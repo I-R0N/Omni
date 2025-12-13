@@ -6,7 +6,8 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap, SolarSystemMap, LocalMap, SubMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../constants';
+import { ASSETS } from '../assets';
 
 const MAP_RANK = {
   [MapType.UNIVERSE]: 0,
@@ -74,7 +75,7 @@ export class GameEngine {
       type: EntityType.PLAYER,
       position: { x: 0, y: 0 },
       velocity: { x: 0, y: 0 },
-      size: { x: 11, y: 11 },
+      size: { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE },
       rotation: 0,
       color: COLORS.PLAYER,
       active: true,
@@ -85,7 +86,8 @@ export class GameEngine {
       weaponCooldown: 0,
       burstQueue: 0,
       burstTimer: 0,
-      trail: []
+      trail: [],
+      sprite: ASSETS.PLAYER_SHIP
     };
 
     this.camera = {
@@ -147,6 +149,7 @@ export class GameEngine {
       this.player.health = this.player.maxHealth;
       this.player.trail = [];
       this.damageTexts = [];
+      this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
       this.camera.zoom = 1;
       this.camera.position = { x: 0, y: 0 };
@@ -588,10 +591,15 @@ export class GameEngine {
               y: config.size * 0.4
           };
 
+          // Spawn slightly forward from the ship nose based on player size
+          const muzzleOffset = SPRITE_CONSTANTS.PLAYER_BASE_SIZE * 0.6;
+          const startX = this.player.position.x + Math.cos(currentAngle) * muzzleOffset;
+          const startY = this.player.position.y + Math.sin(currentAngle) * muzzleOffset;
+
           this.currentMap?.entities.push({
               id: `proj_${Date.now()}_${i}`,
               type: EntityType.PROJECTILE,
-              position: { x: this.player.position.x, y: this.player.position.y },
+              position: { x: startX, y: startY },
               velocity: { x: vx, y: vy },
               size: pSize,
               rotation: currentAngle,

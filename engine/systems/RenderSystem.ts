@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
 export class RenderSystem {
@@ -29,6 +29,13 @@ export class RenderSystem {
       const img = new Image();
       img.crossOrigin = "Anonymous"; // Enable CORS for external images
       img.src = src;
+      img.onerror = () => {
+          // Log once per source to aid debugging missing/blocked assets
+          if (!this.images.has(`${src}-error`)) {
+              console.warn(`Asset failed to load: ${src}`);
+              this.images.set(`${src}-error`, img);
+          }
+      };
       this.images.set(src, img);
       return img;
   }
@@ -253,7 +260,8 @@ export class RenderSystem {
       
       // Transform logic
       ctx.translate(entity.position.x, entity.position.y);
-      ctx.rotate(entity.rotation);
+      const rotation = entity.rotation + (entity.type === EntityType.PLAYER ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET : 0);
+      ctx.rotate(rotation);
       
       // Prevent player from scaling with camera zoom (Warp Effect)
       // BUT scale inversely so it stays same screen size during zoom
@@ -280,17 +288,16 @@ export class RenderSystem {
                   const drawSize = maxDim * drawScale; 
                   const dOffset = -(drawSize / 2);
 
+                  ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
+
+                  // Hit flash: re-draw with brightness instead of filling the bounding box (prevents white square)
                   if (entity.hitFlash && entity.hitFlash > 0) {
-                      // Flash White Effect
+                      ctx.save();
+                      ctx.globalAlpha = Math.min(1, 0.6 + (entity.hitFlash * 2));
+                      ctx.filter = 'brightness(1.35)';
                       ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
-                      ctx.globalCompositeOperation = 'source-atop';
-                      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-                      ctx.beginPath();
-                      ctx.arc(0,0, drawSize/2, 0, Math.PI*2);
-                      ctx.fill();
-                      ctx.globalCompositeOperation = 'source-over';
-                  } else {
-                      ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
+                      ctx.filter = 'none';
+                      ctx.restore();
                   }
 
                   // Special overlays for sprite-based entities

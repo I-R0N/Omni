@@ -1,6 +1,7 @@
 
 
 import { WeaponConfig, WeaponType, MapType, EnemySubtype } from './types';
+import { ASSETS } from './assets';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -30,6 +31,12 @@ export const CAMERA_CONSTANTS = {
   TRANSITION_ZOOM_OUT_FACTOR: 0.95, // Zoom factor when leaving
   SHAKE_DECAY: 0.3, // Duration of shake falloff
   CULL_MARGIN: 150 // Pixels outside screen to still render
+};
+
+export const SPRITE_CONSTANTS = {
+  // Adjust this to align the player ship art with the facing direction.
+  PLAYER_ROTATION_OFFSET: Math.PI*(3/4), // Radians
+  PLAYER_BASE_SIZE: 50 // Default visual/physics size for player (x/y)
 };
 
 export const AI_CONFIG = {
@@ -96,7 +103,7 @@ export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
   MARGIN: 20,          // Distance from screen edge
-  RANGE: 50000,         // World units radius shown in minimap
+  RANGE: 5000,         // World units radius shown in minimap
   BG_COLOR: 'rgba(15, 23, 42, 0.85)',
   BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
   PLAYER_DOT_COLOR: '#ffffff'
@@ -319,30 +326,7 @@ export const WEAPON_LIST = [
 ];
 
 // --- ASSETS ---
-export const ASSETS = {
-  NEBULA_PUFF: 'generated_puff', // Key for procedural texture
-
-  PLAYER_SHIP: "https://storage.googleapis.com/omniverse-assets/ship.png", 
-  ENEMY_SHIP: "https://via.placeholder.com/64/FF0000/FFFFFF?text=Drone",
-  ENEMY_BLUE: "https://via.placeholder.com/64/0000FF/FFFFFF?text=Charger",
-  ENEMY_BLACK: "https://via.placeholder.com/64/000000/FFFFFF?text=Tank",
-  ENEMY_GREEN: "https://via.placeholder.com/64/00FF00/000000?text=Skirm",
-  EXPLOSION: "https://via.placeholder.com/128/FF4400/FFFFFF?text=BOOM",
-  
-  // Placeholder images for demo. REPLACE THESE with your hosted URLs from Google Cloud Storage.
-  ASTEROID_1: "https://via.placeholder.com/100/808080/FFFFFF?text=Ast1",
-  ASTEROID_2: "https://via.placeholder.com/100/606060/FFFFFF?text=Ast2",
-  ASTEROID_3: "https://via.placeholder.com/100/404040/FFFFFF?text=Ast3",
-  ASTEROID_ICE: "https://via.placeholder.com/100/A0FFFF/000000?text=Ice",
-  ASTEROID_VOLCANIC: "https://via.placeholder.com/100/502020/FFFFFF?text=Lava",
-
-  SUN: "https://via.placeholder.com/120/FFFF00/000000?text=Sun",
-  PLANET_TERRAN: "https://via.placeholder.com/80/44FF44/000000?text=Terran",
-  PLANET_RED: "https://via.placeholder.com/70/FF4444/000000?text=Mars",
-  PLANET_ICE: "https://via.placeholder.com/100/88FFFF/000000?text=IceG",
-  PORTAL: "https://via.placeholder.com/90/AA00FF/FFFFFF?text=Portal",
-  HEX_STRUCTURE: "https://via.placeholder.com/80/4444FF/FFFFFF?text=Hex"
-};
+export { ASSETS };
 
 // Distinct configurations for different enemy types
 export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
