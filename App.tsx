@@ -25,14 +25,20 @@ const App: React.FC = () => {
         setStats(newStats);
     });
 
-    engine.initCanvas(canvasRef.current.getContext('2d')!);
+    const ctx = canvasRef.current.getContext('2d')!;
+    engine.initCanvas(ctx);
     engine.start();
     engineRef.current = engine;
 
     const handleResize = () => {
       if (canvasRef.current) {
-        canvasRef.current.width = window.innerWidth;
-        canvasRef.current.height = window.innerHeight;
+        const dpr = window.devicePixelRatio || 1;
+        canvasRef.current.style.width = `${window.innerWidth}px`;
+        canvasRef.current.style.height = `${window.innerHeight}px`;
+        canvasRef.current.width = Math.floor(window.innerWidth * dpr);
+        canvasRef.current.height = Math.floor(window.innerHeight * dpr);
+        // Normalize drawing to CSS pixels
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
     };
 

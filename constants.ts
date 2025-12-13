@@ -36,7 +36,7 @@ export const CAMERA_CONSTANTS = {
 export const SPRITE_CONSTANTS = {
   // Adjust this to align the player ship art with the facing direction.
   PLAYER_ROTATION_OFFSET: Math.PI*(3/4), // Radians
-  PLAYER_BASE_SIZE: 50 // Default visual/physics size for player (x/y)
+  PLAYER_BASE_SIZE: 30 // Default visual/physics size for player (x/y)
 };
 
 export const AI_CONFIG = {
