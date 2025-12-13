@@ -54,6 +54,41 @@ export class BackgroundManager {
     this.shootingTimer = Math.random() * (SHOOTING_STAR_CONSTANTS.MAX_TIMER - SHOOTING_STAR_CONSTANTS.MIN_TIMER) + SHOOTING_STAR_CONSTANTS.MIN_TIMER;
   }
 
+  private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): { x: number, y: number } {
+    let outX = x;
+    let outY = y;
+    for (let i = 0; i < attractors.length; i++) {
+        const attr = attractors[i];
+        const ax = (attr.position.x - cameraPos.x) + halfW;
+        const ay = (attr.position.y - cameraPos.y) + halfH;
+        const adx = outX - ax;
+        const ady = outY - ay;
+        const distSq = adx*adx + ady*ady;
+        const radius = attr.size.x * 8; 
+        if (distSq < radius * radius) {
+            const dist = Math.sqrt(distSq);
+            const factor = (radius - dist) / radius;
+            if (factor > 0) {
+              const push = factor * factor * factor * 120;
+              outX += (adx / dist) * push;
+              outY += (ady / dist) * push;
+            }
+        }
+    }
+    return { x: outX, y: outY };
+  }
+
+  private wrapToBounds(value: number, limit: number): number {
+    let out = value;
+    if (out < 0) out += limit;
+    else if (out > limit) out -= limit;
+
+    if (out < 0 || out > limit) {
+        out = ((out % limit) + limit) % limit;
+    }
+    return out;
+  }
+
   public setMapType(type: MapType) {
     if (this.mapType === type) return;
     this.mapType = type;
@@ -183,8 +218,10 @@ export class BackgroundManager {
     this.lastCameraPos = { ...cameraPos };
 
     ctx.save();
-    const cx = width / 2;
-    const cy = height / 2;
+    const halfW = width / 2;
+    const halfH = height / 2;
+    const cx = halfW;
+    const cy = halfH;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.translate(cx, cy);
     ctx.scale(zoom, zoom);
@@ -213,26 +250,9 @@ export class BackgroundManager {
 
         // INLINED LENSING
         if (hasAttractors) {
-           const halfW = width / 2;
-           const halfH = height / 2;
-           for (let i = 0; i < attractors.length; i++) {
-               const attr = attractors[i];
-               const ax = (attr.position.x - cameraPos.x) + halfW;
-               const ay = (attr.position.y - cameraPos.y) + halfH;
-               const adx = drawX - ax;
-               const ady = drawY - ay;
-               const distSq = adx*adx + ady*ady;
-               const radius = attr.size.x * 8; 
-               if (distSq < radius * radius) {
-                   const dist = Math.sqrt(distSq);
-                   const factor = (radius - dist) / radius; // Optimized: remove Math.max
-                   if (factor > 0) {
-                      const push = factor * factor * factor * 120; // cubic ease
-                      drawX += (adx / dist) * push;
-                      drawY += (ady / dist) * push;
-                   }
-               }
-           }
+           const lensed = this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
+           drawX = lensed.x;
+           drawY = lensed.y;
         }
 
         const texture = this.puffTextures[puff.textureIndex % this.puffTextures.length];
@@ -257,42 +277,17 @@ export class BackgroundManager {
             star.x -= shiftX;
             star.y -= shiftY;
 
-            // Robust Wrapping Logic
-            if (star.x < 0) star.x += width; 
-            else if (star.x > width) star.x -= width;
-            
-            if (star.y < 0) star.y += height; 
-            else if (star.y > height) star.y -= height;
-
-            // Safety modulo for large jumps
-            if (star.x < 0 || star.x > width) star.x = ((star.x % width) + width) % width;
-            if (star.y < 0 || star.y > height) star.y = ((star.y % height) + height) % height;
+            star.x = this.wrapToBounds(star.x, width);
+            star.y = this.wrapToBounds(star.y, height);
 
             let wx = star.x;
             let wy = star.y;
 
             // INLINED LENSING
             if (hasAttractors) {
-               const halfW = width / 2;
-               const halfH = height / 2;
-               for (let k = 0; k < attractors.length; k++) {
-                   const attr = attractors[k];
-                   const ax = (attr.position.x - cameraPos.x) + halfW;
-                   const ay = (attr.position.y - cameraPos.y) + halfH;
-                   const adx = wx - ax;
-                   const ady = wy - ay;
-                   const distSq = adx*adx + ady*ady;
-                   const radius = attr.size.x * 8; 
-                   if (distSq < radius * radius) {
-                       const dist = Math.sqrt(distSq);
-                       const factor = (radius - dist) / radius;
-                       if (factor > 0) {
-                          const push = factor * factor * factor * 120;
-                          wx += (adx / dist) * push;
-                          wy += (ady / dist) * push;
-                       }
-                   }
-               }
+               const lensed = this.applyLensing(wx, wy, cameraPos, attractors, halfW, halfH);
+               wx = lensed.x;
+               wy = lensed.y;
             }
 
             ctx.globalAlpha = star.opacity;

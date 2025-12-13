@@ -10,6 +10,10 @@ export class RenderSystem {
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
+  private _visibleEntities: GameEntity[] = [];
+  private _trailEntities: GameEntity[] = [];
+  private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
+  private _attractors: GameEntity[] = [];
 
   constructor() {
     this.backgroundManager = new BackgroundManager();
@@ -52,18 +56,63 @@ export class RenderSystem {
     // Guard against 0 dimensions
     if (width === 0 || height === 0) return;
 
-    // Identify Attractors for Gravitational Lensing (Stars, Large Planets)
-    const attractors = entities.filter(e => 
-        e.active && 
-        e.type === EntityType.INTERACTABLE && 
-        (e.gravityStrength && e.gravityStrength > 500)
-    );
+    // Build per-frame buckets in a single pass
+    this._attractors.length = 0;
+    this._visibleEntities.length = 0;
+    this._trailEntities.length = 0;
+    this._indicatorBuffer.length = 0;
+    this._minimapBuffer.length = 0;
+
+    const halfW = (width / 2) / camera.zoom;
+    const halfH = (height / 2) / camera.zoom;
+    const cullMargin = CAMERA_CONSTANTS.CULL_MARGIN;
+    const left = camera.position.x - halfW - cullMargin;
+    const right = camera.position.x + halfW + cullMargin;
+    const top = camera.position.y - halfH - cullMargin;
+    const bottom = camera.position.y + halfH + cullMargin;
+
+    const camX = camera.position.x;
+    const camY = camera.position.y;
+
+    for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+        if (!entity.active) continue;
+
+        const dx = entity.position.x - camX;
+        const dy = entity.position.y - camY;
+
+        if (entity.type === EntityType.INTERACTABLE && entity.gravityStrength && entity.gravityStrength > 500) {
+            this._attractors.push(entity);
+        }
+
+        if (entity.type === EntityType.ENEMY || entity.type === EntityType.INTERACTABLE) {
+            this._indicatorBuffer.push({ entity, distSq: dx*dx + dy*dy });
+        }
+
+        if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE) {
+            this._minimapBuffer.push({ entity, dx, dy });
+        }
+
+        if (entity.position.x < left || entity.position.x > right ||
+            entity.position.y < top || entity.position.y > bottom) {
+            continue;
+        }
+
+        this._visibleEntities.push(entity);
+
+        if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
+            this._trailEntities.push(entity);
+        }
+    }
+
+    // Sort indicators once for the frame
+    this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
 
     // 1. Clear & Background
     ctx.clearRect(0, 0, width, height);
     
     // Pass attractors and ZOOM to background for star warping
-    this.backgroundManager.render(ctx, camera.position, attractors, camera.zoom);
+    this.backgroundManager.render(ctx, camera.position, this._attractors, camera.zoom);
 
     // 2. Camera Transform
     ctx.save();
@@ -80,10 +129,10 @@ export class RenderSystem {
     }
 
     // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, entities);
+    this.renderTrails(ctx, this._trailEntities);
 
     // 4. Render Entities (Culling logic added)
-    this.renderEntities(ctx, entities, camera, width, height);
+    this.renderEntities(ctx, this._visibleEntities, camera);
     
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
@@ -93,10 +142,10 @@ export class RenderSystem {
     ctx.restore();
 
     // 6. Render POI Indicators (Screen Space)
-    this.renderIndicators(ctx, entities, camera, width, height);
+    this.renderIndicators(ctx, this._indicatorBuffer, camera, width, height);
 
     // 7. Render Minimap (Screen Space)
-    this.renderMinimap(ctx, entities, camera, width, height, minimapExpanded, mapType);
+    this.renderMinimap(ctx, this._minimapBuffer, camera, width, height, minimapExpanded, mapType);
   }
 
   private renderTrails(ctx: CanvasRenderingContext2D, entities: GameEntity[]) {
@@ -179,29 +228,11 @@ export class RenderSystem {
   private renderEntities(
       ctx: CanvasRenderingContext2D, 
       entities: GameEntity[], 
-      camera: CameraState, 
-      screenWidth: number, 
-      screenHeight: number
+      camera: CameraState
     ) {
-    // Frustum Culling
-    const halfW = (screenWidth / 2) / camera.zoom;
-    const halfH = (screenHeight / 2) / camera.zoom;
-    const cullMargin = CAMERA_CONSTANTS.CULL_MARGIN;
-
-    const left = camera.position.x - halfW - cullMargin;
-    const right = camera.position.x + halfW + cullMargin;
-    const top = camera.position.y - halfH - cullMargin;
-    const bottom = camera.position.y + halfH + cullMargin;
-
     entities.forEach(entity => {
       if (!entity.active) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
-
-      // Check visibility
-      if (entity.position.x < left || entity.position.x > right ||
-          entity.position.y < top || entity.position.y > bottom) {
-          return; // Skip rendering invisible entities
-      }
 
       // --- PARTICLE RENDERING ---
       if (entity.type === EntityType.PARTICLE) {
@@ -520,7 +551,7 @@ export class RenderSystem {
 
   private renderIndicators(
     ctx: CanvasRenderingContext2D, 
-    entities: GameEntity[], 
+    targets: { entity: GameEntity, distSq: number }[], 
     camera: CameraState, 
     width: number, 
     height: number
@@ -530,21 +561,6 @@ export class RenderSystem {
 
       const { RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE } = UI_CONSTANTS.INDICATORS;
 
-      // 1. Filter to reusable buffer (GC Optimization)
-      this._indicatorBuffer.length = 0;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active || (e.type !== EntityType.INTERACTABLE && e.type !== EntityType.ENEMY)) continue;
-          
-          const dx = e.position.x - playerPos.x;
-          const dy = e.position.y - playerPos.y;
-          this._indicatorBuffer.push({ entity: e, distSq: dx*dx + dy*dy });
-      }
-
-      // Sort by distance Descending (Farthest first)
-      this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
-      
-      const targets = this._indicatorBuffer;
       if (targets.length === 0) return;
 
       const cx = width / 2;
@@ -616,7 +632,7 @@ export class RenderSystem {
 
   private renderMinimap(
       ctx: CanvasRenderingContext2D,
-      entities: GameEntity[],
+      items: { entity: GameEntity, dx: number, dy: number }[],
       camera: CameraState,
       screenWidth: number,
       screenHeight: number,
@@ -658,16 +674,14 @@ export class RenderSystem {
       ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
       ctx.fill();
 
-      entities.forEach(entity => {
-          if (!entity.active || entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE || entity.type === EntityType.PARTICLE) return;
+      items.forEach(item => {
+          const entity = item.entity;
+          if (!entity.active) return;
           
-          const dx = entity.position.x - camera.position.x;
-          const dy = entity.position.y - camera.position.y;
-
           const scale = (currentSize / 2) / range;
           
-          const dotX = centerX + dx * scale;
-          const dotY = centerY + dy * scale;
+          const dotX = centerX + item.dx * scale;
+          const dotY = centerY + item.dy * scale;
 
           if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) return;
 

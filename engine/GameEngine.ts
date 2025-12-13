@@ -42,6 +42,7 @@ export class GameEngine {
   private minimapTimer: number = 0;
   private minimapDebounce: number = 0;
   private interactionCooldown: number = 0;
+  private frameEntities: GameEntity[] = [];
   
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -107,6 +108,7 @@ export class GameEngine {
     if (this.isRunning) return;
     this.isRunning = true;
     this.lastTime = performance.now();
+    this.prepareFrameEntities();
     requestAnimationFrame(this.loop);
   }
 
@@ -152,6 +154,7 @@ export class GameEngine {
       this.camera.shakeOffset = { x: 0, y: 0 };
 
       this.gameState = GameState.PLAYING;
+      this.prepareFrameEntities();
   }
 
   public cycleWeapon() {
@@ -194,6 +197,8 @@ export class GameEngine {
         return;
     }
 
+    // Refresh working set for physics/AI without reallocating each call
+    this.prepareFrameEntities();
     this.accumulator += safeFrameTime;
 
     // Safety Cap: Don't run more than N physics steps per frame to avoid "spiral of death" lag
@@ -209,10 +214,22 @@ export class GameEngine {
     }
     
     this.updateGameLogic(safeFrameTime);
+    // Include entities spawned during game logic (e.g., projectiles) before rendering
+    this.prepareFrameEntities();
     this.draw();
 
     requestAnimationFrame(this.loop);
   };
+
+  private prepareFrameEntities() {
+      if (!this.currentMap) return;
+      this.frameEntities.length = 0;
+      const ents = this.currentMap.entities;
+      for (let i = 0; i < ents.length; i++) {
+          this.frameEntities.push(ents[i]);
+      }
+      this.frameEntities.push(this.player);
+  }
 
   private updateTransition(dt: number) {
       this.transition.timer += dt;
@@ -245,7 +262,7 @@ export class GameEngine {
   private updatePhysics(dt: number) {
       if (!this.currentMap) return;
 
-      const allEntities = [...this.currentMap.entities, this.player];
+      const allEntities = this.frameEntities;
       
       this.ai.update(dt, allEntities, this.player);
 
@@ -743,10 +760,8 @@ export class GameEngine {
   private draw() {
       if (!this.currentMap) return;
       
-      const entitiesToRender = [...this.currentMap.entities, this.player];
-
       this.renderer.render(
-          entitiesToRender, 
+          this.frameEntities, 
           this.camera, 
           this.currentMap.type,
           this.minimapExpanded, 
