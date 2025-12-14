@@ -32,13 +32,8 @@ const App: React.FC = () => {
 
     const handleResize = () => {
       if (canvasRef.current) {
-        const dpr = window.devicePixelRatio || 1;
-        canvasRef.current.style.width = `${window.innerWidth}px`;
-        canvasRef.current.style.height = `${window.innerHeight}px`;
-        canvasRef.current.width = Math.floor(window.innerWidth * dpr);
-        canvasRef.current.height = Math.floor(window.innerHeight * dpr);
-        // Normalize drawing to CSS pixels
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
       }
     };
 
