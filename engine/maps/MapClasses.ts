@@ -13,6 +13,7 @@ export abstract class BaseMapLayer {
   public playerSpawn: Vector2;
   public parentId: string | null = null;
   public initialized: boolean = false;
+  public enemyScale: number = 1;
 
   constructor(id: string, name: string, type: MapType) {
     this.id = id;
@@ -99,6 +100,9 @@ export abstract class BaseMapLayer {
   }
 
   protected spawnEnemies(count: number, radius: number) {
+      const scaledCount = Math.round(count * this.enemyScale);
+      if (scaledCount <= 0) return;
+
       const types = [
           EnemySubtype.BASIC,
           EnemySubtype.FAST_CHARGER,
@@ -106,7 +110,7 @@ export abstract class BaseMapLayer {
           EnemySubtype.SKIRMISHER
       ];
 
-      for(let i=0; i<count; i++) {
+      for(let i=0; i<scaledCount; i++) {
           const angle = Math.random() * Math.PI * 2;
           const dist = 600 + Math.random() * (radius - 600);
           const x = Math.cos(angle) * dist;

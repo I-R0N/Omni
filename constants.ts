@@ -36,6 +36,7 @@ export const CAMERA_CONSTANTS = {
 export const SPRITE_CONSTANTS = {
   // Adjust this to align the player ship art with the facing direction.
   PLAYER_ROTATION_OFFSET: Math.PI*(3/4), // Radians
+  ENEMY_ROTATION_OFFSET: Math.PI*(3/4), // Match player art orientation
   PLAYER_BASE_SIZE: 20 // Default visual/physics size for player (x/y)
 };
 
@@ -130,7 +131,7 @@ export const LOCAL_GRAVITY_CONSTANTS = {
   RANGE: 400,          // Pixel radius where gravity takes effect
   STRENGTH: 0.00015,     // Reduced 100x again (1000x total reduction)
   MIN_DIST: 50,        // Clamp to prevent infinite force at center
-  PLAYER_INFLUENCE: 0.000005 // Reduced 100x again
+  PLAYER_INFLUENCE: 0.00001 // Reduced 100x again
 };
 
 export const TRAIL_CONSTANTS = {
@@ -200,14 +201,14 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
 };
 
 export const STRUCTURE_CONSTANTS = {
-  SIZE: 40,
+  SIZE: 30,
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
   CRASH_VELOCITY_THRESHOLD: 4 // Speed needed to break through
 };
 
 export const EXPLOSION_CONSTANTS = {
-  DURATION: 0.3, // Seconds
+  DURATION: 0.6, // Seconds
   SIZE_MULTIPLIER: -1.8
 };
 
@@ -325,52 +326,74 @@ export const WEAPON_LIST = [
   WeaponType.CANNON
 ];
 
+// Simple enemy blaster (separate so we can tune independently of player weapons)
+export const ENEMY_WEAPON: WeaponConfig = {
+  type: WeaponType.BLASTER,
+  name: 'Enemy Blaster',
+  cooldown: 1.2,
+  speed: 8,
+  damage: 5,
+  lifetime: 2.0,
+  color: '#f97316', // Orange to distinguish from player shots
+  size: 6,
+  count: 1,
+  spread: 4,
+  recoil: 0
+};
+
 // --- ASSETS ---
 export { ASSETS };
+
+// Difficulty (enemy count multiplier) 0 = none, 3 = full
+export const DIFFICULTY_SCALES: Record<number, number> = {
+  0: 0,    // No enemies
+  1: 0.35, // Low
+  2: 0.65, // Moderate
+  3: 1     // High (current default)
+};
 
 // Distinct configurations for different enemy types
 export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
   [EnemySubtype.BASIC]: {
     color: '#f87171', // Red
-    size: 20,
+    size: 30,
     health: 1,
-    maxSpeed: 10,
-    accel: 6,
-    turnRate: 1.25,
-    sprite: ASSETS.ENEMY_SHIP,
+    maxSpeed: 5,
+    accel: 3,
+    turnRate: 1.5,
+    sprite: ASSETS.ENEMY_DRONE,
     mass: 10
   },
   [EnemySubtype.FAST_CHARGER]: {
     color: '#60a5fa', // Blue
-    size: 18,
+    size: 30,
     health: 1,
-    maxSpeed: 16, // Faster than basic
-    accel: 10,
+    maxSpeed: 10, // Faster than basic
+    accel: 5,
     turnRate: 1.5,
-    sprite: ASSETS.ENEMY_BLUE,
+    sprite: ASSETS.ENEMY_CHARGER,
     mass: 8
   },
   [EnemySubtype.TANK]: {
     color: '#94a3b8', // Grey/Black
-    size: 28,
-    health: 4, // Takes multiple hits
+    size: 30,
+    health: 3, // Takes multiple hits
     maxSpeed: 5, // Slow
     accel: 2,
     turnRate: 0.5,
-    sprite: ASSETS.ENEMY_BLACK,
+    sprite: ASSETS.ENEMY_TANK,
     mass: 30
   },
   [EnemySubtype.SKIRMISHER]: {
     color: '#4ade80', // Green
-    size: 20,
+    size: 30,
     health: 1,
-    maxSpeed: 12,
-    accel: 8,
+    maxSpeed: 9,
+    accel: 3,
     turnRate: 1.5,
-    sprite: ASSETS.ENEMY_GREEN,
+    sprite: ASSETS.ENEMY_SKIRMISHER,
     mass: 12
   },
-  // Map others to basic for now
-  [EnemySubtype.ORBITER]: { color: '#c084fc', size: 20, health: 1, maxSpeed: 10, accel: 6, turnRate: 1.25, mass: 10 },
-  [EnemySubtype.SNIPER]: { color: '#fbbf24', size: 20, health: 1, maxSpeed: 10, accel: 6, turnRate: 1.25, mass: 10 }
+  [EnemySubtype.ORBITER]: { color: '#c084fc', size: 30, health: 1, maxSpeed: 6, accel: 3, turnRate: 1.25, sprite: ASSETS.ENEMY_ORBITER, mass: 10 },
+  [EnemySubtype.SNIPER]: { color: '#fbbf24', size: 30, health: 1, maxSpeed: 6, accel: 3, turnRate: 1.25, sprite: ASSETS.ENEMY_SNIPER, mass: 10 }
 };

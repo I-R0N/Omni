@@ -400,8 +400,10 @@ export class PhysicsSystem {
           const proj = a.type === EntityType.PROJECTILE ? a : b;
           const target = a.type === EntityType.PROJECTILE ? b : a;
 
-          if (target.type === EntityType.PLAYER) return; 
+          // Ignore friendly fire and projectile-projectile
           if (target.type === EntityType.PROJECTILE) return;
+          if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
+          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
 
           target.health -= (proj.damage || 1);
           target.hitFlash = 0.1;
@@ -413,13 +415,13 @@ export class PhysicsSystem {
           if (onDamage) onDamage(target.position, proj.damage || 1);
 
           if (target.health <= 0) {
-            target.active = false;
-            if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
-                this.removeStaticEntity(target);
-            }
-            if (target.type === EntityType.ENEMY) {
-                if (onDeath) onDeath(target);
-            }
+              if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
+                  this.removeStaticEntity(target);
+              }
+              if (onDeath) onDeath(target);
+              if (!target.isExploding) {
+                  target.active = false;
+              }
           }
 
           if (target.type === EntityType.STRUCTURE) {
@@ -444,6 +446,9 @@ export class PhysicsSystem {
               target.health -= COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
               target.hitFlash = 0.2;
               if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+              if (target.health <= 0 && onDeath) {
+                  onDeath(target);
+              }
           }
       }
 

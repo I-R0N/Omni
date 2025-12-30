@@ -1,10 +1,12 @@
 // Centralized asset manifest for game visuals. Update these URLs when swapping art.
 export type AssetManifest = {
   PLAYER_SHIP: string;
-  ENEMY_SHIP: string;
-  ENEMY_BLUE: string;
-  ENEMY_BLACK: string;
-  ENEMY_GREEN: string;
+  ENEMY_DRONE: string;
+  ENEMY_CHARGER: string;
+  ENEMY_TANK: string;
+  ENEMY_SKIRMISHER: string;
+  ENEMY_ORBITER: string;
+  ENEMY_SNIPER: string;
   EXPLOSION: string;
   ASTEROID_1: string;
   ASTEROID_2: string;
@@ -25,10 +27,12 @@ export const ASSETS: AssetManifest = {
   NEBULA_PUFF: 'generated_puff',
 
   PLAYER_SHIP: '/assets/ship.png',
-  ENEMY_SHIP: 'https://via.placeholder.com/64/FF0000/FFFFFF?text=Drone',
-  ENEMY_BLUE: 'https://via.placeholder.com/64/0000FF/FFFFFF?text=Charger',
-  ENEMY_BLACK: 'https://via.placeholder.com/64/000000/FFFFFF?text=Tank',
-  ENEMY_GREEN: 'https://via.placeholder.com/64/00FF00/000000?text=Skirm',
+  ENEMY_DRONE: '/assets/drone.png',
+  ENEMY_CHARGER: '/assets/charger.png',
+  ENEMY_TANK: '/assets/tank.png',
+  ENEMY_SKIRMISHER: '/assets/skirmisher.png',
+  ENEMY_ORBITER: '/assets/orbiter.png',
+  ENEMY_SNIPER: '/assets/sniper.png',
   EXPLOSION: 'https://via.placeholder.com/128/FF4400/FFFFFF?text=BOOM',
 
   ASTEROID_1: 'https://via.placeholder.com/100/808080/FFFFFF?text=Ast1',

@@ -57,8 +57,12 @@ export class RenderSystem {
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const width = (ctx.canvas.width || 0) / dpr;
+    const height = (ctx.canvas.height || 0) / dpr;
+
+    // Crisp pixels for sprite scaling
+    ctx.imageSmoothingEnabled = false;
 
     // Guard against 0 dimensions
     if (width === 0 || height === 0) return;
@@ -260,7 +264,13 @@ export class RenderSystem {
       
       // Transform logic
       ctx.translate(entity.position.x, entity.position.y);
-      const rotation = entity.rotation + (entity.type === EntityType.PLAYER ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET : 0);
+      const rotation = entity.rotation + (
+        entity.type === EntityType.PLAYER
+          ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
+          : entity.type === EntityType.ENEMY
+            ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
+            : 0
+      );
       ctx.rotate(rotation);
       
       // Prevent player from scaling with camera zoom (Warp Effect)

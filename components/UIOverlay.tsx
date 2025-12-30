@@ -9,9 +9,11 @@ interface UIOverlayProps {
   onPause?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
+  difficulty?: number;
+  onSetDifficulty?: (level: number) => void;
 }
 
-const UIOverlay: React.FC<UIOverlayProps> = ({ stats, onCycleWeapon, onStart, onPause, onResume, onRestart }) => {
+const UIOverlay: React.FC<UIOverlayProps> = ({ stats, onCycleWeapon, onStart, onPause, onResume, onRestart, difficulty = 3, onSetDifficulty }) => {
   const getBadgeColor = (type: MapType) => {
     switch(type) {
         case MapType.UNIVERSE: return 'bg-indigo-600 text-indigo-100';
@@ -69,6 +71,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ stats, onCycleWeapon, onStart, on
             <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
                 Explore an infinite procedural universe. From galaxies to surface caves.
             </p>
+            <div className="mb-8 flex flex-col items-center gap-3">
+                <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
+                <div className="flex gap-2">
+                    {[0,1,2,3].map(level => (
+                        <button
+                          key={level}
+                          onClick={() => onSetDifficulty && onSetDifficulty(level)}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${difficulty === level ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
+                        >
+                          {level}: {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Moderate' : 'High'}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-[11px] text-slate-500">Enemy count scales with difficulty (3 = current default).</p>
+            </div>
             <button 
                 onClick={onStart}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 px-12 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"

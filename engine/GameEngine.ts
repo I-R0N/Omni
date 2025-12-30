@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap, SolarSystemMap, LocalMap, SubMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES } from '../constants';
 import { ASSETS } from '../assets';
 
 const MAP_RANK = {
@@ -45,6 +45,10 @@ export class GameEngine {
   private interactionCooldown: number = 0;
   private frameEntities: GameEntity[] = [];
   
+  private respawnTimer: number = 0;
+  private difficultyLevel: number = 3;
+  private enemyScale: number = 1;
+
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
@@ -62,8 +66,9 @@ export class GameEngine {
 
   private onStatsUpdate: (stats: EngineStats) => void;
 
-  constructor(onStatsUpdate: (stats: EngineStats) => void) {
+  constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
     this.onStatsUpdate = onStatsUpdate;
+    this.setDifficultyLevel(difficultyLevel, false);
     
     this.input = new InputSystem();
     this.physics = new PhysicsSystem();
@@ -98,6 +103,7 @@ export class GameEngine {
     };
 
     const initialMap = new UniverseMap();
+    this.applyDifficultyToMap(initialMap);
     this.maps.set(initialMap.id, initialMap);
     this.loadMap(initialMap);
   }
@@ -140,6 +146,7 @@ export class GameEngine {
       // Reset Maps
       this.maps.clear();
       const initialMap = new UniverseMap();
+      this.applyDifficultyToMap(initialMap);
       this.maps.set(initialMap.id, initialMap);
       this.loadMap(initialMap);
 
@@ -168,6 +175,25 @@ export class GameEngine {
     this.player.burstQueue = 0;
   }
 
+  public setDifficulty(level: number) {
+      this.setDifficultyLevel(level, true);
+  }
+
+  private setDifficultyLevel(level: number, restart: boolean) {
+      const clamped = Math.min(3, Math.max(0, Math.round(level)));
+      this.difficultyLevel = clamped;
+      this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
+      // Propagate to already-created maps
+      this.maps.forEach(map => this.applyDifficultyToMap(map));
+      if (restart) {
+          this.restartGame();
+      }
+  }
+
+  private applyDifficultyToMap(map: BaseMapLayer) {
+      map.enemyScale = this.enemyScale;
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
     
@@ -181,7 +207,8 @@ export class GameEngine {
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
       currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
-      gameState: this.gameState
+      gameState: this.gameState,
+      difficulty: this.difficultyLevel
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -254,6 +281,34 @@ export class GameEngine {
       }
   }
 
+  private handleEnemyShooting(dt: number) {
+      if (!this.currentMap) return;
+      const weapon = ENEMY_WEAPON;
+      const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
+
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+          const enemy = this.currentMap.entities[i];
+          if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+
+          // Cooldown management
+          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
+          if (enemy.weaponCooldown > 0) continue;
+
+          const dx = this.player.position.x - enemy.position.x;
+          const dy = this.player.position.y - enemy.position.y;
+          const distSq = dx*dx + dy*dy;
+          if (distSq > rangeSq) continue;
+
+          // Slight inaccuracy
+          const leadAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+          const targetX = enemy.position.x + Math.cos(leadAngle) * 500;
+          const targetY = enemy.position.y + Math.sin(leadAngle) * 500;
+
+          enemy.weaponCooldown = weapon.cooldown;
+          this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+      }
+  }
+
   private handleScreenShake = (amount: number) => {
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
@@ -268,6 +323,7 @@ export class GameEngine {
       const allEntities = this.frameEntities;
       
       this.ai.update(dt, allEntities, this.player);
+      this.handleEnemyShooting(dt);
 
       this.physics.update(
         allEntities, 
@@ -312,6 +368,10 @@ export class GameEngine {
   }
 
   private handleEntityDeath = (entity: GameEntity) => {
+      if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
+          this.startExplosion(entity);
+      }
+
       // Spawn Particles
       const numParticles = 8 + Math.floor(Math.random() * 5);
       const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
@@ -397,6 +457,23 @@ export class GameEngine {
     
     if (this.minimapDebounce > 0) {
         this.minimapDebounce -= dt;
+    }
+
+    // Death handling
+    if (this.player.health <= 0 && !this.player.isExploding) {
+        this.handleEntityDeath(this.player);
+    }
+
+    if (this.player.isExploding) {
+        if (this.player.explosionTimer !== undefined) {
+            this.player.explosionTimer -= dt;
+            if (this.player.explosionTimer <= 0) {
+                this.respawnPlayer();
+            }
+        }
+        this.camera.position.x = this.player.position.x;
+        this.camera.position.y = this.player.position.y;
+        return; // Skip controls while exploding
     }
 
     // Auto-collapse minimap
@@ -490,7 +567,7 @@ export class GameEngine {
             this.player.burstTimer = config.burstDelay || 0.1;
             const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
             const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
-            this.spawnProjectileFromConfig({x: targetX, y: targetY}, config);
+            this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
         }
     }
 
@@ -547,6 +624,41 @@ export class GameEngine {
       });
   };
 
+  private startExplosion(entity: GameEntity) {
+      if (entity.isExploding) return;
+
+      const baseSize = Math.max(entity.size.x, entity.size.y);
+      const sizeMultiplier = Math.abs(EXPLOSION_CONSTANTS.SIZE_MULTIPLIER || 1.5);
+
+      entity.isExploding = true;
+      entity.explosionTimer = EXPLOSION_CONSTANTS.DURATION;
+      entity.sprite = ASSETS.EXPLOSION;
+      entity.size = { x: baseSize * sizeMultiplier, y: baseSize * sizeMultiplier };
+      entity.velocity = { x: 0, y: 0 };
+      entity.hitFlash = 0;
+      entity.active = true; // Keep active so it renders during explosion
+  }
+
+  private respawnPlayer() {
+      const spawn = this.currentMap?.playerSpawn || { x: 0, y: 0 };
+      this.player.isExploding = false;
+      this.player.explosionTimer = undefined;
+      this.player.health = this.player.maxHealth;
+      this.player.active = true;
+      this.player.sprite = ASSETS.PLAYER_SHIP;
+      this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
+      this.player.position = { ...spawn };
+      this.player.velocity = { x: 0, y: 0 };
+      this.player.rotation = 0;
+      this.player.trail = [];
+      this.player.weaponCooldown = 0;
+      this.player.burstQueue = 0;
+      this.player.burstTimer = 0;
+      this.shakeTimer = 0;
+      this.camera.shakeOffset = { x: 0, y: 0 };
+      this.camera.position = { ...this.player.position };
+  }
+
   private handleShooting(target: Vector2) {
       if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
       const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
@@ -562,15 +674,18 @@ export class GameEngine {
       const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
       const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
 
-      this.spawnProjectileFromConfig({x: worldX, y: worldY}, config);
+      this.spawnProjectileFromConfig(this.player, {x: worldX, y: worldY}, config, EntityType.PLAYER);
   }
 
-  private spawnProjectileFromConfig(target: Vector2, config: WeaponConfig) {
-      const angle = Math.atan2(target.y - this.player.position.y, target.x - this.player.position.x);
+  private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
+      const angle = Math.atan2(target.y - shooter.position.y, target.x - shooter.position.x);
 
-      const recoilImpulse = (PROJECTILE_CONSTANTS.MASS * config.speed * config.recoil) / this.player.mass;
-      this.player.velocity.x -= Math.cos(angle) * recoilImpulse;
-      this.player.velocity.y -= Math.sin(angle) * recoilImpulse;
+      // Only apply recoil to player for now
+      if (ownerType === EntityType.PLAYER) {
+          const recoilImpulse = (PROJECTILE_CONSTANTS.MASS * config.speed * config.recoil) / (shooter.mass || 1);
+          shooter.velocity.x -= Math.cos(angle) * recoilImpulse;
+          shooter.velocity.y -= Math.sin(angle) * recoilImpulse;
+      }
 
       const halfSpread = (config.spread * (Math.PI / 180)) / 2;
 
@@ -591,10 +706,11 @@ export class GameEngine {
               y: config.size * 0.4
           };
 
-          // Spawn slightly forward from the ship nose based on player size
-          const muzzleOffset = SPRITE_CONSTANTS.PLAYER_BASE_SIZE * 0.6;
-          const startX = this.player.position.x + Math.cos(currentAngle) * muzzleOffset;
-          const startY = this.player.position.y + Math.sin(currentAngle) * muzzleOffset;
+          // Spawn slightly forward from the ship nose based on entity size
+          const muzzleBase = Math.max(shooter.size?.x || SPRITE_CONSTANTS.PLAYER_BASE_SIZE, shooter.size?.y || SPRITE_CONSTANTS.PLAYER_BASE_SIZE);
+          const muzzleOffset = muzzleBase * 0.6;
+          const startX = shooter.position.x + Math.cos(currentAngle) * muzzleOffset;
+          const startY = shooter.position.y + Math.sin(currentAngle) * muzzleOffset;
 
           this.currentMap?.entities.push({
               id: `proj_${Date.now()}_${i}`,
@@ -610,7 +726,8 @@ export class GameEngine {
               lifetime: config.lifetime,
               mass: PROJECTILE_CONSTANTS.MASS,
               damage: config.damage,
-              homing: config.homing
+              homing: config.homing,
+              ownerType
           });
       }
   }
@@ -728,6 +845,7 @@ export class GameEngine {
               case MapType.SUB_MAP: newMap = new SubMap(id, 'Station Interior'); break;
               default: newMap = new UniverseMap();
           }
+          this.applyDifficultyToMap(newMap);
           if (this.currentMap) newMap.parentId = this.currentMap.id;
           this.maps.set(id, newMap);
       }

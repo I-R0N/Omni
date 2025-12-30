@@ -131,6 +131,7 @@ export interface GameEntity {
   // Projectile specifics
   damage?: number;
   homing?: boolean;
+  ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
 
   // Debug Visuals
@@ -157,6 +158,7 @@ export interface EngineStats {
   currentMapType: MapType;
   currentWeapon: string;
   gameState: GameState;
+  difficulty?: number;
 }
 
 export interface DamageText {

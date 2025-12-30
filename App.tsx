@@ -14,8 +14,10 @@ const App: React.FC = () => {
     currentMapName: 'Initializing',
     currentMapType: MapType.UNIVERSE,
     currentWeapon: 'Blaster',
-    gameState: GameState.MENU
+    gameState: GameState.MENU,
+    difficulty: 3
   });
+  const [difficulty, setDifficulty] = useState<number>(3);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -23,22 +25,39 @@ const App: React.FC = () => {
     // Initialize Engine
     const engine = new GameEngine((newStats) => {
         setStats(newStats);
-    });
-
-    const ctx = canvasRef.current.getContext('2d')!;
-    engine.initCanvas(ctx);
-    engine.start();
-    engineRef.current = engine;
+    }, difficulty);
 
     const handleResize = () => {
       if (canvasRef.current) {
-        canvasRef.current.width = window.innerWidth;
-        canvasRef.current.height = window.innerHeight;
+        const canvas = canvasRef.current;
+        const dpr = window.devicePixelRatio || 1;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Match CSS size
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+        // Set internal resolution for HiDPI displays
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+
+        // Reset transform before scaling
+        const context = canvas.getContext('2d');
+        if (context) {
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.scale(dpr, dpr);
+        }
       }
     };
 
+    const ctx = canvasRef.current.getContext('2d')!;
+    engine.initCanvas(ctx);
+    handleResize(); // Set initial size before first frame
+    engine.start();
+    engineRef.current = engine;
+
     window.addEventListener('resize', handleResize);
-    handleResize(); // Set initial size
 
     // Cleanup
     return () => {
@@ -69,6 +88,13 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.restartGame();
   };
 
+  const handleSetDifficulty = (level: number) => {
+      setDifficulty(level);
+      if (engineRef.current) {
+          engineRef.current.setDifficulty(level);
+      }
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
       <canvas 
@@ -82,6 +108,8 @@ const App: React.FC = () => {
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}
+        difficulty={difficulty}
+        onSetDifficulty={handleSetDifficulty}
       />
     </div>
   );
