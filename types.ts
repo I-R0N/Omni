@@ -10,7 +10,8 @@ export enum MapType {
 export enum GameState {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
-  PAUSED = 'PAUSED'
+  PAUSED = 'PAUSED',
+  GAME_OVER = 'GAME_OVER'  // Space game: wave ended / player died with no respawn
 }
 
 export interface Vector2 {
@@ -159,6 +160,11 @@ export interface EngineStats {
   currentWeapon: string;
   gameState: GameState;
   difficulty?: number;
+  // Space game additions (optional so original engine is unaffected)
+  playerHealth?: number;
+  playerMaxHealth?: number;
+  score?: number;   // Phase 4
+  wave?: number;    // Phase 4
 }
 
 export interface DamageText {
