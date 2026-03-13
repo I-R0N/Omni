@@ -11,21 +11,22 @@ export class AISystem {
   private reactionTimers: Map<string, number> = new Map();
 
   public update(dt: number, entities: GameEntity[], player: GameEntity) {
-    // PERF: avoid .filter() allocation — iterate in place
-    for (let i = 0; i < entities.length; i++) {
-      const enemy = entities[i];
-      if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+    const enemies = entities.filter(e => e.active && e.type === EntityType.ENEMY);
 
+    enemies.forEach(enemy => {
+      // Default initialization
       if (!enemy.aiState) {
-          enemy.aiState = 'chase';
+          enemy.aiState = 'chase'; 
           enemy.aiTimer = 0;
       }
-
+      
+      // Init Reaction Timer if missing
       if (!this.reactionTimers.has(enemy.id)) {
           this.reactionTimers.set(enemy.id, 0);
           this.laggedTargets.set(enemy.id, { ...player.position });
       }
 
+      // Handle specific behaviors
       switch (enemy.enemySubtype) {
           case EnemySubtype.SKIRMISHER:
               this.updateSkirmisher(dt, enemy, player);
@@ -37,16 +38,11 @@ export class AISystem {
               this.updateBasicDogfighter(dt, enemy, player);
               break;
       }
-    }
-
-    // PERF: GC cleanup — build liveIds from same loop, no extra .map() allocation
+    });
+    
+    // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically
     if (Math.random() < 0.05) {
-        const liveIds = new Set<string>();
-        for (let i = 0; i < entities.length; i++) {
-            if (entities[i].active && entities[i].type === EntityType.ENEMY) {
-                liveIds.add(entities[i].id);
-            }
-        }
+        const liveIds = new Set(enemies.map(e => e.id));
         for (const id of this.laggedTargets.keys()) {
             if (!liveIds.has(id)) {
                 this.laggedTargets.delete(id);
