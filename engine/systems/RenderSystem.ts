@@ -160,9 +160,10 @@ export class RenderSystem {
   }
 
   private renderTrails(ctx: CanvasRenderingContext2D, entities: GameEntity[]) {
-      entities.forEach(entity => {
-          if (!entity.active || !entity.trail || entity.trail.length < 2) return;
-          if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
+      for (let ei = 0; ei < entities.length; ei++) {
+          const entity = entities[ei];
+          if (!entity.active || !entity.trail || entity.trail.length < 2) continue;
+          if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) continue;
 
           const t = entity.trail;
           
@@ -233,7 +234,7 @@ export class RenderSystem {
               ctx.fillStyle = grad;
               ctx.fill();
           }
-      });
+      }
   }
 
   private renderEntities(
@@ -241,9 +242,10 @@ export class RenderSystem {
       entities: GameEntity[], 
       camera: CameraState
     ) {
-    entities.forEach(entity => {
-      if (!entity.active) return;
-      if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
+    for (let ei = 0; ei < entities.length; ei++) {
+      const entity = entities[ei];
+      if (!entity.active) continue;
+      if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) continue;
 
       // --- PARTICLE RENDERING ---
       if (entity.type === EntityType.PARTICLE) {
@@ -468,7 +470,7 @@ export class RenderSystem {
 
       // Render Health Bar (World Space, No Rotation)
       this.renderHealthBar(ctx, entity);
-    });
+    }
   }
 
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity) {
@@ -511,14 +513,14 @@ export class RenderSystem {
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
       
-      texts.forEach(t => {
+      for (let ti = 0; ti < texts.length; ti++) {
+          const t = texts[ti];
           ctx.save();
-          // REMOVED INTEGER OPTIMIZATION
           ctx.translate(t.position.x, t.position.y);
-          
+
           const lifeRatio = t.lifetime / t.maxLifetime;
           ctx.globalAlpha = Math.max(0, lifeRatio);
-          
+
           const scale = 1 + (1 - lifeRatio) * 0.5;
           ctx.scale(scale, scale);
 
@@ -527,9 +529,9 @@ export class RenderSystem {
           ctx.lineWidth = 2;
           ctx.strokeText(t.text, 0, 0);
           ctx.fillText(t.text, 0, 0);
-          
+
           ctx.restore();
-      });
+      }
   }
 
   private renderCracks(ctx: CanvasRenderingContext2D, entity: GameEntity, radius: number) {
@@ -691,32 +693,31 @@ export class RenderSystem {
       ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
       ctx.fill();
 
-      items.forEach(item => {
+      const mmScale = (currentSize / 2) / range;
+      for (let mi = 0; mi < items.length; mi++) {
+          const item = items[mi];
           const entity = item.entity;
-          if (!entity.active) return;
-          
-          const scale = (currentSize / 2) / range;
-          
-          const dotX = centerX + item.dx * scale;
-          const dotY = centerY + item.dy * scale;
+          if (!entity.active) continue;
 
-          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) return;
+          const dotX = centerX + item.dx * mmScale;
+          const dotY = centerY + item.dy * mmScale;
+
+          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
           ctx.fillStyle = entity.color;
-          
+
           if (entity.type === EntityType.STRUCTURE) {
-              // OPTIMIZATION: Use fillRect for structures (faster than arc)
               ctx.fillRect(dotX, dotY, 2, 2);
           } else {
               let dotRadius = 1.5;
               if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
               if (entity.type === EntityType.ENEMY) dotRadius = 2;
-              
+
               ctx.beginPath();
               ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
               ctx.fill();
           }
-      });
+      }
 
       ctx.restore();
   }
