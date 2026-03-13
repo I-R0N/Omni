@@ -28,8 +28,8 @@ export class GameEngine {
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
   private accumulator: number = 0;
-  // UPDATED: 120 Hz Physics for smoother simulation
-  private readonly FIXED_DT: number = 1/120;
+  // PERF: 60 Hz physics halves per-frame update work vs 120 Hz
+  private readonly FIXED_DT: number = 1/60;
   
   private maps: Map<string, BaseMapLayer> = new Map();
   private currentMap: BaseMapLayer | null = null;
@@ -334,24 +334,26 @@ export class GameEngine {
         this.handleScreenShake
       );
 
-      this.currentMap.entities.forEach(e => {
+      // PERF: single pass for explosion timers AND shard spawning (was two allocating passes)
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+          const e = this.currentMap.entities[i];
           if (e.isExploding && e.explosionTimer !== undefined) {
               e.explosionTimer -= dt;
               if (e.explosionTimer <= 0) {
                   e.active = false;
               }
           }
-      });
-
-      const newlyDestroyed = this.currentMap.entities.filter(e => !e.active && e.type === EntityType.ASTEROID);
-      newlyDestroyed.forEach(ast => {
-          if (ast.size.x > 15) {
-              this.createAsteroidShards(ast);
+          if (!e.active && e.type === EntityType.ASTEROID && e.size.x > 15) {
+              this.createAsteroidShards(e);
           }
-      });
+      }
       
       const config = ASTEROID_GENERATION_CONFIG[this.currentMap.type];
-      const currentAsteroids = this.currentMap.entities.filter(e => e.type === EntityType.ASTEROID).length;
+      // PERF: count directly without allocating a filtered array
+      let currentAsteroids = 0;
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+          if (this.currentMap.entities[i].type === EntityType.ASTEROID) currentAsteroids++;
+      }
       if (currentAsteroids < config.count) {
           this.handleAsteroidRespawn(config);
       }
@@ -411,8 +413,11 @@ export class GameEngine {
           const y = Math.sin(angle) * dist;
 
           let safe = true;
-          const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
-          for (const p of pois) {
+          // PERF: iterate directly instead of allocating a filtered array
+          const mapEnts = this.currentMap?.entities || [];
+          for (let pi = 0; pi < mapEnts.length; pi++) {
+              const p = mapEnts[pi];
+              if (p.type !== EntityType.INTERACTABLE) continue;
               const d2 = (x - p.position.x)**2 + (y - p.position.y)**2;
               const safeDist = (p.gravityRange || p.size.x) + 800; 
               if (d2 < safeDist**2) {
@@ -505,12 +510,15 @@ export class GameEngine {
     }
 
     if (this.player.trail) {
-        for (let i = this.player.trail.length - 1; i >= 0; i--) {
+        // PERF: compaction instead of splice to avoid O(n) array shifts
+        let trailWrite = 0;
+        for (let i = 0; i < this.player.trail.length; i++) {
             this.player.trail[i].lifetime -= dt;
-            if (this.player.trail[i].lifetime <= 0) {
-                this.player.trail.splice(i, 1);
+            if (this.player.trail[i].lifetime > 0) {
+                this.player.trail[trailWrite++] = this.player.trail[i];
             }
         }
+        this.player.trail.length = trailWrite;
     }
 
     const lastPos = this.player.trail && this.player.trail.length > 0 
@@ -587,17 +595,18 @@ export class GameEngine {
     this.damageTexts.length = dTextIdx;
 
     if (this.interactionCooldown <= 0) {
-        const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
-        for (const entity of interactables) {
-            const dist = Math.sqrt(
-                (this.player.position.x - entity.position.x) ** 2 +
-                (this.player.position.y - entity.position.y) ** 2
-            );
-
+        // PERF: iterate directly instead of allocating a filtered array
+        const mapEnts2 = this.currentMap.entities;
+        for (let ii = 0; ii < mapEnts2.length; ii++) {
+            const entity = mapEnts2[ii];
+            if (entity.type !== EntityType.INTERACTABLE) continue;
+            const dx2 = this.player.position.x - entity.position.x;
+            const dy2 = this.player.position.y - entity.position.y;
+            const dist = Math.sqrt(dx2 * dx2 + dy2 * dy2);
             if (dist < (entity.size.x / 2 + this.player.size.x)) {
                 if (entity.targetMapId && entity.targetMapType) {
                     this.switchMap(entity.targetMapType, entity.targetMapId);
-                    break; 
+                    break;
                 }
             }
         }
@@ -734,44 +743,60 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      // Filter-less optimization
       const entities = this.currentMap.entities;
+
+      // PERF: Pre-cache homing targets once per call instead of re-scanning for every missile (O(n²) → O(n))
+      let hasHoming = false;
+      for (let i = 0; i < entities.length; i++) {
+          if (entities[i].active && entities[i].type === EntityType.PROJECTILE && entities[i].homing) {
+              hasHoming = true;
+              break;
+          }
+      }
+      if (!hasHoming) return;
+
+      // Build target list once
+      const targets: GameEntity[] = [];
+      for (let j = 0; j < entities.length; j++) {
+          const e = entities[j];
+          if (e.active && (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
+              targets.push(e);
+          }
+      }
+
       for (let i = 0; i < entities.length; i++) {
           const p = entities[i];
-          if (p.active && p.type === EntityType.PROJECTILE && p.homing) {
-             
-              let target: GameEntity | null = null;
-              let minDist = 400 * 400; 
+          if (!p.active || p.type !== EntityType.PROJECTILE || !p.homing) continue;
 
-              for (let j = 0; j < entities.length; j++) {
-                  const e = entities[j];
-                  if (e.active && (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
-                      const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
-                      if (d2 < minDist) {
-                          minDist = d2;
-                          target = e;
-                      }
-                  }
+          let target: GameEntity | null = null;
+          let minDist = 400 * 400;
+
+          for (let j = 0; j < targets.length; j++) {
+              const e = targets[j];
+              const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
+              if (d2 < minDist) {
+                  minDist = d2;
+                  target = e;
+              }
+          }
+
+          if (target) {
+              const desiredAngle = Math.atan2(target.position.y - p.position.y, target.position.x - p.position.x);
+              let angleDiff = desiredAngle - p.rotation;
+
+              while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+              while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+              const turnRate = 5 * dt;
+              if (Math.abs(angleDiff) < turnRate) {
+                  p.rotation = desiredAngle;
+              } else {
+                  p.rotation += Math.sign(angleDiff) * turnRate;
               }
 
-              if (target) {
-                  const desiredAngle = Math.atan2(target.position.y - p.position.y, target.position.x - p.position.x);
-                  let angleDiff = desiredAngle - p.rotation;
-                  
-                  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-                  const turnRate = 5 * dt; 
-                  if (Math.abs(angleDiff) < turnRate) {
-                      p.rotation = desiredAngle;
-                  } else {
-                      p.rotation += Math.sign(angleDiff) * turnRate;
-                  }
-
-                  const speed = Math.sqrt(p.velocity.x**2 + p.velocity.y**2);
-                  p.velocity.x = Math.cos(p.rotation) * speed;
-                  p.velocity.y = Math.sin(p.rotation) * speed;
-              }
+              const speed = Math.sqrt(p.velocity.x**2 + p.velocity.y**2);
+              p.velocity.x = Math.cos(p.rotation) * speed;
+              p.velocity.y = Math.sin(p.rotation) * speed;
           }
       }
   }

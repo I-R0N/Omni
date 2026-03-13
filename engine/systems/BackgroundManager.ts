@@ -180,20 +180,22 @@ export class BackgroundManager {
         });
     }
 
-    const numLayers = 60;
-    const starsPerLayer = 200;
+    // PERF: 4 layers × 150 stars = 600 total (was 60 × 200 = 12,000)
+    // 4 distinct parallax speeds are visually indistinguishable from 60.
+    const numLayers = 4;
+    const starsPerLayer = 150;
     for (let i = 0; i < numLayers; i++) {
         const t = i / numLayers;
         const speed = 0.02 + (t * t) * 2.0;
         const stars: Star[] = [];
         for(let j=0; j<starsPerLayer; j++) {
-            const baseSize = 0.5 + Math.random() * 0.5; 
-            const sizeMod = 0.5 + (t * 1.5); 
+            const baseSize = 0.5 + Math.random() * 0.5;
+            const sizeMod = 0.5 + (t * 1.5);
             stars.push({
                 x: Math.random() * width,
                 y: Math.random() * height,
                 size: baseSize * sizeMod,
-                opacity: 0.3 + Math.random() * 0.7, 
+                opacity: 0.3 + Math.random() * 0.7,
                 color: Math.random() > 0.95 ? COLORS.STAR : '#ffffff'
             });
         }
@@ -233,22 +235,21 @@ export class BackgroundManager {
     const hasAttractors = attractors.length > 0;
     
     // RENDER NEBULAE
-    this.nebulaPuffs.forEach(puff => {
+    for (let pi = 0; pi < this.nebulaPuffs.length; pi++) {
+        const puff = this.nebulaPuffs[pi];
         puff.x -= dx * puff.depth;
         puff.y -= dy * puff.depth;
         puff.rotation += puff.rotationSpeed;
 
-        const margin = puff.size; 
+        const margin = puff.size;
         const rangeX = width + margin * 2;
         const rangeY = height + margin * 2;
-        // Robust modulo-like wrapping for nebulae
         if (puff.x < -margin) puff.x += rangeX; else if (puff.x > width + margin) puff.x -= rangeX;
         if (puff.y < -margin) puff.y += rangeY; else if (puff.y > height + margin) puff.y -= rangeY;
 
         let drawX = puff.x;
         let drawY = puff.y;
 
-        // INLINED LENSING
         if (hasAttractors) {
            const lensed = this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
            drawX = lensed.x;
@@ -256,17 +257,17 @@ export class BackgroundManager {
         }
 
         const texture = this.puffTextures[puff.textureIndex % this.puffTextures.length];
-        ctx.globalAlpha = puff.opacity; 
+        ctx.globalAlpha = puff.opacity;
         ctx.save();
         ctx.translate(drawX, drawY);
         ctx.rotate(puff.rotation);
-        ctx.scale(puff.aspect, 1.0); 
+        ctx.scale(puff.aspect, 1.0);
         if (texture) ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
         ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = puff.color + '1)'; 
+        ctx.fillStyle = puff.color + '1)';
         ctx.beginPath(); ctx.arc(0, 0, puff.size/2, 0, Math.PI*2); ctx.fill();
         ctx.restore();
-    });
+    }
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
 
@@ -323,27 +324,26 @@ export class BackgroundManager {
           this.spawnShootingStar(w, h);
           this.shootingTimer = Math.random() * (SHOOTING_STAR_CONSTANTS.MAX_TIMER - SHOOTING_STAR_CONSTANTS.MIN_TIMER) + SHOOTING_STAR_CONSTANTS.MIN_TIMER;
       }
-      for (let i = this.shootingStars.length - 1; i >= 0; i--) {
+      // PERF: compaction instead of splice to avoid O(n) array shifts
+      let ssWrite = 0;
+      for (let i = 0; i < this.shootingStars.length; i++) {
           const s = this.shootingStars[i];
-          s.position.x += s.velocity.x * 0.016; 
+          s.position.x += s.velocity.x * 0.016;
           s.position.y += s.velocity.y * 0.016;
-          if (s.position.x < -100 || s.position.x > w + 100 || s.position.y < -100 || s.position.y > h + 100) {
-              this.shootingStars.splice(i, 1);
-              continue;
-          }
           s.alpha -= 0.005;
-          if (s.alpha <= 0) {
-              this.shootingStars.splice(i, 1);
-              continue;
+          if (s.alpha <= 0 || s.position.x < -100 || s.position.x > w + 100 || s.position.y < -100 || s.position.y > h + 100) {
+              continue; // discard
           }
-          const tailX = (s.position.x - (s.velocity.x * 0.05));
-          const tailY = (s.position.y - (s.velocity.y * 0.05));
+          this.shootingStars[ssWrite++] = s;
+          const tailX = s.position.x - s.velocity.x * 0.05;
+          const tailY = s.position.y - s.velocity.y * 0.05;
           ctx.save();
           ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha})`;
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.moveTo(s.position.x, s.position.y); ctx.lineTo(tailX, tailY); ctx.stroke();
           ctx.restore();
       }
+      this.shootingStars.length = ssWrite;
   }
 
   private spawnShootingStar(w: number, h: number) {
