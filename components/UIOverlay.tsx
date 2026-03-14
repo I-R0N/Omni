@@ -123,12 +123,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ stats, onCycleWeapon, onStart, on
         </div>
       )}
 
+      {/* Wave HUD (Playing state) */}
+      {stats.gameState === GameState.PLAYING && (
+        <div className="flex flex-col items-center pointer-events-none">
+          {stats.waveStatus === 'complete' ? (
+            <div className="bg-yellow-500/20 border border-yellow-400/60 rounded-lg px-6 py-2 text-center shadow-lg">
+              <span className="text-yellow-300 font-black text-lg tracking-widest">★ ALL WAVES CLEARED ★</span>
+            </div>
+          ) : (
+            <div className="bg-slate-900/70 border border-slate-600/50 rounded-lg px-5 py-1.5 text-center shadow-lg backdrop-blur-sm">
+              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">
+                Wave {Math.min(stats.waveNumber ?? 1, 5)} / 5
+              </span>
+              {stats.waveStatus === 'cleared' && (
+                <p className="text-emerald-400 text-xs font-bold mt-0.5 animate-pulse">Collect the powerup ↓</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom Bar / Weapon Selector (Hidden in Menus) */}
       {stats.gameState === GameState.PLAYING && (
         <div className="flex items-end justify-center relative pointer-events-none">
             {/* Weapon Selector */}
             <div className="absolute right-0 bottom-4 pointer-events-auto">
-                <button 
+                <button
                     onClick={onCycleWeapon}
                     className="bg-slate-800/90 border-2 border-slate-600 hover:border-yellow-400 active:bg-slate-700 text-white rounded-full w-24 h-24 flex flex-col items-center justify-center shadow-2xl transition-all"
                 >

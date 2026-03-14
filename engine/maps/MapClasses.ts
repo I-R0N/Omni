@@ -182,7 +182,6 @@ export class UniverseMap extends BaseMapLayer {
 
     const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
-    this.spawnEnemies(25, 8000);
 
     // Cluster Generation
     this.entities.push(...TileGenerator.generateClusteredMesh(
@@ -298,7 +297,6 @@ export class SolarSystemMap extends BaseMapLayer {
     const gen = ASTEROID_GENERATION_CONFIG[MapType.SOLAR_SYSTEM];
     const solarAsteroids = [ASSETS.ASTEROID_1, ASSETS.ASTEROID_3, ASSETS.ASTEROID_ICE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier, solarAsteroids);
-    this.spawnEnemies(20, 4000);
 
     // Cluster Generation
     this.entities.push(...TileGenerator.generateClusteredMesh(
@@ -368,7 +366,6 @@ export class LocalMap extends BaseMapLayer {
     const gen = ASTEROID_GENERATION_CONFIG[MapType.LOCAL];
     const localAsteroids = [ASSETS.ASTEROID_2, ASSETS.ASTEROID_VOLCANIC];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier, localAsteroids);
-    this.spawnEnemies(15, 2000);
 
     // Cluster Generation
     this.entities.push(...TileGenerator.generateClusteredMesh(
@@ -419,7 +416,6 @@ export class SubMap extends BaseMapLayer {
 
       const gen = ASTEROID_GENERATION_CONFIG[MapType.SUB_MAP];
       this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
-      this.spawnEnemies(10, 1000);
 
       // Cluster Generation - Denser for submap
       this.entities.push(...TileGenerator.generateClusteredMesh(

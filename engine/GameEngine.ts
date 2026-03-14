@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap, SolarSystemMap, LocalMap, SubMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
 
 const MAP_RANK = {
@@ -48,6 +48,12 @@ export class GameEngine {
   private respawnTimer: number = 0;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
+
+  // Wave system
+  private waveIndex: number = 0;
+  private waveEnemyIds: Set<string> = new Set();
+  private waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
+  private powerupId: string | null = null;
 
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -127,6 +133,7 @@ export class GameEngine {
   // --- STATE MANAGEMENT ---
   public startGame() {
     this.gameState = GameState.PLAYING;
+    this.initWaveSystem();
   }
 
   public pauseGame() {
@@ -164,6 +171,7 @@ export class GameEngine {
       this.camera.shakeOffset = { x: 0, y: 0 };
 
       this.gameState = GameState.PLAYING;
+      this.initWaveSystem();
       this.prepareFrameEntities();
   }
 
@@ -201,14 +209,19 @@ export class GameEngine {
     this.lastTime = time;
 
     // Report stats
+    const wsMap: Record<string, 'active' | 'cleared' | 'complete'> = {
+      inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
+    };
     this.onStatsUpdate({
-      fps: Math.round(1000 / ((performance.now() - time) + 1)), 
+      fps: Math.round(1000 / ((performance.now() - time) + 1)),
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
       currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
       gameState: this.gameState,
-      difficulty: this.difficultyLevel
+      difficulty: this.difficultyLevel,
+      waveNumber: this.waveIndex + 1,
+      waveStatus: wsMap[this.waveState]
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -373,7 +386,7 @@ export class GameEngine {
       }
 
       // Spawn Particles
-      const numParticles = 8 + Math.floor(Math.random() * 5);
+      const numParticles = 4 + Math.floor(Math.random() * 3);
       const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
       
       for (let i = 0; i < numParticles; i++) {
@@ -474,6 +487,39 @@ export class GameEngine {
         this.camera.position.x = this.player.position.x;
         this.camera.position.y = this.player.position.y;
         return; // Skip controls while exploding
+    }
+
+    // Wave completion check
+    if (this.waveState === 'active' && this.currentMap) {
+      const entities = this.currentMap.entities;
+      let allDead = true;
+      for (let i = 0; i < entities.length; i++) {
+        const e = entities[i];
+        if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding) {
+          allDead = false;
+          break;
+        }
+      }
+      if (allDead) {
+        this.waveState = 'cleared';
+        const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+        if (waveDef.powerup !== null) {
+          this.spawnPowerup(waveDef.powerup);
+        } else {
+          this.waveState = 'complete';
+        }
+      }
+    }
+
+    // Slowly spin the powerup pickup
+    if (this.powerupId && this.currentMap) {
+      const entities = this.currentMap.entities;
+      for (let i = 0; i < entities.length; i++) {
+        if (entities[i].id === this.powerupId) {
+          entities[i].rotation += dt * 2.0;
+          break;
+        }
+      }
     }
 
     // Auto-collapse minimap
@@ -595,9 +641,26 @@ export class GameEngine {
             );
 
             if (dist < (entity.size.x / 2 + this.player.size.x)) {
+                // Collect weapon powerup
+                if (entity.powerupWeapon !== undefined) {
+                    this.player.currentWeapon = entity.powerupWeapon;
+                    this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.powerupWeapon);
+                    this.player.burstQueue = 0;
+                    entity.active = false;
+                    this.powerupId = null;
+                    this.interactionCooldown = 1.0;
+                    const nextIdx = this.waveIndex + 1;
+                    if (nextIdx < WAVE_DEFINITIONS.length) {
+                        this.spawnWave(nextIdx);
+                    } else {
+                        this.waveState = 'complete';
+                    }
+                    break;
+                }
+
                 if (entity.targetMapId && entity.targetMapType) {
                     this.switchMap(entity.targetMapType, entity.targetMapId);
-                    break; 
+                    break;
                 }
             }
         }
@@ -812,6 +875,90 @@ export class GameEngine {
               sprite: parent.sprite
           });
       }
+  }
+
+  // --- WAVE SYSTEM ---
+
+  private initWaveSystem() {
+    this.waveIndex = 0;
+    this.waveEnemyIds = new Set();
+    this.waveState = 'inactive';
+    this.powerupId = null;
+    this.spawnWave(0);
+  }
+
+  private spawnWave(index: number) {
+    if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
+    this.waveIndex = index;
+    this.waveEnemyIds.clear();
+
+    const waveDef = WAVE_DEFINITIONS[index];
+    const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
+    let enemyIdx = 0;
+
+    for (const group of waveDef.enemies) {
+      for (let i = 0; i < group.count; i++) {
+        const angle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const dist = 550 + Math.random() * 200;
+        const x = this.player.position.x + Math.cos(angle) * dist;
+        const y = this.player.position.y + Math.sin(angle) * dist;
+        const config = ENEMY_VARIANTS[group.subtype];
+        const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
+
+        this.currentMap.entities.push({
+          id,
+          type: EntityType.ENEMY,
+          enemySubtype: group.subtype,
+          position: { x, y },
+          velocity: { x: 0, y: 0 },
+          size: { x: config.size, y: config.size },
+          rotation: Math.random() * Math.PI * 2,
+          color: config.color,
+          active: true,
+          health: config.health,
+          maxHealth: config.health,
+          mass: config.mass,
+          visionRange: ENEMY_CONSTANTS.VISION_RANGE,
+          sprite: config.sprite
+        });
+
+        this.waveEnemyIds.add(id);
+        enemyIdx++;
+      }
+    }
+
+    this.waveState = 'active';
+  }
+
+  private spawnPowerup(weaponType: WeaponType) {
+    if (!this.currentMap) return;
+    const id = `powerup_${Date.now()}`;
+    const weaponConfig = WEAPONS[weaponType];
+
+    // Spawn offset from player so it doesn't overlap them
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 160;
+
+    this.currentMap.entities.push({
+      id,
+      type: EntityType.INTERACTABLE,
+      position: {
+        x: this.player.position.x + Math.cos(angle) * dist,
+        y: this.player.position.y + Math.sin(angle) * dist
+      },
+      velocity: { x: 0, y: 0 },
+      size: { x: 28, y: 28 },
+      rotation: 0,
+      color: weaponConfig.color,
+      active: true,
+      health: 100,
+      maxHealth: 100,
+      mass: Infinity,
+      name: weaponConfig.name,
+      powerupWeapon: weaponType
+    });
+
+    this.powerupId = id;
   }
 
   private switchMap(type: MapType, id: string) {
