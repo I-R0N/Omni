@@ -142,6 +142,9 @@ export interface GameEntity {
   weaponCooldown?: number;
   burstQueue?: number; // How many shots left in current burst
   burstTimer?: number; // Timer for next burst shot
+
+  // Powerup pickup
+  powerupWeapon?: WeaponType;
 }
 
 export interface CameraState {
@@ -159,6 +162,8 @@ export interface EngineStats {
   currentWeapon: string;
   gameState: GameState;
   difficulty?: number;
+  waveNumber?: number;
+  waveStatus?: 'active' | 'cleared' | 'complete';
 }
 
 export interface DamageText {

@@ -104,7 +104,7 @@ export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
   MARGIN: 20,          // Distance from screen edge
-  RANGE: 5000,         // World units radius shown in minimap
+  RANGE: 8000,         // World units radius shown in minimap (universe is large)
   BG_COLOR: 'rgba(15, 23, 42, 0.85)',
   BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
   PLAYER_DOT_COLOR: '#ffffff'
@@ -135,69 +135,52 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 };
 
 export const TRAIL_CONSTANTS = {
-  LIFETIME: 3.0, // Seconds until trail part fades completely
-  MIN_DISTANCE_SQ: 50 // Minimum squared distance (10px) to move before recording a new trail point
+  LIFETIME: 1.2, // Seconds until trail part fades completely
+  MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
 };
 
 export const SHOOTING_STAR_CONSTANTS = {
-  MIN_TIMER: 100,
-  MAX_TIMER: 300,
-  SPEED_MIN: 800,
-  SPEED_MAX: 3200
+  MIN_TIMER: 300,
+  MAX_TIMER: 700,
+  SPEED_MIN: 300,
+  SPEED_MAX: 900
 };
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
-    maxSpeed: 300, // Fast travel across galaxy
-    acceleration: 0.05, // Reduced from 0.125
-    friction: 0.995 // Drag to stop from high speeds
+    maxSpeed: 140,
+    acceleration: 0.04,
+    friction: 0.994
   },
   [MapType.SOLAR_SYSTEM]: {
-    maxSpeed: 250, // Dogfighting speed
-    acceleration: 0.05, // Reduced from 0.125
-    friction: 0.995 // High drift (low drag)
+    maxSpeed: 100,
+    acceleration: 0.04,
+    friction: 0.994
   },
   [MapType.LOCAL]: {
-    maxSpeed: 80, // Controlled maneuvering
-    acceleration: 0.05, // Reduced from 0.125
-    friction: 0.985 // Atmospheric drag
+    maxSpeed: 38,
+    acceleration: 0.04,
+    friction: 0.983
   },
   [MapType.SUB_MAP]: {
-    maxSpeed: 10, // Increased slightly from 6 to prevent stuck feeling
-    acceleration: 0.375, // Reduced from 0.75
-    friction: 0.85 // Reduced drag (was 0.75) to make movement cleaner
+    maxSpeed: 6,
+    acceleration: 0.3,
+    friction: 0.84
   }
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    count: 200, 
-    minSize: 20,   // Tiny debris
-    maxSize: 180,  // Massive planet-killers
-    radius: 3000,  // Reduced radius to concentrate asteroids
-    speedMultiplier: 3.0
-  },
-  [MapType.SOLAR_SYSTEM]: {
-    count: 400,
-    minSize: 20,   // Standard small
-    maxSize: 120,  // Large rocks
+    count: 280,
+    minSize: 20,
+    maxSize: 160,
     radius: 5000,
-    speedMultiplier: 2.0
+    speedMultiplier: 1.5
   },
-  [MapType.LOCAL]: {
-    count: 80,
-    minSize: 15,   // Surface rocks
-    maxSize: 80,   // Large boulders
-    radius: 2000,
-    speedMultiplier: 0.5
-  },
-  [MapType.SUB_MAP]: {
-    count: 0,
-    minSize: 0,
-    maxSize: 0,
-    radius: 0,
-    speedMultiplier: 0
-  }
+  // Unused map types — kept for type completeness
+  [MapType.SOLAR_SYSTEM]: { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
+  [MapType.LOCAL]:        { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
+  [MapType.SUB_MAP]:      { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 }
 };
 
 export const STRUCTURE_CONSTANTS = {
@@ -213,12 +196,12 @@ export const EXPLOSION_CONSTANTS = {
 };
 
 export const PARTICLE_CONSTANTS = {
-  LIFETIME_MIN: 0.4,
-  LIFETIME_MAX: 0.8,
-  SPEED_MIN: 3,  // Reduced by 10x
-  SPEED_MAX: 8,  // Reduced by 10x
-  SIZE_MIN: 2,
-  SIZE_MAX: 5
+  LIFETIME_MIN: 0.25,
+  LIFETIME_MAX: 0.45,
+  SPEED_MIN: 2,
+  SPEED_MAX: 5,
+  SIZE_MIN: 1,
+  SIZE_MAX: 3
 };
 
 export const PROJECTILE_CONSTANTS = {
@@ -358,9 +341,9 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
     color: '#f87171', // Red
     size: 30,
     health: 1,
-    maxSpeed: 5,
-    accel: 3,
-    turnRate: 1.5,
+    maxSpeed: 3,
+    accel: 2,
+    turnRate: 1.2,
     sprite: ASSETS.ENEMY_DRONE,
     mass: 10
   },
@@ -368,19 +351,19 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
     color: '#60a5fa', // Blue
     size: 30,
     health: 1,
-    maxSpeed: 10, // Faster than basic
-    accel: 5,
-    turnRate: 1.5,
+    maxSpeed: 6,
+    accel: 3.5,
+    turnRate: 1.3,
     sprite: ASSETS.ENEMY_CHARGER,
     mass: 8
   },
   [EnemySubtype.TANK]: {
     color: '#94a3b8', // Grey/Black
-    size: 30,
-    health: 3, // Takes multiple hits
-    maxSpeed: 5, // Slow
-    accel: 2,
-    turnRate: 0.5,
+    size: 34,
+    health: 4,
+    maxSpeed: 2.5,
+    accel: 1.5,
+    turnRate: 0.4,
     sprite: ASSETS.ENEMY_TANK,
     mass: 30
   },
@@ -388,12 +371,47 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
     color: '#4ade80', // Green
     size: 30,
     health: 1,
-    maxSpeed: 9,
-    accel: 3,
-    turnRate: 1.5,
+    maxSpeed: 5,
+    accel: 2.5,
+    turnRate: 1.3,
     sprite: ASSETS.ENEMY_SKIRMISHER,
     mass: 12
   },
-  [EnemySubtype.ORBITER]: { color: '#c084fc', size: 30, health: 1, maxSpeed: 6, accel: 3, turnRate: 1.25, sprite: ASSETS.ENEMY_ORBITER, mass: 10 },
-  [EnemySubtype.SNIPER]: { color: '#fbbf24', size: 30, health: 1, maxSpeed: 6, accel: 3, turnRate: 1.25, sprite: ASSETS.ENEMY_SNIPER, mass: 10 }
+  [EnemySubtype.ORBITER]: { color: '#c084fc', size: 30, health: 1, maxSpeed: 4, accel: 2, turnRate: 1.0, sprite: ASSETS.ENEMY_ORBITER, mass: 10 },
+  [EnemySubtype.SNIPER]: { color: '#fbbf24', size: 30, health: 1, maxSpeed: 3.5, accel: 2, turnRate: 1.0, sprite: ASSETS.ENEMY_SNIPER, mass: 10 }
 };
+
+// 5 escalating waves of enemies. powerup: weapon unlocked when wave is cleared (null = victory, no powerup)
+export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null }[] = [
+  // Wave 1: Three basic drones — easy introduction
+  {
+    enemies: [{ subtype: EnemySubtype.BASIC, count: 3 }],
+    powerup: WeaponType.BURST
+  },
+  // Wave 2: More basics + agile skirmishers
+  {
+    enemies: [{ subtype: EnemySubtype.BASIC, count: 3 }, { subtype: EnemySubtype.SKIRMISHER, count: 2 }],
+    powerup: WeaponType.SHOTGUN
+  },
+  // Wave 3: Fast chargers join the mix
+  {
+    enemies: [{ subtype: EnemySubtype.FAST_CHARGER, count: 2 }, { subtype: EnemySubtype.SKIRMISHER, count: 2 }, { subtype: EnemySubtype.BASIC, count: 2 }],
+    powerup: WeaponType.HOMING
+  },
+  // Wave 4: Armored tank leads the charge
+  {
+    enemies: [{ subtype: EnemySubtype.TANK, count: 1 }, { subtype: EnemySubtype.FAST_CHARGER, count: 2 }, { subtype: EnemySubtype.SKIRMISHER, count: 3 }],
+    powerup: WeaponType.CANNON
+  },
+  // Wave 5: Full assault — all enemy types
+  {
+    enemies: [
+      { subtype: EnemySubtype.TANK, count: 2 },
+      { subtype: EnemySubtype.FAST_CHARGER, count: 2 },
+      { subtype: EnemySubtype.SKIRMISHER, count: 2 },
+      { subtype: EnemySubtype.ORBITER, count: 1 },
+      { subtype: EnemySubtype.SNIPER, count: 1 }
+    ],
+    powerup: null // Victory — no more waves
+  }
+];

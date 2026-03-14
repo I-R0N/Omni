@@ -405,15 +405,50 @@ export class RenderSystem {
              }
           } else {
             ctx.fillStyle = entity.color;
-            
-            if (entity.type === EntityType.INTERACTABLE) {
+
+            if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
+                // Weapon powerup — glowing pulsing orb
+                const r = entity.size.x / 2;
+                const pulse = 0.65 + Math.sin(entity.rotation * 3) * 0.35;
+
+                // Outer ring
+                ctx.globalAlpha = 0.6 * pulse;
+                ctx.strokeStyle = entity.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Second ring
+                ctx.globalAlpha = 0.35 * pulse;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Core fill
+                ctx.globalAlpha = 0.9;
+                ctx.fillStyle = entity.color;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Label
+                ctx.globalAlpha = 1.0;
+                ctx.rotate(-entity.rotation);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 11px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('▲ ' + (entity.name || 'WEAPON') + ' ▲', 0, r + 20);
+
+            } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
                  if (Number.isFinite(r) && r > 0) {
                      ctx.beginPath();
-                     ctx.arc(0, 0, r, 0, Math.PI * 2); 
+                     ctx.arc(0, 0, r, 0, Math.PI * 2);
                      ctx.fill();
                  }
-                 
+
                  ctx.rotate(-entity.rotation);
                  ctx.fillStyle = '#ffffff';
                  ctx.font = '12px monospace';
@@ -658,12 +693,7 @@ export class RenderSystem {
   ) {
       const { SIZE, EXPANDED_SIZE, MARGIN, BG_COLOR, BORDER_COLOR, PLAYER_DOT_COLOR } = MINIMAP_CONSTANTS;
       
-      // Adjust Range based on Map Type for better usability
-      let range = MINIMAP_CONSTANTS.RANGE;
-      if (mapType === MapType.SOLAR_SYSTEM) range = 12000;
-      else if (mapType === MapType.LOCAL) range = 4000;
-      else if (mapType === MapType.SUB_MAP) range = 2000;
-      else range = 25000; // Universe
+      const range = MINIMAP_CONSTANTS.RANGE;
 
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
