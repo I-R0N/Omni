@@ -104,7 +104,7 @@ export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
   MARGIN: 20,          // Distance from screen edge
-  RANGE: 5000,         // World units radius shown in minimap
+  RANGE: 8000,         // World units radius shown in minimap (universe is large)
   BG_COLOR: 'rgba(15, 23, 42, 0.85)',
   BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
   PLAYER_DOT_COLOR: '#ffffff'
@@ -171,33 +171,16 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    count: 200, 
-    minSize: 20,   // Tiny debris
-    maxSize: 180,  // Massive planet-killers
-    radius: 3000,  // Reduced radius to concentrate asteroids
-    speedMultiplier: 3.0
-  },
-  [MapType.SOLAR_SYSTEM]: {
-    count: 400,
-    minSize: 20,   // Standard small
-    maxSize: 120,  // Large rocks
+    count: 280,
+    minSize: 20,
+    maxSize: 160,
     radius: 5000,
-    speedMultiplier: 2.0
+    speedMultiplier: 1.5
   },
-  [MapType.LOCAL]: {
-    count: 80,
-    minSize: 15,   // Surface rocks
-    maxSize: 80,   // Large boulders
-    radius: 2000,
-    speedMultiplier: 0.5
-  },
-  [MapType.SUB_MAP]: {
-    count: 0,
-    minSize: 0,
-    maxSize: 0,
-    radius: 0,
-    speedMultiplier: 0
-  }
+  // Unused map types — kept for type completeness
+  [MapType.SOLAR_SYSTEM]: { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
+  [MapType.LOCAL]:        { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
+  [MapType.SUB_MAP]:      { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 }
 };
 
 export const STRUCTURE_CONSTANTS = {

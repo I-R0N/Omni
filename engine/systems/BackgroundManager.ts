@@ -308,9 +308,6 @@ export class BackgroundManager {
         renderStarList(layer.stars, dx * layer.speed * 0.2, dy * layer.speed * 0.2);
     }
 
-    if (this.mapType === MapType.SUB_MAP) {
-        this.renderGrid(ctx, width, height, cameraPos);
-    }
     this.updateAndDrawShootingStars(ctx, width, height);
 
     ctx.restore();

@@ -693,12 +693,7 @@ export class RenderSystem {
   ) {
       const { SIZE, EXPANDED_SIZE, MARGIN, BG_COLOR, BORDER_COLOR, PLAYER_DOT_COLOR } = MINIMAP_CONSTANTS;
       
-      // Adjust Range based on Map Type for better usability
-      let range = MINIMAP_CONSTANTS.RANGE;
-      if (mapType === MapType.SOLAR_SYSTEM) range = 12000;
-      else if (mapType === MapType.LOCAL) range = 4000;
-      else if (mapType === MapType.SUB_MAP) range = 2000;
-      else range = 25000; // Universe
+      const range = MINIMAP_CONSTANTS.RANGE;
 
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 

@@ -4,17 +4,10 @@ import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
-import { BaseMapLayer, UniverseMap, SolarSystemMap, LocalMap, SubMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
-
-const MAP_RANK = {
-  [MapType.UNIVERSE]: 0,
-  [MapType.SOLAR_SYSTEM]: 1,
-  [MapType.LOCAL]: 2,
-  [MapType.SUB_MAP]: 3
-};
 
 const PHYSICS_MAX_STEPS = 5;
 
@@ -31,7 +24,6 @@ export class GameEngine {
   // UPDATED: 120 Hz Physics for smoother simulation
   private readonly FIXED_DT: number = 1/120;
   
-  private maps: Map<string, BaseMapLayer> = new Map();
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
   private camera: CameraState;
@@ -59,22 +51,13 @@ export class GameEngine {
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
 
-  private transition = {
-      active: false,
-      timer: 0,
-      duration: CAMERA_CONSTANTS.TRANSITION_DURATION, 
-      targetType: MapType.UNIVERSE,
-      targetId: '',
-      switched: false,
-      startZoom: 1,
-      direction: 'IN' as 'IN' | 'OUT'
-  };
-
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
     this.onStatsUpdate = onStatsUpdate;
-    this.setDifficultyLevel(difficultyLevel, false);
+    const clamped = Math.min(3, Math.max(0, Math.round(difficultyLevel)));
+    this.difficultyLevel = clamped;
+    this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
     
     this.input = new InputSystem();
     this.physics = new PhysicsSystem();
@@ -109,8 +92,6 @@ export class GameEngine {
     };
 
     const initialMap = new UniverseMap();
-    this.applyDifficultyToMap(initialMap);
-    this.maps.set(initialMap.id, initialMap);
     this.loadMap(initialMap);
   }
 
@@ -150,12 +131,7 @@ export class GameEngine {
   }
 
   public restartGame() {
-      // Reset Maps
-      this.maps.clear();
-      const initialMap = new UniverseMap();
-      this.applyDifficultyToMap(initialMap);
-      this.maps.set(initialMap.id, initialMap);
-      this.loadMap(initialMap);
+      this.loadMap(new UniverseMap());
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -184,22 +160,10 @@ export class GameEngine {
   }
 
   public setDifficulty(level: number) {
-      this.setDifficultyLevel(level, true);
-  }
-
-  private setDifficultyLevel(level: number, restart: boolean) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
       this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
-      // Propagate to already-created maps
-      this.maps.forEach(map => this.applyDifficultyToMap(map));
-      if (restart) {
-          this.restartGame();
-      }
-  }
-
-  private applyDifficultyToMap(map: BaseMapLayer) {
-      map.enemyScale = this.enemyScale;
+      this.restartGame();
   }
 
   private loop = (time: number) => {
@@ -233,13 +197,6 @@ export class GameEngine {
 
     const safeFrameTime = Math.min(frameTime, 0.25);
 
-    if (this.transition.active) {
-        this.updateTransition(safeFrameTime);
-        this.draw(); 
-        requestAnimationFrame(this.loop);
-        return;
-    }
-
     // Refresh working set for physics/AI without reallocating each call
     this.prepareFrameEntities();
     this.accumulator += safeFrameTime;
@@ -272,26 +229,6 @@ export class GameEngine {
           this.frameEntities.push(ents[i]);
       }
       this.frameEntities.push(this.player);
-  }
-
-  private updateTransition(dt: number) {
-      this.transition.timer += dt;
-      const t = Math.min(this.transition.timer / this.transition.duration, 1.0);
-      
-      const { TRANSITION_ZOOM_IN_FACTOR, TRANSITION_ZOOM_OUT_FACTOR } = CAMERA_CONSTANTS;
-
-      if (this.transition.direction === 'IN') {
-          this.camera.zoom = 1 + (TRANSITION_ZOOM_IN_FACTOR * t * t * t); 
-      } else {
-          this.camera.zoom = 1 - (TRANSITION_ZOOM_OUT_FACTOR * t * t * t);
-      }
-
-      if (t >= 1.0) {
-          this.executeMapSwitch(this.transition.targetType, this.transition.targetId);
-          this.camera.position = { ...this.player.position };
-          this.transition.active = false;
-          this.camera.zoom = 1.0;
-      }
   }
 
   private handleEnemyShooting(dt: number) {
@@ -363,7 +300,7 @@ export class GameEngine {
           }
       });
       
-      const config = ASTEROID_GENERATION_CONFIG[this.currentMap.type];
+      const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
       const currentAsteroids = this.currentMap.entities.filter(e => e.type === EntityType.ASTEROID).length;
       if (currentAsteroids < config.count) {
           this.handleAsteroidRespawn(config);
@@ -655,11 +592,6 @@ export class GameEngine {
                     } else {
                         this.waveState = 'complete';
                     }
-                    break;
-                }
-
-                if (entity.targetMapId && entity.targetMapType) {
-                    this.switchMap(entity.targetMapType, entity.targetMapId);
                     break;
                 }
             }
@@ -959,65 +891,6 @@ export class GameEngine {
     });
 
     this.powerupId = id;
-  }
-
-  private switchMap(type: MapType, id: string) {
-      if (this.transition.active) return;
-      console.log(`Starting transition to: ${id} (${type})`);
-      const currentRank = MAP_RANK[this.currentMap?.type || MapType.UNIVERSE];
-      const targetRank = MAP_RANK[type];
-
-      this.transition.active = true;
-      this.transition.timer = 0;
-      this.transition.targetType = type;
-      this.transition.targetId = id;
-      this.transition.switched = false;
-      this.transition.startZoom = this.camera.zoom;
-      this.transition.direction = targetRank > currentRank ? 'IN' : 'OUT';
-      this.interactionCooldown = 2.0; 
-  }
-
-  private executeMapSwitch(type: MapType, id: string) {
-      console.log(`Executing Switch: ${id} (${type})`);
-      const previousMapId = this.currentMap ? this.currentMap.id : null;
-      let newMap: BaseMapLayer;
-      
-      if (this.maps.has(id)) {
-          newMap = this.maps.get(id)!;
-      } else {
-          switch (type) {
-              case MapType.UNIVERSE: newMap = new UniverseMap(); break;
-              case MapType.SOLAR_SYSTEM: newMap = new SolarSystemMap(id, 'Solar System'); break;
-              case MapType.LOCAL: newMap = new LocalMap(id, 'Local Sector'); break;
-              case MapType.SUB_MAP: newMap = new SubMap(id, 'Station Interior'); break;
-              default: newMap = new UniverseMap();
-          }
-          this.applyDifficultyToMap(newMap);
-          if (this.currentMap) newMap.parentId = this.currentMap.id;
-          this.maps.set(id, newMap);
-      }
-
-      this.loadMap(newMap);
-      this.player.trail = [];
-      
-      let spawnFound = false;
-      if (previousMapId) {
-          const gateway = newMap.entities.find(e => e.targetMapId === previousMapId);
-          if (gateway) {
-              const offsetAngle = Math.atan2(-gateway.velocity.y || 1, -gateway.velocity.x || 0); 
-              const offsetDist = gateway.size.x + this.player.size.x + 50;
-              this.player.position = {
-                  x: gateway.position.x + Math.cos(offsetAngle) * offsetDist,
-                  y: gateway.position.y + Math.sin(offsetAngle) * offsetDist
-              };
-              spawnFound = true;
-          }
-      }
-
-      if (!spawnFound) {
-         this.player.position = { ...newMap.playerSpawn };
-      }
-      this.player.velocity = { x: 0, y: 0 };
   }
 
   private loadMap(map: BaseMapLayer) {
