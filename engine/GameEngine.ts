@@ -9,8 +9,6 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, Wea
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
 
-const PHYSICS_MAX_STEPS = 5;
-
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -20,9 +18,6 @@ export class GameEngine {
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
-  private accumulator: number = 0;
-  // UPDATED: 120 Hz Physics for smoother simulation
-  private readonly FIXED_DT: number = 1/120;
   
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
@@ -41,6 +36,9 @@ export class GameEngine {
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
 
+  // Debug mode
+  private debugMode: boolean = false;
+
   // Wave system
   private waveIndex: number = 0;
   private waveEnemyIds: Set<string> = new Set();
@@ -50,6 +48,11 @@ export class GameEngine {
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
+
+  public toggleDebug() {
+    this.debugMode = !this.debugMode;
+    this.renderer.setDebugMode(this.debugMode);
+  }
 
   private onStatsUpdate: (stats: EngineStats) => void;
 
@@ -185,7 +188,8 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveStatus: wsMap[this.waveState]
+      waveStatus: wsMap[this.waveState],
+      debugMode: this.debugMode
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -195,23 +199,16 @@ export class GameEngine {
         return;
     }
 
-    const safeFrameTime = Math.min(frameTime, 0.25);
+    // Cap dt to prevent physics explosion after tab switch / GPU stall
+    const safeFrameTime = Math.min(frameTime, 0.05);
 
     // Refresh working set for physics/AI without reallocating each call
     this.prepareFrameEntities();
-    this.accumulator += safeFrameTime;
 
-    // Safety Cap: Don't run more than N physics steps per frame to avoid "spiral of death" lag
-    let steps = 0;
-    while (this.accumulator >= this.FIXED_DT && steps < PHYSICS_MAX_STEPS) {
-        this.updatePhysics(this.FIXED_DT);
-        this.accumulator -= this.FIXED_DT;
-        steps++;
-    }
-    // If we're falling too far behind, just discard the accumulated time
-    if (this.accumulator > this.FIXED_DT * PHYSICS_MAX_STEPS) {
-        this.accumulator = 0;
-    }
+    // One physics step per rendered frame at the actual frame rate.
+    // This eliminates the 1-vs-2 step alternation that caused visual jitter
+    // with a fixed-timestep accumulator at 60 Hz display.
+    this.updatePhysics(safeFrameTime);
     
     this.updateGameLogic(safeFrameTime);
     // Include entities spawned during game logic (e.g., projectiles) before rendering

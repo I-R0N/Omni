@@ -164,6 +164,7 @@ export interface EngineStats {
   difficulty?: number;
   waveNumber?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
+  debugMode?: boolean;
 }
 
 export interface DamageText {

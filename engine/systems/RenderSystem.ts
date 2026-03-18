@@ -7,6 +7,9 @@ import { BackgroundManager } from './BackgroundManager';
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
+  private debugMode: boolean = false;
+
+  public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -464,8 +467,8 @@ export class RenderSystem {
 
       ctx.restore();
 
-      // Render Debug Acceleration Vector
-      if (entity.type === EntityType.PLAYER && entity.inputVector) {
+      // Render Debug Acceleration Vector (debug mode only)
+      if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
           const iv = entity.inputVector;
           const mag = Math.sqrt(iv.x*iv.x + iv.y*iv.y);
           if (mag > 0.05) { 

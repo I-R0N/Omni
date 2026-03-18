@@ -95,19 +95,24 @@ const App: React.FC = () => {
       }
   };
 
+  const handleToggleDebug = () => {
+      if (engineRef.current) engineRef.current.toggleDebug();
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
       <canvas 
         ref={canvasRef} 
         className="block w-full h-full"
       />
-      <UIOverlay 
-        stats={stats} 
+      <UIOverlay
+        stats={stats}
         onCycleWeapon={handleCycleWeapon}
         onStart={handleStart}
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}
+        onToggleDebug={handleToggleDebug}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
       />

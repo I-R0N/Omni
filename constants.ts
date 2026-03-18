@@ -87,10 +87,10 @@ export const COLLISION_CONFIG = {
 
 export const UI_CONSTANTS = {
   HEALTH_BAR: {
-    PLAYER_WIDTH: 32, PLAYER_HEIGHT: 4,
-    ENEMY_WIDTH: 20, ENEMY_HEIGHT: 3,
-    OFFSET_MODIFIER: 0.75, // Multiplier of entity size
-    OFFSET_BASE: 8 // Pixel padding
+    PLAYER_WIDTH: 44, PLAYER_HEIGHT: 5,
+    ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
+    OFFSET_MODIFIER: 0.85, // Multiplier of entity size
+    OFFSET_BASE: 10 // Pixel padding
   },
   INDICATORS: {
     RADIUS: 120, // Distance from center of screen
@@ -313,7 +313,7 @@ export const WEAPON_LIST = [
 export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
-  cooldown: 1.2,
+  cooldown: 12.0, // Very slow — increases each wave in the future
   speed: 8,
   damage: 5,
   lifetime: 2.0,
