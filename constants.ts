@@ -313,11 +313,11 @@ export const WEAPON_LIST = [
 export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
-  cooldown: 12.0, // Very slow — increases each wave in the future
-  speed: 8,
+  cooldown: 1.2,
+  speed: 0.8, // 10× slower than original 8 — baseline to increase per wave
   damage: 5,
   lifetime: 2.0,
-  color: '#f97316', // Orange to distinguish from player shots
+  color: '#f97316',
   size: 6,
   count: 1,
   spread: 4,
