@@ -149,24 +149,13 @@ export const SHOOTING_STAR_CONSTANTS = {
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
     maxSpeed: 140,
-    acceleration: 0.04,
+    acceleration: 0.05,
     friction: 0.994
   },
-  [MapType.SOLAR_SYSTEM]: {
-    maxSpeed: 100,
-    acceleration: 0.04,
-    friction: 0.994
-  },
-  [MapType.LOCAL]: {
-    maxSpeed: 38,
-    acceleration: 0.04,
-    friction: 0.983
-  },
-  [MapType.SUB_MAP]: {
-    maxSpeed: 6,
-    acceleration: 0.3,
-    friction: 0.84
-  }
+  // Unused map types — kept for type completeness
+  [MapType.SOLAR_SYSTEM]: { maxSpeed: 140, acceleration: 0.05, friction: 0.994 },
+  [MapType.LOCAL]:        { maxSpeed: 140, acceleration: 0.05, friction: 0.994 },
+  [MapType.SUB_MAP]:      { maxSpeed: 140, acceleration: 0.05, friction: 0.994 }
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
