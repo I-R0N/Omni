@@ -100,7 +100,10 @@ export class RenderSystem {
         }
 
         if (entity.type === EntityType.ENEMY || entity.type === EntityType.INTERACTABLE) {
-            this._indicatorBuffer.push({ entity, distSq: dx*dx + dy*dy });
+            const distSq = dx*dx + dy*dy;
+            if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
+                this._indicatorBuffer.push({ entity, distSq });
+            }
         }
 
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE) {
@@ -641,6 +644,10 @@ export class RenderSystem {
           const dy = t.position.y - playerPos.y;
           const angle = Math.atan2(dy, dx);
 
+          // Skip if the enemy is already closer than the indicator ring
+          const screenDist = Math.sqrt(item.distSq) * camera.zoom;
+          if (t.type === EntityType.ENEMY && screenDist < RADIUS) continue;
+
           const ix = cx + Math.cos(angle) * RADIUS;
           const iy = cy + Math.sin(angle) * RADIUS;
 
@@ -650,18 +657,22 @@ export class RenderSystem {
 
           ctx.fillStyle = t.color;
           ctx.beginPath();
-          
+
           if (t.type === EntityType.ENEMY) {
-              // Simple line marker for enemies
-              ctx.rect(-10, -2, 20, 4); 
+              // Caret (^) chevron pointing toward the enemy
+              const w = 7, h = 9;
+              ctx.moveTo( h,  0);      // tip
+              ctx.lineTo(-h,  w);      // bottom-left
+              ctx.lineTo(-h + 4,  0);  // inner notch
+              ctx.lineTo(-h, -w);      // top-left
           } else {
               // Standard pointer for POIs
-              ctx.moveTo(12, 0); 
-              ctx.lineTo(-8, 8); 
-              ctx.lineTo(-2, 0); 
-              ctx.lineTo(-8, -8); 
+              ctx.moveTo(12, 0);
+              ctx.lineTo(-8,  8);
+              ctx.lineTo(-2,  0);
+              ctx.lineTo(-8, -8);
           }
-          
+
           ctx.closePath();
           ctx.fill();
           
