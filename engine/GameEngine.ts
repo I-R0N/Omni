@@ -189,7 +189,8 @@ export class GameEngine {
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
-      debugMode: this.debugMode
+      debugMode: this.debugMode,
+      weaponCount: this.currentWeaponIndex + 1
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -737,7 +738,7 @@ export class GameEngine {
 
               for (let j = 0; j < entities.length; j++) {
                   const e = entities[j];
-                  if (e.active && (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
+                  if (e.active && e.type === EntityType.ENEMY) {
                       const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
                       if (d2 < minDist) {
                           minDist = d2;

@@ -165,6 +165,7 @@ export interface EngineStats {
   waveNumber?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
   debugMode?: boolean;
+  weaponCount?: number;
 }
 
 export interface DamageText {

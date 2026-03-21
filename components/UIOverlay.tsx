@@ -164,13 +164,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* ── Bottom Bar: Weapon Selector ── */}
       {stats.gameState === GameState.PLAYING && (
         <div className="flex items-end justify-end pointer-events-none">
-          <button
-            onClick={onCycleWeapon}
-            className="pointer-events-auto bg-slate-800/90 border-2 border-slate-600 hover:border-yellow-400 active:bg-slate-700 text-white rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-2xl transition-all"
-          >
-            <span className="text-[9px] uppercase text-slate-400 tracking-widest font-bold">Weapon</span>
-            <span className="text-xs font-bold text-yellow-400 mt-0.5 text-center leading-tight px-1">{stats.currentWeapon || 'Blaster'}</span>
-          </button>
+          {(stats.weaponCount ?? 1) > 1 ? (
+            <button
+              onClick={onCycleWeapon}
+              className="pointer-events-auto bg-slate-800/90 border-2 border-slate-600 hover:border-yellow-400 active:bg-slate-700 text-white rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-2xl transition-all"
+            >
+              <span className="text-[9px] uppercase text-slate-400 tracking-widest font-bold">Weapon</span>
+              <span className="text-xs font-bold text-yellow-400 mt-0.5 text-center leading-tight px-1">{stats.currentWeapon || 'Blaster'}</span>
+            </button>
+          ) : (
+            <div className="bg-slate-800/50 border-2 border-slate-700/50 text-slate-600 rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-2xl">
+              <span className="text-[9px] uppercase tracking-widest font-bold">Weapon</span>
+              <span className="text-xs font-bold mt-0.5 text-center leading-tight px-1">{stats.currentWeapon || 'Blaster'}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
