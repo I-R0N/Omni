@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole } from './types';
 import { ASSETS } from './assets';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
@@ -324,83 +324,101 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   3: 1     // High (current default)
 };
 
-// Distinct configurations for different enemy types
-export const ENEMY_VARIANTS: Record<EnemySubtype, any> = {
-  [EnemySubtype.BASIC]: {
-    color: '#f87171', // Red
-    size: 30,
-    health: 1,
-    maxSpeed: 3,
-    accel: 2,
-    turnRate: 1.2,
-    sprite: ASSETS.ENEMY_DRONE,
-    mass: 10
+// ── Enemy variant configs ─────────────────────────────────────────────────────
+// Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
+// Three tiers per role — each tier is strictly faster/tougher than the last.
+// To add a new enemy type: add entries to EnemySubtype, EnemyRole, ENEMY_ROLE,
+// and ENEMY_VARIANTS, then reference the new subtype in WAVE_DEFINITIONS.
+
+export const ENEMY_VARIANTS: Record<EnemySubtype, {
+  color: string; size: number; health: number;
+  maxSpeed: number; accel: number; turnRate: number;
+  sprite: string; mass: number;
+}> = {
+  // ── Ramming ──
+  [EnemySubtype.RAMMER_1]: {
+    color: '#f87171', size: 28, health: 1,
+    maxSpeed: 3,   accel: 2,   turnRate: 1.2,
+    sprite: ASSETS.ENEMY_DRONE,    mass: 10
   },
-  [EnemySubtype.FAST_CHARGER]: {
-    color: '#60a5fa', // Blue
-    size: 30,
-    health: 1,
-    maxSpeed: 6,
-    accel: 3.5,
-    turnRate: 1.3,
-    sprite: ASSETS.ENEMY_CHARGER,
-    mass: 8
+  [EnemySubtype.RAMMER_2]: {
+    color: '#60a5fa', size: 28, health: 1,
+    maxSpeed: 6,   accel: 3.5, turnRate: 1.3,
+    sprite: ASSETS.ENEMY_CHARGER,  mass: 8
   },
-  [EnemySubtype.TANK]: {
-    color: '#94a3b8', // Grey/Black
-    size: 34,
-    health: 4,
-    maxSpeed: 2.5,
-    accel: 1.5,
-    turnRate: 0.4,
-    sprite: ASSETS.ENEMY_TANK,
-    mass: 30
+  [EnemySubtype.RAMMER_3]: {
+    color: '#94a3b8', size: 32, health: 3,
+    maxSpeed: 9,   accel: 5.5, turnRate: 1.1,
+    sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
-  [EnemySubtype.SKIRMISHER]: {
-    color: '#4ade80', // Green
-    size: 30,
-    health: 1,
-    maxSpeed: 5,
-    accel: 2.5,
-    turnRate: 1.3,
-    sprite: ASSETS.ENEMY_SKIRMISHER,
-    mass: 12
+  // ── Shooting ──
+  [EnemySubtype.SHOOTER_1]: {
+    color: '#4ade80', size: 28, health: 1,
+    maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
+    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12
   },
-  [EnemySubtype.ORBITER]: { color: '#c084fc', size: 30, health: 1, maxSpeed: 4, accel: 2, turnRate: 1.0, sprite: ASSETS.ENEMY_ORBITER, mass: 10 },
-  [EnemySubtype.SNIPER]: { color: '#fbbf24', size: 30, health: 1, maxSpeed: 3.5, accel: 2, turnRate: 1.0, sprite: ASSETS.ENEMY_SNIPER, mass: 10 }
+  [EnemySubtype.SHOOTER_2]: {
+    color: '#c084fc', size: 28, health: 2,
+    maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
+    sprite: ASSETS.ENEMY_ORBITER,  mass: 10
+  },
+  [EnemySubtype.SHOOTER_3]: {
+    color: '#fbbf24', size: 26, health: 2,
+    maxSpeed: 7,   accel: 4,   turnRate: 1.5,
+    sprite: ASSETS.ENEMY_SNIPER,   mass: 9
+  },
 };
 
-// 5 escalating waves of enemies. powerup: weapon unlocked when wave is cleared (null = victory, no powerup)
+// Maps each subtype to its role — used by AI routing and shooting logic.
+export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
+  [EnemySubtype.RAMMER_1]:  EnemyRole.RAMMING,
+  [EnemySubtype.RAMMER_2]:  EnemyRole.RAMMING,
+  [EnemySubtype.RAMMER_3]:  EnemyRole.RAMMING,
+  [EnemySubtype.SHOOTER_1]: EnemyRole.SHOOTING,
+  [EnemySubtype.SHOOTER_2]: EnemyRole.SHOOTING,
+  [EnemySubtype.SHOOTER_3]: EnemyRole.SHOOTING,
+};
+
+// ── Wave definitions ──────────────────────────────────────────────────────────
+// 18 waves across 6 sets of 3.  Each set: [Ramming-only, Shooting-only, Mixed].
+// Difficulty blend per set:
+//   Set 1: L1       Set 2: ½L1+½L2   Set 3: L2
+//   Set 4: ⅓L1+⅓L2+⅓L3   Set 5: ½L2+½L3   Set 6: L3
+//
+// powerup: weapon dropped when the wave is cleared (null = no drop, auto-advance;
+//          on the final wave null also triggers the victory state).
 export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null }[] = [
-  // Wave 1: Three basic drones — easy introduction
-  {
-    enemies: [{ subtype: EnemySubtype.BASIC, count: 3 }],
-    powerup: WeaponType.BURST
-  },
-  // Wave 2: More basics + agile skirmishers
-  {
-    enemies: [{ subtype: EnemySubtype.BASIC, count: 3 }, { subtype: EnemySubtype.SKIRMISHER, count: 2 }],
-    powerup: WeaponType.SHOTGUN
-  },
-  // Wave 3: Fast chargers join the mix
-  {
-    enemies: [{ subtype: EnemySubtype.FAST_CHARGER, count: 2 }, { subtype: EnemySubtype.SKIRMISHER, count: 2 }, { subtype: EnemySubtype.BASIC, count: 2 }],
-    powerup: WeaponType.HOMING
-  },
-  // Wave 4: Armored tank leads the charge
-  {
-    enemies: [{ subtype: EnemySubtype.TANK, count: 1 }, { subtype: EnemySubtype.FAST_CHARGER, count: 2 }, { subtype: EnemySubtype.SKIRMISHER, count: 3 }],
-    powerup: WeaponType.CANNON
-  },
-  // Wave 5: Full assault — all enemy types
-  {
-    enemies: [
-      { subtype: EnemySubtype.TANK, count: 2 },
-      { subtype: EnemySubtype.FAST_CHARGER, count: 2 },
-      { subtype: EnemySubtype.SKIRMISHER, count: 2 },
-      { subtype: EnemySubtype.ORBITER, count: 1 },
-      { subtype: EnemySubtype.SNIPER, count: 1 }
-    ],
-    powerup: null // Victory — no more waves
-  }
+
+  // ── Set 1 — Level 1 only ──────────────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }], powerup: null },                                                    // W1  Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }], powerup: null },                                                    // W2  Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }], powerup: WeaponType.BURST },   // W3  Mixed
+
+  // ── Set 2 — ½ L1, ½ L2 ───────────────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }], powerup: null },     // W4  Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: null },     // W5  Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 },
+              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }], powerup: WeaponType.SHOTGUN }, // W6  Mixed
+
+  // ── Set 3 — Level 2 only ─────────────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 4 }], powerup: null },                                                    // W7  Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 4 }], powerup: null },                                                    // W8  Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: WeaponType.HOMING }, // W9  Mixed
+
+  // ── Set 4 — ⅓ L1, ⅓ L2, ⅓ L3 ────────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },    // W10 Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },    // W11 Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
+              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: WeaponType.CANNON }, // W12 Mixed
+
+  // ── Set 5 — ½ L2, ½ L3 ───────────────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },     // W13 Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W14 Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
+              { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
+
+  // ── Set 6 — Level 3 only (final) ─────────────────────────────────────────
+  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed (victory)
 ];

@@ -50,7 +50,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="pointer-events-none bg-slate-900/80 border border-slate-700/60 rounded-lg px-3 py-2 text-[11px] font-mono text-slate-300 space-y-0.5 shadow-lg backdrop-blur-sm">
               <p>FPS: <span className="text-white">{stats.fps}</span></p>
               <p>Entities: <span className="text-white">{stats.entityCount}</span></p>
-              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1} / 5</span></p>
+              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}</span></p>
               <p>State: <span className="text-white">{stats.waveStatus}</span></p>
             </div>
           )}
@@ -69,7 +69,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               ) : (
                 <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
                   <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
-                    Wave {Math.min(stats.waveNumber ?? 1, 5)} / 5
+                    Wave {stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}
                   </span>
                   {stats.waveStatus === 'cleared' && (
                     <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">

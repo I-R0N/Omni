@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
 
 export class GameEngine {
@@ -188,6 +188,7 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
+      waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1
@@ -237,6 +238,7 @@ export class GameEngine {
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const enemy = this.currentMap.entities[i];
           if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+          if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
           // Cooldown management
           enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
@@ -439,9 +441,16 @@ export class GameEngine {
         this.waveState = 'cleared';
         const waveDef = WAVE_DEFINITIONS[this.waveIndex];
         if (waveDef.powerup !== null) {
+          // Drop a weapon pickup — player must collect it to advance
           this.spawnPowerup(waveDef.powerup);
         } else {
-          this.waveState = 'complete';
+          // No weapon drop: auto-advance to next wave, or end if this was the last
+          const nextIdx = this.waveIndex + 1;
+          if (nextIdx < WAVE_DEFINITIONS.length) {
+            this.spawnWave(nextIdx);
+          } else {
+            this.waveState = 'complete';
+          }
         }
       }
     }

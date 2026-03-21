@@ -1,7 +1,7 @@
 
 
-import { GameEntity, EntityType, EnemySubtype, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, AI_CONFIG } from '../../constants';
+import { GameEntity, EntityType, EnemySubtype, EnemyRole, Vector2 } from '../../types';
+import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
 
 export class AISystem {
   // Store persistent aim targets to simulate reaction time.
@@ -26,17 +26,12 @@ export class AISystem {
           this.laggedTargets.set(enemy.id, { ...player.position });
       }
 
-      // Handle specific behaviors
-      switch (enemy.enemySubtype) {
-          case EnemySubtype.SKIRMISHER:
-              this.updateSkirmisher(dt, enemy, player);
-              break;
-          case EnemySubtype.BASIC:
-          case EnemySubtype.FAST_CHARGER:
-          case EnemySubtype.TANK:
-          default:
-              this.updateBasicDogfighter(dt, enemy, player);
-              break;
+      // Route by role — add new roles here as needed
+      const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
+      if (role === EnemyRole.SHOOTING) {
+          this.updateSkirmisher(dt, enemy, player);
+      } else {
+          this.updateBasicDogfighter(dt, enemy, player);
       }
     });
     
@@ -60,7 +55,7 @@ export class AISystem {
    * - If in "sweet spot", strafes laterally to dodge.
    */
   private updateSkirmisher(dt: number, enemy: GameEntity, player: GameEntity) {
-      const config = ENEMY_VARIANTS[EnemySubtype.SKIRMISHER];
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SHOOTER_1];
       const maxSpeed = config.maxSpeed || 12;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
@@ -121,7 +116,7 @@ export class AISystem {
    */
   private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
-      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.BASIC];
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
       const maxSpeed = config.maxSpeed || 10;
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;

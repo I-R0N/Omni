@@ -41,12 +41,19 @@ export enum EntityType {
 }
 
 export enum EnemySubtype {
-  BASIC = 'BASIC',
-  FAST_CHARGER = 'FAST_CHARGER',
-  TANK = 'TANK',
-  SKIRMISHER = 'SKIRMISHER',
-  ORBITER = 'ORBITER',
-  SNIPER = 'SNIPER'
+  // Ramming enemies — charge into the player
+  RAMMER_1 = 'RAMMER_1',
+  RAMMER_2 = 'RAMMER_2',
+  RAMMER_3 = 'RAMMER_3',
+  // Shooting enemies — keep distance and fire
+  SHOOTER_1 = 'SHOOTER_1',
+  SHOOTER_2 = 'SHOOTER_2',
+  SHOOTER_3 = 'SHOOTER_3',
+}
+
+export enum EnemyRole {
+  RAMMING  = 'RAMMING',
+  SHOOTING = 'SHOOTING',
 }
 
 export enum WeaponType {
@@ -163,6 +170,7 @@ export interface EngineStats {
   gameState: GameState;
   difficulty?: number;
   waveNumber?: number;
+  waveTotal?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
   debugMode?: boolean;
   weaponCount?: number;
