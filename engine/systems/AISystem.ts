@@ -121,14 +121,16 @@ export class AISystem {
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;
 
+      const isRammer = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] === EnemyRole.RAMMING : true;
+      const timers = isRammer ? AI_CONFIG.RAMMER : AI_CONFIG;
+      const rotThreshold = isRammer ? AI_CONFIG.RAMMER.ROTATION_THRESHOLD : AI_CONFIG.ROTATION_THRESHOLD;
+
       // --- TARGETING LOGIC (Delayed Aim) ---
       let reaction = this.reactionTimers.get(enemy.id) || 0;
       reaction -= dt;
 
       if (reaction <= 0) {
-          // Update the "lagged" target to the player's current position
           this.laggedTargets.set(enemy.id, { ...player.position });
-          // Reset timer with random variance
           reaction = AI_CONFIG.REACTION_TIME_BASE + Math.random() * AI_CONFIG.REACTION_TIME_VAR;
       }
       this.reactionTimers.set(enemy.id, reaction);
@@ -139,13 +141,12 @@ export class AISystem {
       if (enemy.aiTimer && enemy.aiTimer > 0) {
           enemy.aiTimer -= dt;
       } else {
-          // Flip State between Chase and Idle
           if (enemy.aiState === 'chase') {
-              enemy.aiState = 'idle'; // Coast/Turn
-              enemy.aiTimer = AI_CONFIG.IDLE_TIME_BASE + Math.random() * AI_CONFIG.IDLE_TIME_VAR; 
+              enemy.aiState = 'idle';
+              enemy.aiTimer = timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR;
           } else {
-              enemy.aiState = 'chase'; // Charge
-              enemy.aiTimer = AI_CONFIG.CHASE_TIME_BASE + Math.random() * AI_CONFIG.CHASE_TIME_VAR; 
+              enemy.aiState = 'chase';
+              enemy.aiTimer = timers.CHASE_TIME_BASE + Math.random() * timers.CHASE_TIME_VAR;
           }
       }
 
@@ -177,13 +178,12 @@ export class AISystem {
       // Face player when moving slow (Drift/Hover dynamics)
       let targetAngle = enemy.rotation;
 
-      if (speed > AI_CONFIG.ROTATION_THRESHOLD) {
-        targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      if (speed > rotThreshold) {
+          targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
       } else {
-        // If stopped/slow, turn towards the ACTUAL player position (not lagged) for situational awareness
-        const toTargetX = player.position.x - enemy.position.x;
-        const toTargetY = player.position.y - enemy.position.y;
-        targetAngle = Math.atan2(toTargetY, toTargetX);
+          const toTargetX = player.position.x - enemy.position.x;
+          const toTargetY = player.position.y - enemy.position.y;
+          targetAngle = Math.atan2(toTargetY, toTargetX);
       }
 
       let angleDiff = targetAngle - enemy.rotation;

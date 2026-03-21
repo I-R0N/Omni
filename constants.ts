@@ -44,8 +44,8 @@ export const AI_CONFIG = {
   // Reaction time simulation
   REACTION_TIME_BASE: 0.3,
   REACTION_TIME_VAR: 0.5,
-  
-  // State switching timers
+
+  // State switching timers (used by SHOOTING enemies and default)
   IDLE_TIME_BASE: 1.0,
   IDLE_TIME_VAR: 1.5,
   CHASE_TIME_BASE: 2.0,
@@ -53,6 +53,15 @@ export const AI_CONFIG = {
 
   // Flight Physics
   ROTATION_THRESHOLD: 20, // Speed at which enemy rotates to face velocity instead of target
+
+  // Rammer-specific overrides: minimal idle, long aggressive charge bursts
+  RAMMER: {
+    IDLE_TIME_BASE: 0.1,
+    IDLE_TIME_VAR: 0.2,
+    CHASE_TIME_BASE: 4.0,
+    CHASE_TIME_VAR: 1.5,
+    ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
+  },
 
   // Skirmisher specific behavior
   SKIRMISHER: {
@@ -338,17 +347,17 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // ── Ramming ──
   [EnemySubtype.RAMMER_1]: {
     color: '#f87171', size: 28, health: 1,
-    maxSpeed: 3,   accel: 2,   turnRate: 1.2,
+    maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
     sprite: ASSETS.ENEMY_DRONE,    mass: 10
   },
   [EnemySubtype.RAMMER_2]: {
     color: '#60a5fa', size: 28, health: 1,
-    maxSpeed: 6,   accel: 3.5, turnRate: 1.3,
+    maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8
   },
   [EnemySubtype.RAMMER_3]: {
     color: '#94a3b8', size: 32, health: 3,
-    maxSpeed: 9,   accel: 5.5, turnRate: 1.1,
+    maxSpeed: 11,  accel: 8,   turnRate: 3.0,
     sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
   // ── Shooting ──
