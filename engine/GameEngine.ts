@@ -90,7 +90,7 @@ export class GameEngine {
 
     this.camera = {
       position: { x: 0, y: 0 },
-      zoom: 1,
+      zoom: CAMERA_CONSTANTS.DEFAULT_ZOOM,
       targetId: 'player',
       shakeOffset: { x: 0, y: 0 }
     };
@@ -145,7 +145,7 @@ export class GameEngine {
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
-      this.camera.zoom = 1;
+      this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
       this.camera.position = { x: 0, y: 0 };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };

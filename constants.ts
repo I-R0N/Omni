@@ -26,6 +26,7 @@ export const COLORS = {
 // --- SYSTEM CONFIGURATIONS ---
 
 export const CAMERA_CONSTANTS = {
+  DEFAULT_ZOOM: 0.65,
   TRANSITION_DURATION: 0.8,
   TRANSITION_ZOOM_IN_FACTOR: 14, // Zoom multiplier when entering map
   TRANSITION_ZOOM_OUT_FACTOR: 0.95, // Zoom factor when leaving
@@ -158,7 +159,7 @@ export const SHOOTING_STAR_CONSTANTS = {
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
     maxSpeed: 140,
-    acceleration: 0.05,
+    acceleration: 0.077,
     friction: 0.994
   },
   // Unused map types — kept for type completeness
