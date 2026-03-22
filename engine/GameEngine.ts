@@ -8,6 +8,7 @@ import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
+import { sampleFlow } from './systems/FlowField';
 
 export class GameEngine {
   private input: InputSystem;
@@ -304,6 +305,24 @@ export class GameEngine {
       const currentAsteroids = this.currentMap.entities.filter(e => e.type === EntityType.ASTEROID).length;
       if (currentAsteroids < config.count) {
           this.handleAsteroidRespawn(config);
+      }
+
+      // Flow-field nudge: gently steer each asteroid toward the local flow
+      // direction. The correction rate is small (8 % per second) so collisions
+      // and spawn randomness are not overwhelmed, but over time the field keeps
+      // streams coherent.
+      const FLOW_CORRECTION = 0.08;
+      const FLOW_TARGET_SPEED = config.speedMultiplier;
+      const entities = this.currentMap.entities;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.type !== EntityType.ASTEROID || !e.active) continue;
+          const flow = sampleFlow(e.position.x, e.position.y);
+          const tx = flow.x * FLOW_TARGET_SPEED;
+          const ty = flow.y * FLOW_TARGET_SPEED;
+          const alpha = FLOW_CORRECTION * dt;
+          e.velocity.x += (tx - e.velocity.x) * alpha;
+          e.velocity.y += (ty - e.velocity.y) * alpha;
       }
 
       // In-place compaction (Garbage Free)

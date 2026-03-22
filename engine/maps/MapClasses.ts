@@ -2,6 +2,7 @@
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS } from '../../constants';
+import { sampleFlow } from '../systems/FlowField';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -72,14 +73,20 @@ export abstract class BaseMapLayer {
     const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
     const hp = size > 30 ? 2 : 1;
 
+    // Blend flow direction (70%) with random drift (30%) for the initial velocity.
+    // This seeds the asteroid into the vortex streamlines from spawn.
+    const flow = sampleFlow(x, y);
+    const randX = (Math.random() - 0.5) * 2;
+    const randY = (Math.random() - 0.5) * 2;
+    const FLOW_BIAS = 0.7;
+    const vx = (flow.x * FLOW_BIAS + randX * (1 - FLOW_BIAS)) * speedMultiplier;
+    const vy = (flow.y * FLOW_BIAS + randY * (1 - FLOW_BIAS)) * speedMultiplier;
+
     return {
         id: `ast_${Date.now()}_${Math.random()}`,
         type: EntityType.ASTEROID,
         position: { x, y },
-        velocity: {
-            x: (Math.random() - 0.5) * 2 * speedMultiplier,
-            y: (Math.random() - 0.5) * 2 * speedMultiplier
-        },
+        velocity: { x: vx, y: vy },
         size: { x: size, y: size },
         rotation: Math.random() * Math.PI * 2,
         color: COLORS.ASTEROID,
