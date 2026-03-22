@@ -870,10 +870,13 @@ export class GameEngine {
               y: Math.sin(p.angle) * p.r,
           }));
 
-          // Spawn offset in the scatter direction so shards don't all originate
-          // at the exact same point and immediately re-collide.
-          const offsetX = scatterX * (newSize * 0.35);
-          const offsetY = scatterY * (newSize * 0.35);
+          // Offset spawn position in the scatter direction so shards don't all
+          // originate at the same point and immediately re-collide.
+          // Use the parent radius (not shard size) as the scale so large
+          // asteroids don't teleport pieces to their outer edge.
+          const parentRadius = parent.size.x / 2;
+          const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
+          const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
 
           // Shards tumble faster than their parent (smaller = faster spin).
           const maxSpin      = 2.0 / (newSize / 20);
