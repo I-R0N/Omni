@@ -279,13 +279,6 @@ export class RenderSystem {
       );
       ctx.rotate(rotation);
       
-      // Prevent player from scaling with camera zoom (Warp Effect)
-      // BUT scale inversely so it stays same screen size during zoom
-      if (entity.type === EntityType.PLAYER && camera.zoom !== 1) {
-          const invScale = 1 / camera.zoom;
-          ctx.scale(invScale, invScale);
-      }
-
       let drawn = false;
 
       // --- SPRITE RENDERING ---

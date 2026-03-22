@@ -223,9 +223,6 @@ export class BackgroundManager {
     const cx = halfW;
     const cy = halfH;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.translate(cx, cy);
-    ctx.scale(zoom, zoom);
-    ctx.translate(-cx, -cy);
 
     ctx.fillStyle = '#000000';
     ctx.fillRect(-width * 50, -height * 50, width * 100, height * 100);
