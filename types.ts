@@ -113,6 +113,7 @@ export interface GameEntity {
   
   // Visuals
   polygonPoints?: Vector2[]; // For physics/collision shape
+  rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
   sprite?: string; // URL or DataURI for image rendering
   trail?: TrailPoint[]; // Path history with lifetime

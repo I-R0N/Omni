@@ -332,6 +332,7 @@ export class GameEngine {
           const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       }
 
       // In-place compaction (Garbage Free)
