@@ -813,38 +813,87 @@ export class GameEngine {
 
   private createAsteroidShards(parent: GameEntity) {
       const shardCount = 2 + Math.floor(Math.random() * 2);
-      const newSize = parent.size.x / Math.sqrt(shardCount);
-      const hp = newSize > 30 ? 2 : 1;
+      const newSize    = parent.size.x / Math.sqrt(shardCount);
+      const hp         = newSize > 30 ? 2 : 1;
+
+      // Resolve impact direction from the stamped impactor velocity.
+      // If none is present (gravity crush, asteroid-asteroid) fall back to
+      // isotropic scatter.
+      const iv = parent.lastImpactVelocity;
+      const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+
+      // Half-angle of the forward scatter cone.  Wide enough to read as an
+      // explosion, narrow enough to have clear directionality.
+      const HALF_CONE = Math.PI * 0.55; // ±99°
 
       for (let i = 0; i < shardCount; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const speed = 1 + Math.random() * 2;
-          const vx = parent.velocity.x + Math.cos(angle) * speed;
-          const vy = parent.velocity.y + Math.sin(angle) * speed;
-          const points: Vector2[] = [];
-          const numPoints = 5;
-          for (let j = 0; j < numPoints; j++) {
-             const a = (j / numPoints) * Math.PI * 2;
-             const r = (newSize/2) * (0.6 + Math.random() * 0.4);
-             points.push({x: Math.cos(a)*r, y: Math.sin(a)*r});
+          // --- scatter direction ---
+          let scatterAngle: number;
+          let scatterSpeed: number;
+
+          if (impactAngle !== null) {
+              // Forward-biased cone centred on the projectile's travel direction.
+              scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
+              // Shards carry a fraction of the projectile speed plus a small
+              // randomised kick so pieces spread rather than clump.
+              scatterSpeed = impactSpeed * 0.35 + 0.4 + Math.random() * 1.2;
+          } else {
+              scatterAngle = Math.random() * Math.PI * 2;
+              scatterSpeed = 1 + Math.random() * 2;
           }
-          const offsetX = Math.cos(angle) * (newSize * 0.5);
-          const offsetY = Math.sin(angle) * (newSize * 0.5);
+
+          const scatterX = Math.cos(scatterAngle) * scatterSpeed;
+          const scatterY = Math.sin(scatterAngle) * scatterSpeed;
+
+          // Final shard velocity = parent drift + directional scatter.
+          const vx = parent.velocity.x + scatterX;
+          const vy = parent.velocity.y + scatterY;
+
+          // --- irregular shard polygon (same technique as createAsteroid) ---
+          // Fewer points than a full asteroid, and more aggressive radius
+          // variation so shards look like jagged fragments.
+          const numPoints = 5 + Math.floor(Math.random() * 3); // 5–7
+          const baseR     = (newSize / 2) * 0.8;
+          const rawPts: { angle: number; r: number }[] = [];
+          for (let j = 0; j < numPoints; j++) {
+              const baseAngle   = (j / numPoints) * Math.PI * 2;
+              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
+              rawPts.push({
+                  angle: baseAngle + angleJitter,
+                  r:     baseR * (0.55 + Math.random() * 0.7), // 55 %–125 % — more jagged
+              });
+          }
+          rawPts.sort((a, b) => a.angle - b.angle);
+          const points: Vector2[] = rawPts.map(p => ({
+              x: Math.cos(p.angle) * p.r,
+              y: Math.sin(p.angle) * p.r,
+          }));
+
+          // Spawn offset in the scatter direction so shards don't all originate
+          // at the exact same point and immediately re-collide.
+          const offsetX = scatterX * (newSize * 0.35);
+          const offsetY = scatterY * (newSize * 0.35);
+
+          // Shards tumble faster than their parent (smaller = faster spin).
+          const maxSpin      = 2.0 / (newSize / 20);
+          const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
 
           this.currentMap?.entities.push({
-              id: `shard_${Date.now()}_${i}`,
-              type: EntityType.ASTEROID,
-              position: { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
-              velocity: { x: vx, y: vy },
-              size: { x: newSize, y: newSize },
-              rotation: Math.random() * Math.PI * 2,
-              color: COLORS.ASTEROID,
-              active: true,
-              health: hp,
-              maxHealth: hp,
+              id:           `shard_${Date.now()}_${i}`,
+              type:          EntityType.ASTEROID,
+              position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
+              velocity:     { x: vx, y: vy },
+              size:         { x: newSize, y: newSize },
+              rotation:      Math.random() * Math.PI * 2,
+              rotationSpeed,
+              color:         COLORS.ASTEROID,
+              active:        true,
+              health:        hp,
+              maxHealth:     hp,
               polygonPoints: points,
-              mass: newSize,
-              sprite: parent.sprite
+              mass:          newSize,
+              sprite:        parent.sprite,
           });
       }
   }

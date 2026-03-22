@@ -116,6 +116,7 @@ export interface GameEntity {
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
   sprite?: string; // URL or DataURI for image rendering
+  lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
   trail?: TrailPoint[]; // Path history with lifetime
   
   // Explosion Effect
