@@ -2,6 +2,7 @@
 
 import { GameEntity, EntityType, EnemySubtype, EnemyRole, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
+import { FlowFieldGrid } from './FlowFieldGrid';
 
 export class AISystem {
   // Store persistent aim targets to simulate reaction time.
@@ -10,16 +11,16 @@ export class AISystem {
   private laggedTargets: Map<string, Vector2> = new Map();
   private reactionTimers: Map<string, number> = new Map();
 
-  public update(dt: number, entities: GameEntity[], player: GameEntity) {
+  public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
     const enemies = entities.filter(e => e.active && e.type === EntityType.ENEMY);
 
     enemies.forEach(enemy => {
       // Default initialization
       if (!enemy.aiState) {
-          enemy.aiState = 'chase'; 
+          enemy.aiState = 'chase';
           enemy.aiTimer = 0;
       }
-      
+
       // Init Reaction Timer if missing
       if (!this.reactionTimers.has(enemy.id)) {
           this.reactionTimers.set(enemy.id, 0);
@@ -31,7 +32,7 @@ export class AISystem {
       if (role === EnemyRole.SHOOTING) {
           this.updateSkirmisher(dt, enemy, player);
       } else {
-          this.updateBasicDogfighter(dt, enemy, player);
+          this.updateBasicDogfighter(dt, enemy, player, flowField);
       }
     });
     
@@ -114,7 +115,7 @@ export class AISystem {
    * Uses a state machine to switch between "Charging" and "Coasting/Turning".
    * Simulated reaction delay makes them inaccurate at hitting a moving player.
    */
-  private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity) {
+  private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
       const maxSpeed = config.maxSpeed || 10;
@@ -152,18 +153,38 @@ export class AISystem {
 
       // --- MOVEMENT BEHAVIOR ---
       if (enemy.aiState === 'chase') {
-          // ENGAGE: Fly towards the LAGGED target
+          // ENGAGE: Fly toward the lagged target, blended with the pursuit
+          // flow field so enemies navigate around tile clusters.
+          // The flow field uses the player's *current* cell as its goal —
+          // optimal for routing; the lagged target is kept for rotation/aim.
           const dx = targetPos.x - enemy.position.x;
           const dy = targetPos.y - enemy.position.y;
-          const d = Math.sqrt(dx*dx + dy*dy);
+          const d  = Math.sqrt(dx * dx + dy * dy);
 
           if (d > 0) {
-              const ndx = dx / d;
-              const ndy = dy / d;
-              enemy.velocity.x += ndx * accel * dt;
-              enemy.velocity.y += ndy * accel * dt;
+              const eneFlow = flowField.sampleEnemyFlow(enemy.position.x, enemy.position.y);
+              const hasFlow = eneFlow.x !== 0 || eneFlow.y !== 0;
+
+              let moveX: number, moveY: number;
+              if (hasFlow) {
+                  // 65 % flow field (avoids tile walls) + 35 % direct (stays
+                  // responsive when in open space).
+                  const directX = dx / d, directY = dy / d;
+                  moveX = eneFlow.x * 0.65 + directX * 0.35;
+                  moveY = eneFlow.y * 0.65 + directY * 0.35;
+                  const mag = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
+                  moveX /= mag;
+                  moveY /= mag;
+              } else {
+                  // Outside the pursuit field range — fall back to direct chase.
+                  moveX = dx / d;
+                  moveY = dy / d;
+              }
+
+              enemy.velocity.x += moveX * accel * dt;
+              enemy.velocity.y += moveY * accel * dt;
           }
-      } 
+      }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
 
       // Cap Speed

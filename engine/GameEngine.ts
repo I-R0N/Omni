@@ -8,13 +8,14 @@ import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
-import { sampleFlow } from './systems/FlowField';
+import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
   private ai: AISystem;
+  private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
@@ -67,6 +68,7 @@ export class GameEngine {
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
+    this.flowField = new FlowFieldGrid();
 
     this.player = {
       id: 'player',
@@ -272,8 +274,12 @@ export class GameEngine {
       if (!this.currentMap) return;
 
       const allEntities = this.frameEntities;
-      
-      this.ai.update(dt, allEntities, this.player);
+
+      // Rebuild the enemy pursuit field if the player changed grid cells.
+      this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
+      this.flowField.flushEnemyField();
+
+      this.ai.update(dt, allEntities, this.player, this.flowField);
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -307,20 +313,23 @@ export class GameEngine {
           this.handleAsteroidRespawn(config);
       }
 
-      // Flow-field nudge: gently steer each asteroid toward the local flow
-      // direction. The correction rate is small (8 % per second) so collisions
-      // and spawn randomness are not overwhelmed, but over time the field keeps
-      // streams coherent.
-      const FLOW_CORRECTION = 0.08;
+      // Flow-field nudge: steer each asteroid toward the grid flow direction.
+      // Elastic correction rate: asteroids near the target speed get a gentle
+      // 8 %/s nudge; asteroids that have been slowed by collisions receive up
+      // to 9× stronger correction so they re-enter the stream quickly without
+      // any hard velocity override (no teleporting).
+      const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const entities = this.currentMap.entities;
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (e.type !== EntityType.ASTEROID || !e.active) continue;
-          const flow = sampleFlow(e.position.x, e.position.y);
+          const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
-          const alpha = FLOW_CORRECTION * dt;
+          const speed   = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
+          const urgency = 1 + 8 * Math.max(0, 1 - speed / FLOW_TARGET_SPEED);
+          const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
       }
@@ -339,6 +348,10 @@ export class GameEngine {
   private handleEntityDeath = (entity: GameEntity) => {
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
+      }
+
+      if (entity.type === EntityType.STRUCTURE) {
+          this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
       }
 
       // Spawn Particles
@@ -926,6 +939,8 @@ export class GameEngine {
       this.currentMap = map;
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
+      this.flowField.initObstacles(map.entities);
+      this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
   }
 
