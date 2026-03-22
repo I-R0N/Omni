@@ -392,15 +392,11 @@ export class RenderSystem {
 
           } else if (entity.type === EntityType.PROJECTILE) {
              ctx.fillStyle = entity.color;
-             // Removed expensive shadowBlur for performance
-             
-             if (Number.isFinite(entity.size.x) && Number.isFinite(entity.size.y)) {
-                ctx.fillRect(
-                    -entity.size.x / 2, 
-                    -entity.size.y / 2, 
-                    entity.size.x, 
-                    entity.size.y
-                );
+             const r = entity.size.x / 2;
+             if (Number.isFinite(r) && r > 0) {
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
              }
           } else {
             ctx.fillStyle = entity.color;
