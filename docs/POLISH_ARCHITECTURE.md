@@ -320,6 +320,203 @@ the parent's type, orientation, and a degrade of its damage state.
 
 ---
 
+---
+
+## System 4 — Item Drops
+
+### Motivation
+
+Nothing currently rewards destroying things beyond wave progression.
+Tiles, asteroids, and enemies should drop collectible items that give the
+player a reason to engage everything on screen.  Three distinct drop
+currencies:
+
+| Source | Drop |
+|---|---|
+| Tiles (STRUCTURE) | **Fuel** — restores ship fuel |
+| Asteroids | **Gold** — persistent currency; rare powerup |
+| Enemies | **Gold** — scales with tier; rare powerup |
+
+**Powerups** dropped mid-wave are temporary and are swept when the next
+wave begins.  Powerups from the existing wave-clear system are permanent
+and are not affected by this sweep.
+
+---
+
+### Step 1 — Player resource model
+
+Add `fuel` and `maxFuel` to the player entity (`GameEngine.ts` init,
+`types.ts` `GameEntity` interface):
+
+```typescript
+fuel:    number;   // starts at 100 (or whatever max)
+maxFuel: number;   // 100
+gold:    number;   // starts at 0; persists across waves
+```
+
+`fuel` is not yet wired to movement mechanics — it is a collectible
+resource for now; movement throttling can come later.
+
+Update `UIOverlay.tsx` to show a fuel bar and a gold counter alongside the
+existing wave display.
+
+---
+
+### Step 2 — Drop item entity variant
+
+Extend `GameEntity` (or keep it untyped via optional fields — same pattern
+as `powerupWeapon`) with:
+
+```typescript
+dropType?: 'fuel' | 'gold' | 'powerup';
+dropValue?: number;            // fuel units or gold amount
+dropWeapon?: WeaponType;       // set when dropType === 'powerup'
+isTemporaryDrop?: boolean;     // true = swept at next wave start
+```
+
+Drop entities use `EntityType.INTERACTABLE` (physics system already skips
+collision for this type, and the renderer already has a pickup-orb path).
+Size: `{x: 18, y: 18}` (slightly smaller than weapon orbs at 28×28).
+Mass: `Infinity` (stationary).
+
+---
+
+### Step 3 — Spawn drops on death
+
+In `handleEntityDeath` (`GameEngine.ts` lines 349–387), add a drop spawn
+call after the existing particle spawn:
+
+```typescript
+this.spawnDrops(entity);
+```
+
+`spawnDrops(entity: GameEntity)` logic:
+
+```typescript
+private spawnDrops(entity: GameEntity) {
+  const pos = entity.position;
+
+  if (entity.type === EntityType.STRUCTURE) {
+    // Tiles → guaranteed fuel canister
+    this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE);
+
+  } else if (entity.type === EntityType.ASTEROID) {
+    // Gold amount scales with asteroid size
+    const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
+    this.spawnDrop(pos, 'gold', goldAmt);
+
+    // Rare powerup chance
+    if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
+      this.spawnRandomPowerupDrop(pos, /*temporary=*/ true);
+    }
+
+  } else if (entity.type === EntityType.ENEMY) {
+    // Gold scales with enemy tier (stored on entity as enemyTier: 1|2|3)
+    const tier = entity.enemyTier ?? 1;
+    this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
+
+    // Powerup chance increases with tier
+    if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
+      this.spawnRandomPowerupDrop(pos, /*temporary=*/ true);
+    }
+  }
+}
+```
+
+`spawnDrop` creates an INTERACTABLE entity at `pos` with a small random
+scatter offset (±20 units) so overlapping drops don't stack perfectly.
+
+`spawnRandomPowerupDrop` picks a random weapon from `WEAPON_LIST` (or any
+powerup pool defined in `DROP_CONFIG`) and spawns a drop entity with
+`dropType: 'powerup'`, `dropWeapon: <chosen>`, `isTemporaryDrop: true`.
+
+---
+
+### Step 4 — Constants
+
+In `constants.ts`, add a `DROP_CONFIG` block:
+
+```typescript
+export const DROP_CONFIG = {
+  FUEL_FROM_TILE:            15,    // fuel units per tile destroyed
+  GOLD_PER_ASTEROID_SIZE:     0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
+  GOLD_PER_ENEMY_TIER:       20,    // gold = tier * 20 → 20/40/60
+  POWERUP_CHANCE_ASTEROID:    0.04, // 4 % chance per asteroid
+  POWERUP_CHANCE_ENEMY:       0.10, // 10 % × tier → 10 %/20 %/30 %
+  COLLECT_RADIUS:            45,    // world units; matches existing weapon pickup
+  LIFETIME:                  20.0,  // seconds before drop despawns
+};
+```
+
+---
+
+### Step 5 — Collection loop
+
+The existing collection check for weapon powerups is in
+`GameEngine.ts` lines 613–638 (proximity check, distance < 50).  Extend
+this loop to also handle `dropType` entities:
+
+```typescript
+if (entity.dropType === 'fuel') {
+  this.player.fuel = Math.min(this.player.maxFuel, this.player.fuel + (entity.dropValue ?? 0));
+  this.removeEntity(entity);
+
+} else if (entity.dropType === 'gold') {
+  this.player.gold += entity.dropValue ?? 0;
+  this.removeEntity(entity);
+
+} else if (entity.dropType === 'powerup') {
+  this.player.currentWeapon = entity.dropWeapon!;
+  this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon!);
+  this.removeEntity(entity);
+  // Do NOT advance the wave — this is a mid-wave pickup
+}
+```
+
+Also add lifetime ticking: each frame `entity.lifetime -= dt`; remove when
+`<= 0`.  Show a fading alpha when `lifetime < 3.0` to warn the player.
+
+---
+
+### Step 6 — Temporary powerup sweep
+
+At the start of `spawnWave` (before spawning new enemies), remove all
+temporary drops still on the field:
+
+```typescript
+for (const entity of this.entities) {
+  if (entity.isTemporaryDrop && entity.type === EntityType.INTERACTABLE) {
+    this.removeEntity(entity);
+  }
+}
+```
+
+This ensures mid-wave powerups don't carry over and the player can't
+stockpile them across waves.
+
+---
+
+### Step 7 — Renderer: distinct drop visuals
+
+Extend `RenderSystem` interactable rendering (currently lines 404–430) to
+branch on `dropType`:
+
+| `dropType` | Core colour | Ring colour | Label |
+|---|---|---|---|
+| `'fuel'`   | `#00e5ff` (cyan) | `#0090a0` | "FUEL" |
+| `'gold'`   | `#ffd700` (gold) | `#b8860b` | "GOLD" |
+| `'powerup'`| weapon's existing colour | same | weapon name |
+
+Fuel and gold orbs are smaller (radius = 9) and use a single outer ring
+rather than two, to visually distinguish them from weapon powerups.
+
+Apply fading alpha when `entity.lifetime < 3.0`:
+```typescript
+ctx.globalAlpha *= Math.min(1, entity.lifetime / 3.0);
+```
+
+---
+
 ## Dependency graph
 
 ```
@@ -334,6 +531,12 @@ System 2 (visuals)
 
 System 3 (shards)
   └── depends on System 2 Step 3 (type field exists on entity)
+
+System 4 (drops)
+  ├── Step 3 hooks into handleEntityDeath (no other system dependency)
+  ├── Step 5 needs enemyTier field (add when System 1 Step 2 adds hardness;
+  │         or add independently as a small enemy field)
+  └── Step 6 (sweep) is independent
 ```
 
 Recommended implementation order:
@@ -341,5 +544,7 @@ Recommended implementation order:
 1. System 1 Steps 1–3 (energy physics — unblocks balance work)
 2. System 2 Steps 1–3 (type taxonomy — required for shard inheritance)
 3. System 3 (shard inheritance)
-4. System 2 Step 4 (damage-tier sprites — needs art assets)
-5. System 1 Step 5 / System 2 Step 5 (tuning / procedural — ongoing)
+4. **System 4 Steps 1–6 (item drops — can start after System 1 Step 3)**
+5. System 2 Step 4 (damage-tier sprites — needs art assets)
+6. System 4 Step 7 (drop renderer polish — additive)
+7. System 1 Step 5 / System 2 Step 5 (tuning / procedural — ongoing)
