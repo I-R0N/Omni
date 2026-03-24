@@ -619,6 +619,48 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
+    // Drop collection: lifetime tick, magnetic draw, collect on contact.
+    // Runs every frame — not gated on interactionCooldown.
+    const ATTRACT_RADIUS = 120; // world units — outer vacuum range
+    const ATTRACT_SPEED  = 220; // world units per second toward player
+    for (const entity of this.currentMap.entities) {
+        if (entity.type !== EntityType.INTERACTABLE || !entity.dropType || !entity.active) continue;
+
+        // Lifetime tick
+        if (entity.lifetime !== undefined) {
+            entity.lifetime -= dt;
+            if (entity.lifetime <= 0) { entity.active = false; continue; }
+        }
+
+        const dx = this.player.position.x - entity.position.x;
+        const dy = this.player.position.y - entity.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Magnetic draw — slide entity toward player
+        if (dist < ATTRACT_RADIUS && dist > 0.1) {
+            const step = Math.min(ATTRACT_SPEED * dt, dist);
+            entity.position.x += (dx / dist) * step;
+            entity.position.y += (dy / dist) * step;
+        }
+
+        // Collect on contact
+        if (dist < this.player.size.x) {
+            if (entity.dropType === 'fuel') {
+                this.player.fuel = Math.min(
+                    this.player.maxFuel ?? 100,
+                    (this.player.fuel ?? 0) + (entity.dropValue ?? 0)
+                );
+            } else if (entity.dropType === 'gold') {
+                this.player.gold = (this.player.gold ?? 0) + (entity.dropValue ?? 0);
+            } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
+                this.player.currentWeapon = entity.dropWeapon;
+                this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
+                this.player.burstQueue = 0;
+            }
+            entity.active = false;
+        }
+    }
+
     if (this.interactionCooldown <= 0) {
         const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
         for (const entity of interactables) {
