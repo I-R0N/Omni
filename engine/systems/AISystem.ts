@@ -1,7 +1,8 @@
 
 
-import { GameEntity, EntityType, EnemySubtype, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, AI_CONFIG } from '../../constants';
+import { GameEntity, EntityType, EnemySubtype, EnemyRole, Vector2 } from '../../types';
+import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
+import { FlowFieldGrid } from './FlowFieldGrid';
 
 export class AISystem {
   // Store persistent aim targets to simulate reaction time.
@@ -10,33 +11,28 @@ export class AISystem {
   private laggedTargets: Map<string, Vector2> = new Map();
   private reactionTimers: Map<string, number> = new Map();
 
-  public update(dt: number, entities: GameEntity[], player: GameEntity) {
+  public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
     const enemies = entities.filter(e => e.active && e.type === EntityType.ENEMY);
 
     enemies.forEach(enemy => {
       // Default initialization
       if (!enemy.aiState) {
-          enemy.aiState = 'chase'; 
+          enemy.aiState = 'chase';
           enemy.aiTimer = 0;
       }
-      
+
       // Init Reaction Timer if missing
       if (!this.reactionTimers.has(enemy.id)) {
           this.reactionTimers.set(enemy.id, 0);
           this.laggedTargets.set(enemy.id, { ...player.position });
       }
 
-      // Handle specific behaviors
-      switch (enemy.enemySubtype) {
-          case EnemySubtype.SKIRMISHER:
-              this.updateSkirmisher(dt, enemy, player);
-              break;
-          case EnemySubtype.BASIC:
-          case EnemySubtype.FAST_CHARGER:
-          case EnemySubtype.TANK:
-          default:
-              this.updateBasicDogfighter(dt, enemy, player);
-              break;
+      // Route by role — add new roles here as needed
+      const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
+      if (role === EnemyRole.SHOOTING) {
+          this.updateSkirmisher(dt, enemy, player);
+      } else {
+          this.updateBasicDogfighter(dt, enemy, player, flowField);
       }
     });
     
@@ -60,7 +56,7 @@ export class AISystem {
    * - If in "sweet spot", strafes laterally to dodge.
    */
   private updateSkirmisher(dt: number, enemy: GameEntity, player: GameEntity) {
-      const config = ENEMY_VARIANTS[EnemySubtype.SKIRMISHER];
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SHOOTER_1];
       const maxSpeed = config.maxSpeed || 12;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
@@ -119,21 +115,23 @@ export class AISystem {
    * Uses a state machine to switch between "Charging" and "Coasting/Turning".
    * Simulated reaction delay makes them inaccurate at hitting a moving player.
    */
-  private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity) {
+  private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
-      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.BASIC];
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
       const maxSpeed = config.maxSpeed || 10;
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;
+
+      const isRammer = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] === EnemyRole.RAMMING : true;
+      const timers = isRammer ? AI_CONFIG.RAMMER : AI_CONFIG;
+      const rotThreshold = isRammer ? AI_CONFIG.RAMMER.ROTATION_THRESHOLD : AI_CONFIG.ROTATION_THRESHOLD;
 
       // --- TARGETING LOGIC (Delayed Aim) ---
       let reaction = this.reactionTimers.get(enemy.id) || 0;
       reaction -= dt;
 
       if (reaction <= 0) {
-          // Update the "lagged" target to the player's current position
           this.laggedTargets.set(enemy.id, { ...player.position });
-          // Reset timer with random variance
           reaction = AI_CONFIG.REACTION_TIME_BASE + Math.random() * AI_CONFIG.REACTION_TIME_VAR;
       }
       this.reactionTimers.set(enemy.id, reaction);
@@ -144,30 +142,49 @@ export class AISystem {
       if (enemy.aiTimer && enemy.aiTimer > 0) {
           enemy.aiTimer -= dt;
       } else {
-          // Flip State between Chase and Idle
           if (enemy.aiState === 'chase') {
-              enemy.aiState = 'idle'; // Coast/Turn
-              enemy.aiTimer = AI_CONFIG.IDLE_TIME_BASE + Math.random() * AI_CONFIG.IDLE_TIME_VAR; 
+              enemy.aiState = 'idle';
+              enemy.aiTimer = timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR;
           } else {
-              enemy.aiState = 'chase'; // Charge
-              enemy.aiTimer = AI_CONFIG.CHASE_TIME_BASE + Math.random() * AI_CONFIG.CHASE_TIME_VAR; 
+              enemy.aiState = 'chase';
+              enemy.aiTimer = timers.CHASE_TIME_BASE + Math.random() * timers.CHASE_TIME_VAR;
           }
       }
 
       // --- MOVEMENT BEHAVIOR ---
       if (enemy.aiState === 'chase') {
-          // ENGAGE: Fly towards the LAGGED target
+          // ENGAGE: Fly toward the lagged target, blended with the pursuit
+          // flow field so enemies navigate around tile clusters.
+          // The flow field uses the player's *current* cell as its goal —
+          // optimal for routing; the lagged target is kept for rotation/aim.
           const dx = targetPos.x - enemy.position.x;
           const dy = targetPos.y - enemy.position.y;
-          const d = Math.sqrt(dx*dx + dy*dy);
+          const d  = Math.sqrt(dx * dx + dy * dy);
 
           if (d > 0) {
-              const ndx = dx / d;
-              const ndy = dy / d;
-              enemy.velocity.x += ndx * accel * dt;
-              enemy.velocity.y += ndy * accel * dt;
+              const eneFlow = flowField.sampleEnemyFlow(enemy.position.x, enemy.position.y);
+              const hasFlow = eneFlow.x !== 0 || eneFlow.y !== 0;
+
+              let moveX: number, moveY: number;
+              if (hasFlow) {
+                  // 65 % flow field (avoids tile walls) + 35 % direct (stays
+                  // responsive when in open space).
+                  const directX = dx / d, directY = dy / d;
+                  moveX = eneFlow.x * 0.65 + directX * 0.35;
+                  moveY = eneFlow.y * 0.65 + directY * 0.35;
+                  const mag = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
+                  moveX /= mag;
+                  moveY /= mag;
+              } else {
+                  // Outside the pursuit field range — fall back to direct chase.
+                  moveX = dx / d;
+                  moveY = dy / d;
+              }
+
+              enemy.velocity.x += moveX * accel * dt;
+              enemy.velocity.y += moveY * accel * dt;
           }
-      } 
+      }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
 
       // Cap Speed
@@ -182,13 +199,12 @@ export class AISystem {
       // Face player when moving slow (Drift/Hover dynamics)
       let targetAngle = enemy.rotation;
 
-      if (speed > AI_CONFIG.ROTATION_THRESHOLD) {
-        targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      if (speed > rotThreshold) {
+          targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
       } else {
-        // If stopped/slow, turn towards the ACTUAL player position (not lagged) for situational awareness
-        const toTargetX = player.position.x - enemy.position.x;
-        const toTargetY = player.position.y - enemy.position.y;
-        targetAngle = Math.atan2(toTargetY, toTargetX);
+          const toTargetX = player.position.x - enemy.position.x;
+          const toTargetY = player.position.y - enemy.position.y;
+          targetAngle = Math.atan2(toTargetY, toTargetX);
       }
 
       let angleDiff = targetAngle - enemy.rotation;

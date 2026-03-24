@@ -203,8 +203,9 @@ export class BackgroundManager {
   }
 
   public render(ctx: CanvasRenderingContext2D, cameraPos: Vector2, attractors: GameEntity[] = [], zoom: number = 1.0) {
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const width = ctx.canvas.width / dpr;
+    const height = ctx.canvas.height / dpr;
     if (width === 0 || height === 0) return;
 
     if (!this.initialized || width !== this.sceneWidth || height !== this.sceneHeight) {
@@ -222,10 +223,9 @@ export class BackgroundManager {
     const halfH = height / 2;
     const cx = halfW;
     const cy = halfH;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.translate(cx, cy);
-    ctx.scale(zoom, zoom);
-    ctx.translate(-cx, -cy);
+    // Reset to DPR-scaled identity so background draws in CSS pixel space,
+    // consistent with the rest of the renderer (which uses canvas.width / dpr).
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     ctx.fillStyle = '#000000';
     ctx.fillRect(-width * 50, -height * 50, width * 100, height * 100);

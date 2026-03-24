@@ -7,6 +7,9 @@ import { BackgroundManager } from './BackgroundManager';
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
+  private debugMode: boolean = false;
+
+  public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -97,7 +100,10 @@ export class RenderSystem {
         }
 
         if (entity.type === EntityType.ENEMY || entity.type === EntityType.INTERACTABLE) {
-            this._indicatorBuffer.push({ entity, distSq: dx*dx + dy*dy });
+            const distSq = dx*dx + dy*dy;
+            if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
+                this._indicatorBuffer.push({ entity, distSq });
+            }
         }
 
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE) {
@@ -273,13 +279,6 @@ export class RenderSystem {
       );
       ctx.rotate(rotation);
       
-      // Prevent player from scaling with camera zoom (Warp Effect)
-      // BUT scale inversely so it stays same screen size during zoom
-      if (entity.type === EntityType.PLAYER && camera.zoom !== 1) {
-          const invScale = 1 / camera.zoom;
-          ctx.scale(invScale, invScale);
-      }
-
       let drawn = false;
 
       // --- SPRITE RENDERING ---
@@ -393,15 +392,11 @@ export class RenderSystem {
 
           } else if (entity.type === EntityType.PROJECTILE) {
              ctx.fillStyle = entity.color;
-             // Removed expensive shadowBlur for performance
-             
-             if (Number.isFinite(entity.size.x) && Number.isFinite(entity.size.y)) {
-                ctx.fillRect(
-                    -entity.size.x / 2, 
-                    -entity.size.y / 2, 
-                    entity.size.x, 
-                    entity.size.y
-                );
+             const r = entity.size.x / 2;
+             if (Number.isFinite(r) && r > 0) {
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
              }
           } else {
             ctx.fillStyle = entity.color;
@@ -464,8 +459,8 @@ export class RenderSystem {
 
       ctx.restore();
 
-      // Render Debug Acceleration Vector
-      if (entity.type === EntityType.PLAYER && entity.inputVector) {
+      // Render Debug Acceleration Vector (debug mode only)
+      if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
           const iv = entity.inputVector;
           const mag = Math.sqrt(iv.x*iv.x + iv.y*iv.y);
           if (mag > 0.05) { 
@@ -638,6 +633,10 @@ export class RenderSystem {
           const dy = t.position.y - playerPos.y;
           const angle = Math.atan2(dy, dx);
 
+          // Skip if the enemy is already closer than the indicator ring
+          const screenDist = Math.sqrt(item.distSq) * camera.zoom;
+          if (t.type === EntityType.ENEMY && screenDist < RADIUS) continue;
+
           const ix = cx + Math.cos(angle) * RADIUS;
           const iy = cy + Math.sin(angle) * RADIUS;
 
@@ -647,18 +646,22 @@ export class RenderSystem {
 
           ctx.fillStyle = t.color;
           ctx.beginPath();
-          
+
           if (t.type === EntityType.ENEMY) {
-              // Simple line marker for enemies
-              ctx.rect(-10, -2, 20, 4); 
+              // Caret (^) chevron pointing toward the enemy
+              const w = 7, h = 9;
+              ctx.moveTo( h,  0);      // tip
+              ctx.lineTo(-h,  w);      // bottom-left
+              ctx.lineTo(-h + 4,  0);  // inner notch
+              ctx.lineTo(-h, -w);      // top-left
           } else {
               // Standard pointer for POIs
-              ctx.moveTo(12, 0); 
-              ctx.lineTo(-8, 8); 
-              ctx.lineTo(-2, 0); 
-              ctx.lineTo(-8, -8); 
+              ctx.moveTo(12, 0);
+              ctx.lineTo(-8,  8);
+              ctx.lineTo(-2,  0);
+              ctx.lineTo(-8, -8);
           }
-          
+
           ctx.closePath();
           ctx.fill();
           

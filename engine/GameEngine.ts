@@ -5,24 +5,21 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
 import { ASSETS } from '../assets';
-
-const PHYSICS_MAX_STEPS = 5;
+import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
   private ai: AISystem;
+  private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
-  private accumulator: number = 0;
-  // UPDATED: 120 Hz Physics for smoother simulation
-  private readonly FIXED_DT: number = 1/120;
   
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
@@ -41,6 +38,9 @@ export class GameEngine {
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
 
+  // Debug mode
+  private debugMode: boolean = false;
+
   // Wave system
   private waveIndex: number = 0;
   private waveEnemyIds: Set<string> = new Set();
@@ -50,6 +50,11 @@ export class GameEngine {
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
+
+  public toggleDebug() {
+    this.debugMode = !this.debugMode;
+    this.renderer.setDebugMode(this.debugMode);
+  }
 
   private onStatsUpdate: (stats: EngineStats) => void;
 
@@ -63,6 +68,7 @@ export class GameEngine {
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
+    this.flowField = new FlowFieldGrid();
 
     this.player = {
       id: 'player',
@@ -86,7 +92,7 @@ export class GameEngine {
 
     this.camera = {
       position: { x: 0, y: 0 },
-      zoom: 1,
+      zoom: CAMERA_CONSTANTS.DEFAULT_ZOOM,
       targetId: 'player',
       shakeOffset: { x: 0, y: 0 }
     };
@@ -141,7 +147,7 @@ export class GameEngine {
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
-      this.camera.zoom = 1;
+      this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
       this.camera.position = { x: 0, y: 0 };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
@@ -185,7 +191,10 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveStatus: wsMap[this.waveState]
+      waveTotal: WAVE_DEFINITIONS.length,
+      waveStatus: wsMap[this.waveState],
+      debugMode: this.debugMode,
+      weaponCount: this.currentWeaponIndex + 1
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -195,23 +204,16 @@ export class GameEngine {
         return;
     }
 
-    const safeFrameTime = Math.min(frameTime, 0.25);
+    // Cap dt to prevent physics explosion after tab switch / GPU stall
+    const safeFrameTime = Math.min(frameTime, 0.05);
 
     // Refresh working set for physics/AI without reallocating each call
     this.prepareFrameEntities();
-    this.accumulator += safeFrameTime;
 
-    // Safety Cap: Don't run more than N physics steps per frame to avoid "spiral of death" lag
-    let steps = 0;
-    while (this.accumulator >= this.FIXED_DT && steps < PHYSICS_MAX_STEPS) {
-        this.updatePhysics(this.FIXED_DT);
-        this.accumulator -= this.FIXED_DT;
-        steps++;
-    }
-    // If we're falling too far behind, just discard the accumulated time
-    if (this.accumulator > this.FIXED_DT * PHYSICS_MAX_STEPS) {
-        this.accumulator = 0;
-    }
+    // One physics step per rendered frame at the actual frame rate.
+    // This eliminates the 1-vs-2 step alternation that caused visual jitter
+    // with a fixed-timestep accumulator at 60 Hz display.
+    this.updatePhysics(safeFrameTime);
     
     this.updateGameLogic(safeFrameTime);
     // Include entities spawned during game logic (e.g., projectiles) before rendering
@@ -239,6 +241,7 @@ export class GameEngine {
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const enemy = this.currentMap.entities[i];
           if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+          if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
           // Cooldown management
           enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
@@ -271,8 +274,12 @@ export class GameEngine {
       if (!this.currentMap) return;
 
       const allEntities = this.frameEntities;
-      
-      this.ai.update(dt, allEntities, this.player);
+
+      // Rebuild the enemy pursuit field if the player changed grid cells.
+      this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
+      this.flowField.flushEnemyField();
+
+      this.ai.update(dt, allEntities, this.player, this.flowField);
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -306,6 +313,28 @@ export class GameEngine {
           this.handleAsteroidRespawn(config);
       }
 
+      // Flow-field nudge: steer each asteroid toward the grid flow direction.
+      // Elastic correction rate: asteroids near the target speed get a gentle
+      // 8 %/s nudge; asteroids that have been slowed by collisions receive up
+      // to 9× stronger correction so they re-enter the stream quickly without
+      // any hard velocity override (no teleporting).
+      const FLOW_CORRECTION  = 0.08;
+      const FLOW_TARGET_SPEED = config.speedMultiplier;
+      const entities = this.currentMap.entities;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.type !== EntityType.ASTEROID || !e.active) continue;
+          const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
+          const tx = flow.x * FLOW_TARGET_SPEED;
+          const ty = flow.y * FLOW_TARGET_SPEED;
+          const speed   = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
+          const urgency = 1 + 8 * Math.max(0, 1 - speed / FLOW_TARGET_SPEED);
+          const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
+          e.velocity.x += (tx - e.velocity.x) * alpha;
+          e.velocity.y += (ty - e.velocity.y) * alpha;
+          if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+      }
+
       // In-place compaction (Garbage Free)
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
@@ -320,6 +349,10 @@ export class GameEngine {
   private handleEntityDeath = (entity: GameEntity) => {
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
+      }
+
+      if (entity.type === EntityType.STRUCTURE) {
+          this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
       }
 
       // Spawn Particles
@@ -441,9 +474,16 @@ export class GameEngine {
         this.waveState = 'cleared';
         const waveDef = WAVE_DEFINITIONS[this.waveIndex];
         if (waveDef.powerup !== null) {
+          // Drop a weapon pickup — player must collect it to advance
           this.spawnPowerup(waveDef.powerup);
         } else {
-          this.waveState = 'complete';
+          // No weapon drop: auto-advance to next wave, or end if this was the last
+          const nextIdx = this.waveIndex + 1;
+          if (nextIdx < WAVE_DEFINITIONS.length) {
+            this.spawnWave(nextIdx);
+          } else {
+            this.waveState = 'complete';
+          }
         }
       }
     }
@@ -740,7 +780,7 @@ export class GameEngine {
 
               for (let j = 0; j < entities.length; j++) {
                   const e = entities[j];
-                  if (e.active && (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
+                  if (e.active && e.type === EntityType.ENEMY) {
                       const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
                       if (d2 < minDist) {
                           minDist = d2;
@@ -773,38 +813,90 @@ export class GameEngine {
 
   private createAsteroidShards(parent: GameEntity) {
       const shardCount = 2 + Math.floor(Math.random() * 2);
-      const newSize = parent.size.x / Math.sqrt(shardCount);
-      const hp = newSize > 30 ? 2 : 1;
+      const newSize    = parent.size.x / Math.sqrt(shardCount);
+      const hp         = newSize > 30 ? 2 : 1;
+
+      // Resolve impact direction from the stamped impactor velocity.
+      // If none is present (gravity crush, asteroid-asteroid) fall back to
+      // isotropic scatter.
+      const iv = parent.lastImpactVelocity;
+      const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+
+      // Half-angle of the forward scatter cone.  Wide enough to read as an
+      // explosion, narrow enough to have clear directionality.
+      const HALF_CONE = Math.PI * 0.55; // ±99°
 
       for (let i = 0; i < shardCount; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const speed = 1 + Math.random() * 2;
-          const vx = parent.velocity.x + Math.cos(angle) * speed;
-          const vy = parent.velocity.y + Math.sin(angle) * speed;
-          const points: Vector2[] = [];
-          const numPoints = 5;
-          for (let j = 0; j < numPoints; j++) {
-             const a = (j / numPoints) * Math.PI * 2;
-             const r = (newSize/2) * (0.6 + Math.random() * 0.4);
-             points.push({x: Math.cos(a)*r, y: Math.sin(a)*r});
+          // --- scatter direction ---
+          let scatterAngle: number;
+          let scatterSpeed: number;
+
+          if (impactAngle !== null) {
+              // Forward-biased cone centred on the projectile's travel direction.
+              scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
+              // Shards carry a fraction of the projectile speed plus a small
+              // randomised kick so pieces spread rather than clump.
+              scatterSpeed = impactSpeed * 0.35 + 0.4 + Math.random() * 1.2;
+          } else {
+              scatterAngle = Math.random() * Math.PI * 2;
+              scatterSpeed = 1 + Math.random() * 2;
           }
-          const offsetX = Math.cos(angle) * (newSize * 0.5);
-          const offsetY = Math.sin(angle) * (newSize * 0.5);
+
+          const scatterX = Math.cos(scatterAngle) * scatterSpeed;
+          const scatterY = Math.sin(scatterAngle) * scatterSpeed;
+
+          // Final shard velocity = parent drift + directional scatter.
+          const vx = parent.velocity.x + scatterX;
+          const vy = parent.velocity.y + scatterY;
+
+          // --- irregular shard polygon (same technique as createAsteroid) ---
+          // Fewer points than a full asteroid, and more aggressive radius
+          // variation so shards look like jagged fragments.
+          const numPoints = 5 + Math.floor(Math.random() * 3); // 5–7
+          const baseR     = (newSize / 2) * 0.8;
+          const rawPts: { angle: number; r: number }[] = [];
+          for (let j = 0; j < numPoints; j++) {
+              const baseAngle   = (j / numPoints) * Math.PI * 2;
+              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
+              rawPts.push({
+                  angle: baseAngle + angleJitter,
+                  r:     baseR * (0.55 + Math.random() * 0.7), // 55 %–125 % — more jagged
+              });
+          }
+          rawPts.sort((a, b) => a.angle - b.angle);
+          const points: Vector2[] = rawPts.map(p => ({
+              x: Math.cos(p.angle) * p.r,
+              y: Math.sin(p.angle) * p.r,
+          }));
+
+          // Offset spawn position in the scatter direction so shards don't all
+          // originate at the same point and immediately re-collide.
+          // Use the parent radius (not shard size) as the scale so large
+          // asteroids don't teleport pieces to their outer edge.
+          const parentRadius = parent.size.x / 2;
+          const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
+          const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
+
+          // Shards tumble faster than their parent (smaller = faster spin).
+          const maxSpin      = 2.0 / (newSize / 20);
+          const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
 
           this.currentMap?.entities.push({
-              id: `shard_${Date.now()}_${i}`,
-              type: EntityType.ASTEROID,
-              position: { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
-              velocity: { x: vx, y: vy },
-              size: { x: newSize, y: newSize },
-              rotation: Math.random() * Math.PI * 2,
-              color: COLORS.ASTEROID,
-              active: true,
-              health: hp,
-              maxHealth: hp,
+              id:           `shard_${Date.now()}_${i}`,
+              type:          EntityType.ASTEROID,
+              position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
+              velocity:     { x: vx, y: vy },
+              size:         { x: newSize, y: newSize },
+              rotation:      Math.random() * Math.PI * 2,
+              rotationSpeed,
+              color:         COLORS.ASTEROID,
+              active:        true,
+              health:        hp,
+              maxHealth:     hp,
               polygonPoints: points,
-              mass: newSize,
-              sprite: parent.sprite
+              mass:          newSize,
+              sprite:        parent.sprite,
           });
       }
   }
@@ -900,6 +992,8 @@ export class GameEngine {
       this.currentMap = map;
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
+      this.flowField.initObstacles(map.entities);
+      this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
   }
 

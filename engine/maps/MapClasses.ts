@@ -2,6 +2,7 @@
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS } from '../../constants';
+import { sampleFlow } from '../systems/FlowField';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -52,16 +53,27 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
     ): GameEntity {
-    const points: Vector2[] = [];
-    const numPoints = 8;
+    // Irregular convex-ish polygon: 9-12 points with varied radius and
+    // slight angular jitter.  Variation is capped at ±25 % of base radius
+    // so the shape stays approximately convex (safe for SAT collision).
+    // Points are generated in angular order and sorted to guarantee correct
+    // polygon winding regardless of jitter direction.
+    const numPoints = 9 + Math.floor(Math.random() * 4); // 9–12
+    const baseR    = (size / 2) * 0.82;
+    const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
-        const angle = (i / numPoints) * Math.PI * 2;
-        const r = (size/2) * 0.8;
-        points.push({
-            x: Math.cos(angle) * r,
-            y: Math.sin(angle) * r
+        const baseAngle   = (i / numPoints) * Math.PI * 2;
+        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.65;
+        rawPts.push({
+            angle: baseAngle + angleJitter,
+            r:     baseR * (0.75 + Math.random() * 0.5), // 75 %–125 % of base
         });
     }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    const points: Vector2[] = rawPts.map(p => ({
+        x: Math.cos(p.angle) * p.r,
+        y: Math.sin(p.angle) * p.r,
+    }));
 
     let asteroidAssets = [ASSETS.ASTEROID_1, ASSETS.ASTEROID_2, ASSETS.ASTEROID_3, ASSETS.ASTEROID_ICE, ASSETS.ASTEROID_VOLCANIC];
 
@@ -72,16 +84,28 @@ export abstract class BaseMapLayer {
     const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
     const hp = size > 30 ? 2 : 1;
 
+    // Blend flow direction (70%) with random drift (30%) for the initial velocity.
+    // This seeds the asteroid into the vortex streamlines from spawn.
+    const flow = sampleFlow(x, y);
+    const randX = (Math.random() - 0.5) * 2;
+    const randY = (Math.random() - 0.5) * 2;
+    const FLOW_BIAS = 0.7;
+    const vx = (flow.x * FLOW_BIAS + randX * (1 - FLOW_BIAS)) * speedMultiplier;
+    const vy = (flow.y * FLOW_BIAS + randY * (1 - FLOW_BIAS)) * speedMultiplier;
+
+    // Smaller rocks spin faster; scale is roughly 1.5 rad/s at size 20 down
+    // to ~0.19 rad/s at size 160.  Random sign gives both CW and CCW tumble.
+    const maxSpin = 1.5 / (size / 20);
+    const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
+
     return {
         id: `ast_${Date.now()}_${Math.random()}`,
         type: EntityType.ASTEROID,
         position: { x, y },
-        velocity: {
-            x: (Math.random() - 0.5) * 2 * speedMultiplier,
-            y: (Math.random() - 0.5) * 2 * speedMultiplier
-        },
+        velocity: { x: vx, y: vy },
         size: { x: size, y: size },
         rotation: Math.random() * Math.PI * 2,
+        rotationSpeed,
         color: COLORS.ASTEROID,
         active: true,
         health: hp,

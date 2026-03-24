@@ -415,6 +415,11 @@ export class PhysicsSystem {
           if (onDamage) onDamage(target.position, proj.damage || 1);
 
           if (target.health <= 0) {
+              // Stamp the impactor's velocity so shard spawning can scatter
+              // pieces in the direction of impact rather than randomly.
+              if (target.type === EntityType.ASTEROID && proj.velocity) {
+                  target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+              }
               if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
                   this.removeStaticEntity(target);
               }
