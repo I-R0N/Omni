@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, DROP_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -87,7 +87,10 @@ export class GameEngine {
       burstQueue: 0,
       burstTimer: 0,
       trail: [],
-      sprite: ASSETS.PLAYER_SHIP
+      sprite: ASSETS.PLAYER_SHIP,
+      fuel: 100,
+      maxFuel: 100,
+      gold: 0
     };
 
     this.camera = {
@@ -143,6 +146,8 @@ export class GameEngine {
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
+      this.player.fuel = this.player.maxFuel;
+      this.player.gold = 0;
       this.player.trail = [];
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
@@ -194,7 +199,10 @@ export class GameEngine {
       waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       debugMode: this.debugMode,
-      weaponCount: this.currentWeaponIndex + 1
+      weaponCount: this.currentWeaponIndex + 1,
+      fuel: this.player.fuel,
+      maxFuel: this.player.maxFuel,
+      gold: this.player.gold
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -369,13 +377,13 @@ export class GameEngine {
               id: `part_${Date.now()}_${i}`,
               type: EntityType.PARTICLE,
               position: { x: entity.position.x, y: entity.position.y },
-              velocity: { 
-                  x: Math.cos(angle) * speed, 
-                  y: Math.sin(angle) * speed 
+              velocity: {
+                  x: Math.cos(angle) * speed,
+                  y: Math.sin(angle) * speed
               },
               size: { x: size, y: size },
               rotation: Math.random() * Math.PI * 2,
-              color: entity.color || '#facc15', 
+              color: entity.color || '#facc15',
               active: true,
               health: 1,
               maxHealth: 1,
@@ -384,6 +392,8 @@ export class GameEngine {
               mass: 0.1
           });
       }
+
+      this.spawnDrops(entity);
   };
 
   private handleAsteroidRespawn(config: any) {
@@ -929,10 +939,18 @@ export class GameEngine {
         const config = ENEMY_VARIANTS[group.subtype];
         const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
 
+        const tierMap: Partial<Record<string, number>> = {
+          RAMMER_1: 1, SHOOTER_1: 1,
+          RAMMER_2: 2, SHOOTER_2: 2,
+          RAMMER_3: 3, SHOOTER_3: 3,
+        };
+        const enemyTier = tierMap[group.subtype] ?? 1;
+
         this.currentMap.entities.push({
           id,
           type: EntityType.ENEMY,
           enemySubtype: group.subtype,
+          enemyTier,
           position: { x, y },
           velocity: { x: 0, y: 0 },
           size: { x: config.size, y: config.size },
@@ -983,6 +1001,85 @@ export class GameEngine {
     });
 
     this.powerupId = id;
+  }
+
+  private spawnDrops(entity: GameEntity) {
+    const pos = entity.position;
+
+    if (entity.type === EntityType.STRUCTURE) {
+      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE);
+
+    } else if (entity.type === EntityType.ASTEROID) {
+      const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
+      this.spawnDrop(pos, 'gold', goldAmt);
+
+      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
+        this.spawnRandomPowerupDrop(pos, true);
+      }
+
+    } else if (entity.type === EntityType.ENEMY) {
+      const tier = entity.enemyTier ?? 1;
+      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
+
+      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
+        this.spawnRandomPowerupDrop(pos, true);
+      }
+    }
+  }
+
+  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold', value: number) {
+    if (!this.currentMap) return;
+    const scatter = 20;
+    this.currentMap.entities.push({
+      id: `drop_${type}_${Date.now()}_${Math.random()}`,
+      type: EntityType.INTERACTABLE,
+      position: {
+        x: pos.x + (Math.random() - 0.5) * scatter * 2,
+        y: pos.y + (Math.random() - 0.5) * scatter * 2,
+      },
+      velocity: { x: 0, y: 0 },
+      size: { x: 18, y: 18 },
+      rotation: 0,
+      color: type === 'fuel' ? '#00e5ff' : '#ffd700',
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+      dropType: type,
+      dropValue: value,
+      isTemporaryDrop: true,
+      lifetime: DROP_CONFIG.LIFETIME,
+      maxLifetime: DROP_CONFIG.LIFETIME,
+    });
+  }
+
+  private spawnRandomPowerupDrop(pos: Vector2, temporary: boolean) {
+    if (!this.currentMap) return;
+    const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
+    const weaponConfig = WEAPONS[weaponType];
+    const scatter = 20;
+    this.currentMap.entities.push({
+      id: `drop_powerup_${Date.now()}_${Math.random()}`,
+      type: EntityType.INTERACTABLE,
+      position: {
+        x: pos.x + (Math.random() - 0.5) * scatter * 2,
+        y: pos.y + (Math.random() - 0.5) * scatter * 2,
+      },
+      velocity: { x: 0, y: 0 },
+      size: { x: 18, y: 18 },
+      rotation: 0,
+      color: weaponConfig.color,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+      name: weaponConfig.name,
+      dropType: 'powerup',
+      dropWeapon: weaponType,
+      isTemporaryDrop: temporary,
+      lifetime: DROP_CONFIG.LIFETIME,
+      maxLifetime: DROP_CONFIG.LIFETIME,
+    });
   }
 
   private loadMap(map: BaseMapLayer) {

@@ -154,6 +154,20 @@ export interface GameEntity {
 
   // Powerup pickup
   powerupWeapon?: WeaponType;
+
+  // Player resources
+  fuel?: number;
+  maxFuel?: number;
+  gold?: number;
+
+  // Drop item fields
+  dropType?: 'fuel' | 'gold' | 'powerup';
+  dropValue?: number;
+  dropWeapon?: WeaponType;
+  isTemporaryDrop?: boolean;
+
+  // Enemy tier (1 | 2 | 3) — used for drop scaling
+  enemyTier?: number;
 }
 
 export interface CameraState {
@@ -176,6 +190,9 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   debugMode?: boolean;
   weaponCount?: number;
+  fuel?: number;
+  maxFuel?: number;
+  gold?: number;
 }
 
 export interface DamageText {

@@ -326,6 +326,16 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // --- ASSETS ---
 export { ASSETS };
 
+export const DROP_CONFIG = {
+  FUEL_FROM_TILE:          15,    // fuel units per tile destroyed
+  GOLD_PER_ASTEROID_SIZE:   0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
+  GOLD_PER_ENEMY_TIER:     20,    // gold = tier * 20 → 20/40/60
+  POWERUP_CHANCE_ASTEROID:  0.04, // 4 % chance per asteroid
+  POWERUP_CHANCE_ENEMY:     0.10, // 10 % × tier → 10 %/20 %/30 %
+  COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
+  LIFETIME:                20.0,  // seconds before drop despawns
+};
+
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
 export const DIFFICULTY_SCALES: Record<number, number> = {
   0: 0,    // No enemies

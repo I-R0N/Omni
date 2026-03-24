@@ -62,6 +62,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="pointer-events-none flex flex-col items-end gap-1">
+              {/* Fuel bar */}
+              <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
+                <span className="text-cyan-400 text-[10px] font-bold uppercase tracking-widest">FUEL</span>
+                <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.round(((stats.fuel ?? 100) / (stats.maxFuel ?? 100)) * 100)}%`,
+                      backgroundColor: '#00e5ff',
+                    }}
+                  />
+                </div>
+                <span className="text-cyan-300 text-[10px] font-mono">{Math.round(stats.fuel ?? 100)}</span>
+              </div>
+
+              {/* Gold counter */}
+              <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
+                <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">GOLD</span>
+                <span className="text-yellow-300 text-[10px] font-mono font-bold">{Math.round(stats.gold ?? 0)}</span>
+              </div>
+
               {stats.waveStatus === 'complete' ? (
                 <div className="bg-yellow-500/20 border border-yellow-400/60 rounded-lg px-4 py-1.5 shadow-lg">
                   <span className="text-yellow-300 font-black text-sm tracking-widest">★ ALL WAVES CLEARED ★</span>
