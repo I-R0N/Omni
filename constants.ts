@@ -121,12 +121,10 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
-  TAP_THRESHOLD: 200,     // ms: Time to differentiate tap vs hold (delay before moving)
-  TAP_DISTANCE_LIMIT: 20,  // px: Max movement allowed for a tap
-  ZERO_DELAY_SHOOTING: false, // If true, movement is instant (no delay), checkTap ignores duration
-  THROTTLE_DISTANCE: 150, // px: Distance drag to reach max acceleration
-  MIN_THROTTLE: 0.1,     // Absolute minimum floor (reduced to allow radial logic to take over)
-  RADIAL_ACCEL_FACTOR: 0.0006 // Factor to convert pixel distance from center to base acceleration
+  TAP_THRESHOLD: 200,      // ms: max hold duration for a tap-to-fire
+  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap-to-fire
+  ZERO_DELAY_SHOOTING: false, // if true, checkTap ignores hold duration
+  THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 };
 
 export const PHYSICS_CONSTANTS = {
