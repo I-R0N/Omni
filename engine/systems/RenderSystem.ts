@@ -401,7 +401,53 @@ export class RenderSystem {
           } else {
             ctx.fillStyle = entity.color;
 
-            if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
+            if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
+                // Mid-wave drop — fuel, gold, or powerup orb
+                const r = 9;
+                const lt = entity.lifetime ?? Infinity;
+                const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
+                const pulse = 0.65 + Math.sin(Date.now() / 350) * 0.35;
+
+                let coreColor: string;
+                let ringColor: string;
+                let label: string;
+                if (entity.dropType === 'fuel') {
+                    coreColor = '#00e5ff';
+                    ringColor = '#0090a0';
+                    label = 'FUEL';
+                } else if (entity.dropType === 'gold') {
+                    coreColor = '#ffd700';
+                    ringColor = '#b8860b';
+                    label = 'GOLD';
+                } else {
+                    coreColor = entity.color;
+                    ringColor = entity.color;
+                    label = entity.name || 'WEAPON';
+                }
+
+                // Single outer ring
+                ctx.globalAlpha = 0.55 * pulse * fadeAlpha;
+                ctx.strokeStyle = ringColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 1.7, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Core fill
+                ctx.globalAlpha = 0.92 * fadeAlpha;
+                ctx.fillStyle = coreColor;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Label
+                ctx.globalAlpha = fadeAlpha;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 9px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, 0, r + 13);
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
                 // Weapon powerup — glowing pulsing orb
                 const r = entity.size.x / 2;
                 const pulse = 0.65 + Math.sin(entity.rotation * 3) * 0.35;

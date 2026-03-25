@@ -332,6 +332,7 @@ export const DROP_CONFIG = {
   POWERUP_CHANCE_ENEMY:     0.10, // 10 % × tier → 10 %/20 %/30 %
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
+  FUEL_DRAIN_RATE:          5,    // fuel units per second at full throttle
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full

@@ -531,6 +531,12 @@ export class GameEngine {
     this.player.velocity.x += moveDir.x * acc * timeScale;
     this.player.velocity.y += moveDir.y * acc * timeScale;
 
+    // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
+    const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
+    if (throttle > 0) {
+        this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
+    }
+
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {
         this.player.velocity.x = (this.player.velocity.x / currentSpeed) * maxSpeed;
@@ -967,6 +973,13 @@ export class GameEngine {
     if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
+
+    // Sweep any temporary mid-wave drops before spawning the next wave
+    for (const entity of this.currentMap.entities) {
+      if (entity.isTemporaryDrop && entity.type === EntityType.INTERACTABLE) {
+        entity.active = false;
+      }
+    }
 
     const waveDef = WAVE_DEFINITIONS[index];
     const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
