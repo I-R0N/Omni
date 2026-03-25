@@ -149,61 +149,29 @@ export class InputSystem {
       return { x: kDir.x / length, y: kDir.y / length };
     }
 
-    // 2. Hybrid Touch Input
-    // Direction: Radial from screen center -> current touch
-    // Throttle: 
-    //   Part A: Initial Radial Distance (Base Throttle)
-    //   Part B: Drag Slide Distance (Additional Throttle)
+    // 2. Touch / Mouse Input
+    // Direction: screen center → current touch position (normalized).
+    // Throttle: current radial distance from screen center, clamped to
+    //           [0, THROTTLE_DISTANCE] and normalised to [0, 1].
+    // This makes direction and magnitude fully independent of where the
+    // touch started, so sweeping past 180° never drops acceleration.
     if (this.mouseDown) {
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
 
-      // Calculate Current Direction (Screen Center -> Current Touch)
-      const radialRx = this.mousePosition.x - cx;
-      const radialRy = this.mousePosition.y - cy;
-      const radialDist = Math.sqrt(radialRx * radialRx + radialRy * radialRy);
+      const dx = this.mousePosition.x - cx;
+      const dy = this.mousePosition.y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      let nx = 0;
-      let ny = 0;
-      
-      if (radialDist > 0.001) {
-          nx = radialRx / radialDist;
-          ny = radialRy / radialDist;
-      }
+      if (dist < 1) return { x: 0, y: 0 };
 
-      // A. Calculate Base Throttle from Initial Touch Position
-      //    Touches further from the center give a higher starting speed immediately.
-      const startRx = this.touchStartPos.x - cx;
-      const startRy = this.touchStartPos.y - cy;
-      const startRadialDist = Math.sqrt(startRx * startRx + startRy * startRy);
-      
-      const baseRadialThrottle = startRadialDist * INPUT_CONSTANTS.RADIAL_ACCEL_FACTOR;
+      const nx = dx / dist;
+      const ny = dy / dist;
 
-      // B. Calculate Drag Throttle from Slide Action
-      const slideDx = this.mousePosition.x - this.touchStartPos.x;
-      const slideDy = this.mousePosition.y - this.touchStartPos.y;
-      const slideDist = Math.sqrt(slideDx * slideDx + slideDy * slideDy);
+      // Throttle = 0 at center, 1 at THROTTLE_DISTANCE px, capped beyond.
+      const throttle = Math.min(1, dist / INPUT_CONSTANTS.THROTTLE_DISTANCE);
 
-      const deadzone = INPUT_CONSTANTS.TAP_DISTANCE_LIMIT; 
-      
-      let dragThrottle = 0;
-      // Only apply drag throttle if outside deadzone to allow for small movements/taps without altering course significantly
-      if (slideDist > deadzone) {
-          const maxSlide = INPUT_CONSTANTS.THROTTLE_DISTANCE;
-          const range = Math.max(1, maxSlide - deadzone);
-          const rawDrag = (slideDist - deadzone) / range;
-          // Apply MIN_THROTTLE floor only to the drag component
-          dragThrottle = Math.max(INPUT_CONSTANTS.MIN_THROTTLE, rawDrag);
-      }
-
-      // C. Combine (Base + Drag)
-      // The base radial throttle is unaffected by the minimum floor.
-      const totalThrottle = baseRadialThrottle + dragThrottle;
-
-      return {
-        x: nx * totalThrottle,
-        y: ny * totalThrottle
-      };
+      return { x: nx * throttle, y: ny * throttle };
     }
 
     return { x: 0, y: 0 };
