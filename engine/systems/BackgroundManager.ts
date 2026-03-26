@@ -174,8 +174,8 @@ export class BackgroundManager {
         this.milkyWay.push({
             x: x,
             y: y,
-            size: 1 + Math.random() * 2,
-            opacity: 0.3 + Math.random() * 0.3,
+            size: 0.4 + Math.random() * 0.8,
+            opacity: 0.2 + Math.random() * 0.25,
             color: Math.random() > 0.8 ? mwColors[Math.floor(Math.random() * mwColors.length)] : '#ffffff'
         });
     }
@@ -187,13 +187,13 @@ export class BackgroundManager {
         const speed = 0.02 + (t * t) * 2.0;
         const stars: Star[] = [];
         for(let j=0; j<starsPerLayer; j++) {
-            const baseSize = 0.5 + Math.random() * 0.5; 
-            const sizeMod = 0.5 + (t * 1.5); 
+            const baseSize = 0.3 + Math.random() * 0.3;
+            const sizeMod = 0.4 + (t * 0.8);
             stars.push({
                 x: Math.random() * width,
                 y: Math.random() * height,
                 size: baseSize * sizeMod,
-                opacity: 0.3 + Math.random() * 0.7, 
+                opacity: 0.2 + Math.random() * 0.45,
                 color: Math.random() > 0.95 ? COLORS.STAR : '#ffffff'
             });
         }
