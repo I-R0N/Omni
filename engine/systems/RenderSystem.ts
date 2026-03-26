@@ -4,6 +4,31 @@ import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } fro
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
+// Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
+// Provide a fallback so older preview engines don't throw on drop rendering.
+function roundRectPath(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number
+) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+        return;
+    }
+    // Manual fallback using arcTo
+    const rx = Math.min(r, w / 2);
+    const ry = Math.min(r, h / 2);
+    ctx.moveTo(x + rx, y);
+    ctx.lineTo(x + w - rx, y);
+    ctx.arcTo(x + w, y,     x + w, y + ry,     rx);
+    ctx.lineTo(x + w, y + h - ry);
+    ctx.arcTo(x + w, y + h, x + w - rx, y + h, rx);
+    ctx.lineTo(x + rx, y + h);
+    ctx.arcTo(x,      y + h, x,      y + h - ry, rx);
+    ctx.lineTo(x, y + ry);
+    ctx.arcTo(x,      y,     x + rx, y,          rx);
+    ctx.closePath();
+}
+
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
@@ -250,7 +275,9 @@ export class RenderSystem {
       camera: CameraState
     ) {
     entities.forEach(entity => {
-      if (!entity.active) return;
+      // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
+      const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
+      if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
       // --- PARTICLE RENDERING ---
@@ -499,12 +526,12 @@ export class RenderSystem {
                     ctx.strokeStyle = rimColor;
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.roundRect(-hw - 3, -hh - 3, (hw + 3) * 2, (hh + 3) * 2, rad + 3);
+                    roundRectPath(ctx, -hw - 3, -hh - 3, (hw + 3) * 2, (hh + 3) * 2, rad + 3);
                     ctx.stroke();
                     ctx.globalAlpha = 0.93 * fadeAlpha;
                     ctx.fillStyle = coreColor;
                     ctx.beginPath();
-                    ctx.roundRect(-hw, -hh, hw * 2, hh * 2, rad);
+                    roundRectPath(ctx, -hw, -hh, hw * 2, hh * 2, rad);
                     ctx.fill();
 
                 } else if (entity.dropType === 'gold') {
@@ -533,12 +560,12 @@ export class RenderSystem {
                     ctx.strokeStyle = rimColor;
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.roundRect(-s - 3, -s - 3, (s + 3) * 2, (s + 3) * 2, rad + 2);
+                    roundRectPath(ctx, -s - 3, -s - 3, (s + 3) * 2, (s + 3) * 2, rad + 2);
                     ctx.stroke();
                     ctx.globalAlpha = 0.93 * fadeAlpha;
                     ctx.fillStyle = coreColor;
                     ctx.beginPath();
-                    ctx.roundRect(-s, -s, s * 2, s * 2, rad);
+                    roundRectPath(ctx, -s, -s, s * 2, s * 2, rad);
                     ctx.fill();
                 }
 

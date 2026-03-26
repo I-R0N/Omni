@@ -143,6 +143,7 @@ export class GameEngine {
   }
 
   public restartGame() {
+      this.pendingRegens = [];
       this.loadMap(new UniverseMap());
 
       // Reset Player
@@ -210,7 +211,7 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
-        this.draw();
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         requestAnimationFrame(this.loop);
         return;
     }
@@ -224,12 +225,11 @@ export class GameEngine {
     // One physics step per rendered frame at the actual frame rate.
     // This eliminates the 1-vs-2 step alternation that caused visual jitter
     // with a fixed-timestep accumulator at 60 Hz display.
-    this.updatePhysics(safeFrameTime);
-    
-    this.updateGameLogic(safeFrameTime);
+    try { this.updatePhysics(safeFrameTime); } catch (e) { console.error('[PhysicsSystem] update error:', e); }
+    try { this.updateGameLogic(safeFrameTime); } catch (e) { console.error('[GameLogic] update error:', e); }
     // Include entities spawned during game logic (e.g., projectiles) before rendering
     this.prepareFrameEntities();
-    this.draw();
+    try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
 
     requestAnimationFrame(this.loop);
   };
