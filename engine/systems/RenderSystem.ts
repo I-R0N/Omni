@@ -176,7 +176,7 @@ export class RenderSystem {
     this.renderTrails(ctx, this._trailEntities);
 
     // 4. Render Entities (Culling logic added)
-    this.renderEntities(ctx, this._visibleEntities, camera);
+    this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
     
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
@@ -270,9 +270,10 @@ export class RenderSystem {
   }
 
   private renderEntities(
-      ctx: CanvasRenderingContext2D, 
-      entities: GameEntity[], 
-      camera: CameraState
+      ctx: CanvasRenderingContext2D,
+      entities: GameEntity[],
+      camera: CameraState,
+      playerPos?: Vector2
     ) {
     entities.forEach(entity => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
