@@ -168,6 +168,10 @@ export interface GameEntity {
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
+
+  // Tile regeneration — regenProgress counts up from 0; tile is a ghost
+  // outline when regenProgress < TILE_REGEN_DELAY and active === false.
+  regenProgress?: number;
 }
 
 export interface CameraState {

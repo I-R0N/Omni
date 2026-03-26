@@ -56,7 +56,8 @@ export class RenderSystem {
     camera: CameraState,
     mapType: MapType,
     minimapExpanded: boolean = false,
-    damageTexts?: DamageText[]
+    damageTexts?: DamageText[],
+    playerPos?: Vector2
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -90,7 +91,8 @@ export class RenderSystem {
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
-        if (!entity.active) continue;
+        // Allow inactive tiles that are regenerating to pass through for ghost rendering
+        if (!entity.active && !(entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined)) continue;
 
         const dx = entity.position.x - camX;
         const dy = entity.position.y - camY;
@@ -347,47 +349,111 @@ export class RenderSystem {
             ctx.fill();
 
           } else if (entity.type === EntityType.ASTEROID || entity.type === EntityType.STRUCTURE) {
-            if (entity.hitFlash && entity.hitFlash > 0) {
-                ctx.fillStyle = '#ffffff';
-            } else {
-                ctx.fillStyle = entity.color;
-            }
 
-            ctx.beginPath();
-            if (entity.polygonPoints && entity.polygonPoints.length > 0) {
-                const p0 = entity.polygonPoints[0];
-                if (Number.isFinite(p0.x) && Number.isFinite(p0.y)) {
-                    ctx.moveTo(p0.x, p0.y);
-                    for (let i = 1; i < entity.polygonPoints.length; i++) {
-                        const p = entity.polygonPoints[i];
-                        if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
-                            ctx.lineTo(p.x, p.y);
+            // Build polygon path (shared by asteroid and tile)
+            const buildPath = () => {
+                ctx.beginPath();
+                if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                    const p0 = entity.polygonPoints[0];
+                    if (Number.isFinite(p0.x) && Number.isFinite(p0.y)) {
+                        ctx.moveTo(p0.x, p0.y);
+                        for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                            const p = entity.polygonPoints[pi];
+                            if (Number.isFinite(p.x) && Number.isFinite(p.y)) ctx.lineTo(p.x, p.y);
                         }
                     }
+                } else {
+                    const r = entity.size.x / 2;
+                    if (Number.isFinite(r) && r > 0) ctx.arc(0, 0, r, 0, Math.PI * 2);
                 }
-            } else {
-                const r = entity.size.x / 2;
-                if (Number.isFinite(r) && r > 0) {
-                    ctx.arc(0, 0, r, 0, Math.PI * 2);
-                }
-            }
-            ctx.closePath();
-            ctx.fill();
-            
-            if (entity.type === EntityType.ASTEROID) {
-                this.renderCracks(ctx, entity, entity.size.x/2);
-            }
+                ctx.closePath();
+            };
 
             if (entity.type === EntityType.STRUCTURE) {
-                 ctx.strokeStyle = '#818cf8';
-                 ctx.lineWidth = 2;
-                 ctx.stroke();
-                 ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                 ctx.fill();
+                // ── Regen ghost outline (tile not yet active) ────────────────
+                if (!entity.active && entity.regenProgress !== undefined) {
+                    // Only show ghost during final 3 s (regenProgress > threshold)
+                    const delay = 12; // mirrors TILE_REGEN_DELAY
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart); // 0→1
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1.0;
+                    // Skip normal glass rendering — tile isn't back yet
+                    // (close the else below by jumping past it)
+                } else {
+
+                // ── Glass tile ──────────────────────────────────────────────
+                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+
+                // Proximity tint: edge shifts from cool blue-white → bright cyan
+                const PROX_RANGE = 120;
+                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
+                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+
+                const edgeR = Math.round(186 - prox * 83);
+                const edgeG = Math.round(230 + prox * 2);
+                const edgeB = Math.round(253 - prox * 4);
+                const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
+                const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
+
+                // Layer 1 — translucent base fill
+                buildPath();
+                ctx.globalAlpha = isFlash ? 0.55 : 0.13;
+                ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
+                ctx.fill();
+
+                // Layer 2 — diagonal shine gradient
+                if (!isFlash) {
+                    const shine = ctx.createLinearGradient(-14, -17, 6, 7);
+                    shine.addColorStop(0,   'rgba(255,255,255,0.18)');
+                    shine.addColorStop(0.55, 'rgba(255,255,255,0.04)');
+                    shine.addColorStop(1,   'rgba(255,255,255,0)');
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = shine;
+                    ctx.fill();
+                }
+
+                // Layer 3 — edge stroke (proximity-tinted)
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = edgeColor;
+                ctx.lineWidth = isFlash ? 2.5 : 1.5;
+                ctx.stroke();
+
+                // Layer 4 — small specular dot (upper-left of hex)
+                if (!isFlash) {
+                    ctx.globalAlpha = 0.28 + prox * 0.18;
+                    const spec = ctx.createRadialGradient(-9, -11, 0, -9, -11, 5);
+                    spec.addColorStop(0, 'rgba(255,255,255,0.85)');
+                    spec.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = spec;
+                    ctx.beginPath();
+                    ctx.arc(-9, -11, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                } // end else (glass tile — paired with regen ghost if/else above)
+
             } else {
-                 ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                 ctx.lineWidth = 2;
-                 ctx.stroke();
+                // ── Asteroid ─────────────────────────────────────────────────
+                buildPath();
+                if (entity.hitFlash && entity.hitFlash > 0) {
+                    ctx.fillStyle = '#ffffff';
+                } else {
+                    ctx.fillStyle = entity.color;
+                }
+                ctx.fill();
+                this.renderCracks(ctx, entity, entity.size.x / 2);
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
@@ -402,50 +468,86 @@ export class RenderSystem {
             ctx.fillStyle = entity.color;
 
             if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
-                // Mid-wave drop — fuel, gold, or powerup orb
-                const r = 9;
+                // Mid-wave drop — distinct shape per type
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const pulse = 0.65 + Math.sin(Date.now() / 350) * 0.35;
+                const pulse = 0.7 + Math.sin(Date.now() / 350) * 0.3;
 
                 let coreColor: string;
-                let ringColor: string;
+                let rimColor: string;
                 let label: string;
                 if (entity.dropType === 'fuel') {
                     coreColor = '#00e5ff';
-                    ringColor = '#0090a0';
+                    rimColor = '#0090a0';
                     label = 'FUEL';
                 } else if (entity.dropType === 'gold') {
                     coreColor = '#ffd700';
-                    ringColor = '#b8860b';
+                    rimColor = '#b8860b';
                     label = 'GOLD';
                 } else {
                     coreColor = entity.color;
-                    ringColor = entity.color;
+                    rimColor = entity.color;
                     label = entity.name || 'WEAPON';
                 }
 
-                // Single outer ring
-                ctx.globalAlpha = 0.55 * pulse * fadeAlpha;
-                ctx.strokeStyle = ringColor;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(0, 0, r * 1.7, 0, Math.PI * 2);
-                ctx.stroke();
+                ctx.globalAlpha = fadeAlpha;
 
-                // Core fill
-                ctx.globalAlpha = 0.92 * fadeAlpha;
-                ctx.fillStyle = coreColor;
-                ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
-                ctx.fill();
+                if (entity.dropType === 'fuel') {
+                    // Horizontal capsule — reads like a fuel canister
+                    const hw = 10, hh = 5, rad = hh;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.roundRect(-hw - 3, -hh - 3, (hw + 3) * 2, (hh + 3) * 2, rad + 3);
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    ctx.roundRect(-hw, -hh, hw * 2, hh * 2, rad);
+                    ctx.fill();
 
-                // Label
+                } else if (entity.dropType === 'gold') {
+                    // Tilted square — classic coin/gem diamond silhouette
+                    const s = 7;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -(s + 3)); ctx.lineTo(s + 3, 0);
+                    ctx.lineTo(0, s + 3);   ctx.lineTo(-(s + 3), 0);
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -s); ctx.lineTo(s, 0);
+                    ctx.lineTo(0, s); ctx.lineTo(-s, 0);
+                    ctx.closePath();
+                    ctx.fill();
+
+                } else {
+                    // Powerup drop — rounded square
+                    const s = 8, rad = 3;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.roundRect(-s - 3, -s - 3, (s + 3) * 2, (s + 3) * 2, rad + 2);
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    ctx.roundRect(-s, -s, s * 2, s * 2, rad);
+                    ctx.fill();
+                }
+
+                // Label beneath
                 ctx.globalAlpha = fadeAlpha;
                 ctx.fillStyle = '#ffffff';
                 ctx.font = 'bold 9px monospace';
                 ctx.textAlign = 'center';
-                ctx.fillText(label, 0, r + 13);
+                ctx.fillText(label, 0, 18);
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
                 // Weapon powerup — glowing pulsing orb

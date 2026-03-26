@@ -184,7 +184,8 @@ export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
-  CRASH_VELOCITY_THRESHOLD: 4 // Speed needed to break through
+  CRASH_VELOCITY_THRESHOLD: 4, // Speed needed to break through
+  TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 
 export const EXPLOSION_CONSTANTS = {
@@ -325,14 +326,14 @@ export const ENEMY_WEAPON: WeaponConfig = {
 export { ASSETS };
 
 export const DROP_CONFIG = {
-  FUEL_FROM_TILE:          15,    // fuel units per tile destroyed
+  FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
   GOLD_PER_ASTEROID_SIZE:   0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
   GOLD_PER_ENEMY_TIER:     20,    // gold = tier * 20 → 20/40/60
   POWERUP_CHANCE_ASTEROID:  0.04, // 4 % chance per asteroid
   POWERUP_CHANCE_ENEMY:     0.10, // 10 % × tier → 10 %/20 %/30 %
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
-  FUEL_DRAIN_RATE:          5,    // fuel units per second at full throttle
+  FUEL_DRAIN_RATE:          7,    // fuel units per second at full throttle
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full

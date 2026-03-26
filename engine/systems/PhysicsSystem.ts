@@ -286,7 +286,7 @@ export class PhysicsSystem {
       const cx = Math.floor(entity.position.x / cellSize);
       const cy = Math.floor(entity.position.y / cellSize);
       const key = (cx << 16) | (cy & 0xFFFF);
-      
+
       const cell = this.staticGrid.get(key);
       if (cell) {
           const idx = cell.indexOf(entity);
@@ -294,6 +294,47 @@ export class PhysicsSystem {
               cell.splice(idx, 1);
           }
       }
+  }
+
+  public addStaticEntity(entity: GameEntity) {
+      const cellSize = SPATIAL_GRID_SIZE;
+      const cx = Math.floor(entity.position.x / cellSize);
+      const cy = Math.floor(entity.position.y / cellSize);
+      const key = (cx << 16) | (cy & 0xFFFF);
+
+      let cell = this.staticGrid.get(key);
+      if (!cell) {
+          cell = [];
+          this.staticGrid.set(key, cell);
+      }
+      if (!cell.includes(entity)) {
+          cell.push(entity);
+      }
+  }
+
+  // Returns true if world-space point (x, y) with radius r is clear of all
+  // static tiles — used for safe spawn-point validation.
+  public isPositionClear(x: number, y: number, r: number): boolean {
+      const cellSize = SPATIAL_GRID_SIZE;
+      const cx = Math.floor(x / cellSize);
+      const cy = Math.floor(y / cellSize);
+      const rSq = r * r;
+
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const key = ((cx + dx) << 16) | ((cy + dy) & 0xFFFF);
+              const cell = this.staticGrid.get(key);
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  const tdx = x - t.position.x;
+                  const tdy = y - t.position.y;
+                  if (tdx * tdx + tdy * tdy < rSq) return false;
+              }
+          }
+      }
+      return true;
   }
 
   private checkAndResolveCollision(

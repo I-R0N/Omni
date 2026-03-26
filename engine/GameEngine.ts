@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, DROP_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -50,6 +50,9 @@ export class GameEngine {
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
+
+  // Tile regeneration — destroyed tiles waiting to respawn
+  private pendingRegens: { entity: GameEntity; timer: number }[] = [];
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -344,10 +347,11 @@ export class GameEngine {
       }
 
       // In-place compaction (Garbage Free)
+      // Inactive tiles with regenProgress set are kept as ghost placeholders.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
-          if (ent.active) {
+          if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
               this.currentMap.entities[writeIdx++] = ent;
           }
       }
@@ -361,6 +365,10 @@ export class GameEngine {
 
       if (entity.type === EntityType.STRUCTURE) {
           this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
+          // Queue for regeneration; entity stays in the map entities list as
+          // an inactive ghost so we can render an outline during regen.
+          entity.regenProgress = 0;
+          this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
       // Spawn Particles
@@ -450,6 +458,22 @@ export class GameEngine {
     
     if (this.minimapDebounce > 0) {
         this.minimapDebounce -= dt;
+    }
+
+    // Tile regeneration tick
+    for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
+        const regen = this.pendingRegens[i];
+        regen.timer -= dt;
+        regen.entity.regenProgress = 1 - (regen.timer / STRUCTURE_CONSTANTS.TILE_REGEN_DELAY);
+
+        if (regen.timer <= 0) {
+            // Restore tile to full health and re-add to physics static grid
+            regen.entity.health = regen.entity.maxHealth;
+            regen.entity.active = true;
+            regen.entity.regenProgress = undefined;
+            this.physics.addStaticEntity(regen.entity);
+            this.pendingRegens.splice(i, 1);
+        }
     }
 
     // Death handling
@@ -987,10 +1011,17 @@ export class GameEngine {
 
     for (const group of waveDef.enemies) {
       for (let i = 0; i < group.count; i++) {
-        const angle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-        const dist = 550 + Math.random() * 200;
-        const x = this.player.position.x + Math.cos(angle) * dist;
-        const y = this.player.position.y + Math.sin(angle) * dist;
+        const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
+        let x = 0, y = 0;
+        // Try up to 8 candidate positions; pick first one clear of static tiles
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
+          const dist = 550 + Math.random() * 200;
+          x = this.player.position.x + Math.cos(a) * dist;
+          y = this.player.position.y + Math.sin(a) * dist;
+          if (this.physics.isPositionClear(x, y, safeRadius)) break;
+        }
         const config = ENEMY_VARIANTS[group.subtype];
         const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
 
@@ -1153,11 +1184,12 @@ export class GameEngine {
       if (!this.currentMap) return;
       
       this.renderer.render(
-          this.frameEntities, 
-          this.camera, 
+          this.frameEntities,
+          this.camera,
           this.currentMap.type,
-          this.minimapExpanded, 
-          this.damageTexts 
+          this.minimapExpanded,
+          this.damageTexts,
+          this.player.position
       );
   }
 }
