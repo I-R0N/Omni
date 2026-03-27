@@ -315,16 +315,21 @@ export class GameEngine {
           }
       });
 
-      const newlyDestroyed = this.currentMap.entities.filter(e => !e.active && e.type === EntityType.ASTEROID);
-      newlyDestroyed.forEach(ast => {
-          if (ast.size.x > 15) {
-              this.createAsteroidShards(ast);
-          }
-      });
-      
+      // Single pass: collect destroyed asteroids + count all, avoiding two filter() allocations.
+      // createAsteroidShards() pushes to entities so we must collect before iterating.
       const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
-      const currentAsteroids = this.currentMap.entities.filter(e => e.type === EntityType.ASTEROID).length;
-      if (currentAsteroids < config.count) {
+      const newlyDestroyed: GameEntity[] = [];
+      let currentAsteroidCount = 0;
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+          const e = this.currentMap.entities[i];
+          if (e.type !== EntityType.ASTEROID) continue;
+          currentAsteroidCount++;
+          if (!e.active) newlyDestroyed.push(e);
+      }
+      for (const ast of newlyDestroyed) {
+          if (ast.size.x > 15) this.createAsteroidShards(ast);
+      }
+      if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
       }
 
@@ -409,14 +414,15 @@ export class GameEngine {
   };
 
   private handleAsteroidRespawn(config: any) {
-      for (let i=0; i<5; i++) { 
+      // Collect POIs once outside the placement-attempt loop.
+      const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
+      for (let i=0; i<5; i++) {
           const angle = Math.random() * Math.PI * 2;
           const dist = 500 + Math.random() * (config.radius - 500);
           const x = Math.cos(angle) * dist;
           const y = Math.sin(angle) * dist;
 
           let safe = true;
-          const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
           for (const p of pois) {
               const d2 = (x - p.position.x)**2 + (y - p.position.y)**2;
               const safeDist = (p.gravityRange || p.size.x) + 800; 
@@ -700,7 +706,7 @@ export class GameEngine {
     }
     this.activeDrops.length = dropWriteIdx;
 
-    if (this.interactionCooldown <= 0) {
+    if (this.interactionCooldown <= 0 && this.powerupId !== null) {
         const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
         for (const entity of interactables) {
             const dist = Math.sqrt(
