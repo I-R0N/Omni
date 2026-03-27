@@ -694,21 +694,24 @@ export class RenderSystem {
       expanded: boolean,
       mapType: MapType
   ) {
-      const { SIZE, EXPANDED_SIZE, MARGIN, BG_COLOR, BORDER_COLOR, PLAYER_DOT_COLOR } = MINIMAP_CONSTANTS;
-      
-      const range = MINIMAP_CONSTANTS.RANGE;
+      const {
+          SIZE, EXPANDED_SIZE, MARGIN, BG_COLOR, BORDER_COLOR, PLAYER_DOT_COLOR,
+          ZOOM_RANGE, RANGE, VIEWPORT_COLOR, VIEWPORT_BORDER_COLOR
+      } = MINIMAP_CONSTANTS;
 
+      // Small map uses a zoomed-in range; expanded map shows the full overview range
+      const range = expanded ? RANGE : ZOOM_RANGE;
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
       const mapY = screenHeight - currentSize - MARGIN;
 
       ctx.save();
-      
+
       ctx.fillStyle = BG_COLOR;
       ctx.strokeStyle = BORDER_COLOR;
       ctx.lineWidth = 2;
-      
+
       ctx.beginPath();
       ctx.rect(mapX, mapY, currentSize, currentSize);
       ctx.fill();
@@ -718,25 +721,19 @@ export class RenderSystem {
 
       const centerX = mapX + currentSize / 2;
       const centerY = mapY + currentSize / 2;
-
-      ctx.fillStyle = PLAYER_DOT_COLOR;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
-      ctx.fill();
+      const scale = (currentSize / 2) / range;
 
       items.forEach(item => {
           const entity = item.entity;
           if (!entity.active) return;
-          
-          const scale = (currentSize / 2) / range;
-          
+
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
 
           if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) return;
 
           ctx.fillStyle = entity.color;
-          
+
           if (entity.type === EntityType.STRUCTURE) {
               // OPTIMIZATION: Use fillRect for structures (faster than arc)
               ctx.fillRect(dotX, dotY, 2, 2);
@@ -744,12 +741,33 @@ export class RenderSystem {
               let dotRadius = 1.5;
               if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
               if (entity.type === EntityType.ENEMY) dotRadius = 2;
-              
+
               ctx.beginPath();
               ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
               ctx.fill();
           }
       });
+
+      // When expanded, draw a rectangle showing the area covered by the small zoomed map
+      if (expanded) {
+          const zoomHalfPx = ZOOM_RANGE * scale;
+          const rectX = centerX - zoomHalfPx;
+          const rectY = centerY - zoomHalfPx;
+          const rectSize = zoomHalfPx * 2;
+
+          ctx.fillStyle = VIEWPORT_COLOR;
+          ctx.fillRect(rectX, rectY, rectSize, rectSize);
+
+          ctx.strokeStyle = VIEWPORT_BORDER_COLOR;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rectX, rectY, rectSize, rectSize);
+      }
+
+      // Player dot drawn on top of everything
+      ctx.fillStyle = PLAYER_DOT_COLOR;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
+      ctx.fill();
 
       ctx.restore();
   }
