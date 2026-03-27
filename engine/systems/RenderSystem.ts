@@ -146,14 +146,15 @@ export class RenderSystem {
             this._attractors.push(entity);
         }
 
-        if (entity.type === EntityType.ENEMY || entity.type === EntityType.INTERACTABLE) {
+        if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
             const distSq = dx*dx + dy*dy;
             if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
                 this._indicatorBuffer.push({ entity, distSq });
             }
         }
 
-        if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE) {
+        if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
+                && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
 
