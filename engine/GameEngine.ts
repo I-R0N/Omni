@@ -54,6 +54,9 @@ export class GameEngine {
   // Tile regeneration — destroyed tiles waiting to respawn
   private pendingRegens: { entity: GameEntity; timer: number }[] = [];
 
+  // Fast drop lookup — avoids scanning all ~22k map entities every frame
+  private activeDrops: GameEntity[] = [];
+
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
@@ -144,6 +147,7 @@ export class GameEngine {
 
   public restartGame() {
       this.pendingRegens = [];
+      this.activeDrops = [];
       this.loadMap(new UniverseMap());
 
       // Reset Player
@@ -649,32 +653,33 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
-    // Drop collection: lifetime tick, magnetic draw, collect on contact.
-    // Runs every frame — not gated on interactionCooldown.
-    const ATTRACT_RADIUS = 120; // world units — outer vacuum range
-    const ATTRACT_SPEED  = 220; // world units per second toward player
-    for (const entity of this.currentMap.entities) {
-        if (entity.type !== EntityType.INTERACTABLE || !entity.dropType || !entity.active) continue;
+    // Drop collection: magnetic draw and collect on contact.
+    // Iterates activeDrops (dedicated list) instead of all ~22k map entities.
+    // Lifetime is managed by PhysicsSystem — no duplicate tick here.
+    const ATTRACT_RADIUS_SQ = 120 * 120; // squared — avoids sqrt for distant drops
+    const ATTRACT_SPEED     = 220;       // world units per second
+    const collectRadiusSq   = this.player.size.x * this.player.size.x;
+    let dropWriteIdx = 0;
+    for (let i = 0; i < this.activeDrops.length; i++) {
+        const entity = this.activeDrops[i];
 
-        // Lifetime tick
-        if (entity.lifetime !== undefined) {
-            entity.lifetime -= dt;
-            if (entity.lifetime <= 0) { entity.active = false; continue; }
-        }
+        // Remove drops that expired via PhysicsSystem lifetime management
+        if (!entity.active) continue;
 
         const dx = this.player.position.x - entity.position.x;
         const dy = this.player.position.y - entity.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const distSq = dx * dx + dy * dy;
 
-        // Magnetic draw — slide entity toward player
-        if (dist < ATTRACT_RADIUS && dist > 0.1) {
+        // Magnetic draw — only pay sqrt cost when within attract range
+        if (distSq < ATTRACT_RADIUS_SQ && distSq > 0.01) {
+            const dist = Math.sqrt(distSq);
             const step = Math.min(ATTRACT_SPEED * dt, dist);
             entity.position.x += (dx / dist) * step;
             entity.position.y += (dy / dist) * step;
         }
 
         // Collect on contact
-        if (dist < this.player.size.x) {
+        if (distSq < collectRadiusSq) {
             if (entity.dropType === 'fuel') {
                 this.player.fuel = Math.min(
                     this.player.maxFuel ?? 100,
@@ -688,8 +693,12 @@ export class GameEngine {
                 this.player.burstQueue = 0;
             }
             entity.active = false;
+            continue; // don't keep in activeDrops
         }
+
+        this.activeDrops[dropWriteIdx++] = entity;
     }
+    this.activeDrops.length = dropWriteIdx;
 
     if (this.interactionCooldown <= 0) {
         const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
@@ -999,11 +1008,16 @@ export class GameEngine {
     this.waveEnemyIds.clear();
 
     // Sweep any temporary mid-wave drops before spawning the next wave
-    for (const entity of this.currentMap.entities) {
-      if (entity.isTemporaryDrop && entity.type === EntityType.INTERACTABLE) {
-        entity.active = false;
+    let sweepWriteIdx = 0;
+    for (let i = 0; i < this.activeDrops.length; i++) {
+      const drop = this.activeDrops[i];
+      if (drop.isTemporaryDrop) {
+        drop.active = false; // physics compaction will remove from map entities
+      } else {
+        this.activeDrops[sweepWriteIdx++] = drop;
       }
     }
+    this.activeDrops.length = sweepWriteIdx;
 
     const waveDef = WAVE_DEFINITIONS[index];
     const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
@@ -1116,7 +1130,7 @@ export class GameEngine {
   private spawnDrop(pos: Vector2, type: 'fuel' | 'gold', value: number) {
     if (!this.currentMap) return;
     const scatter = 20;
-    this.currentMap.entities.push({
+    const drop: GameEntity = {
       id: `drop_${type}_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
       position: {
@@ -1136,7 +1150,9 @@ export class GameEngine {
       isTemporaryDrop: true,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
-    });
+    };
+    this.currentMap.entities.push(drop);
+    this.activeDrops.push(drop);
   }
 
   private spawnRandomPowerupDrop(pos: Vector2, temporary: boolean) {
@@ -1144,7 +1160,7 @@ export class GameEngine {
     const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;
-    this.currentMap.entities.push({
+    const drop: GameEntity = {
       id: `drop_powerup_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
       position: {
@@ -1165,7 +1181,9 @@ export class GameEngine {
       isTemporaryDrop: temporary,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
-    });
+    };
+    this.currentMap.entities.push(drop);
+    this.activeDrops.push(drop);
   }
 
   private loadMap(map: BaseMapLayer) {
