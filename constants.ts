@@ -114,10 +114,13 @@ export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched
   MARGIN: 20,          // Distance from screen edge
-  RANGE: 8000,         // World units radius shown in minimap (universe is large)
+  ZOOM_RANGE: 1000,    // World units radius shown in small (zoomed-in) minimap
+  RANGE: 8000,         // World units radius shown in expanded (overview) map
   BG_COLOR: 'rgba(15, 23, 42, 0.85)',
   BORDER_COLOR: 'rgba(56, 189, 248, 0.4)',
-  PLAYER_DOT_COLOR: '#ffffff'
+  PLAYER_DOT_COLOR: '#ffffff',
+  VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
+  VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
 };
 
 export const INPUT_CONSTANTS = {
