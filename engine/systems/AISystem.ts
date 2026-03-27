@@ -12,9 +12,10 @@ export class AISystem {
   private reactionTimers: Map<string, number> = new Map();
 
   public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
-    const enemies = entities.filter(e => e.active && e.type === EntityType.ENEMY);
+    for (let i = 0; i < entities.length; i++) {
+      const enemy = entities[i];
+      if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
 
-    enemies.forEach(enemy => {
       // Default initialization
       if (!enemy.aiState) {
           enemy.aiState = 'chase';
@@ -34,11 +35,14 @@ export class AISystem {
       } else {
           this.updateBasicDogfighter(dt, enemy, player, flowField);
       }
-    });
-    
+    }
+
     // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically
     if (Math.random() < 0.05) {
-        const liveIds = new Set(enemies.map(e => e.id));
+        const liveIds = new Set<string>();
+        for (let i = 0; i < entities.length; i++) {
+            if (entities[i].active && entities[i].type === EntityType.ENEMY) liveIds.add(entities[i].id);
+        }
         for (const id of this.laggedTargets.keys()) {
             if (!liveIds.has(id)) {
                 this.laggedTargets.delete(id);

@@ -38,6 +38,8 @@ export class RenderSystem {
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
+  // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
+  private _specularBitmap: HTMLCanvasElement | null = null;
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -47,6 +49,24 @@ export class RenderSystem {
     this.backgroundManager = new BackgroundManager();
     // Preload basic assets
     Object.values(ASSETS).forEach(src => this.getImage(src));
+  }
+
+  // Returns a 12×12 offscreen canvas with a radial-gradient specular dot,
+  // matching the (-9,-11,r=5) dot drawn on glass tiles. Created once.
+  private getSpecularBitmap(): HTMLCanvasElement {
+      if (this._specularBitmap) return this._specularBitmap;
+      const c = document.createElement('canvas');
+      c.width = 12; c.height = 12;
+      const cx = c.getContext('2d')!;
+      const spec = cx.createRadialGradient(6, 6, 0, 6, 6, 6);
+      spec.addColorStop(0, 'rgba(255,255,255,0.85)');
+      spec.addColorStop(1, 'rgba(255,255,255,0)');
+      cx.fillStyle = spec;
+      cx.beginPath();
+      cx.arc(6, 6, 6, 0, Math.PI * 2);
+      cx.fill();
+      this._specularBitmap = c;
+      return c;
   }
 
   // Helper to load/get images
@@ -438,14 +458,10 @@ export class RenderSystem {
                 ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
                 ctx.fill();
 
-                // Layer 2 — diagonal shine gradient
+                // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
                 if (!isFlash) {
-                    const shine = ctx.createLinearGradient(-14, -17, 6, 7);
-                    shine.addColorStop(0,   'rgba(255,255,255,0.18)');
-                    shine.addColorStop(0.55, 'rgba(255,255,255,0.04)');
-                    shine.addColorStop(1,   'rgba(255,255,255,0)');
-                    ctx.globalAlpha = 1.0;
-                    ctx.fillStyle = shine;
+                    ctx.globalAlpha = 0.09;
+                    ctx.fillStyle = '#ffffff';
                     ctx.fill();
                 }
 
@@ -456,15 +472,10 @@ export class RenderSystem {
                 ctx.stroke();
 
                 // Layer 4 — small specular dot (upper-left of hex)
+                // Uses a pre-rendered 12×12 bitmap instead of a per-tile gradient.
                 if (!isFlash) {
                     ctx.globalAlpha = 0.28 + prox * 0.18;
-                    const spec = ctx.createRadialGradient(-9, -11, 0, -9, -11, 5);
-                    spec.addColorStop(0, 'rgba(255,255,255,0.85)');
-                    spec.addColorStop(1, 'rgba(255,255,255,0)');
-                    ctx.fillStyle = spec;
-                    ctx.beginPath();
-                    ctx.arc(-9, -11, 5, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
