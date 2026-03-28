@@ -77,6 +77,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className="text-cyan-300 text-[10px] font-mono">{Math.round(stats.fuel ?? 100)}</span>
               </div>
 
+              {/* Shield bar */}
+              <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
+                <span className="text-blue-400 text-[10px] font-bold uppercase tracking-widest">SHLD</span>
+                <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.round(((stats.shield ?? 50) / (stats.maxShield ?? 50)) * 100)}%`,
+                      backgroundColor: '#60a5fa',
+                    }}
+                  />
+                </div>
+                <span className="text-blue-300 text-[10px] font-mono">{Math.round(stats.shield ?? 50)}</span>
+              </div>
+
               {/* Gold counter */}
               <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
                 <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">GOLD</span>

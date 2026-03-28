@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -78,6 +78,18 @@ export class PhysicsSystem {
       // Visuals: Tick down flash timer
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
+      }
+      // Shield: tick down hit flash and recharge timer, then recharge
+      if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
+          entity.shieldHitFlash -= dt;
+      }
+      if (entity.shieldRechargeTimer !== undefined && entity.shieldRechargeTimer > 0) {
+          entity.shieldRechargeTimer -= dt;
+      }
+      if (entity.shield !== undefined && entity.maxShield !== undefined
+          && entity.shield < entity.maxShield
+          && (entity.shieldRechargeTimer ?? 0) <= 0) {
+          entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
       }
 
       // OPTIMIZATION: Skip Integration for Static Geometry
@@ -470,13 +482,25 @@ export class PhysicsSystem {
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
 
-          target.health -= (proj.damage || 1);
-          target.hitFlash = 0.1;
-          
-          if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
-              onShake(COLLISION_CONFIG.SHAKE.MICRO); 
+          let projDmg = proj.damage || 1;
+
+          // Shield absorbs damage for the player
+          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+              const absorbed = Math.min(target.shield!, projDmg);
+              target.shield! -= absorbed;
+              projDmg -= absorbed;
+              target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+              target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
-          
+          if (projDmg > 0) {
+              target.health -= projDmg;
+              target.hitFlash = 0.1;
+          }
+
+          if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
+              onShake(COLLISION_CONFIG.SHAKE.MICRO);
+          }
+
           if (onDamage) onDamage(target.position, proj.damage || 1);
 
           if (target.health <= 0) {
@@ -513,9 +537,19 @@ export class PhysicsSystem {
       if (a.type === EntityType.ENEMY || b.type === EntityType.ENEMY) {
           const target = a.type === EntityType.ENEMY ? b : a;
           if (target.type === EntityType.PLAYER) {
+              let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+              if ((target.shield ?? 0) > 0) {
+                  const absorbed = Math.min(target.shield!, ramDmg);
+                  target.shield! -= absorbed;
+                  ramDmg -= absorbed;
+                  target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+              }
               if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY);
-              target.health -= COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              target.hitFlash = 0.2;
+              if (ramDmg > 0) {
+                  target.health -= ramDmg;
+                  target.hitFlash = 0.2;
+              }
               if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
               if (target.health <= 0 && onDeath) {
                   onDeath(target);

@@ -328,6 +328,14 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // --- ASSETS ---
 export { ASSETS };
 
+export const SHIELD_CONSTANTS = {
+  MAX_CHARGE: 50,            // Shield capacity (half of 100 HP)
+  RECHARGE_RATE: 8,          // Points per second when recharging
+  RECHARGE_DELAY: 3.0,       // Seconds after last hit before recharge starts
+  HIT_FLASH_DURATION: 0.3,   // How long the shield ring stays visible after a hit
+  COLOR: '#60a5fa',          // Blue-400
+};
+
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
 };

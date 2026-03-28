@@ -1,8 +1,11 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, SHIELD_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+
+const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
+const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
@@ -663,6 +666,24 @@ export class RenderSystem {
           }
       }
 
+      // Shield hit ring — visible only when recently struck
+      if (entity.type === EntityType.PLAYER && entity.shieldHitFlash && entity.shieldHitFlash > 0) {
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const ringRadius = maxDim * 1.3;
+          const flashRatio = entity.shieldHitFlash / SHIELD_HIT_FLASH_DURATION;
+          // Undo entity rotation so the ring is axis-aligned
+          const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          ctx.rotate(-rot);
+          ctx.globalAlpha = 0.7 * flashRatio;
+          ctx.strokeStyle = SHIELD_COLOR;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          // Restore rotation for any remaining transforms
+          ctx.rotate(rot);
+      }
+
       ctx.restore();
 
       // Render Debug Acceleration Vector (debug mode only)
@@ -741,6 +762,17 @@ export class RenderSystem {
       }
 
       ctx.fillRect(x, y, width * healthPct, height);
+
+      // Shield bar — thin blue bar below health bar (player only)
+      if (isPlayer && entity.maxShield && entity.maxShield > 0) {
+          const shieldY = y + height + 1;
+          const shieldHeight = height - 1;
+          const shieldPct = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.fillRect(x, shieldY, width, shieldHeight);
+          ctx.fillStyle = SHIELD_COLOR;
+          ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
+      }
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[]) {
