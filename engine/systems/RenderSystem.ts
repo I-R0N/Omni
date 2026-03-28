@@ -524,6 +524,10 @@ export class RenderSystem {
                     coreColor = '#ffd700';
                     rimColor = '#b8860b';
                     label = 'GOLD';
+                } else if (entity.dropType === 'health') {
+                    coreColor = '#4ade80';
+                    rimColor = '#16a34a';
+                    label = 'HP';
                 } else {
                     coreColor = entity.color;
                     rimColor = entity.color;
@@ -546,6 +550,20 @@ export class RenderSystem {
                     ctx.beginPath();
                     roundRectPath(ctx, -hw, -hh, hw * 2, hh * 2, rad);
                     ctx.fill();
+
+                } else if (entity.dropType === 'health') {
+                    // Green cross / plus symbol
+                    const arm = 3.5, length = 8;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, length + 3, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.fillRect(-arm, -length, arm * 2, length * 2);
+                    ctx.fillRect(-length, -arm, length * 2, arm * 2);
 
                 } else if (entity.dropType === 'gold') {
                     // Tilted square — classic coin/gem diamond silhouette

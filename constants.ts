@@ -328,6 +328,10 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // --- ASSETS ---
 export { ASSETS };
 
+export const WAVE_CONSTANTS = {
+  GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
+};
+
 export const DROP_CONFIG = {
   FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
   GOLD_PER_ASTEROID_SIZE:   0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
@@ -338,6 +342,8 @@ export const DROP_CONFIG = {
   LIFETIME:                20.0,  // seconds before drop despawns
   FUEL_DRAIN_RATE:          7,    // fuel units per second at full throttle
   MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
+  HEALTH_CHANCE_ENEMY:     0.4,  // 40% chance per enemy kill
+  HEALTH_HEAL_AMOUNT:      20,   // HP restored per health drop
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
