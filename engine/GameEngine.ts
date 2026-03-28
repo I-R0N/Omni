@@ -687,12 +687,34 @@ export class GameEngine {
         // Collect on contact
         if (distSq < collectRadiusSq) {
             if (entity.dropType === 'fuel') {
-                this.player.fuel = Math.min(
-                    this.player.maxFuel ?? 100,
-                    (this.player.fuel ?? 0) + (entity.dropValue ?? 0)
+                const gained = Math.min(
+                    (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
+                    entity.dropValue ?? 0
                 );
+                this.player.fuel = (this.player.fuel ?? 0) + gained;
+                this.damageTexts.push({
+                    id: `collect_${Date.now()}_${Math.random()}`,
+                    position: { ...entity.position },
+                    text: '+FUEL',
+                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    color: '#00e5ff',
+                    active: true,
+                });
             } else if (entity.dropType === 'gold') {
-                this.player.gold = (this.player.gold ?? 0) + (entity.dropValue ?? 0);
+                const amount = entity.dropValue ?? 0;
+                this.player.gold = (this.player.gold ?? 0) + amount;
+                this.damageTexts.push({
+                    id: `collect_${Date.now()}_${Math.random()}`,
+                    position: { ...entity.position },
+                    text: `+${Math.round(amount)}`,
+                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    color: '#ffd700',
+                    active: true,
+                });
             } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
                 this.player.currentWeapon = entity.dropWeapon;
                 this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
@@ -1135,6 +1157,7 @@ export class GameEngine {
 
   private spawnDrop(pos: Vector2, type: 'fuel' | 'gold', value: number) {
     if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const scatter = 20;
     const drop: GameEntity = {
       id: `drop_${type}_${Date.now()}_${Math.random()}`,
@@ -1163,6 +1186,7 @@ export class GameEngine {
 
   private spawnRandomPowerupDrop(pos: Vector2, temporary: boolean) {
     if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;

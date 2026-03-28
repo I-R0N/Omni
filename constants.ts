@@ -337,6 +337,7 @@ export const DROP_CONFIG = {
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
   FUEL_DRAIN_RATE:          7,    // fuel units per second at full throttle
+  MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
