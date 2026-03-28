@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -45,7 +45,7 @@ export class GameEngine {
   private waveIndex: number = 0;
   private waveEnemyIds: Set<string> = new Set();
   private waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
-  private powerupId: string | null = null;
+  private waveGraceTimer: number = 0;
 
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -210,6 +210,7 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
+      waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
       fuel: this.player.fuel,
@@ -521,28 +522,45 @@ export class GameEngine {
       if (allDead) {
         this.waveState = 'cleared';
         const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+
+        // Auto-grant weapon unlock
         if (waveDef.powerup !== null) {
-          // Drop a weapon pickup — player must collect it to advance
-          this.spawnPowerup(waveDef.powerup);
+          this.player.currentWeapon = waveDef.powerup;
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
+          this.player.burstQueue = 0;
+          // Announce weapon with floating text
+          this.damageTexts.push({
+            id: `unlock_${Date.now()}`,
+            position: { ...this.player.position },
+            text: WEAPONS[waveDef.powerup].name + ' Unlocked!',
+            velocity: { x: 0, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+            lifetime: 2.5,
+            maxLifetime: 2.5,
+            color: WEAPONS[waveDef.powerup].color,
+            active: true,
+          });
+        }
+
+        // Start grace period or mark complete
+        const nextIdx = this.waveIndex + 1;
+        if (nextIdx < WAVE_DEFINITIONS.length) {
+          this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
         } else {
-          // No weapon drop: auto-advance to next wave, or end if this was the last
-          const nextIdx = this.waveIndex + 1;
-          if (nextIdx < WAVE_DEFINITIONS.length) {
-            this.spawnWave(nextIdx);
-          } else {
-            this.waveState = 'complete';
-          }
+          this.waveState = 'complete';
         }
       }
     }
 
-    // Slowly spin the powerup pickup
-    if (this.powerupId && this.currentMap) {
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-        if (entities[i].id === this.powerupId) {
-          entities[i].rotation += dt * 2.0;
-          break;
+    // Grace period countdown — spawn next wave when timer expires
+    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
+      this.waveGraceTimer -= dt;
+      if (this.waveGraceTimer <= 0) {
+        this.waveGraceTimer = 0;
+        const nextIdx = this.waveIndex + 1;
+        if (nextIdx < WAVE_DEFINITIONS.length) {
+          this.spawnWave(nextIdx);
+        } else {
+          this.waveState = 'complete';
         }
       }
     }
@@ -735,6 +753,25 @@ export class GameEngine {
                     color: '#ffd700',
                     active: true,
                 });
+            } else if (entity.dropType === 'health') {
+                // Don't consume if player is already at full health
+                if (this.player.health >= this.player.maxHealth) {
+                    this.activeDrops[dropWriteIdx++] = entity;
+                    continue;
+                }
+                const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
+                const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
+                this.player.health += healed;
+                this.damageTexts.push({
+                    id: `collect_${Date.now()}_${Math.random()}`,
+                    position: { ...entity.position },
+                    text: `+${Math.round(healed)}`,
+                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    color: '#4ade80',
+                    active: true,
+                });
             } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
                 this.player.currentWeapon = entity.dropWeapon;
                 this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
@@ -748,34 +785,6 @@ export class GameEngine {
     }
     this.activeDrops.length = dropWriteIdx;
 
-    if (this.interactionCooldown <= 0 && this.powerupId !== null) {
-        const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
-        for (const entity of interactables) {
-            const dist = Math.sqrt(
-                (this.player.position.x - entity.position.x) ** 2 +
-                (this.player.position.y - entity.position.y) ** 2
-            );
-
-            if (dist < (entity.size.x / 2 + this.player.size.x)) {
-                // Collect weapon powerup
-                if (entity.powerupWeapon !== undefined) {
-                    this.player.currentWeapon = entity.powerupWeapon;
-                    this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.powerupWeapon);
-                    this.player.burstQueue = 0;
-                    entity.active = false;
-                    this.powerupId = null;
-                    this.interactionCooldown = 1.0;
-                    const nextIdx = this.waveIndex + 1;
-                    if (nextIdx < WAVE_DEFINITIONS.length) {
-                        this.spawnWave(nextIdx);
-                    } else {
-                        this.waveState = 'complete';
-                    }
-                    break;
-                }
-            }
-        }
-    }
 
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
@@ -1047,7 +1056,7 @@ export class GameEngine {
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
-    this.powerupId = null;
+    this.waveGraceTimer = 0;
     this.spawnWave(0);
   }
 
@@ -1055,18 +1064,6 @@ export class GameEngine {
     if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
-
-    // Sweep any temporary mid-wave drops before spawning the next wave
-    let sweepWriteIdx = 0;
-    for (let i = 0; i < this.activeDrops.length; i++) {
-      const drop = this.activeDrops[i];
-      if (drop.isTemporaryDrop) {
-        drop.active = false; // physics compaction will remove from map entities
-      } else {
-        this.activeDrops[sweepWriteIdx++] = drop;
-      }
-    }
-    this.activeDrops.length = sweepWriteIdx;
 
     const waveDef = WAVE_DEFINITIONS[index];
     const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
@@ -1121,36 +1118,6 @@ export class GameEngine {
     this.waveState = 'active';
   }
 
-  private spawnPowerup(weaponType: WeaponType) {
-    if (!this.currentMap) return;
-    const id = `powerup_${Date.now()}`;
-    const weaponConfig = WEAPONS[weaponType];
-
-    // Spawn offset from player so it doesn't overlap them
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 160;
-
-    this.currentMap.entities.push({
-      id,
-      type: EntityType.INTERACTABLE,
-      position: {
-        x: this.player.position.x + Math.cos(angle) * dist,
-        y: this.player.position.y + Math.sin(angle) * dist
-      },
-      velocity: { x: 0, y: 0 },
-      size: { x: 28, y: 28 },
-      rotation: 0,
-      color: weaponConfig.color,
-      active: true,
-      health: 100,
-      maxHealth: 100,
-      mass: Infinity,
-      name: weaponConfig.name,
-      powerupWeapon: weaponType
-    });
-
-    this.powerupId = id;
-  }
 
   private spawnDrops(entity: GameEntity) {
     const pos = entity.position;
@@ -1163,20 +1130,24 @@ export class GameEngine {
       this.spawnDrop(pos, 'gold', goldAmt);
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
-        this.spawnRandomPowerupDrop(pos, true);
+        this.spawnRandomPowerupDrop(pos);
       }
 
     } else if (entity.type === EntityType.ENEMY) {
       const tier = entity.enemyTier ?? 1;
       this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
 
+      if (Math.random() < DROP_CONFIG.HEALTH_CHANCE_ENEMY) {
+        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+      }
+
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
-        this.spawnRandomPowerupDrop(pos, true);
+        this.spawnRandomPowerupDrop(pos);
       }
     }
   }
 
-  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold', value: number) {
+  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const scatter = 20;
@@ -1190,14 +1161,13 @@ export class GameEngine {
       velocity: { x: 0, y: 0 },
       size: { x: 18, y: 18 },
       rotation: 0,
-      color: type === 'fuel' ? '#00e5ff' : '#ffd700',
+      color: type === 'fuel' ? '#00e5ff' : type === 'health' ? '#4ade80' : '#ffd700',
       active: true,
       health: 1,
       maxHealth: 1,
       mass: Infinity,
       dropType: type,
       dropValue: value,
-      isTemporaryDrop: true,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
     };
@@ -1205,7 +1175,7 @@ export class GameEngine {
     this.activeDrops.push(drop);
   }
 
-  private spawnRandomPowerupDrop(pos: Vector2, temporary: boolean) {
+  private spawnRandomPowerupDrop(pos: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
@@ -1229,7 +1199,6 @@ export class GameEngine {
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
-      isTemporaryDrop: temporary,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
     };

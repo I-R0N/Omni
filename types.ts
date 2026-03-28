@@ -162,10 +162,9 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'fuel' | 'gold' | 'powerup';
+  dropType?: 'fuel' | 'gold' | 'powerup' | 'health';
   dropValue?: number;
   dropWeapon?: WeaponType;
-  isTemporaryDrop?: boolean;
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
@@ -193,6 +192,7 @@ export interface EngineStats {
   waveNumber?: number;
   waveTotal?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
+  waveGraceTimer?: number;
   debugMode?: boolean;
   weaponCount?: number;
   fuel?: number;

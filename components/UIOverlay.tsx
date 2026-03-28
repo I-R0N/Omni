@@ -92,9 +92,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
                     Wave {stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}
                   </span>
-                  {stats.waveStatus === 'cleared' && (
+                  {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
                     <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
-                      ▶ Collect the powerup
+                      Next wave in {stats.waveGraceTimer}s
                     </p>
                   )}
                 </div>
