@@ -22,7 +22,12 @@ export type AssetManifest = {
   NEBULA_PUFF: string;
 };
 
-// TODO: Replace these placeholder URLs with real asset locations (CDN/object storage).
+// Placeholder path used for assets that have no real image yet.
+// A local 404 completes in milliseconds and lets the canvas fallback
+// render immediately, without hanging external HTTP requests.
+const PLACEHOLDER = '/assets/placeholder.png';
+
+// TODO: Replace PLACEHOLDER entries with real asset locations (CDN/object storage).
 export const ASSETS: AssetManifest = {
   NEBULA_PUFF: 'generated_puff',
 
@@ -33,18 +38,18 @@ export const ASSETS: AssetManifest = {
   ENEMY_SKIRMISHER: '/assets/skirmisher.png',
   ENEMY_ORBITER: '/assets/orbiter.png',
   ENEMY_SNIPER: '/assets/sniper.png',
-  EXPLOSION: 'https://via.placeholder.com/128/FF4400/FFFFFF?text=BOOM',
+  EXPLOSION:          PLACEHOLDER,
 
-  ASTEROID_1: 'https://via.placeholder.com/100/808080/FFFFFF?text=Ast1',
-  ASTEROID_2: 'https://via.placeholder.com/100/606060/FFFFFF?text=Ast2',
-  ASTEROID_3: 'https://via.placeholder.com/100/404040/FFFFFF?text=Ast3',
-  ASTEROID_ICE: 'https://via.placeholder.com/100/A0FFFF/000000?text=Ice',
-  ASTEROID_VOLCANIC: 'https://via.placeholder.com/100/502020/FFFFFF?text=Lava',
+  ASTEROID_1:         PLACEHOLDER,
+  ASTEROID_2:         PLACEHOLDER,
+  ASTEROID_3:         PLACEHOLDER,
+  ASTEROID_ICE:       PLACEHOLDER,
+  ASTEROID_VOLCANIC:  PLACEHOLDER,
 
-  SUN: 'https://via.placeholder.com/120/FFFF00/000000?text=Sun',
-  PLANET_TERRAN: 'https://via.placeholder.com/80/44FF44/000000?text=Terran',
-  PLANET_RED: 'https://via.placeholder.com/70/FF4444/000000?text=Mars',
-  PLANET_ICE: 'https://via.placeholder.com/100/88FFFF/000000?text=IceG',
-  PORTAL: 'https://via.placeholder.com/90/AA00FF/FFFFFF?text=Portal',
-  HEX_STRUCTURE: 'https://via.placeholder.com/80/4444FF/FFFFFF?text=Hex',
+  SUN:            PLACEHOLDER,
+  PLANET_TERRAN:  PLACEHOLDER,
+  PLANET_RED:     PLACEHOLDER,
+  PLANET_ICE:     PLACEHOLDER,
+  PORTAL:         PLACEHOLDER,
+  HEX_STRUCTURE:  PLACEHOLDER,
 };

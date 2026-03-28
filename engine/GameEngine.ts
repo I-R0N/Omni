@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -51,6 +51,15 @@ export class GameEngine {
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
 
+  // Tile regeneration — destroyed tiles waiting to respawn
+  private pendingRegens: { entity: GameEntity; timer: number }[] = [];
+
+  // Fast drop lookup — avoids scanning all ~22k map entities every frame
+  private activeDrops: GameEntity[] = [];
+  // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
+  private trailDecayTimer: number = 0;
+  private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
+
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
@@ -87,7 +96,10 @@ export class GameEngine {
       burstQueue: 0,
       burstTimer: 0,
       trail: [],
-      sprite: ASSETS.PLAYER_SHIP
+      sprite: ASSETS.PLAYER_SHIP,
+      fuel: 100,
+      maxFuel: 100,
+      gold: 0
     };
 
     this.camera = {
@@ -137,12 +149,17 @@ export class GameEngine {
   }
 
   public restartGame() {
+      this.pendingRegens = [];
+      this.activeDrops = [];
+      this.trailDecayTimer = 0;
       this.loadMap(new UniverseMap());
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
+      this.player.fuel = this.player.maxFuel;
+      this.player.gold = 0;
       this.player.trail = [];
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
@@ -194,12 +211,15 @@ export class GameEngine {
       waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       debugMode: this.debugMode,
-      weaponCount: this.currentWeaponIndex + 1
+      weaponCount: this.currentWeaponIndex + 1,
+      fuel: this.player.fuel,
+      maxFuel: this.player.maxFuel,
+      gold: this.player.gold
     });
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
-        this.draw();
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         requestAnimationFrame(this.loop);
         return;
     }
@@ -213,12 +233,11 @@ export class GameEngine {
     // One physics step per rendered frame at the actual frame rate.
     // This eliminates the 1-vs-2 step alternation that caused visual jitter
     // with a fixed-timestep accumulator at 60 Hz display.
-    this.updatePhysics(safeFrameTime);
-    
-    this.updateGameLogic(safeFrameTime);
+    try { this.updatePhysics(safeFrameTime); } catch (e) { console.error('[PhysicsSystem] update error:', e); }
+    try { this.updateGameLogic(safeFrameTime); } catch (e) { console.error('[GameLogic] update error:', e); }
     // Include entities spawned during game logic (e.g., projectiles) before rendering
     this.prepareFrameEntities();
-    this.draw();
+    try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
 
     requestAnimationFrame(this.loop);
   };
@@ -300,16 +319,21 @@ export class GameEngine {
           }
       });
 
-      const newlyDestroyed = this.currentMap.entities.filter(e => !e.active && e.type === EntityType.ASTEROID);
-      newlyDestroyed.forEach(ast => {
-          if (ast.size.x > 15) {
-              this.createAsteroidShards(ast);
-          }
-      });
-      
+      // Single pass: collect destroyed asteroids + count all, avoiding two filter() allocations.
+      // createAsteroidShards() pushes to entities so we must collect before iterating.
       const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
-      const currentAsteroids = this.currentMap.entities.filter(e => e.type === EntityType.ASTEROID).length;
-      if (currentAsteroids < config.count) {
+      const newlyDestroyed: GameEntity[] = [];
+      let currentAsteroidCount = 0;
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+          const e = this.currentMap.entities[i];
+          if (e.type !== EntityType.ASTEROID) continue;
+          currentAsteroidCount++;
+          if (!e.active) newlyDestroyed.push(e);
+      }
+      for (const ast of newlyDestroyed) {
+          if (ast.size.x > 15) this.createAsteroidShards(ast);
+      }
+      if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
       }
 
@@ -336,10 +360,11 @@ export class GameEngine {
       }
 
       // In-place compaction (Garbage Free)
+      // Inactive tiles with regenProgress set are kept as ghost placeholders.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
-          if (ent.active) {
+          if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
               this.currentMap.entities[writeIdx++] = ent;
           }
       }
@@ -353,6 +378,10 @@ export class GameEngine {
 
       if (entity.type === EntityType.STRUCTURE) {
           this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
+          // Queue for regeneration; entity stays in the map entities list as
+          // an inactive ghost so we can render an outline during regen.
+          entity.regenProgress = 0;
+          this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
       // Spawn Particles
@@ -369,13 +398,13 @@ export class GameEngine {
               id: `part_${Date.now()}_${i}`,
               type: EntityType.PARTICLE,
               position: { x: entity.position.x, y: entity.position.y },
-              velocity: { 
-                  x: Math.cos(angle) * speed, 
-                  y: Math.sin(angle) * speed 
+              velocity: {
+                  x: Math.cos(angle) * speed,
+                  y: Math.sin(angle) * speed
               },
               size: { x: size, y: size },
               rotation: Math.random() * Math.PI * 2,
-              color: entity.color || '#facc15', 
+              color: entity.color || '#facc15',
               active: true,
               health: 1,
               maxHealth: 1,
@@ -384,17 +413,20 @@ export class GameEngine {
               mass: 0.1
           });
       }
+
+      this.spawnDrops(entity);
   };
 
   private handleAsteroidRespawn(config: any) {
-      for (let i=0; i<5; i++) { 
+      // Collect POIs once outside the placement-attempt loop.
+      const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
+      for (let i=0; i<5; i++) {
           const angle = Math.random() * Math.PI * 2;
           const dist = 500 + Math.random() * (config.radius - 500);
           const x = Math.cos(angle) * dist;
           const y = Math.sin(angle) * dist;
 
           let safe = true;
-          const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
           for (const p of pois) {
               const d2 = (x - p.position.x)**2 + (y - p.position.y)**2;
               const safeDist = (p.gravityRange || p.size.x) + 800; 
@@ -440,6 +472,22 @@ export class GameEngine {
     
     if (this.minimapDebounce > 0) {
         this.minimapDebounce -= dt;
+    }
+
+    // Tile regeneration tick
+    for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
+        const regen = this.pendingRegens[i];
+        regen.timer -= dt;
+        regen.entity.regenProgress = 1 - (regen.timer / STRUCTURE_CONSTANTS.TILE_REGEN_DELAY);
+
+        if (regen.timer <= 0) {
+            // Restore tile to full health and re-add to physics static grid
+            regen.entity.health = regen.entity.maxHealth;
+            regen.entity.active = true;
+            regen.entity.regenProgress = undefined;
+            this.physics.addStaticEntity(regen.entity);
+            this.pendingRegens.splice(i, 1);
+        }
     }
 
     // Death handling
@@ -518,8 +566,17 @@ export class GameEngine {
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
     // Normalized to 60fps (dt * 60)
     const timeScale = dt * 60;
-    this.player.velocity.x += moveDir.x * acc * timeScale;
-    this.player.velocity.y += moveDir.y * acc * timeScale;
+    const hasFuel = (this.player.fuel ?? 0) > 0;
+    if (hasFuel) {
+        this.player.velocity.x += moveDir.x * acc * timeScale;
+        this.player.velocity.y += moveDir.y * acc * timeScale;
+    }
+
+    // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
+    const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
+    if (throttle > 0 && hasFuel) {
+        this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
+    }
 
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {
@@ -536,17 +593,30 @@ export class GameEngine {
         }
     }
 
-    const lastPos = this.player.trail && this.player.trail.length > 0 
-        ? this.player.trail[this.player.trail.length - 1] 
+    const thrusting = hasFuel && throttle > 0;
+    if (thrusting) {
+        this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+    } else {
+        this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
+    }
+
+    const lastPos = this.player.trail && this.player.trail.length > 0
+        ? this.player.trail[this.player.trail.length - 1]
         : null;
-    
-    if (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ)) {
+
+    if (this.trailDecayTimer > 0 &&
+            (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
+        // t: 1.0 while thrusting, tapers to 0 over the decay window.
+        // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
+        const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
+        const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
         this.player.trail = this.player.trail || [];
-        this.player.trail.push({ 
-            x: this.player.position.x, 
+        this.player.trail.push({
+            x: this.player.position.x,
             y: this.player.position.y,
-            lifetime: TRAIL_CONSTANTS.LIFETIME,
-            maxLifetime: TRAIL_CONSTANTS.LIFETIME
+            lifetime: pointLifetime,
+            maxLifetime: pointLifetime,
+            scale: t,
         });
     }
 
@@ -609,7 +679,76 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
-    if (this.interactionCooldown <= 0) {
+    // Drop collection: magnetic draw and collect on contact.
+    // Iterates activeDrops (dedicated list) instead of all ~22k map entities.
+    // Lifetime is managed by PhysicsSystem — no duplicate tick here.
+    const ATTRACT_RADIUS_SQ = 120 * 120; // squared — avoids sqrt for distant drops
+    const ATTRACT_SPEED     = 220;       // world units per second
+    const collectRadiusSq   = this.player.size.x * this.player.size.x;
+    let dropWriteIdx = 0;
+    for (let i = 0; i < this.activeDrops.length; i++) {
+        const entity = this.activeDrops[i];
+
+        // Remove drops that expired via PhysicsSystem lifetime management
+        if (!entity.active) continue;
+
+        const dx = this.player.position.x - entity.position.x;
+        const dy = this.player.position.y - entity.position.y;
+        const distSq = dx * dx + dy * dy;
+
+        // Magnetic draw — only pay sqrt cost when within attract range
+        if (distSq < ATTRACT_RADIUS_SQ && distSq > 0.01) {
+            const dist = Math.sqrt(distSq);
+            const step = Math.min(ATTRACT_SPEED * dt, dist);
+            entity.position.x += (dx / dist) * step;
+            entity.position.y += (dy / dist) * step;
+        }
+
+        // Collect on contact
+        if (distSq < collectRadiusSq) {
+            if (entity.dropType === 'fuel') {
+                const gained = Math.min(
+                    (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
+                    entity.dropValue ?? 0
+                );
+                this.player.fuel = (this.player.fuel ?? 0) + gained;
+                this.damageTexts.push({
+                    id: `collect_${Date.now()}_${Math.random()}`,
+                    position: { ...entity.position },
+                    text: '+FUEL',
+                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    color: '#00e5ff',
+                    active: true,
+                });
+            } else if (entity.dropType === 'gold') {
+                const amount = entity.dropValue ?? 0;
+                this.player.gold = (this.player.gold ?? 0) + amount;
+                this.damageTexts.push({
+                    id: `collect_${Date.now()}_${Math.random()}`,
+                    position: { ...entity.position },
+                    text: `+${Math.round(amount)}`,
+                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+                    color: '#ffd700',
+                    active: true,
+                });
+            } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
+                this.player.currentWeapon = entity.dropWeapon;
+                this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
+                this.player.burstQueue = 0;
+            }
+            entity.active = false;
+            continue; // don't keep in activeDrops
+        }
+
+        this.activeDrops[dropWriteIdx++] = entity;
+    }
+    this.activeDrops.length = dropWriteIdx;
+
+    if (this.interactionCooldown <= 0 && this.powerupId !== null) {
         const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
         for (const entity of interactables) {
             const dist = Math.sqrt(
@@ -686,6 +825,7 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
+      this.trailDecayTimer = 0;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
@@ -916,23 +1056,50 @@ export class GameEngine {
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
+    // Sweep any temporary mid-wave drops before spawning the next wave
+    let sweepWriteIdx = 0;
+    for (let i = 0; i < this.activeDrops.length; i++) {
+      const drop = this.activeDrops[i];
+      if (drop.isTemporaryDrop) {
+        drop.active = false; // physics compaction will remove from map entities
+      } else {
+        this.activeDrops[sweepWriteIdx++] = drop;
+      }
+    }
+    this.activeDrops.length = sweepWriteIdx;
+
     const waveDef = WAVE_DEFINITIONS[index];
     const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;
 
     for (const group of waveDef.enemies) {
       for (let i = 0; i < group.count; i++) {
-        const angle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-        const dist = 550 + Math.random() * 200;
-        const x = this.player.position.x + Math.cos(angle) * dist;
-        const y = this.player.position.y + Math.sin(angle) * dist;
+        const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
+        let x = 0, y = 0;
+        // Try up to 8 candidate positions; pick first one clear of static tiles
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
+          const dist = 550 + Math.random() * 200;
+          x = this.player.position.x + Math.cos(a) * dist;
+          y = this.player.position.y + Math.sin(a) * dist;
+          if (this.physics.isPositionClear(x, y, safeRadius)) break;
+        }
         const config = ENEMY_VARIANTS[group.subtype];
         const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
+
+        const tierMap: Partial<Record<string, number>> = {
+          RAMMER_1: 1, SHOOTER_1: 1,
+          RAMMER_2: 2, SHOOTER_2: 2,
+          RAMMER_3: 3, SHOOTER_3: 3,
+        };
+        const enemyTier = tierMap[group.subtype] ?? 1;
 
         this.currentMap.entities.push({
           id,
           type: EntityType.ENEMY,
           enemySubtype: group.subtype,
+          enemyTier,
           position: { x, y },
           velocity: { x: 0, y: 0 },
           size: { x: config.size, y: config.size },
@@ -985,6 +1152,91 @@ export class GameEngine {
     this.powerupId = id;
   }
 
+  private spawnDrops(entity: GameEntity) {
+    const pos = entity.position;
+
+    if (entity.type === EntityType.STRUCTURE) {
+      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE);
+
+    } else if (entity.type === EntityType.ASTEROID) {
+      const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
+      this.spawnDrop(pos, 'gold', goldAmt);
+
+      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
+        this.spawnRandomPowerupDrop(pos, true);
+      }
+
+    } else if (entity.type === EntityType.ENEMY) {
+      const tier = entity.enemyTier ?? 1;
+      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
+
+      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
+        this.spawnRandomPowerupDrop(pos, true);
+      }
+    }
+  }
+
+  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold', value: number) {
+    if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    const scatter = 20;
+    const drop: GameEntity = {
+      id: `drop_${type}_${Date.now()}_${Math.random()}`,
+      type: EntityType.INTERACTABLE,
+      position: {
+        x: pos.x + (Math.random() - 0.5) * scatter * 2,
+        y: pos.y + (Math.random() - 0.5) * scatter * 2,
+      },
+      velocity: { x: 0, y: 0 },
+      size: { x: 18, y: 18 },
+      rotation: 0,
+      color: type === 'fuel' ? '#00e5ff' : '#ffd700',
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+      dropType: type,
+      dropValue: value,
+      isTemporaryDrop: true,
+      lifetime: DROP_CONFIG.LIFETIME,
+      maxLifetime: DROP_CONFIG.LIFETIME,
+    };
+    this.currentMap.entities.push(drop);
+    this.activeDrops.push(drop);
+  }
+
+  private spawnRandomPowerupDrop(pos: Vector2, temporary: boolean) {
+    if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
+    const weaponConfig = WEAPONS[weaponType];
+    const scatter = 20;
+    const drop: GameEntity = {
+      id: `drop_powerup_${Date.now()}_${Math.random()}`,
+      type: EntityType.INTERACTABLE,
+      position: {
+        x: pos.x + (Math.random() - 0.5) * scatter * 2,
+        y: pos.y + (Math.random() - 0.5) * scatter * 2,
+      },
+      velocity: { x: 0, y: 0 },
+      size: { x: 18, y: 18 },
+      rotation: 0,
+      color: weaponConfig.color,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+      name: weaponConfig.name,
+      dropType: 'powerup',
+      dropWeapon: weaponType,
+      isTemporaryDrop: temporary,
+      lifetime: DROP_CONFIG.LIFETIME,
+      maxLifetime: DROP_CONFIG.LIFETIME,
+    };
+    this.currentMap.entities.push(drop);
+    this.activeDrops.push(drop);
+  }
+
   private loadMap(map: BaseMapLayer) {
       if (!map.initialized) {
           map.init();
@@ -1001,11 +1253,12 @@ export class GameEngine {
       if (!this.currentMap) return;
       
       this.renderer.render(
-          this.frameEntities, 
-          this.camera, 
+          this.frameEntities,
+          this.camera,
           this.currentMap.type,
-          this.minimapExpanded, 
-          this.damageTexts 
+          this.minimapExpanded,
+          this.damageTexts,
+          this.player.position
       );
   }
 }

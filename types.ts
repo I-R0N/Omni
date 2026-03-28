@@ -21,6 +21,7 @@ export interface Vector2 {
 export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
+  scale: number; // Width multiplier: 1.0 during thrust, tapers toward 0 during decay
 }
 
 export interface Rect {
@@ -154,6 +155,24 @@ export interface GameEntity {
 
   // Powerup pickup
   powerupWeapon?: WeaponType;
+
+  // Player resources
+  fuel?: number;
+  maxFuel?: number;
+  gold?: number;
+
+  // Drop item fields
+  dropType?: 'fuel' | 'gold' | 'powerup';
+  dropValue?: number;
+  dropWeapon?: WeaponType;
+  isTemporaryDrop?: boolean;
+
+  // Enemy tier (1 | 2 | 3) — used for drop scaling
+  enemyTier?: number;
+
+  // Tile regeneration — regenProgress counts up from 0; tile is a ghost
+  // outline when regenProgress < TILE_REGEN_DELAY and active === false.
+  regenProgress?: number;
 }
 
 export interface CameraState {
@@ -176,6 +195,9 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   debugMode?: boolean;
   weaponCount?: number;
+  fuel?: number;
+  maxFuel?: number;
+  gold?: number;
 }
 
 export interface DamageText {

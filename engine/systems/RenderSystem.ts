@@ -4,6 +4,31 @@ import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } fro
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
+// Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
+// Provide a fallback so older preview engines don't throw on drop rendering.
+function roundRectPath(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number
+) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+        return;
+    }
+    // Manual fallback using arcTo
+    const rx = Math.min(r, w / 2);
+    const ry = Math.min(r, h / 2);
+    ctx.moveTo(x + rx, y);
+    ctx.lineTo(x + w - rx, y);
+    ctx.arcTo(x + w, y,     x + w, y + ry,     rx);
+    ctx.lineTo(x + w, y + h - ry);
+    ctx.arcTo(x + w, y + h, x + w - rx, y + h, rx);
+    ctx.lineTo(x + rx, y + h);
+    ctx.arcTo(x,      y + h, x,      y + h - ry, rx);
+    ctx.lineTo(x, y + ry);
+    ctx.arcTo(x,      y,     x + rx, y,          rx);
+    ctx.closePath();
+}
+
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
@@ -13,6 +38,8 @@ export class RenderSystem {
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
+  // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
+  private _specularBitmap: HTMLCanvasElement | null = null;
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -22,6 +49,24 @@ export class RenderSystem {
     this.backgroundManager = new BackgroundManager();
     // Preload basic assets
     Object.values(ASSETS).forEach(src => this.getImage(src));
+  }
+
+  // Returns a 12×12 offscreen canvas with a radial-gradient specular dot,
+  // matching the (-9,-11,r=5) dot drawn on glass tiles. Created once.
+  private getSpecularBitmap(): HTMLCanvasElement {
+      if (this._specularBitmap) return this._specularBitmap;
+      const c = document.createElement('canvas');
+      c.width = 12; c.height = 12;
+      const cx = c.getContext('2d')!;
+      const spec = cx.createRadialGradient(6, 6, 0, 6, 6, 6);
+      spec.addColorStop(0, 'rgba(255,255,255,0.85)');
+      spec.addColorStop(1, 'rgba(255,255,255,0)');
+      cx.fillStyle = spec;
+      cx.beginPath();
+      cx.arc(6, 6, 6, 0, Math.PI * 2);
+      cx.fill();
+      this._specularBitmap = c;
+      return c;
   }
 
   // Helper to load/get images
@@ -56,7 +101,8 @@ export class RenderSystem {
     camera: CameraState,
     mapType: MapType,
     minimapExpanded: boolean = false,
-    damageTexts?: DamageText[]
+    damageTexts?: DamageText[],
+    playerPos?: Vector2
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -90,7 +136,8 @@ export class RenderSystem {
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
-        if (!entity.active) continue;
+        // Allow inactive tiles that are regenerating to pass through for ghost rendering
+        if (!entity.active && !(entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined)) continue;
 
         const dx = entity.position.x - camX;
         const dy = entity.position.y - camY;
@@ -99,14 +146,15 @@ export class RenderSystem {
             this._attractors.push(entity);
         }
 
-        if (entity.type === EntityType.ENEMY || entity.type === EntityType.INTERACTABLE) {
+        if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
             const distSq = dx*dx + dy*dy;
             if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
                 this._indicatorBuffer.push({ entity, distSq });
             }
         }
 
-        if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE) {
+        if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
+                && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
 
@@ -149,7 +197,7 @@ export class RenderSystem {
     this.renderTrails(ctx, this._trailEntities);
 
     // 4. Render Entities (Culling logic added)
-    this.renderEntities(ctx, this._visibleEntities, camera);
+    this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
     
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
@@ -180,7 +228,7 @@ export class RenderSystem {
               const p = t[i];
               const ratio = p.lifetime / p.maxLifetime;
               if (ratio <= 0) continue;
-              const width = (1 + (ratio * 5)) / 2; // Half width
+              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
               
               // Simple normal calculation (perpendicular to velocity approximation)
               // For first point, use next point. For last, use prev.
@@ -207,7 +255,7 @@ export class RenderSystem {
               const p = t[i];
               const ratio = p.lifetime / p.maxLifetime;
               if (ratio <= 0) continue;
-              const width = (1 + (ratio * 5)) / 2; 
+              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
 
               let nx = 0, ny = 0;
               if (i < t.length - 1) {
@@ -243,12 +291,15 @@ export class RenderSystem {
   }
 
   private renderEntities(
-      ctx: CanvasRenderingContext2D, 
-      entities: GameEntity[], 
-      camera: CameraState
+      ctx: CanvasRenderingContext2D,
+      entities: GameEntity[],
+      camera: CameraState,
+      playerPos?: Vector2
     ) {
     entities.forEach(entity => {
-      if (!entity.active) return;
+      // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
+      const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
+      if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
       // --- PARTICLE RENDERING ---
@@ -347,47 +398,102 @@ export class RenderSystem {
             ctx.fill();
 
           } else if (entity.type === EntityType.ASTEROID || entity.type === EntityType.STRUCTURE) {
-            if (entity.hitFlash && entity.hitFlash > 0) {
-                ctx.fillStyle = '#ffffff';
-            } else {
-                ctx.fillStyle = entity.color;
-            }
 
-            ctx.beginPath();
-            if (entity.polygonPoints && entity.polygonPoints.length > 0) {
-                const p0 = entity.polygonPoints[0];
-                if (Number.isFinite(p0.x) && Number.isFinite(p0.y)) {
-                    ctx.moveTo(p0.x, p0.y);
-                    for (let i = 1; i < entity.polygonPoints.length; i++) {
-                        const p = entity.polygonPoints[i];
-                        if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
-                            ctx.lineTo(p.x, p.y);
+            // Build polygon path (shared by asteroid and tile)
+            const buildPath = () => {
+                ctx.beginPath();
+                if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                    const p0 = entity.polygonPoints[0];
+                    if (Number.isFinite(p0.x) && Number.isFinite(p0.y)) {
+                        ctx.moveTo(p0.x, p0.y);
+                        for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                            const p = entity.polygonPoints[pi];
+                            if (Number.isFinite(p.x) && Number.isFinite(p.y)) ctx.lineTo(p.x, p.y);
                         }
                     }
+                } else {
+                    const r = entity.size.x / 2;
+                    if (Number.isFinite(r) && r > 0) ctx.arc(0, 0, r, 0, Math.PI * 2);
                 }
-            } else {
-                const r = entity.size.x / 2;
-                if (Number.isFinite(r) && r > 0) {
-                    ctx.arc(0, 0, r, 0, Math.PI * 2);
-                }
-            }
-            ctx.closePath();
-            ctx.fill();
-            
-            if (entity.type === EntityType.ASTEROID) {
-                this.renderCracks(ctx, entity, entity.size.x/2);
-            }
+                ctx.closePath();
+            };
 
             if (entity.type === EntityType.STRUCTURE) {
-                 ctx.strokeStyle = '#818cf8';
-                 ctx.lineWidth = 2;
-                 ctx.stroke();
-                 ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                 ctx.fill();
+                // ── Regen ghost outline (tile not yet active) ────────────────
+                if (!entity.active && entity.regenProgress !== undefined) {
+                    // Only show ghost during final 3 s (regenProgress > threshold)
+                    const delay = 12; // mirrors TILE_REGEN_DELAY
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart); // 0→1
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1.0;
+                    // Skip normal glass rendering — tile isn't back yet
+                    // (close the else below by jumping past it)
+                } else {
+
+                // ── Glass tile ──────────────────────────────────────────────
+                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+
+                // Proximity tint: edge shifts from cool blue-white → bright cyan
+                const PROX_RANGE = 120;
+                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
+                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+
+                const edgeR = Math.round(186 - prox * 83);
+                const edgeG = Math.round(230 + prox * 2);
+                const edgeB = Math.round(253 - prox * 4);
+                const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
+                const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
+
+                // Layer 1 — translucent base fill
+                buildPath();
+                ctx.globalAlpha = isFlash ? 0.55 : 0.13;
+                ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
+                ctx.fill();
+
+                // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
+                if (!isFlash) {
+                    ctx.globalAlpha = 0.09;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fill();
+                }
+
+                // Layer 3 — edge stroke (proximity-tinted)
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = edgeColor;
+                ctx.lineWidth = isFlash ? 2.5 : 1.5;
+                ctx.stroke();
+
+                // Layer 4 — small specular dot (upper-left of hex)
+                // Uses a pre-rendered 12×12 bitmap instead of a per-tile gradient.
+                if (!isFlash) {
+                    ctx.globalAlpha = 0.28 + prox * 0.18;
+                    ctx.drawImage(this.getSpecularBitmap(), -15, -17);
+                }
+
+                } // end else (glass tile — paired with regen ghost if/else above)
+
             } else {
-                 ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                 ctx.lineWidth = 2;
-                 ctx.stroke();
+                // ── Asteroid ─────────────────────────────────────────────────
+                buildPath();
+                if (entity.hitFlash && entity.hitFlash > 0) {
+                    ctx.fillStyle = '#ffffff';
+                } else {
+                    ctx.fillStyle = entity.color;
+                }
+                ctx.fill();
+                this.renderCracks(ctx, entity, entity.size.x / 2);
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
@@ -401,7 +507,89 @@ export class RenderSystem {
           } else {
             ctx.fillStyle = entity.color;
 
-            if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
+            if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
+                // Mid-wave drop — distinct shape per type
+                const lt = entity.lifetime ?? Infinity;
+                const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
+                const pulse = 0.7 + Math.sin(Date.now() / 350) * 0.3;
+
+                let coreColor: string;
+                let rimColor: string;
+                let label: string;
+                if (entity.dropType === 'fuel') {
+                    coreColor = '#00e5ff';
+                    rimColor = '#0090a0';
+                    label = 'FUEL';
+                } else if (entity.dropType === 'gold') {
+                    coreColor = '#ffd700';
+                    rimColor = '#b8860b';
+                    label = 'GOLD';
+                } else {
+                    coreColor = entity.color;
+                    rimColor = entity.color;
+                    label = entity.name || 'WEAPON';
+                }
+
+                ctx.globalAlpha = fadeAlpha;
+
+                if (entity.dropType === 'fuel') {
+                    // Horizontal capsule — reads like a fuel canister
+                    const hw = 10, hh = 5, rad = hh;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    roundRectPath(ctx, -hw - 3, -hh - 3, (hw + 3) * 2, (hh + 3) * 2, rad + 3);
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    roundRectPath(ctx, -hw, -hh, hw * 2, hh * 2, rad);
+                    ctx.fill();
+
+                } else if (entity.dropType === 'gold') {
+                    // Tilted square — classic coin/gem diamond silhouette
+                    const s = 7;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -(s + 3)); ctx.lineTo(s + 3, 0);
+                    ctx.lineTo(0, s + 3);   ctx.lineTo(-(s + 3), 0);
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -s); ctx.lineTo(s, 0);
+                    ctx.lineTo(0, s); ctx.lineTo(-s, 0);
+                    ctx.closePath();
+                    ctx.fill();
+
+                } else {
+                    // Powerup drop — rounded square
+                    const s = 8, rad = 3;
+                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
+                    ctx.strokeStyle = rimColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    roundRectPath(ctx, -s - 3, -s - 3, (s + 3) * 2, (s + 3) * 2, rad + 2);
+                    ctx.stroke();
+                    ctx.globalAlpha = 0.93 * fadeAlpha;
+                    ctx.fillStyle = coreColor;
+                    ctx.beginPath();
+                    roundRectPath(ctx, -s, -s, s * 2, s * 2, rad);
+                    ctx.fill();
+                }
+
+                // Label beneath
+                ctx.globalAlpha = fadeAlpha;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 9px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, 0, 18);
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
                 // Weapon powerup — glowing pulsing orb
                 const r = entity.size.x / 2;
                 const pulse = 0.65 + Math.sin(entity.rotation * 3) * 0.35;
