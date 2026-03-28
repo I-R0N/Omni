@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, PickupType } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 
 const PHYSICS_MAX_STEPS = 5;
@@ -45,7 +45,7 @@ export class GameEngine {
   private waveIndex: number = 0;
   private waveEnemyIds: Set<string> = new Set();
   private waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
-  private powerupId: string | null = null;
+  private waveGraceTimer: number = 0;
 
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -185,7 +185,8 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveStatus: wsMap[this.waveState]
+      waveStatus: wsMap[this.waveState],
+      waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -322,6 +323,11 @@ export class GameEngine {
           this.startExplosion(entity);
       }
 
+      // Spawn health drop from enemy kills
+      if (entity.type === EntityType.ENEMY && Math.random() < DROP_CONSTANTS.HEALTH.CHANCE) {
+          this.spawnHealthDrop(entity.position);
+      }
+
       // Spawn Particles
       const numParticles = 4 + Math.floor(Math.random() * 3);
       const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
@@ -440,21 +446,40 @@ export class GameEngine {
       if (allDead) {
         this.waveState = 'cleared';
         const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+
+        // Auto-grant weapon unlock
         if (waveDef.powerup !== null) {
-          this.spawnPowerup(waveDef.powerup);
+          this.player.currentWeapon = waveDef.powerup;
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
+          this.player.burstQueue = 0;
+          this.spawnDamageText(this.player.position, 0);
+          // Announce weapon with a floating text
+          this.damageTexts[this.damageTexts.length - 1].text = WEAPONS[waveDef.powerup].name + ' Unlocked!';
+          this.damageTexts[this.damageTexts.length - 1].color = WEAPONS[waveDef.powerup].color;
+          this.damageTexts[this.damageTexts.length - 1].lifetime = 2.5;
+          this.damageTexts[this.damageTexts.length - 1].maxLifetime = 2.5;
+        }
+
+        // Start grace period or mark complete
+        const nextIdx = this.waveIndex + 1;
+        if (nextIdx < WAVE_DEFINITIONS.length) {
+          this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
         } else {
           this.waveState = 'complete';
         }
       }
     }
 
-    // Slowly spin the powerup pickup
-    if (this.powerupId && this.currentMap) {
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-        if (entities[i].id === this.powerupId) {
-          entities[i].rotation += dt * 2.0;
-          break;
+    // Grace period countdown — spawn next wave when timer expires
+    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
+      this.waveGraceTimer -= dt;
+      if (this.waveGraceTimer <= 0) {
+        this.waveGraceTimer = 0;
+        const nextIdx = this.waveIndex + 1;
+        if (nextIdx < WAVE_DEFINITIONS.length) {
+          this.spawnWave(nextIdx);
+        } else {
+          this.waveState = 'complete';
         }
       }
     }
@@ -570,28 +595,30 @@ export class GameEngine {
     this.damageTexts.length = dTextIdx;
 
     if (this.interactionCooldown <= 0) {
-        const interactables = this.currentMap.entities.filter(e => e.type === EntityType.INTERACTABLE);
-        for (const entity of interactables) {
-            const dist = Math.sqrt(
-                (this.player.position.x - entity.position.x) ** 2 +
-                (this.player.position.y - entity.position.y) ** 2
-            );
+        const entities = this.currentMap.entities;
+        for (let i = 0; i < entities.length; i++) {
+            const entity = entities[i];
+            if (!entity.active || entity.type !== EntityType.INTERACTABLE) continue;
+            if (entity.pickupType === undefined) continue;
+
+            const dx = this.player.position.x - entity.position.x;
+            const dy = this.player.position.y - entity.position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < (entity.size.x / 2 + this.player.size.x)) {
-                // Collect weapon powerup
-                if (entity.powerupWeapon !== undefined) {
-                    this.player.currentWeapon = entity.powerupWeapon;
-                    this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.powerupWeapon);
-                    this.player.burstQueue = 0;
+                if (entity.pickupType === PickupType.HEALTH) {
+                    // Don't consume if player is already at full health
+                    if (this.player.health >= this.player.maxHealth) continue;
+
+                    const healAmount = entity.pickupValue || DROP_CONSTANTS.HEALTH.HEAL_AMOUNT;
+                    const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
+                    this.player.health += healed;
+                    this.spawnDamageText(this.player.position, healed);
+                    const lastText = this.damageTexts[this.damageTexts.length - 1];
+                    lastText.text = '+' + Math.round(healed);
+                    lastText.color = DROP_CONSTANTS.HEALTH.COLOR;
                     entity.active = false;
-                    this.powerupId = null;
-                    this.interactionCooldown = 1.0;
-                    const nextIdx = this.waveIndex + 1;
-                    if (nextIdx < WAVE_DEFINITIONS.length) {
-                        this.spawnWave(nextIdx);
-                    } else {
-                        this.waveState = 'complete';
-                    }
+                    this.interactionCooldown = 0.15;
                     break;
                 }
             }
@@ -815,7 +842,7 @@ export class GameEngine {
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
-    this.powerupId = null;
+    this.waveGraceTimer = 0;
     this.spawnWave(0);
   }
 
@@ -862,35 +889,37 @@ export class GameEngine {
     this.waveState = 'active';
   }
 
-  private spawnPowerup(weaponType: WeaponType) {
+  private spawnHealthDrop(position: Vector2) {
     if (!this.currentMap) return;
-    const id = `powerup_${Date.now()}`;
-    const weaponConfig = WEAPONS[weaponType];
+    const { SIZE, COLOR, LIFETIME, MASS, HEAL_AMOUNT } = DROP_CONSTANTS.HEALTH;
 
-    // Spawn offset from player so it doesn't overlap them
+    // Small random offset so drops don't stack exactly
     const angle = Math.random() * Math.PI * 2;
-    const dist = 160;
+    const offset = 10 + Math.random() * 15;
 
     this.currentMap.entities.push({
-      id,
+      id: `drop_health_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
       position: {
-        x: this.player.position.x + Math.cos(angle) * dist,
-        y: this.player.position.y + Math.sin(angle) * dist
+        x: position.x + Math.cos(angle) * offset,
+        y: position.y + Math.sin(angle) * offset
       },
-      velocity: { x: 0, y: 0 },
-      size: { x: 28, y: 28 },
+      velocity: {
+        x: Math.cos(angle) * 0.5,
+        y: Math.sin(angle) * 0.5
+      },
+      size: { x: SIZE, y: SIZE },
       rotation: 0,
-      color: weaponConfig.color,
+      color: COLOR,
       active: true,
-      health: 100,
-      maxHealth: 100,
-      mass: Infinity,
-      name: weaponConfig.name,
-      powerupWeapon: weaponType
+      health: 1,
+      maxHealth: 1,
+      mass: MASS,
+      lifetime: LIFETIME,
+      maxLifetime: LIFETIME,
+      pickupType: PickupType.HEALTH,
+      pickupValue: HEAL_AMOUNT
     });
-
-    this.powerupId = id;
   }
 
   private loadMap(map: BaseMapLayer) {

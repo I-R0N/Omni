@@ -57,6 +57,11 @@ export enum WeaponType {
   BURST = 'BURST'
 }
 
+export enum PickupType {
+  HEALTH = 'HEALTH',
+  WEAPON = 'WEAPON'
+}
+
 export interface WeaponConfig {
   type: WeaponType;
   name: string;
@@ -143,8 +148,12 @@ export interface GameEntity {
   burstQueue?: number; // How many shots left in current burst
   burstTimer?: number; // Timer for next burst shot
 
-  // Powerup pickup
+  // Powerup pickup (legacy)
   powerupWeapon?: WeaponType;
+
+  // Pickup system
+  pickupType?: PickupType;
+  pickupValue?: number; // e.g., health amount to restore
 }
 
 export interface CameraState {
@@ -164,6 +173,7 @@ export interface EngineStats {
   difficulty?: number;
   waveNumber?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
+  waveGraceTimer?: number;
 }
 
 export interface DamageText {

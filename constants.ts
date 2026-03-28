@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, PickupType } from './types';
 import { ASSETS } from './assets';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
@@ -228,6 +228,21 @@ export const DAMAGE_TEXT_CONSTANTS = {
   SIZE: 14,
   COLOR: '#ffffff',
   CRIT_COLOR: '#facc15'
+};
+
+export const WAVE_CONSTANTS = {
+  GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
+};
+
+export const DROP_CONSTANTS = {
+  HEALTH: {
+    CHANCE: 0.4, // 40% chance per enemy kill
+    HEAL_AMOUNT: 20,
+    SIZE: 16,
+    COLOR: '#4ade80', // Green
+    LIFETIME: 15.0, // Seconds before fading
+    MASS: 0.5, // Light, driftable
+  }
 };
 
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {

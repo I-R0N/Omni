@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PickupType } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
@@ -406,40 +406,29 @@ export class RenderSystem {
           } else {
             ctx.fillStyle = entity.color;
 
-            if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
-                // Weapon powerup — glowing pulsing orb
+            if (entity.type === EntityType.INTERACTABLE && entity.pickupType === PickupType.HEALTH) {
+                // Health drop — green cross with pulsing glow
                 const r = entity.size.x / 2;
-                const pulse = 0.65 + Math.sin(entity.rotation * 3) * 0.35;
+                const lifeRatio = (entity.lifetime || 1) / (entity.maxLifetime || 1);
+                // Blink when about to expire (last 3 seconds)
+                const blink = (entity.lifetime !== undefined && entity.lifetime < 3.0)
+                    ? 0.4 + Math.abs(Math.sin((entity.lifetime || 0) * 6)) * 0.6
+                    : 1.0;
+                ctx.globalAlpha = Math.min(1, lifeRatio * 2) * blink;
 
-                // Outer ring
-                ctx.globalAlpha = 0.6 * pulse;
+                // Glow ring
                 ctx.strokeStyle = entity.color;
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // Second ring
-                ctx.globalAlpha = 0.35 * pulse;
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
+                ctx.arc(0, 0, r * 1.3, 0, Math.PI * 2);
                 ctx.stroke();
 
-                // Core fill
-                ctx.globalAlpha = 0.9;
+                // Cross shape
                 ctx.fillStyle = entity.color;
-                ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Label
-                ctx.globalAlpha = 1.0;
-                ctx.rotate(-entity.rotation);
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 11px monospace';
-                ctx.textAlign = 'center';
-                ctx.fillText('▲ ' + (entity.name || 'WEAPON') + ' ▲', 0, r + 20);
+                const arm = r * 0.35;
+                const length = r * 0.85;
+                ctx.fillRect(-arm, -length, arm * 2, length * 2);
+                ctx.fillRect(-length, -arm, length * 2, arm * 2);
 
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;

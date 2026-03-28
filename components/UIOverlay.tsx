@@ -135,8 +135,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({ stats, onCycleWeapon, onStart, on
               <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">
                 Wave {Math.min(stats.waveNumber ?? 1, 5)} / 5
               </span>
-              {stats.waveStatus === 'cleared' && (
-                <p className="text-emerald-400 text-xs font-bold mt-0.5 animate-pulse">Collect the powerup ↓</p>
+              {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
+                <p className="text-emerald-400 text-xs font-bold mt-0.5 animate-pulse">Next wave in {stats.waveGraceTimer}s</p>
               )}
             </div>
           )}
