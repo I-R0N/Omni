@@ -58,7 +58,7 @@ export class GameEngine {
   private activeDrops: GameEntity[] = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 0.35; // seconds
+  private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -605,7 +605,8 @@ export class GameEngine {
 
     if (this.trailDecayTimer > 0 &&
             (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
-        // Taper lifetime to zero as the decay window expires so the trail pinches off smoothly.
+        // t: 1.0 while thrusting, tapers to 0 over the decay window.
+        // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
         const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
         const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
         this.player.trail = this.player.trail || [];
@@ -614,6 +615,7 @@ export class GameEngine {
             y: this.player.position.y,
             lifetime: pointLifetime,
             maxLifetime: pointLifetime,
+            scale: t,
         });
     }
 

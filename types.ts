@@ -21,6 +21,7 @@ export interface Vector2 {
 export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
+  scale: number; // Width multiplier: 1.0 during thrust, tapers toward 0 during decay
 }
 
 export interface Rect {

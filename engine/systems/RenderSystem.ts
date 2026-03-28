@@ -228,7 +228,7 @@ export class RenderSystem {
               const p = t[i];
               const ratio = p.lifetime / p.maxLifetime;
               if (ratio <= 0) continue;
-              const width = (1 + (ratio * 5)) / 2; // Half width
+              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
               
               // Simple normal calculation (perpendicular to velocity approximation)
               // For first point, use next point. For last, use prev.
@@ -255,7 +255,7 @@ export class RenderSystem {
               const p = t[i];
               const ratio = p.lifetime / p.maxLifetime;
               if (ratio <= 0) continue;
-              const width = (1 + (ratio * 5)) / 2; 
+              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
 
               let nx = 0, ny = 0;
               if (i < t.length - 1) {
