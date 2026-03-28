@@ -614,7 +614,7 @@ export class PhysicsSystem {
           const player = a.type === EntityType.PLAYER ? a : b;
           const structure = a.type === EntityType.STRUCTURE ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
-          
+
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
               structure.health = 0;
               structure.active = false;
@@ -624,11 +624,22 @@ export class PhysicsSystem {
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT);
-              return; 
-          } else {
-              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT);
-              player.health -= COLLISION_CONFIG.DAMAGE.MINOR_IMPACT;
-              player.hitFlash = 0.2;
+              return;
+          } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
+              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              player.health -= envDmg;
+              player.hitFlash = 0.1;
+          }
+      }
+
+      // Asteroid vs Player — speed-gated environmental damage (bypasses shield)
+      if ((a.type === EntityType.PLAYER && b.type === EntityType.ASTEROID) || (b.type === EntityType.PLAYER && a.type === EntityType.ASTEROID)) {
+          const player = a.type === EntityType.PLAYER ? a : b;
+          const impactSpeed = Math.abs(velAlongNormal);
+          if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
+              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              player.health -= envDmg;
+              player.hitFlash = 0.1;
           }
       }
       

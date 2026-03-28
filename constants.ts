@@ -85,6 +85,12 @@ export const COLLISION_CONFIG = {
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
   },
+  // Environmental damage (tiles & asteroids) — speed-gated so being
+  // stuck between objects doesn't drain health.
+  ENV_DAMAGE: {
+    SPEED_THRESHOLD: 1.5,  // Minimum impact speed to take any damage
+    MULTIPLIER: 0.15,      // damage = impactSpeed × multiplier (fractional HP)
+  },
 
   // Screen Shake Intensity
   SHAKE: {
