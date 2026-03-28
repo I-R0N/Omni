@@ -358,8 +358,11 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void
   ) {
       // 0. BROADPHASE: Fast Circle Check
-      const rA = Math.max(a.size.x, a.size.y) / 2;
-      const rB = Math.max(b.size.x, b.size.y) / 2;
+      let rA = Math.max(a.size.x, a.size.y) / 2;
+      let rB = Math.max(b.size.x, b.size.y) / 2;
+      // Expand player radius when shield is active
+      if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       const dx = a.position.x - b.position.x;
       const dy = a.position.y - b.position.y;
       const distSq = dx*dx + dy*dy;
@@ -648,20 +651,26 @@ export class PhysicsSystem {
   // --- OPTIMIZED SAT HELPERS ---
   private fillVertices(e: GameEntity, buffer: Vector2[]): number {
       let count = 0;
+      // Shield expands the player's collision shape
+      const shieldScale = (e.id === 'player' && (e.shield ?? 0) > 0)
+          ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
+
       if (e.polygonPoints && e.polygonPoints.length > 0) {
           const cos = Math.cos(e.rotation);
           const sin = Math.sin(e.rotation);
-          
+
           for (let i = 0; i < e.polygonPoints.length; i++) {
               if (count >= buffer.length) break;
               const p = e.polygonPoints[i];
-              buffer[count].x = e.position.x + (p.x * cos - p.y * sin);
-              buffer[count].y = e.position.y + (p.x * sin + p.y * cos);
+              const px = p.x * shieldScale;
+              const py = p.y * shieldScale;
+              buffer[count].x = e.position.x + (px * cos - py * sin);
+              buffer[count].y = e.position.y + (px * sin + py * cos);
               count++;
           }
       } else {
-          const w = e.size.x / 2;
-          const h = e.size.y / 2;
+          const w = (e.size.x / 2) * shieldScale;
+          const h = (e.size.y / 2) * shieldScale;
           buffer[0].x = e.position.x - w; buffer[0].y = e.position.y - h;
           buffer[1].x = e.position.x + w; buffer[1].y = e.position.y - h;
           buffer[2].x = e.position.x + w; buffer[2].y = e.position.y + h;
