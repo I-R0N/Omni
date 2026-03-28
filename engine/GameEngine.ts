@@ -56,6 +56,9 @@ export class GameEngine {
 
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
+  // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
+  private trailDecayTimer: number = 0;
+  private static readonly TRAIL_DECAY_DURATION = 0.35; // seconds
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -589,18 +592,28 @@ export class GameEngine {
         }
     }
 
+    const thrusting = hasFuel && throttle > 0;
+    if (thrusting) {
+        this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+    } else {
+        this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
+    }
+
     const lastPos = this.player.trail && this.player.trail.length > 0
         ? this.player.trail[this.player.trail.length - 1]
         : null;
 
-    if (hasFuel && throttle > 0 &&
+    if (this.trailDecayTimer > 0 &&
             (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
+        // Taper lifetime to zero as the decay window expires so the trail pinches off smoothly.
+        const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
+        const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
         this.player.trail = this.player.trail || [];
         this.player.trail.push({
             x: this.player.position.x,
             y: this.player.position.y,
-            lifetime: TRAIL_CONSTANTS.LIFETIME,
-            maxLifetime: TRAIL_CONSTANTS.LIFETIME
+            lifetime: pointLifetime,
+            maxLifetime: pointLifetime,
         });
     }
 
