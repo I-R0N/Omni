@@ -562,12 +562,15 @@ export class GameEngine {
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
     // Normalized to 60fps (dt * 60)
     const timeScale = dt * 60;
-    this.player.velocity.x += moveDir.x * acc * timeScale;
-    this.player.velocity.y += moveDir.y * acc * timeScale;
+    const hasFuel = (this.player.fuel ?? 0) > 0;
+    if (hasFuel) {
+        this.player.velocity.x += moveDir.x * acc * timeScale;
+        this.player.velocity.y += moveDir.y * acc * timeScale;
+    }
 
     // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
-    if (throttle > 0) {
+    if (throttle > 0 && hasFuel) {
         this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
     }
 
