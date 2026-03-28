@@ -589,14 +589,15 @@ export class GameEngine {
         }
     }
 
-    const lastPos = this.player.trail && this.player.trail.length > 0 
-        ? this.player.trail[this.player.trail.length - 1] 
+    const lastPos = this.player.trail && this.player.trail.length > 0
+        ? this.player.trail[this.player.trail.length - 1]
         : null;
-    
-    if (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ)) {
+
+    if (hasFuel && throttle > 0 &&
+            (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
         this.player.trail = this.player.trail || [];
-        this.player.trail.push({ 
-            x: this.player.position.x, 
+        this.player.trail.push({
+            x: this.player.position.x,
             y: this.player.position.y,
             lifetime: TRAIL_CONSTANTS.LIFETIME,
             maxLifetime: TRAIL_CONSTANTS.LIFETIME
