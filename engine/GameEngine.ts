@@ -151,6 +151,7 @@ export class GameEngine {
   public restartGame() {
       this.pendingRegens = [];
       this.activeDrops = [];
+      this.trailDecayTimer = 0;
       this.loadMap(new UniverseMap());
 
       // Reset Player
@@ -824,6 +825,7 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
+      this.trailDecayTimer = 0;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
