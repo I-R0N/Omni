@@ -701,7 +701,7 @@ export class GameEngine {
     // Drop collection: magnetic draw and collect on contact.
     // Iterates activeDrops (dedicated list) instead of all ~22k map entities.
     // Lifetime is managed by PhysicsSystem — no duplicate tick here.
-    const ATTRACT_RADIUS_SQ = 120 * 120; // squared — avoids sqrt for distant drops
+    const ATTRACT_RADIUS_SQ = 90 * 90; // squared — avoids sqrt for distant drops
     const ATTRACT_SPEED     = 220;       // world units per second
     const collectRadiusSq   = this.player.size.x * this.player.size.x;
     let dropWriteIdx = 0;
