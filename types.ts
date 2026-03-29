@@ -162,7 +162,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'fuel' | 'gold' | 'powerup' | 'health';
+  dropType?: 'fuel' | 'gold' | 'powerup' | 'health' | 'glass';
   dropValue?: number;
   dropWeapon?: WeaponType;
 

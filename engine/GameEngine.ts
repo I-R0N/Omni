@@ -1137,7 +1137,7 @@ export class GameEngine {
     const pv = entity.velocity;
 
     if (entity.type === EntityType.STRUCTURE) {
-      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, pv);
+      this.spawnGlassShards(entity);
 
     } else if (entity.type === EntityType.ASTEROID) {
       const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
@@ -1192,6 +1192,80 @@ export class GameEngine {
     }
     rawPts.sort((a, b) => a.angle - b.angle);
     return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+  }
+
+  /**
+   * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel shard.
+   * Glass shards look like tile fragments (same glass rendering), drift with the
+   * flow field, and expire after 8–15 s.  They are NOT added to activeDrops so
+   * they cannot be collected — they are purely environmental debris.
+   */
+  private spawnGlassShards(tile: GameEntity) {
+    if (!this.currentMap) return;
+
+    const count = 7 + Math.floor(Math.random() * 3); // 7–9
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const HALF_CONE = Math.PI * 0.6;
+
+    for (let i = 0; i < count; i++) {
+      // Vary radius so shards aren't all identical — roughly fuel-shard scale
+      const radius = 3.5 + Math.random() * 2.5; // 3.5–6
+
+      let angle: number;
+      let speed: number;
+      if (impactAngle !== null) {
+        angle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
+        speed = impactSpeed * 0.2 + 0.3 + Math.random() * 1.2;
+      } else {
+        angle = Math.random() * Math.PI * 2;
+        speed = 0.4 + Math.random() * 1.5;
+      }
+
+      // Angular glass shard polygon — 3–5 vertices, low jitter so edges stay sharp
+      const numPoints = 3 + Math.floor(Math.random() * 3);
+      const rawPts: { angle: number; r: number }[] = [];
+      for (let j = 0; j < numPoints; j++) {
+        const baseAngle = (j / numPoints) * Math.PI * 2;
+        const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.35;
+        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.5 + Math.random() * 0.65) });
+      }
+      rawPts.sort((a, b) => a.angle - b.angle);
+      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+      const scatter = 12;
+      const life = 8 + Math.random() * 7;
+      const maxSpin = 2.8;
+
+      this.currentMap.entities.push({
+        id:           `glass_${Date.now()}_${i}_${Math.random()}`,
+        type:          EntityType.INTERACTABLE,
+        position:     {
+          x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
+          y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
+        },
+        velocity:     { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size:         { x: radius * 3, y: radius * 3 },
+        rotation:      Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        color:         'rgba(186,230,253,0.8)',
+        active:        true,
+        health:        1,
+        maxHealth:     1,
+        mass:          3,
+        dropType:      'glass',
+        dropValue:     0,
+        lifetime:      life,
+        maxLifetime:   life,
+        polygonPoints: pts,
+      });
+    }
+
+    // ~35 % chance: also eject a fuel shard
+    if (Math.random() < 0.35) {
+      this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
+    }
   }
 
   private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {

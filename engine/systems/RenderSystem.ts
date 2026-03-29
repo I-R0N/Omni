@@ -507,7 +507,54 @@ export class RenderSystem {
           } else {
             ctx.fillStyle = entity.color;
 
-            if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
+            if (entity.type === EntityType.INTERACTABLE && entity.dropType === 'glass') {
+                // Glass tile shard — same layered rendering as a full tile, with lifetime fade
+                const lt = entity.lifetime ?? Infinity;
+                const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
+
+                const buildShardPath = () => {
+                    ctx.beginPath();
+                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                        ctx.moveTo(entity.polygonPoints[0].x, entity.polygonPoints[0].y);
+                        for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                            ctx.lineTo(entity.polygonPoints[pi].x, entity.polygonPoints[pi].y);
+                        }
+                    } else {
+                        ctx.arc(0, 0, entity.size.x / 2, 0, Math.PI * 2);
+                    }
+                    ctx.closePath();
+                };
+
+                // Proximity tint — same formula as full tile
+                const PROX_RANGE = 120;
+                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
+                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const edgeR = Math.round(186 - prox * 83);
+                const edgeG = Math.round(230 + prox * 2);
+                const edgeB = Math.round(253 - prox * 4);
+                const edgeAlpha = (0.55 + prox * 0.35) * fadeAlpha;
+                const edgeColor = `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
+
+                // Layer 1 — translucent base fill
+                buildShardPath();
+                ctx.globalAlpha = 0.13 * fadeAlpha;
+                ctx.fillStyle = 'rgba(186,230,253,1)';
+                ctx.fill();
+
+                // Layer 2 — diagonal shine
+                ctx.globalAlpha = 0.09 * fadeAlpha;
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                // Layer 3 — proximity-tinted edge stroke
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = edgeColor;
+                ctx.lineWidth = 1.5;
+                buildShardPath();
+                ctx.stroke();
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
