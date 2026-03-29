@@ -968,11 +968,17 @@ export class GameEngine {
 
       // Maximum number of equal-area shards that all meet the minimum size.
       // area ∝ size²  →  N ≤ (parent / MIN_SIZE)²
-      const maxN = Math.min(3, Math.floor((parent.size.x / MIN_SIZE) ** 2));
+      // Cap at 4 to allow high-damage weapons to produce an extra fragment.
+      const maxN = Math.min(4, Math.floor((parent.size.x / MIN_SIZE) ** 2));
       if (maxN < 2) return; // parent too small to produce valid fragments
 
-      // Randomise between 2 and maxN shards (capped at 3).
-      const shardCount = 2 + Math.floor(Math.random() * Math.min(2, maxN - 1));
+      // Damage biases the shard count: low damage → fewer larger pieces,
+      // high damage → more smaller pieces.
+      // damageNorm 0 (damage 1) → prefer 2 shards; 1 (damage 5) → up to maxN.
+      const damage     = parent.lastImpactDamage ?? 1;
+      const damageNorm = Math.min(1, (damage - 1) / 4);
+      const maxForDmg  = Math.min(maxN, 2 + Math.round(damageNorm * 2)); // 2..4
+      const shardCount = 2 + Math.floor(Math.random() * (maxForDmg - 1));
 
       // Equal-area split: each shard has 1/N of the parent's area.
       const newSize = parent.size.x / Math.sqrt(shardCount);
@@ -1203,15 +1209,23 @@ export class GameEngine {
   private spawnGlassShards(tile: GameEntity) {
     if (!this.currentMap) return;
 
-    const count = 7 + Math.floor(Math.random() * 3); // 7–9
+    // Damage biases count and size: low damage → fewer, larger shards;
+    // high damage → more, smaller shards.
+    // damageNorm 0 (damage 1) → 4–6 chunky; 1 (damage 5) → 9–11 tiny.
+    const damage     = tile.lastImpactDamage ?? 1;
+    const damageNorm = Math.min(1, (damage - 1) / 4);
+    const countBase  = Math.round(4 + damageNorm * 6); // 4..10
+    const count      = countBase + Math.floor(Math.random() * 3);
+    // Radius centre shifts from 6.5 (low dmg, chunky) to 4.0 (high dmg, tiny).
+    const radiusCenter = 6.5 - damageNorm * 2.5;
+
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE = Math.PI * 0.6;
 
     for (let i = 0; i < count; i++) {
-      // Vary radius so shards aren't all identical — roughly fuel-shard scale
-      const radius = 3.5 + Math.random() * 2.5; // 3.5–6
+      const radius = (radiusCenter - 1.5) + Math.random() * 3; // ±1.5 around centre
 
       let angle: number;
       let speed: number;
