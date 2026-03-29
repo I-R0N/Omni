@@ -142,18 +142,18 @@ export class UniverseMap extends BaseMapLayer {
     this.entities.push(...TileGenerator.generateClusteredMesh(
         8000, 8000,  // inner zone
         22,          // hexSize
-        70,          // clusterCount  (was 250 — dense walls)
-        12,          // minClusterSize (was 20)
-        40           // maxClusterSize (was 70)
+        100,         // clusterCount  (was 70)
+        15,          // minClusterSize (was 12)
+        45           // maxClusterSize (was 40)
     ));
 
     // Sparse outer landmarks — well-separated chunks across deep space
     this.entities.push(...TileGenerator.generateClusteredMesh(
         this.width, this.height,
         22,
-        100,         // was 350
-        6,           // was 15
-        24           // was 55
+        130,         // was 100
+        8,           // was 6
+        28           // was 24
     ));
 
     // Clear a safe open area around spawn
