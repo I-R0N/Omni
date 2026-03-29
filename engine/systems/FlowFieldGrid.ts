@@ -28,6 +28,7 @@
  */
 
 import { GameEntity, EntityType } from '../../types';
+import { sampleFlow } from './FlowField';
 
 // ─── grid constants ────────────────────────────────────────────────────────
 
@@ -46,13 +47,12 @@ const INF = 0x7FFF_FFFF;
 const DR4 = [-1,  1,  0,  0] as const;
 const DC4 = [ 0,  0, -1,  1] as const;
 
-// Asteroid streaming goal positions — same quadrant layout as the old vortices.
-const AST_GOALS = [
-  { x:  3500, y:  3500 },
-  { x: -3500, y:  3500 },
-  { x:  3500, y: -3500 },
-  { x: -3500, y: -3500 },
-] as const;
+// How strongly blocked cardinal neighbours deflect the asteroid flow.
+// Each blocked neighbour subtracts WALL_REPULSE in the opposing axis from
+// the base vortex vector before normalisation.  At 1.2 a single wall
+// neighbour rotates the flow ~50° away from the obstacle; two adjacent
+// walls (inside corner) rotate it ~90°.
+const WALL_REPULSE = 1.2;
 
 // Enemy pursuit BFS is capped at this many cells from the player so each
 // rebuild stays cheap (~800 cells vs. 14 k for the whole map).
@@ -69,8 +69,7 @@ export class FlowFieldGrid {
   // Shared obstacle bitmap (1 = blocked by a tile)
   private readonly blocked   = new Uint8Array(TOTAL);
 
-  // ── asteroid streaming field ──
-  private readonly astDist   = new Int32Array(TOTAL).fill(INF);
+  // ── asteroid streaming field (vortex-based, no BFS distance needed) ──
   private readonly astFlowX  = new Float32Array(TOTAL);
   private readonly astFlowY  = new Float32Array(TOTAL);
 
@@ -116,22 +115,60 @@ export class FlowFieldGrid {
   }
 
   /**
-   * Full BFS from the 4 asteroid goal anchors.
-   * Runs once at map load (~0.5 ms).  The resulting gradient steers asteroids
-   * through tile corridors toward the nearest goal.
+   * Build the asteroid streaming field from the analytical vortex field.
+   *
+   * For every unblocked cell the base flow direction is sampled from
+   * sampleFlow() and then corrected by wall repulsion: each blocked
+   * cardinal neighbour subtracts WALL_REPULSE along its axis so that
+   * the resulting vector curves away from obstacles while still following
+   * the global vortex current.
+   *
+   * This replaces the old BFS-to-4-corners approach which caused all
+   * asteroids to funnel toward the same convergence points.
    */
   buildAsteroidField(): void {
-    this.astDist.fill(INF);
-    const seeds: number[] = [];
-    for (const g of AST_GOALS) {
-      const idx = this.worldToCell(g.x, g.y);
-      if (idx >= 0 && !this.blocked[idx]) {
-        this.astDist[idx] = 0;
-        seeds.push(idx);
+    for (let idx = 0; idx < TOTAL; idx++) {
+      this._computeAsteroidCell(idx);
+    }
+  }
+
+  /** Recompute the asteroid flow vector for a single cell. */
+  private _computeAsteroidCell(idx: number): void {
+    if (this.blocked[idx]) {
+      this.astFlowX[idx] = 0; this.astFlowY[idx] = 0; return;
+    }
+
+    const row = (idx / FF_COLS) | 0;
+    const col =  idx % FF_COLS;
+    const wx  = MAP_MIN + (col + 0.5) * CELL_SIZE;
+    const wy  = MAP_MIN + (row + 0.5) * CELL_SIZE;
+
+    // Base direction from the analytical vortex field
+    const base = sampleFlow(wx, wy);
+    let fx = base.x;
+    let fy = base.y;
+
+    // Wall repulsion: each blocked cardinal neighbour pushes the flow
+    // away from it.  DC4[k]/DR4[k] is the world-space direction toward
+    // that neighbour, so we subtract it to deflect away.
+    for (let k = 0; k < 4; k++) {
+      const nr = row + DR4[k], nc = col + DC4[k];
+      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      if (this.blocked[nr * FF_COLS + nc]) {
+        fx -= DC4[k] * WALL_REPULSE;
+        fy -= DR4[k] * WALL_REPULSE;
       }
     }
-    this._runFullBFS(seeds, this.astDist, INF);
-    this._computeAllGradients(this.astDist, this.astFlowX, this.astFlowY);
+
+    const mag = Math.sqrt(fx * fx + fy * fy);
+    if (mag > 0.001) {
+      this.astFlowX[idx] = fx / mag;
+      this.astFlowY[idx] = fy / mag;
+    } else {
+      // Near-zero after repulsion (e.g. inside corner) — fall back to base
+      this.astFlowX[idx] = base.x;
+      this.astFlowY[idx] = base.y;
+    }
   }
 
   // ─── runtime updates ─────────────────────────────────────────────────────
@@ -166,14 +203,29 @@ export class FlowFieldGrid {
 
   /**
    * Notify the grid that a tile was destroyed at world position (wx, wy).
-   * Performs an incremental BFS patch on both fields — only cells whose
-   * shortest-path distance actually improves are touched.
+   *
+   * Asteroid field: recompute the cleared cell and its 4 cardinal
+   * neighbours — their wall-repulsion vectors change because one obstacle
+   * just disappeared.  O(5) cells touched.
+   *
+   * Enemy field: incremental BFS patch (unchanged).
    */
   onTileDestroyed(wx: number, wy: number): void {
     const idx = this.worldToCell(wx, wy);
     if (idx < 0 || !this.blocked[idx]) return;
     this.blocked[idx] = 0;
-    this._patchField(idx, this.astDist, this.astFlowX, this.astFlowY);
+
+    // Asteroid field — cheap neighbourhood recompute
+    this._computeAsteroidCell(idx);
+    const row = (idx / FF_COLS) | 0;
+    const col =  idx % FF_COLS;
+    for (let k = 0; k < 4; k++) {
+      const nr = row + DR4[k], nc = col + DC4[k];
+      if (nr >= 0 && nr < FF_ROWS && nc >= 0 && nc < FF_COLS)
+        this._computeAsteroidCell(nr * FF_COLS + nc);
+    }
+
+    // Enemy field — BFS patch
     this._patchField(idx, this.eneDist, this.eneFlowX, this.eneFlowY);
   }
 
@@ -182,9 +234,10 @@ export class FlowFieldGrid {
   /** O(1) — returns a unit vector in the asteroid streaming direction. */
   sampleAsteroidFlow(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
-    if (idx < 0) return { x: 1, y: 0 };
+    // Outside the grid or zero-vector cell: fall back to the raw analytical field
+    if (idx < 0) return sampleFlow(wx, wy);
     const fx = this.astFlowX[idx], fy = this.astFlowY[idx];
-    return (fx !== 0 || fy !== 0) ? { x: fx, y: fy } : { x: 1, y: 0 };
+    return (fx !== 0 || fy !== 0) ? { x: fx, y: fy } : sampleFlow(wx, wy);
   }
 
   /**
