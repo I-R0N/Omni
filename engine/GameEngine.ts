@@ -1203,7 +1203,7 @@ export class GameEngine {
   /**
    * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel shard.
    * Glass shards look like tile fragments (same glass rendering), drift with the
-   * flow field, and expire after 8–15 s.  They are NOT added to activeDrops so
+   * flow field, and persist as permanent debris.  They are NOT added to activeDrops so
    * they cannot be collected — they are purely environmental debris.
    */
   private spawnGlassShards(tile: GameEntity) {
@@ -1249,7 +1249,6 @@ export class GameEngine {
       const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
 
       const scatter = 12;
-      const life = 8 + Math.random() * 7;
       const maxSpin = 2.8;
 
       this.currentMap.entities.push({
@@ -1270,8 +1269,6 @@ export class GameEngine {
         mass:          3,
         dropType:      'glass',
         dropValue:     0,
-        lifetime:      life,
-        maxLifetime:   life,
         polygonPoints: pts,
       });
     }
