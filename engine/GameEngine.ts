@@ -710,6 +710,9 @@ export class GameEngine {
         // Remove drops that expired via PhysicsSystem lifetime management
         if (!entity.active) continue;
 
+        // Tick rotation so shards tumble in flight
+        if (entity.rotationSpeed) entity.rotation += entity.rotationSpeed * dt;
+
         const dx = this.player.position.x - entity.position.x;
         const dy = this.player.position.y - entity.position.y;
         const distSq = dx * dx + dy * dy;
@@ -1121,36 +1124,76 @@ export class GameEngine {
 
   private spawnDrops(entity: GameEntity) {
     const pos = entity.position;
+    const pv = entity.velocity;
 
     if (entity.type === EntityType.STRUCTURE) {
-      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE);
+      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, pv);
 
     } else if (entity.type === EntityType.ASTEROID) {
       const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
-      this.spawnDrop(pos, 'gold', goldAmt);
+      this.spawnDrop(pos, 'gold', goldAmt, pv);
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
-        this.spawnRandomPowerupDrop(pos);
+        this.spawnRandomPowerupDrop(pos, pv);
       }
 
     } else if (entity.type === EntityType.ENEMY) {
       const tier = entity.enemyTier ?? 1;
-      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
+      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier, pv);
 
       if (Math.random() < DROP_CONFIG.HEALTH_CHANCE_ENEMY) {
-        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT, pv);
       }
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
-        this.spawnRandomPowerupDrop(pos);
+        this.spawnRandomPowerupDrop(pos, pv);
       }
     }
   }
 
-  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number) {
+  /** Generate an irregular shard polygon representing a fragment of the source object. */
+  private generateShardPolygon(type: 'fuel' | 'gold' | 'health' | 'powerup'): Vector2[] {
+    // Fuel shards: chunky 4-5 point angular fragments (pieces of a structure tile)
+    // Gold shards: jagged 5-7 point asteroid-style fragments
+    // Health shards: organic 6-8 point blobs (from enemy)
+    // Powerup shards: 5-6 point crystal-like angular pieces
+    let numPoints: number;
+    let baseR: number;
+    let radMin: number;
+    let radMax: number;
+    let angleJitterScale: number;
+    if (type === 'fuel') {
+      numPoints = 4 + Math.floor(Math.random() * 2);   // 4-5, chunky tile piece
+      baseR = 7; radMin = 0.6; radMax = 1.1; angleJitterScale = 0.3;
+    } else if (type === 'gold') {
+      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, asteroid shard
+      baseR = 7; radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
+    } else if (type === 'health') {
+      numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
+      baseR = 6; radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
+    } else {
+      numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
+      baseR = 8; radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
+    }
+    const rawPts: { angle: number; r: number }[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const baseAngle = (i / numPoints) * Math.PI * 2;
+      const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 2 * angleJitterScale;
+      rawPts.push({ angle: baseAngle + jitter, r: baseR * (radMin + Math.random() * (radMax - radMin)) });
+    }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+  }
+
+  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const scatter = 20;
+    const scatterAngle = Math.random() * Math.PI * 2;
+    const scatterSpeed = 0.5 + Math.random() * 1.5;
+    const pvx = parentVelocity?.x ?? 0;
+    const pvy = parentVelocity?.y ?? 0;
+    const maxSpin = 2.5;
     const drop: GameEntity = {
       id: `drop_${type}_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1158,29 +1201,39 @@ export class GameEngine {
         x: pos.x + (Math.random() - 0.5) * scatter * 2,
         y: pos.y + (Math.random() - 0.5) * scatter * 2,
       },
-      velocity: { x: 0, y: 0 },
+      velocity: {
+        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
+        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
+      },
       size: { x: 18, y: 18 },
-      rotation: 0,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: type === 'fuel' ? '#00e5ff' : type === 'health' ? '#4ade80' : '#ffd700',
       active: true,
       health: 1,
       maxHealth: 1,
-      mass: Infinity,
+      mass: 5,
       dropType: type,
       dropValue: value,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
+      polygonPoints: this.generateShardPolygon(type),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
   }
 
-  private spawnRandomPowerupDrop(pos: Vector2) {
+  private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;
+    const scatterAngle = Math.random() * Math.PI * 2;
+    const scatterSpeed = 0.5 + Math.random() * 1.5;
+    const pvx = parentVelocity?.x ?? 0;
+    const pvy = parentVelocity?.y ?? 0;
+    const maxSpin = 2.5;
     const drop: GameEntity = {
       id: `drop_powerup_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1188,19 +1241,24 @@ export class GameEngine {
         x: pos.x + (Math.random() - 0.5) * scatter * 2,
         y: pos.y + (Math.random() - 0.5) * scatter * 2,
       },
-      velocity: { x: 0, y: 0 },
+      velocity: {
+        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
+        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
+      },
       size: { x: 18, y: 18 },
-      rotation: 0,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: weaponConfig.color,
       active: true,
       health: 1,
       maxHealth: 1,
-      mass: Infinity,
+      mass: 5,
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
+      polygonPoints: this.generateShardPolygon('powerup'),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
