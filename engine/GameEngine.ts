@@ -348,7 +348,8 @@ export class GameEngine {
       const entities = this.currentMap.entities;
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (e.type !== EntityType.ASTEROID || !e.active) continue;
+          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType;
+          if ((e.type !== EntityType.ASTEROID && !isDropShard) || !e.active) continue;
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
@@ -709,9 +710,6 @@ export class GameEngine {
 
         // Remove drops that expired via PhysicsSystem lifetime management
         if (!entity.active) continue;
-
-        // Tick rotation so shards tumble in flight
-        if (entity.rotationSpeed) entity.rotation += entity.rotationSpeed * dt;
 
         const dx = this.player.position.x - entity.position.x;
         const dy = this.player.position.y - entity.position.y;

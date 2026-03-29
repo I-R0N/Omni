@@ -104,8 +104,9 @@ export class PhysicsSystem {
           entity.position.y += entity.velocity.y;
 
           // Apply Friction
-          // Don't apply friction to projectiles (constant speed) or asteroids (drift)
-          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE) {
+          // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
+          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
+              && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             // Apply standard friction to all dynamic entities (Player, Enemies, etc)
             entity.velocity.x *= friction;
             entity.velocity.y *= friction;
@@ -433,8 +434,16 @@ export class PhysicsSystem {
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void
   ) {
-      if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) return; 
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
+      // Drop shards collide with asteroids and structures only — not player, enemies, or projectiles.
+      // Non-drop interactables (POIs, etc.) are skipped entirely.
+      if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
+          const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
+          const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
+          if (!dropA && !dropB) return;
+          const other = dropA ? b : a;
+          if (other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
+      }
 
       // --- PROJECTILE COLLISIONS ---
       if (a.type === EntityType.PROJECTILE || b.type === EntityType.PROJECTILE) {
