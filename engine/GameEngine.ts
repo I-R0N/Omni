@@ -332,7 +332,7 @@ export class GameEngine {
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
-          if (ast.size.x > 15) this.createAsteroidShards(ast);
+          if (ast.size.x > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize) this.createAsteroidShards(ast);
       }
       if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
@@ -962,9 +962,21 @@ export class GameEngine {
   }
 
   private createAsteroidShards(parent: GameEntity) {
-      const shardCount = 2 + Math.floor(Math.random() * 2);
-      const newSize    = parent.size.x / Math.sqrt(shardCount);
-      const hp         = newSize > 30 ? 2 : 1;
+      // Minimum shard size = smallest spawnable asteroid so all fragments
+      // are gameplay-valid and the size hierarchy stays consistent.
+      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
+
+      // Maximum number of equal-area shards that all meet the minimum size.
+      // area ∝ size²  →  N ≤ (parent / MIN_SIZE)²
+      const maxN = Math.min(3, Math.floor((parent.size.x / MIN_SIZE) ** 2));
+      if (maxN < 2) return; // parent too small to produce valid fragments
+
+      // Randomise between 2 and maxN shards (capped at 3).
+      const shardCount = 2 + Math.floor(Math.random() * Math.min(2, maxN - 1));
+
+      // Equal-area split: each shard has 1/N of the parent's area.
+      const newSize = parent.size.x / Math.sqrt(shardCount);
+      const hp      = newSize > 30 ? 2 : 1;
 
       // Resolve impact direction from the stamped impactor velocity.
       // If none is present (gravity crush, asteroid-asteroid) fall back to
@@ -1149,29 +1161,28 @@ export class GameEngine {
     }
   }
 
-  /** Generate an irregular shard polygon representing a fragment of the source object. */
-  private generateShardPolygon(type: 'fuel' | 'gold' | 'health' | 'powerup'): Vector2[] {
-    // Fuel shards: chunky 4-5 point angular fragments (pieces of a structure tile)
-    // Gold shards: jagged 5-7 point asteroid-style fragments
-    // Health shards: organic 6-8 point blobs (from enemy)
-    // Powerup shards: 5-6 point crystal-like angular pieces
+  /**
+   * Generate an irregular shard polygon for a drop.
+   * baseR controls visual size and should scale with the drop's value so
+   * larger-value drops are physically bigger.
+   */
+  private generateShardPolygon(type: 'fuel' | 'gold' | 'health' | 'powerup', baseR: number): Vector2[] {
     let numPoints: number;
-    let baseR: number;
     let radMin: number;
     let radMax: number;
     let angleJitterScale: number;
     if (type === 'fuel') {
       numPoints = 4 + Math.floor(Math.random() * 2);   // 4-5, chunky tile piece
-      baseR = 7; radMin = 0.6; radMax = 1.1; angleJitterScale = 0.3;
+      radMin = 0.6; radMax = 1.1; angleJitterScale = 0.3;
     } else if (type === 'gold') {
       numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, asteroid shard
-      baseR = 7; radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
+      radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
     } else if (type === 'health') {
       numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
-      baseR = 6; radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
+      radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
     } else {
       numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
-      baseR = 8; radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
+      radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
     }
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
@@ -1192,6 +1203,9 @@ export class GameEngine {
     const pvx = parentVelocity?.x ?? 0;
     const pvy = parentVelocity?.y ?? 0;
     const maxSpin = 2.5;
+    // Visual radius scales linearly with value so larger drops are physically bigger.
+    // Range: value=10 → r≈4.2, value=80 → r≈9.5
+    const dropRadius = Math.min(10, Math.max(4, 3.5 + value * 0.075));
     const drop: GameEntity = {
       id: `drop_${type}_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1203,7 +1217,7 @@ export class GameEngine {
         x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
         y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
       },
-      size: { x: 18, y: 18 },
+      size: { x: dropRadius * 3, y: dropRadius * 3 },
       rotation: Math.random() * Math.PI * 2,
       rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: type === 'fuel' ? '#00e5ff' : type === 'health' ? '#4ade80' : '#ffd700',
@@ -1215,7 +1229,7 @@ export class GameEngine {
       dropValue: value,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
-      polygonPoints: this.generateShardPolygon(type),
+      polygonPoints: this.generateShardPolygon(type, dropRadius),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
@@ -1232,6 +1246,7 @@ export class GameEngine {
     const pvx = parentVelocity?.x ?? 0;
     const pvy = parentVelocity?.y ?? 0;
     const maxSpin = 2.5;
+    const dropRadius = 7; // fixed mid-range size for weapon powerups
     const drop: GameEntity = {
       id: `drop_powerup_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1243,7 +1258,7 @@ export class GameEngine {
         x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
         y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
       },
-      size: { x: 18, y: 18 },
+      size: { x: dropRadius * 3, y: dropRadius * 3 },
       rotation: Math.random() * Math.PI * 2,
       rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: weaponConfig.color,
@@ -1256,7 +1271,7 @@ export class GameEngine {
       dropWeapon: weaponType,
       lifetime: DROP_CONFIG.LIFETIME,
       maxLifetime: DROP_CONFIG.LIFETIME,
-      polygonPoints: this.generateShardPolygon('powerup'),
+      polygonPoints: this.generateShardPolygon('powerup', dropRadius),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
