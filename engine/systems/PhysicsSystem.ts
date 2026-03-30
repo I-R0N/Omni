@@ -435,14 +435,26 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
-      // Drop shards collide with asteroids and structures only — not player, enemies, or projectiles.
-      // Non-drop interactables (POIs, etc.) are skipped entirely.
+      // INTERACTABLE collision rules:
+      // - Non-drop interactables (POIs, etc.): skip entirely.
+      // - Glass shards are full physics participants — they interact with everything
+      //   (player, enemies, projectiles, asteroids, structures).  They are environmental
+      //   debris and should deflect shots and bounce off ships.
+      // - Non-glass collectible drops: only physically collide with asteroids and
+      //   structures.  Player collection is handled by the magnetic logic in GameEngine,
+      //   not by physics contact, so we skip those pairs here to avoid accidental
+      //   collection via direct collision.
       if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
           const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
           const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
-          if (!dropA && !dropB) return;
+          if (!dropA && !dropB) return; // non-drop interactable (POI, etc.) — skip
+          const drop  = dropA ? a : b;
           const other = dropA ? b : a;
-          if (other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
+          if (drop.dropType !== 'glass') {
+              // Non-glass drops only physically bounce off asteroids and structures.
+              if (other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
+          }
+          // Glass shards: fall through — interact with all entity types.
       }
 
       // --- PROJECTILE COLLISIONS ---
