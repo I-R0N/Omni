@@ -361,6 +361,42 @@ export class GameEngine {
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       }
 
+      // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
+      // causing gradual clustering as they drift through the flow field.
+      // Glass shards are purely debris and excluded.
+      // Pre-build a candidate list to keep the O(n²) pair count small.
+      const GRAV_G        = 2.5;
+      const GRAV_RANGE_SQ = 120 * 120;
+      const GRAV_MIN_SQ   = 12 * 12; // avoid singularity at close range
+      const gravCandidates: GameEntity[] = [];
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active) continue;
+          if (e.type === EntityType.ASTEROID) { gravCandidates.push(e); continue; }
+          if (e.type === EntityType.INTERACTABLE && e.dropType && e.dropType !== 'glass') {
+              gravCandidates.push(e);
+          }
+      }
+      const gc = gravCandidates;
+      for (let i = 0; i < gc.length; i++) {
+          for (let j = i + 1; j < gc.length; j++) {
+              const a  = gc[i];
+              const b  = gc[j];
+              const dx = b.position.x - a.position.x;
+              const dy = b.position.y - a.position.y;
+              const distSq = dx * dx + dy * dy;
+              if (distSq > GRAV_RANGE_SQ) continue;
+              const effSq  = Math.max(distSq, GRAV_MIN_SQ);
+              const f      = GRAV_G / effSq; // acceleration magnitude (both get same)
+              const fx     = dx * f;
+              const fy     = dy * f;
+              a.velocity.x += fx * dt;
+              a.velocity.y += fy * dt;
+              b.velocity.x -= fx * dt;
+              b.velocity.y -= fy * dt;
+          }
+      }
+
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
       let writeIdx = 0;
@@ -962,93 +998,72 @@ export class GameEngine {
   }
 
   private createAsteroidShards(parent: GameEntity) {
-      // Minimum shard size = smallest spawnable asteroid so all fragments
-      // are gameplay-valid and the size hierarchy stays consistent.
+      // Minimum shard size = smallest spawnable asteroid.
       const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
 
-      // Maximum number of equal-area shards that all meet the minimum size.
-      // area ∝ size²  →  N ≤ (parent / MIN_SIZE)²
-      // Cap at 4 to allow high-damage weapons to produce an extra fragment.
-      const maxN = Math.min(4, Math.floor((parent.size.x / MIN_SIZE) ** 2));
-      if (maxN < 2) return; // parent too small to produce valid fragments
+      // Parent area (area ∝ size²).
+      const parentArea = parent.size.x * parent.size.x;
 
-      // Damage biases the shard count: low damage → fewer larger pieces,
-      // high damage → more smaller pieces.
-      // damageNorm 0 (damage 1) → prefer 2 shards; 1 (damage 5) → up to maxN.
+      // If parent is too small to yield two valid fragments, stop.
+      if (parentArea < MIN_SIZE * MIN_SIZE * 2) return;
+
+      // Damage scales both count and size distribution.
+      // damageNorm 0 → 2 pieces, mostly large; 1 → 5 pieces, mostly small.
       const damage     = parent.lastImpactDamage ?? 1;
       const damageNorm = Math.min(1, (damage - 1) / 4);
-      const maxForDmg  = Math.min(maxN, 2 + Math.round(damageNorm * 2)); // 2..4
-      const shardCount = 2 + Math.floor(Math.random() * (maxForDmg - 1));
+      const count      = 2 + Math.round(damageNorm * 3); // 2–5
 
-      // Equal-area split: each shard has 1/N of the parent's area.
-      const newSize = parent.size.x / Math.sqrt(shardCount);
-      const hp      = newSize > 30 ? 2 : 1;
+      // Power-law area distribution: alpha low → few large; alpha high → many small.
+      const alpha = 0.4 + damageNorm * 1.6; // 0.4–2.0
+      const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+      const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
 
-      // Resolve impact direction from the stamped impactor velocity.
-      // If none is present (gravity crush, asteroid-asteroid) fall back to
-      // isotropic scatter.
+      // Normalise so total area equals parent area, then convert to sizes.
+      const sizes: number[] = rawAreas
+          .map(a => Math.sqrt((a / rawSum) * parentArea))
+          .filter(s => s >= MIN_SIZE);
+
+      if (sizes.length < 2) return; // not enough valid fragments
+
+      // Resolve impact direction.
       const iv = parent.lastImpactVelocity;
       const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
       const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+      const HALF_CONE   = Math.PI * 0.55;
 
-      // Half-angle of the forward scatter cone.  Wide enough to read as an
-      // explosion, narrow enough to have clear directionality.
-      const HALF_CONE = Math.PI * 0.55; // ±99°
+      const parentRadius = parent.size.x / 2;
 
-      for (let i = 0; i < shardCount; i++) {
-          // --- scatter direction ---
+      for (let i = 0; i < sizes.length; i++) {
+          const newSize = sizes[i];
+          const hp      = newSize > 30 ? 2 : 1;
+
           let scatterAngle: number;
           let scatterSpeed: number;
-
           if (impactAngle !== null) {
-              // Forward-biased cone centred on the projectile's travel direction.
               scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-              // Shards carry a fraction of the projectile speed plus a small
-              // randomised kick so pieces spread rather than clump.
               scatterSpeed = impactSpeed * 0.35 + 0.4 + Math.random() * 1.2;
           } else {
               scatterAngle = Math.random() * Math.PI * 2;
               scatterSpeed = 1 + Math.random() * 2;
           }
 
-          const scatterX = Math.cos(scatterAngle) * scatterSpeed;
-          const scatterY = Math.sin(scatterAngle) * scatterSpeed;
+          const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
+          const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
-          // Final shard velocity = parent drift + directional scatter.
-          const vx = parent.velocity.x + scatterX;
-          const vy = parent.velocity.y + scatterY;
-
-          // --- irregular shard polygon (same technique as createAsteroid) ---
-          // Fewer points than a full asteroid, and more aggressive radius
-          // variation so shards look like jagged fragments.
-          const numPoints = 5 + Math.floor(Math.random() * 3); // 5–7
+          const numPoints = 5 + Math.floor(Math.random() * 3);
           const baseR     = (newSize / 2) * 0.8;
           const rawPts: { angle: number; r: number }[] = [];
           for (let j = 0; j < numPoints; j++) {
               const baseAngle   = (j / numPoints) * Math.PI * 2;
               const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
-              rawPts.push({
-                  angle: baseAngle + angleJitter,
-                  r:     baseR * (0.55 + Math.random() * 0.7), // 55 %–125 % — more jagged
-              });
+              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (0.55 + Math.random() * 0.7) });
           }
           rawPts.sort((a, b) => a.angle - b.angle);
-          const points: Vector2[] = rawPts.map(p => ({
-              x: Math.cos(p.angle) * p.r,
-              y: Math.sin(p.angle) * p.r,
-          }));
+          const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
 
-          // Offset spawn position in the scatter direction so shards don't all
-          // originate at the same point and immediately re-collide.
-          // Use the parent radius (not shard size) as the scale so large
-          // asteroids don't teleport pieces to their outer edge.
-          const parentRadius = parent.size.x / 2;
           const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
           const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
-
-          // Shards tumble faster than their parent (smaller = faster spin).
-          const maxSpin      = 2.0 / (newSize / 20);
-          const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
+          const maxSpin = 2.0 / (newSize / 20);
 
           this.currentMap?.entities.push({
               id:           `shard_${Date.now()}_${i}`,
@@ -1057,7 +1072,7 @@ export class GameEngine {
               velocity:     { x: vx, y: vy },
               size:         { x: newSize, y: newSize },
               rotation:      Math.random() * Math.PI * 2,
-              rotationSpeed,
+              rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
               color:         COLORS.ASTEROID,
               active:        true,
               health:        hp,
@@ -1209,23 +1224,36 @@ export class GameEngine {
   private spawnGlassShards(tile: GameEntity) {
     if (!this.currentMap) return;
 
-    // Damage biases count and size: low damage → fewer, larger shards;
-    // high damage → more, smaller shards.
-    // damageNorm 0 (damage 1) → 4–6 chunky; 1 (damage 5) → 9–11 tiny.
+    // Damage biases count and size distribution.
+    // damageNorm 0 → 4–6 shards, mostly large; 1 → 9–11, mostly small.
     const damage     = tile.lastImpactDamage ?? 1;
     const damageNorm = Math.min(1, (damage - 1) / 4);
-    const countBase  = Math.round(4 + damageNorm * 6); // 4..10
-    const count      = countBase + Math.floor(Math.random() * 3);
-    // Radius centre shifts from 6.5 (low dmg, chunky) to 4.0 (high dmg, tiny).
-    const radiusCenter = 6.5 - damageNorm * 2.5;
+    const count      = Math.round(4 + damageNorm * 6) + Math.floor(Math.random() * 3);
+
+    // Tile is approximated as a square with half-side 11 → area = 11² = 121.
+    const TILE_HALF = 11;
+    const parentArea = TILE_HALF * TILE_HALF;
+    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
+
+    // Power-law area distribution — same principle as asteroids.
+    const alpha    = 0.3 + damageNorm * 1.5; // 0.3 → few large; 1.8 → many small
+    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
+    // Radii derived from normalised areas (area = r²).
+    const radii: number[] = rawAreas
+      .map(a => Math.sqrt((a / rawSum) * parentArea))
+      .filter(r => r >= MIN_RADIUS);
+
+    if (radii.length < 2) return;
 
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
-    const HALF_CONE = Math.PI * 0.6;
+    const HALF_CONE   = Math.PI * 0.6;
+    const scatter     = 12;
 
-    for (let i = 0; i < count; i++) {
-      const radius = (radiusCenter - 1.5) + Math.random() * 3; // ±1.5 around centre
+    for (let i = 0; i < radii.length; i++) {
+      const radius = radii[i];
 
       let angle: number;
       let speed: number;
@@ -1237,19 +1265,16 @@ export class GameEngine {
         speed = 0.4 + Math.random() * 1.5;
       }
 
-      // Angular glass shard polygon — 3–5 vertices, low jitter so edges stay sharp
+      // Angular glass shard polygon — 3–5 vertices, low jitter so edges stay sharp.
       const numPoints = 3 + Math.floor(Math.random() * 3);
       const rawPts: { angle: number; r: number }[] = [];
       for (let j = 0; j < numPoints; j++) {
         const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.35;
+        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.35;
         rawPts.push({ angle: baseAngle + jitter, r: radius * (0.5 + Math.random() * 0.65) });
       }
       rawPts.sort((a, b) => a.angle - b.angle);
       const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-      const scatter = 12;
-      const maxSpin = 2.8;
 
       this.currentMap.entities.push({
         id:           `glass_${Date.now()}_${i}_${Math.random()}`,
@@ -1261,7 +1286,7 @@ export class GameEngine {
         velocity:     { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
         size:         { x: radius * 3, y: radius * 3 },
         rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        rotationSpeed: (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
         color:         'rgba(186,230,253,0.8)',
         active:        true,
         health:        1,
