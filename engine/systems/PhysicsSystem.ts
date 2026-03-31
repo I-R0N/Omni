@@ -454,7 +454,8 @@ export class PhysicsSystem {
               // Only player projectiles can break collectible drops.
               // Enemy shots pass through them so enemies can't farm the player's loot.
               const isPlayerShot = other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER;
-              if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
+              if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE
+                      && other.type !== EntityType.PLAYER) return;
           }
           // Glass shards: fall through — interact with all entity types.
       }
