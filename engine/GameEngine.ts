@@ -361,6 +361,16 @@ export class GameEngine {
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       }
 
+      // Gentle flow-field current on the player — adds a subtle drift bias in
+      // the direction of the field without fighting player input.  The correction
+      // is ~4× weaker than asteroids so it's felt as ambience, not forced movement.
+      {
+          const flow = this.flowField.sampleAsteroidFlow(this.player.position.x, this.player.position.y);
+          const PLAYER_FLOW_STRENGTH = 0.6; // world units per second added toward flow
+          this.player.velocity.x += flow.x * PLAYER_FLOW_STRENGTH * dt;
+          this.player.velocity.y += flow.y * PLAYER_FLOW_STRENGTH * dt;
+      }
+
       // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
       // causing gradual clustering as they drift through the flow field.
       // Glass shards are purely debris and excluded.
