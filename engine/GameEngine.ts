@@ -378,7 +378,7 @@ export class GameEngine {
       const GRAV_G        = 2.5;
       const GRAV_RANGE_SQ = 120 * 120;
       const GRAV_MIN_SQ   = 12 * 12; // avoid singularity at close range
-      const gravCandidates: GameEntity[] = [];
+      const gravCandidates: GameEntity[] = [this.player];
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (!e.active) continue;
