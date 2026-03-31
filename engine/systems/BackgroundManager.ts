@@ -1,6 +1,7 @@
 
 import { MapType, Vector2, GameEntity } from '../../types';
 import { COLORS, SHOOTING_STAR_CONSTANTS } from '../../constants';
+import { NEBULA_IMAGES } from '../../assets';
 
 interface Star {
   x: number;
@@ -43,15 +44,29 @@ export class BackgroundManager {
   private shootingStars: ShootingStar[] = [];
   private shootingTimer: number = 0;
   private lastCameraPos: Vector2 | null = null;
-  private puffTextures: HTMLCanvasElement[] = [];
+  private puffTextures: (HTMLCanvasElement | HTMLImageElement)[] = [];
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
-    this.createPuffVariants();
+    if (NEBULA_IMAGES.length > 0) {
+      this.loadNebulaImages(NEBULA_IMAGES);
+    } else {
+      this.createPuffVariants();
+    }
     this.shootingTimer = Math.random() * (SHOOTING_STAR_CONSTANTS.MAX_TIMER - SHOOTING_STAR_CONSTANTS.MIN_TIMER) + SHOOTING_STAR_CONSTANTS.MIN_TIMER;
+  }
+
+  private loadNebulaImages(paths: string[]) {
+    paths.forEach(path => {
+      const img = new Image();
+      img.src = path;
+      // Push immediately so textureIndex assignments in initContent are stable.
+      // The image may still be loading; drawImage handles in-progress loads gracefully.
+      this.puffTextures.push(img);
+    });
   }
 
   private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): { x: number, y: number } {
