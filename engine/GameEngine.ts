@@ -734,91 +734,11 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
-    // Drop collection: magnetic draw and collect on contact.
-    // Iterates activeDrops (dedicated list) instead of all ~22k map entities.
-    // Lifetime is managed by PhysicsSystem — no duplicate tick here.
-    const ATTRACT_RADIUS_SQ = 90 * 90; // squared — avoids sqrt for distant drops
-    const ATTRACT_SPEED     = 220;       // world units per second
-    const collectRadiusSq   = this.player.size.x * this.player.size.x;
+    // Remove drops that were deactivated (shot by player).
+    // Collection is now triggered by player projectile hits, not magnetic contact.
     let dropWriteIdx = 0;
     for (let i = 0; i < this.activeDrops.length; i++) {
-        const entity = this.activeDrops[i];
-
-        // Remove drops that expired via PhysicsSystem lifetime management
-        if (!entity.active) continue;
-
-        const dx = this.player.position.x - entity.position.x;
-        const dy = this.player.position.y - entity.position.y;
-        const distSq = dx * dx + dy * dy;
-
-        // Magnetic draw — only pay sqrt cost when within attract range
-        if (distSq < ATTRACT_RADIUS_SQ && distSq > 0.01) {
-            const dist = Math.sqrt(distSq);
-            const step = Math.min(ATTRACT_SPEED * dt, dist);
-            entity.position.x += (dx / dist) * step;
-            entity.position.y += (dy / dist) * step;
-        }
-
-        // Collect on contact
-        if (distSq < collectRadiusSq) {
-            if (entity.dropType === 'fuel') {
-                const gained = Math.min(
-                    (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
-                    entity.dropValue ?? 0
-                );
-                this.player.fuel = (this.player.fuel ?? 0) + gained;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: '+FUEL',
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#00e5ff',
-                    active: true,
-                });
-            } else if (entity.dropType === 'gold') {
-                const amount = entity.dropValue ?? 0;
-                this.player.gold = (this.player.gold ?? 0) + amount;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: `+${Math.round(amount)}`,
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#ffd700',
-                    active: true,
-                });
-            } else if (entity.dropType === 'health') {
-                // Don't consume if player is already at full health
-                if (this.player.health >= this.player.maxHealth) {
-                    this.activeDrops[dropWriteIdx++] = entity;
-                    continue;
-                }
-                const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
-                const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
-                this.player.health += healed;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: `+${Math.round(healed)}`,
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#4ade80',
-                    active: true,
-                });
-            } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
-                this.player.currentWeapon = entity.dropWeapon;
-                this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
-                this.player.burstQueue = 0;
-            }
-            entity.active = false;
-            continue; // don't keep in activeDrops
-        }
-
-        this.activeDrops[dropWriteIdx++] = entity;
+        if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
 
@@ -1153,12 +1073,74 @@ export class GameEngine {
   }
 
 
+  /**
+   * Apply the reward of a collected/broken drop directly to the player.
+   * Called both from spawnDrops (when a drop is destroyed by a player projectile)
+   * and previously from the contact-collection loop.
+   */
+  private applyDropEffect(entity: GameEntity) {
+    if (entity.dropType === 'fuel') {
+      const gained = Math.min(
+        (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
+        entity.dropValue ?? 0
+      );
+      this.player.fuel = (this.player.fuel ?? 0) + gained;
+      this.damageTexts.push({
+        id: `collect_${Date.now()}_${Math.random()}`,
+        position: { ...entity.position },
+        text: '+FUEL',
+        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        color: '#00e5ff',
+        active: true,
+      });
+    } else if (entity.dropType === 'gold') {
+      const amount = entity.dropValue ?? 0;
+      this.player.gold = (this.player.gold ?? 0) + amount;
+      this.damageTexts.push({
+        id: `collect_${Date.now()}_${Math.random()}`,
+        position: { ...entity.position },
+        text: `+${Math.round(amount)}`,
+        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        color: '#ffd700',
+        active: true,
+      });
+    } else if (entity.dropType === 'health') {
+      const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
+      const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
+      if (healed > 0) {
+        this.player.health += healed;
+        this.damageTexts.push({
+          id: `collect_${Date.now()}_${Math.random()}`,
+          position: { ...entity.position },
+          text: `+${Math.round(healed)}`,
+          velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+          color: '#4ade80',
+          active: true,
+        });
+      }
+    } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
+      this.player.currentWeapon = entity.dropWeapon;
+      this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
+      this.player.burstQueue = 0;
+    }
+  }
+
   private spawnDrops(entity: GameEntity) {
     const pos = entity.position;
     const pv = entity.velocity;
 
     if (entity.type === EntityType.STRUCTURE) {
       this.spawnGlassShards(entity);
+
+    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
+      // Drop was destroyed by a player projectile — apply its reward immediately.
+      this.applyDropEffect(entity);
 
     } else if (entity.type === EntityType.ASTEROID) {
       const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
@@ -1337,8 +1319,6 @@ export class GameEngine {
       mass: 5,
       dropType: type,
       dropValue: value,
-      lifetime: DROP_CONFIG.LIFETIME,
-      maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: this.generateShardPolygon(type, dropRadius),
     };
     this.currentMap.entities.push(drop);
@@ -1379,8 +1359,6 @@ export class GameEngine {
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
-      lifetime: DROP_CONFIG.LIFETIME,
-      maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: this.generateShardPolygon('powerup', dropRadius),
     };
     this.currentMap.entities.push(drop);

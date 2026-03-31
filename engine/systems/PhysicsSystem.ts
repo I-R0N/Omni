@@ -451,8 +451,10 @@ export class PhysicsSystem {
           const drop  = dropA ? a : b;
           const other = dropA ? b : a;
           if (drop.dropType !== 'glass') {
-              // Non-glass drops only physically bounce off asteroids and structures.
-              if (other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
+              // Only player projectiles can break collectible drops.
+              // Enemy shots pass through them so enemies can't farm the player's loot.
+              const isPlayerShot = other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER;
+              if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE) return;
           }
           // Glass shards: fall through — interact with all entity types.
       }
