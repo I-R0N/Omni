@@ -332,7 +332,7 @@ export class GameEngine {
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
-          if (ast.size.x > 15) this.createAsteroidShards(ast);
+          if (ast.size.x > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize) this.createAsteroidShards(ast);
       }
       if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
@@ -348,7 +348,8 @@ export class GameEngine {
       const entities = this.currentMap.entities;
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (e.type !== EntityType.ASTEROID || !e.active) continue;
+          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType;
+          if ((e.type !== EntityType.ASTEROID && !isDropShard) || !e.active) continue;
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
@@ -358,6 +359,52 @@ export class GameEngine {
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+      }
+
+      // Gentle flow-field current on the player — adds a subtle drift bias in
+      // the direction of the field without fighting player input.  The correction
+      // is ~4× weaker than asteroids so it's felt as ambience, not forced movement.
+      {
+          const flow = this.flowField.sampleAsteroidFlow(this.player.position.x, this.player.position.y);
+          const PLAYER_FLOW_STRENGTH = 0.6; // world units per second added toward flow
+          this.player.velocity.x += flow.x * PLAYER_FLOW_STRENGTH * dt;
+          this.player.velocity.y += flow.y * PLAYER_FLOW_STRENGTH * dt;
+      }
+
+      // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
+      // causing gradual clustering as they drift through the flow field.
+      // Glass shards are purely debris and excluded.
+      // Pre-build a candidate list to keep the O(n²) pair count small.
+      const GRAV_G        = 2.5;
+      const GRAV_RANGE_SQ = 120 * 120;
+      const GRAV_MIN_SQ   = 12 * 12; // avoid singularity at close range
+      const gravCandidates: GameEntity[] = [this.player];
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active) continue;
+          if (e.type === EntityType.ASTEROID) { gravCandidates.push(e); continue; }
+          if (e.type === EntityType.INTERACTABLE && e.dropType && e.dropType !== 'glass') {
+              gravCandidates.push(e);
+          }
+      }
+      const gc = gravCandidates;
+      for (let i = 0; i < gc.length; i++) {
+          for (let j = i + 1; j < gc.length; j++) {
+              const a  = gc[i];
+              const b  = gc[j];
+              const dx = b.position.x - a.position.x;
+              const dy = b.position.y - a.position.y;
+              const distSq = dx * dx + dy * dy;
+              if (distSq > GRAV_RANGE_SQ) continue;
+              const effSq  = Math.max(distSq, GRAV_MIN_SQ);
+              const f      = GRAV_G / effSq; // acceleration magnitude (both get same)
+              const fx     = dx * f;
+              const fy     = dy * f;
+              a.velocity.x += fx * dt;
+              a.velocity.y += fy * dt;
+              b.velocity.x -= fx * dt;
+              b.velocity.y -= fy * dt;
+          }
       }
 
       // In-place compaction (Garbage Free)
@@ -697,91 +744,11 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
-    // Drop collection: magnetic draw and collect on contact.
-    // Iterates activeDrops (dedicated list) instead of all ~22k map entities.
-    // Lifetime is managed by PhysicsSystem — no duplicate tick here.
-    const ATTRACT_RADIUS_SQ = 120 * 120; // squared — avoids sqrt for distant drops
-    const ATTRACT_SPEED     = 220;       // world units per second
-    const collectRadiusSq   = this.player.size.x * this.player.size.x;
+    // Remove drops that were deactivated (shot by player).
+    // Collection is now triggered by player projectile hits, not magnetic contact.
     let dropWriteIdx = 0;
     for (let i = 0; i < this.activeDrops.length; i++) {
-        const entity = this.activeDrops[i];
-
-        // Remove drops that expired via PhysicsSystem lifetime management
-        if (!entity.active) continue;
-
-        const dx = this.player.position.x - entity.position.x;
-        const dy = this.player.position.y - entity.position.y;
-        const distSq = dx * dx + dy * dy;
-
-        // Magnetic draw — only pay sqrt cost when within attract range
-        if (distSq < ATTRACT_RADIUS_SQ && distSq > 0.01) {
-            const dist = Math.sqrt(distSq);
-            const step = Math.min(ATTRACT_SPEED * dt, dist);
-            entity.position.x += (dx / dist) * step;
-            entity.position.y += (dy / dist) * step;
-        }
-
-        // Collect on contact
-        if (distSq < collectRadiusSq) {
-            if (entity.dropType === 'fuel') {
-                const gained = Math.min(
-                    (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
-                    entity.dropValue ?? 0
-                );
-                this.player.fuel = (this.player.fuel ?? 0) + gained;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: '+FUEL',
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#00e5ff',
-                    active: true,
-                });
-            } else if (entity.dropType === 'gold') {
-                const amount = entity.dropValue ?? 0;
-                this.player.gold = (this.player.gold ?? 0) + amount;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: `+${Math.round(amount)}`,
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#ffd700',
-                    active: true,
-                });
-            } else if (entity.dropType === 'health') {
-                // Don't consume if player is already at full health
-                if (this.player.health >= this.player.maxHealth) {
-                    this.activeDrops[dropWriteIdx++] = entity;
-                    continue;
-                }
-                const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
-                const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
-                this.player.health += healed;
-                this.damageTexts.push({
-                    id: `collect_${Date.now()}_${Math.random()}`,
-                    position: { ...entity.position },
-                    text: `+${Math.round(healed)}`,
-                    velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-                    lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-                    color: '#4ade80',
-                    active: true,
-                });
-            } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
-                this.player.currentWeapon = entity.dropWeapon;
-                this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
-                this.player.burstQueue = 0;
-            }
-            entity.active = false;
-            continue; // don't keep in activeDrops
-        }
-
-        this.activeDrops[dropWriteIdx++] = entity;
+        if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
 
@@ -961,75 +928,72 @@ export class GameEngine {
   }
 
   private createAsteroidShards(parent: GameEntity) {
-      const shardCount = 2 + Math.floor(Math.random() * 2);
-      const newSize    = parent.size.x / Math.sqrt(shardCount);
-      const hp         = newSize > 30 ? 2 : 1;
+      // Minimum shard size = smallest spawnable asteroid.
+      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
 
-      // Resolve impact direction from the stamped impactor velocity.
-      // If none is present (gravity crush, asteroid-asteroid) fall back to
-      // isotropic scatter.
+      // Parent area (area ∝ size²).
+      const parentArea = parent.size.x * parent.size.x;
+
+      // If parent is too small to yield two valid fragments, stop.
+      if (parentArea < MIN_SIZE * MIN_SIZE * 2) return;
+
+      // Damage scales both count and size distribution.
+      // damageNorm 0 → 2 pieces, mostly large; 1 → 5 pieces, mostly small.
+      const damage     = parent.lastImpactDamage ?? 1;
+      const damageNorm = Math.min(1, (damage - 1) / 4);
+      const count      = 2 + Math.round(damageNorm * 3); // 2–5
+
+      // Power-law area distribution: alpha low → few large; alpha high → many small.
+      const alpha = 0.4 + damageNorm * 1.6; // 0.4–2.0
+      const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+      const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
+
+      // Normalise so total area equals parent area, then convert to sizes.
+      const sizes: number[] = rawAreas
+          .map(a => Math.sqrt((a / rawSum) * parentArea))
+          .filter(s => s >= MIN_SIZE);
+
+      if (sizes.length < 2) return; // not enough valid fragments
+
+      // Resolve impact direction.
       const iv = parent.lastImpactVelocity;
       const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
       const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+      const HALF_CONE   = Math.PI * 0.55;
 
-      // Half-angle of the forward scatter cone.  Wide enough to read as an
-      // explosion, narrow enough to have clear directionality.
-      const HALF_CONE = Math.PI * 0.55; // ±99°
+      const parentRadius = parent.size.x / 2;
 
-      for (let i = 0; i < shardCount; i++) {
-          // --- scatter direction ---
+      for (let i = 0; i < sizes.length; i++) {
+          const newSize = sizes[i];
+          const hp      = newSize > 30 ? 2 : 1;
+
           let scatterAngle: number;
           let scatterSpeed: number;
-
           if (impactAngle !== null) {
-              // Forward-biased cone centred on the projectile's travel direction.
               scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-              // Shards carry a fraction of the projectile speed plus a small
-              // randomised kick so pieces spread rather than clump.
               scatterSpeed = impactSpeed * 0.35 + 0.4 + Math.random() * 1.2;
           } else {
               scatterAngle = Math.random() * Math.PI * 2;
               scatterSpeed = 1 + Math.random() * 2;
           }
 
-          const scatterX = Math.cos(scatterAngle) * scatterSpeed;
-          const scatterY = Math.sin(scatterAngle) * scatterSpeed;
+          const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
+          const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
-          // Final shard velocity = parent drift + directional scatter.
-          const vx = parent.velocity.x + scatterX;
-          const vy = parent.velocity.y + scatterY;
-
-          // --- irregular shard polygon (same technique as createAsteroid) ---
-          // Fewer points than a full asteroid, and more aggressive radius
-          // variation so shards look like jagged fragments.
-          const numPoints = 5 + Math.floor(Math.random() * 3); // 5–7
+          const numPoints = 5 + Math.floor(Math.random() * 3);
           const baseR     = (newSize / 2) * 0.8;
           const rawPts: { angle: number; r: number }[] = [];
           for (let j = 0; j < numPoints; j++) {
               const baseAngle   = (j / numPoints) * Math.PI * 2;
               const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
-              rawPts.push({
-                  angle: baseAngle + angleJitter,
-                  r:     baseR * (0.55 + Math.random() * 0.7), // 55 %–125 % — more jagged
-              });
+              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (0.55 + Math.random() * 0.7) });
           }
           rawPts.sort((a, b) => a.angle - b.angle);
-          const points: Vector2[] = rawPts.map(p => ({
-              x: Math.cos(p.angle) * p.r,
-              y: Math.sin(p.angle) * p.r,
-          }));
+          const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
 
-          // Offset spawn position in the scatter direction so shards don't all
-          // originate at the same point and immediately re-collide.
-          // Use the parent radius (not shard size) as the scale so large
-          // asteroids don't teleport pieces to their outer edge.
-          const parentRadius = parent.size.x / 2;
           const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
           const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
-
-          // Shards tumble faster than their parent (smaller = faster spin).
-          const maxSpin      = 2.0 / (newSize / 20);
-          const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
+          const maxSpin = 2.0 / (newSize / 20);
 
           this.currentMap?.entities.push({
               id:           `shard_${Date.now()}_${i}`,
@@ -1038,7 +1002,7 @@ export class GameEngine {
               velocity:     { x: vx, y: vy },
               size:         { x: newSize, y: newSize },
               rotation:      Math.random() * Math.PI * 2,
-              rotationSpeed,
+              rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
               color:         COLORS.ASTEROID,
               active:        true,
               health:        hp,
@@ -1119,38 +1083,231 @@ export class GameEngine {
   }
 
 
+  /**
+   * Apply the reward of a collected/broken drop directly to the player.
+   * Called both from spawnDrops (when a drop is destroyed by a player projectile)
+   * and previously from the contact-collection loop.
+   */
+  private applyDropEffect(entity: GameEntity) {
+    if (entity.dropType === 'fuel') {
+      const gained = Math.min(
+        (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
+        entity.dropValue ?? 0
+      );
+      this.player.fuel = (this.player.fuel ?? 0) + gained;
+      this.damageTexts.push({
+        id: `collect_${Date.now()}_${Math.random()}`,
+        position: { ...entity.position },
+        text: '+FUEL',
+        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        color: '#00e5ff',
+        active: true,
+      });
+    } else if (entity.dropType === 'gold') {
+      const amount = entity.dropValue ?? 0;
+      this.player.gold = (this.player.gold ?? 0) + amount;
+      this.damageTexts.push({
+        id: `collect_${Date.now()}_${Math.random()}`,
+        position: { ...entity.position },
+        text: `+${Math.round(amount)}`,
+        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+        color: '#ffd700',
+        active: true,
+      });
+    } else if (entity.dropType === 'health') {
+      const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
+      const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
+      if (healed > 0) {
+        this.player.health += healed;
+        this.damageTexts.push({
+          id: `collect_${Date.now()}_${Math.random()}`,
+          position: { ...entity.position },
+          text: `+${Math.round(healed)}`,
+          velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
+          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+          color: '#4ade80',
+          active: true,
+        });
+      }
+    } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
+      this.player.currentWeapon = entity.dropWeapon;
+      this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
+      this.player.burstQueue = 0;
+    }
+  }
+
   private spawnDrops(entity: GameEntity) {
     const pos = entity.position;
+    const pv = entity.velocity;
 
     if (entity.type === EntityType.STRUCTURE) {
-      this.spawnDrop(pos, 'fuel', DROP_CONFIG.FUEL_FROM_TILE);
+      this.spawnGlassShards(entity);
+
+    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
+      // Drop was destroyed by a player projectile — apply its reward immediately.
+      this.applyDropEffect(entity);
 
     } else if (entity.type === EntityType.ASTEROID) {
       const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
-      this.spawnDrop(pos, 'gold', goldAmt);
+      this.spawnDrop(pos, 'gold', goldAmt, pv);
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
-        this.spawnRandomPowerupDrop(pos);
+        this.spawnRandomPowerupDrop(pos, pv);
       }
 
     } else if (entity.type === EntityType.ENEMY) {
       const tier = entity.enemyTier ?? 1;
-      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier);
+      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier, pv);
 
       if (Math.random() < DROP_CONFIG.HEALTH_CHANCE_ENEMY) {
-        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT, pv);
       }
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
-        this.spawnRandomPowerupDrop(pos);
+        this.spawnRandomPowerupDrop(pos, pv);
       }
     }
   }
 
-  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number) {
+  /**
+   * Generate an irregular shard polygon for a drop.
+   * baseR controls visual size and should scale with the drop's value so
+   * larger-value drops are physically bigger.
+   */
+  private generateShardPolygon(type: 'fuel' | 'gold' | 'health' | 'powerup', baseR: number): Vector2[] {
+    let numPoints: number;
+    let radMin: number;
+    let radMax: number;
+    let angleJitterScale: number;
+    if (type === 'fuel') {
+      numPoints = 4 + Math.floor(Math.random() * 2);   // 4-5, chunky tile piece
+      radMin = 0.6; radMax = 1.1; angleJitterScale = 0.3;
+    } else if (type === 'gold') {
+      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, asteroid shard
+      radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
+    } else if (type === 'health') {
+      numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
+      radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
+    } else {
+      numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
+      radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
+    }
+    const rawPts: { angle: number; r: number }[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const baseAngle = (i / numPoints) * Math.PI * 2;
+      const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 2 * angleJitterScale;
+      rawPts.push({ angle: baseAngle + jitter, r: baseR * (radMin + Math.random() * (radMax - radMin)) });
+    }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+  }
+
+  /**
+   * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel shard.
+   * Glass shards look like tile fragments (same glass rendering), drift with the
+   * flow field, and persist as permanent debris.  They are NOT added to activeDrops so
+   * they cannot be collected — they are purely environmental debris.
+   */
+  private spawnGlassShards(tile: GameEntity) {
+    if (!this.currentMap) return;
+
+    // Damage biases count and size distribution.
+    // damageNorm 0 → 4–6 shards, mostly large; 1 → 9–11, mostly small.
+    const damage     = tile.lastImpactDamage ?? 1;
+    const damageNorm = Math.min(1, (damage - 1) / 4);
+    const count      = Math.round(4 + damageNorm * 6) + Math.floor(Math.random() * 3);
+
+    // Tile is approximated as a square with half-side 11 → area = 11² = 121.
+    const TILE_HALF = 11;
+    const parentArea = TILE_HALF * TILE_HALF;
+    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
+
+    // Power-law area distribution — same principle as asteroids.
+    const alpha    = 0.3 + damageNorm * 1.5; // 0.3 → few large; 1.8 → many small
+    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
+    // Radii derived from normalised areas (area = r²).
+    const radii: number[] = rawAreas
+      .map(a => Math.sqrt((a / rawSum) * parentArea))
+      .filter(r => r >= MIN_RADIUS);
+
+    if (radii.length < 2) return;
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const HALF_CONE   = Math.PI * 0.6;
+    const scatter     = 12;
+
+    for (let i = 0; i < radii.length; i++) {
+      const radius = radii[i];
+
+      let angle: number;
+      let speed: number;
+      if (impactAngle !== null) {
+        angle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
+        speed = impactSpeed * 0.2 + 0.3 + Math.random() * 1.2;
+      } else {
+        angle = Math.random() * Math.PI * 2;
+        speed = 0.4 + Math.random() * 1.5;
+      }
+
+      // Angular glass shard polygon — 3–5 vertices, low jitter so edges stay sharp.
+      const numPoints = 3 + Math.floor(Math.random() * 3);
+      const rawPts: { angle: number; r: number }[] = [];
+      for (let j = 0; j < numPoints; j++) {
+        const baseAngle = (j / numPoints) * Math.PI * 2;
+        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.35;
+        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.5 + Math.random() * 0.65) });
+      }
+      rawPts.sort((a, b) => a.angle - b.angle);
+      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+      this.currentMap.entities.push({
+        id:           `glass_${Date.now()}_${i}_${Math.random()}`,
+        type:          EntityType.INTERACTABLE,
+        position:     {
+          x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
+          y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
+        },
+        velocity:     { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size:         { x: radius * 3, y: radius * 3 },
+        rotation:      Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
+        color:         'rgba(186,230,253,0.8)',
+        active:        true,
+        health:        1,
+        maxHealth:     1,
+        mass:          3,
+        dropType:      'glass',
+        dropValue:     0,
+        polygonPoints: pts,
+      });
+    }
+
+    // ~35 % chance: also eject a fuel shard
+    if (Math.random() < 0.35) {
+      this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
+    }
+  }
+
+  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const scatter = 20;
+    const scatterAngle = Math.random() * Math.PI * 2;
+    const scatterSpeed = 0.5 + Math.random() * 1.5;
+    const pvx = parentVelocity?.x ?? 0;
+    const pvy = parentVelocity?.y ?? 0;
+    const maxSpin = 2.5;
+    // Visual radius scales linearly with value so larger drops are physically bigger.
+    // Range: value=10 → r≈4.2, value=80 → r≈9.5
+    const dropRadius = Math.min(10, Math.max(4, 3.5 + value * 0.075));
     const drop: GameEntity = {
       id: `drop_${type}_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1158,29 +1315,38 @@ export class GameEngine {
         x: pos.x + (Math.random() - 0.5) * scatter * 2,
         y: pos.y + (Math.random() - 0.5) * scatter * 2,
       },
-      velocity: { x: 0, y: 0 },
-      size: { x: 18, y: 18 },
-      rotation: 0,
+      velocity: {
+        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
+        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
+      },
+      size: { x: dropRadius * 3, y: dropRadius * 3 },
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: type === 'fuel' ? '#00e5ff' : type === 'health' ? '#4ade80' : '#ffd700',
       active: true,
       health: 1,
       maxHealth: 1,
-      mass: Infinity,
+      mass: 5,
       dropType: type,
       dropValue: value,
-      lifetime: DROP_CONFIG.LIFETIME,
-      maxLifetime: DROP_CONFIG.LIFETIME,
+      polygonPoints: this.generateShardPolygon(type, dropRadius),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
   }
 
-  private spawnRandomPowerupDrop(pos: Vector2) {
+  private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;
+    const scatterAngle = Math.random() * Math.PI * 2;
+    const scatterSpeed = 0.5 + Math.random() * 1.5;
+    const pvx = parentVelocity?.x ?? 0;
+    const pvy = parentVelocity?.y ?? 0;
+    const maxSpin = 2.5;
+    const dropRadius = 7; // fixed mid-range size for weapon powerups
     const drop: GameEntity = {
       id: `drop_powerup_${Date.now()}_${Math.random()}`,
       type: EntityType.INTERACTABLE,
@@ -1188,19 +1354,22 @@ export class GameEngine {
         x: pos.x + (Math.random() - 0.5) * scatter * 2,
         y: pos.y + (Math.random() - 0.5) * scatter * 2,
       },
-      velocity: { x: 0, y: 0 },
-      size: { x: 18, y: 18 },
-      rotation: 0,
+      velocity: {
+        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
+        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
+      },
+      size: { x: dropRadius * 3, y: dropRadius * 3 },
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
       color: weaponConfig.color,
       active: true,
       health: 1,
       maxHealth: 1,
-      mass: Infinity,
+      mass: 5,
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
-      lifetime: DROP_CONFIG.LIFETIME,
-      maxLifetime: DROP_CONFIG.LIFETIME,
+      polygonPoints: this.generateShardPolygon('powerup', dropRadius),
     };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);

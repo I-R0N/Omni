@@ -137,22 +137,23 @@ export class UniverseMap extends BaseMapLayer {
     const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
 
-    // Dense landmark clusters close to spawn so the player has immediate visual context
+    // Landmark clusters in the inner zone — sparse enough to leave clear
+    // flow corridors between chunks for asteroids to stream through
     this.entities.push(...TileGenerator.generateClusteredMesh(
         8000, 8000,  // inner zone
         22,          // hexSize
-        250,         // clusterCount
-        20,          // minClusterSize
-        70           // maxClusterSize
+        100,         // clusterCount  (was 70)
+        15,          // minClusterSize (was 12)
+        45           // maxClusterSize (was 40)
     ));
 
-    // Sparser field of landmarks across the wide universe for long-range exploration
+    // Sparse outer landmarks — well-separated chunks across deep space
     this.entities.push(...TileGenerator.generateClusteredMesh(
         this.width, this.height,
         22,
-        350,
-        15,
-        55
+        130,         // was 100
+        8,           // was 6
+        28           // was 24
     ));
 
     // Clear a safe open area around spawn

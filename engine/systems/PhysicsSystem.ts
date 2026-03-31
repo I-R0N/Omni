@@ -104,8 +104,9 @@ export class PhysicsSystem {
           entity.position.y += entity.velocity.y;
 
           // Apply Friction
-          // Don't apply friction to projectiles (constant speed) or asteroids (drift)
-          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE) {
+          // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
+          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
+              && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             // Apply standard friction to all dynamic entities (Player, Enemies, etc)
             entity.velocity.x *= friction;
             entity.velocity.y *= friction;
@@ -433,8 +434,31 @@ export class PhysicsSystem {
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void
   ) {
-      if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) return; 
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
+      // INTERACTABLE collision rules:
+      // - Non-drop interactables (POIs, etc.): skip entirely.
+      // - Glass shards are full physics participants — they interact with everything
+      //   (player, enemies, projectiles, asteroids, structures).  They are environmental
+      //   debris and should deflect shots and bounce off ships.
+      // - Non-glass collectible drops: only physically collide with asteroids and
+      //   structures.  Player collection is handled by the magnetic logic in GameEngine,
+      //   not by physics contact, so we skip those pairs here to avoid accidental
+      //   collection via direct collision.
+      if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
+          const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
+          const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
+          if (!dropA && !dropB) return; // non-drop interactable (POI, etc.) — skip
+          const drop  = dropA ? a : b;
+          const other = dropA ? b : a;
+          if (drop.dropType !== 'glass') {
+              // Only player projectiles can break collectible drops.
+              // Enemy shots pass through them so enemies can't farm the player's loot.
+              const isPlayerShot = other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER;
+              if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE
+                      && other.type !== EntityType.PLAYER) return;
+          }
+          // Glass shards: fall through — interact with all entity types.
+      }
 
       // --- PROJECTILE COLLISIONS ---
       if (a.type === EntityType.PROJECTILE || b.type === EntityType.PROJECTILE) {
@@ -458,8 +482,9 @@ export class PhysicsSystem {
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
-              if (target.type === EntityType.ASTEROID && proj.velocity) {
-                  target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+              if (target.type === EntityType.ASTEROID || target.type === EntityType.STRUCTURE) {
+                  if (proj.velocity) target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+                  target.lastImpactDamage = proj.damage ?? 1;
               }
               if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
                   this.removeStaticEntity(target);

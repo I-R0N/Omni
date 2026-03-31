@@ -1,13 +1,11 @@
 /**
  * FlowField — analytical vortex flow field for asteroid streaming.
  *
- * Mimics the level-set streaming you get from a Fast Marching Method distance
- * field, but evaluated analytically so it works on an infinite map at O(1)
- * per sample with zero memory overhead.
- *
- * Each vortex contributes a tangential (orbital) velocity at every point.
- * Alternating spin directions create saddle-shaped channels between vortices
- * that asteroids naturally flow through — visually similar to FMM streamlines.
+ * A central galactic vortex dominates the inner map with smooth CCW rotation.
+ * Four spiral-arm vortices (offset ~17° from the cardinal axes, same spin)
+ * add secondary layered streams that interweave between tile clusters without
+ * creating convergence/saddle points.  Because all vortices share the same
+ * spin direction there are no cancellation points within the active map area.
  */
 
 interface Vortex {
@@ -18,13 +16,17 @@ interface Vortex {
   strength: number;
 }
 
-// Four vortex centres placed at ±2 000 units in a 2×2 grid.
-// Alternating spin produces "river" channels along the diagonals and axes.
+// Central galactic vortex + four spiral-arm vortices, all CCW.
+// Arms are placed at ~17° off the cardinal axes so their local flow
+// patterns don't align with the grid and produce a richer, non-symmetric field.
 const VORTICES: Vortex[] = [
-  { x:  2200, y:  2200, spin:  1, radius: 3500, strength: 1.0 },
-  { x: -2200, y:  2200, spin: -1, radius: 3500, strength: 1.0 },
-  { x:  2200, y: -2200, spin: -1, radius: 3500, strength: 1.0 },
-  { x: -2200, y: -2200, spin:  1, radius: 3500, strength: 1.0 },
+  // Dominant central rotation — smooth large-scale CCW sweep
+  { x:     0, y:     0, spin:  1, radius: 8000, strength: 1.0 },
+  // Spiral arms — secondary interweaving streams
+  { x:  3200, y:  1000, spin:  1, radius: 2800, strength: 0.45 },
+  { x: -1000, y:  3200, spin:  1, radius: 2800, strength: 0.45 },
+  { x: -3200, y: -1000, spin:  1, radius: 2800, strength: 0.45 },
+  { x:  1000, y: -3200, spin:  1, radius: 2800, strength: 0.45 },
 ];
 
 export interface FlowVector {
@@ -34,7 +36,7 @@ export interface FlowVector {
 
 /**
  * Sample the flow field at world position (wx, wy).
- * Returns a unit vector (approximately) in the dominant flow direction.
+ * Returns a unit vector in the dominant flow direction.
  */
 export function sampleFlow(wx: number, wy: number): FlowVector {
   let fx = 0;
@@ -56,6 +58,6 @@ export function sampleFlow(wx: number, wy: number): FlowVector {
   }
 
   const mag = Math.sqrt(fx * fx + fy * fy);
-  if (mag < 0.001) return { x: 1, y: 0 };
+  if (mag < 0.001) return { x: 0, y: 1 };
   return { x: fx / mag, y: fy / mag };
 }

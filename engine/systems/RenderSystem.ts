@@ -507,105 +507,105 @@ export class RenderSystem {
           } else {
             ctx.fillStyle = entity.color;
 
-            if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
-                // Mid-wave drop — distinct shape per type
+            if (entity.type === EntityType.INTERACTABLE && entity.dropType === 'glass') {
+                // Glass tile shard — same layered rendering as a full tile, with lifetime fade
+                const lt = entity.lifetime ?? Infinity;
+                const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
+
+                const buildShardPath = () => {
+                    ctx.beginPath();
+                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                        ctx.moveTo(entity.polygonPoints[0].x, entity.polygonPoints[0].y);
+                        for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                            ctx.lineTo(entity.polygonPoints[pi].x, entity.polygonPoints[pi].y);
+                        }
+                    } else {
+                        ctx.arc(0, 0, entity.size.x / 2, 0, Math.PI * 2);
+                    }
+                    ctx.closePath();
+                };
+
+                // Proximity tint — same formula as full tile
+                const PROX_RANGE = 120;
+                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
+                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const edgeR = Math.round(186 - prox * 83);
+                const edgeG = Math.round(230 + prox * 2);
+                const edgeB = Math.round(253 - prox * 4);
+                const edgeAlpha = (0.55 + prox * 0.35) * fadeAlpha;
+                const edgeColor = `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
+
+                // Layer 1 — translucent base fill
+                buildShardPath();
+                ctx.globalAlpha = 0.13 * fadeAlpha;
+                ctx.fillStyle = 'rgba(186,230,253,1)';
+                ctx.fill();
+
+                // Layer 2 — diagonal shine
+                ctx.globalAlpha = 0.09 * fadeAlpha;
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                // Layer 3 — proximity-tinted edge stroke
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = edgeColor;
+                ctx.lineWidth = 1.5;
+                buildShardPath();
+                ctx.stroke();
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
+                // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
                 const pulse = 0.7 + Math.sin(Date.now() / 350) * 0.3;
 
+                // Color palette per drop type
                 let coreColor: string;
                 let rimColor: string;
-                let label: string;
                 if (entity.dropType === 'fuel') {
-                    coreColor = '#00e5ff';
-                    rimColor = '#0090a0';
-                    label = 'FUEL';
+                    coreColor = '#00e5ff'; rimColor = '#0090a0';
                 } else if (entity.dropType === 'gold') {
-                    coreColor = '#ffd700';
-                    rimColor = '#b8860b';
-                    label = 'GOLD';
+                    coreColor = '#ffd700'; rimColor = '#b8860b';
                 } else if (entity.dropType === 'health') {
-                    coreColor = '#4ade80';
-                    rimColor = '#16a34a';
-                    label = 'HP';
+                    coreColor = '#4ade80'; rimColor = '#16a34a';
                 } else {
-                    coreColor = entity.color;
-                    rimColor = entity.color;
-                    label = entity.name || 'WEAPON';
+                    coreColor = entity.color; rimColor = entity.color;
                 }
 
-                ctx.globalAlpha = fadeAlpha;
-
-                if (entity.dropType === 'fuel') {
-                    // Horizontal capsule — reads like a fuel canister
-                    const hw = 10, hh = 5, rad = hh;
-                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
-                    ctx.strokeStyle = rimColor;
-                    ctx.lineWidth = 1.5;
+                // Build shard polygon path
+                const buildShardPath = () => {
                     ctx.beginPath();
-                    roundRectPath(ctx, -hw - 3, -hh - 3, (hw + 3) * 2, (hh + 3) * 2, rad + 3);
-                    ctx.stroke();
-                    ctx.globalAlpha = 0.93 * fadeAlpha;
-                    ctx.fillStyle = coreColor;
-                    ctx.beginPath();
-                    roundRectPath(ctx, -hw, -hh, hw * 2, hh * 2, rad);
-                    ctx.fill();
-
-                } else if (entity.dropType === 'health') {
-                    // Green cross / plus symbol
-                    const arm = 3.5, length = 8;
-                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
-                    ctx.strokeStyle = rimColor;
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, length + 3, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.globalAlpha = 0.93 * fadeAlpha;
-                    ctx.fillStyle = coreColor;
-                    ctx.fillRect(-arm, -length, arm * 2, length * 2);
-                    ctx.fillRect(-length, -arm, length * 2, arm * 2);
-
-                } else if (entity.dropType === 'gold') {
-                    // Tilted square — classic coin/gem diamond silhouette
-                    const s = 7;
-                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
-                    ctx.strokeStyle = rimColor;
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.moveTo(0, -(s + 3)); ctx.lineTo(s + 3, 0);
-                    ctx.lineTo(0, s + 3);   ctx.lineTo(-(s + 3), 0);
+                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                        ctx.moveTo(entity.polygonPoints[0].x, entity.polygonPoints[0].y);
+                        for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                            ctx.lineTo(entity.polygonPoints[pi].x, entity.polygonPoints[pi].y);
+                        }
+                    } else {
+                        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+                    }
                     ctx.closePath();
-                    ctx.stroke();
-                    ctx.globalAlpha = 0.93 * fadeAlpha;
-                    ctx.fillStyle = coreColor;
-                    ctx.beginPath();
-                    ctx.moveTo(0, -s); ctx.lineTo(s, 0);
-                    ctx.lineTo(0, s); ctx.lineTo(-s, 0);
-                    ctx.closePath();
-                    ctx.fill();
+                };
 
-                } else {
-                    // Powerup drop — rounded square
-                    const s = 8, rad = 3;
-                    ctx.globalAlpha = 0.5 * pulse * fadeAlpha;
-                    ctx.strokeStyle = rimColor;
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    roundRectPath(ctx, -s - 3, -s - 3, (s + 3) * 2, (s + 3) * 2, rad + 2);
-                    ctx.stroke();
-                    ctx.globalAlpha = 0.93 * fadeAlpha;
-                    ctx.fillStyle = coreColor;
-                    ctx.beginPath();
-                    roundRectPath(ctx, -s, -s, s * 2, s * 2, rad);
-                    ctx.fill();
-                }
+                // Outer glow rim
+                ctx.globalAlpha = 0.45 * pulse * fadeAlpha;
+                ctx.strokeStyle = rimColor;
+                ctx.lineWidth = 3;
+                buildShardPath();
+                ctx.stroke();
 
-                // Label beneath
-                ctx.globalAlpha = fadeAlpha;
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 9px monospace';
-                ctx.textAlign = 'center';
-                ctx.fillText(label, 0, 18);
+                // Solid shard fill
+                ctx.globalAlpha = 0.92 * fadeAlpha;
+                ctx.fillStyle = coreColor;
+                buildShardPath();
+                ctx.fill();
+
+                // Sharp edge outline
+                ctx.globalAlpha = 0.6 * fadeAlpha;
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 1;
+                buildShardPath();
+                ctx.stroke();
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
                 // Weapon powerup — glowing pulsing orb

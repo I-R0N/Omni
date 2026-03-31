@@ -118,6 +118,7 @@ export interface GameEntity {
   hitFlash?: number; // Timer for white flash effect on damage
   sprite?: string; // URL or DataURI for image rendering
   lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
+  lastImpactDamage?: number;   // Damage of the killing blow (used to scale shard count/size)
   trail?: TrailPoint[]; // Path history with lifetime
   
   // Explosion Effect
@@ -162,7 +163,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'fuel' | 'gold' | 'powerup' | 'health';
+  dropType?: 'fuel' | 'gold' | 'powerup' | 'health' | 'glass';
   dropValue?: number;
   dropWeapon?: WeaponType;
 
