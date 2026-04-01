@@ -173,7 +173,7 @@ export class BackgroundManager {
                 y: cy + offsetY,
                 size: size,
                 depth: depth,
-                opacity: 0.22,
+                opacity: 0.75,
                 color: color,
                 hue: hue,
                 rotation: Math.random() * Math.PI * 2,
@@ -279,7 +279,7 @@ export class BackgroundManager {
         if (texture instanceof HTMLImageElement) {
             // sepia converts white → warm brown, hue-rotate shifts to the puff's hue,
             // saturate boosts vibrance. Screen blend makes the black background invisible.
-            ctx.filter = `sepia(1) hue-rotate(${puff.hue - 30}deg) saturate(6) brightness(1.4)`;
+            ctx.filter = `sepia(1) hue-rotate(${puff.hue - 30}deg) saturate(8) brightness(1.8)`;
             ctx.globalCompositeOperation = 'screen';
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
             ctx.filter = 'none';
