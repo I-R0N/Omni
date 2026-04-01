@@ -28,7 +28,6 @@ interface NebulaPuff {
   rotationSpeed: number;
   aspect: number;
   textureIndex: number;
-  tintedCanvas?: HTMLCanvasElement;
 }
 
 interface ShootingStar {
@@ -277,32 +276,14 @@ export class BackgroundManager {
         ctx.translate(drawX, drawY);
         ctx.rotate(puff.rotation);
         ctx.scale(puff.aspect, 1.0);
-        if (texture instanceof HTMLImageElement) {
-            // Build a tinted offscreen canvas once per puff (cached on first use).
-            // multiply(white_nebula, color) = color, multiply(black_bg, color) = black.
-            // Drawing that to main canvas with 'screen' makes black areas invisible.
-            if (!puff.tintedCanvas && texture.complete && texture.naturalWidth > 0) {
-                const sz = 256;
-                const offscreen = document.createElement('canvas');
-                offscreen.width = sz;
-                offscreen.height = sz;
-                const offCtx = offscreen.getContext('2d')!;
-                offCtx.drawImage(texture, 0, 0, sz, sz);
-                offCtx.globalCompositeOperation = 'multiply';
-                offCtx.fillStyle = `hsl(${puff.hue}, 100%, 50%)`;
-                offCtx.fillRect(0, 0, sz, sz);
-                puff.tintedCanvas = offscreen;
-            }
-            if (puff.tintedCanvas) {
-                ctx.globalCompositeOperation = 'screen';
-                ctx.drawImage(puff.tintedCanvas, -puff.size/2, -puff.size/2, puff.size, puff.size);
-            }
-        } else if (texture) {
-            // Procedural canvas textures have transparent backgrounds — original approach.
+        if (texture) {
+            // Images must have a transparent background (PNG with alpha).
+            // Draw image first, then source-atop fills the tint color only over
+            // non-transparent pixels — giving the nebula its color without any oval clipping.
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
             ctx.globalCompositeOperation = 'source-atop';
-            ctx.fillStyle = puff.color + '1)';
-            ctx.beginPath(); ctx.arc(0, 0, puff.size/2, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = puff.color + '0.85)';
+            ctx.fillRect(-puff.size/2, -puff.size/2, puff.size, puff.size);
         }
         ctx.restore();
     });
