@@ -154,8 +154,8 @@ export class BackgroundManager {
     const numClusters = 10 + Math.floor(Math.random() * 21); // 10–30 like Python version
 
     for (let i = 0; i < numClusters; i++) {
-        const cx = (Math.random() - 0.5) * width * 800;
-        const cy = (Math.random() - 0.5) * height * 800;
+        const cx = (Math.random() - 0.5) * width * 20;
+        const cy = (Math.random() - 0.5) * height * 20;
         const puffsPerCluster = 4 + Math.floor(Math.random() * 5); // 4–8
 
         for (let j = 0; j < puffsPerCluster; j++) {
