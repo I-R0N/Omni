@@ -192,8 +192,8 @@ public setMapType(type: MapType) {
     for (let i = 0; i < 80; i++) {
         const x = Math.random() * width;
         const y = (height / 2) + Math.tan(mwAngle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
-        const size = 0.4 + Math.random() * 0.8;
-        mwCtx.globalAlpha = 0.2 + Math.random() * 0.25;
+        const size = 0.4 + Math.pow(Math.random(), 3) * 4.0;
+        mwCtx.globalAlpha = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
         mwCtx.fillStyle = Math.random() > 0.7 ? mwColors[Math.floor(Math.random() * mwColors.length)] : starColor();
         if (size < 1.5) { mwCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
         else { mwCtx.beginPath(); mwCtx.arc(x, y, size, 0, Math.PI * 2); mwCtx.fill(); }
@@ -214,8 +214,14 @@ public setMapType(type: MapType) {
         const bandCtx = bandCanvas.getContext('2d')!;
         for (let i = 0; i < STARS_PER_BAND; i++) {
             const t = (b + Math.random()) / NUM_BANDS;
-            const size = (0.3 + Math.random() * 0.3) * (0.4 + t * 0.8);
-            bandCtx.globalAlpha = 0.2 + Math.random() * 0.45;
+            // Power-law size distribution: many tiny stars, fewer large ones.
+            // Math.pow(r, 3) skews heavily toward small values so the field
+            // has dense background haze but visible coloured foreground stars.
+            const sizeBase = 0.4 + Math.pow(Math.random(), 3) * 5.0;
+            const size = sizeBase * (0.5 + t * 0.8);
+            // Opacity: full 0.2–1.0 range; larger stars weighted brighter.
+            const opacity = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            bandCtx.globalAlpha = opacity;
             bandCtx.fillStyle = starColor();
             const x = Math.random() * width;
             const y = Math.random() * height;
