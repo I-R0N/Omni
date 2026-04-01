@@ -168,6 +168,21 @@ public setMapType(type: MapType) {
         }
     }
 
+    // Realistic stellar color distribution based on spectral class frequency.
+    // Heavily weighted toward white/warm-white (most common), with a visible
+    // minority of blue, orange and red stars for depth and variety.
+    const starColor = (): string => {
+        const r = Math.random();
+        if (r < 0.50) return '#ffffff';    // A-type — white
+        if (r < 0.65) return '#fff4e0';    // F-type — warm white
+        if (r < 0.74) return '#ffd280';    // G-type — pale yellow (sun-like)
+        if (r < 0.82) return '#ffb347';    // K-type — orange
+        if (r < 0.89) return '#c8d8ff';    // B-type — pale blue
+        if (r < 0.94) return '#9bb0ff';    // B/O-type — blue-white
+        if (r < 0.97) return '#ff7043';    // M-type giant — red-orange
+        return '#7ec8ff';                   // O-type — hot blue
+    };
+
     // Pre-render milky way to its own band canvas (scrolls at a fixed slow speed).
     const mwCanvas = document.createElement('canvas');
     mwCanvas.width = width; mwCanvas.height = height;
@@ -179,7 +194,7 @@ public setMapType(type: MapType) {
         const y = (height / 2) + Math.tan(mwAngle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
         const size = 0.4 + Math.random() * 0.8;
         mwCtx.globalAlpha = 0.2 + Math.random() * 0.25;
-        mwCtx.fillStyle = Math.random() > 0.8 ? mwColors[Math.floor(Math.random() * mwColors.length)] : '#ffffff';
+        mwCtx.fillStyle = Math.random() > 0.7 ? mwColors[Math.floor(Math.random() * mwColors.length)] : starColor();
         if (size < 1.5) { mwCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
         else { mwCtx.beginPath(); mwCtx.arc(x, y, size, 0, Math.PI * 2); mwCtx.fill(); }
     }
@@ -190,7 +205,7 @@ public setMapType(type: MapType) {
     // Speed increases quadratically from background (slow) to foreground (fast).
     this.starBands = [];
     const NUM_BANDS = 60;
-    const STARS_PER_BAND = 200;
+    const STARS_PER_BAND = 400;
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
         const speed = 0.02 + (tMid * tMid) * 2.0;
@@ -201,7 +216,7 @@ public setMapType(type: MapType) {
             const t = (b + Math.random()) / NUM_BANDS;
             const size = (0.3 + Math.random() * 0.3) * (0.4 + t * 0.8);
             bandCtx.globalAlpha = 0.2 + Math.random() * 0.45;
-            bandCtx.fillStyle = Math.random() > 0.95 ? COLORS.STAR : '#ffffff';
+            bandCtx.fillStyle = starColor();
             const x = Math.random() * width;
             const y = Math.random() * height;
             if (size < 1.5) { bandCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
