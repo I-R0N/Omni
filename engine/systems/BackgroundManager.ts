@@ -189,8 +189,8 @@ public setMapType(type: MapType) {
     // Pre-render 8 star bands. Each band gets 1500 stars = 12,000 total.
     // Speed increases quadratically from background (slow) to foreground (fast).
     this.starBands = [];
-    const NUM_BANDS = 8;
-    const STARS_PER_BAND = 1500;
+    const NUM_BANDS = 60;
+    const STARS_PER_BAND = 200;
     for (let b = 0; b < NUM_BANDS; b++) {
         const tMid = (b + 0.5) / NUM_BANDS;
         const speed = 0.02 + (tMid * tMid) * 2.0;
