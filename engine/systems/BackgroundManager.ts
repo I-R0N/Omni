@@ -28,6 +28,7 @@ interface NebulaPuff {
   rotationSpeed: number;
   aspect: number;
   textureIndex: number;
+  tintedCanvas?: HTMLCanvasElement;
 }
 
 interface ShootingStar {
@@ -277,12 +278,25 @@ export class BackgroundManager {
         ctx.rotate(puff.rotation);
         ctx.scale(puff.aspect, 1.0);
         if (texture instanceof HTMLImageElement) {
-            // sepia converts white → warm brown, hue-rotate shifts to the puff's hue,
-            // saturate boosts vibrance. Screen blend makes the black background invisible.
-            ctx.filter = `sepia(1) hue-rotate(${puff.hue - 30}deg) saturate(8) brightness(1.8)`;
-            ctx.globalCompositeOperation = 'screen';
-            ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
-            ctx.filter = 'none';
+            // Build a tinted offscreen canvas once per puff (cached on first use).
+            // multiply(white_nebula, color) = color, multiply(black_bg, color) = black.
+            // Drawing that to main canvas with 'screen' makes black areas invisible.
+            if (!puff.tintedCanvas && texture.complete && texture.naturalWidth > 0) {
+                const sz = 256;
+                const offscreen = document.createElement('canvas');
+                offscreen.width = sz;
+                offscreen.height = sz;
+                const offCtx = offscreen.getContext('2d')!;
+                offCtx.drawImage(texture, 0, 0, sz, sz);
+                offCtx.globalCompositeOperation = 'multiply';
+                offCtx.fillStyle = `hsl(${puff.hue}, 100%, 50%)`;
+                offCtx.fillRect(0, 0, sz, sz);
+                puff.tintedCanvas = offscreen;
+            }
+            if (puff.tintedCanvas) {
+                ctx.globalCompositeOperation = 'screen';
+                ctx.drawImage(puff.tintedCanvas, -puff.size/2, -puff.size/2, puff.size, puff.size);
+            }
         } else if (texture) {
             // Procedural canvas textures have transparent backgrounds — original approach.
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
