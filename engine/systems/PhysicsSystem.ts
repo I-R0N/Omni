@@ -540,22 +540,31 @@ export class PhysicsSystem {
       if (a.type === EntityType.ENEMY || b.type === EntityType.ENEMY) {
           const target = a.type === EntityType.ENEMY ? b : a;
           if (target.type === EntityType.PLAYER) {
-              let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              if ((target.shield ?? 0) > 0) {
-                  const absorbed = Math.min(target.shield!, ramDmg);
-                  target.shield! -= absorbed;
-                  ramDmg -= absorbed;
-                  target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
-                  target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
-              }
-              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY);
-              if (ramDmg > 0) {
-                  target.health -= ramDmg;
-                  target.hitFlash = 0.2;
-              }
-              if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-              if (target.health <= 0 && onDeath) {
-                  onDeath(target);
+              const enemy = a.type === EntityType.ENEMY ? a : b;
+              const rdx = enemy.velocity.x - target.velocity.x;
+              const rdy = enemy.velocity.y - target.velocity.y;
+              const ramImpact = Math.sqrt(rdx * rdx + rdy * rdy);
+              // Below shield damage threshold: contact flash only, no damage
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
+                  // flash already handled by the general contact flash above
+              } else {
+                  let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+                  if ((target.shield ?? 0) > 0) {
+                      const absorbed = Math.min(target.shield!, ramDmg);
+                      target.shield! -= absorbed;
+                      ramDmg -= absorbed;
+                      target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                      target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  }
+                  if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY);
+                  if (ramDmg > 0) {
+                      target.health -= ramDmg;
+                      target.hitFlash = 0.2;
+                  }
+                  if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+                  if (target.health <= 0 && onDeath) {
+                      onDeath(target);
+                  }
               }
           }
       }
@@ -603,9 +612,16 @@ export class PhysicsSystem {
           const impactSpeed = Math.abs(velAlongNormal);
           const other = a.type === EntityType.PLAYER ? b : a;
           const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.ASTEROID || other.type === EntityType.STRUCTURE;
-          
+
           if (impactSpeed > 2.0 && isHardTarget) {
               onShake(Math.min(impactSpeed, COLLISION_CONFIG.SHAKE.HEAVY) * COLLISION_CONFIG.SHAKE.CAP_MULTIPLIER);
+          }
+      }
+      // Shield contact flash — any collision lights up the shield ring
+      if (isPlayerCollision) {
+          const player = a.type === EntityType.PLAYER ? a : b;
+          if ((player.shield ?? 0) > 0) {
+              player.shieldHitFlash = Math.max(player.shieldHitFlash ?? 0, SHIELD_CONSTANTS.CONTACT_FLASH_DURATION);
           }
       }
 

@@ -339,8 +339,10 @@ export const SHIELD_CONSTANTS = {
   RECHARGE_RATE: 25,         // Points/sec — full recharge in ~2s (Halo-style fast regen)
   RECHARGE_DELAY: 2.0,       // Brief pause after last hit before recharge kicks in
   HIT_FLASH_DURATION: 0.3,   // How long the shield ring stays visible after a hit
+  CONTACT_FLASH_DURATION: 0.15, // Shorter flash for non-damaging contact
   COLOR: '#60a5fa',          // Blue-400
   COLLISION_MULTIPLIER: 1.3, // Player collision radius multiplier when shield > 0
+  DAMAGE_THRESHOLD: 2.0,     // Min impact speed to actually drain shield (below = flash only)
 };
 
 export const WAVE_CONSTANTS = {

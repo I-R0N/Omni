@@ -6,6 +6,7 @@ import { BackgroundManager } from './BackgroundManager';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+const SHIELD_COLLISION_MULT = SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
@@ -666,21 +667,23 @@ export class RenderSystem {
           }
       }
 
-      // Shield hit ring — visible only when recently struck
+      // Shield hit ring — visible only on contact; radius matches physical collision
       if (entity.type === EntityType.PLAYER && entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
-          const ringRadius = maxDim * 1.3;
+          // Exact match: collision uses (size/2) * COLLISION_MULTIPLIER as half-extent
+          const ringRadius = (maxDim / 2) * SHIELD_COLLISION_MULT;
           const flashRatio = entity.shieldHitFlash / SHIELD_HIT_FLASH_DURATION;
+          // Instant full brightness that fades out
+          const alpha = Math.min(1.0, flashRatio * 3.0);
           // Undo entity rotation so the ring is axis-aligned
           const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
           ctx.rotate(-rot);
-          ctx.globalAlpha = 0.7 * flashRatio;
+          ctx.globalAlpha = alpha;
           ctx.strokeStyle = SHIELD_COLOR;
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
           ctx.stroke();
-          // Restore rotation for any remaining transforms
           ctx.rotate(rot);
       }
 
