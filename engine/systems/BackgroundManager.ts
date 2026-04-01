@@ -3,17 +3,11 @@ import { MapType, Vector2, GameEntity } from '../../types';
 import { COLORS, SHOOTING_STAR_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 
-interface Star {
-  x: number;
-  y: number;
-  size: number;
-  opacity: number;
-  color: string;
-}
-
-interface StarLayer {
-  stars: Star[];
+interface StarBand {
+  canvas: HTMLCanvasElement;
   speed: number;
+  offsetX: number;
+  offsetY: number;
 }
 
 interface NebulaPuff {
@@ -40,9 +34,9 @@ interface ShootingStar {
 
 export class BackgroundManager {
   private mapType: MapType;
-  private starLayers: StarLayer[] = [];
+  private starBands: StarBand[] = [];
+  private milkyWayBand: StarBand | null = null;
   private nebulaPuffs: NebulaPuff[] = [];
-  private milkyWay: Star[] = [];
   private shootingStars: ShootingStar[] = [];
   private shootingTimer: number = 0;
   private lastCameraPos: Vector2 | null = null;
@@ -95,18 +89,7 @@ export class BackgroundManager {
     return { x: outX, y: outY };
   }
 
-  private wrapToBounds(value: number, limit: number): number {
-    let out = value;
-    if (out < 0) out += limit;
-    else if (out > limit) out -= limit;
-
-    if (out < 0 || out > limit) {
-        out = ((out % limit) + limit) % limit;
-    }
-    return out;
-  }
-
-  public setMapType(type: MapType) {
+public setMapType(type: MapType) {
     if (this.mapType === type) return;
     this.mapType = type;
   }
@@ -185,38 +168,47 @@ export class BackgroundManager {
         }
     }
 
-    const angle = (Math.random() - 0.5); 
-    const mwColors = ['#8b5cf6', '#3b82f6', '#fbbf24', '#f472b6']; 
+    // Pre-render milky way to its own band canvas (scrolls at a fixed slow speed).
+    const mwCanvas = document.createElement('canvas');
+    mwCanvas.width = width; mwCanvas.height = height;
+    const mwCtx = mwCanvas.getContext('2d')!;
+    const mwAngle = (Math.random() - 0.5);
+    const mwColors = ['#8b5cf6', '#3b82f6', '#fbbf24', '#f472b6'];
     for (let i = 0; i < 80; i++) {
         const x = Math.random() * width;
-        const y = (height / 2) + Math.tan(angle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
-        this.milkyWay.push({
-            x: x,
-            y: y,
-            size: 0.4 + Math.random() * 0.8,
-            opacity: 0.2 + Math.random() * 0.25,
-            color: Math.random() > 0.8 ? mwColors[Math.floor(Math.random() * mwColors.length)] : '#ffffff'
-        });
+        const y = (height / 2) + Math.tan(mwAngle) * (x - width / 2) + ((Math.random() + Math.random() + Math.random() - 1.5) * 40);
+        const size = 0.4 + Math.random() * 0.8;
+        mwCtx.globalAlpha = 0.2 + Math.random() * 0.25;
+        mwCtx.fillStyle = Math.random() > 0.8 ? mwColors[Math.floor(Math.random() * mwColors.length)] : '#ffffff';
+        if (size < 1.5) { mwCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
+        else { mwCtx.beginPath(); mwCtx.arc(x, y, size, 0, Math.PI * 2); mwCtx.fill(); }
     }
+    mwCtx.globalAlpha = 1.0;
+    this.milkyWayBand = { canvas: mwCanvas, speed: 0.03, offsetX: 0, offsetY: 0 };
 
-    const numLayers = 30;
-    const starsPerLayer = 150;
-    for (let i = 0; i < numLayers; i++) {
-        const t = i / numLayers;
-        const speed = 0.02 + (t * t) * 2.0;
-        const stars: Star[] = [];
-        for(let j=0; j<starsPerLayer; j++) {
-            const baseSize = 0.3 + Math.random() * 0.3;
-            const sizeMod = 0.4 + (t * 0.8);
-            stars.push({
-                x: Math.random() * width,
-                y: Math.random() * height,
-                size: baseSize * sizeMod,
-                opacity: 0.2 + Math.random() * 0.45,
-                color: Math.random() > 0.95 ? COLORS.STAR : '#ffffff'
-            });
+    // Pre-render 8 star bands. Each band gets 1500 stars = 12,000 total.
+    // Speed increases quadratically from background (slow) to foreground (fast).
+    this.starBands = [];
+    const NUM_BANDS = 8;
+    const STARS_PER_BAND = 1500;
+    for (let b = 0; b < NUM_BANDS; b++) {
+        const tMid = (b + 0.5) / NUM_BANDS;
+        const speed = 0.02 + (tMid * tMid) * 2.0;
+        const bandCanvas = document.createElement('canvas');
+        bandCanvas.width = width; bandCanvas.height = height;
+        const bandCtx = bandCanvas.getContext('2d')!;
+        for (let i = 0; i < STARS_PER_BAND; i++) {
+            const t = (b + Math.random()) / NUM_BANDS;
+            const size = (0.3 + Math.random() * 0.3) * (0.4 + t * 0.8);
+            bandCtx.globalAlpha = 0.2 + Math.random() * 0.45;
+            bandCtx.fillStyle = Math.random() > 0.95 ? COLORS.STAR : '#ffffff';
+            const x = Math.random() * width;
+            const y = Math.random() * height;
+            if (size < 1.5) { bandCtx.fillRect(x, y, Math.max(1, size), Math.max(1, size)); }
+            else { bandCtx.beginPath(); bandCtx.arc(x, y, size, 0, Math.PI * 2); bandCtx.fill(); }
         }
-        this.starLayers.push({ stars, speed });
+        bandCtx.globalAlpha = 1.0;
+        this.starBands.push({ canvas: bandCanvas, speed, offsetX: 0, offsetY: 0 });
     }
     this.initialized = true;
   }
@@ -299,42 +291,21 @@ export class BackgroundManager {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
 
-    // RENDER STARS
-    const renderStarList = (list: Star[], shiftX: number, shiftY: number) => {
-        for (let i = 0; i < list.length; i++) {
-            const star = list[i];
-            star.x -= shiftX;
-            star.y -= shiftY;
-
-            star.x = this.wrapToBounds(star.x, width);
-            star.y = this.wrapToBounds(star.y, height);
-
-            let wx = star.x;
-            let wy = star.y;
-
-            // INLINED LENSING
-            if (hasAttractors) {
-               const lensed = this.applyLensing(wx, wy, cameraPos, attractors, halfW, halfH);
-               wx = lensed.x;
-               wy = lensed.y;
-            }
-
-            ctx.globalAlpha = star.opacity;
-            // No sparkles, just simple shapes for performance and cleaner look
-            ctx.fillStyle = star.color;
-            if (star.size < 1.5) {
-                ctx.fillRect(wx, wy, Math.max(1, star.size), Math.max(1, star.size));
-            } else {
-                ctx.beginPath(); ctx.arc(wx, wy, star.size, 0, Math.PI * 2); ctx.fill();
-            }
-        }
+    // RENDER STARS — each band is a pre-rendered canvas, shifted each frame
+    // and tiled 4-ways for seamless wrapping. 32 drawImage calls vs 12,000.
+    ctx.globalAlpha = 1.0;
+    const drawBand = (band: StarBand, shiftX: number, shiftY: number) => {
+        band.offsetX = ((band.offsetX - shiftX) % width + width) % width;
+        band.offsetY = ((band.offsetY - shiftY) % height + height) % height;
+        ctx.drawImage(band.canvas, band.offsetX,         band.offsetY);
+        ctx.drawImage(band.canvas, band.offsetX - width, band.offsetY);
+        ctx.drawImage(band.canvas, band.offsetX,         band.offsetY - height);
+        ctx.drawImage(band.canvas, band.offsetX - width, band.offsetY - height);
     };
 
-    renderStarList(this.milkyWay, dx * 0.03, dy * 0.03);
-
-    for (let i = 0; i < this.starLayers.length; i++) {
-        const layer = this.starLayers[i];
-        renderStarList(layer.stars, dx * layer.speed * 0.2, dy * layer.speed * 0.2);
+    if (this.milkyWayBand) drawBand(this.milkyWayBand, dx * 0.03, dy * 0.03);
+    for (const band of this.starBands) {
+        drawBand(band, dx * band.speed * 0.2, dy * band.speed * 0.2);
     }
 
     this.updateAndDrawShootingStars(ctx, width, height);
