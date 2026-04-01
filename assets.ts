@@ -32,7 +32,17 @@ const PLACEHOLDER = '/assets/placeholder.png';
 // or black background — the engine tints them at runtime with per-nebula colors.
 // Leave empty to keep the built-in procedural generation.
 // Example: ['/assets/nebula_1.png', '/assets/nebula_2.png']
-export const NEBULA_IMAGES: string[] = [];
+export const NEBULA_IMAGES: string[] = [
+  '/assets/Nebula00.png',
+  '/assets/Nebula01.png',
+  '/assets/Nebula02.png',
+  '/assets/Nebula03.png',
+  '/assets/Nebula04.png',
+  '/assets/Nebula05.png',
+  '/assets/Nebula06.png',
+  '/assets/Nebula07.png',
+  '/assets/Nebula08.png',
+];
 
 // TODO: Replace PLACEHOLDER entries with real asset locations (CDN/object storage).
 export const ASSETS: AssetManifest = {
