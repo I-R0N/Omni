@@ -136,7 +136,7 @@ public setMapType(type: MapType) {
     this.nebulaPuffs = [];
     this.milkyWay = [];
     
-    const numClusters = 10 + Math.floor(Math.random() * 21); // 10–30 like Python version
+    const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
 
     for (let i = 0; i < numClusters; i++) {
         const cx = (Math.random() - 0.5) * width * 20;
