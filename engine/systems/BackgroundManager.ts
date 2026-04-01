@@ -271,15 +271,29 @@ export class BackgroundManager {
         }
 
         const texture = this.puffTextures[puff.textureIndex % this.puffTextures.length];
-        ctx.globalAlpha = puff.opacity; 
+        ctx.globalAlpha = puff.opacity;
         ctx.save();
         ctx.translate(drawX, drawY);
         ctx.rotate(puff.rotation);
-        ctx.scale(puff.aspect, 1.0); 
-        if (texture) ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = puff.color + '1)'; 
-        ctx.beginPath(); ctx.arc(0, 0, puff.size/2, 0, Math.PI*2); ctx.fill();
+        ctx.scale(puff.aspect, 1.0);
+        if (texture instanceof HTMLImageElement) {
+            // Real images have dark backgrounds — 'screen' blend makes black pixels
+            // invisible so no oval clipping artifact appears.
+            ctx.globalCompositeOperation = 'screen';
+            ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
+            // Color tint: radial gradient fades to transparent so there's no hard edge.
+            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, puff.size * 0.4);
+            grad.addColorStop(0, puff.color + '0.55)');
+            grad.addColorStop(1, puff.color + '0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(-puff.size/2, -puff.size/2, puff.size, puff.size);
+        } else if (texture) {
+            // Procedural canvas textures have transparent backgrounds — original approach.
+            ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = puff.color + '1)';
+            ctx.beginPath(); ctx.arc(0, 0, puff.size/2, 0, Math.PI*2); ctx.fill();
+        }
         ctx.restore();
     });
     ctx.globalCompositeOperation = 'source-over';
