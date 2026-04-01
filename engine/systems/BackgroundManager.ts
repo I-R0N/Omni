@@ -154,8 +154,8 @@ export class BackgroundManager {
     const numClusters = 10 + Math.floor(Math.random() * 21); // 10–30 like Python version
 
     for (let i = 0; i < numClusters; i++) {
-        const cx = (Math.random() - 0.5) * width * 14000;
-        const cy = (Math.random() - 0.5) * height * 14000;
+        const cx = (Math.random() - 0.5) * width * 800;
+        const cy = (Math.random() - 0.5) * height * 800;
         const puffsPerCluster = 4 + Math.floor(Math.random() * 5); // 4–8
 
         for (let j = 0; j < puffsPerCluster; j++) {
@@ -250,20 +250,17 @@ export class BackgroundManager {
     const hasAttractors = attractors.length > 0;
     
     // RENDER NEBULAE
+    // x/y are world-space coordinates. Project to screen via parallax depth so
+    // nebulae are distributed across the world and discovered as the camera moves.
     this.nebulaPuffs.forEach(puff => {
-        puff.x -= dx * puff.depth;
-        puff.y -= dy * puff.depth;
         puff.rotation += puff.rotationSpeed;
 
-        const margin = puff.size; 
-        const rangeX = width + margin * 2;
-        const rangeY = height + margin * 2;
-        // Robust modulo-like wrapping for nebulae
-        if (puff.x < -margin) puff.x += rangeX; else if (puff.x > width + margin) puff.x -= rangeX;
-        if (puff.y < -margin) puff.y += rangeY; else if (puff.y > height + margin) puff.y -= rangeY;
+        let drawX = (puff.x - cameraPos.x) * puff.depth + halfW;
+        let drawY = (puff.y - cameraPos.y) * puff.depth + halfH;
 
-        let drawX = puff.x;
-        let drawY = puff.y;
+        // Frustum cull — skip puffs that are off-screen
+        const margin = puff.size;
+        if (drawX < -margin || drawX > width + margin || drawY < -margin || drawY > height + margin) return;
 
         // INLINED LENSING
         if (hasAttractors) {
