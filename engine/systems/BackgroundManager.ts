@@ -23,6 +23,7 @@ interface NebulaPuff {
   depth: number;
   opacity: number;
   color: string;
+  hue: number;
   rotation: number;
   rotationSpeed: number;
   aspect: number;
@@ -156,17 +157,16 @@ export class BackgroundManager {
     for (let i = 0; i < numClusters; i++) {
         const cx = (Math.random() - 0.5) * width * 20;
         const cy = (Math.random() - 0.5) * height * 20;
-        const puffsPerCluster = 4 + Math.floor(Math.random() * 5); // 4–8
+        const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
 
         for (let j = 0; j < puffsPerCluster; j++) {
             const size = 150 + Math.random() * 250; // 150–400px
             const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
             const offsetX = (Math.random() - 0.5) * 300; // ±150
             const offsetY = (Math.random() - 0.5) * 200; // ±100
-            // random R, random G, full B — matches Python: color=(random(), random(), 1)
-            const r = Math.floor(Math.random() * 256);
-            const g = Math.floor(Math.random() * 256);
-            const color = `rgba(${r}, ${g}, 255,`;
+            const hue = Math.random() * 360;
+            // Keep color string for procedural fallback path
+            const color = `hsla(${hue}, 100%, 60%,`;
 
             this.nebulaPuffs.push({
                 x: cx + offsetX,
@@ -175,6 +175,7 @@ export class BackgroundManager {
                 depth: depth,
                 opacity: 0.22,
                 color: color,
+                hue: hue,
                 rotation: Math.random() * Math.PI * 2,
                 rotationSpeed: (Math.random() - 0.5) * 0.001,
                 aspect: 0.8 + Math.random() * 0.4,
@@ -276,16 +277,12 @@ export class BackgroundManager {
         ctx.rotate(puff.rotation);
         ctx.scale(puff.aspect, 1.0);
         if (texture instanceof HTMLImageElement) {
-            // Real images have dark backgrounds — 'screen' blend makes black pixels
-            // invisible so no oval clipping artifact appears.
+            // sepia converts white → warm brown, hue-rotate shifts to the puff's hue,
+            // saturate boosts vibrance. Screen blend makes the black background invisible.
+            ctx.filter = `sepia(1) hue-rotate(${puff.hue - 30}deg) saturate(6) brightness(1.4)`;
             ctx.globalCompositeOperation = 'screen';
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
-            // Color tint: radial gradient fades to transparent so there's no hard edge.
-            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, puff.size * 0.4);
-            grad.addColorStop(0, puff.color + '1)');
-            grad.addColorStop(1, puff.color + '0)');
-            ctx.fillStyle = grad;
-            ctx.fillRect(-puff.size/2, -puff.size/2, puff.size, puff.size);
+            ctx.filter = 'none';
         } else if (texture) {
             // Procedural canvas textures have transparent backgrounds — original approach.
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
