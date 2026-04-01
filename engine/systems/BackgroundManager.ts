@@ -157,7 +157,7 @@ public setMapType(type: MapType) {
                 y: cy + offsetY,
                 size: size,
                 depth: depth,
-                opacity: 0.75,
+                opacity: 0.55,
                 color: color,
                 hue: hue,
                 rotation: Math.random() * Math.PI * 2,
