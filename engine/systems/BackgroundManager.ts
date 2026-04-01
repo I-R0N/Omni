@@ -28,6 +28,7 @@ interface NebulaPuff {
   rotationSpeed: number;
   aspect: number;
   textureIndex: number;
+  cachedCanvas?: HTMLCanvasElement;
 }
 
 interface ShootingStar {
@@ -49,8 +50,6 @@ export class BackgroundManager {
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
-  private offscreenCanvas: HTMLCanvasElement = document.createElement('canvas');
-  private offscreenCtx: CanvasRenderingContext2D | null = null;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -200,8 +199,8 @@ export class BackgroundManager {
         });
     }
 
-    const numLayers = 60;
-    const starsPerLayer = 200;
+    const numLayers = 30;
+    const starsPerLayer = 150;
     for (let i = 0; i < numLayers; i++) {
         const t = i / numLayers;
         const speed = 0.02 + (t * t) * 2.0;
@@ -248,7 +247,7 @@ export class BackgroundManager {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     ctx.fillStyle = '#000000';
-    ctx.fillRect(-width * 50, -height * 50, width * 100, height * 100);
+    ctx.fillRect(0, 0, width, height);
 
     const hasAttractors = attractors.length > 0;
     
@@ -256,47 +255,45 @@ export class BackgroundManager {
     // x/y are world-space coordinates. Project to screen via parallax depth so
     // nebulae are distributed across the world and discovered as the camera moves.
     this.nebulaPuffs.forEach(puff => {
-        puff.rotation += puff.rotationSpeed;
-
         let drawX = (puff.x - cameraPos.x) * puff.depth + halfW;
         let drawY = (puff.y - cameraPos.y) * puff.depth + halfH;
 
-        // Frustum cull — skip puffs that are off-screen
+        // Frustum cull before doing any work
         const margin = puff.size;
         if (drawX < -margin || drawX > width + margin || drawY < -margin || drawY > height + margin) return;
 
-        // INLINED LENSING
+        puff.rotation += puff.rotationSpeed;
+
+        // Build tinted canvas once per puff when the image is ready, then reuse every frame.
+        const texture = this.puffTextures[puff.textureIndex % this.puffTextures.length];
+        if (!puff.cachedCanvas && texture instanceof HTMLImageElement && texture.complete && texture.naturalWidth > 0) {
+            const sz = 256;
+            const offscreen = document.createElement('canvas');
+            offscreen.width = sz;
+            offscreen.height = sz;
+            const off = offscreen.getContext('2d')!;
+            off.drawImage(texture, 0, 0, sz, sz);
+            off.globalCompositeOperation = 'source-atop';
+            off.fillStyle = puff.color + '0.85)';
+            off.fillRect(0, 0, sz, sz);
+            puff.cachedCanvas = offscreen;
+        }
+
+        const drawable = puff.cachedCanvas ?? (texture instanceof HTMLCanvasElement ? texture : null);
+        if (!drawable) return;
+
         if (hasAttractors) {
            const lensed = this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
            drawX = lensed.x;
            drawY = lensed.y;
         }
 
-        const texture = this.puffTextures[puff.textureIndex % this.puffTextures.length];
         ctx.globalAlpha = puff.opacity;
         ctx.save();
         ctx.translate(drawX, drawY);
         ctx.rotate(puff.rotation);
         ctx.scale(puff.aspect, 1.0);
-        if (texture) {
-            // Tint on an isolated offscreen canvas so source-atop only sees the
-            // image pixels — not the starfield already on the main canvas.
-            const sz = 512;
-            if (!this.offscreenCtx) {
-                this.offscreenCanvas.width = sz;
-                this.offscreenCanvas.height = sz;
-                this.offscreenCtx = this.offscreenCanvas.getContext('2d');
-            }
-            const off = this.offscreenCtx!;
-            off.clearRect(0, 0, sz, sz);
-            off.globalCompositeOperation = 'source-over';
-            off.drawImage(texture, 0, 0, sz, sz);
-            off.globalCompositeOperation = 'source-atop';
-            off.fillStyle = puff.color + '0.85)';
-            off.fillRect(0, 0, sz, sz);
-            off.globalCompositeOperation = 'source-over';
-            ctx.drawImage(this.offscreenCanvas, -puff.size/2, -puff.size/2, puff.size, puff.size);
-        }
+        ctx.drawImage(drawable, -puff.size/2, -puff.size/2, puff.size, puff.size);
         ctx.restore();
     });
     ctx.globalCompositeOperation = 'source-over';
