@@ -154,8 +154,8 @@ export class BackgroundManager {
     const numClusters = 10 + Math.floor(Math.random() * 21); // 10–30 like Python version
 
     for (let i = 0; i < numClusters; i++) {
-        const cx = (Math.random() - 0.5) * width * 4;
-        const cy = (Math.random() - 0.5) * height * 4;
+        const cx = (Math.random() - 0.5) * width * 14;
+        const cy = (Math.random() - 0.5) * height * 14;
         const puffsPerCluster = 4 + Math.floor(Math.random() * 5); // 4–8
 
         for (let j = 0; j < puffsPerCluster; j++) {
@@ -173,7 +173,7 @@ export class BackgroundManager {
                 y: cy + offsetY,
                 size: size,
                 depth: depth,
-                opacity: 0.12,
+                opacity: 0.22,
                 color: color,
                 rotation: Math.random() * Math.PI * 2,
                 rotationSpeed: (Math.random() - 0.5) * 0.001,
@@ -285,7 +285,7 @@ export class BackgroundManager {
             ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
             // Color tint: radial gradient fades to transparent so there's no hard edge.
             const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, puff.size * 0.4);
-            grad.addColorStop(0, puff.color + '0.55)');
+            grad.addColorStop(0, puff.color + '1)');
             grad.addColorStop(1, puff.color + '0)');
             ctx.fillStyle = grad;
             ctx.fillRect(-puff.size/2, -puff.size/2, puff.size, puff.size);
