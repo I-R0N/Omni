@@ -151,28 +151,30 @@ export class BackgroundManager {
     this.nebulaPuffs = [];
     this.milkyWay = [];
     
-    const numClusters = 15; 
-    const colors = ['rgba(239, 68, 68,', 'rgba(59, 130, 246,', 'rgba(168, 85, 247,', 'rgba(16, 185, 129,', 'rgba(245, 158, 11,', 'rgba(6, 182, 212,'];
+    const numClusters = 10 + Math.floor(Math.random() * 21); // 10–30 like Python version
 
     for (let i = 0; i < numClusters; i++) {
         const cx = (Math.random() - 0.5) * width * 4;
         const cy = (Math.random() - 0.5) * height * 4;
-        const puffsPerCluster = 1 + Math.floor(Math.random() * 2);
-        const clusterColorBase = colors[Math.floor(Math.random() * colors.length)];
+        const puffsPerCluster = 4 + Math.floor(Math.random() * 5); // 4–8
 
         for (let j = 0; j < puffsPerCluster; j++) {
-            const size = 80 + Math.random() * 30; 
-            const depth = 0.2 + Math.random() * 0.8; 
-            const offsetX = (Math.random() - 0.5) * 40; 
-            const offsetY = (Math.random() - 0.5) * 30;
-            
+            const size = 150 + Math.random() * 250; // 150–400px
+            const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
+            const offsetX = (Math.random() - 0.5) * 300; // ±150
+            const offsetY = (Math.random() - 0.5) * 200; // ±100
+            // random R, random G, full B — matches Python: color=(random(), random(), 1)
+            const r = Math.floor(Math.random() * 256);
+            const g = Math.floor(Math.random() * 256);
+            const color = `rgba(${r}, ${g}, 255,`;
+
             this.nebulaPuffs.push({
                 x: cx + offsetX,
                 y: cy + offsetY,
                 size: size,
-                depth: depth * 0.5,
-                opacity: 0.3,
-                color: clusterColorBase, 
+                depth: depth,
+                opacity: 0.12,
+                color: color,
                 rotation: Math.random() * Math.PI * 2,
                 rotationSpeed: (Math.random() - 0.5) * 0.001,
                 aspect: 0.8 + Math.random() * 0.4,
