@@ -49,6 +49,8 @@ export class BackgroundManager {
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
+  private offscreenCanvas: HTMLCanvasElement = document.createElement('canvas');
+  private offscreenCtx: CanvasRenderingContext2D | null = null;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -277,13 +279,23 @@ export class BackgroundManager {
         ctx.rotate(puff.rotation);
         ctx.scale(puff.aspect, 1.0);
         if (texture) {
-            // Images must have a transparent background (PNG with alpha).
-            // Draw image first, then source-atop fills the tint color only over
-            // non-transparent pixels — giving the nebula its color without any oval clipping.
-            ctx.drawImage(texture, -puff.size/2, -puff.size/2, puff.size, puff.size);
-            ctx.globalCompositeOperation = 'source-atop';
-            ctx.fillStyle = puff.color + '0.85)';
-            ctx.fillRect(-puff.size/2, -puff.size/2, puff.size, puff.size);
+            // Tint on an isolated offscreen canvas so source-atop only sees the
+            // image pixels — not the starfield already on the main canvas.
+            const sz = 512;
+            if (!this.offscreenCtx) {
+                this.offscreenCanvas.width = sz;
+                this.offscreenCanvas.height = sz;
+                this.offscreenCtx = this.offscreenCanvas.getContext('2d');
+            }
+            const off = this.offscreenCtx!;
+            off.clearRect(0, 0, sz, sz);
+            off.globalCompositeOperation = 'source-over';
+            off.drawImage(texture, 0, 0, sz, sz);
+            off.globalCompositeOperation = 'source-atop';
+            off.fillStyle = puff.color + '0.85)';
+            off.fillRect(0, 0, sz, sz);
+            off.globalCompositeOperation = 'source-over';
+            ctx.drawImage(this.offscreenCanvas, -puff.size/2, -puff.size/2, puff.size, puff.size);
         }
         ctx.restore();
     });
