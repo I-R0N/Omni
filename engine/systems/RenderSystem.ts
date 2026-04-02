@@ -626,19 +626,25 @@ export class RenderSystem {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const pulse = 0.7 + Math.sin(Date.now() / 350) * 0.3;
+                const now = Date.now() / 1000;
+                const pulse = 0.75 + Math.sin(now * 2.8) * 0.25;
 
                 // Color palette per drop type
                 let coreColor: string;
                 let rimColor: string;
+                let glowRgb: [number, number, number];
                 if (entity.dropType === 'fuel') {
                     coreColor = '#00e5ff'; rimColor = '#0090a0';
+                    glowRgb = [0, 229, 255];
                 } else if (entity.dropType === 'gold') {
                     coreColor = '#ffd700'; rimColor = '#b8860b';
+                    glowRgb = [255, 215, 0];
                 } else if (entity.dropType === 'health') {
                     coreColor = '#4ade80'; rimColor = '#16a34a';
+                    glowRgb = [74, 222, 128];
                 } else {
                     coreColor = entity.color; rimColor = entity.color;
+                    glowRgb = hexToRgb(entity.color);
                 }
 
                 // Build shard polygon path
@@ -655,8 +661,21 @@ export class RenderSystem {
                     ctx.closePath();
                 };
 
+                // Radial glow bloom — drawn first so the shard sits on top
+                const glowRadius = (entity.size.x / 2) * 2.8 * pulse;
+                const [gr, gg, gb] = glowRgb;
+                const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.55 * fadeAlpha})`);
+                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.25 * fadeAlpha})`);
+                bloom.addColorStop(1,   `rgba(${gr}, ${gg}, ${gb}, 0)`);
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
                 // Outer glow rim
-                ctx.globalAlpha = 0.45 * pulse * fadeAlpha;
+                ctx.globalAlpha = 0.55 * pulse * fadeAlpha;
                 ctx.strokeStyle = rimColor;
                 ctx.lineWidth = 3;
                 buildShardPath();
