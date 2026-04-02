@@ -626,20 +626,21 @@ export class RenderSystem {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const pulse = 1.0;
+                const now = Date.now() / 1000;
+                const pulse = 0.82 + Math.sin(now * 6.5) * 0.18;
 
                 // Color palette per drop type
                 let coreColor: string;
                 let rimColor: string;
                 let glowRgb: [number, number, number];
                 if (entity.dropType === 'fuel') {
-                    coreColor = '#00e5ff'; rimColor = '#0090a0';
+                    coreColor = '#33eeff'; rimColor = '#00c8d8';
                     glowRgb = [0, 229, 255];
                 } else if (entity.dropType === 'gold') {
-                    coreColor = '#ffd700'; rimColor = '#b8860b';
+                    coreColor = '#ffe033'; rimColor = '#c8a000';
                     glowRgb = [255, 215, 0];
                 } else if (entity.dropType === 'health') {
-                    coreColor = '#4ade80'; rimColor = '#16a34a';
+                    coreColor = '#6ef09a'; rimColor = '#22c55e';
                     glowRgb = [74, 222, 128];
                 } else {
                     coreColor = entity.color; rimColor = entity.color;
@@ -661,11 +662,11 @@ export class RenderSystem {
                 };
 
                 // Radial glow bloom — drawn first so the shard sits on top
-                const glowRadius = (entity.size.x / 2) * 1.6;
+                const glowRadius = (entity.size.x / 2) * 1.6 * pulse;
                 const [gr, gg, gb] = glowRgb;
                 const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.55 * fadeAlpha})`);
-                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.25 * fadeAlpha})`);
+                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.65 * fadeAlpha})`);
+                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.30 * fadeAlpha})`);
                 bloom.addColorStop(1,   `rgba(${gr}, ${gg}, ${gb}, 0)`);
                 ctx.globalAlpha = 1.0;
                 ctx.beginPath();
@@ -674,14 +675,14 @@ export class RenderSystem {
                 ctx.fill();
 
                 // Outer glow rim
-                ctx.globalAlpha = 0.55 * fadeAlpha;
+                ctx.globalAlpha = 0.65 * pulse * fadeAlpha;
                 ctx.strokeStyle = rimColor;
                 ctx.lineWidth = 3;
                 buildShardPath();
                 ctx.stroke();
 
                 // Solid shard fill
-                ctx.globalAlpha = 0.92 * fadeAlpha;
+                ctx.globalAlpha = 1.0 * fadeAlpha;
                 ctx.fillStyle = coreColor;
                 buildShardPath();
                 ctx.fill();
