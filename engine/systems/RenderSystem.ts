@@ -5,13 +5,20 @@ import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRI
 import { BackgroundManager } from './BackgroundManager';
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
+// Results are cached to avoid per-frame string parsing.
+const _rgbCache = new Map<string, [number, number, number]>();
 function hexToRgb(hex: string): [number, number, number] {
-    const h = hex.replace('#', '');
-    return [
-        parseInt(h.substring(0, 2), 16),
-        parseInt(h.substring(2, 4), 16),
-        parseInt(h.substring(4, 6), 16),
-    ];
+    let cached = _rgbCache.get(hex);
+    if (!cached) {
+        const h = hex.replace('#', '');
+        cached = [
+            parseInt(h.substring(0, 2), 16),
+            parseInt(h.substring(2, 4), 16),
+            parseInt(h.substring(4, 6), 16),
+        ];
+        _rgbCache.set(hex, cached);
+    }
+    return cached;
 }
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
@@ -314,6 +321,9 @@ export class RenderSystem {
       camera: CameraState,
       playerPos?: Vector2
     ) {
+    // Computed once per frame and reused by all entity rendering below.
+    const nowSec = Date.now() / 1000;
+
     entities.forEach(entity => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -517,57 +527,40 @@ export class RenderSystem {
           } else if (entity.type === EntityType.PROJECTILE) {
              const r = entity.size.x / 2;
              if (Number.isFinite(r) && r > 0) {
-                const now = Date.now() / 1000;
                 // Pulsing animation: fast oscillation tied to position for variety
-                const pulse = 0.88 + Math.sin(now * 14 + r * 1.3) * 0.12;
-                const animR = r * pulse;
+                const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                const glowR = r * pulse * 3.0;
 
                 // Fade out in the last 20% of lifetime
                 const lifetimeFrac = (entity.lifetime !== undefined && entity.maxLifetime !== undefined && entity.maxLifetime > 0)
                     ? Math.min(1, entity.lifetime / (entity.maxLifetime * 0.2))
                     : 1;
-                const alpha = Math.min(1, lifetimeFrac);
 
                 const isEnemy = entity.ownerType === EntityType.ENEMY;
                 const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
 
                 ctx.save();
-                ctx.globalAlpha = alpha;
+                ctx.globalAlpha = Math.min(1, lifetimeFrac);
 
-                // Outer soft glow
-                const glowR = animR * 3.0;
-                const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                // Single merged gradient: hot white core → weapon colour → transparent glow.
+                // One gradient object + one draw call instead of two.
+                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
                 if (isEnemy) {
-                    glow.addColorStop(0,   'rgba(255, 200, 80, 0.55)');
-                    glow.addColorStop(0.35,'rgba(249, 115, 22, 0.35)');
-                    glow.addColorStop(0.7, 'rgba(180, 40,  0,  0.15)');
-                    glow.addColorStop(1,   'rgba(180, 40,  0,  0)');
+                    grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
+                    grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
+                    grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
+                    grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
+                    grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
                 } else {
-                    glow.addColorStop(0,   `rgba(255, 255, 255, 0.45)`);
-                    glow.addColorStop(0.35,`rgba(${cr}, ${cg}, ${cb}, 0.30)`);
-                    glow.addColorStop(0.7, `rgba(${cr}, ${cg}, ${cb}, 0.10)`);
-                    glow.addColorStop(1,   `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                    grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
+                    grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                    grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                    grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
+                    grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
                 }
                 ctx.beginPath();
                 ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-                ctx.fillStyle = glow;
-                ctx.fill();
-
-                // Bright core with hot white center
-                const core = ctx.createRadialGradient(0, 0, 0, 0, 0, animR);
-                if (isEnemy) {
-                    core.addColorStop(0,   'rgba(255, 255, 220, 1)');
-                    core.addColorStop(0.35,'rgba(255, 180,  50, 1)');
-                    core.addColorStop(0.7, 'rgba(249, 115,  22, 1)');
-                    core.addColorStop(1,   'rgba(180,  40,   0, 0.8)');
-                } else {
-                    core.addColorStop(0,   'rgba(255, 255, 255, 1)');
-                    core.addColorStop(0.4, `rgba(${cr}, ${cg}, ${cb}, 1)`);
-                    core.addColorStop(1,   `rgba(${Math.round(cr*0.6)}, ${Math.round(cg*0.6)}, ${Math.round(cb*0.6)}, 0.85)`);
-                }
-                ctx.beginPath();
-                ctx.arc(0, 0, animR, 0, Math.PI * 2);
-                ctx.fillStyle = core;
+                ctx.fillStyle = grad;
                 ctx.fill();
 
                 ctx.restore();
@@ -626,8 +619,7 @@ export class RenderSystem {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const now = Date.now() / 1000;
-                const pulse = 0.82 + Math.sin(now * 6.5) * 0.18;
+                const pulse = 0.82 + Math.sin(nowSec * 6.5) * 0.18;
 
                 // Color palette per drop type
                 let coreColor: string;

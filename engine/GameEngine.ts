@@ -941,14 +941,16 @@ export class GameEngine {
           const p = entities[i];
           if (!p.active || p.type !== EntityType.PROJECTILE) continue;
 
-          // Decay existing trail points
+          // Decay existing trail points (write-index avoids O(n) splice shifts)
           if (p.trail) {
-              for (let j = p.trail.length - 1; j >= 0; j--) {
+              let writeIdx = 0;
+              for (let j = 0; j < p.trail.length; j++) {
                   p.trail[j].lifetime -= dt;
-                  if (p.trail[j].lifetime <= 0) {
-                      p.trail.splice(j, 1);
+                  if (p.trail[j].lifetime > 0) {
+                      p.trail[writeIdx++] = p.trail[j];
                   }
               }
+              p.trail.length = writeIdx;
           } else {
               p.trail = [];
           }
