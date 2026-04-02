@@ -626,8 +626,7 @@ export class RenderSystem {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const now = Date.now() / 1000;
-                const pulse = 0.75 + Math.sin(now * 2.8) * 0.25;
+                const pulse = 1.0;
 
                 // Color palette per drop type
                 let coreColor: string;
@@ -662,7 +661,7 @@ export class RenderSystem {
                 };
 
                 // Radial glow bloom — drawn first so the shard sits on top
-                const glowRadius = (entity.size.x / 2) * 2.8 * pulse;
+                const glowRadius = (entity.size.x / 2) * 1.6;
                 const [gr, gg, gb] = glowRgb;
                 const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
                 bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.55 * fadeAlpha})`);
@@ -675,7 +674,7 @@ export class RenderSystem {
                 ctx.fill();
 
                 // Outer glow rim
-                ctx.globalAlpha = 0.55 * pulse * fadeAlpha;
+                ctx.globalAlpha = 0.55 * fadeAlpha;
                 ctx.strokeStyle = rimColor;
                 ctx.lineWidth = 3;
                 buildShardPath();
