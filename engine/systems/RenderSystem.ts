@@ -662,7 +662,7 @@ export class RenderSystem {
                 };
 
                 // Radial glow bloom — drawn first so the shard sits on top
-                const glowRadius = (entity.size.x / 2) * 1.6 * pulse;
+                const glowRadius = (entity.size.x / 2) * 3.5 * pulse;
                 const [gr, gg, gb] = glowRgb;
                 const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
                 bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.65 * fadeAlpha})`);
