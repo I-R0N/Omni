@@ -665,8 +665,8 @@ export class RenderSystem {
                 const glowRadius = (entity.size.x / 2) * 3.5 * pulse;
                 const [gr, gg, gb] = glowRgb;
                 const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.65 * fadeAlpha})`);
-                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.30 * fadeAlpha})`);
+                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.90 * fadeAlpha})`);
+                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.55 * fadeAlpha})`);
                 bloom.addColorStop(1,   `rgba(${gr}, ${gg}, ${gb}, 0)`);
                 ctx.globalAlpha = 1.0;
                 ctx.beginPath();
