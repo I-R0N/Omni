@@ -10,6 +10,13 @@ import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, 
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
+/** Average two 6-digit hex colours component-wise. */
+function blendHexColors(hexA: string, hexB: string): string {
+    const rA = parseInt(hexA.slice(1, 3), 16), gA = parseInt(hexA.slice(3, 5), 16), bA = parseInt(hexA.slice(5, 7), 16);
+    const rB = parseInt(hexB.slice(1, 3), 16), gB = parseInt(hexB.slice(3, 5), 16), bB = parseInt(hexB.slice(5, 7), 16);
+    return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
+}
+
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -432,6 +439,12 @@ export class GameEngine {
               }
           }
       }
+
+      // Portal system — scatter/teleport stalled entities before compaction removes them
+      this.handleEntityPortals(dt);
+
+      // Drop merging — combine nearby drops before compaction removes deactivated ones
+      this.handleDropMerging();
 
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
@@ -998,6 +1011,233 @@ export class GameEngine {
       }
   }
 
+  // ─── Portal system ─────────────────────────────────────────────────────────
+  // Detects stalled asteroids/drops and scatters or teleports them so they
+  // don't pile up at gravity wells or flow-field dead zones.
+
+  private handleEntityPortals(dt: number) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const config   = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+
+      const STALL_SPEED_SQ  = 0.3 * 0.3;   // < 0.3 units/frame counts as stalled
+      const STALL_SECONDS   = 3.5;           // seconds before portal triggers
+      const ATTRACTOR_SCALE = 1.5;           // multiplier on attractor.size.x for portal zone
+
+      // Collect gravity attractors once for attractor-proximity checks
+      const attractors: GameEntity[] = [];
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.gravityRange && e.gravityRange > 0) attractors.push(e);
+      }
+
+      // Pre-collect POIs for safe rim-spawn placement (reuse across scatter calls)
+      const pois: GameEntity[] = [];
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.INTERACTABLE && !e.dropType) pois.push(e);
+      }
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active) continue;
+
+          const isAsteroid = e.type === EntityType.ASTEROID;
+          const isDrop = e.type === EntityType.INTERACTABLE &&
+                         !!e.dropType && e.dropType !== 'glass' && e.dropType !== 'powerup';
+          if (!isAsteroid && !isDrop) continue;
+
+          const speedSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+          if (speedSq < STALL_SPEED_SQ) {
+              e.stallTimer = (e.stallTimer ?? 0) + dt;
+          } else {
+              e.stallTimer = 0;
+          }
+
+          // Check proximity to gravity attractor portal zones
+          let nearAttractor = false;
+          for (let j = 0; j < attractors.length; j++) {
+              const attr = attractors[j];
+              const dx = attr.position.x - e.position.x;
+              const dy = attr.position.y - e.position.y;
+              const portalRSq = (attr.size.x * ATTRACTOR_SCALE) ** 2;
+              if (dx * dx + dy * dy < portalRSq) { nearAttractor = true; break; }
+          }
+
+          const stalledLongEnough = (e.stallTimer ?? 0) >= STALL_SECONDS;
+
+          if (!stalledLongEnough && !nearAttractor) continue;
+
+          e.stallTimer = 0;
+
+          if (isAsteroid) {
+              // Teleport asteroid back to the spawn rim with fresh flow-aligned velocity
+              this.scatterToRim(e, config, pois);
+          } else {
+              // Drop near attractor: deactivate (absorbed by gravity well)
+              if (nearAttractor) {
+                  e.active = false;
+              } else {
+                  // Drop stalled in flow field: kick it in a random direction
+                  const kickAngle = Math.random() * Math.PI * 2;
+                  const kickSpeed = 2.0 + Math.random() * 2.0;
+                  e.velocity.x = Math.cos(kickAngle) * kickSpeed;
+                  e.velocity.y = Math.sin(kickAngle) * kickSpeed;
+              }
+          }
+      }
+  }
+
+  /** Teleport entity to a random safe point on the asteroid spawn rim. */
+  private scatterToRim(entity: GameEntity, config: any, pois: GameEntity[]) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist  = 500 + Math.random() * (config.radius - 500);
+          const nx    = Math.cos(angle) * dist;
+          const ny    = Math.sin(angle) * dist;
+
+          let safe = true;
+          for (let k = 0; k < pois.length; k++) {
+              const p  = pois[k];
+              const dx = nx - p.position.x;
+              const dy = ny - p.position.y;
+              if (dx * dx + dy * dy < ((p.gravityRange || p.size.x) + 800) ** 2) {
+                  safe = false; break;
+              }
+          }
+
+          if (safe) {
+              entity.position.x = nx;
+              entity.position.y = ny;
+              // Align to flow field at new position with entity's existing speed
+              const flow = this.flowField.sampleAsteroidFlow(nx, ny);
+              const prevSpeed = Math.sqrt(entity.velocity.x ** 2 + entity.velocity.y ** 2) || 1.5;
+              entity.velocity.x = flow.x * prevSpeed;
+              entity.velocity.y = flow.y * prevSpeed;
+              return;
+          }
+      }
+  }
+
+  // ─── Drop merging ───────────────────────────────────────────────────────────
+  // Nearby drops of the same type combine into a larger drop; different types
+  // collapse into a composite asteroid that carries both payloads until destroyed.
+
+  private handleDropMerging() {
+      const drops = this.activeDrops;
+      if (drops.length < 2) return;
+
+      const MERGE_DIST    = 18;            // world units
+      const MERGE_DIST_SQ = MERGE_DIST * MERGE_DIST;
+      const MAX_DROP_SIZE = 30;            // max visual radius for merged drops
+
+      // Spatial grid: cell = MERGE_DIST so adjacent cells cover all pairs within range
+      const grid = new Map<number, number[]>();
+      for (let i = 0; i < drops.length; i++) {
+          const d = drops[i];
+          if (!d.active || d.dropType === 'glass' || d.dropType === 'powerup') continue;
+          const cx  = Math.floor(d.position.x / MERGE_DIST);
+          const cy  = Math.floor(d.position.y / MERGE_DIST);
+          const key = (cx << 16) | (cy & 0xFFFF);
+          let cell  = grid.get(key);
+          if (!cell) { cell = []; grid.set(key, cell); }
+          cell.push(i);
+      }
+
+      for (let i = 0; i < drops.length; i++) {
+          const a = drops[i];
+          if (!a.active || a.dropType === 'glass' || a.dropType === 'powerup') continue;
+
+          const acx = Math.floor(a.position.x / MERGE_DIST);
+          const acy = Math.floor(a.position.y / MERGE_DIST);
+
+          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                  const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                  if (!cell) continue;
+                  for (let k = 0; k < cell.length; k++) {
+                      const j = cell[k];
+                      if (j <= i) continue;
+                      const b = drops[j];
+                      if (!b.active) continue;
+
+                      const dx = b.position.x - a.position.x;
+                      const dy = b.position.y - a.position.y;
+                      if (dx * dx + dy * dy > MERGE_DIST_SQ) continue;
+
+                      // Center-of-mass position and averaged velocity
+                      const mx = (a.position.x + b.position.x) * 0.5;
+                      const my = (a.position.y + b.position.y) * 0.5;
+                      const mvx = (a.velocity.x + b.velocity.x) * 0.5;
+                      const mvy = (a.velocity.y + b.velocity.y) * 0.5;
+
+                      if (a.dropType === b.dropType) {
+                          // Same type → grow a, deactivate b
+                          a.dropValue = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+                          const newR = Math.min(MAX_DROP_SIZE, (a.size.x + b.size.x) * 0.55);
+                          a.size.x = newR; a.size.y = newR;
+                          a.position.x = mx; a.position.y = my;
+                          a.velocity.x  = mvx; a.velocity.y = mvy;
+                          b.active = false;
+                      } else {
+                          // Different types → composite asteroid
+                          this.spawnCompositeAsteroid(a, b, mx, my, mvx, mvy);
+                          a.active = false;
+                          b.active = false;
+                      }
+                  }
+              }
+          }
+      }
+  }
+
+  private spawnCompositeAsteroid(
+      dropA: GameEntity, dropB: GameEntity,
+      mx: number, my: number, mvx: number, mvy: number
+  ) {
+      if (!this.currentMap) return;
+
+      const ra      = dropA.size.x / 2;
+      const rb      = dropB.size.x / 2;
+      const newSize = Math.min(80, (ra + rb) * 4.5);
+      const hp      = Math.max(2, Math.round(newSize / 20));
+
+      // Irregular polygon (same approach as normal asteroids)
+      const numPts = 9 + Math.floor(Math.random() * 4);
+      const baseR  = (newSize / 2) * 0.82;
+      const rawPts: { angle: number; r: number }[] = [];
+      for (let i = 0; i < numPts; i++) {
+          const base   = (i / numPts) * Math.PI * 2;
+          const jitter = (Math.random() - 0.5) * (Math.PI / numPts) * 0.65;
+          rawPts.push({ angle: base + jitter, r: baseR * (0.75 + Math.random() * 0.5) });
+      }
+      rawPts.sort((a, b) => a.angle - b.angle);
+      const points = rawPts.map(p => ({
+          x: Math.cos(p.angle) * p.r,
+          y: Math.sin(p.angle) * p.r,
+      }));
+
+      this.currentMap.entities.push({
+          id:            `composite_${Date.now()}_${Math.random()}`,
+          type:          EntityType.ASTEROID,
+          position:      { x: mx, y: my },
+          velocity:      { x: mvx, y: mvy },
+          size:          { x: newSize, y: newSize },
+          rotation:      Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * (1.5 / (newSize / 20)),
+          color:         blendHexColors(dropA.color, dropB.color),
+          active:        true,
+          health:        hp,
+          maxHealth:     hp,
+          mass:          newSize,
+          polygonPoints: points,
+          dropComposition: [
+              { type: dropA.dropType as 'fuel' | 'gold' | 'health', value: dropA.dropValue ?? 1 },
+              { type: dropB.dropType as 'fuel' | 'gold' | 'health', value: dropB.dropValue ?? 1 },
+          ],
+      });
+  }
+
   private createAsteroidShards(parent: GameEntity) {
       // Minimum shard size = smallest spawnable asteroid.
       const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
@@ -1224,8 +1464,15 @@ export class GameEngine {
       this.applyDropEffect(entity);
 
     } else if (entity.type === EntityType.ASTEROID) {
-      const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
-      this.spawnDrop(pos, 'gold', goldAmt, pv);
+      if (entity.dropComposition && entity.dropComposition.length > 0) {
+        // Composite asteroid — release all stored drop payloads
+        for (const comp of entity.dropComposition) {
+          this.spawnDrop(pos, comp.type, comp.value, pv);
+        }
+      } else {
+        const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
+        this.spawnDrop(pos, 'gold', goldAmt, pv);
+      }
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
         this.spawnRandomPowerupDrop(pos, pv);
