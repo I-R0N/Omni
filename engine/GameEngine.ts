@@ -374,10 +374,13 @@ export class GameEngine {
       // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
       // causing gradual clustering as they drift through the flow field.
       // Glass shards are purely debris and excluded.
-      // Pre-build a candidate list to keep the O(n²) pair count small.
+      // Spatial grid (cell = interaction radius) reduces O(n²) pairs to O(n·k)
+      // where k is the local candidate density — typically 1–5 vs. all candidates.
       const GRAV_G        = 2.5;
-      const GRAV_RANGE_SQ = 120 * 120;
-      const GRAV_MIN_SQ   = 12 * 12; // avoid singularity at close range
+      const GRAV_RANGE    = 120;
+      const GRAV_RANGE_SQ = GRAV_RANGE * GRAV_RANGE;
+      const GRAV_MIN_SQ   = 12 * 12;
+
       const gravCandidates: GameEntity[] = [this.player];
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
@@ -387,23 +390,46 @@ export class GameEngine {
               gravCandidates.push(e);
           }
       }
-      const gc = gravCandidates;
-      for (let i = 0; i < gc.length; i++) {
-          for (let j = i + 1; j < gc.length; j++) {
-              const a  = gc[i];
-              const b  = gc[j];
-              const dx = b.position.x - a.position.x;
-              const dy = b.position.y - a.position.y;
-              const distSq = dx * dx + dy * dy;
-              if (distSq > GRAV_RANGE_SQ) continue;
-              const effSq  = Math.max(distSq, GRAV_MIN_SQ);
-              const f      = GRAV_G / effSq; // acceleration magnitude (both get same)
-              const fx     = dx * f;
-              const fy     = dy * f;
-              a.velocity.x += fx * dt;
-              a.velocity.y += fy * dt;
-              b.velocity.x -= fx * dt;
-              b.velocity.y -= fy * dt;
+
+      // Bucket candidate indices by grid cell
+      const gravGrid = new Map<number, number[]>();
+      for (let i = 0; i < gravCandidates.length; i++) {
+          const e = gravCandidates[i];
+          const cx = Math.floor(e.position.x / GRAV_RANGE);
+          const cy = Math.floor(e.position.y / GRAV_RANGE);
+          const key = (cx << 16) | (cy & 0xFFFF);
+          let cell = gravGrid.get(key);
+          if (!cell) { cell = []; gravGrid.set(key, cell); }
+          cell.push(i);
+      }
+
+      // Check only same + 8 neighbouring cells; j > i ensures each pair is processed once
+      for (let i = 0; i < gravCandidates.length; i++) {
+          const a = gravCandidates[i];
+          const acx = Math.floor(a.position.x / GRAV_RANGE);
+          const acy = Math.floor(a.position.y / GRAV_RANGE);
+          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                  const cell = gravGrid.get((ncx << 16) | (ncy & 0xFFFF));
+                  if (!cell) continue;
+                  for (let k = 0; k < cell.length; k++) {
+                      const j = cell[k];
+                      if (j <= i) continue;
+                      const b = gravCandidates[j];
+                      const dx = b.position.x - a.position.x;
+                      const dy = b.position.y - a.position.y;
+                      const distSq = dx * dx + dy * dy;
+                      if (distSq > GRAV_RANGE_SQ) continue;
+                      const effSq = Math.max(distSq, GRAV_MIN_SQ);
+                      const f    = GRAV_G / effSq;
+                      const fx   = dx * f;
+                      const fy   = dy * f;
+                      a.velocity.x += fx * dt;
+                      a.velocity.y += fy * dt;
+                      b.velocity.x -= fx * dt;
+                      b.velocity.y -= fy * dt;
+                  }
+              }
           }
       }
 

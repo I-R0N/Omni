@@ -59,6 +59,7 @@ export class RenderSystem {
   private _specularBitmap: HTMLCanvasElement | null = null;
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
+  private _particleBuffer: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
 
@@ -137,6 +138,7 @@ export class RenderSystem {
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
     this._trailEntities.length = 0;
+    this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
     this._minimapBuffer.length = 0;
 
@@ -180,7 +182,12 @@ export class RenderSystem {
             continue;
         }
 
-        this._visibleEntities.push(entity);
+        // Particles go to a separate buffer for single-pass 'lighter' composite rendering
+        if (entity.type === EntityType.PARTICLE) {
+            this._particleBuffer.push(entity);
+        } else {
+            this._visibleEntities.push(entity);
+        }
 
         if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
             this._trailEntities.push(entity);
@@ -215,7 +222,10 @@ export class RenderSystem {
 
     // 4. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
-    
+
+    // 4b. Render Particles — single composite-op switch for the whole batch
+    this.renderParticles(ctx, this._particleBuffer);
+
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
         this.renderDamageTexts(ctx, damageTexts);
@@ -315,6 +325,22 @@ export class RenderSystem {
       });
   }
 
+  private renderParticles(ctx: CanvasRenderingContext2D, particles: GameEntity[]) {
+      if (particles.length === 0) return;
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
+          ctx.globalAlpha = lifeRatio;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.position.x, p.position.y, p.size.x, 0, Math.PI * 2);
+          ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+  }
+
   private renderEntities(
       ctx: CanvasRenderingContext2D,
       entities: GameEntity[],
@@ -330,20 +356,8 @@ export class RenderSystem {
       if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
-      // --- PARTICLE RENDERING ---
-      if (entity.type === EntityType.PARTICLE) {
-          ctx.save();
-          // Glow effect for particles
-          ctx.globalCompositeOperation = 'lighter';
-          const lifeRatio = (entity.lifetime || 0) / (entity.maxLifetime || 1);
-          ctx.globalAlpha = lifeRatio;
-          ctx.fillStyle = entity.color;
-          ctx.beginPath();
-          ctx.arc(entity.position.x, entity.position.y, entity.size.x, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-          return;
-      }
+      // Particles are handled separately in renderParticles() — skip here
+      if (entity.type === EntityType.PARTICLE) return;
 
       ctx.save();
       
