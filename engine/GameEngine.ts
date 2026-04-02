@@ -63,6 +63,9 @@ export class GameEngine {
 
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
+
+  // Collision-based stick bonds — entities bond on contact and merge after threshold
+  private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
   private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
@@ -440,9 +443,8 @@ export class GameEngine {
           }
       }
 
-      // Merge nearby entities before compaction removes deactivated ones
-      this.handleAsteroidMerging();
-      this.handleDropMerging();
+      // Stick bonds: detect contact and merge entities after threshold
+      this.handleEntitySticking(dt);
 
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
@@ -1009,41 +1011,94 @@ export class GameEngine {
       }
   }
 
-  // ─── Asteroid merging ──────────────────────────────────────────────────────
-  // When two asteroids drift close enough together they accrete into one larger
-  // body. Size grows by area conservation, velocity by momentum conservation,
-  // health by summing both, capped so individual giants don't become unkillable.
+  // ─── Collision-based stick bonds ───────────────────────────────────────────
+  // Entities bond only on physical contact. While bonded their velocities are
+  // nudged toward shared momentum. After the threshold duration they merge.
+  // Bonds break if entities drift apart beyond 1.5× contact distance.
 
-  private handleAsteroidMerging() {
+  private handleEntitySticking(dt: number) {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      const MAX_SIZE  = 200;  // world units — hard cap on merged asteroid diameter
-      const MAX_HP    = 6;    // health cap so large asteroids stay killable
 
-      // Collect active asteroids into a local list for the grid
-      const asts: GameEntity[] = [];
+      const SAME_THRESHOLD = 3.0;   // seconds before same-type bond merges
+      const DIFF_THRESHOLD = 6.0;   // seconds before cross-type bond merges
+      const DIFF_CHANCE    = 0.5;   // probability that a cross-type contact forms a bond
+      const COHESION       = 4.0;   // fraction of velocity delta corrected per second
+      const BREAK_FACTOR   = 1.5;   // bond breaks when dist > contactDist * this
+      const CONTACT_BUFFER = 4;     // extra pixel tolerance for contact detection
+
+      // ── 1. Update existing bonds ──────────────────────────────────────────
+      const bonded = new Set<GameEntity>();
+      let writeIdx = 0;
+
+      for (let bi = 0; bi < this.stickBonds.length; bi++) {
+          const bond = this.stickBonds[bi];
+          const { a, b } = bond;
+
+          if (!a.active || !b.active) continue; // discard silently
+
+          const dx = b.position.x - a.position.x;
+          const dy = b.position.y - a.position.y;
+          const dist       = Math.sqrt(dx * dx + dy * dy);
+          const contactDist = (a.size.x + b.size.x) * 0.5;
+
+          if (dist > contactDist * BREAK_FACTOR) continue; // bond broken — discard
+
+          // Velocity cohesion: nudge both toward shared momentum centre
+          const totalMass = a.mass + b.mass;
+          const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+          const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+          const blend     = Math.min(1, COHESION * dt);
+          a.velocity.x   += (sharedVx - a.velocity.x) * blend;
+          a.velocity.y   += (sharedVy - a.velocity.y) * blend;
+          b.velocity.x   += (sharedVx - b.velocity.x) * blend;
+          b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+
+          bond.timer += dt;
+
+          if (bond.timer >= bond.threshold) {
+              // Time's up — merge and discard bond
+              this.mergeEntities(a, b);
+              continue;
+          }
+
+          // Keep bond alive
+          this.stickBonds[writeIdx++] = bond;
+          bonded.add(a);
+          bonded.add(b);
+      }
+      this.stickBonds.length = writeIdx;
+
+      // ── 2. Detect new contacts via spatial grid ───────────────────────────
+      // Candidates: active asteroids + eligible drops (no glass/powerup)
+      const candidates: GameEntity[] = [];
+      const entities = this.currentMap.entities;
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (e.active && e.type === EntityType.ASTEROID) asts.push(e);
+          if (e.active && e.type === EntityType.ASTEROID) candidates.push(e);
       }
-      if (asts.length < 2) return;
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup') candidates.push(d);
+      }
+      if (candidates.length < 2) return;
 
-      // Spatial grid — cell = half the max asteroid diameter so neighbours are always adjacent
-      const CELL = MAX_SIZE / 2;
+      // Cell size: must cover the widest possible contact distance.
+      // Max asteroid = 200, max drop ≈ 30 → max contactDist ≈ (200+200)/2 + buffer = 104 → use 110.
+      const CELL = 110;
       const grid  = new Map<number, number[]>();
-      for (let i = 0; i < asts.length; i++) {
-          const a  = asts[i];
-          const cx = Math.floor(a.position.x / CELL);
-          const cy = Math.floor(a.position.y / CELL);
+      for (let i = 0; i < candidates.length; i++) {
+          const c  = candidates[i];
+          const cx = Math.floor(c.position.x / CELL);
+          const cy = Math.floor(c.position.y / CELL);
           const key = (cx << 16) | (cy & 0xFFFF);
           let cell  = grid.get(key);
           if (!cell) { cell = []; grid.set(key, cell); }
           cell.push(i);
       }
 
-      for (let i = 0; i < asts.length; i++) {
-          const a = asts[i];
-          if (!a.active) continue;
+      for (let i = 0; i < candidates.length; i++) {
+          const a = candidates[i];
+          if (!a.active || bonded.has(a)) continue;
 
           const acx = Math.floor(a.position.x / CELL);
           const acy = Math.floor(a.position.y / CELL);
@@ -1055,120 +1110,101 @@ export class GameEngine {
                   for (let k = 0; k < cell.length; k++) {
                       const j = cell[k];
                       if (j <= i) continue;
-                      const b = asts[j];
-                      if (!b.active) continue;
+                      const b = candidates[j];
+                      if (!b.active || bonded.has(b)) continue;
 
                       const dx = b.position.x - a.position.x;
                       const dy = b.position.y - a.position.y;
-                      // Merge when centres are within the sum of both radii (touching/overlapping)
-                      const mergeDist = (a.size.x + b.size.x) * 0.5;
-                      if (dx * dx + dy * dy > mergeDist * mergeDist) continue;
+                      const distSq      = dx * dx + dy * dy;
+                      const contactDist = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
+                      if (distSq > contactDist * contactDist) continue;
 
-                      // Area-conserving size: sqrt(rA² + rB²) * √2 ≈ diameter of combined area
-                      const rA = a.size.x / 2;
-                      const rB = b.size.x / 2;
-                      const newDiam = Math.min(MAX_SIZE, Math.sqrt(rA * rA + rB * rB) * 2);
+                      // Same type: ast+ast or drop+drop with matching dropType
+                      const sameType =
+                          (a.type === EntityType.ASTEROID && b.type === EntityType.ASTEROID) ||
+                          (a.type !== EntityType.ASTEROID && b.type !== EntityType.ASTEROID &&
+                           a.dropType === b.dropType);
 
-                      // Momentum-conserving velocity
-                      const totalMass = a.mass + b.mass;
-                      const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
-                      const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+                      if (!sameType && Math.random() > DIFF_CHANCE) continue;
 
-                      // Centre of mass position
-                      const nmx = (a.position.x * a.mass + b.position.x * b.mass) / totalMass;
-                      const nmy = (a.position.y * a.mass + b.position.y * b.mass) / totalMass;
-
-                      // Carry any composite drop payloads forward
-                      const composition = [
-                          ...(a.dropComposition ?? []),
-                          ...(b.dropComposition ?? []),
-                      ];
-
-                      // Grow a into the merged body, deactivate b
-                      a.size.x       = newDiam;
-                      a.size.y       = newDiam;
-                      a.mass         = newDiam;
-                      a.position.x   = nmx; a.position.y = nmy;
-                      a.velocity.x   = nvx; a.velocity.y = nvy;
-                      a.health       = Math.min(MAX_HP, a.health + b.health);
-                      a.maxHealth    = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
-                      a.dropComposition = composition.length > 0 ? composition : undefined;
-                      b.active = false;
+                      const threshold = sameType ? SAME_THRESHOLD : DIFF_THRESHOLD;
+                      this.stickBonds.push({ a, b, timer: 0, threshold });
+                      bonded.add(a);
+                      bonded.add(b);
                   }
               }
           }
       }
   }
 
-  // ─── Drop merging ───────────────────────────────────────────────────────────
-  // Nearby drops of the same type combine into a larger drop; different types
-  // collapse into a composite asteroid that carries both payloads until destroyed.
+  // ─── Merge two bonded entities ──────────────────────────────────────────────
+  // Handles: asteroid+asteroid, drop+drop (same/different type), asteroid+drop.
 
-  private handleDropMerging() {
-      const drops = this.activeDrops;
-      if (drops.length < 2) return;
+  private mergeEntities(a: GameEntity, b: GameEntity) {
+      if (!a.active || !b.active) return;
 
-      const MERGE_DIST    = 18;            // world units
-      const MERGE_DIST_SQ = MERGE_DIST * MERGE_DIST;
-      const MAX_DROP_SIZE = 30;            // max visual radius for merged drops
+      const totalMass = a.mass + b.mass;
+      const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+      const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+      const nmx = (a.position.x * a.mass + b.position.x * b.mass) / totalMass;
+      const nmy = (a.position.y * a.mass + b.position.y * b.mass) / totalMass;
 
-      // Spatial grid: cell = MERGE_DIST so adjacent cells cover all pairs within range
-      const grid = new Map<number, number[]>();
-      for (let i = 0; i < drops.length; i++) {
-          const d = drops[i];
-          if (!d.active || d.dropType === 'glass' || d.dropType === 'powerup') continue;
-          const cx  = Math.floor(d.position.x / MERGE_DIST);
-          const cy  = Math.floor(d.position.y / MERGE_DIST);
-          const key = (cx << 16) | (cy & 0xFFFF);
-          let cell  = grid.get(key);
-          if (!cell) { cell = []; grid.set(key, cell); }
-          cell.push(i);
-      }
+      const aIsAst = a.type === EntityType.ASTEROID;
+      const bIsAst = b.type === EntityType.ASTEROID;
 
-      for (let i = 0; i < drops.length; i++) {
-          const a = drops[i];
-          if (!a.active || a.dropType === 'glass' || a.dropType === 'powerup') continue;
+      if (aIsAst && bIsAst) {
+          // Asteroid + Asteroid — area-conserving accretion
+          const MAX_SIZE = 200;
+          const MAX_HP   = 6;
+          const rA = a.size.x / 2;
+          const rB = b.size.x / 2;
+          const newDiam = Math.min(MAX_SIZE, Math.sqrt(rA * rA + rB * rB) * 2);
 
-          const acx = Math.floor(a.position.x / MERGE_DIST);
-          const acy = Math.floor(a.position.y / MERGE_DIST);
+          const composition = [
+              ...(a.dropComposition ?? []),
+              ...(b.dropComposition ?? []),
+          ];
 
-          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                  const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
-                  if (!cell) continue;
-                  for (let k = 0; k < cell.length; k++) {
-                      const j = cell[k];
-                      if (j <= i) continue;
-                      const b = drops[j];
-                      if (!b.active) continue;
+          a.size.x = newDiam; a.size.y = newDiam;
+          a.mass   = newDiam;
+          a.position.x = nmx; a.position.y = nmy;
+          a.velocity.x = nvx; a.velocity.y = nvy;
+          a.health     = Math.min(MAX_HP, a.health + b.health);
+          a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
+          a.dropComposition = composition.length > 0 ? composition : undefined;
+          b.active = false;
 
-                      const dx = b.position.x - a.position.x;
-                      const dy = b.position.y - a.position.y;
-                      if (dx * dx + dy * dy > MERGE_DIST_SQ) continue;
-
-                      // Center-of-mass position and averaged velocity
-                      const mx = (a.position.x + b.position.x) * 0.5;
-                      const my = (a.position.y + b.position.y) * 0.5;
-                      const mvx = (a.velocity.x + b.velocity.x) * 0.5;
-                      const mvy = (a.velocity.y + b.velocity.y) * 0.5;
-
-                      if (a.dropType === b.dropType) {
-                          // Same type → grow a, deactivate b
-                          a.dropValue = (a.dropValue ?? 0) + (b.dropValue ?? 0);
-                          const newR = Math.min(MAX_DROP_SIZE, (a.size.x + b.size.x) * 0.55);
-                          a.size.x = newR; a.size.y = newR;
-                          a.position.x = mx; a.position.y = my;
-                          a.velocity.x  = mvx; a.velocity.y = mvy;
-                          b.active = false;
-                      } else {
-                          // Different types → composite asteroid
-                          this.spawnCompositeAsteroid(a, b, mx, my, mvx, mvy);
-                          a.active = false;
-                          b.active = false;
-                      }
-                  }
-              }
+      } else if (!aIsAst && !bIsAst) {
+          // Drop + Drop
+          const MAX_DROP_SIZE = 30;
+          if (a.dropType === b.dropType) {
+              // Same type — grow the drop
+              a.dropValue  = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+              const newR   = Math.min(MAX_DROP_SIZE, (a.size.x + b.size.x) * 0.55);
+              a.size.x     = newR; a.size.y = newR;
+              a.position.x = nmx;  a.position.y = nmy;
+              a.velocity.x = nvx;  a.velocity.y = nvy;
+              b.active = false;
+          } else {
+              // Different types — collapse into a composite asteroid
+              this.spawnCompositeAsteroid(a, b, nmx, nmy, nvx, nvy);
+              a.active = false;
+              b.active = false;
           }
+
+      } else {
+          // Asteroid + Drop — asteroid absorbs the drop payload
+          const ast  = aIsAst ? a : b;
+          const drop = aIsAst ? b : a;
+          const comp: Array<{ type: 'fuel' | 'gold' | 'health'; value: number }> = [
+              ...(ast.dropComposition ?? []),
+          ];
+          if (drop.dropType && drop.dropType !== 'glass' && drop.dropType !== 'powerup') {
+              comp.push({ type: drop.dropType as 'fuel' | 'gold' | 'health', value: drop.dropValue ?? 1 });
+          }
+          ast.dropComposition = comp.length > 0 ? comp : undefined;
+          ast.velocity.x = nvx; ast.velocity.y = nvy;
+          drop.active = false;
       }
   }
 
