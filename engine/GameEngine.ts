@@ -440,10 +440,8 @@ export class GameEngine {
           }
       }
 
-      // Portal system — scatter/teleport stalled entities before compaction removes them
-      this.handleEntityPortals(dt);
-
-      // Drop merging — combine nearby drops before compaction removes deactivated ones
+      // Merge nearby entities before compaction removes deactivated ones
+      this.handleAsteroidMerging();
       this.handleDropMerging();
 
       // In-place compaction (Garbage Free)
@@ -1011,110 +1009,93 @@ export class GameEngine {
       }
   }
 
-  // ─── Portal system ─────────────────────────────────────────────────────────
-  // Detects stalled asteroids/drops and scatters or teleports them so they
-  // don't pile up at gravity wells or flow-field dead zones.
+  // ─── Asteroid merging ──────────────────────────────────────────────────────
+  // When two asteroids drift close enough together they accrete into one larger
+  // body. Size grows by area conservation, velocity by momentum conservation,
+  // health by summing both, capped so individual giants don't become unkillable.
 
-  private handleEntityPortals(dt: number) {
+  private handleAsteroidMerging() {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
-      const config   = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+      const MAX_SIZE  = 200;  // world units — hard cap on merged asteroid diameter
+      const MAX_HP    = 6;    // health cap so large asteroids stay killable
 
-      const STALL_SPEED_SQ  = 0.3 * 0.3;   // < 0.3 units/frame counts as stalled
-      const STALL_SECONDS   = 3.5;           // seconds before portal triggers
-      const ATTRACTOR_SCALE = 1.5;           // multiplier on attractor.size.x for portal zone
-
-      // Collect gravity attractors once for attractor-proximity checks
-      const attractors: GameEntity[] = [];
+      // Collect active asteroids into a local list for the grid
+      const asts: GameEntity[] = [];
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (e.active && e.gravityRange && e.gravityRange > 0) attractors.push(e);
+          if (e.active && e.type === EntityType.ASTEROID) asts.push(e);
+      }
+      if (asts.length < 2) return;
+
+      // Spatial grid — cell = half the max asteroid diameter so neighbours are always adjacent
+      const CELL = MAX_SIZE / 2;
+      const grid  = new Map<number, number[]>();
+      for (let i = 0; i < asts.length; i++) {
+          const a  = asts[i];
+          const cx = Math.floor(a.position.x / CELL);
+          const cy = Math.floor(a.position.y / CELL);
+          const key = (cx << 16) | (cy & 0xFFFF);
+          let cell  = grid.get(key);
+          if (!cell) { cell = []; grid.set(key, cell); }
+          cell.push(i);
       }
 
-      // Pre-collect POIs for safe rim-spawn placement (reuse across scatter calls)
-      const pois: GameEntity[] = [];
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.INTERACTABLE && !e.dropType) pois.push(e);
-      }
+      for (let i = 0; i < asts.length; i++) {
+          const a = asts[i];
+          if (!a.active) continue;
 
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active) continue;
+          const acx = Math.floor(a.position.x / CELL);
+          const acy = Math.floor(a.position.y / CELL);
 
-          const isAsteroid = e.type === EntityType.ASTEROID;
-          const isDrop = e.type === EntityType.INTERACTABLE &&
-                         !!e.dropType && e.dropType !== 'glass' && e.dropType !== 'powerup';
-          if (!isAsteroid && !isDrop) continue;
+          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                  const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                  if (!cell) continue;
+                  for (let k = 0; k < cell.length; k++) {
+                      const j = cell[k];
+                      if (j <= i) continue;
+                      const b = asts[j];
+                      if (!b.active) continue;
 
-          const speedSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-          if (speedSq < STALL_SPEED_SQ) {
-              e.stallTimer = (e.stallTimer ?? 0) + dt;
-          } else {
-              e.stallTimer = 0;
-          }
+                      const dx = b.position.x - a.position.x;
+                      const dy = b.position.y - a.position.y;
+                      // Merge when centres are within the sum of both radii (touching/overlapping)
+                      const mergeDist = (a.size.x + b.size.x) * 0.5;
+                      if (dx * dx + dy * dy > mergeDist * mergeDist) continue;
 
-          // Check proximity to gravity attractor portal zones
-          let nearAttractor = false;
-          for (let j = 0; j < attractors.length; j++) {
-              const attr = attractors[j];
-              const dx = attr.position.x - e.position.x;
-              const dy = attr.position.y - e.position.y;
-              const portalRSq = (attr.size.x * ATTRACTOR_SCALE) ** 2;
-              if (dx * dx + dy * dy < portalRSq) { nearAttractor = true; break; }
-          }
+                      // Area-conserving size: sqrt(rA² + rB²) * √2 ≈ diameter of combined area
+                      const rA = a.size.x / 2;
+                      const rB = b.size.x / 2;
+                      const newDiam = Math.min(MAX_SIZE, Math.sqrt(rA * rA + rB * rB) * 2);
 
-          const stalledLongEnough = (e.stallTimer ?? 0) >= STALL_SECONDS;
+                      // Momentum-conserving velocity
+                      const totalMass = a.mass + b.mass;
+                      const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+                      const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
 
-          if (!stalledLongEnough && !nearAttractor) continue;
+                      // Centre of mass position
+                      const nmx = (a.position.x * a.mass + b.position.x * b.mass) / totalMass;
+                      const nmy = (a.position.y * a.mass + b.position.y * b.mass) / totalMass;
 
-          e.stallTimer = 0;
+                      // Carry any composite drop payloads forward
+                      const composition = [
+                          ...(a.dropComposition ?? []),
+                          ...(b.dropComposition ?? []),
+                      ];
 
-          if (isAsteroid) {
-              // Teleport asteroid back to the spawn rim with fresh flow-aligned velocity
-              this.scatterToRim(e, config, pois);
-          } else {
-              // Drop near attractor: deactivate (absorbed by gravity well)
-              if (nearAttractor) {
-                  e.active = false;
-              } else {
-                  // Drop stalled in flow field: kick it in a random direction
-                  const kickAngle = Math.random() * Math.PI * 2;
-                  const kickSpeed = 2.0 + Math.random() * 2.0;
-                  e.velocity.x = Math.cos(kickAngle) * kickSpeed;
-                  e.velocity.y = Math.sin(kickAngle) * kickSpeed;
+                      // Grow a into the merged body, deactivate b
+                      a.size.x       = newDiam;
+                      a.size.y       = newDiam;
+                      a.mass         = newDiam;
+                      a.position.x   = nmx; a.position.y = nmy;
+                      a.velocity.x   = nvx; a.velocity.y = nvy;
+                      a.health       = Math.min(MAX_HP, a.health + b.health);
+                      a.maxHealth    = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
+                      a.dropComposition = composition.length > 0 ? composition : undefined;
+                      b.active = false;
+                  }
               }
-          }
-      }
-  }
-
-  /** Teleport entity to a random safe point on the asteroid spawn rim. */
-  private scatterToRim(entity: GameEntity, config: any, pois: GameEntity[]) {
-      for (let attempt = 0; attempt < 6; attempt++) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist  = 500 + Math.random() * (config.radius - 500);
-          const nx    = Math.cos(angle) * dist;
-          const ny    = Math.sin(angle) * dist;
-
-          let safe = true;
-          for (let k = 0; k < pois.length; k++) {
-              const p  = pois[k];
-              const dx = nx - p.position.x;
-              const dy = ny - p.position.y;
-              if (dx * dx + dy * dy < ((p.gravityRange || p.size.x) + 800) ** 2) {
-                  safe = false; break;
-              }
-          }
-
-          if (safe) {
-              entity.position.x = nx;
-              entity.position.y = ny;
-              // Align to flow field at new position with entity's existing speed
-              const flow = this.flowField.sampleAsteroidFlow(nx, ny);
-              const prevSpeed = Math.sqrt(entity.velocity.x ** 2 + entity.velocity.y ** 2) || 1.5;
-              entity.velocity.x = flow.x * prevSpeed;
-              entity.velocity.y = flow.y * prevSpeed;
-              return;
           }
       }
   }

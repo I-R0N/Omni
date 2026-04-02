@@ -174,10 +174,6 @@ export interface GameEntity {
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
 
-  // Stall detection — seconds spent below the stall speed threshold.
-  // Reset to 0 whenever the entity exceeds that speed.
-  stallTimer?: number;
-
   // Composite asteroid — set when two different-type drops merge.
   // On destruction the contents are spawned as individual drops instead of
   // the default gold reward.
