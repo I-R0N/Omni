@@ -315,9 +315,9 @@ export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
-  speed: 1.5, // slightly faster — baseline to increase per wave
+  speed: 5.0, // increased from 1.5 for more threatening projectiles
   damage: 5,
-  lifetime: 2.0,
+  lifetime: 3.5, // increased from 2.0 for longer range
   color: '#f97316',
   size: 6,
   count: 1,

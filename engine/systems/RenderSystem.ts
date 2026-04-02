@@ -4,6 +4,16 @@ import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } fro
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
+// Converts a 6-digit hex color string to an [r, g, b] tuple.
+function hexToRgb(hex: string): [number, number, number] {
+    const h = hex.replace('#', '');
+    return [
+        parseInt(h.substring(0, 2), 16),
+        parseInt(h.substring(2, 4), 16),
+        parseInt(h.substring(4, 6), 16),
+    ];
+}
+
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
 function roundRectPath(
@@ -282,8 +292,16 @@ export class RenderSystem {
               const head = t[t.length-1];
               const tail = t[0];
               const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-              grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
+              if (entity.type === EntityType.PROJECTILE) {
+                  // Use weapon color for projectile trails
+                  const [r, g, b] = hexToRgb(entity.color || '#facc15');
+                  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.75)`);
+              } else {
+                  // Player: cyan engine exhaust
+                  grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
+                  grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
+              }
               ctx.fillStyle = grad;
               ctx.fill();
           }
@@ -497,12 +515,62 @@ export class RenderSystem {
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
-             ctx.fillStyle = entity.color;
              const r = entity.size.x / 2;
              if (Number.isFinite(r) && r > 0) {
+                const now = Date.now() / 1000;
+                // Pulsing animation: fast oscillation tied to position for variety
+                const pulse = 0.88 + Math.sin(now * 14 + r * 1.3) * 0.12;
+                const animR = r * pulse;
+
+                // Fade out in the last 20% of lifetime
+                const lifetimeFrac = (entity.lifetime !== undefined && entity.maxLifetime !== undefined && entity.maxLifetime > 0)
+                    ? Math.min(1, entity.lifetime / (entity.maxLifetime * 0.2))
+                    : 1;
+                const alpha = Math.min(1, lifetimeFrac);
+
+                const isEnemy = entity.ownerType === EntityType.ENEMY;
+                const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+
+                // Outer soft glow
+                const glowR = animR * 3.0;
+                const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                if (isEnemy) {
+                    glow.addColorStop(0,   'rgba(255, 200, 80, 0.55)');
+                    glow.addColorStop(0.35,'rgba(249, 115, 22, 0.35)');
+                    glow.addColorStop(0.7, 'rgba(180, 40,  0,  0.15)');
+                    glow.addColorStop(1,   'rgba(180, 40,  0,  0)');
+                } else {
+                    glow.addColorStop(0,   `rgba(255, 255, 255, 0.45)`);
+                    glow.addColorStop(0.35,`rgba(${cr}, ${cg}, ${cb}, 0.30)`);
+                    glow.addColorStop(0.7, `rgba(${cr}, ${cg}, ${cb}, 0.10)`);
+                    glow.addColorStop(1,   `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                }
                 ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                ctx.fillStyle = glow;
                 ctx.fill();
+
+                // Bright core with hot white center
+                const core = ctx.createRadialGradient(0, 0, 0, 0, 0, animR);
+                if (isEnemy) {
+                    core.addColorStop(0,   'rgba(255, 255, 220, 1)');
+                    core.addColorStop(0.35,'rgba(255, 180,  50, 1)');
+                    core.addColorStop(0.7, 'rgba(249, 115,  22, 1)');
+                    core.addColorStop(1,   'rgba(180,  40,   0, 0.8)');
+                } else {
+                    core.addColorStop(0,   'rgba(255, 255, 255, 1)');
+                    core.addColorStop(0.4, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                    core.addColorStop(1,   `rgba(${Math.round(cr*0.6)}, ${Math.round(cg*0.6)}, ${Math.round(cb*0.6)}, 0.85)`);
+                }
+                ctx.beginPath();
+                ctx.arc(0, 0, animR, 0, Math.PI * 2);
+                ctx.fillStyle = core;
+                ctx.fill();
+
+                ctx.restore();
              }
           } else {
             ctx.fillStyle = entity.color;

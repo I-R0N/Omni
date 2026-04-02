@@ -730,6 +730,7 @@ export class GameEngine {
     }
 
     this.updateHomingProjectiles(dt);
+    this.updateProjectileTrails(dt);
 
     // Damage Text cleanup
     let dTextIdx = 0;
@@ -875,10 +876,12 @@ export class GameEngine {
               health: 1,
               maxHealth: 1,
               lifetime: config.lifetime,
+              maxLifetime: config.lifetime,
               mass: PROJECTILE_CONSTANTS.MASS,
               damage: config.damage,
               homing: config.homing,
-              ownerType
+              ownerType,
+              trail: [],
           });
       }
   }
@@ -923,6 +926,46 @@ export class GameEngine {
                   p.velocity.x = Math.cos(p.rotation) * speed;
                   p.velocity.y = Math.sin(p.rotation) * speed;
               }
+          }
+      }
+  }
+
+  private updateProjectileTrails(dt: number) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const TRAIL_LIFETIME = 0.25; // shorter than player trail
+      const TRAIL_SCALE = 0.5;
+      const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
+
+      for (let i = 0; i < entities.length; i++) {
+          const p = entities[i];
+          if (!p.active || p.type !== EntityType.PROJECTILE) continue;
+
+          // Decay existing trail points
+          if (p.trail) {
+              for (let j = p.trail.length - 1; j >= 0; j--) {
+                  p.trail[j].lifetime -= dt;
+                  if (p.trail[j].lifetime <= 0) {
+                      p.trail.splice(j, 1);
+                  }
+              }
+          } else {
+              p.trail = [];
+          }
+
+          // Add new trail point if far enough from last
+          const t = p.trail;
+          const lastPos = t.length > 0 ? t[t.length - 1] : null;
+          const dx = p.position.x - (lastPos?.x ?? p.position.x - 1);
+          const dy = p.position.y - (lastPos?.y ?? p.position.y - 1);
+          if (!lastPos || (dx * dx + dy * dy > MIN_DIST_SQ)) {
+              t.push({
+                  x: p.position.x,
+                  y: p.position.y,
+                  lifetime: TRAIL_LIFETIME,
+                  maxLifetime: TRAIL_LIFETIME,
+                  scale: TRAIL_SCALE,
+              });
           }
       }
   }
