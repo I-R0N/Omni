@@ -236,46 +236,49 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BLASTER,
     name: 'Blaster',
     cooldown: 0.005,
-    speed: 9, // Reduced from 12
-    damage: 2, // Buffed to ensure 1-shot kill (Enemy Health is 1)
+    speed: 9,
+    damage: 2,
     lifetime: 1.5,
     color: '#facc15', // Yellow
     size: 6,
     count: 1,
     spread: 2,
-    recoil: 0.5
+    recoil: 0.5,
+    pierce: 0        // baseline — stops on first hit
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
     name: 'Shotgun',
     cooldown: 0.005,
-    speed: 12, // Reduced from 10
+    speed: 12,
     damage: 1,
-    lifetime: 0.4, // Short range
+    lifetime: 0.4,
     color: '#f87171', // Red
     size: 5,
     count: 6,
     spread: 35,
-    recoil: 3.0
+    recoil: 3.0,
+    pierce: 1        // each pellet threads through one entity before stopping
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
     name: 'Plasma Cannon',
     cooldown: 0.005,
-    speed: 10, // Reduced from 8
+    speed: 10,
     damage: 5,
     lifetime: 2.5,
     color: '#22d3ee', // Cyan
     size: 16,
     count: 1,
     spread: 0,
-    recoil: 8.0
+    recoil: 8.0,
+    pierce: 5        // punches through up to 6 entities; clears small shards with ease
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
     cooldown: 0.005,
-    speed: 7, // Reduced from 6
+    speed: 7,
     damage: 2,
     lifetime: 3.0,
     color: '#c084fc', // Purple
@@ -283,20 +286,22 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
+    pierce: 0,       // same as blaster — stops on first hit
     homing: true
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
     name: 'Burst Rifle',
     cooldown: 0.005,
-    speed: 12, // Reduced from 14
-    damage: 1,
+    speed: 12,
+    damage: 3,       // up from 1 — more damage per shot than blaster
     lifetime: 3.0,
     color: '#4ade80', // Green
     size: 5,
     count: 1,
     spread: 1,
     recoil: 0.3,
+    pierce: 2,       // threads through two entities — more than blaster
     burstCount: 3,
     burstDelay: 0.05
   }
@@ -315,14 +320,15 @@ export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
-  speed: 5.0, // increased from 1.5 for more threatening projectiles
+  speed: 5.0,
   damage: 5,
-  lifetime: 3.5, // increased from 2.0 for longer range
+  lifetime: 3.5,
   color: '#f97316',
   size: 6,
   count: 1,
   spread: 4,
-  recoil: 0
+  recoil: 0,
+  pierce: 0
 };
 
 // --- ASSETS ---

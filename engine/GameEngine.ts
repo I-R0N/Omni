@@ -912,6 +912,7 @@ export class GameEngine {
               damage: config.damage,
               homing: config.homing,
               ownerType,
+              pierceCount: config.pierce,
               trail: [],
           });
       }

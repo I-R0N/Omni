@@ -77,6 +77,7 @@ export interface WeaponConfig {
   count: number; // Number of projectiles per shot
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
+  pierce: number; // How many entities the projectile passes through after the first hit
   homing?: boolean; // Does it track targets?
   burstCount?: number; // How many shots in a burst sequence
   burstDelay?: number; // Time between burst shots
@@ -155,6 +156,8 @@ export interface GameEntity {
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
+  pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
+  hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
   inputVector?: Vector2;

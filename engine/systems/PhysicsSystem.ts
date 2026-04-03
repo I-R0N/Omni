@@ -495,13 +495,26 @@ export class PhysicsSystem {
               }
           }
 
-          if (target.type === EntityType.STRUCTURE) {
-              if (proj.damage) proj.damage -= 1;
-              if ((proj.damage || 0) <= 0) proj.active = false;
-          } else if (!target.isExploding) {
-              proj.active = false; 
+          // Penetration: if the projectile still has pierce capacity, let it continue
+          // through the target rather than stopping. Track struck IDs to avoid
+          // hitting the same entity multiple times on consecutive frames.
+          const pierce = proj.pierceCount ?? 0;
+          const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
+
+          if (!alreadyHit && pierce > 0 && !target.isExploding) {
+              proj.pierceCount = pierce - 1;
+              if (!proj.hitEntityIds) proj.hitEntityIds = [];
+              proj.hitEntityIds.push(target.id);
+              // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
-                  const massRatio = proj.mass / target.mass;
+                  const massRatio = (proj.mass ?? 1) / target.mass;
+                  target.velocity.x += proj.velocity.x * massRatio * 0.3;
+                  target.velocity.y += proj.velocity.y * massRatio * 0.3;
+              }
+          } else if (!target.isExploding) {
+              proj.active = false;
+              if (target.mass !== Infinity && proj.velocity) {
+                  const massRatio = (proj.mass ?? 1) / target.mass;
                   target.velocity.x += proj.velocity.x * massRatio;
                   target.velocity.y += proj.velocity.y * massRatio;
               }
