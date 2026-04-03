@@ -1011,8 +1011,10 @@ export class GameEngine {
   private handleEntitySticking(dt: number) {
       if (!this.currentMap) return;
 
-      const SAME_THRESHOLD = 3.0;   // seconds before same-type bond merges
-      const DIFF_THRESHOLD = 6.0;   // seconds before cross-type bond merges
+      const SAME_THRESHOLD = 1.0;   // base seconds for min-size pair (same type)
+      const DIFF_THRESHOLD = 2.0;   // base seconds for min-size pair (cross type)
+      const SIZE_REF       = 20;    // reference size (min asteroid diameter)
+      const SIZE_POWER     = 1.5;   // exponent — small bodies merge fast, large ones slowly
       const DIFF_CHANCE    = 0.5;   // probability that a cross-type contact forms a bond
       const COHESION       = 4.0;   // fraction of velocity delta corrected per second
       const BREAK_FACTOR   = 1.5;   // bond breaks when dist > contactDist * this
@@ -1119,7 +1121,13 @@ export class GameEngine {
 
                       if (!sameType && Math.random() > DIFF_CHANCE) continue;
 
-                      const threshold = sameType ? SAME_THRESHOLD : DIFF_THRESHOLD;
+                      // Threshold scales with average entity size: small pairs merge quickly,
+                      // large ones take significantly longer.
+                      // e.g. size 20→1s, size 50→4s, size 100→11s, size 200→32s (same type)
+                      const avgSize   = (a.size.x + b.size.x) * 0.5;
+                      const sizeRatio = Math.max(1, avgSize / SIZE_REF);
+                      const baseTime  = sameType ? SAME_THRESHOLD : DIFF_THRESHOLD;
+                      const threshold = baseTime * Math.pow(sizeRatio, SIZE_POWER);
                       this.stickBonds.push({ a, b, timer: 0, threshold });
                       bonded.add(a);
                       bonded.add(b);
