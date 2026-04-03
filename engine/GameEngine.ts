@@ -1339,6 +1339,10 @@ export class GameEngine {
 
       const parentRadius = parent.size.x / 2;
 
+      // Inherit shard type and color from parent so tile shards stay tiles, etc.
+      const parentShardType = parent.shardType ?? 'asteroid';
+      const isTile          = parentShardType === 'tile';
+
       for (let i = 0; i < sizes.length; i++) {
           const newSize = sizes[i];
           const hp      = newSize > 30 ? 2 : 1;
@@ -1356,13 +1360,17 @@ export class GameEngine {
           const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
           const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
-          const numPoints = 5 + Math.floor(Math.random() * 3);
-          const baseR     = (newSize / 2) * 0.8;
+          // Polygon style mirrors the parent type: blocky for tile, jagged for asteroid
+          const numPoints   = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
+          const angleJitterK = isTile ? 0.25 : 0.8;
+          const rMin         = isTile ? 0.60 : 0.55;
+          const rRange       = isTile ? 0.55 : 0.70;
+          const baseR        = (newSize / 2) * 0.8;
           const rawPts: { angle: number; r: number }[] = [];
           for (let j = 0; j < numPoints; j++) {
               const baseAngle   = (j / numPoints) * Math.PI * 2;
-              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
-              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (0.55 + Math.random() * 0.7) });
+              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitterK;
+              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (rMin + Math.random() * rRange) });
           }
           rawPts.sort((a, b) => a.angle - b.angle);
           const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
@@ -1374,13 +1382,13 @@ export class GameEngine {
           this.currentMap?.entities.push({
               id:           `shard_${Date.now()}_${i}`,
               type:          EntityType.ASTEROID,
-              shardType:    'asteroid',
+              shardType:     parentShardType,
               position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
               velocity:     { x: vx, y: vy },
               size:         { x: newSize, y: newSize },
               rotation:      Math.random() * Math.PI * 2,
               rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-              color:         COLORS.ASTEROID,
+              color:         isTile ? parent.color : COLORS.ASTEROID,
               active:        true,
               health:        hp,
               maxHealth:     hp,
