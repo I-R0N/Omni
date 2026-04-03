@@ -82,6 +82,17 @@ export interface WeaponConfig {
   burstDelay?: number; // Time between burst shots
 }
 
+// ── Shard type ────────────────────────────────────────────────────────────────
+// Discriminates the visual and physical origin of an asteroid-type entity.
+// Add new variants here as the game gains new destructible material types.
+export type ShardType = 'asteroid' | 'tile';
+
+// ── Drop composition entry ────────────────────────────────────────────────────
+// Tracks drops stored inside a composite asteroid, including absorbed power-ups.
+export type DropCompositionEntry =
+  | { type: 'fuel' | 'gold' | 'health'; value: number }
+  | { type: 'powerup'; value: number; weapon: WeaponType };
+
 export interface GameEntity {
   id: string;
   type: EntityType;
@@ -174,10 +185,19 @@ export interface GameEntity {
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
 
-  // Composite asteroid — set when two different-type drops merge.
-  // On destruction the contents are spawned as individual drops instead of
-  // the default gold reward.
-  dropComposition?: Array<{ type: 'fuel' | 'gold' | 'health'; value: number }>;
+  // ── Shard identity ───────────────────────────────────────────────────────
+  // Set on EntityType.ASTEROID entities that originate from a destructible
+  // material.  Drives visual style and bonding affinity in the stick system.
+  shardType?: ShardType;
+
+  // Blended hex color of all absorbed power-up weapons; drives glow tinting
+  // in the renderer.  Computed/blended in GameEngine when a power-up is
+  // absorbed; undefined means no power-up content.
+  powerupGlowColor?: string;
+
+  // Composite asteroid — tracks every drop (including power-ups) stored
+  // inside this asteroid; released as individual drops on destruction.
+  dropComposition?: DropCompositionEntry[];
 }
 
 export interface CameraState {

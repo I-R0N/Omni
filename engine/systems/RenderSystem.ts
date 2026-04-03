@@ -524,18 +524,77 @@ export class RenderSystem {
                 } // end else (glass tile — paired with regen ghost if/else above)
 
             } else {
-                // ── Asteroid ─────────────────────────────────────────────────
-                buildPath();
-                if (entity.hitFlash && entity.hitFlash > 0) {
-                    ctx.fillStyle = '#ffffff';
+                // ── Asteroid / Tile shard ─────────────────────────────────────
+                const isFlash   = entity.hitFlash && entity.hitFlash > 0;
+                const shardType = entity.shardType ?? 'asteroid';
+                const glowColor = entity.powerupGlowColor;
+
+                if (shardType === 'tile') {
+                    // ── Tile shard — glass-like translucent panels with optional glow
+                    const [gr, gg, gb] = glowColor ? hexToRgb(glowColor) : [180, 230, 253];
+
+                    if (glowColor) {
+                        // Power-up glow bloom — strong, opaque tint
+                        const pulse     = 0.82 + Math.sin(nowSec * 5.5) * 0.18;
+                        const glowR     = (entity.size.x / 2) * 3.0 * pulse;
+                        const bloom     = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0.55)`);
+                        bloom.addColorStop(0.5, `rgba(${gr},${gg},${gb},0.25)`);
+                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    // Base fill — more opaque than a plain tile, solid color tint
+                    buildPath();
+                    ctx.globalAlpha = isFlash ? 0.85 : (glowColor ? 0.55 : 0.22);
+                    ctx.fillStyle   = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},1)`;
+                    ctx.fill();
+
+                    // Edge stroke
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},0.85)`;
+                    ctx.lineWidth   = isFlash ? 2.5 : 1.5;
+                    ctx.stroke();
+
                 } else {
-                    ctx.fillStyle = entity.color;
+                    // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
+                    buildPath();
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
+                    ctx.fill();
+
+                    if (glowColor && !isFlash) {
+                        // Subtle powerup color overlay — semi-transparent, mixes with rock color
+                        const [gr, gg, gb] = hexToRgb(glowColor);
+                        const pulse = 0.6 + Math.sin(nowSec * 4.5) * 0.15;
+                        buildPath();
+                        ctx.globalAlpha = 0.28 * pulse;
+                        ctx.fillStyle   = `rgb(${gr},${gg},${gb})`;
+                        ctx.fill();
+
+                        // Ambient rim glow
+                        const glowR = (entity.size.x / 2) * 2.0 * pulse;
+                        const bloom = ctx.createRadialGradient(0, 0, entity.size.x * 0.25, 0, 0, glowR);
+                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0)`);
+                        bloom.addColorStop(0.6, `rgba(${gr},${gg},${gb},0.12)`);
+                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    ctx.globalAlpha = 1.0;
+                    this.renderCracks(ctx, entity, entity.size.x / 2);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                    ctx.lineWidth   = 2;
+                    ctx.stroke();
                 }
-                ctx.fill();
-                this.renderCracks(ctx, entity, entity.size.x / 2);
-                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
