@@ -123,8 +123,8 @@ export class PhysicsSystem {
   }
 
   private applyLocalGravity(entities: GameEntity[], timeScale: number) {
-      const player = entities.find(e => e.type === EntityType.PLAYER);
-      if (!player || !player.active) return;
+      const players = entities.filter(e => e.type === EntityType.PLAYER && e.active);
+      if (players.length === 0) return;
 
       const { RANGE, STRENGTH, MIN_DIST, PLAYER_INFLUENCE } = LOCAL_GRAVITY_CONSTANTS;
       const rangeSq = RANGE * RANGE;
@@ -135,24 +135,26 @@ export class PhysicsSystem {
           const e = entities[i];
           if (e.type !== EntityType.ASTEROID || !e.active || e.isExploding) continue;
 
-          const dx = player.position.x - e.position.x;
-          const dy = player.position.y - e.position.y;
-          const distSq = dx*dx + dy*dy;
+          for (const player of players) {
+              const dx = player.position.x - e.position.x;
+              const dy = player.position.y - e.position.y;
+              const distSq = dx*dx + dy*dy;
 
-          if (distSq < rangeSq && distSq > minDistSq) {
-              const dist = Math.sqrt(distSq);
-              const forceMag = (STRENGTH / dist) * timeScale; // Normalize force by time
-              const ndx = dx / dist;
-              const ndy = dy / dist;
+              if (distSq < rangeSq && distSq > minDistSq) {
+                  const dist = Math.sqrt(distSq);
+                  const forceMag = (STRENGTH / dist) * timeScale; // Normalize force by time
+                  const ndx = dx / dist;
+                  const ndy = dy / dist;
 
-              // Pull Asteroid
-              e.velocity.x += ndx * forceMag;
-              e.velocity.y += ndy * forceMag;
+                  // Pull Asteroid
+                  e.velocity.x += ndx * forceMag;
+                  e.velocity.y += ndy * forceMag;
 
-              // Pull Player
-              const accelPlayer = forceMag * (e.mass / player.mass) * PLAYER_INFLUENCE;
-              player.velocity.x -= ndx * accelPlayer;
-              player.velocity.y -= ndy * accelPlayer;
+                  // Pull Player
+                  const accelPlayer = forceMag * (e.mass / player.mass) * PLAYER_INFLUENCE;
+                  player.velocity.x -= ndx * accelPlayer;
+                  player.velocity.y -= ndy * accelPlayer;
+              }
           }
       }
   }

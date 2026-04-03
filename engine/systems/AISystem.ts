@@ -11,10 +11,12 @@ export class AISystem {
   private laggedTargets: Map<string, Vector2> = new Map();
   private reactionTimers: Map<string, number> = new Map();
 
-  public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
+  public update(dt: number, entities: GameEntity[], players: GameEntity[], flowField: FlowFieldGrid) {
     for (let i = 0; i < entities.length; i++) {
       const enemy = entities[i];
       if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+      const player = this.getNearestPlayer(enemy, players);
+      if (!player) continue;
 
       // Default initialization
       if (!enemy.aiState) {
@@ -50,6 +52,24 @@ export class AISystem {
             }
         }
     }
+  }
+
+  private getNearestPlayer(enemy: GameEntity, players: GameEntity[]): GameEntity | null {
+    let target: GameEntity | null = null;
+    let nearestDistSq = Number.POSITIVE_INFINITY;
+
+    for (const player of players) {
+      if (!player.active && !player.isExploding) continue;
+      const dx = player.position.x - enemy.position.x;
+      const dy = player.position.y - enemy.position.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < nearestDistSq) {
+        nearestDistSq = distSq;
+        target = player;
+      }
+    }
+
+    return target;
   }
 
   /**

@@ -5,12 +5,17 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, MultiplayerStartOptions, MultiplayerMode, MultiplayerPeer, MultiplayerSnapshot, NetworkPlayerInput } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { BroadcastMultiplayerSession } from '../multiplayer/BroadcastMultiplayerSession';
 
 export class GameEngine {
+  private static readonly MAX_MULTIPLAYER_PLAYERS = 8;
+  private static readonly SNAPSHOT_INTERVAL = 1 / 15;
+  private static readonly INPUT_SYNC_INTERVAL = 1 / 20;
+
   private input: InputSystem;
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
@@ -23,6 +28,7 @@ export class GameEngine {
   
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
+  private humanPlayers: GameEntity[] = [];
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
@@ -37,6 +43,15 @@ export class GameEngine {
   private respawnTimer: number = 0;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
+  private multiplayerMode: MultiplayerMode = 'solo';
+  private multiplayerRoomId: string | null = null;
+  private multiplayerPlayerName: string = 'Pilot';
+  private multiplayerSyncState: 'offline' | 'connecting' | 'connected' = 'offline';
+  private multiplayerSession: BroadcastMultiplayerSession | null = null;
+  private multiplayerSnapshot: MultiplayerSnapshot | null = null;
+  private remoteInputs: Map<string, NetworkPlayerInput> = new Map();
+  private inputSyncTimer: number = 0;
+  private snapshotTimer: number = 0;
 
   // Debug mode
   private debugMode: boolean = false;
@@ -79,8 +94,29 @@ export class GameEngine {
     this.ai = new AISystem();
     this.flowField = new FlowFieldGrid();
 
-    this.player = {
-      id: 'player',
+    this.player = this.createPlayerEntity('player-local', 'Pilot');
+    this.humanPlayers = [this.player];
+
+    this.camera = {
+      position: { x: 0, y: 0 },
+      zoom: CAMERA_CONSTANTS.DEFAULT_ZOOM,
+      targetId: 'player',
+      shakeOffset: { x: 0, y: 0 }
+    };
+
+    const initialMap = new UniverseMap();
+    this.loadMap(initialMap);
+  }
+
+  public initCanvas(ctx: CanvasRenderingContext2D) {
+    this.renderer.setContext(ctx);
+  }
+
+  private createPlayerEntity(playerId: string, playerName: string): GameEntity {
+    return {
+      id: `player_${playerId}`,
+      playerId,
+      playerName,
       type: EntityType.PLAYER,
       position: { x: 0, y: 0 },
       velocity: { x: 0, y: 0 },
@@ -101,20 +137,64 @@ export class GameEngine {
       maxFuel: 100,
       gold: 0
     };
-
-    this.camera = {
-      position: { x: 0, y: 0 },
-      zoom: CAMERA_CONSTANTS.DEFAULT_ZOOM,
-      targetId: 'player',
-      shakeOffset: { x: 0, y: 0 }
-    };
-
-    const initialMap = new UniverseMap();
-    this.loadMap(initialMap);
   }
 
-  public initCanvas(ctx: CanvasRenderingContext2D) {
-    this.renderer.setContext(ctx);
+  private getConnectedPlayerCount(): number {
+    return this.humanPlayers.length;
+  }
+
+  private getLocalPlayer(): GameEntity {
+    return this.player;
+  }
+
+  private getActivePlayers(): GameEntity[] {
+    return this.humanPlayers.filter(player => player.active || player.isExploding);
+  }
+
+  private getNearestPlayer(target: GameEntity): GameEntity {
+    const players = this.getActivePlayers();
+    if (players.length === 0) return this.player;
+
+    let nearest = players[0];
+    let nearestDistSq = Number.POSITIVE_INFINITY;
+    for (const player of players) {
+      const dx = player.position.x - target.position.x;
+      const dy = player.position.y - target.position.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < nearestDistSq) {
+        nearest = player;
+        nearestDistSq = distSq;
+      }
+    }
+    return nearest;
+  }
+
+  private getSpawnPoint(index: number): Vector2 {
+    const spawn = this.currentMap?.playerSpawn || { x: 0, y: 0 };
+    if (index === 0) return { ...spawn };
+
+    const angle = ((index - 1) / Math.max(1, GameEngine.MAX_MULTIPLAYER_PLAYERS - 1)) * Math.PI * 2;
+    return {
+      x: spawn.x + Math.cos(angle) * 80,
+      y: spawn.y + Math.sin(angle) * 80,
+    };
+  }
+
+  private resetPlayerEntity(player: GameEntity, spawn: Vector2) {
+    player.isExploding = false;
+    player.explosionTimer = undefined;
+    player.health = player.maxHealth;
+    player.active = true;
+    player.sprite = ASSETS.PLAYER_SHIP;
+    player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
+    player.position = { ...spawn };
+    player.velocity = { x: 0, y: 0 };
+    player.rotation = 0;
+    player.trail = [];
+    player.weaponCooldown = 0;
+    player.burstQueue = 0;
+    player.burstTimer = 0;
+    player.fuel = player.maxFuel;
   }
 
   public start() {
@@ -127,12 +207,17 @@ export class GameEngine {
 
   public stop() {
     this.isRunning = false;
+    this.multiplayerSession?.destroy();
+    this.multiplayerSession = null;
   }
 
   // --- STATE MANAGEMENT ---
-  public startGame() {
+  public startGame(options?: MultiplayerStartOptions) {
+    this.configureMultiplayer(options);
     this.gameState = GameState.PLAYING;
-    this.initWaveSystem();
+    if (this.multiplayerMode !== 'client') {
+      this.initWaveSystem();
+    }
   }
 
   public pauseGame() {
@@ -154,15 +239,12 @@ export class GameEngine {
       this.trailDecayTimer = 0;
       this.loadMap(new UniverseMap());
 
-      // Reset Player
-      this.player.position = { x: 0, y: 0 };
-      this.player.velocity = { x: 0, y: 0 };
-      this.player.health = this.player.maxHealth;
-      this.player.fuel = this.player.maxFuel;
-      this.player.gold = 0;
-      this.player.trail = [];
+      // Reset Players
       this.damageTexts = [];
-      this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
+      this.humanPlayers.forEach((player, index) => {
+        this.resetPlayerEntity(player, this.getSpawnPoint(index));
+        player.gold = 0;
+      });
       
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
       this.camera.position = { x: 0, y: 0 };
@@ -172,6 +254,76 @@ export class GameEngine {
       this.gameState = GameState.PLAYING;
       this.initWaveSystem();
       this.prepareFrameEntities();
+  }
+
+  private configureMultiplayer(options?: MultiplayerStartOptions) {
+    const mode = options?.mode ?? 'solo';
+    this.multiplayerMode = mode;
+    this.multiplayerRoomId = mode === 'solo' ? null : (options?.roomId?.trim() || 'multiplayer-preview');
+    this.multiplayerPlayerName = options?.playerName?.trim() || this.multiplayerPlayerName;
+    this.player.playerName = this.multiplayerPlayerName;
+    this.player.playerId = this.player.playerId || 'player-local';
+
+    this.multiplayerSession?.destroy();
+    this.multiplayerSession = null;
+    this.multiplayerSnapshot = null;
+    this.remoteInputs.clear();
+    this.humanPlayers = [this.player];
+
+    if (mode === 'solo') {
+      this.multiplayerSyncState = 'offline';
+      return;
+    }
+
+    this.multiplayerSyncState = 'connecting';
+    const self: MultiplayerPeer = {
+      playerId: this.player.playerId || 'player-local',
+      playerName: this.multiplayerPlayerName,
+    };
+
+    this.multiplayerSession = new BroadcastMultiplayerSession(
+      {
+        mode,
+        roomId: this.multiplayerRoomId || 'multiplayer-preview',
+        self,
+        maxPlayers: GameEngine.MAX_MULTIPLAYER_PLAYERS,
+      },
+      {
+        onConnected: () => {
+          this.multiplayerSyncState = 'connected';
+        },
+        onPeerJoined: (peer) => {
+          if (this.multiplayerMode === 'host') {
+            this.addRemotePlayer(peer);
+          }
+        },
+        onPeerLeft: (playerId) => {
+          this.removeRemotePlayer(playerId);
+        },
+        onInput: (playerId, input) => {
+          this.remoteInputs.set(playerId, input);
+        },
+        onSnapshot: (snapshot) => {
+          this.multiplayerSnapshot = snapshot;
+        },
+        onRejected: () => {
+          this.multiplayerSyncState = 'offline';
+          this.multiplayerMode = 'solo';
+        },
+      }
+    );
+  }
+
+  private addRemotePlayer(peer: MultiplayerPeer) {
+    if (this.humanPlayers.some(player => player.playerId === peer.playerId)) return;
+    const player = this.createPlayerEntity(peer.playerId, peer.playerName);
+    this.resetPlayerEntity(player, this.getSpawnPoint(this.humanPlayers.length));
+    this.humanPlayers.push(player);
+  }
+
+  private removeRemotePlayer(playerId: string) {
+    this.humanPlayers = this.humanPlayers.filter(player => player.playerId !== playerId);
+    this.remoteInputs.delete(playerId);
   }
 
   public cycleWeapon() {
@@ -201,10 +353,10 @@ export class GameEngine {
     };
     this.onStatsUpdate({
       fps: Math.round(1000 / ((performance.now() - time) + 1)),
-      entityCount: (this.currentMap?.entities.length || 0) + 1,
+      entityCount: (this.currentMap?.entities.length || 0) + this.humanPlayers.length,
       currentMapName: this.currentMap?.name || 'Loading...',
-      currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      currentMapType: this.multiplayerSnapshot?.mapType || this.currentMap?.type || MapType.UNIVERSE,
+      currentWeapon: WEAPONS[this.getLocalPlayer().currentWeapon || WeaponType.BLASTER].name,
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -213,9 +365,17 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
-      fuel: this.player.fuel,
-      maxFuel: this.player.maxFuel,
-      gold: this.player.gold
+      fuel: this.getLocalPlayer().fuel,
+      maxFuel: this.getLocalPlayer().maxFuel,
+      gold: this.getLocalPlayer().gold,
+      multiplayerMode: this.multiplayerMode,
+      roomId: this.multiplayerRoomId || undefined,
+      playerName: this.multiplayerPlayerName,
+      connectedPlayers: this.multiplayerMode === 'client'
+        ? (this.multiplayerSnapshot?.connectedPlayers ?? this.getConnectedPlayerCount())
+        : this.getConnectedPlayerCount(),
+      isHost: this.multiplayerMode === 'host',
+      syncState: this.multiplayerSyncState,
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -228,6 +388,14 @@ export class GameEngine {
     // Cap dt to prevent physics explosion after tab switch / GPU stall
     const safeFrameTime = Math.min(frameTime, 0.05);
 
+    if (this.multiplayerMode === 'client') {
+      this.updateClientNetworking(safeFrameTime);
+      this.prepareFrameEntities();
+      try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+      requestAnimationFrame(this.loop);
+      return;
+    }
+
     // Refresh working set for physics/AI without reallocating each call
     this.prepareFrameEntities();
 
@@ -239,18 +407,92 @@ export class GameEngine {
     // Include entities spawned during game logic (e.g., projectiles) before rendering
     this.prepareFrameEntities();
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+    this.broadcastSnapshotIfNeeded(safeFrameTime);
 
     requestAnimationFrame(this.loop);
   };
 
   private prepareFrameEntities() {
+      if (this.multiplayerMode === 'client' && this.multiplayerSnapshot) {
+          this.frameEntities = this.multiplayerSnapshot.entities;
+          const localPlayer = this.frameEntities.find(entity => entity.playerId === this.player.playerId) || this.frameEntities.find(entity => entity.type === EntityType.PLAYER);
+          if (localPlayer) {
+              this.player = localPlayer;
+              this.camera.position.x = localPlayer.position.x;
+              this.camera.position.y = localPlayer.position.y;
+          }
+          return;
+      }
+
       if (!this.currentMap) return;
       this.frameEntities.length = 0;
       const ents = this.currentMap.entities;
       for (let i = 0; i < ents.length; i++) {
           this.frameEntities.push(ents[i]);
       }
-      this.frameEntities.push(this.player);
+      for (const player of this.humanPlayers) {
+          this.frameEntities.push(player);
+      }
+  }
+
+  private updateClientNetworking(dt: number) {
+      this.inputSyncTimer -= dt;
+      if (this.inputSyncTimer <= 0) {
+          this.inputSyncTimer = GameEngine.INPUT_SYNC_INTERVAL;
+          this.multiplayerSession?.sendInput(this.input.getNetworkInput());
+      }
+
+      if (this.multiplayerSnapshot) {
+          this.gameState = this.multiplayerSnapshot.gameState;
+      }
+  }
+
+  private cloneVector(v: Vector2): Vector2 {
+      return { x: v.x, y: v.y };
+  }
+
+  private cloneEntity(entity: GameEntity): GameEntity {
+      return {
+          ...entity,
+          position: this.cloneVector(entity.position),
+          velocity: this.cloneVector(entity.velocity),
+          size: this.cloneVector(entity.size),
+          inputVector: entity.inputVector ? this.cloneVector(entity.inputVector) : undefined,
+          orbitCenter: entity.orbitCenter ? this.cloneVector(entity.orbitCenter) : undefined,
+          lastImpactVelocity: entity.lastImpactVelocity ? this.cloneVector(entity.lastImpactVelocity) : undefined,
+          polygonPoints: entity.polygonPoints?.map(point => this.cloneVector(point)),
+          trail: entity.trail?.map(point => ({ ...point })),
+      };
+  }
+
+  private cloneDamageText(text: DamageText): DamageText {
+      return {
+          ...text,
+          position: this.cloneVector(text.position),
+          velocity: this.cloneVector(text.velocity),
+      };
+  }
+
+  private broadcastSnapshotIfNeeded(dt: number) {
+      if (this.multiplayerMode !== 'host' || !this.multiplayerSession || !this.currentMap) return;
+
+      this.snapshotTimer -= dt;
+      if (this.snapshotTimer > 0) return;
+      this.snapshotTimer = GameEngine.SNAPSHOT_INTERVAL;
+
+      this.multiplayerSession.broadcastSnapshot({
+          gameState: this.gameState,
+          mapType: this.currentMap.type,
+          currentMapName: this.currentMap.name,
+          entities: this.frameEntities.map(entity => this.cloneEntity(entity)),
+          damageTexts: this.damageTexts.map(text => this.cloneDamageText(text)),
+          connectedPlayers: this.getConnectedPlayerCount(),
+          difficulty: this.difficultyLevel,
+          waveNumber: this.waveIndex + 1,
+          waveTotal: WAVE_DEFINITIONS.length,
+          waveStatus: this.waveState === 'inactive' ? 'active' : this.waveState,
+          waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+      });
   }
 
   private handleEnemyShooting(dt: number) {
@@ -267,8 +509,9 @@ export class GameEngine {
           enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
           if (enemy.weaponCooldown > 0) continue;
 
-          const dx = this.player.position.x - enemy.position.x;
-          const dy = this.player.position.y - enemy.position.y;
+          const targetPlayer = this.getNearestPlayer(enemy);
+          const dx = targetPlayer.position.x - enemy.position.x;
+          const dy = targetPlayer.position.y - enemy.position.y;
           const distSq = dx*dx + dy*dy;
           if (distSq > rangeSq) continue;
 
@@ -299,7 +542,7 @@ export class GameEngine {
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
       this.flowField.flushEnemyField();
 
-      this.ai.update(dt, allEntities, this.player, this.flowField);
+      this.ai.update(dt, allEntities, this.humanPlayers, this.flowField);
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -539,20 +782,15 @@ export class GameEngine {
     }
 
     // Death handling
-    if (this.player.health <= 0 && !this.player.isExploding) {
-        this.handleEntityDeath(this.player);
+    for (const player of this.humanPlayers) {
+        if (player.health <= 0 && !player.isExploding) {
+            this.handleEntityDeath(player);
+        }
     }
 
     if (this.player.isExploding) {
-        if (this.player.explosionTimer !== undefined) {
-            this.player.explosionTimer -= dt;
-            if (this.player.explosionTimer <= 0) {
-                this.respawnPlayer();
-            }
-        }
         this.camera.position.x = this.player.position.x;
         this.camera.position.y = this.player.position.y;
-        return; // Skip controls while exploding
     }
 
     // Wave completion check
@@ -572,9 +810,11 @@ export class GameEngine {
 
         // Auto-grant weapon unlock
         if (waveDef.powerup !== null) {
-          this.player.currentWeapon = waveDef.powerup;
+          for (const player of this.humanPlayers) {
+            player.currentWeapon = waveDef.powerup;
+            player.burstQueue = 0;
+          }
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
-          this.player.burstQueue = 0;
           // Announce weapon with floating text
           this.damageTexts.push({
             id: `unlock_${Date.now()}`,
@@ -620,113 +860,16 @@ export class GameEngine {
         }
     }
 
-    const moveDir = this.input.getMovementVector();
-    this.player.inputVector = moveDir; // Debug visualization assignment
-    
-    const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
-    const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
-
-    // Time-Scaled Input Acceleration
-    // Input is applied per-frame (variable dt), so we must scale acceleration by dt
-    // Normalized to 60fps (dt * 60)
-    const timeScale = dt * 60;
-    const hasFuel = (this.player.fuel ?? 0) > 0;
-    if (hasFuel) {
-        this.player.velocity.x += moveDir.x * acc * timeScale;
-        this.player.velocity.y += moveDir.y * acc * timeScale;
-    }
-
-    // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
-    const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
-    if (throttle > 0 && hasFuel) {
-        this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
-    }
-
-    const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
-    if (currentSpeed > maxSpeed) {
-        this.player.velocity.x = (this.player.velocity.x / currentSpeed) * maxSpeed;
-        this.player.velocity.y = (this.player.velocity.y / currentSpeed) * maxSpeed;
-    }
-
-    if (this.player.trail) {
-        for (let i = this.player.trail.length - 1; i >= 0; i--) {
-            this.player.trail[i].lifetime -= dt;
-            if (this.player.trail[i].lifetime <= 0) {
-                this.player.trail.splice(i, 1);
-            }
-        }
-    }
-
-    const thrusting = hasFuel && throttle > 0;
-    if (thrusting) {
-        this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
-    } else {
-        this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
-    }
-
-    const lastPos = this.player.trail && this.player.trail.length > 0
-        ? this.player.trail[this.player.trail.length - 1]
-        : null;
-
-    if (this.trailDecayTimer > 0 &&
-            (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
-        // t: 1.0 while thrusting, tapers to 0 over the decay window.
-        // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
-        const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
-        const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
-        this.player.trail = this.player.trail || [];
-        this.player.trail.push({
-            x: this.player.position.x,
-            y: this.player.position.y,
-            lifetime: pointLifetime,
-            maxLifetime: pointLifetime,
-            scale: t,
-        });
-    }
-
-    const mousePos = this.input.getMousePosition();
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
-
-    const fireEvents = this.input.getFireEvents();
-    fireEvents.forEach(evt => {
-        const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
-        const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
-        const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - MARGIN;
-
-        if (evt.x >= mapX && evt.x <= mapX + currentSize &&
-            evt.y >= mapY && evt.y <= mapY + currentSize) {
-            
-            if (this.minimapDebounce > 0) return;
-            
-            this.minimapExpanded = !this.minimapExpanded;
-            this.minimapTimer = this.minimapExpanded ? 5.0 : 0; 
-            this.minimapDebounce = 0.3; 
-            return;
-        }
-
-        if (!this.minimapExpanded) {
-            this.handleShooting(evt);
-        }
-    });
-
-    if (this.player.weaponCooldown && this.player.weaponCooldown > 0) {
-        this.player.weaponCooldown -= dt;
-    }
-
-    if (this.player.burstQueue && this.player.burstQueue > 0) {
-        this.player.burstTimer = (this.player.burstTimer || 0) - dt;
-        if (this.player.burstTimer <= 0) {
-            this.player.burstQueue--;
-            const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
-            this.player.burstTimer = config.burstDelay || 0.1;
-            const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
-            const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
-            this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
-        }
+    const localInput = this.input.getNetworkInput();
+    this.updatePlayerFromInput(this.player, localInput, dt, true);
+    for (const remotePlayer of this.humanPlayers) {
+        if (remotePlayer.playerId === this.player.playerId) continue;
+        this.updatePlayerFromInput(
+            remotePlayer,
+            this.remoteInputs.get(remotePlayer.playerId || '') || { movement: { x: 0, y: 0 }, aimAngle: remotePlayer.rotation, fireAngles: [] },
+            dt,
+            false
+        );
     }
 
     this.updateHomingProjectiles(dt);
@@ -752,7 +895,6 @@ export class GameEngine {
     }
     this.activeDrops.length = dropWriteIdx;
 
-
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
   }
@@ -774,6 +916,117 @@ export class GameEngine {
       });
   };
 
+  private updatePlayerFromInput(player: GameEntity, input: NetworkPlayerInput, dt: number, isLocalPlayer: boolean) {
+      if (player.isExploding) {
+          if (player.explosionTimer !== undefined) {
+              player.explosionTimer -= dt;
+              if (player.explosionTimer <= 0) {
+                  this.respawnPlayer(player);
+              }
+          }
+          return;
+      }
+
+      player.inputVector = input.movement;
+
+      const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap?.type || MapType.UNIVERSE];
+      const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
+      const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+      const timeScale = dt * 60;
+      const hasFuel = (player.fuel ?? 0) > 0;
+
+      if (hasFuel) {
+          player.velocity.x += input.movement.x * acc * timeScale;
+          player.velocity.y += input.movement.y * acc * timeScale;
+      }
+
+      const throttle = Math.sqrt(input.movement.x * input.movement.x + input.movement.y * input.movement.y);
+      if (throttle > 0 && hasFuel) {
+          player.fuel = Math.max(0, (player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
+      }
+
+      const currentSpeed = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
+      if (currentSpeed > maxSpeed) {
+          player.velocity.x = (player.velocity.x / currentSpeed) * maxSpeed;
+          player.velocity.y = (player.velocity.y / currentSpeed) * maxSpeed;
+      }
+
+      if (player.trail) {
+          for (let i = player.trail.length - 1; i >= 0; i--) {
+              player.trail[i].lifetime -= dt;
+              if (player.trail[i].lifetime <= 0) {
+                  player.trail.splice(i, 1);
+              }
+          }
+      }
+
+      if (throttle > 0 && hasFuel) {
+          this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+      } else if (isLocalPlayer) {
+          this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
+      }
+
+      const trailTimer = throttle > 0 && hasFuel ? GameEngine.TRAIL_DECAY_DURATION : this.trailDecayTimer;
+      const lastPos = player.trail && player.trail.length > 0 ? player.trail[player.trail.length - 1] : null;
+      if (trailTimer > 0 && (!lastPos || ((player.position.x - lastPos.x) ** 2 + (player.position.y - lastPos.y) ** 2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
+          const t = trailTimer / GameEngine.TRAIL_DECAY_DURATION;
+          const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
+          player.trail = player.trail || [];
+          player.trail.push({
+              x: player.position.x,
+              y: player.position.y,
+              lifetime: pointLifetime,
+              maxLifetime: pointLifetime,
+              scale: t,
+          });
+      }
+
+      player.rotation = input.aimAngle;
+
+      if (isLocalPlayer) {
+          const fireEvents = this.input.getFireEvents();
+          fireEvents.forEach(evt => {
+              const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
+              const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
+              const mapX = MARGIN;
+              const mapY = window.innerHeight - currentSize - MARGIN;
+
+              if (evt.x >= mapX && evt.x <= mapX + currentSize && evt.y >= mapY && evt.y <= mapY + currentSize) {
+                  if (this.minimapDebounce > 0) return;
+                  this.minimapExpanded = !this.minimapExpanded;
+                  this.minimapTimer = this.minimapExpanded ? 5.0 : 0;
+                  this.minimapDebounce = 0.3;
+                  return;
+              }
+
+              if (!this.minimapExpanded) {
+                  this.handleShootingAngle(player, Math.atan2(evt.y - window.innerHeight / 2, evt.x - window.innerWidth / 2));
+              }
+          });
+      } else {
+          for (const angle of input.fireAngles) {
+              this.handleShootingAngle(player, angle);
+          }
+      }
+
+      if (player.weaponCooldown && player.weaponCooldown > 0) {
+          player.weaponCooldown -= dt;
+      }
+
+      if (player.burstQueue && player.burstQueue > 0) {
+          player.burstTimer = (player.burstTimer || 0) - dt;
+          if (player.burstTimer <= 0) {
+              player.burstQueue--;
+              const config = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+              player.burstTimer = config.burstDelay || 0.1;
+              this.spawnProjectileFromConfig(player, {
+                  x: player.position.x + Math.cos(player.rotation) * 100,
+                  y: player.position.y + Math.sin(player.rotation) * 100
+              }, config, EntityType.PLAYER);
+          }
+      }
+  }
+
   private startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;
 
@@ -789,43 +1042,31 @@ export class GameEngine {
       entity.active = true; // Keep active so it renders during explosion
   }
 
-  private respawnPlayer() {
-      const spawn = this.currentMap?.playerSpawn || { x: 0, y: 0 };
-      this.player.isExploding = false;
-      this.player.explosionTimer = undefined;
-      this.player.health = this.player.maxHealth;
-      this.player.active = true;
-      this.player.sprite = ASSETS.PLAYER_SHIP;
-      this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
-      this.player.position = { ...spawn };
-      this.player.velocity = { x: 0, y: 0 };
-      this.player.rotation = 0;
-      this.player.trail = [];
-      this.trailDecayTimer = 0;
-      this.player.weaponCooldown = 0;
-      this.player.burstQueue = 0;
-      this.player.burstTimer = 0;
-      this.shakeTimer = 0;
-      this.camera.shakeOffset = { x: 0, y: 0 };
-      this.camera.position = { ...this.player.position };
+  private respawnPlayer(player: GameEntity) {
+      const index = Math.max(0, this.humanPlayers.findIndex(candidate => candidate.playerId === player.playerId));
+      this.resetPlayerEntity(player, this.getSpawnPoint(index));
+      if (player.playerId === this.player.playerId) {
+          this.trailDecayTimer = 0;
+          this.shakeTimer = 0;
+          this.camera.shakeOffset = { x: 0, y: 0 };
+          this.camera.position = { ...this.player.position };
+      }
   }
 
-  private handleShooting(target: Vector2) {
-      if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
-      const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
-      this.player.weaponCooldown = config.cooldown;
+  private handleShootingAngle(player: GameEntity, angle: number) {
+      if (player.weaponCooldown && player.weaponCooldown > 0) return;
+      const config = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+      player.weaponCooldown = config.cooldown;
 
       if (config.type === WeaponType.BURST && config.burstCount) {
-          this.player.burstQueue = config.burstCount - 1; 
-          this.player.burstTimer = config.burstDelay;
+          player.burstQueue = config.burstCount - 1;
+          player.burstTimer = config.burstDelay;
       }
 
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
-      const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
-      const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
-
-      this.spawnProjectileFromConfig(this.player, {x: worldX, y: worldY}, config, EntityType.PLAYER);
+      this.spawnProjectileFromConfig(player, {
+          x: player.position.x + Math.cos(angle) * 100,
+          y: player.position.y + Math.sin(angle) * 100,
+      }, config, EntityType.PLAYER);
   }
 
   private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
@@ -878,7 +1119,8 @@ export class GameEngine {
               mass: PROJECTILE_CONSTANTS.MASS,
               damage: config.damage,
               homing: config.homing,
-              ownerType
+              ownerType,
+              ownerId: shooter.playerId || shooter.id,
           });
       }
   }
@@ -1388,6 +1630,18 @@ export class GameEngine {
   }
 
   private draw() {
+      if (this.multiplayerMode === 'client' && this.multiplayerSnapshot) {
+          this.renderer.render(
+              this.frameEntities,
+              this.camera,
+              this.multiplayerSnapshot.mapType,
+              this.minimapExpanded,
+              this.multiplayerSnapshot.damageTexts,
+              this.player.position
+          );
+          return;
+      }
+
       if (!this.currentMap) return;
       
       this.renderer.render(

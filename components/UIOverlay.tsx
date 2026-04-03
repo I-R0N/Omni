@@ -1,11 +1,11 @@
 
 import React from 'react';
-import { EngineStats, MapType, GameState } from '../types';
+import { EngineStats, GameState, MultiplayerStartOptions } from '../types';
 
 interface UIOverlayProps {
   stats: EngineStats;
   onCycleWeapon?: () => void;
-  onStart?: () => void;
+  onStart?: (options: MultiplayerStartOptions) => void;
   onPause?: () => void;
   onResume?: () => void;
   onRestart?: () => void;
@@ -25,6 +25,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   difficulty = 3,
   onSetDifficulty,
 }) => {
+  const [mode, setMode] = React.useState<MultiplayerStartOptions['mode']>('solo');
+  const [roomId, setRoomId] = React.useState('multiplayer-preview');
+  const [playerName, setPlayerName] = React.useState(() => `Pilot-${Math.floor(100 + Math.random() * 900)}`);
+
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
@@ -52,6 +56,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <p>Entities: <span className="text-white">{stats.entityCount}</span></p>
               <p>Wave: <span className="text-white">{stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}</span></p>
               <p>State: <span className="text-white">{stats.waveStatus}</span></p>
+              <p>Mode: <span className="text-white">{stats.multiplayerMode ?? 'solo'}</span></p>
+              <p>Peers: <span className="text-white">{stats.connectedPlayers ?? 1}</span></p>
             </div>
           )}
         </div>
@@ -62,6 +68,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="pointer-events-none flex flex-col items-end gap-1">
+              {stats.multiplayerMode !== 'solo' && (
+                <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
+                  <span className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest">
+                    {stats.isHost ? 'Host' : 'Room'}
+                  </span>
+                  <span className="text-slate-100 text-[10px] font-mono">
+                    {stats.roomId || 'multiplayer-preview'} · {stats.connectedPlayers ?? 1}P
+                  </span>
+                </div>
+              )}
+
               {/* Fuel bar */}
               <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
                 <span className="text-cyan-400 text-[10px] font-bold uppercase tracking-widest">FUEL</span>
@@ -145,11 +162,51 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               ))}
             </div>
           </div>
+          <div className="mb-6 w-full max-w-md flex flex-col gap-3">
+            <div className="flex gap-2 justify-center">
+              {[
+                { value: 'solo', label: 'Solo' },
+                { value: 'host', label: 'Host Room' },
+                { value: 'client', label: 'Join Room' },
+              ].map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setMode(option.value as MultiplayerStartOptions['mode'])}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                    mode === option.value
+                      ? 'bg-cyan-600 border-cyan-400 text-white shadow-lg'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-400 hover:text-white'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {mode !== 'solo' && (
+              <div className="grid gap-3">
+                <input
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                  placeholder="Player name"
+                />
+                <input
+                  value={roomId}
+                  onChange={(e) => setRoomId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                  placeholder="Room ID"
+                />
+                <p className="text-center text-xs text-slate-500">
+                  Use the same room ID in 4-8 tabs to test synchronized play in the deploy preview.
+                </p>
+              </div>
+            )}
+          </div>
           <button
-            onClick={onStart}
+            onClick={() => onStart?.({ mode, roomId, playerName })}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 px-12 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95"
           >
-            START
+            {mode === 'solo' ? 'START' : mode === 'host' ? 'HOST ROOM' : 'JOIN ROOM'}
           </button>
         </div>
       )}

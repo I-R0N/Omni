@@ -665,6 +665,17 @@ export class RenderSystem {
 
       ctx.restore();
 
+      if (entity.type === EntityType.PLAYER && entity.playerName) {
+          ctx.save();
+          ctx.fillStyle = '#e2e8f0';
+          ctx.font = '11px monospace';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = 'black';
+          ctx.shadowBlur = 4;
+          ctx.fillText(entity.playerName, entity.position.x, entity.position.y - Math.max(entity.size.x, entity.size.y));
+          ctx.restore();
+      }
+
       // Render Debug Acceleration Vector (debug mode only)
       if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
           const iv = entity.inputVector;

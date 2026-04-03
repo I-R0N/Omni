@@ -1,6 +1,6 @@
 
 
-import { Vector2 } from '../../types';
+import { NetworkPlayerInput, Vector2 } from '../../types';
 import { INPUT_CONSTANTS } from '../../constants';
 
 export class InputSystem {
@@ -189,6 +189,20 @@ export class InputSystem {
     const events = [...this.fireEvents];
     this.fireEvents = [];
     return events;
+  }
+
+  public getNetworkInput(): NetworkPlayerInput {
+    const movement = this.getMovementVector();
+    const mousePos = this.getMousePosition();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const fireAngles = this.getFireEvents().map(event => Math.atan2(event.y - cy, event.x - cx));
+
+    return {
+      movement,
+      aimAngle: Math.atan2(mousePos.y - cy, mousePos.x - cx),
+      fireAngles,
+    };
   }
 
   public cleanup() {

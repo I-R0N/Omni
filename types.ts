@@ -18,6 +18,20 @@ export interface Vector2 {
   y: number;
 }
 
+export type MultiplayerMode = 'solo' | 'host' | 'client';
+
+export interface MultiplayerStartOptions {
+  mode: MultiplayerMode;
+  roomId?: string;
+  playerName?: string;
+}
+
+export interface NetworkPlayerInput {
+  movement: Vector2;
+  aimAngle: number;
+  fireAngles: number[];
+}
+
 export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
@@ -86,6 +100,8 @@ export interface GameEntity {
   id: string;
   type: EntityType;
   name?: string;
+  playerId?: string;
+  playerName?: string;
   position: Vector2;
   velocity: Vector2;
   size: Vector2; // Treated as bounding box or diameter
@@ -143,6 +159,7 @@ export interface GameEntity {
   damage?: number;
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
+  ownerId?: string;
   targetEntityId?: string; // For homing locking
 
   // Debug Visuals
@@ -199,6 +216,12 @@ export interface EngineStats {
   fuel?: number;
   maxFuel?: number;
   gold?: number;
+  multiplayerMode?: MultiplayerMode;
+  roomId?: string;
+  playerName?: string;
+  connectedPlayers?: number;
+  isHost?: boolean;
+  syncState?: 'offline' | 'connecting' | 'connected';
 }
 
 export interface DamageText {
@@ -210,4 +233,23 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+}
+
+export interface MultiplayerPeer {
+  playerId: string;
+  playerName: string;
+}
+
+export interface MultiplayerSnapshot {
+  gameState: GameState;
+  mapType: MapType;
+  currentMapName: string;
+  entities: GameEntity[];
+  damageTexts: DamageText[];
+  connectedPlayers: number;
+  difficulty: number;
+  waveNumber?: number;
+  waveTotal?: number;
+  waveStatus?: 'active' | 'cleared' | 'complete';
+  waveGraceTimer?: number;
 }

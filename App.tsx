@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { EngineStats, MapType, GameState } from './types';
+import { EngineStats, MapType, GameState, MultiplayerStartOptions } from './types';
 import UIOverlay from './components/UIOverlay';
 
 const App: React.FC = () => {
@@ -72,8 +72,8 @@ const App: React.FC = () => {
       }
   };
 
-  const handleStart = () => {
-      if (engineRef.current) engineRef.current.startGame();
+  const handleStart = (options: MultiplayerStartOptions) => {
+      if (engineRef.current) engineRef.current.startGame(options);
   };
 
   const handlePause = () => {
