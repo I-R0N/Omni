@@ -1165,6 +1165,18 @@ export class GameEngine {
               ...(b.dropComposition ?? []),
           ];
 
+          // Regenerate polygon at new size so the visual shape actually grows
+          const numPts = 7 + Math.floor(Math.random() * 4);
+          const baseR  = (newDiam / 2) * 0.82;
+          const rawPts: { angle: number; r: number }[] = [];
+          for (let pi = 0; pi < numPts; pi++) {
+              const base   = (pi / numPts) * Math.PI * 2;
+              const jitter = (Math.random() - 0.5) * (Math.PI / numPts) * 0.7;
+              rawPts.push({ angle: base + jitter, r: baseR * (0.6 + Math.random() * 0.65) });
+          }
+          rawPts.sort((pa, pb) => pa.angle - pb.angle);
+          a.polygonPoints = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
           a.size.x = newDiam; a.size.y = newDiam;
           a.mass   = newDiam;
           a.position.x = nmx; a.position.y = nmy;
