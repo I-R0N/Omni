@@ -1154,11 +1154,10 @@ export class GameEngine {
 
       if (aIsAst && bIsAst) {
           // Asteroid + Asteroid — area-conserving accretion
-          const MAX_SIZE = 200;
           const MAX_HP   = 6;
           const rA = a.size.x / 2;
           const rB = b.size.x / 2;
-          const newDiam = Math.min(MAX_SIZE, Math.sqrt(rA * rA + rB * rB) * 2);
+          const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
 
           const composition = [
               ...(a.dropComposition ?? []),
@@ -1188,13 +1187,12 @@ export class GameEngine {
 
       } else if (!aIsAst && !bIsAst) {
           // Drop + Drop
-          const MAX_DROP_SIZE = 30;
           if (a.dropType === b.dropType) {
               // Same type — grow the drop (area-conserving: new_r = sqrt(rA² + rB²))
               a.dropValue  = (a.dropValue ?? 0) + (b.dropValue ?? 0);
               const rda    = a.size.x / 2;
               const rdb    = b.size.x / 2;
-              const newR   = Math.min(MAX_DROP_SIZE, Math.sqrt(rda * rda + rdb * rdb) * 2);
+              const newR   = Math.sqrt(rda * rda + rdb * rdb) * 2;
               a.size.x     = newR; a.size.y = newR;
               a.position.x = nmx;  a.position.y = nmy;
               a.velocity.x = nvx;  a.velocity.y = nvy;
@@ -1231,7 +1229,7 @@ export class GameEngine {
       const ra      = dropA.size.x / 2;
       const rb      = dropB.size.x / 2;
       // Area-conserving: new area = area_A + area_B → new_radius = sqrt(ra² + rb²)
-      const newSize = Math.max(20, Math.min(80, Math.sqrt(ra * ra + rb * rb) * 2));
+      const newSize = Math.sqrt(ra * ra + rb * rb) * 2;
       const hp      = Math.max(1, Math.round(newSize / 20));
 
       // Irregular polygon (same approach as normal asteroids)
