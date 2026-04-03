@@ -77,10 +77,22 @@ export interface WeaponConfig {
   count: number; // Number of projectiles per shot
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
+  pierce: number; // How many entities the projectile passes through after the first hit
   homing?: boolean; // Does it track targets?
   burstCount?: number; // How many shots in a burst sequence
   burstDelay?: number; // Time between burst shots
 }
+
+// ── Shard type ────────────────────────────────────────────────────────────────
+// Discriminates the visual and physical origin of an asteroid-type entity.
+// Add new variants here as the game gains new destructible material types.
+export type ShardType = 'asteroid' | 'tile';
+
+// ── Drop composition entry ────────────────────────────────────────────────────
+// Tracks drops stored inside a composite asteroid, including absorbed power-ups.
+export type DropCompositionEntry =
+  | { type: 'fuel' | 'gold' | 'health'; value: number }
+  | { type: 'powerup'; value: number; weapon: WeaponType };
 
 export interface GameEntity {
   id: string;
@@ -144,6 +156,8 @@ export interface GameEntity {
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
+  pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
+  hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
   inputVector?: Vector2;
@@ -173,6 +187,20 @@ export interface GameEntity {
   // Tile regeneration — regenProgress counts up from 0; tile is a ghost
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
+
+  // ── Shard identity ───────────────────────────────────────────────────────
+  // Set on EntityType.ASTEROID entities that originate from a destructible
+  // material.  Drives visual style and bonding affinity in the stick system.
+  shardType?: ShardType;
+
+  // Blended hex color of all absorbed power-up weapons; drives glow tinting
+  // in the renderer.  Computed/blended in GameEngine when a power-up is
+  // absorbed; undefined means no power-up content.
+  powerupGlowColor?: string;
+
+  // Composite asteroid — tracks every drop (including power-ups) stored
+  // inside this asteroid; released as individual drops on destruction.
+  dropComposition?: DropCompositionEntry[];
 }
 
 export interface CameraState {

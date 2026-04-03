@@ -44,6 +44,9 @@ export class BackgroundManager {
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
+  // Reusable output for applyLensing — avoids a heap allocation per puff
+  private _lensedX: number = 0;
+  private _lensedY: number = 0;
 
   constructor() {
     this.mapType = MapType.UNIVERSE;
@@ -65,7 +68,7 @@ export class BackgroundManager {
     });
   }
 
-  private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): { x: number, y: number } {
+  private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): void {
     let outX = x;
     let outY = y;
     for (let i = 0; i < attractors.length; i++) {
@@ -75,7 +78,7 @@ export class BackgroundManager {
         const adx = outX - ax;
         const ady = outY - ay;
         const distSq = adx*adx + ady*ady;
-        const radius = attr.size.x * 8; 
+        const radius = attr.size.x * 8;
         if (distSq < radius * radius) {
             const dist = Math.sqrt(distSq);
             const factor = (radius - dist) / radius;
@@ -86,7 +89,8 @@ export class BackgroundManager {
             }
         }
     }
-    return { x: outX, y: outY };
+    this._lensedX = outX;
+    this._lensedY = outY;
   }
 
 public setMapType(type: MapType) {
@@ -296,19 +300,24 @@ public setMapType(type: MapType) {
         if (!drawable) return;
 
         if (hasAttractors) {
-           const lensed = this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
-           drawX = lensed.x;
-           drawY = lensed.y;
+           this.applyLensing(drawX, drawY, cameraPos, attractors, halfW, halfH);
+           drawX = this._lensedX;
+           drawY = this._lensedY;
         }
 
+        // Direct matrix set — no push/pop, ~2× faster than save/translate/rotate/scale/restore
+        const cos = Math.cos(puff.rotation);
+        const sin = Math.sin(puff.rotation);
         ctx.globalAlpha = puff.opacity;
-        ctx.save();
-        ctx.translate(drawX, drawY);
-        ctx.rotate(puff.rotation);
-        ctx.scale(puff.aspect, 1.0);
-        ctx.drawImage(drawable, -puff.size/2, -puff.size/2, puff.size, puff.size);
-        ctx.restore();
+        ctx.setTransform(
+            dpr * cos * puff.aspect,  dpr * sin * puff.aspect,
+            dpr * -sin,               dpr * cos,
+            dpr * drawX,              dpr * drawY
+        );
+        ctx.drawImage(drawable, -puff.size / 2, -puff.size / 2, puff.size, puff.size);
     });
+    // Restore base DPR transform for subsequent star-band and shooting-star drawing
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
 

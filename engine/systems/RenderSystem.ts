@@ -4,6 +4,23 @@ import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } fro
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
+// Converts a 6-digit hex color string to an [r, g, b] tuple.
+// Results are cached to avoid per-frame string parsing.
+const _rgbCache = new Map<string, [number, number, number]>();
+function hexToRgb(hex: string): [number, number, number] {
+    let cached = _rgbCache.get(hex);
+    if (!cached) {
+        const h = hex.replace('#', '');
+        cached = [
+            parseInt(h.substring(0, 2), 16),
+            parseInt(h.substring(2, 4), 16),
+            parseInt(h.substring(4, 6), 16),
+        ];
+        _rgbCache.set(hex, cached);
+    }
+    return cached;
+}
+
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
 function roundRectPath(
@@ -42,6 +59,7 @@ export class RenderSystem {
   private _specularBitmap: HTMLCanvasElement | null = null;
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
+  private _particleBuffer: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
 
@@ -120,6 +138,7 @@ export class RenderSystem {
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
     this._trailEntities.length = 0;
+    this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
     this._minimapBuffer.length = 0;
 
@@ -163,7 +182,12 @@ export class RenderSystem {
             continue;
         }
 
-        this._visibleEntities.push(entity);
+        // Particles go to a separate buffer for single-pass 'lighter' composite rendering
+        if (entity.type === EntityType.PARTICLE) {
+            this._particleBuffer.push(entity);
+        } else {
+            this._visibleEntities.push(entity);
+        }
 
         if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
             this._trailEntities.push(entity);
@@ -198,7 +222,10 @@ export class RenderSystem {
 
     // 4. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
-    
+
+    // 4b. Render Particles — single composite-op switch for the whole batch
+    this.renderParticles(ctx, this._particleBuffer);
+
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
         this.renderDamageTexts(ctx, damageTexts);
@@ -282,12 +309,36 @@ export class RenderSystem {
               const head = t[t.length-1];
               const tail = t[0];
               const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-              grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
+              if (entity.type === EntityType.PROJECTILE) {
+                  // Use weapon color for projectile trails
+                  const [r, g, b] = hexToRgb(entity.color || '#facc15');
+                  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.75)`);
+              } else {
+                  // Player: cyan engine exhaust
+                  grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
+                  grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
+              }
               ctx.fillStyle = grad;
               ctx.fill();
           }
       });
+  }
+
+  private renderParticles(ctx: CanvasRenderingContext2D, particles: GameEntity[]) {
+      if (particles.length === 0) return;
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
+          ctx.globalAlpha = lifeRatio;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.position.x, p.position.y, p.size.x, 0, Math.PI * 2);
+          ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
   }
 
   private renderEntities(
@@ -296,26 +347,17 @@ export class RenderSystem {
       camera: CameraState,
       playerPos?: Vector2
     ) {
+    // Computed once per frame and reused by all entity rendering below.
+    const nowSec = Date.now() / 1000;
+
     entities.forEach(entity => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
       if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
-      // --- PARTICLE RENDERING ---
-      if (entity.type === EntityType.PARTICLE) {
-          ctx.save();
-          // Glow effect for particles
-          ctx.globalCompositeOperation = 'lighter';
-          const lifeRatio = (entity.lifetime || 0) / (entity.maxLifetime || 1);
-          ctx.globalAlpha = lifeRatio;
-          ctx.fillStyle = entity.color;
-          ctx.beginPath();
-          ctx.arc(entity.position.x, entity.position.y, entity.size.x, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-          return;
-      }
+      // Particles are handled separately in renderParticles() — skip here
+      if (entity.type === EntityType.PARTICLE) return;
 
       ctx.save();
       
@@ -482,27 +524,119 @@ export class RenderSystem {
                 } // end else (glass tile — paired with regen ghost if/else above)
 
             } else {
-                // ── Asteroid ─────────────────────────────────────────────────
-                buildPath();
-                if (entity.hitFlash && entity.hitFlash > 0) {
-                    ctx.fillStyle = '#ffffff';
+                // ── Asteroid / Tile shard ─────────────────────────────────────
+                const isFlash   = entity.hitFlash && entity.hitFlash > 0;
+                const shardType = entity.shardType ?? 'asteroid';
+                const glowColor = entity.powerupGlowColor;
+
+                if (shardType === 'tile') {
+                    // ── Tile shard — glass-like translucent panels with optional glow
+                    const [gr, gg, gb] = glowColor ? hexToRgb(glowColor) : [180, 230, 253];
+
+                    if (glowColor) {
+                        // Power-up glow bloom — strong, opaque tint
+                        const pulse     = 0.82 + Math.sin(nowSec * 5.5) * 0.18;
+                        const glowR     = (entity.size.x / 2) * 3.0 * pulse;
+                        const bloom     = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0.55)`);
+                        bloom.addColorStop(0.5, `rgba(${gr},${gg},${gb},0.25)`);
+                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    // Base fill — more opaque than a plain tile, solid color tint
+                    buildPath();
+                    ctx.globalAlpha = isFlash ? 0.85 : (glowColor ? 0.55 : 0.22);
+                    ctx.fillStyle   = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},1)`;
+                    ctx.fill();
+
+                    // Edge stroke
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},0.85)`;
+                    ctx.lineWidth   = isFlash ? 2.5 : 1.5;
+                    ctx.stroke();
+
                 } else {
-                    ctx.fillStyle = entity.color;
+                    // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
+                    buildPath();
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
+                    ctx.fill();
+
+                    if (glowColor && !isFlash) {
+                        // Subtle powerup color overlay — semi-transparent, mixes with rock color
+                        const [gr, gg, gb] = hexToRgb(glowColor);
+                        const pulse = 0.6 + Math.sin(nowSec * 4.5) * 0.15;
+                        buildPath();
+                        ctx.globalAlpha = 0.28 * pulse;
+                        ctx.fillStyle   = `rgb(${gr},${gg},${gb})`;
+                        ctx.fill();
+
+                        // Ambient rim glow
+                        const glowR = (entity.size.x / 2) * 2.0 * pulse;
+                        const bloom = ctx.createRadialGradient(0, 0, entity.size.x * 0.25, 0, 0, glowR);
+                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0)`);
+                        bloom.addColorStop(0.6, `rgba(${gr},${gg},${gb},0.12)`);
+                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    ctx.globalAlpha = 1.0;
+                    this.renderCracks(ctx, entity, entity.size.x / 2);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                    ctx.lineWidth   = 2;
+                    ctx.stroke();
                 }
-                ctx.fill();
-                this.renderCracks(ctx, entity, entity.size.x / 2);
-                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
-             ctx.fillStyle = entity.color;
              const r = entity.size.x / 2;
              if (Number.isFinite(r) && r > 0) {
+                // Pulsing animation: fast oscillation tied to position for variety
+                const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                const glowR = r * pulse * 3.0;
+
+                // Fade out in the last 20% of lifetime
+                const lifetimeFrac = (entity.lifetime !== undefined && entity.maxLifetime !== undefined && entity.maxLifetime > 0)
+                    ? Math.min(1, entity.lifetime / (entity.maxLifetime * 0.2))
+                    : 1;
+
+                const isEnemy = entity.ownerType === EntityType.ENEMY;
+                const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                // Single merged gradient: hot white core → weapon colour → transparent glow.
+                // One gradient object + one draw call instead of two.
+                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                if (isEnemy) {
+                    grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
+                    grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
+                    grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
+                    grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
+                    grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                } else {
+                    grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
+                    grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                    grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                    grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
+                    grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                }
                 ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                ctx.fillStyle = grad;
                 ctx.fill();
+
+                ctx.restore();
              }
           } else {
             ctx.fillStyle = entity.color;
@@ -558,19 +692,24 @@ export class RenderSystem {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
                 const fadeAlpha = lt < 3.0 ? Math.max(0, lt / 3.0) : 1.0;
-                const pulse = 0.7 + Math.sin(Date.now() / 350) * 0.3;
+                const pulse = 0.82 + Math.sin(nowSec * 6.5) * 0.18;
 
                 // Color palette per drop type
                 let coreColor: string;
                 let rimColor: string;
+                let glowRgb: [number, number, number];
                 if (entity.dropType === 'fuel') {
-                    coreColor = '#00e5ff'; rimColor = '#0090a0';
+                    coreColor = '#33eeff'; rimColor = '#00c8d8';
+                    glowRgb = [0, 229, 255];
                 } else if (entity.dropType === 'gold') {
-                    coreColor = '#ffd700'; rimColor = '#b8860b';
+                    coreColor = '#ffe033'; rimColor = '#c8a000';
+                    glowRgb = [255, 215, 0];
                 } else if (entity.dropType === 'health') {
-                    coreColor = '#4ade80'; rimColor = '#16a34a';
+                    coreColor = '#6ef09a'; rimColor = '#22c55e';
+                    glowRgb = [74, 222, 128];
                 } else {
                     coreColor = entity.color; rimColor = entity.color;
+                    glowRgb = hexToRgb(entity.color);
                 }
 
                 // Build shard polygon path
@@ -587,15 +726,28 @@ export class RenderSystem {
                     ctx.closePath();
                 };
 
+                // Radial glow bloom — drawn first so the shard sits on top
+                const glowRadius = (entity.size.x / 2) * 3.5 * pulse;
+                const [gr, gg, gb] = glowRgb;
+                const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+                bloom.addColorStop(0,   `rgba(${gr}, ${gg}, ${gb}, ${0.90 * fadeAlpha})`);
+                bloom.addColorStop(0.4, `rgba(${gr}, ${gg}, ${gb}, ${0.55 * fadeAlpha})`);
+                bloom.addColorStop(1,   `rgba(${gr}, ${gg}, ${gb}, 0)`);
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
                 // Outer glow rim
-                ctx.globalAlpha = 0.45 * pulse * fadeAlpha;
+                ctx.globalAlpha = 0.65 * pulse * fadeAlpha;
                 ctx.strokeStyle = rimColor;
                 ctx.lineWidth = 3;
                 buildShardPath();
                 ctx.stroke();
 
                 // Solid shard fill
-                ctx.globalAlpha = 0.92 * fadeAlpha;
+                ctx.globalAlpha = 1.0 * fadeAlpha;
                 ctx.fillStyle = coreColor;
                 buildShardPath();
                 ctx.fill();

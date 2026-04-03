@@ -5,10 +5,17 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState } from '../types';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+
+/** Average two 6-digit hex colours component-wise. */
+function blendHexColors(hexA: string, hexB: string): string {
+    const rA = parseInt(hexA.slice(1, 3), 16), gA = parseInt(hexA.slice(3, 5), 16), bA = parseInt(hexA.slice(5, 7), 16);
+    const rB = parseInt(hexB.slice(1, 3), 16), gB = parseInt(hexB.slice(3, 5), 16), bB = parseInt(hexB.slice(5, 7), 16);
+    return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
+}
 
 export class GameEngine {
   private input: InputSystem;
@@ -56,6 +63,9 @@ export class GameEngine {
 
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
+
+  // Collision-based stick bonds — entities bond on contact and merge after threshold
+  private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
   private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
@@ -362,22 +372,17 @@ export class GameEngine {
       }
 
       // Gentle flow-field current on the player — adds a subtle drift bias in
-      // the direction of the field without fighting player input.  The correction
-      // is ~4× weaker than asteroids so it's felt as ambience, not forced movement.
-      {
-          const flow = this.flowField.sampleAsteroidFlow(this.player.position.x, this.player.position.y);
-          const PLAYER_FLOW_STRENGTH = 0.6; // world units per second added toward flow
-          this.player.velocity.x += flow.x * PLAYER_FLOW_STRENGTH * dt;
-          this.player.velocity.y += flow.y * PLAYER_FLOW_STRENGTH * dt;
-      }
 
       // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
       // causing gradual clustering as they drift through the flow field.
       // Glass shards are purely debris and excluded.
-      // Pre-build a candidate list to keep the O(n²) pair count small.
+      // Spatial grid (cell = interaction radius) reduces O(n²) pairs to O(n·k)
+      // where k is the local candidate density — typically 1–5 vs. all candidates.
       const GRAV_G        = 2.5;
-      const GRAV_RANGE_SQ = 120 * 120;
-      const GRAV_MIN_SQ   = 12 * 12; // avoid singularity at close range
+      const GRAV_RANGE    = 120;
+      const GRAV_RANGE_SQ = GRAV_RANGE * GRAV_RANGE;
+      const GRAV_MIN_SQ   = 12 * 12;
+
       const gravCandidates: GameEntity[] = [this.player];
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
@@ -387,25 +392,51 @@ export class GameEngine {
               gravCandidates.push(e);
           }
       }
-      const gc = gravCandidates;
-      for (let i = 0; i < gc.length; i++) {
-          for (let j = i + 1; j < gc.length; j++) {
-              const a  = gc[i];
-              const b  = gc[j];
-              const dx = b.position.x - a.position.x;
-              const dy = b.position.y - a.position.y;
-              const distSq = dx * dx + dy * dy;
-              if (distSq > GRAV_RANGE_SQ) continue;
-              const effSq  = Math.max(distSq, GRAV_MIN_SQ);
-              const f      = GRAV_G / effSq; // acceleration magnitude (both get same)
-              const fx     = dx * f;
-              const fy     = dy * f;
-              a.velocity.x += fx * dt;
-              a.velocity.y += fy * dt;
-              b.velocity.x -= fx * dt;
-              b.velocity.y -= fy * dt;
+
+      // Bucket candidate indices by grid cell
+      const gravGrid = new Map<number, number[]>();
+      for (let i = 0; i < gravCandidates.length; i++) {
+          const e = gravCandidates[i];
+          const cx = Math.floor(e.position.x / GRAV_RANGE);
+          const cy = Math.floor(e.position.y / GRAV_RANGE);
+          const key = (cx << 16) | (cy & 0xFFFF);
+          let cell = gravGrid.get(key);
+          if (!cell) { cell = []; gravGrid.set(key, cell); }
+          cell.push(i);
+      }
+
+      // Check only same + 8 neighbouring cells; j > i ensures each pair is processed once
+      for (let i = 0; i < gravCandidates.length; i++) {
+          const a = gravCandidates[i];
+          const acx = Math.floor(a.position.x / GRAV_RANGE);
+          const acy = Math.floor(a.position.y / GRAV_RANGE);
+          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                  const cell = gravGrid.get((ncx << 16) | (ncy & 0xFFFF));
+                  if (!cell) continue;
+                  for (let k = 0; k < cell.length; k++) {
+                      const j = cell[k];
+                      if (j <= i) continue;
+                      const b = gravCandidates[j];
+                      const dx = b.position.x - a.position.x;
+                      const dy = b.position.y - a.position.y;
+                      const distSq = dx * dx + dy * dy;
+                      if (distSq > GRAV_RANGE_SQ) continue;
+                      const effSq = Math.max(distSq, GRAV_MIN_SQ);
+                      const f    = GRAV_G / effSq;
+                      const fx   = dx * f;
+                      const fy   = dy * f;
+                      a.velocity.x += fx * dt;
+                      a.velocity.y += fy * dt;
+                      b.velocity.x -= fx * dt;
+                      b.velocity.y -= fy * dt;
+                  }
+              }
           }
       }
+
+      // Stick bonds: detect contact and merge entities after threshold
+      this.handleEntitySticking(dt);
 
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
@@ -730,6 +761,7 @@ export class GameEngine {
     }
 
     this.updateHomingProjectiles(dt);
+    this.updateProjectileTrails(dt);
 
     // Damage Text cleanup
     let dTextIdx = 0;
@@ -875,10 +907,13 @@ export class GameEngine {
               health: 1,
               maxHealth: 1,
               lifetime: config.lifetime,
+              maxLifetime: config.lifetime,
               mass: PROJECTILE_CONSTANTS.MASS,
               damage: config.damage,
               homing: config.homing,
-              ownerType
+              ownerType,
+              pierceCount: config.pierce,
+              trail: [],
           });
       }
   }
@@ -927,6 +962,348 @@ export class GameEngine {
       }
   }
 
+  private updateProjectileTrails(dt: number) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const TRAIL_LIFETIME = 0.25; // shorter than player trail
+      const TRAIL_SCALE = 0.5;
+      const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
+
+      for (let i = 0; i < entities.length; i++) {
+          const p = entities[i];
+          if (!p.active || p.type !== EntityType.PROJECTILE) continue;
+
+          // Decay existing trail points (write-index avoids O(n) splice shifts)
+          if (p.trail) {
+              let writeIdx = 0;
+              for (let j = 0; j < p.trail.length; j++) {
+                  p.trail[j].lifetime -= dt;
+                  if (p.trail[j].lifetime > 0) {
+                      p.trail[writeIdx++] = p.trail[j];
+                  }
+              }
+              p.trail.length = writeIdx;
+          } else {
+              p.trail = [];
+          }
+
+          // Add new trail point if far enough from last
+          const t = p.trail;
+          const lastPos = t.length > 0 ? t[t.length - 1] : null;
+          const dx = p.position.x - (lastPos?.x ?? p.position.x - 1);
+          const dy = p.position.y - (lastPos?.y ?? p.position.y - 1);
+          if (!lastPos || (dx * dx + dy * dy > MIN_DIST_SQ)) {
+              t.push({
+                  x: p.position.x,
+                  y: p.position.y,
+                  lifetime: TRAIL_LIFETIME,
+                  maxLifetime: TRAIL_LIFETIME,
+                  scale: TRAIL_SCALE,
+              });
+          }
+      }
+  }
+
+  // ─── Collision-based stick bonds ───────────────────────────────────────────
+  // Entities bond only on physical contact. While bonded their velocities are
+  // nudged toward shared momentum. After the threshold duration they merge.
+  // Bonds break if entities drift apart beyond 1.5× contact distance.
+
+  private handleEntitySticking(dt: number) {
+      if (!this.currentMap) return;
+
+      const SAME_THRESHOLD = 1.0;   // base seconds for min-size pair (same type)
+      const DIFF_THRESHOLD = 2.0;   // base seconds for min-size pair (cross type)
+      const SIZE_REF       = 20;    // reference size (min asteroid diameter)
+      const SIZE_POWER     = 1.5;   // exponent — small bodies merge fast, large ones slowly
+      const DIFF_CHANCE    = 0.5;   // probability that a cross-type contact forms a bond
+      const COHESION       = 4.0;   // fraction of velocity delta corrected per second
+      const BREAK_FACTOR   = 1.5;   // bond breaks when dist > contactDist * this
+      const CONTACT_BUFFER = 4;     // extra pixel tolerance for contact detection
+
+      // ── 1. Update existing bonds ──────────────────────────────────────────
+      const bonded = new Set<GameEntity>();
+      let writeIdx = 0;
+
+      for (let bi = 0; bi < this.stickBonds.length; bi++) {
+          const bond = this.stickBonds[bi];
+          const { a, b } = bond;
+
+          if (!a.active || !b.active) continue; // discard silently
+
+          const dx = b.position.x - a.position.x;
+          const dy = b.position.y - a.position.y;
+          const dist       = Math.sqrt(dx * dx + dy * dy);
+          const contactDist = (a.size.x + b.size.x) * 0.5;
+
+          if (dist > contactDist * BREAK_FACTOR) continue; // bond broken — discard
+
+          // Velocity cohesion: nudge both toward shared momentum centre
+          const totalMass = a.mass + b.mass;
+          const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+          const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+          const blend     = Math.min(1, COHESION * dt);
+          a.velocity.x   += (sharedVx - a.velocity.x) * blend;
+          a.velocity.y   += (sharedVy - a.velocity.y) * blend;
+          b.velocity.x   += (sharedVx - b.velocity.x) * blend;
+          b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+
+          bond.timer += dt;
+
+          if (bond.timer >= bond.threshold) {
+              // Time's up — merge and discard bond
+              this.mergeEntities(a, b);
+              continue;
+          }
+
+          // Keep bond alive
+          this.stickBonds[writeIdx++] = bond;
+          bonded.add(a);
+          bonded.add(b);
+      }
+      this.stickBonds.length = writeIdx;
+
+      // ── 2. Detect new contacts via spatial grid ───────────────────────────
+      // Candidates: active asteroids + eligible drops (no glass/powerup)
+      const candidates: GameEntity[] = [];
+      const entities = this.currentMap.entities;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.ASTEROID) candidates.push(e);
+      }
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup') candidates.push(d);
+      }
+      if (candidates.length < 2) return;
+
+      // Cell size: must cover the widest possible contact distance.
+      // Max asteroid = 200, max drop ≈ 30 → max contactDist ≈ (200+200)/2 + buffer = 104 → use 110.
+      const CELL = 110;
+      const grid  = new Map<number, number[]>();
+      for (let i = 0; i < candidates.length; i++) {
+          const c  = candidates[i];
+          const cx = Math.floor(c.position.x / CELL);
+          const cy = Math.floor(c.position.y / CELL);
+          const key = (cx << 16) | (cy & 0xFFFF);
+          let cell  = grid.get(key);
+          if (!cell) { cell = []; grid.set(key, cell); }
+          cell.push(i);
+      }
+
+      for (let i = 0; i < candidates.length; i++) {
+          const a = candidates[i];
+          if (!a.active || bonded.has(a)) continue;
+
+          const acx = Math.floor(a.position.x / CELL);
+          const acy = Math.floor(a.position.y / CELL);
+
+          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                  const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                  if (!cell) continue;
+                  for (let k = 0; k < cell.length; k++) {
+                      const j = cell[k];
+                      if (j <= i) continue;
+                      const b = candidates[j];
+                      if (!b.active || bonded.has(b)) continue;
+
+                      const dx = b.position.x - a.position.x;
+                      const dy = b.position.y - a.position.y;
+                      const distSq      = dx * dx + dy * dy;
+                      const contactDist = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
+                      if (distSq > contactDist * contactDist) continue;
+
+                      // Same type: ast+ast with same shardType, or drop+drop with same dropType
+                      const sameType =
+                          (a.type === EntityType.ASTEROID && b.type === EntityType.ASTEROID &&
+                           (a.shardType ?? 'asteroid') === (b.shardType ?? 'asteroid')) ||
+                          (a.type !== EntityType.ASTEROID && b.type !== EntityType.ASTEROID &&
+                           a.dropType === b.dropType);
+
+                      if (!sameType && Math.random() > DIFF_CHANCE) continue;
+
+                      // Threshold scales with average entity size: small pairs merge quickly,
+                      // large ones take significantly longer.
+                      // e.g. size 20→1s, size 50→4s, size 100→11s, size 200→32s (same type)
+                      const avgSize   = (a.size.x + b.size.x) * 0.5;
+                      const sizeRatio = Math.max(1, avgSize / SIZE_REF);
+                      const baseTime  = sameType ? SAME_THRESHOLD : DIFF_THRESHOLD;
+                      const threshold = baseTime * Math.pow(sizeRatio, SIZE_POWER);
+                      this.stickBonds.push({ a, b, timer: 0, threshold });
+                      bonded.add(a);
+                      bonded.add(b);
+                  }
+              }
+          }
+      }
+  }
+
+  // ─── Merge two bonded entities ──────────────────────────────────────────────
+  // Handles: asteroid+asteroid, drop+drop (same/different type), asteroid+drop.
+
+  private mergeEntities(a: GameEntity, b: GameEntity) {
+      if (!a.active || !b.active) return;
+
+      const totalMass = a.mass + b.mass;
+      const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+      const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+      const nmx = (a.position.x * a.mass + b.position.x * b.mass) / totalMass;
+      const nmy = (a.position.y * a.mass + b.position.y * b.mass) / totalMass;
+
+      const aIsAst = a.type === EntityType.ASTEROID;
+      const bIsAst = b.type === EntityType.ASTEROID;
+
+      if (aIsAst && bIsAst) {
+          // Asteroid + Asteroid — area-conserving accretion
+          const MAX_HP   = 6;
+          const rA = a.size.x / 2;
+          const rB = b.size.x / 2;
+          const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+
+          // Larger entity by area dominates shardType; blend glow colors
+          const dominant: ShardType = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
+          const glowA = a.powerupGlowColor;
+          const glowB = b.powerupGlowColor;
+          const newGlow = glowA && glowB ? blendHexColors(glowA, glowB) : (glowA ?? glowB);
+
+          const composition: DropCompositionEntry[] = [
+              ...(a.dropComposition ?? []),
+              ...(b.dropComposition ?? []),
+          ];
+
+          // Regenerate polygon at new size; keep blocky for tile, jagged for asteroid
+          const isTile  = dominant === 'tile';
+          const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (7 + Math.floor(Math.random() * 4));
+          const jitterK = isTile ? 0.25 : 0.7;
+          const rMin    = isTile ? 0.60 : 0.60;
+          const rRange  = isTile ? 0.55 : 0.65;
+          const baseR   = (newDiam / 2) * 0.82;
+          const rawPts: { angle: number; r: number }[] = [];
+          for (let pi = 0; pi < numPts; pi++) {
+              const base   = (pi / numPts) * Math.PI * 2;
+              const jitter = (Math.random() - 0.5) * (Math.PI / numPts) * jitterK;
+              rawPts.push({ angle: base + jitter, r: baseR * (rMin + Math.random() * rRange) });
+          }
+          rawPts.sort((pa, pb) => pa.angle - pb.angle);
+          a.polygonPoints = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+          a.shardType        = dominant;
+          a.powerupGlowColor = newGlow;
+          // Blend color toward dominant when merging cross-type
+          if (a.shardType !== b.shardType) a.color = blendHexColors(a.color, b.color);
+          a.size.x = newDiam; a.size.y = newDiam;
+          a.mass   = newDiam;
+          a.position.x = nmx; a.position.y = nmy;
+          a.velocity.x = nvx; a.velocity.y = nvy;
+          a.health     = Math.min(MAX_HP, a.health + b.health);
+          a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
+          a.dropComposition = composition.length > 0 ? composition : undefined;
+          b.active = false;
+
+      } else if (!aIsAst && !bIsAst) {
+          // Drop + Drop
+          if (a.dropType === b.dropType) {
+              // Same type — grow the drop (area-conserving: new_r = sqrt(rA² + rB²))
+              a.dropValue  = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+              const rda    = a.size.x / 2;
+              const rdb    = b.size.x / 2;
+              const newR   = Math.sqrt(rda * rda + rdb * rdb) * 2;
+              a.size.x     = newR; a.size.y = newR;
+              a.position.x = nmx;  a.position.y = nmy;
+              a.velocity.x = nvx;  a.velocity.y = nvy;
+              b.active = false;
+          } else {
+              // Different types — collapse into a composite asteroid
+              this.spawnCompositeAsteroid(a, b, nmx, nmy, nvx, nvy);
+              a.active = false;
+              b.active = false;
+          }
+
+      } else {
+          // Asteroid + Drop — asteroid absorbs the drop payload and takes on its glow color
+          const ast  = aIsAst ? a : b;
+          const drop = aIsAst ? b : a;
+          const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
+
+          // Color keyed to drop type — matches what the renderer uses for drop glows
+          const DROP_COLORS: Partial<Record<string, string>> = {
+              fuel:   '#00e5ff',
+              gold:   '#ffd700',
+              health: '#4ade80',
+          };
+
+          if (drop.dropType === 'powerup' && drop.dropWeapon !== undefined) {
+              comp.push({ type: 'powerup', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
+              const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
+              ast.powerupGlowColor = ast.powerupGlowColor
+                  ? blendHexColors(ast.powerupGlowColor, wColor)
+                  : wColor;
+          } else if (drop.dropType && drop.dropType !== 'glass') {
+              comp.push({ type: drop.dropType as 'fuel' | 'gold' | 'health', value: drop.dropValue ?? 1 });
+              const dColor = DROP_COLORS[drop.dropType];
+              if (dColor) {
+                  ast.powerupGlowColor = ast.powerupGlowColor
+                      ? blendHexColors(ast.powerupGlowColor, dColor)
+                      : dColor;
+              }
+          }
+
+          ast.dropComposition = comp.length > 0 ? comp : undefined;
+          ast.velocity.x = nvx; ast.velocity.y = nvy;
+          drop.active = false;
+      }
+  }
+
+  private spawnCompositeAsteroid(
+      dropA: GameEntity, dropB: GameEntity,
+      mx: number, my: number, mvx: number, mvy: number
+  ) {
+      if (!this.currentMap) return;
+
+      const ra      = dropA.size.x / 2;
+      const rb      = dropB.size.x / 2;
+      // Area-conserving: new area = area_A + area_B → new_radius = sqrt(ra² + rb²)
+      const newSize = Math.sqrt(ra * ra + rb * rb) * 2;
+      const hp      = Math.max(1, Math.round(newSize / 20));
+
+      // Irregular polygon (same approach as normal asteroids)
+      const numPts = 9 + Math.floor(Math.random() * 4);
+      const baseR  = (newSize / 2) * 0.82;
+      const rawPts: { angle: number; r: number }[] = [];
+      for (let i = 0; i < numPts; i++) {
+          const base   = (i / numPts) * Math.PI * 2;
+          const jitter = (Math.random() - 0.5) * (Math.PI / numPts) * 0.65;
+          rawPts.push({ angle: base + jitter, r: baseR * (0.75 + Math.random() * 0.5) });
+      }
+      rawPts.sort((a, b) => a.angle - b.angle);
+      const points = rawPts.map(p => ({
+          x: Math.cos(p.angle) * p.r,
+          y: Math.sin(p.angle) * p.r,
+      }));
+
+      this.currentMap.entities.push({
+          id:            `composite_${Date.now()}_${Math.random()}`,
+          type:          EntityType.ASTEROID,
+          shardType:    'asteroid',
+          position:      { x: mx, y: my },
+          velocity:      { x: mvx, y: mvy },
+          size:          { x: newSize, y: newSize },
+          rotation:      Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * (1.5 / (newSize / 20)),
+          color:         blendHexColors(dropA.color, dropB.color),
+          active:        true,
+          health:        hp,
+          maxHealth:     hp,
+          mass:          newSize,
+          polygonPoints: points,
+          dropComposition: [
+              { type: dropA.dropType as 'fuel' | 'gold' | 'health', value: dropA.dropValue ?? 1 },
+              { type: dropB.dropType as 'fuel' | 'gold' | 'health', value: dropB.dropValue ?? 1 },
+          ],
+      });
+  }
+
   private createAsteroidShards(parent: GameEntity) {
       // Minimum shard size = smallest spawnable asteroid.
       const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
@@ -963,6 +1340,10 @@ export class GameEngine {
 
       const parentRadius = parent.size.x / 2;
 
+      // Inherit shard type and color from parent so tile shards stay tiles, etc.
+      const parentShardType = parent.shardType ?? 'asteroid';
+      const isTile          = parentShardType === 'tile';
+
       for (let i = 0; i < sizes.length; i++) {
           const newSize = sizes[i];
           const hp      = newSize > 30 ? 2 : 1;
@@ -980,13 +1361,17 @@ export class GameEngine {
           const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
           const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
-          const numPoints = 5 + Math.floor(Math.random() * 3);
-          const baseR     = (newSize / 2) * 0.8;
+          // Polygon style mirrors the parent type: blocky for tile, jagged for asteroid
+          const numPoints   = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
+          const angleJitterK = isTile ? 0.25 : 0.8;
+          const rMin         = isTile ? 0.60 : 0.55;
+          const rRange       = isTile ? 0.55 : 0.70;
+          const baseR        = (newSize / 2) * 0.8;
           const rawPts: { angle: number; r: number }[] = [];
           for (let j = 0; j < numPoints; j++) {
               const baseAngle   = (j / numPoints) * Math.PI * 2;
-              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.8;
-              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (0.55 + Math.random() * 0.7) });
+              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitterK;
+              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (rMin + Math.random() * rRange) });
           }
           rawPts.sort((a, b) => a.angle - b.angle);
           const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
@@ -998,12 +1383,13 @@ export class GameEngine {
           this.currentMap?.entities.push({
               id:           `shard_${Date.now()}_${i}`,
               type:          EntityType.ASTEROID,
+              shardType:     parentShardType,
               position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
               velocity:     { x: vx, y: vy },
               size:         { x: newSize, y: newSize },
               rotation:      Math.random() * Math.PI * 2,
               rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-              color:         COLORS.ASTEROID,
+              color:         isTile ? parent.color : COLORS.ASTEROID,
               active:        true,
               health:        hp,
               maxHealth:     hp,
@@ -1153,8 +1539,19 @@ export class GameEngine {
       this.applyDropEffect(entity);
 
     } else if (entity.type === EntityType.ASTEROID) {
-      const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
-      this.spawnDrop(pos, 'gold', goldAmt, pv);
+      if (entity.dropComposition && entity.dropComposition.length > 0) {
+        // Release all stored drop payloads (fuel/gold/health as drops; powerups as weapon drops)
+        for (const comp of entity.dropComposition) {
+          if (comp.type === 'powerup') {
+            this.spawnPowerupDrop(pos, pv, comp.weapon);
+          } else {
+            this.spawnDrop(pos, comp.type, comp.value, pv);
+          }
+        }
+      } else {
+        const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
+        this.spawnDrop(pos, 'gold', goldAmt, pv);
+      }
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
         this.spawnRandomPowerupDrop(pos, pv);
@@ -1257,36 +1654,38 @@ export class GameEngine {
         speed = 0.4 + Math.random() * 1.5;
       }
 
-      // Angular glass shard polygon — 3–5 vertices, low jitter so edges stay sharp.
-      const numPoints = 3 + Math.floor(Math.random() * 3);
+      // Tile shard polygon — 4–6 vertices, low angular jitter, moderate radius
+      // variation.  More blocky/faceted than asteroid shards (which use 5–7 pts
+      // with higher jitter) to hint at their manufactured origin.
+      const numPoints = 4 + Math.floor(Math.random() * 3);
       const rawPts: { angle: number; r: number }[] = [];
       for (let j = 0; j < numPoints; j++) {
         const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.35;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.5 + Math.random() * 0.65) });
+        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
+        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
       }
       rawPts.sort((a, b) => a.angle - b.angle);
       const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
 
+      const size = radius * 4; // diameter; slightly larger so physics feel solid
       this.currentMap.entities.push({
-        id:           `glass_${Date.now()}_${i}_${Math.random()}`,
-        type:          EntityType.INTERACTABLE,
-        position:     {
+        id:            `tile_shard_${Date.now()}_${i}_${Math.random()}`,
+        type:           EntityType.ASTEROID,
+        shardType:     'tile',
+        position:      {
           x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
           y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
         },
-        velocity:     { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-        size:         { x: radius * 3, y: radius * 3 },
-        rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
-        color:         'rgba(186,230,253,0.8)',
-        active:        true,
-        health:        1,
-        maxHealth:     1,
-        mass:          3,
-        dropType:      'glass',
-        dropValue:     0,
-        polygonPoints: pts,
+        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size:          { x: size, y: size },
+        rotation:       Math.random() * Math.PI * 2,
+        rotationSpeed:  (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
+        color:          '#b4e6fd',   // blue-white tile hue
+        active:         true,
+        health:         1,
+        maxHealth:      1,
+        mass:           size,
+        polygonPoints:  pts,
       });
     }
 
@@ -1335,10 +1734,17 @@ export class GameEngine {
     this.activeDrops.push(drop);
   }
 
-  private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2) {
+  // Spawn a powerup drop for a specific weapon (used when a composite asteroid releases its stored weapons).
+  private spawnPowerupDrop(pos: Vector2, parentVelocity: Vector2 | undefined, weapon: WeaponType) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const weaponType = WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
+    this.spawnRandomPowerupDrop(pos, parentVelocity, weapon);
+  }
+
+  private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2, specificWeapon?: WeaponType) {
+    if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    const weaponType = specificWeapon ?? WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;
     const scatterAngle = Math.random() * Math.PI * 2;
