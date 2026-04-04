@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1415,11 +1415,13 @@ export class GameEngine {
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
+    const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
     const waveDef = WAVE_DEFINITIONS[index];
-    const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
+    const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
+    const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;
 
-    for (const group of waveDef.enemies) {
+    for (const group of scaledGroups) {
       for (let i = 0; i < group.count; i++) {
         const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
@@ -1442,6 +1444,7 @@ export class GameEngine {
         };
         const enemyTier = tierMap[group.subtype] ?? 1;
 
+        const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
         this.currentMap.entities.push({
           id,
           type: EntityType.ENEMY,
@@ -1453,8 +1456,9 @@ export class GameEngine {
           rotation: Math.random() * Math.PI * 2,
           color: config.color,
           active: true,
-          health: config.health,
-          maxHealth: config.health,
+          health: scaledHealth,
+          maxHealth: scaledHealth,
+          maxSpeed: config.maxSpeed * statScale.speed,
           mass: config.mass,
           visionRange: ENEMY_CONSTANTS.VISION_RANGE,
           sprite: config.sprite

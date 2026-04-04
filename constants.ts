@@ -43,8 +43,8 @@ export const SPRITE_CONSTANTS = {
 
 export const AI_CONFIG = {
   // Reaction time simulation
-  REACTION_TIME_BASE: 0.3,
-  REACTION_TIME_VAR: 0.5,
+  REACTION_TIME_BASE: 0.2,
+  REACTION_TIME_VAR: 0.3,
 
   // State switching timers (used by SHOOTING enemies and default)
   IDLE_TIME_BASE: 1.0,
@@ -55,10 +55,10 @@ export const AI_CONFIG = {
   // Flight Physics
   ROTATION_THRESHOLD: 20, // Speed at which enemy rotates to face velocity instead of target
 
-  // Rammer-specific overrides: minimal idle, long aggressive charge bursts
+  // Rammer-specific overrides: short idle pause, long aggressive charge bursts
   RAMMER: {
-    IDLE_TIME_BASE: 0.1,
-    IDLE_TIME_VAR: 0.2,
+    IDLE_TIME_BASE: 0.5,
+    IDLE_TIME_VAR: 0.3,
     CHASE_TIME_BASE: 4.0,
     CHASE_TIME_VAR: 1.5,
     ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
@@ -68,7 +68,7 @@ export const AI_CONFIG = {
   SKIRMISHER: {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
-    STRAFE_MODIFIER: 0.5
+    STRAFE_MODIFIER: 0.75
   }
 };
 
@@ -358,6 +358,14 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   1: 0.35, // Low
   2: 0.65, // Moderate
   3: 1     // High (current default)
+};
+
+// Difficulty stat multipliers — scale individual enemy health and speed
+export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number }> = {
+  0: { health: 1.0, speed: 1.0 }, // N/A (no enemies)
+  1: { health: 0.7, speed: 0.8 }, // Low — weaker, slower enemies
+  2: { health: 0.85, speed: 0.9 }, // Moderate
+  3: { health: 1.0, speed: 1.0 }, // Full difficulty
 };
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────

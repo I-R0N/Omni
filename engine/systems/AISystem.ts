@@ -61,7 +61,7 @@ export class AISystem {
    */
   private updateSkirmisher(dt: number, enemy: GameEntity, player: GameEntity) {
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SHOOTER_1];
-      const maxSpeed = config.maxSpeed || 12;
+      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 12;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
 
@@ -122,7 +122,7 @@ export class AISystem {
   private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
-      const maxSpeed = config.maxSpeed || 10;
+      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 10;
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;
 
