@@ -69,7 +69,11 @@ export const AI_CONFIG = {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
     STRAFE_MODIFIER: 0.75
-  }
+  },
+
+  // Distance beyond which enemies always seek the player, overriding idle state.
+  // Prevents waves from stalling when the player moves away from the spawn location.
+  LONG_RANGE_SEEK_DIST: 700,
 };
 
 export const COLLISION_CONFIG = {

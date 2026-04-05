@@ -156,7 +156,14 @@ export class AISystem {
       }
 
       // --- MOVEMENT BEHAVIOR ---
-      if (enemy.aiState === 'chase') {
+      const dxPlayer = player.position.x - enemy.position.x;
+      const dyPlayer = player.position.y - enemy.position.y;
+      const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
+      const longRange = distToPlayer > AI_CONFIG.LONG_RANGE_SEEK_DIST;
+
+      // At long range always seek regardless of idle state, so waves never
+      // stall when the player moves away from the initial spawn location.
+      if (enemy.aiState === 'chase' || longRange) {
           // ENGAGE: Fly toward the lagged target, blended with the pursuit
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
