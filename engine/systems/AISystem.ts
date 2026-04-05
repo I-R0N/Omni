@@ -42,6 +42,33 @@ export class AISystem {
       }
     }
 
+    // Pack sync: idle rammers near a chasing rammer get pulled into the charge.
+    // Truncating the idle timer to PACK_SYNC_WINDOW forces near-simultaneous
+    // attacks — a much harder threat to dodge than staggered individuals.
+    for (let i = 0; i < entities.length; i++) {
+      const leader = entities[i];
+      if (!leader.active || leader.type !== EntityType.ENEMY) continue;
+      if (!leader.enemySubtype || ENEMY_ROLE[leader.enemySubtype] !== EnemyRole.RAMMING) continue;
+      if (leader.aiState !== 'chase') continue;
+
+      for (let j = 0; j < entities.length; j++) {
+        if (i === j) continue;
+        const follower = entities[j];
+        if (!follower.active || follower.type !== EntityType.ENEMY) continue;
+        if (!follower.enemySubtype || ENEMY_ROLE[follower.enemySubtype] !== EnemyRole.RAMMING) continue;
+        if (follower.aiState !== 'idle') continue;
+
+        const pdx = leader.position.x - follower.position.x;
+        const pdy = leader.position.y - follower.position.y;
+        if (pdx * pdx + pdy * pdy > AI_CONFIG.PACK_SYNC_RANGE * AI_CONFIG.PACK_SYNC_RANGE) continue;
+
+        // Snap idle timer down so this rammer joins the charge within PACK_SYNC_WINDOW
+        if ((follower.aiTimer ?? 0) > AI_CONFIG.PACK_SYNC_WINDOW) {
+          follower.aiTimer = Math.random() * AI_CONFIG.PACK_SYNC_WINDOW;
+        }
+      }
+    }
+
     // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically
     if (Math.random() < 0.05) {
         const liveIds = new Set<string>();
@@ -76,10 +103,14 @@ export class AISystem {
       const dy = player.position.y - enemy.position.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       
-      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER } = AI_CONFIG.SKIRMISHER;
+      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
 
-      // Reaction lag affects aim direction only; movement logic remains responsive for gameplay feel
-      let targetAngle = Math.atan2(dy, dx);
+      // Aim-lead: predict where the player will be when the projectile arrives.
+      // Movement still tracks the real player position for responsive seek/flee/strafe.
+      const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
+      const aimX = player.position.x + player.velocity.x * leadTime - enemy.position.x;
+      const aimY = player.position.y + player.velocity.y * leadTime - enemy.position.y;
+      let targetAngle = Math.atan2(aimY, aimX);
       
       if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)

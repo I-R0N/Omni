@@ -64,11 +64,18 @@ export const AI_CONFIG = {
     ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
   },
 
+  // Pack behavior — rammers within PACK_SYNC_RANGE of a chasing rammer get
+  // their idle timer capped to PACK_SYNC_WINDOW, forcing a near-simultaneous charge.
+  PACK_SYNC_RANGE: 450,
+  PACK_SYNC_WINDOW: 0.3,
+
   // Skirmisher specific behavior
   SKIRMISHER: {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
-    STRAFE_MODIFIER: 0.75
+    STRAFE_MODIFIER: 0.75,
+    LEAD_FACTOR: 0.7,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
+    PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
   },
 
   // Distance beyond which enemies always seek the player, overriding idle state.

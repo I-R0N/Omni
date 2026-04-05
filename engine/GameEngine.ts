@@ -1409,9 +1409,16 @@ export class GameEngine {
     const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;
 
+    // Flanking: divide enemies into groups arriving from evenly-spaced angles.
+    // A random base rotation ensures no two waves look the same.
+    const numFlanks = totalEnemies >= 5 ? 3 : 2;
+    const flankSpacing = (Math.PI * 2) / numFlanks;
+    const flankBaseRotation = Math.random() * Math.PI * 2;
+
     for (const group of scaledGroups) {
       for (let i = 0; i < group.count; i++) {
-        const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const flankIdx = enemyIdx % numFlanks;
+        const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
         let x = 0, y = 0;
         // Try up to 8 candidate positions; pick first one clear of static tiles
