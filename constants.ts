@@ -74,6 +74,11 @@ export const AI_CONFIG = {
   // Distance beyond which enemies always seek the player, overriding idle state.
   // Prevents waves from stalling when the player moves away from the spawn location.
   LONG_RANGE_SEEK_DIST: 700,
+
+  // Stuck detection: if an enemy travels less than STUCK_DIST_THRESHOLD units
+  // over STUCK_CHECK_INTERVAL seconds while chasing, it gets a random nudge.
+  STUCK_CHECK_INTERVAL: 1.5,
+  STUCK_DIST_THRESHOLD: 50,
 };
 
 export const COLLISION_CONFIG = {

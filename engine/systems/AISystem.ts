@@ -11,6 +11,11 @@ export class AISystem {
   private laggedTargets: Map<string, Vector2> = new Map();
   private reactionTimers: Map<string, number> = new Map();
 
+  // Stuck detection: sample position every STUCK_CHECK_INTERVAL seconds;
+  // if the enemy hasn't moved enough, apply a random impulse to break free.
+  private stuckTimers: Map<string, number> = new Map();
+  private lastPositions: Map<string, Vector2> = new Map();
+
   public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
     for (let i = 0; i < entities.length; i++) {
       const enemy = entities[i];
@@ -47,6 +52,8 @@ export class AISystem {
             if (!liveIds.has(id)) {
                 this.laggedTargets.delete(id);
                 this.reactionTimers.delete(id);
+                this.stuckTimers.delete(id);
+                this.lastPositions.delete(id);
             }
         }
     }
@@ -187,9 +194,14 @@ export class AISystem {
                   moveX /= mag;
                   moveY /= mag;
               } else {
-                  // Outside the pursuit field range — fall back to direct chase.
-                  moveX = dx / d;
-                  moveY = dy / d;
+                  // No flow field data — blend direct chase with wall repulsion
+                  // so enemies deflect around tile clusters instead of pressing in.
+                  const repulsion = flowField.sampleWallRepulsion(enemy.position.x, enemy.position.y);
+                  moveX = dx / d + repulsion.x * 0.8;
+                  moveY = dy / d + repulsion.y * 0.8;
+                  const mag = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
+                  moveX /= mag;
+                  moveY /= mag;
               }
 
               enemy.velocity.x += moveX * accel * dt;
@@ -204,6 +216,26 @@ export class AISystem {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
+
+      // --- STUCK DETECTION ---
+      // If the enemy has barely moved over the check interval while chasing,
+      // it's pinned against geometry. Apply a random impulse to break free.
+      let stuckTimer = (this.stuckTimers.get(enemy.id) ?? AI_CONFIG.STUCK_CHECK_INTERVAL) - dt;
+      if (stuckTimer <= 0) {
+          const last = this.lastPositions.get(enemy.id);
+          if (last && (enemy.aiState === 'chase' || longRange)) {
+              const sx = enemy.position.x - last.x;
+              const sy = enemy.position.y - last.y;
+              if (sx * sx + sy * sy < AI_CONFIG.STUCK_DIST_THRESHOLD * AI_CONFIG.STUCK_DIST_THRESHOLD) {
+                  const nudgeAngle = Math.random() * Math.PI * 2;
+                  enemy.velocity.x += Math.cos(nudgeAngle) * maxSpeed * 0.8;
+                  enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
+              }
+          }
+          this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          stuckTimer = AI_CONFIG.STUCK_CHECK_INTERVAL;
+      }
+      this.stuckTimers.set(enemy.id, stuckTimer);
 
       // --- ROTATION LOGIC ---
       // Face velocity vector when moving fast (Flight dynamics)
