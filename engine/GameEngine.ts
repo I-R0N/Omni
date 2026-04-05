@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -218,7 +218,6 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
@@ -599,14 +598,13 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
-        const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+        const waveDef = generateWaveDef(this.waveIndex);
 
-        // Auto-grant weapon unlock
+        // Auto-grant weapon unlock (only first 18 hand-authored waves carry powerups)
         if (waveDef.powerup !== null) {
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
-          // Announce weapon with floating text
           this.damageTexts.push({
             id: `unlock_${Date.now()}`,
             position: { ...this.player.position },
@@ -619,27 +617,17 @@ export class GameEngine {
           });
         }
 
-        // Start grace period or mark complete
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-        } else {
-          this.waveState = 'complete';
-        }
+        // Always start the grace period — waves are infinite
+        this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
       }
     }
 
-    // Grace period countdown — spawn next wave when timer expires
+    // Grace period countdown — spawn next wave when timer expires (infinite)
     if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
       this.waveGraceTimer -= dt;
       if (this.waveGraceTimer <= 0) {
         this.waveGraceTimer = 0;
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.spawnWave(nextIdx);
-        } else {
-          this.waveState = 'complete';
-        }
+        this.spawnWave(this.waveIndex + 1);
       }
     }
 
@@ -1411,12 +1399,12 @@ export class GameEngine {
   }
 
   private spawnWave(index: number) {
-    if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
+    if (!this.currentMap) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
     const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
-    const waveDef = WAVE_DEFINITIONS[index];
+    const waveDef = generateWaveDef(index);
     const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
     const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;

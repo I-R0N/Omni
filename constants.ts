@@ -347,6 +347,17 @@ export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
 };
 
+// Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
+// The pattern is always: rammer → shooter → mixed (every PATTERN_LENGTH waves).
+// Enemy count starts at INFINITE_BASE_COUNT and grows by INFINITE_COUNT_PER_SET
+// each set (group of PATTERN_LENGTH waves), capped at INFINITE_MAX_COUNT.
+export const WAVE_CONFIG = {
+  PATTERN_LENGTH: 3,           // waves per set (rammer, shooter, mixed)
+  INFINITE_BASE_COUNT: 4,      // enemy count for the first infinite set
+  INFINITE_COUNT_PER_SET: 1,   // +1 enemy per set (every 3 waves)
+  INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
+};
+
 export const DROP_CONFIG = {
   FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
   GOLD_PER_ASTEROID_SIZE:   0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
@@ -470,8 +481,37 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
               { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
 
-  // ── Set 6 — Level 3 only (final) ─────────────────────────────────────────
+  // ── Set 6 — Level 3 only ─────────────────────────────────────────────────
   { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
   { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed (victory)
+  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed
 ];
+
+/**
+ * Returns the wave definition for any wave index (0-based, infinite).
+ *
+ * Indices 0–17 map directly to the hand-authored WAVE_DEFINITIONS above.
+ * Indices 18+ enter the infinite phase: pure tier-3 enemies, all-rammer →
+ * all-shooter → mixed pattern, with enemy count increasing by
+ * WAVE_CONFIG.INFINITE_COUNT_PER_SET each set, capped at INFINITE_MAX_COUNT.
+ */
+export function generateWaveDef(index: number): { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null } {
+  if (index < WAVE_DEFINITIONS.length) return WAVE_DEFINITIONS[index];
+
+  const infiniteIdx = index - WAVE_DEFINITIONS.length;
+  const set     = Math.floor(infiniteIdx / WAVE_CONFIG.PATTERN_LENGTH);
+  const pattern = infiniteIdx % WAVE_CONFIG.PATTERN_LENGTH;
+
+  const count = Math.min(
+    WAVE_CONFIG.INFINITE_BASE_COUNT + set * WAVE_CONFIG.INFINITE_COUNT_PER_SET,
+    WAVE_CONFIG.INFINITE_MAX_COUNT,
+  );
+
+  const half = Math.ceil(count / 2);
+  const enemies: { subtype: EnemySubtype; count: number }[] =
+    pattern === 0 ? [{ subtype: EnemySubtype.RAMMER_3,  count }]
+    : pattern === 1 ? [{ subtype: EnemySubtype.SHOOTER_3, count }]
+    : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
+
+  return { enemies, powerup: null };
+}
