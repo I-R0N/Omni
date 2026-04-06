@@ -120,7 +120,7 @@ export class PhysicsSystem {
     }
 
     // Optimized Entity-Entity Collision (Spatial Hash Grid)
-    this.handleEntityCollisions(entities, onDamage, onDeath, onShake);
+    this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
   }
 
   private applyLocalGravity(entities: GameEntity[], timeScale: number) {
@@ -208,10 +208,11 @@ export class PhysicsSystem {
   }
 
   private handleEntityCollisions(
-    entities: GameEntity[], 
-    onDamage?: (pos: Vector2, amount: number) => void, 
+    entities: GameEntity[],
+    onDamage?: (pos: Vector2, amount: number) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
     this.dynamicGrid.clear();
