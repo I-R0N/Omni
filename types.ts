@@ -118,7 +118,8 @@ export interface GameEntity {
   aiState?: 'idle' | 'chase' | 'flee' | 'hunt' | 'skirmish' | 'orbit' | 'snipe';
   aiTimer?: number;
   visionRange?: number;
-  maxSpeed?: number; // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
+  maxSpeed?: number;    // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
+  aggroTimer?: number;  // Remaining seconds of post-kill aggro boost (speed + shorter idle)
   
   // AI Specific Params (Orbiter/Skirmisher)
   orbitRadius?: number;

@@ -33,6 +33,11 @@ export class AISystem {
           this.laggedTargets.set(enemy.id, { ...player.position });
       }
 
+      // Decay aggro boost each frame
+      if (enemy.aggroTimer && enemy.aggroTimer > 0) {
+          enemy.aggroTimer = Math.max(0, enemy.aggroTimer - dt);
+      }
+
       // Route by role — add new roles here as needed
       const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
       if (role === EnemyRole.SHOOTING) {
@@ -95,7 +100,9 @@ export class AISystem {
    */
   private updateSkirmisher(dt: number, enemy: GameEntity, player: GameEntity) {
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SHOOTER_1];
-      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 12;
+      const baseMaxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 12;
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
 
@@ -160,7 +167,9 @@ export class AISystem {
   private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
-      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 10;
+      const baseMaxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 10;
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;
 
@@ -186,7 +195,22 @@ export class AISystem {
       } else {
           if (enemy.aiState === 'chase') {
               enemy.aiState = 'idle';
-              enemy.aiTimer = timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR;
+              // Aggro shortens idle so enraged enemies press the attack faster.
+              const idleMult = aggroed ? AI_CONFIG.AGGRO_IDLE_MULT : 1;
+              enemy.aiTimer = (timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR) * idleMult;
+
+              // Retreat arc: when the rammer has just overshot the player,
+              // kick it laterally so it circles away instead of stopping dead.
+              if (isRammer && distToPlayer < AI_CONFIG.RAMMER.RETREAT_TRIGGER_DIST) {
+                  const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+                  if (spd > 0.1) {
+                      const vx = enemy.velocity.x / spd;
+                      const vy = enemy.velocity.y / spd;
+                      const sign = Math.random() < 0.5 ? 1 : -1;
+                      enemy.velocity.x += -vy * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
+                      enemy.velocity.y +=  vx * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
+                  }
+              }
           } else {
               enemy.aiState = 'chase';
               enemy.aiTimer = timers.CHASE_TIME_BASE + Math.random() * timers.CHASE_TIME_VAR;

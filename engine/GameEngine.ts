@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -273,21 +273,32 @@ export class GameEngine {
           if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
           // Cooldown management
-          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
+          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
           if (enemy.weaponCooldown > 0) continue;
 
           const dx = this.player.position.x - enemy.position.x;
           const dy = this.player.position.y - enemy.position.y;
-          const distSq = dx*dx + dy*dy;
+          const distSq = dx * dx + dy * dy;
           if (distSq > rangeSq) continue;
 
-          // Slight inaccuracy
-          const leadAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
-          const targetX = enemy.position.x + Math.cos(leadAngle) * 500;
-          const targetY = enemy.position.y + Math.sin(leadAngle) * 500;
+          // Lazily init burst state — first trigger starts a fresh burst
+          if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
 
-          enemy.weaponCooldown = weapon.cooldown;
+          // Slight inaccuracy
+          const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+          const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
+          const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
           this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+
+          // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
+          // then wait BURST_RELOAD before starting the next burst.
+          if (enemy.burstQueue > 1) {
+              enemy.burstQueue--;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+          } else {
+              enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+          }
       }
   }
 
@@ -1567,6 +1578,26 @@ export class GameEngine {
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
         this.spawnRandomPowerupDrop(pos, pv);
       }
+
+      // Enrage nearby survivors — losing a packmate makes the rest angrier.
+      this.triggerAggroNearby(entity.position);
+    }
+  }
+
+  /**
+   * Set aggroTimer on all active enemies within AGGRO_RANGE of a kill position.
+   * Called whenever an enemy is destroyed; nearby survivors become enraged,
+   * gaining a speed boost and shortened idle time for AGGRO_DURATION seconds.
+   */
+  private triggerAggroNearby(position: Vector2) {
+    if (!this.currentMap) return;
+    const rangeSq = AI_CONFIG.AGGRO_RANGE * AI_CONFIG.AGGRO_RANGE;
+    for (const e of this.currentMap.entities) {
+      if (!e.active || e.type !== EntityType.ENEMY) continue;
+      const dx = e.position.x - position.x;
+      const dy = e.position.y - position.y;
+      if (dx * dx + dy * dy > rangeSq) continue;
+      e.aggroTimer = AI_CONFIG.AGGRO_DURATION;
     }
   }
 

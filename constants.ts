@@ -57,26 +57,37 @@ export const AI_CONFIG = {
 
   // Rammer-specific overrides: short idle pause, long aggressive charge bursts
   RAMMER: {
-    IDLE_TIME_BASE: 0.5,
+    IDLE_TIME_BASE: 0.4,
     IDLE_TIME_VAR: 0.3,
     CHASE_TIME_BASE: 4.0,
     CHASE_TIME_VAR: 1.5,
     ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
+    // Retreat arc: when transitioning chase→idle within this distance, apply a
+    // lateral impulse so the rammer circles away instead of stopping dead.
+    RETREAT_TRIGGER_DIST: 280,
+    RETREAT_IMPULSE: 0.6,        // perpendicular kick as fraction of maxSpeed
   },
 
   // Pack behavior — rammers within PACK_SYNC_RANGE of a chasing rammer get
   // their idle timer capped to PACK_SYNC_WINDOW, forcing a near-simultaneous charge.
   PACK_SYNC_RANGE: 450,
-  PACK_SYNC_WINDOW: 0.3,
+  PACK_SYNC_WINDOW: 0.2,
 
   // Skirmisher specific behavior
   SKIRMISHER: {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
     STRAFE_MODIFIER: 0.75,
-    LEAD_FACTOR: 0.7,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
+    LEAD_FACTOR: 0.8,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
     PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
   },
+
+  // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
+  // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
+  AGGRO_RANGE: 500,
+  AGGRO_DURATION: 4.0,
+  AGGRO_SPEED_MULT: 1.35,
+  AGGRO_IDLE_MULT: 0.35, // idle time multiplier while aggroed (shorter pauses)
 
   // Distance beyond which enemies always seek the player, overriding idle state.
   // Prevents waves from stalling when the player moves away from the spawn location.
@@ -330,6 +341,14 @@ export const WEAPON_LIST = [
   WeaponType.HOMING,
   WeaponType.CANNON
 ];
+
+// Burst-fire parameters for shooting enemies.
+// Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
+export const ENEMY_BURST_CONFIG = {
+  BURST_SIZE: 2,        // shots per burst
+  BURST_GAP: 0.15,      // seconds between shots within a burst
+  BURST_RELOAD: 2.5,    // seconds between bursts
+};
 
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
