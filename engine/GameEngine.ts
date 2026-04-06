@@ -937,16 +937,12 @@ export class GameEngine {
   private startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;
 
-      const baseSize = Math.max(entity.size.x, entity.size.y);
-      const sizeMultiplier = Math.abs(EXPLOSION_CONSTANTS.SIZE_MULTIPLIER || 1.5);
-
       entity.isExploding = true;
       entity.explosionTimer = EXPLOSION_CONSTANTS.DURATION;
-      entity.sprite = ASSETS.EXPLOSION;
-      entity.size = { x: baseSize * sizeMultiplier, y: baseSize * sizeMultiplier };
+      entity.sprite = undefined;
       entity.velocity = { x: 0, y: 0 };
       entity.hitFlash = 0;
-      entity.active = true; // Keep active so it renders during explosion
+      entity.active = false; // Hide immediately — particles carry the effect
   }
 
   private respawnPlayer() {
