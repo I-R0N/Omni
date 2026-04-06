@@ -478,7 +478,10 @@ export class PhysicsSystem {
           target.hitFlash = 0.1;
 
           if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
-              onShake(COLLISION_CONFIG.SHAKE.MICRO);
+              const shakeAmount = target.type === EntityType.PLAYER
+                  ? COLLISION_CONFIG.SHAKE.MEDIUM
+                  : COLLISION_CONFIG.SHAKE.MICRO;
+              onShake(shakeAmount);
           }
 
           if (onHit) onHit(proj.position, proj, target);
