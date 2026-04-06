@@ -772,6 +772,7 @@ export class GameEngine {
             const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
             const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
             this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
+            if (config.type === WeaponType.BURST) this.handleScreenShake(3);
         }
     }
 
@@ -972,9 +973,11 @@ export class GameEngine {
       this.player.weaponCooldown = config.cooldown;
 
       if (config.type === WeaponType.SHOTGUN) {
-          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO);
+          this.handleScreenShake(5);
       } else if (config.type === WeaponType.CANNON) {
           this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+      } else if (config.type === WeaponType.BURST) {
+          this.handleScreenShake(3);
       }
 
       if (config.type === WeaponType.BURST && config.burstCount) {
