@@ -313,12 +313,13 @@ export class GameEngine {
       this.handleEnemyShooting(dt);
 
       this.physics.update(
-        allEntities, 
-        this.currentMap.type, 
+        allEntities,
+        this.currentMap.type,
         dt,
         this.spawnDamageText,
         this.handleEntityDeath,
-        this.handleScreenShake
+        this.handleScreenShake,
+        this.handleProjectileHit
       );
 
       this.currentMap.entities.forEach(e => {
@@ -463,33 +464,43 @@ export class GameEngine {
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
-      // Spawn Particles
-      const numParticles = 4 + Math.floor(Math.random() * 3);
-      const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
-      
-      for (let i = 0; i < numParticles; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const speed = SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN);
-          const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
-          const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
-
-          this.currentMap?.entities.push({
-              id: `part_${Date.now()}_${i}`,
-              type: EntityType.PARTICLE,
-              position: { x: entity.position.x, y: entity.position.y },
-              velocity: {
-                  x: Math.cos(angle) * speed,
-                  y: Math.sin(angle) * speed
-              },
-              size: { x: size, y: size },
-              rotation: Math.random() * Math.PI * 2,
-              color: entity.color || '#facc15',
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: life,
-              maxLifetime: life,
-              mass: 0.1
+      // Death burst particles — size/color tuned per entity type
+      if (entity.type === EntityType.ENEMY) {
+          // Large colored burst matching the enemy's tier color, plus a white core flash
+          this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), entity.color || '#f87171', {
+              speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3.5,
+              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          });
+          this.spawnParticles(entity.position, 5, '#ffffff', {
+              speedMin: 5, speedMax: 14, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          });
+      } else if (entity.type === EntityType.PLAYER) {
+          // Cyan energy explosion
+          this.spawnParticles(entity.position, 12, '#38bdf8', {
+              speedMin: 4, speedMax: 12, sizeMin: 1.5, sizeMax: 3,
+              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          });
+          this.spawnParticles(entity.position, 6, '#ffffff', {
+              speedMin: 6, speedMax: 16, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          });
+      } else if (entity.type === EntityType.ASTEROID) {
+          // Small shard/asteroid break — quick dusty puff
+          const isTileShard = entity.shardType === 'tile';
+          const breakColor = isTileShard ? (entity.color || '#6366f1') : '#94a3b8';
+          this.spawnParticles(entity.position, 4, breakColor, {
+              speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.35,
+          });
+      } else {
+          // Generic fallback (structures, misc)
+          const numParticles = 4 + Math.floor(Math.random() * 3);
+          const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
+          this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {
+              speedMin: SPEED_MIN, speedMax: SPEED_MAX,
+              sizeMin: SIZE_MIN, sizeMax: SIZE_MAX,
+              lifetimeMin: LIFETIME_MIN, lifetimeMax: LIFETIME_MAX,
           });
       }
 
@@ -788,6 +799,119 @@ export class GameEngine {
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
   }
+
+  // ── Particle helpers ────────────────────────────────────────────────────────
+
+  private spawnParticles(
+    position: Vector2,
+    count: number,
+    color: string,
+    options?: {
+      speedMin?: number;
+      speedMax?: number;
+      sizeMin?: number;
+      sizeMax?: number;
+      lifetimeMin?: number;
+      lifetimeMax?: number;
+      spreadAngle?: number; // center angle (radians); undefined = full circle
+      spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
+      baseVelocity?: Vector2;
+    }
+  ) {
+    if (!this.currentMap) return;
+    const {
+      speedMin = 2, speedMax = 5,
+      sizeMin = 1, sizeMax = 3,
+      lifetimeMin = 0.2, lifetimeMax = 0.45,
+      spreadAngle, spreadCone,
+      baseVelocity,
+    } = options ?? {};
+
+    const halfCone = spreadCone ?? Math.PI;
+
+    for (let i = 0; i < count; i++) {
+      const angle = spreadAngle !== undefined
+        ? spreadAngle + (Math.random() - 0.5) * 2 * halfCone
+        : Math.random() * Math.PI * 2;
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
+      const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
+
+      this.currentMap.entities.push({
+        id: `part_${Date.now()}_${i}_${Math.random()}`,
+        type: EntityType.PARTICLE,
+        position: { x: position.x, y: position.y },
+        velocity: {
+          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
+          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
+        },
+        size:      { x: size, y: size },
+        rotation:  0,
+        color,
+        active:    true,
+        health:    1,
+        maxHealth: 1,
+        lifetime:  life,
+        maxLifetime: life,
+        mass:      0.1,
+      });
+    }
+  }
+
+  private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Derive impact direction for a slight forward cone bias
+    const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
+    const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+    switch (target.type) {
+      case EntityType.ENEMY:
+        // Bright sparks in the enemy's own color, spread forward from impact
+        this.spawnParticles(impactPos, 6, target.color || '#f87171', {
+          speedMin: 3, speedMax: 8, sizeMin: 1.5, sizeMax: 3,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+        });
+        break;
+
+      case EntityType.PLAYER:
+        // Cyan energy burst
+        this.spawnParticles(impactPos, 5, '#38bdf8', {
+          speedMin: 3, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+        });
+        break;
+
+      case EntityType.ASTEROID: {
+        // Gray rocky dust, smaller and slower
+        const dustCount = target.size.x > 50 ? 5 : 3;
+        this.spawnParticles(impactPos, dustCount, '#94a3b8', {
+          speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.55,
+          baseVelocity: { x: target.velocity.x * 0.3, y: target.velocity.y * 0.3 },
+        });
+        break;
+      }
+
+      case EntityType.STRUCTURE:
+        // Tile sparks: two layers — colored chips + white hot sparks
+        this.spawnParticles(impactPos, 4, target.color || '#6366f1', {
+          speedMin: 3, speedMax: 7, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.65,
+        });
+        this.spawnParticles(impactPos, 3, '#ffffff', {
+          speedMin: 5, speedMax: 10, sizeMin: 0.5, sizeMax: 1.5,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.5,
+        });
+        break;
+
+      case EntityType.INTERACTABLE:
+        // Small glint when hitting a drop item
+        this.spawnParticles(impactPos, 3, proj.color || '#facc15', {
+          speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
+        });
+        break;
+    }
+    void projSpeed; // suppress lint
+  };
 
   private spawnDamageText = (pos: Vector2, amount: number) => {
       const isCrit = amount > 3;
@@ -1253,6 +1377,16 @@ export class GameEngine {
           ast.velocity.x = nvx; ast.velocity.y = nvy;
           drop.active = false;
       }
+
+      // Soft sparkle at the merge point for all cases
+      this.spawnParticles({ x: nmx, y: nmy }, 5, '#fbbf24', {
+          speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,
+          lifetimeMin: 0.2, lifetimeMax: 0.4,
+      });
+      this.spawnParticles({ x: nmx, y: nmy }, 3, '#ffffff', {
+          speedMin: 2, speedMax: 6, sizeMin: 0.5, sizeMax: 1.5,
+          lifetimeMin: 0.1, lifetimeMax: 0.25,
+      });
   }
 
   private spawnCompositeAsteroid(
@@ -1398,6 +1532,19 @@ export class GameEngine {
               sprite:        parent.sprite,
           });
       }
+
+      // Dust/debris burst at the break point
+      const dustColor  = isTile ? parent.color : '#94a3b8';
+      const dustCount  = 5 + Math.floor(parent.size.x / 20);
+      const dustSpeed  = impactSpeed * 0.4 + 2;
+      this.spawnParticles(parent.position, dustCount, dustColor, {
+          speedMin: 1, speedMax: dustSpeed,
+          sizeMin: 1, sizeMax: 2.5,
+          lifetimeMin: 0.25, lifetimeMax: 0.55,
+          spreadAngle: impactAngle ?? undefined,
+          spreadCone: Math.PI,
+          baseVelocity: parent.velocity,
+      });
   }
 
   // --- WAVE SYSTEM ---
@@ -1693,6 +1840,21 @@ export class GameEngine {
     if (Math.random() < 0.35) {
       this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
     }
+
+    // Impact sparks: tile-colored chips + bright white hot sparks
+    const tileImpactAngle = tile.lastImpactVelocity
+      ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
+      : undefined;
+    this.spawnParticles(tile.position, 6, tile.color || '#6366f1', {
+      speedMin: 2, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.2, lifetimeMax: 0.45,
+      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.65,
+    });
+    this.spawnParticles(tile.position, 4, '#ffffff', {
+      speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
+      lifetimeMin: 0.1, lifetimeMax: 0.25,
+      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
+    });
   }
 
   private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {
