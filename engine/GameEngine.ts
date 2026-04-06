@@ -809,7 +809,7 @@ export class GameEngine {
 
   // ── Player HUD messages ─────────────────────────────────────────────────────
 
-  private pushPlayerMessage(text: string, color: string, lifetime = 1.8) {
+  private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
     this.playerMessages.push({
       id: `hud_${Date.now()}_${Math.random()}`,
       text,
@@ -947,7 +947,7 @@ export class GameEngine {
           this.pushPlayerMessage(
               `-${Math.round(amount)}`,
               isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : '#f87171',
-              isCrit ? 2.0 : 1.5
+              isCrit ? 2.8 : 2.2
           );
           return;
       }

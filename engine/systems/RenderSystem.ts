@@ -1055,10 +1055,10 @@ export class RenderSystem {
       width: number,
       height: number
   ) {
-      const cx      = width / 2;
-      const baseY   = height / 2 - 72; // above the player sprite
-      const lineH   = 20;
-      const fontSize = 13;
+      const cx       = width / 2;
+      const baseY    = height / 2 - 72; // above the player sprite
+      const lineH    = 20;
+      const fontSize = 11;
 
       ctx.save();
       ctx.font = `bold ${fontSize}px monospace`;
@@ -1067,8 +1067,10 @@ export class RenderSystem {
 
       // Newest message is last in array → render at baseY; older messages rise above it
       for (let i = 0; i < messages.length; i++) {
-          const msg   = messages[i];
-          const alpha = Math.min(1, msg.lifetime / msg.maxLifetime);
+          const msg      = messages[i];
+          const lifeRatio = msg.lifetime / msg.maxLifetime;
+          // Stay fully opaque for the first 70% of lifetime, then fade in the last 30%
+          const alpha    = lifeRatio > 0.3 ? 1 : lifeRatio / 0.3;
           // Index from the end: last item (newest) sits at baseY
           const slot  = messages.length - 1 - i;
           const y     = baseY - slot * lineH;
