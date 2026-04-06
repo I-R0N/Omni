@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -970,6 +970,12 @@ export class GameEngine {
       if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
       const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
       this.player.weaponCooldown = config.cooldown;
+
+      if (config.type === WeaponType.SHOTGUN) {
+          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO);
+      } else if (config.type === WeaponType.CANNON) {
+          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+      }
 
       if (config.type === WeaponType.BURST && config.burstCount) {
           this.player.burstQueue = config.burstCount - 1; 
