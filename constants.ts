@@ -108,7 +108,7 @@ export const COLLISION_CONFIG = {
   // Damage Values
   DAMAGE: {
     ASTEROID_CRUSH: 999, // Instant kill
-    PLAYER_RAM_ENEMY: 5,
+    PLAYER_RAM_ENEMY: 15,
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
   },
@@ -356,7 +356,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
   name: 'Enemy Blaster',
   cooldown: 1.2,
   speed: 5.0,
-  damage: 5,
+  damage: 10,
   lifetime: 3.5,
   color: '#f97316',
   size: 6,
