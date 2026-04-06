@@ -623,7 +623,7 @@ export class GameEngine {
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
-          this.pushPlayerMessage(WEAPONS[waveDef.powerup].name + ' Unlocked!', WEAPONS[waveDef.powerup].color, 2.5);
+          this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
         }
 
         // Start grace period or mark complete
@@ -1669,23 +1669,23 @@ export class GameEngine {
         entity.dropValue ?? 0
       );
       this.player.fuel = (this.player.fuel ?? 0) + gained;
-      this.pushPlayerMessage('+FUEL', '#00e5ff');
+      this.pushPlayerMessage(`+${Math.round(gained)}`, '#00e5ff');
     } else if (entity.dropType === 'gold') {
       const amount = entity.dropValue ?? 0;
       this.player.gold = (this.player.gold ?? 0) + amount;
-      this.pushPlayerMessage(`+${Math.round(amount)} GOLD`, '#ffd700');
+      this.pushPlayerMessage(`+${Math.round(amount)}`, '#ffd700');
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
       const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
       if (healed > 0) {
         this.player.health += healed;
-        this.pushPlayerMessage(`+${Math.round(healed)} HP`, '#4ade80');
+        this.pushPlayerMessage(`+${Math.round(healed)}`, '#4ade80');
       }
     } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
       this.player.currentWeapon = entity.dropWeapon;
       this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
       this.player.burstQueue = 0;
-      this.pushPlayerMessage(WEAPONS[entity.dropWeapon].name + ' Unlocked!', WEAPONS[entity.dropWeapon].color, 2.5);
+      this.pushPlayerMessage(`+${WEAPONS[entity.dropWeapon].name}`, WEAPONS[entity.dropWeapon].color, 2.5);
     }
   }
 

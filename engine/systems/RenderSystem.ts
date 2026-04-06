@@ -1056,7 +1056,7 @@ export class RenderSystem {
       height: number
   ) {
       const cx       = width / 2;
-      const baseY    = height / 2 - 72; // above the player sprite
+      const baseY    = height / 2 - 48; // above the player sprite
       const lineH    = 20;
       const fontSize = 11;
 
