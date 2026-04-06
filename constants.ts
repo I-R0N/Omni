@@ -348,8 +348,8 @@ export const DROP_CONFIG = {
   LIFETIME:                20.0,  // seconds before drop despawns
   FUEL_DRAIN_RATE:        2.5,    // fuel units per second at full throttle
   MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
-  HEALTH_CHANCE_ENEMY:     0.4,  // 40% chance per enemy kill
-  HEALTH_HEAL_AMOUNT:      20,   // HP restored per health drop
+  HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
+  HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
