@@ -464,6 +464,10 @@ export class GameEngine {
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
+      if (entity.type === EntityType.ENEMY) {
+          this.spawnEnemyShards(entity);
+      }
+
       // Death burst particles — size/color tuned per entity type
       if (entity.type === EntityType.ENEMY) {
           // Large colored burst matching the enemy's tier color, plus a white core flash
@@ -1706,14 +1710,86 @@ export class GameEngine {
 
     } else if (entity.type === EntityType.ENEMY) {
       const tier = entity.enemyTier ?? 1;
-      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier, pv);
-
-      if (Math.random() < DROP_CONFIG.HEALTH_CHANCE_ENEMY) {
-        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT, pv);
-      }
-
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
         this.spawnRandomPowerupDrop(pos, pv);
+      }
+    }
+  }
+
+  /**
+   * Break a dead enemy into small shards: equal counts of tile, asteroid, and drop types.
+   * Replaces the flat gold/health drop with physical debris that can be collected or
+   * observed, and inherits the enemy's velocity so pieces fly in the same direction.
+   */
+  private spawnEnemyShards(enemy: GameEntity) {
+    if (!this.currentMap) return;
+
+    const SHARDS_PER_TYPE = 3;
+    const TOTAL = SHARDS_PER_TYPE * 3;
+    const pos = enemy.position;
+    const pv  = enemy.velocity;
+    const tier = enemy.enemyTier ?? 1;
+
+    // Drop payloads: gold split across gold shards, one health shard, one fuel shard
+    const goldPerShard  = (DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier) / SHARDS_PER_TYPE;
+    const dropCycle: ('fuel' | 'gold' | 'health')[] = ['fuel', 'gold', 'health'];
+
+    for (let i = 0; i < TOTAL; i++) {
+      // Evenly distribute angles around a full circle with a small random jitter
+      const baseAngle = (i / TOTAL) * Math.PI * 2;
+      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / TOTAL) * 1.5;
+      const speed     = 1.5 + Math.random() * 3.0;
+      const vx = pv.x * 0.2 + Math.cos(angle) * speed;
+      const vy = pv.y * 0.2 + Math.sin(angle) * speed;
+
+      // Cycle: 0-2 = tile, 3-5 = asteroid, 6-8 = drop
+      const typeIdx = Math.floor(i / SHARDS_PER_TYPE);
+
+      if (typeIdx === 2) {
+        // Drop shard — use the existing drop system so it's collectable
+        const dropType = dropCycle[i % SHARDS_PER_TYPE];
+        const value    = dropType === 'gold'
+          ? goldPerShard
+          : dropType === 'health'
+            ? DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE
+            : DROP_CONFIG.FUEL_FROM_TILE / SHARDS_PER_TYPE;
+        this.spawnDrop(pos, dropType, value, { x: vx * 5, y: vy * 5 });
+      } else {
+        // Physical shard — tile or asteroid
+        const shardType: ShardType = typeIdx === 0 ? 'tile' : 'asteroid';
+        const isTile   = shardType === 'tile';
+        const size     = 12 + Math.random() * 10; // 12–22 px, always below min-respawn size
+
+        const numPts      = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
+        const angleJitterK = isTile ? 0.25 : 0.8;
+        const rMin         = isTile ? 0.60 : 0.55;
+        const rRange       = isTile ? 0.55 : 0.70;
+        const baseR        = (size / 2) * 0.8;
+        const rawPts: { angle: number; r: number }[] = [];
+        for (let j = 0; j < numPts; j++) {
+          const ba = (j / numPts) * Math.PI * 2;
+          const aj = (Math.random() - 0.5) * (Math.PI / numPts) * angleJitterK;
+          rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
+        }
+        rawPts.sort((a, b) => a.angle - b.angle);
+        const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+        this.currentMap.entities.push({
+          id:            `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
+          type:           EntityType.ASTEROID,
+          shardType,
+          position:      { x: pos.x, y: pos.y },
+          velocity:      { x: vx, y: vy },
+          size:          { x: size, y: size },
+          rotation:       Math.random() * Math.PI * 2,
+          rotationSpeed:  (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
+          color:          isTile ? '#b4e6fd' : COLORS.ASTEROID,
+          active:         true,
+          health:         1,
+          maxHealth:      1,
+          mass:           size,
+          polygonPoints:  pts,
+        });
       }
     }
   }
