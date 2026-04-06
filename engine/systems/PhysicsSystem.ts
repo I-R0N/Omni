@@ -43,7 +43,7 @@ export class PhysicsSystem {
     entities: GameEntity[],
     mapType: MapType,
     dt: number,
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -185,7 +185,7 @@ export class PhysicsSystem {
 
             if (distSq < (attractor.size.x / 2)**2 && entity.type === EntityType.ASTEROID) {
                 entity.active = false;
-                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH);
+                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
                 continue; 
             }
 
@@ -209,7 +209,7 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -433,7 +433,7 @@ export class PhysicsSystem {
     a: GameEntity,
     b: GameEntity,
     mtv: Vector2,
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -485,7 +485,7 @@ export class PhysicsSystem {
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1);
+          if (onDamage) onDamage(target.position, proj.damage || 1, target);
 
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
@@ -534,7 +534,7 @@ export class PhysicsSystem {
       if (a.type === EntityType.ENEMY || b.type === EntityType.ENEMY) {
           const target = a.type === EntityType.ENEMY ? b : a;
           if (target.type === EntityType.PLAYER) {
-              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY);
+              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
               target.health -= COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
               target.hitFlash = 0.2;
               if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
@@ -607,10 +607,10 @@ export class PhysicsSystem {
               }
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT);
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               return; 
           } else {
-              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT);
+              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT, player);
               player.health -= COLLISION_CONFIG.DAMAGE.MINOR_IMPACT;
               player.hitFlash = 0.2;
           }

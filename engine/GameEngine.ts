@@ -5,7 +5,7 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -33,6 +33,8 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  private playerMessages: PlayerHUDMessage[] = [];
+  private readonly MAX_PLAYER_MESSAGES = 6;
   private currentWeaponIndex: number = 0;
   
   private minimapExpanded: boolean = false;
@@ -621,17 +623,7 @@ export class GameEngine {
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
-          // Announce weapon with floating text
-          this.damageTexts.push({
-            id: `unlock_${Date.now()}`,
-            position: { ...this.player.position },
-            text: WEAPONS[waveDef.powerup].name + ' Unlocked!',
-            velocity: { x: 0, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-            lifetime: 2.5,
-            maxLifetime: 2.5,
-            color: WEAPONS[waveDef.powerup].color,
-            active: true,
-          });
+          this.pushPlayerMessage(WEAPONS[waveDef.powerup].name + ' Unlocked!', WEAPONS[waveDef.powerup].color, 2.5);
         }
 
         // Start grace period or mark complete
@@ -792,6 +784,16 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
+    // Player HUD message tick
+    let msgIdx = 0;
+    for (let i = 0; i < this.playerMessages.length; i++) {
+        this.playerMessages[i].lifetime -= dt;
+        if (this.playerMessages[i].lifetime > 0) {
+            this.playerMessages[msgIdx++] = this.playerMessages[i];
+        }
+    }
+    this.playerMessages.length = msgIdx;
+
     // Remove drops that were deactivated (shot by player).
     // Collection is now triggered by player projectile hits, not magnetic contact.
     let dropWriteIdx = 0;
@@ -803,6 +805,22 @@ export class GameEngine {
 
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
+  }
+
+  // ── Player HUD messages ─────────────────────────────────────────────────────
+
+  private pushPlayerMessage(text: string, color: string, lifetime = 1.8) {
+    this.playerMessages.push({
+      id: `hud_${Date.now()}_${Math.random()}`,
+      text,
+      color,
+      lifetime,
+      maxLifetime: lifetime,
+    });
+    // Keep the list bounded; drop the oldest entry when over the cap
+    if (this.playerMessages.length > this.MAX_PLAYER_MESSAGES) {
+      this.playerMessages.shift();
+    }
   }
 
   // ── Particle helpers ────────────────────────────────────────────────────────
@@ -878,10 +896,14 @@ export class GameEngine {
         break;
 
       case EntityType.PLAYER:
-        // Cyan energy burst
-        this.spawnParticles(impactPos, 5, '#38bdf8', {
-          speedMin: 3, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
-          spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+        // Sparks deflect away from the contact point (opposite of incoming direction)
+        this.spawnParticles(impactPos, 8, '#38bdf8', {
+          speedMin: 4, speedMax: 9, sizeMin: 1, sizeMax: 2.5,
+          spreadAngle: impactAngle + Math.PI, spreadCone: Math.PI * 0.65,
+        });
+        this.spawnParticles(impactPos, 3, '#ffffff', {
+          speedMin: 6, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
+          spreadAngle: impactAngle + Math.PI, spreadCone: Math.PI * 0.45,
         });
         break;
 
@@ -918,15 +940,25 @@ export class GameEngine {
     void projSpeed; // suppress lint
   };
 
-  private spawnDamageText = (pos: Vector2, amount: number) => {
+  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {
+      // Player damage goes to the HUD list, not the world-space float
+      if (target?.type === EntityType.PLAYER) {
+          const isCrit = amount > 3;
+          this.pushPlayerMessage(
+              `-${Math.round(amount)}`,
+              isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : '#f87171',
+              isCrit ? 2.0 : 1.5
+          );
+          return;
+      }
       const isCrit = amount > 3;
       this.damageTexts.push({
           id: `dmg_${Date.now()}_${Math.random()}`,
           position: { ...pos },
           text: Math.round(amount).toString(),
-          velocity: { 
-              x: (Math.random() - 0.5) * 10, 
-              y: -DAMAGE_TEXT_CONSTANTS.SPEED 
+          velocity: {
+              x: (Math.random() - 0.5) * 10,
+              y: -DAMAGE_TEXT_CONSTANTS.SPEED
           },
           lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
           maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
@@ -1637,49 +1669,23 @@ export class GameEngine {
         entity.dropValue ?? 0
       );
       this.player.fuel = (this.player.fuel ?? 0) + gained;
-      this.damageTexts.push({
-        id: `collect_${Date.now()}_${Math.random()}`,
-        position: { ...entity.position },
-        text: '+FUEL',
-        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        color: '#00e5ff',
-        active: true,
-      });
+      this.pushPlayerMessage('+FUEL', '#00e5ff');
     } else if (entity.dropType === 'gold') {
       const amount = entity.dropValue ?? 0;
       this.player.gold = (this.player.gold ?? 0) + amount;
-      this.damageTexts.push({
-        id: `collect_${Date.now()}_${Math.random()}`,
-        position: { ...entity.position },
-        text: `+${Math.round(amount)}`,
-        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        color: '#ffd700',
-        active: true,
-      });
+      this.pushPlayerMessage(`+${Math.round(amount)} GOLD`, '#ffd700');
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
       const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
       if (healed > 0) {
         this.player.health += healed;
-        this.damageTexts.push({
-          id: `collect_${Date.now()}_${Math.random()}`,
-          position: { ...entity.position },
-          text: `+${Math.round(healed)}`,
-          velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          color: '#4ade80',
-          active: true,
-        });
+        this.pushPlayerMessage(`+${Math.round(healed)} HP`, '#4ade80');
       }
     } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
       this.player.currentWeapon = entity.dropWeapon;
       this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
       this.player.burstQueue = 0;
+      this.pushPlayerMessage(WEAPONS[entity.dropWeapon].name + ' Unlocked!', WEAPONS[entity.dropWeapon].color, 2.5);
     }
   }
 
@@ -2045,7 +2051,8 @@ export class GameEngine {
           this.currentMap.type,
           this.minimapExpanded,
           this.damageTexts,
-          this.player.position
+          this.player.position,
+          this.playerMessages
       );
   }
 }
