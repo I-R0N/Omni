@@ -109,8 +109,7 @@ export class GameEngine {
       burstTimer: 0,
       trail: [],
       sprite: ASSETS.PLAYER_SHIP,
-      fuel: 100,
-      maxFuel: 100,
+      ammo: {},  // BLASTER is always ∞ (no entry); other weapons stored here when unlocked
       gold: 0
     };
 
@@ -170,7 +169,7 @@ export class GameEngine {
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
-      this.player.fuel = this.player.maxFuel;
+      this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
       this.damageTexts = [];
@@ -188,9 +187,16 @@ export class GameEngine {
 
   public cycleWeapon() {
     if (this.gameState !== GameState.PLAYING) return;
-    this.currentWeaponIndex = (this.currentWeaponIndex + 1) % WEAPON_LIST.length;
-    const newWeapon = WEAPON_LIST[this.currentWeaponIndex];
-    this.player.currentWeapon = newWeapon;
+    // Only cycle through blaster (always owned) + weapons with ammo
+    const owned = WEAPON_LIST.filter(w =>
+      w === WeaponType.BLASTER ||
+      ((this.player.ammo?.[w] ?? 0) > 0)
+    );
+    if (owned.length <= 1) return;
+    const currentIdx = owned.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
+    const nextIdx = (currentIdx + 1) % owned.length;
+    this.player.currentWeapon = owned[nextIdx];
+    this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon);
     this.player.burstQueue = 0;
   }
 
@@ -225,9 +231,6 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
-      fuel: this.player.fuel,
-      maxFuel: this.player.maxFuel,
-      gold: this.player.gold
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -618,8 +621,19 @@ export class GameEngine {
         this.waveState = 'cleared';
         const waveDef = WAVE_DEFINITIONS[this.waveIndex];
 
-        // Auto-grant weapon unlock
+        // Auto-grant weapon unlock — assign initial ammo and equip
         if (waveDef.powerup !== null) {
+          const INITIAL_AMMO: Partial<Record<WeaponType, number>> = {
+            [WeaponType.BURST]:     60,
+            [WeaponType.SHOTGUN]:   30,
+            [WeaponType.LASER]:     40,
+            [WeaponType.LIGHTNING]: 25,
+            [WeaponType.HOMING]:    20,
+            [WeaponType.CANNON]:    15,
+          };
+          const grant = INITIAL_AMMO[waveDef.powerup] ?? 20;
+          if (!this.player.ammo) this.player.ammo = {};
+          this.player.ammo[waveDef.powerup] = (this.player.ammo[waveDef.powerup] ?? 0) + grant;
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
@@ -669,17 +683,9 @@ export class GameEngine {
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
     // Normalized to 60fps (dt * 60)
     const timeScale = dt * 60;
-    const hasFuel = (this.player.fuel ?? 0) > 0;
-    if (hasFuel) {
-        this.player.velocity.x += moveDir.x * acc * timeScale;
-        this.player.velocity.y += moveDir.y * acc * timeScale;
-    }
-
-    // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
+    this.player.velocity.x += moveDir.x * acc * timeScale;
+    this.player.velocity.y += moveDir.y * acc * timeScale;
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
-    if (throttle > 0 && hasFuel) {
-        this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
-    }
 
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {
@@ -696,7 +702,7 @@ export class GameEngine {
         }
     }
 
-    const thrusting = hasFuel && throttle > 0;
+    const thrusting = throttle > 0;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
     } else {
@@ -1001,8 +1007,28 @@ export class GameEngine {
 
   private handleShooting(target: Vector2) {
       if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
-      const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
+
+      let weaponType = this.player.currentWeapon || WeaponType.BLASTER;
+
+      // If non-blaster and out of ammo, auto-fallback to blaster
+      if (weaponType !== WeaponType.BLASTER && (this.player.ammo?.[weaponType] ?? 0) <= 0) {
+          weaponType = WeaponType.BLASTER;
+          this.player.currentWeapon = WeaponType.BLASTER;
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(WeaponType.BLASTER);
+          this.player.burstQueue = 0;
+      }
+
+      const config = WEAPONS[weaponType];
       this.player.weaponCooldown = config.cooldown;
+
+      // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
+      if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
+          const before = this.player.ammo[weaponType] ?? 0;
+          this.player.ammo[weaponType] = Math.max(0, before - 1);
+          if (this.player.ammo[weaponType] === 0) {
+              // Will auto-switch on next shot; leave current active until then
+          }
+      }
 
       if (config.type === WeaponType.SHOTGUN) {
           this.handleScreenShake(5);
@@ -1013,7 +1039,7 @@ export class GameEngine {
       }
 
       if (config.type === WeaponType.BURST && config.burstCount) {
-          this.player.burstQueue = config.burstCount - 1; 
+          this.player.burstQueue = config.burstCount - 1;
           this.player.burstTimer = config.burstDelay;
       }
 
@@ -1664,12 +1690,7 @@ export class GameEngine {
    */
   private applyDropEffect(entity: GameEntity) {
     if (entity.dropType === 'fuel') {
-      const gained = Math.min(
-        (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
-        entity.dropValue ?? 0
-      );
-      this.player.fuel = (this.player.fuel ?? 0) + gained;
-      this.pushPlayerMessage(`+${Math.round(gained)}`, '#00e5ff');
+      // Fuel system removed — fuel drops are no-ops until PR 2 drop overhaul
     } else if (entity.dropType === 'gold') {
       const amount = entity.dropValue ?? 0;
       this.player.gold = (this.player.gold ?? 0) + amount;
@@ -1763,7 +1784,7 @@ export class GameEngine {
           ? goldPerShard
           : dropType === 'health'
             ? DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE
-            : DROP_CONFIG.FUEL_FROM_TILE / SHARDS_PER_TYPE;
+            : DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE; // fuel removed; extra health shard
         this.spawnDrop(pos, dropType, value, { x: vx * 5, y: vy * 5 });
       } else {
         // Physical shard — tile or asteroid
@@ -1923,11 +1944,6 @@ export class GameEngine {
       });
     }
 
-    // ~35 % chance: also eject a fuel shard
-    if (Math.random() < 0.35) {
-      this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
-    }
-
     // Impact sparks: tile-colored chips + bright white hot sparks
     const tileImpactAngle = tile.lastImpactVelocity
       ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
@@ -2044,7 +2060,7 @@ export class GameEngine {
 
   private draw() {
       if (!this.currentMap) return;
-      
+
       this.renderer.render(
           this.frameEntities,
           this.camera,
@@ -2052,7 +2068,8 @@ export class GameEngine {
           this.minimapExpanded,
           this.damageTexts,
           this.player.position,
-          this.playerMessages
+          this.playerMessages,
+          this.player
       );
   }
 }

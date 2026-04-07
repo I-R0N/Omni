@@ -231,6 +231,7 @@ export const DAMAGE_TEXT_CONSTANTS = {
   CRIT_COLOR: '#facc15'
 };
 
+// ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
@@ -239,12 +240,28 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 9,
     damage: 2,
     lifetime: 1.5,
-    color: '#facc15', // Yellow
+    color: '#ef4444', // Red — infinite ammo starter
     size: 6,
     count: 1,
     spread: 2,
     recoil: 0.5,
-    pierce: 0        // baseline — stops on first hit
+    pierce: 0
+  },
+  [WeaponType.BURST]: {
+    type: WeaponType.BURST,
+    name: 'Burst Rifle',
+    cooldown: 0.005,
+    speed: 12,
+    damage: 3,
+    lifetime: 3.0,
+    color: '#f97316', // Orange
+    size: 5,
+    count: 1,
+    spread: 1,
+    recoil: 0.3,
+    pierce: 2,
+    burstCount: 3,
+    burstDelay: 0.05
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -253,26 +270,40 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 12,
     damage: 1,
     lifetime: 0.4,
-    color: '#f87171', // Red
+    color: '#facc15', // Yellow
     size: 5,
     count: 6,
     spread: 35,
     recoil: 3.0,
-    pierce: 1        // each pellet threads through one entity before stopping
+    pierce: 1
   },
-  [WeaponType.CANNON]: {
-    type: WeaponType.CANNON,
-    name: 'Plasma Cannon',
-    cooldown: 0.005,
-    speed: 10,
-    damage: 5,
-    lifetime: 2.5,
-    color: '#a855f7', // Purple
-    size: 16,
+  [WeaponType.LASER]: {
+    type: WeaponType.LASER,
+    name: 'Laser',
+    cooldown: 0.08,
+    speed: 25,
+    damage: 1,
+    lifetime: 0.25,
+    color: '#4ade80', // Green — continuous short-range beam (full impl in PR 3)
+    size: 4,
     count: 1,
     spread: 0,
-    recoil: 8.0,
-    pierce: 5        // punches through up to 6 entities; clears small shards with ease
+    recoil: 0,
+    pierce: 999
+  },
+  [WeaponType.LIGHTNING]: {
+    type: WeaponType.LIGHTNING,
+    name: 'Lightning',
+    cooldown: 0.8,
+    speed: 20,
+    damage: 4,
+    lifetime: 0.5,
+    color: '#22d3ee', // Cyan — chain hop behavior in PR 3
+    size: 5,
+    count: 1,
+    spread: 5,
+    recoil: 0.2,
+    pierce: 0
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -286,33 +317,34 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
-    pierce: 0,       // same as blaster — stops on first hit
+    pierce: 0,
     homing: true
   },
-  [WeaponType.BURST]: {
-    type: WeaponType.BURST,
-    name: 'Burst Rifle',
+  [WeaponType.CANNON]: {
+    type: WeaponType.CANNON,
+    name: 'Plasma Cannon',
     cooldown: 0.005,
-    speed: 12,
-    damage: 3,       // up from 1 — more damage per shot than blaster
-    lifetime: 3.0,
-    color: '#4ade80', // Green
-    size: 5,
+    speed: 10,
+    damage: 5,
+    lifetime: 2.5,
+    color: '#a855f7', // Purple
+    size: 16,
     count: 1,
-    spread: 1,
-    recoil: 0.3,
-    pierce: 2,       // threads through two entities — more than blaster
-    burstCount: 3,
-    burstDelay: 0.05
-  }
+    spread: 0,
+    recoil: 8.0,
+    pierce: 5
+  },
 };
 
+// Full rainbow order — used for ammo HUD slot layout and weapon cycling
 export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
   WeaponType.SHOTGUN,
+  WeaponType.LASER,
+  WeaponType.LIGHTNING,
   WeaponType.HOMING,
-  WeaponType.CANNON
+  WeaponType.CANNON,
 ];
 
 // Simple enemy blaster (separate so we can tune independently of player weapons)
@@ -339,14 +371,12 @@ export const WAVE_CONSTANTS = {
 };
 
 export const DROP_CONFIG = {
-  FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
-  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large)
-  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30
+  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large) — removed in PR 2
+  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30 — removed in PR 2
   POWERUP_CHANCE_ASTEROID:  0.01, // 1 % chance per asteroid
   POWERUP_CHANCE_ENEMY:     0.05, // 5 % × tier → 5 %/10 %/15 %
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
-  FUEL_DRAIN_RATE:        2.5,    // fuel units per second at full throttle
   MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
   HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
   HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
@@ -371,35 +401,35 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number;
 }> = {
-  // ── Ramming ──
+  // ── Ramming — red → orange → yellow ──
   [EnemySubtype.RAMMER_1]: {
-    color: '#f87171', size: 28, health: 1,
+    color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
     sprite: ASSETS.ENEMY_DRONE,    mass: 10
   },
   [EnemySubtype.RAMMER_2]: {
-    color: '#60a5fa', size: 28, health: 1,
+    color: '#f97316', size: 28, health: 1,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8
   },
   [EnemySubtype.RAMMER_3]: {
-    color: '#94a3b8', size: 32, health: 3,
+    color: '#facc15', size: 32, health: 3,
     maxSpeed: 11,  accel: 8,   turnRate: 3.0,
     sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
-  // ── Shooting ──
+  // ── Shooting — green → cyan → blue ──
   [EnemySubtype.SHOOTER_1]: {
     color: '#4ade80', size: 28, health: 1,
     maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
     sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12
   },
   [EnemySubtype.SHOOTER_2]: {
-    color: '#c084fc', size: 28, health: 2,
+    color: '#22d3ee', size: 28, health: 2,
     maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
     sprite: ASSETS.ENEMY_ORBITER,  mass: 10
   },
   [EnemySubtype.SHOOTER_3]: {
-    color: '#fbbf24', size: 26, health: 2,
+    color: '#3b82f6', size: 26, health: 2,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9
   },
