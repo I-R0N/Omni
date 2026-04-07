@@ -267,7 +267,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 10,
     damage: 5,
     lifetime: 2.5,
-    color: '#22d3ee', // Cyan
+    color: '#a855f7', // Purple
     size: 16,
     count: 1,
     spread: 0,
