@@ -40,12 +40,13 @@ export class PhysicsSystem {
   }
 
   public update(
-    entities: GameEntity[], 
-    mapType: MapType, 
-    dt: number, 
-    onDamage?: (pos: Vector2, amount: number) => void, 
+    entities: GameEntity[],
+    mapType: MapType,
+    dt: number,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     // Determine Friction based on Environment (MapType) from Config
     const config = PLAYER_MOVEMENT_CONFIG[mapType];
@@ -119,7 +120,7 @@ export class PhysicsSystem {
     }
 
     // Optimized Entity-Entity Collision (Spatial Hash Grid)
-    this.handleEntityCollisions(entities, onDamage, onDeath, onShake);
+    this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
   }
 
   private applyLocalGravity(entities: GameEntity[], timeScale: number) {
@@ -184,7 +185,7 @@ export class PhysicsSystem {
 
             if (distSq < (attractor.size.x / 2)**2 && entity.type === EntityType.ASTEROID) {
                 entity.active = false;
-                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH);
+                if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
                 continue; 
             }
 
@@ -207,10 +208,11 @@ export class PhysicsSystem {
   }
 
   private handleEntityCollisions(
-    entities: GameEntity[], 
-    onDamage?: (pos: Vector2, amount: number) => void, 
+    entities: GameEntity[],
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
     // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
     this.dynamicGrid.clear();
@@ -264,7 +266,7 @@ export class PhysicsSystem {
                         // Avoid double checking dynamic pairs
                         if (a.id > b.id) continue;
                         
-                        this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake);
+                        this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
                 }
 
@@ -273,8 +275,8 @@ export class PhysicsSystem {
                     for (let j = 0; j < staticCandidates.length; j++) {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
-                        
-                        this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake);
+
+                        this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
                 }
             }
@@ -339,11 +341,12 @@ export class PhysicsSystem {
   }
 
   private checkAndResolveCollision(
-    a: GameEntity, 
-    b: GameEntity, 
-    onDamage?: (pos: Vector2, amount: number) => void, 
+    a: GameEntity,
+    b: GameEntity,
+    onDamage?: (pos: Vector2, amount: number) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       // 0. BROADPHASE: Fast Circle Check
       const rA = Math.max(a.size.x, a.size.y) / 2;
@@ -351,12 +354,12 @@ export class PhysicsSystem {
       const dx = a.position.x - b.position.x;
       const dy = a.position.y - b.position.y;
       const distSq = dx*dx + dy*dy;
-      
+
       if (distSq > (rA + rB + 10)**2) return;
 
       // 1. SAT Collision Detection (Alloc-Free)
       if (this.checkCollisionSAT(a, b)) {
-          this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake);
+          this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
   }
 
@@ -427,12 +430,13 @@ export class PhysicsSystem {
   }
 
   private resolveCollision(
-    a: GameEntity, 
-    b: GameEntity, 
-    mtv: Vector2, 
-    onDamage?: (pos: Vector2, amount: number) => void, 
+    a: GameEntity,
+    b: GameEntity,
+    mtv: Vector2,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
       // INTERACTABLE collision rules:
@@ -472,12 +476,16 @@ export class PhysicsSystem {
 
           target.health -= (proj.damage || 1);
           target.hitFlash = 0.1;
-          
+
           if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
-              onShake(COLLISION_CONFIG.SHAKE.MICRO); 
+              const shakeAmount = target.type === EntityType.PLAYER
+                  ? COLLISION_CONFIG.SHAKE.MEDIUM
+                  : COLLISION_CONFIG.SHAKE.MICRO;
+              onShake(shakeAmount);
           }
-          
-          if (onDamage) onDamage(target.position, proj.damage || 1);
+
+          if (onHit) onHit(proj.position, proj, target);
+          if (onDamage) onDamage(target.position, proj.damage || 1, target);
 
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
@@ -526,7 +534,7 @@ export class PhysicsSystem {
       if (a.type === EntityType.ENEMY || b.type === EntityType.ENEMY) {
           const target = a.type === EntityType.ENEMY ? b : a;
           if (target.type === EntityType.PLAYER) {
-              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY);
+              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
               target.health -= COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
               target.hitFlash = 0.2;
               if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
@@ -599,10 +607,10 @@ export class PhysicsSystem {
               }
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT);
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               return; 
           } else {
-              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT);
+              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT, player);
               player.health -= COLLISION_CONFIG.DAMAGE.MINOR_IMPACT;
               player.hitFlash = 0.2;
           }
