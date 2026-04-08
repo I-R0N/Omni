@@ -110,6 +110,14 @@ export const UI_CONSTANTS = {
   }
 };
 
+export const AMMO_HUD_CONSTANTS = {
+  SLOT_W:        44,
+  SLOT_H:        48,
+  SLOT_GAP:      4,
+  SLOT_RADIUS:   5,
+  BOTTOM_MARGIN: 14,
+};
+
 export const MINIMAP_CONSTANTS = {
   SIZE: 75,            // Smaller Default
   EXPANDED_SIZE: 280,  // Larger when touched

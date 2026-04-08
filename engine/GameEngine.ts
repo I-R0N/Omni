@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG, AMMO_HUD_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -183,6 +183,31 @@ export class GameEngine {
       this.gameState = GameState.PLAYING;
       this.initWaveSystem();
       this.prepareFrameEntities();
+  }
+
+  /**
+   * Select a weapon by slot tap.
+   * - Tapping an unowned / empty slot does nothing.
+   * - Tapping the already-active non-blaster weapon toggles it off (switches to blaster).
+   * - Tapping any other owned weapon switches to it.
+   * At level 1 only one weapon is active at a time (exclusive selection).
+   */
+  private selectWeapon(wType: WeaponType) {
+    const isBlaster = wType === WeaponType.BLASTER;
+    const ammo      = this.player.ammo?.[wType] ?? 0;
+    if (!isBlaster && ammo <= 0) return; // unowned / empty — ignore tap
+
+    if (!isBlaster && this.player.currentWeapon === wType) {
+      // Toggle off: deselect and fall back to blaster
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex   = WEAPON_LIST.indexOf(WeaponType.BLASTER);
+      this.player.burstQueue    = 0;
+      return;
+    }
+
+    this.player.currentWeapon = wType;
+    this.currentWeaponIndex   = WEAPON_LIST.indexOf(wType);
+    this.player.burstQueue    = 0;
   }
 
   public cycleWeapon() {
@@ -743,13 +768,29 @@ export class GameEngine {
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
-            
+
             if (this.minimapDebounce > 0) return;
-            
+
             this.minimapExpanded = !this.minimapExpanded;
-            this.minimapTimer = this.minimapExpanded ? 5.0 : 0; 
-            this.minimapDebounce = 0.3; 
+            this.minimapTimer = this.minimapExpanded ? 5.0 : 0;
+            this.minimapDebounce = 0.3;
             return;
+        }
+
+        // Ammo HUD slot selection — intercept taps on the weapon slots
+        const { SLOT_W, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+        const totalW    = WEAPON_LIST.length * (SLOT_W + SLOT_GAP) - SLOT_GAP;
+        const slotStartX = (window.innerWidth - totalW) / 2;
+        const slotStartY = window.innerHeight - SLOT_H - BOTTOM_MARGIN;
+
+        if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
+            for (let i = 0; i < WEAPON_LIST.length; i++) {
+                const sx = slotStartX + i * (SLOT_W + SLOT_GAP);
+                if (evt.x >= sx && evt.x <= sx + SLOT_W) {
+                    this.selectWeapon(WEAPON_LIST[i]);
+                    return;
+                }
+            }
         }
 
         if (!this.minimapExpanded) {

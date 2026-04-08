@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
@@ -1097,13 +1097,10 @@ export class RenderSystem {
       width: number,
       height: number
   ) {
-      const SLOT_W   = 44;
-      const SLOT_H   = 48;
-      const SLOT_GAP = 4;
-      const RADIUS   = 5;
+      const { SLOT_W, SLOT_H, SLOT_GAP, SLOT_RADIUS: RADIUS, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
       const totalW   = WEAPON_LIST.length * (SLOT_W + SLOT_GAP) - SLOT_GAP;
       const startX   = (width - totalW) / 2;
-      const startY   = height - SLOT_H - 14; // 14px above bottom edge
+      const startY   = height - SLOT_H - BOTTOM_MARGIN;
       const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
 
       ctx.save();
