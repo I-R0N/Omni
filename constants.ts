@@ -111,7 +111,8 @@ export const UI_CONSTANTS = {
 };
 
 export const AMMO_HUD_CONSTANTS = {
-  SLOT_W:        44,
+  SLOT_W_MAX:    44,   // shrinks on narrow screens to clear the minimap
+  SLOT_W_MIN:    24,
   SLOT_H:        48,
   SLOT_GAP:      4,
   SLOT_RADIUS:   5,
@@ -389,6 +390,35 @@ export const DROP_CONFIG = {
   HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
   HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
 };
+
+/**
+ * Compute the ammo-HUD slot layout for a given screen size.
+ * Slots live to the right of the minimap, scaled to fit the available space.
+ */
+export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
+  startX: number; startY: number; slotW: number; totalW: number;
+} {
+  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+  const { MARGIN: MM, SIZE: MS } = MINIMAP_CONSTANTS;
+
+  // Horizontal: start just right of the minimap, leave symmetric margin on the right
+  const leftClear   = MM + MS + SLOT_GAP * 2;   // minimap right edge + small gap
+  const rightEdge   = screenWidth - MM;
+  const availableW  = rightEdge - leftClear;
+
+  // Scale slot width to fill available space without overflowing
+  const slotW = Math.max(
+    SLOT_W_MIN,
+    Math.min(SLOT_W_MAX, Math.floor((availableW - (WEAPON_LIST.length - 1) * SLOT_GAP) / WEAPON_LIST.length))
+  );
+  const totalW = WEAPON_LIST.length * (slotW + SLOT_GAP) - SLOT_GAP;
+
+  // Center the scaled group within the available width
+  const startX = leftClear + Math.max(0, (availableW - totalW) / 2);
+  const startY = screenHeight - SLOT_H - BOTTOM_MARGIN;
+
+  return { startX, startY, slotW, totalW };
+}
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
 export const DIFFICULTY_SCALES: Record<number, number> = {

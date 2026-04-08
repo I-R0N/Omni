@@ -161,17 +161,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* ── Bottom Bar: Cycle Weapon Button ── */}
-      {stats.gameState === GameState.PLAYING && (
-        <div className="flex items-end justify-end pointer-events-none">
-          <button
-            onClick={onCycleWeapon}
-            className="pointer-events-auto bg-slate-800/80 border border-slate-600/50 hover:border-slate-400 active:bg-slate-700 text-white rounded-lg px-3 py-1.5 shadow-lg transition-all text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-white"
-          >
-            CYCLE
-          </button>
-        </div>
-      )}
     </div>
   );
 };

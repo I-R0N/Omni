@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG, AMMO_HUD_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -778,15 +778,14 @@ export class GameEngine {
         }
 
         // Ammo HUD slot selection — intercept taps on the weapon slots
-        const { SLOT_W, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
-        const totalW    = WEAPON_LIST.length * (SLOT_W + SLOT_GAP) - SLOT_GAP;
-        const slotStartX = (window.innerWidth - totalW) / 2;
-        const slotStartY = window.innerHeight - SLOT_H - BOTTOM_MARGIN;
+        const { SLOT_H, SLOT_GAP } = AMMO_HUD_CONSTANTS;
+        const { startX: slotStartX, startY: slotStartY, slotW } =
+            computeAmmoHUDLayout(window.innerWidth, window.innerHeight);
 
         if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
             for (let i = 0; i < WEAPON_LIST.length; i++) {
-                const sx = slotStartX + i * (SLOT_W + SLOT_GAP);
-                if (evt.x >= sx && evt.x <= sx + SLOT_W) {
+                const sx = slotStartX + i * (slotW + SLOT_GAP);
+                if (evt.x >= sx && evt.x <= sx + slotW) {
                     this.selectWeapon(WEAPON_LIST[i]);
                     return;
                 }
