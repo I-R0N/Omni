@@ -241,3 +241,12 @@ export interface DamageText {
   color: string;
   active: boolean;
 }
+
+// Screen-space messages stacked above the player (damage taken, pickups, unlocks).
+export interface PlayerHUDMessage {
+  id: string;
+  text: string;
+  color: string;
+  lifetime: number;
+  maxLifetime: number;
+}

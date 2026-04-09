@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
@@ -120,7 +120,8 @@ export class RenderSystem {
     mapType: MapType,
     minimapExpanded: boolean = false,
     damageTexts?: DamageText[],
-    playerPos?: Vector2
+    playerPos?: Vector2,
+    playerMessages?: PlayerHUDMessage[]
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -238,6 +239,11 @@ export class RenderSystem {
 
     // 7. Render Minimap (Screen Space)
     this.renderMinimap(ctx, this._minimapBuffer, camera, width, height, minimapExpanded, mapType);
+
+    // 8. Render Player HUD messages (Screen Space)
+    if (playerMessages && playerMessages.length > 0) {
+        this.renderPlayerMessages(ctx, playerMessages, width, height);
+    }
   }
 
   private renderTrails(ctx: CanvasRenderingContext2D, entities: GameEntity[]) {
@@ -1041,6 +1047,44 @@ export class RenderSystem {
 
           ctx.restore();
       }
+  }
+
+  private renderPlayerMessages(
+      ctx: CanvasRenderingContext2D,
+      messages: PlayerHUDMessage[],
+      width: number,
+      height: number
+  ) {
+      const cx       = width / 2;
+      const baseY    = height / 2 - 48; // above the player sprite
+      const lineH    = 20;
+      const fontSize = 11;
+
+      ctx.save();
+      ctx.font = `bold ${fontSize}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Newest message is last in array → render at baseY; older messages rise above it
+      for (let i = 0; i < messages.length; i++) {
+          const msg      = messages[i];
+          const lifeRatio = msg.lifetime / msg.maxLifetime;
+          // Stay fully opaque for the first 70% of lifetime, then fade in the last 30%
+          const alpha    = lifeRatio > 0.3 ? 1 : lifeRatio / 0.3;
+          // Index from the end: last item (newest) sits at baseY
+          const slot  = messages.length - 1 - i;
+          const y     = baseY - slot * lineH;
+
+          ctx.globalAlpha = alpha;
+          // Subtle shadow for readability over any background
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillText(msg.text, cx + 1, y + 1);
+          ctx.fillStyle = msg.color;
+          ctx.fillText(msg.text, cx, y);
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
   }
 
   private renderMinimap(

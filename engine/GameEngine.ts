@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -33,6 +33,8 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  private playerMessages: PlayerHUDMessage[] = [];
+  private readonly MAX_PLAYER_MESSAGES = 6;
   private currentWeaponIndex: number = 0;
   
   private minimapExpanded: boolean = false;
@@ -323,12 +325,13 @@ export class GameEngine {
       this.handleEnemyShooting(dt);
 
       this.physics.update(
-        allEntities, 
-        this.currentMap.type, 
+        allEntities,
+        this.currentMap.type,
         dt,
         this.spawnDamageText,
         this.handleEntityDeath,
-        this.handleScreenShake
+        this.handleScreenShake,
+        this.handleProjectileHit
       );
 
       this.currentMap.entities.forEach(e => {
@@ -473,33 +476,47 @@ export class GameEngine {
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
-      // Spawn Particles
-      const numParticles = 4 + Math.floor(Math.random() * 3);
-      const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
-      
-      for (let i = 0; i < numParticles; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const speed = SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN);
-          const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
-          const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
+      if (entity.type === EntityType.ENEMY) {
+          this.spawnEnemyShards(entity);
+      }
 
-          this.currentMap?.entities.push({
-              id: `part_${Date.now()}_${i}`,
-              type: EntityType.PARTICLE,
-              position: { x: entity.position.x, y: entity.position.y },
-              velocity: {
-                  x: Math.cos(angle) * speed,
-                  y: Math.sin(angle) * speed
-              },
-              size: { x: size, y: size },
-              rotation: Math.random() * Math.PI * 2,
-              color: entity.color || '#facc15',
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: life,
-              maxLifetime: life,
-              mass: 0.1
+      // Death burst particles — size/color tuned per entity type
+      if (entity.type === EntityType.ENEMY) {
+          // Large colored burst matching the enemy's tier color, plus a white core flash
+          this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), entity.color || '#f87171', {
+              speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3.5,
+              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          });
+          this.spawnParticles(entity.position, 5, '#ffffff', {
+              speedMin: 5, speedMax: 14, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          });
+      } else if (entity.type === EntityType.PLAYER) {
+          // Cyan energy explosion
+          this.spawnParticles(entity.position, 12, '#38bdf8', {
+              speedMin: 4, speedMax: 12, sizeMin: 1.5, sizeMax: 3,
+              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          });
+          this.spawnParticles(entity.position, 6, '#ffffff', {
+              speedMin: 6, speedMax: 16, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          });
+      } else if (entity.type === EntityType.ASTEROID) {
+          // Small shard/asteroid break — quick dusty puff
+          const isTileShard = entity.shardType === 'tile';
+          const breakColor = isTileShard ? (entity.color || '#6366f1') : '#94a3b8';
+          this.spawnParticles(entity.position, 4, breakColor, {
+              speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
+              lifetimeMin: 0.15, lifetimeMax: 0.35,
+          });
+      } else {
+          // Generic fallback (structures, misc)
+          const numParticles = 4 + Math.floor(Math.random() * 3);
+          const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
+          this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {
+              speedMin: SPEED_MIN, speedMax: SPEED_MAX,
+              sizeMin: SIZE_MIN, sizeMax: SIZE_MAX,
+              lifetimeMin: LIFETIME_MIN, lifetimeMax: LIFETIME_MAX,
           });
       }
 
@@ -616,16 +633,7 @@ export class GameEngine {
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
-          this.damageTexts.push({
-            id: `unlock_${Date.now()}`,
-            position: { ...this.player.position },
-            text: WEAPONS[waveDef.powerup].name + ' Unlocked!',
-            velocity: { x: 0, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-            lifetime: 2.5,
-            maxLifetime: 2.5,
-            color: WEAPONS[waveDef.powerup].color,
-            active: true,
-          });
+          this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
         }
 
         // Always start the grace period — waves are infinite
@@ -756,6 +764,7 @@ export class GameEngine {
             const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
             const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
             this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
+            if (config.type === WeaponType.BURST) this.handleScreenShake(3);
         }
     }
 
@@ -775,6 +784,16 @@ export class GameEngine {
     }
     this.damageTexts.length = dTextIdx;
 
+    // Player HUD message tick
+    let msgIdx = 0;
+    for (let i = 0; i < this.playerMessages.length; i++) {
+        this.playerMessages[i].lifetime -= dt;
+        if (this.playerMessages[i].lifetime > 0) {
+            this.playerMessages[msgIdx++] = this.playerMessages[i];
+        }
+    }
+    this.playerMessages.length = msgIdx;
+
     // Remove drops that were deactivated (shot by player).
     // Collection is now triggered by player projectile hits, not magnetic contact.
     let dropWriteIdx = 0;
@@ -788,15 +807,158 @@ export class GameEngine {
     this.camera.position.y = this.player.position.y;
   }
 
-  private spawnDamageText = (pos: Vector2, amount: number) => {
+  // ── Player HUD messages ─────────────────────────────────────────────────────
+
+  private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
+    this.playerMessages.push({
+      id: `hud_${Date.now()}_${Math.random()}`,
+      text,
+      color,
+      lifetime,
+      maxLifetime: lifetime,
+    });
+    // Keep the list bounded; drop the oldest entry when over the cap
+    if (this.playerMessages.length > this.MAX_PLAYER_MESSAGES) {
+      this.playerMessages.shift();
+    }
+  }
+
+  // ── Particle helpers ────────────────────────────────────────────────────────
+
+  private spawnParticles(
+    position: Vector2,
+    count: number,
+    color: string,
+    options?: {
+      speedMin?: number;
+      speedMax?: number;
+      sizeMin?: number;
+      sizeMax?: number;
+      lifetimeMin?: number;
+      lifetimeMax?: number;
+      spreadAngle?: number; // center angle (radians); undefined = full circle
+      spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
+      baseVelocity?: Vector2;
+    }
+  ) {
+    if (!this.currentMap) return;
+    const {
+      speedMin = 2, speedMax = 5,
+      sizeMin = 1, sizeMax = 3,
+      lifetimeMin = 0.2, lifetimeMax = 0.45,
+      spreadAngle, spreadCone,
+      baseVelocity,
+    } = options ?? {};
+
+    const halfCone = spreadCone ?? Math.PI;
+
+    for (let i = 0; i < count; i++) {
+      const angle = spreadAngle !== undefined
+        ? spreadAngle + (Math.random() - 0.5) * 2 * halfCone
+        : Math.random() * Math.PI * 2;
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
+      const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
+
+      this.currentMap.entities.push({
+        id: `part_${Date.now()}_${i}_${Math.random()}`,
+        type: EntityType.PARTICLE,
+        position: { x: position.x, y: position.y },
+        velocity: {
+          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
+          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
+        },
+        size:      { x: size, y: size },
+        rotation:  0,
+        color,
+        active:    true,
+        health:    1,
+        maxHealth: 1,
+        lifetime:  life,
+        maxLifetime: life,
+        mass:      0.1,
+      });
+    }
+  }
+
+  private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Derive impact direction for a slight forward cone bias
+    const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
+    const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+    switch (target.type) {
+      case EntityType.ENEMY:
+        // Bright sparks in the enemy's own color, spread forward from impact
+        this.spawnParticles(impactPos, 6, target.color || '#f87171', {
+          speedMin: 3, speedMax: 8, sizeMin: 1.5, sizeMax: 3,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+        });
+        break;
+
+      case EntityType.PLAYER:
+        // Sparks deflect away from the contact point (opposite of incoming direction)
+        this.spawnParticles(impactPos, 8, '#38bdf8', {
+          speedMin: 4, speedMax: 9, sizeMin: 1, sizeMax: 2.5,
+          spreadAngle: impactAngle + Math.PI, spreadCone: Math.PI * 0.65,
+        });
+        this.spawnParticles(impactPos, 3, '#ffffff', {
+          speedMin: 6, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
+          spreadAngle: impactAngle + Math.PI, spreadCone: Math.PI * 0.45,
+        });
+        break;
+
+      case EntityType.ASTEROID: {
+        // Gray rocky dust, smaller and slower
+        const dustCount = target.size.x > 50 ? 5 : 3;
+        this.spawnParticles(impactPos, dustCount, '#94a3b8', {
+          speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.55,
+          baseVelocity: { x: target.velocity.x * 0.3, y: target.velocity.y * 0.3 },
+        });
+        break;
+      }
+
+      case EntityType.STRUCTURE:
+        // Tile sparks: two layers — colored chips + white hot sparks
+        this.spawnParticles(impactPos, 4, target.color || '#6366f1', {
+          speedMin: 3, speedMax: 7, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.65,
+        });
+        this.spawnParticles(impactPos, 3, '#ffffff', {
+          speedMin: 5, speedMax: 10, sizeMin: 0.5, sizeMax: 1.5,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.5,
+        });
+        break;
+
+      case EntityType.INTERACTABLE:
+        // Small glint when hitting a drop item
+        this.spawnParticles(impactPos, 3, proj.color || '#facc15', {
+          speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
+        });
+        break;
+    }
+    void projSpeed; // suppress lint
+  };
+
+  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {
+      // Player damage goes to the HUD list, not the world-space float
+      if (target?.type === EntityType.PLAYER) {
+          const isCrit = amount > 3;
+          this.pushPlayerMessage(
+              `-${Math.round(amount)}`,
+              isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : '#f87171',
+              isCrit ? 2.8 : 2.2
+          );
+          return;
+      }
       const isCrit = amount > 3;
       this.damageTexts.push({
           id: `dmg_${Date.now()}_${Math.random()}`,
           position: { ...pos },
           text: Math.round(amount).toString(),
-          velocity: { 
-              x: (Math.random() - 0.5) * 10, 
-              y: -DAMAGE_TEXT_CONSTANTS.SPEED 
+          velocity: {
+              x: (Math.random() - 0.5) * 10,
+              y: -DAMAGE_TEXT_CONSTANTS.SPEED
           },
           lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
           maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
@@ -808,16 +970,12 @@ export class GameEngine {
   private startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;
 
-      const baseSize = Math.max(entity.size.x, entity.size.y);
-      const sizeMultiplier = Math.abs(EXPLOSION_CONSTANTS.SIZE_MULTIPLIER || 1.5);
-
       entity.isExploding = true;
       entity.explosionTimer = EXPLOSION_CONSTANTS.DURATION;
-      entity.sprite = ASSETS.EXPLOSION;
-      entity.size = { x: baseSize * sizeMultiplier, y: baseSize * sizeMultiplier };
+      entity.sprite = undefined;
       entity.velocity = { x: 0, y: 0 };
       entity.hitFlash = 0;
-      entity.active = true; // Keep active so it renders during explosion
+      entity.active = false; // Hide immediately — particles carry the effect
   }
 
   private respawnPlayer() {
@@ -845,6 +1003,14 @@ export class GameEngine {
       if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
       const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
       this.player.weaponCooldown = config.cooldown;
+
+      if (config.type === WeaponType.SHOTGUN) {
+          this.handleScreenShake(5);
+      } else if (config.type === WeaponType.CANNON) {
+          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+      } else if (config.type === WeaponType.BURST) {
+          this.handleScreenShake(3);
+      }
 
       if (config.type === WeaponType.BURST && config.burstCount) {
           this.player.burstQueue = config.burstCount - 1; 
@@ -1252,6 +1418,16 @@ export class GameEngine {
           ast.velocity.x = nvx; ast.velocity.y = nvy;
           drop.active = false;
       }
+
+      // Soft sparkle at the merge point for all cases
+      this.spawnParticles({ x: nmx, y: nmy }, 5, '#fbbf24', {
+          speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,
+          lifetimeMin: 0.2, lifetimeMax: 0.4,
+      });
+      this.spawnParticles({ x: nmx, y: nmy }, 3, '#ffffff', {
+          speedMin: 2, speedMax: 6, sizeMin: 0.5, sizeMax: 1.5,
+          lifetimeMin: 0.1, lifetimeMax: 0.25,
+      });
   }
 
   private spawnCompositeAsteroid(
@@ -1397,6 +1573,19 @@ export class GameEngine {
               sprite:        parent.sprite,
           });
       }
+
+      // Dust/debris burst at the break point
+      const dustColor  = isTile ? parent.color : '#94a3b8';
+      const dustCount  = 5 + Math.floor(parent.size.x / 20);
+      const dustSpeed  = impactSpeed * 0.4 + 2;
+      this.spawnParticles(parent.position, dustCount, dustColor, {
+          speedMin: 1, speedMax: dustSpeed,
+          sizeMin: 1, sizeMax: 2.5,
+          lifetimeMin: 0.25, lifetimeMax: 0.55,
+          spreadAngle: impactAngle ?? undefined,
+          spreadCone: Math.PI,
+          baseVelocity: parent.velocity,
+      });
   }
 
   // --- WAVE SYSTEM ---
@@ -1491,49 +1680,23 @@ export class GameEngine {
         entity.dropValue ?? 0
       );
       this.player.fuel = (this.player.fuel ?? 0) + gained;
-      this.damageTexts.push({
-        id: `collect_${Date.now()}_${Math.random()}`,
-        position: { ...entity.position },
-        text: '+FUEL',
-        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        color: '#00e5ff',
-        active: true,
-      });
+      this.pushPlayerMessage(`+${Math.round(gained)}`, '#00e5ff');
     } else if (entity.dropType === 'gold') {
       const amount = entity.dropValue ?? 0;
       this.player.gold = (this.player.gold ?? 0) + amount;
-      this.damageTexts.push({
-        id: `collect_${Date.now()}_${Math.random()}`,
-        position: { ...entity.position },
-        text: `+${Math.round(amount)}`,
-        velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-        lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-        color: '#ffd700',
-        active: true,
-      });
+      this.pushPlayerMessage(`+${Math.round(amount)}`, '#ffd700');
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
       const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
       if (healed > 0) {
         this.player.health += healed;
-        this.damageTexts.push({
-          id: `collect_${Date.now()}_${Math.random()}`,
-          position: { ...entity.position },
-          text: `+${Math.round(healed)}`,
-          velocity: { x: (Math.random() - 0.5) * 8, y: -DAMAGE_TEXT_CONSTANTS.SPEED },
-          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          color: '#4ade80',
-          active: true,
-        });
+        this.pushPlayerMessage(`+${Math.round(healed)}`, '#4ade80');
       }
     } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
       this.player.currentWeapon = entity.dropWeapon;
       this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
       this.player.burstQueue = 0;
+      this.pushPlayerMessage(`+${WEAPONS[entity.dropWeapon].name}`, WEAPONS[entity.dropWeapon].color, 2.5);
     }
   }
 
@@ -1569,12 +1732,6 @@ export class GameEngine {
 
     } else if (entity.type === EntityType.ENEMY) {
       const tier = entity.enemyTier ?? 1;
-      this.spawnDrop(pos, 'gold', DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier, pv);
-
-      if (Math.random() < DROP_CONFIG.HEALTH_CHANCE_ENEMY) {
-        this.spawnDrop(pos, 'health', DROP_CONFIG.HEALTH_HEAL_AMOUNT, pv);
-      }
-
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
         this.spawnRandomPowerupDrop(pos, pv);
       }
@@ -1598,6 +1755,84 @@ export class GameEngine {
       const dy = e.position.y - position.y;
       if (dx * dx + dy * dy > rangeSq) continue;
       e.aggroTimer = AI_CONFIG.AGGRO_DURATION;
+    }
+  }
+
+  /**
+   * Break a dead enemy into small shards: equal counts of tile, asteroid, and drop types.
+   * Replaces the flat gold/health drop with physical debris that can be collected or
+   * observed, and inherits the enemy's velocity so pieces fly in the same direction.
+   */
+  private spawnEnemyShards(enemy: GameEntity) {
+    if (!this.currentMap) return;
+
+    const SHARDS_PER_TYPE = 3;
+    const TOTAL = SHARDS_PER_TYPE * 3;
+    const pos = enemy.position;
+    const pv  = enemy.velocity;
+    const tier = enemy.enemyTier ?? 1;
+
+    // Drop payloads: gold split across gold shards, one health shard, one fuel shard
+    const goldPerShard  = (DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier) / SHARDS_PER_TYPE;
+    const dropCycle: ('fuel' | 'gold' | 'health')[] = ['fuel', 'gold', 'health'];
+
+    for (let i = 0; i < TOTAL; i++) {
+      // Evenly distribute angles around a full circle with a small random jitter
+      const baseAngle = (i / TOTAL) * Math.PI * 2;
+      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / TOTAL) * 1.5;
+      const speed     = 1.5 + Math.random() * 3.0;
+      const vx = pv.x * 0.2 + Math.cos(angle) * speed;
+      const vy = pv.y * 0.2 + Math.sin(angle) * speed;
+
+      // Cycle: 0-2 = tile, 3-5 = asteroid, 6-8 = drop
+      const typeIdx = Math.floor(i / SHARDS_PER_TYPE);
+
+      if (typeIdx === 2) {
+        // Drop shard — use the existing drop system so it's collectable
+        const dropType = dropCycle[i % SHARDS_PER_TYPE];
+        const value    = dropType === 'gold'
+          ? goldPerShard
+          : dropType === 'health'
+            ? DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE
+            : DROP_CONFIG.FUEL_FROM_TILE / SHARDS_PER_TYPE;
+        this.spawnDrop(pos, dropType, value, { x: vx * 5, y: vy * 5 });
+      } else {
+        // Physical shard — tile or asteroid
+        const shardType: ShardType = typeIdx === 0 ? 'tile' : 'asteroid';
+        const isTile   = shardType === 'tile';
+        const size     = 12 + Math.random() * 10; // 12–22 px, always below min-respawn size
+
+        const numPts      = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
+        const angleJitterK = isTile ? 0.25 : 0.8;
+        const rMin         = isTile ? 0.60 : 0.55;
+        const rRange       = isTile ? 0.55 : 0.70;
+        const baseR        = (size / 2) * 0.8;
+        const rawPts: { angle: number; r: number }[] = [];
+        for (let j = 0; j < numPts; j++) {
+          const ba = (j / numPts) * Math.PI * 2;
+          const aj = (Math.random() - 0.5) * (Math.PI / numPts) * angleJitterK;
+          rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
+        }
+        rawPts.sort((a, b) => a.angle - b.angle);
+        const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+        this.currentMap.entities.push({
+          id:            `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
+          type:           EntityType.ASTEROID,
+          shardType,
+          position:      { x: pos.x, y: pos.y },
+          velocity:      { x: vx, y: vy },
+          size:          { x: size, y: size },
+          rotation:       Math.random() * Math.PI * 2,
+          rotationSpeed:  (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
+          color:          isTile ? '#b4e6fd' : COLORS.ASTEROID,
+          active:         true,
+          health:         1,
+          maxHealth:      1,
+          mass:           size,
+          polygonPoints:  pts,
+        });
+      }
     }
   }
 
@@ -1723,6 +1958,21 @@ export class GameEngine {
     if (Math.random() < 0.35) {
       this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
     }
+
+    // Impact sparks: tile-colored chips + bright white hot sparks
+    const tileImpactAngle = tile.lastImpactVelocity
+      ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
+      : undefined;
+    this.spawnParticles(tile.position, 6, tile.color || '#6366f1', {
+      speedMin: 2, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.2, lifetimeMax: 0.45,
+      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.65,
+    });
+    this.spawnParticles(tile.position, 4, '#ffffff', {
+      speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
+      lifetimeMin: 0.1, lifetimeMax: 0.25,
+      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
+    });
   }
 
   private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {
@@ -1832,7 +2082,8 @@ export class GameEngine {
           this.currentMap.type,
           this.minimapExpanded,
           this.damageTexts,
-          this.player.position
+          this.player.position,
+          this.playerMessages
       );
   }
 }

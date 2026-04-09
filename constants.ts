@@ -294,7 +294,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 10,
     damage: 5,
     lifetime: 2.5,
-    color: '#22d3ee', // Cyan
+    color: '#a855f7', // Purple
     size: 16,
     count: 1,
     spread: 0,
@@ -308,7 +308,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 7,
     damage: 2,
     lifetime: 3.0,
-    color: '#c084fc', // Purple
+    color: '#3b82f6', // Blue
     size: 8,
     count: 1,
     spread: 10,
@@ -386,16 +386,16 @@ export const WAVE_CONFIG = {
 
 export const DROP_CONFIG = {
   FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
-  GOLD_PER_ASTEROID_SIZE:   0.5,  // gold = size * 0.5 → 10 (small) / 50 (large)
-  GOLD_PER_ENEMY_TIER:     20,    // gold = tier * 20 → 20/40/60
-  POWERUP_CHANCE_ASTEROID:  0.04, // 4 % chance per asteroid
-  POWERUP_CHANCE_ENEMY:     0.10, // 10 % × tier → 10 %/20 %/30 %
+  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large)
+  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30
+  POWERUP_CHANCE_ASTEROID:  0.01, // 1 % chance per asteroid
+  POWERUP_CHANCE_ENEMY:     0.05, // 5 % × tier → 5 %/10 %/15 %
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
   FUEL_DRAIN_RATE:        2.5,    // fuel units per second at full throttle
   MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
-  HEALTH_CHANCE_ENEMY:     0.4,  // 40% chance per enemy kill
-  HEALTH_HEAL_AMOUNT:      20,   // HP restored per health drop
+  HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
+  HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
 };
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
