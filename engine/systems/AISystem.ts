@@ -11,6 +11,11 @@ export class AISystem {
   private laggedTargets: Map<string, Vector2> = new Map();
   private reactionTimers: Map<string, number> = new Map();
 
+  // Stuck detection: sample position every STUCK_CHECK_INTERVAL seconds;
+  // if the enemy hasn't moved enough, apply a random impulse to break free.
+  private stuckTimers: Map<string, number> = new Map();
+  private lastPositions: Map<string, Vector2> = new Map();
+
   public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
     for (let i = 0; i < entities.length; i++) {
       const enemy = entities[i];
@@ -28,12 +33,44 @@ export class AISystem {
           this.laggedTargets.set(enemy.id, { ...player.position });
       }
 
+      // Decay aggro boost each frame
+      if (enemy.aggroTimer && enemy.aggroTimer > 0) {
+          enemy.aggroTimer = Math.max(0, enemy.aggroTimer - dt);
+      }
+
       // Route by role — add new roles here as needed
       const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
       if (role === EnemyRole.SHOOTING) {
           this.updateSkirmisher(dt, enemy, player);
       } else {
           this.updateBasicDogfighter(dt, enemy, player, flowField);
+      }
+    }
+
+    // Pack sync: idle rammers near a chasing rammer get pulled into the charge.
+    // Truncating the idle timer to PACK_SYNC_WINDOW forces near-simultaneous
+    // attacks — a much harder threat to dodge than staggered individuals.
+    for (let i = 0; i < entities.length; i++) {
+      const leader = entities[i];
+      if (!leader.active || leader.type !== EntityType.ENEMY) continue;
+      if (!leader.enemySubtype || ENEMY_ROLE[leader.enemySubtype] !== EnemyRole.RAMMING) continue;
+      if (leader.aiState !== 'chase') continue;
+
+      for (let j = 0; j < entities.length; j++) {
+        if (i === j) continue;
+        const follower = entities[j];
+        if (!follower.active || follower.type !== EntityType.ENEMY) continue;
+        if (!follower.enemySubtype || ENEMY_ROLE[follower.enemySubtype] !== EnemyRole.RAMMING) continue;
+        if (follower.aiState !== 'idle') continue;
+
+        const pdx = leader.position.x - follower.position.x;
+        const pdy = leader.position.y - follower.position.y;
+        if (pdx * pdx + pdy * pdy > AI_CONFIG.PACK_SYNC_RANGE * AI_CONFIG.PACK_SYNC_RANGE) continue;
+
+        // Snap idle timer down so this rammer joins the charge within PACK_SYNC_WINDOW
+        if ((follower.aiTimer ?? 0) > AI_CONFIG.PACK_SYNC_WINDOW) {
+          follower.aiTimer = Math.random() * AI_CONFIG.PACK_SYNC_WINDOW;
+        }
       }
     }
 
@@ -47,6 +84,8 @@ export class AISystem {
             if (!liveIds.has(id)) {
                 this.laggedTargets.delete(id);
                 this.reactionTimers.delete(id);
+                this.stuckTimers.delete(id);
+                this.lastPositions.delete(id);
             }
         }
     }
@@ -61,7 +100,9 @@ export class AISystem {
    */
   private updateSkirmisher(dt: number, enemy: GameEntity, player: GameEntity) {
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SHOOTER_1];
-      const maxSpeed = config.maxSpeed || 12;
+      const baseMaxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 12;
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
 
@@ -69,10 +110,14 @@ export class AISystem {
       const dy = player.position.y - enemy.position.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       
-      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER } = AI_CONFIG.SKIRMISHER;
+      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
 
-      // Reaction lag affects aim direction only; movement logic remains responsive for gameplay feel
-      let targetAngle = Math.atan2(dy, dx);
+      // Aim-lead: predict where the player will be when the projectile arrives.
+      // Movement still tracks the real player position for responsive seek/flee/strafe.
+      const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
+      const aimX = player.position.x + player.velocity.x * leadTime - enemy.position.x;
+      const aimY = player.position.y + player.velocity.y * leadTime - enemy.position.y;
+      let targetAngle = Math.atan2(aimY, aimX);
       
       if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
@@ -122,7 +167,9 @@ export class AISystem {
   private updateBasicDogfighter(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) {
       // Use config based on subtype (Basic, Charger, Tank have different stats)
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.RAMMER_1];
-      const maxSpeed = config.maxSpeed || 10;
+      const baseMaxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 10;
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 6;
       const turnRate = config.turnRate || 1.25;
 
@@ -148,7 +195,22 @@ export class AISystem {
       } else {
           if (enemy.aiState === 'chase') {
               enemy.aiState = 'idle';
-              enemy.aiTimer = timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR;
+              // Aggro shortens idle so enraged enemies press the attack faster.
+              const idleMult = aggroed ? AI_CONFIG.AGGRO_IDLE_MULT : 1;
+              enemy.aiTimer = (timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR) * idleMult;
+
+              // Retreat arc: when the rammer has just overshot the player,
+              // kick it laterally so it circles away instead of stopping dead.
+              if (isRammer && distToPlayer < AI_CONFIG.RAMMER.RETREAT_TRIGGER_DIST) {
+                  const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+                  if (spd > 0.1) {
+                      const vx = enemy.velocity.x / spd;
+                      const vy = enemy.velocity.y / spd;
+                      const sign = Math.random() < 0.5 ? 1 : -1;
+                      enemy.velocity.x += -vy * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
+                      enemy.velocity.y +=  vx * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
+                  }
+              }
           } else {
               enemy.aiState = 'chase';
               enemy.aiTimer = timers.CHASE_TIME_BASE + Math.random() * timers.CHASE_TIME_VAR;
@@ -156,7 +218,14 @@ export class AISystem {
       }
 
       // --- MOVEMENT BEHAVIOR ---
-      if (enemy.aiState === 'chase') {
+      const dxPlayer = player.position.x - enemy.position.x;
+      const dyPlayer = player.position.y - enemy.position.y;
+      const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
+      const longRange = distToPlayer > AI_CONFIG.LONG_RANGE_SEEK_DIST;
+
+      // At long range always seek regardless of idle state, so waves never
+      // stall when the player moves away from the initial spawn location.
+      if (enemy.aiState === 'chase' || longRange) {
           // ENGAGE: Fly toward the lagged target, blended with the pursuit
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
@@ -180,9 +249,14 @@ export class AISystem {
                   moveX /= mag;
                   moveY /= mag;
               } else {
-                  // Outside the pursuit field range — fall back to direct chase.
-                  moveX = dx / d;
-                  moveY = dy / d;
+                  // No flow field data — blend direct chase with wall repulsion
+                  // so enemies deflect around tile clusters instead of pressing in.
+                  const repulsion = flowField.sampleWallRepulsion(enemy.position.x, enemy.position.y);
+                  moveX = dx / d + repulsion.x * 0.8;
+                  moveY = dy / d + repulsion.y * 0.8;
+                  const mag = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
+                  moveX /= mag;
+                  moveY /= mag;
               }
 
               enemy.velocity.x += moveX * accel * dt;
@@ -197,6 +271,26 @@ export class AISystem {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
+
+      // --- STUCK DETECTION ---
+      // If the enemy has barely moved over the check interval while chasing,
+      // it's pinned against geometry. Apply a random impulse to break free.
+      let stuckTimer = (this.stuckTimers.get(enemy.id) ?? AI_CONFIG.STUCK_CHECK_INTERVAL) - dt;
+      if (stuckTimer <= 0) {
+          const last = this.lastPositions.get(enemy.id);
+          if (last && (enemy.aiState === 'chase' || longRange)) {
+              const sx = enemy.position.x - last.x;
+              const sy = enemy.position.y - last.y;
+              if (sx * sx + sy * sy < AI_CONFIG.STUCK_DIST_THRESHOLD * AI_CONFIG.STUCK_DIST_THRESHOLD) {
+                  const nudgeAngle = Math.random() * Math.PI * 2;
+                  enemy.velocity.x += Math.cos(nudgeAngle) * maxSpeed * 0.8;
+                  enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
+              }
+          }
+          this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          stuckTimer = AI_CONFIG.STUCK_CHECK_INTERVAL;
+      }
+      this.stuckTimers.set(enemy.id, stuckTimer);
 
       // --- ROTATION LOGIC ---
       // Face velocity vector when moving fast (Flight dynamics)

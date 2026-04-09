@@ -50,7 +50,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="pointer-events-none bg-slate-900/80 border border-slate-700/60 rounded-lg px-3 py-2 text-[11px] font-mono text-slate-300 space-y-0.5 shadow-lg backdrop-blur-sm">
               <p>FPS: <span className="text-white">{stats.fps}</span></p>
               <p>Entities: <span className="text-white">{stats.entityCount}</span></p>
-              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}</span></p>
+              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1}</span></p>
               <p>State: <span className="text-white">{stats.waveStatus}</span></p>
             </div>
           )}
@@ -62,22 +62,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="pointer-events-none flex flex-col items-end gap-1">
-              {stats.waveStatus === 'complete' ? (
-                <div className="bg-yellow-500/20 border border-yellow-400/60 rounded-lg px-4 py-1.5 shadow-lg">
-                  <span className="text-yellow-300 font-black text-sm tracking-widest">★ ALL WAVES CLEARED ★</span>
-                </div>
-              ) : (
-                <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
-                  <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
-                    Wave {stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}
-                  </span>
-                  {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
-                    <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
-                      Next wave in {stats.waveGraceTimer}s
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
+                  Wave {stats.waveNumber ?? 1}
+                </span>
+                {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
+                  <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
+                    Next wave in {stats.waveGraceTimer}s
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -104,7 +98,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             OMNIVERSE
           </h1>
           <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
-            Survive five waves of escalating enemies across an infinite universe.
+            Survive endless waves of escalating enemies across an infinite universe.
           </p>
           <div className="mb-8 flex flex-col items-center gap-3">
             <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
