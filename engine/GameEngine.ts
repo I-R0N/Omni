@@ -764,7 +764,7 @@ export class GameEngine {
         const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
         const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
         const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - MARGIN;
+        const mapY = window.innerHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {

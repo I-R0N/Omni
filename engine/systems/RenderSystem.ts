@@ -1183,7 +1183,7 @@ export class RenderSystem {
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
-      const mapY = screenHeight - currentSize - MARGIN;
+      const mapY = screenHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
 
       ctx.save();
 
