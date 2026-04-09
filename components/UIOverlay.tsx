@@ -50,7 +50,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="pointer-events-none bg-slate-900/80 border border-slate-700/60 rounded-lg px-3 py-2 text-[11px] font-mono text-slate-300 space-y-0.5 shadow-lg backdrop-blur-sm">
               <p>FPS: <span className="text-white">{stats.fps}</span></p>
               <p>Entities: <span className="text-white">{stats.entityCount}</span></p>
-              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}</span></p>
+              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1}</span></p>
               <p>State: <span className="text-white">{stats.waveStatus}</span></p>
             </div>
           )}
@@ -62,43 +62,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="pointer-events-none flex flex-col items-end gap-1">
-              {/* Fuel bar */}
-              <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
-                <span className="text-cyan-400 text-[10px] font-bold uppercase tracking-widest">FUEL</span>
-                <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${Math.round(((stats.fuel ?? 100) / (stats.maxFuel ?? 100)) * 100)}%`,
-                      backgroundColor: '#00e5ff',
-                    }}
-                  />
-                </div>
-                <span className="text-cyan-300 text-[10px] font-mono">{Math.round(stats.fuel ?? 100)}</span>
+              <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
+                  Wave {stats.waveNumber ?? 1}
+                </span>
+                {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
+                  <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
+                    Next wave in {stats.waveGraceTimer}s
+                  </p>
+                )}
               </div>
-
-              {/* Gold counter */}
-              <div className="flex items-center gap-2 bg-slate-900/75 border border-slate-600/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm">
-                <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">GOLD</span>
-                <span className="text-yellow-300 text-[10px] font-mono font-bold">{Math.round(stats.gold ?? 0)}</span>
-              </div>
-
-              {stats.waveStatus === 'complete' ? (
-                <div className="bg-yellow-500/20 border border-yellow-400/60 rounded-lg px-4 py-1.5 shadow-lg">
-                  <span className="text-yellow-300 font-black text-sm tracking-widest">★ ALL WAVES CLEARED ★</span>
-                </div>
-              ) : (
-                <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
-                  <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
-                    Wave {stats.waveNumber ?? 1} / {stats.waveTotal ?? '?'}
-                  </span>
-                  {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
-                    <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
-                      Next wave in {stats.waveGraceTimer}s
-                    </p>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -125,7 +98,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             OMNIVERSE
           </h1>
           <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
-            Survive five waves of escalating enemies across an infinite universe.
+            Survive endless waves of escalating enemies across an infinite universe.
           </p>
           <div className="mb-8 flex flex-col items-center gap-3">
             <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
@@ -182,25 +155,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* ── Bottom Bar: Weapon Selector ── */}
-      {stats.gameState === GameState.PLAYING && (
-        <div className="flex items-end justify-end pointer-events-none">
-          {(stats.weaponCount ?? 1) > 1 ? (
-            <button
-              onClick={onCycleWeapon}
-              className="pointer-events-auto bg-slate-800/90 border-2 border-slate-600 hover:border-yellow-400 active:bg-slate-700 text-white rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-2xl transition-all"
-            >
-              <span className="text-[9px] uppercase text-slate-400 tracking-widest font-bold">Weapon</span>
-              <span className="text-xs font-bold text-yellow-400 mt-0.5 text-center leading-tight px-1">{stats.currentWeapon || 'Blaster'}</span>
-            </button>
-          ) : (
-            <div className="bg-slate-800/50 border-2 border-slate-700/50 text-slate-600 rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-2xl">
-              <span className="text-[9px] uppercase tracking-widest font-bold">Weapon</span>
-              <span className="text-xs font-bold mt-0.5 text-center leading-tight px-1">{stats.currentWeapon || 'Blaster'}</span>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

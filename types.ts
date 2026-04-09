@@ -58,11 +58,13 @@ export enum EnemyRole {
 }
 
 export enum WeaponType {
-  BLASTER = 'BLASTER',
-  SHOTGUN = 'SHOTGUN',
-  CANNON = 'CANNON',
-  HOMING = 'HOMING',
-  BURST = 'BURST'
+  BLASTER   = 'BLASTER',
+  BURST     = 'BURST',
+  SHOTGUN   = 'SHOTGUN',
+  LASER     = 'LASER',
+  LIGHTNING = 'LIGHTNING',
+  HOMING    = 'HOMING',
+  CANNON    = 'CANNON',
 }
 
 export interface WeaponConfig {
@@ -118,6 +120,8 @@ export interface GameEntity {
   aiState?: 'idle' | 'chase' | 'flee' | 'hunt' | 'skirmish' | 'orbit' | 'snipe';
   aiTimer?: number;
   visionRange?: number;
+  maxSpeed?: number;    // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
+  aggroTimer?: number;  // Remaining seconds of post-kill aggro boost (speed + shorter idle)
   
   // AI Specific Params (Orbiter/Skirmisher)
   orbitRadius?: number;
@@ -171,9 +175,10 @@ export interface GameEntity {
   // Powerup pickup
   powerupWeapon?: WeaponType;
 
-  // Player resources
-  fuel?: number;
-  maxFuel?: number;
+  // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
+  ammo?: Partial<Record<WeaponType, number>>;
+
+  // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
 
   // Drop item fields
@@ -224,9 +229,6 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   weaponCount?: number;
-  fuel?: number;
-  maxFuel?: number;
-  gold?: number;
 }
 
 export interface DamageText {

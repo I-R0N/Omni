@@ -43,8 +43,8 @@ export const SPRITE_CONSTANTS = {
 
 export const AI_CONFIG = {
   // Reaction time simulation
-  REACTION_TIME_BASE: 0.3,
-  REACTION_TIME_VAR: 0.5,
+  REACTION_TIME_BASE: 0.2,
+  REACTION_TIME_VAR: 0.3,
 
   // State switching timers (used by SHOOTING enemies and default)
   IDLE_TIME_BASE: 1.0,
@@ -55,21 +55,48 @@ export const AI_CONFIG = {
   // Flight Physics
   ROTATION_THRESHOLD: 20, // Speed at which enemy rotates to face velocity instead of target
 
-  // Rammer-specific overrides: minimal idle, long aggressive charge bursts
+  // Rammer-specific overrides: short idle pause, long aggressive charge bursts
   RAMMER: {
-    IDLE_TIME_BASE: 0.1,
-    IDLE_TIME_VAR: 0.2,
+    IDLE_TIME_BASE: 0.4,
+    IDLE_TIME_VAR: 0.3,
     CHASE_TIME_BASE: 4.0,
     CHASE_TIME_VAR: 1.5,
     ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
+    // Retreat arc: when transitioning chase→idle within this distance, apply a
+    // lateral impulse so the rammer circles away instead of stopping dead.
+    RETREAT_TRIGGER_DIST: 280,
+    RETREAT_IMPULSE: 0.6,        // perpendicular kick as fraction of maxSpeed
   },
+
+  // Pack behavior — rammers within PACK_SYNC_RANGE of a chasing rammer get
+  // their idle timer capped to PACK_SYNC_WINDOW, forcing a near-simultaneous charge.
+  PACK_SYNC_RANGE: 450,
+  PACK_SYNC_WINDOW: 0.2,
 
   // Skirmisher specific behavior
   SKIRMISHER: {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
-    STRAFE_MODIFIER: 0.5
-  }
+    STRAFE_MODIFIER: 0.75,
+    LEAD_FACTOR: 0.8,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
+    PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
+  },
+
+  // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
+  // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
+  AGGRO_RANGE: 500,
+  AGGRO_DURATION: 4.0,
+  AGGRO_SPEED_MULT: 1.35,
+  AGGRO_IDLE_MULT: 0.35, // idle time multiplier while aggroed (shorter pauses)
+
+  // Distance beyond which enemies always seek the player, overriding idle state.
+  // Prevents waves from stalling when the player moves away from the spawn location.
+  LONG_RANGE_SEEK_DIST: 700,
+
+  // Stuck detection: if an enemy travels less than STUCK_DIST_THRESHOLD units
+  // over STUCK_CHECK_INTERVAL seconds while chasing, it gets a random nudge.
+  STUCK_CHECK_INTERVAL: 1.5,
+  STUCK_DIST_THRESHOLD: 50,
 };
 
 export const COLLISION_CONFIG = {
@@ -81,7 +108,7 @@ export const COLLISION_CONFIG = {
   // Damage Values
   DAMAGE: {
     ASTEROID_CRUSH: 999, // Instant kill
-    PLAYER_RAM_ENEMY: 5,
+    PLAYER_RAM_ENEMY: 15,
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
   },
@@ -108,6 +135,15 @@ export const UI_CONSTANTS = {
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5 // Max arrows per type
   }
+};
+
+export const AMMO_HUD_CONSTANTS = {
+  SLOT_W_MAX:    44,   // shrinks on narrow screens to clear the minimap
+  SLOT_W_MIN:    24,
+  SLOT_H:        48,
+  SLOT_GAP:      4,
+  SLOT_RADIUS:   5,
+  BOTTOM_MARGIN: 14,
 };
 
 export const MINIMAP_CONSTANTS = {
@@ -231,6 +267,7 @@ export const DAMAGE_TEXT_CONSTANTS = {
   CRIT_COLOR: '#facc15'
 };
 
+// ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
@@ -239,12 +276,28 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 9,
     damage: 2,
     lifetime: 1.5,
-    color: '#facc15', // Yellow
+    color: '#ef4444', // Red — infinite ammo starter
     size: 6,
     count: 1,
     spread: 2,
     recoil: 0.5,
-    pierce: 0        // baseline — stops on first hit
+    pierce: 0
+  },
+  [WeaponType.BURST]: {
+    type: WeaponType.BURST,
+    name: 'Burst Rifle',
+    cooldown: 0.005,
+    speed: 12,
+    damage: 3,
+    lifetime: 3.0,
+    color: '#f97316', // Orange
+    size: 5,
+    count: 1,
+    spread: 1,
+    recoil: 0.3,
+    pierce: 2,
+    burstCount: 3,
+    burstDelay: 0.05
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -253,26 +306,40 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 12,
     damage: 1,
     lifetime: 0.4,
-    color: '#f87171', // Red
+    color: '#facc15', // Yellow
     size: 5,
     count: 6,
     spread: 35,
     recoil: 3.0,
-    pierce: 1        // each pellet threads through one entity before stopping
+    pierce: 1
   },
-  [WeaponType.CANNON]: {
-    type: WeaponType.CANNON,
-    name: 'Plasma Cannon',
-    cooldown: 0.005,
-    speed: 10,
-    damage: 5,
-    lifetime: 2.5,
-    color: '#a855f7', // Purple
-    size: 16,
+  [WeaponType.LASER]: {
+    type: WeaponType.LASER,
+    name: 'Laser',
+    cooldown: 0.08,
+    speed: 25,
+    damage: 1,
+    lifetime: 0.25,
+    color: '#4ade80', // Green — continuous short-range beam (full impl in PR 3)
+    size: 4,
     count: 1,
     spread: 0,
-    recoil: 8.0,
-    pierce: 5        // punches through up to 6 entities; clears small shards with ease
+    recoil: 0,
+    pierce: 999
+  },
+  [WeaponType.LIGHTNING]: {
+    type: WeaponType.LIGHTNING,
+    name: 'Lightning',
+    cooldown: 0.8,
+    speed: 20,
+    damage: 4,
+    lifetime: 0.5,
+    color: '#22d3ee', // Cyan — chain hop behavior in PR 3
+    size: 5,
+    count: 1,
+    spread: 5,
+    recoil: 0.2,
+    pierce: 0
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -286,34 +353,43 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
-    pierce: 0,       // same as blaster — stops on first hit
+    pierce: 0,
     homing: true
   },
-  [WeaponType.BURST]: {
-    type: WeaponType.BURST,
-    name: 'Burst Rifle',
+  [WeaponType.CANNON]: {
+    type: WeaponType.CANNON,
+    name: 'Plasma Cannon',
     cooldown: 0.005,
-    speed: 12,
-    damage: 3,       // up from 1 — more damage per shot than blaster
-    lifetime: 3.0,
-    color: '#4ade80', // Green
-    size: 5,
+    speed: 10,
+    damage: 5,
+    lifetime: 2.5,
+    color: '#a855f7', // Purple
+    size: 16,
     count: 1,
-    spread: 1,
-    recoil: 0.3,
-    pierce: 2,       // threads through two entities — more than blaster
-    burstCount: 3,
-    burstDelay: 0.05
-  }
+    spread: 0,
+    recoil: 8.0,
+    pierce: 5
+  },
 };
 
+// Full rainbow order — used for ammo HUD slot layout and weapon cycling
 export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
   WeaponType.SHOTGUN,
+  WeaponType.LASER,
+  WeaponType.LIGHTNING,
   WeaponType.HOMING,
-  WeaponType.CANNON
+  WeaponType.CANNON,
 ];
+
+// Burst-fire parameters for shooting enemies.
+// Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
+export const ENEMY_BURST_CONFIG = {
+  BURST_SIZE: 2,        // shots per burst
+  BURST_GAP: 0.15,      // seconds between shots within a burst
+  BURST_RELOAD: 2.5,    // seconds between bursts
+};
 
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
@@ -321,7 +397,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
   name: 'Enemy Blaster',
   cooldown: 1.2,
   speed: 5.0,
-  damage: 5,
+  damage: 10,
   lifetime: 3.5,
   color: '#f97316',
   size: 6,
@@ -338,19 +414,57 @@ export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
 };
 
+// Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
+// The pattern is always: rammer → shooter → mixed (every PATTERN_LENGTH waves).
+// Enemy count starts at INFINITE_BASE_COUNT and grows by INFINITE_COUNT_PER_SET
+// each set (group of PATTERN_LENGTH waves), capped at INFINITE_MAX_COUNT.
+export const WAVE_CONFIG = {
+  PATTERN_LENGTH: 3,           // waves per set (rammer, shooter, mixed)
+  INFINITE_BASE_COUNT: 4,      // enemy count for the first infinite set
+  INFINITE_COUNT_PER_SET: 1,   // +1 enemy per set (every 3 waves)
+  INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
+};
+
 export const DROP_CONFIG = {
-  FUEL_FROM_TILE:          10,    // fuel units per tile (1 tile ≈ 1.4 s full throttle)
-  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large)
-  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30
+  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large) — removed in PR 2
+  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30 — removed in PR 2
   POWERUP_CHANCE_ASTEROID:  0.01, // 1 % chance per asteroid
   POWERUP_CHANCE_ENEMY:     0.05, // 5 % × tier → 5 %/10 %/15 %
   COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
   LIFETIME:                20.0,  // seconds before drop despawns
-  FUEL_DRAIN_RATE:        2.5,    // fuel units per second at full throttle
   MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
   HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
   HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
 };
+
+/**
+ * Compute the ammo-HUD slot layout for a given screen size.
+ * Slots live to the right of the minimap, scaled to fit the available space.
+ */
+export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
+  startX: number; startY: number; slotW: number; totalW: number;
+} {
+  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+  const { MARGIN: MM, SIZE: MS } = MINIMAP_CONSTANTS;
+
+  // Horizontal: start just right of the minimap, leave symmetric margin on the right
+  const leftClear   = MM + MS + SLOT_GAP * 2;   // minimap right edge + small gap
+  const rightEdge   = screenWidth - MM;
+  const availableW  = rightEdge - leftClear;
+
+  // Scale slot width to fill available space without overflowing
+  const slotW = Math.max(
+    SLOT_W_MIN,
+    Math.min(SLOT_W_MAX, Math.floor((availableW - (WEAPON_LIST.length - 1) * SLOT_GAP) / WEAPON_LIST.length))
+  );
+  const totalW = WEAPON_LIST.length * (slotW + SLOT_GAP) - SLOT_GAP;
+
+  // Center the scaled group within the available width
+  const startX = leftClear + Math.max(0, (availableW - totalW) / 2);
+  const startY = screenHeight - SLOT_H - BOTTOM_MARGIN;
+
+  return { startX, startY, slotW, totalW };
+}
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
 export const DIFFICULTY_SCALES: Record<number, number> = {
@@ -358,6 +472,14 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   1: 0.35, // Low
   2: 0.65, // Moderate
   3: 1     // High (current default)
+};
+
+// Difficulty stat multipliers — scale individual enemy health and speed
+export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number }> = {
+  0: { health: 1.0, speed: 1.0 }, // N/A (no enemies)
+  1: { health: 0.7, speed: 0.8 }, // Low — weaker, slower enemies
+  2: { health: 0.85, speed: 0.9 }, // Moderate
+  3: { health: 1.0, speed: 1.0 }, // Full difficulty
 };
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────
@@ -371,35 +493,35 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number;
 }> = {
-  // ── Ramming ──
+  // ── Ramming — red → orange → yellow ──
   [EnemySubtype.RAMMER_1]: {
-    color: '#f87171', size: 28, health: 1,
+    color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
     sprite: ASSETS.ENEMY_DRONE,    mass: 10
   },
   [EnemySubtype.RAMMER_2]: {
-    color: '#60a5fa', size: 28, health: 1,
+    color: '#f97316', size: 28, health: 1,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8
   },
   [EnemySubtype.RAMMER_3]: {
-    color: '#94a3b8', size: 32, health: 3,
+    color: '#facc15', size: 32, health: 3,
     maxSpeed: 11,  accel: 8,   turnRate: 3.0,
     sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
-  // ── Shooting ──
+  // ── Shooting — green → cyan → blue ──
   [EnemySubtype.SHOOTER_1]: {
     color: '#4ade80', size: 28, health: 1,
     maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
     sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12
   },
   [EnemySubtype.SHOOTER_2]: {
-    color: '#c084fc', size: 28, health: 2,
+    color: '#22d3ee', size: 28, health: 2,
     maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
     sprite: ASSETS.ENEMY_ORBITER,  mass: 10
   },
   [EnemySubtype.SHOOTER_3]: {
-    color: '#fbbf24', size: 26, health: 2,
+    color: '#3b82f6', size: 26, health: 2,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9
   },
@@ -453,8 +575,37 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
               { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
 
-  // ── Set 6 — Level 3 only (final) ─────────────────────────────────────────
+  // ── Set 6 — Level 3 only ─────────────────────────────────────────────────
   { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
   { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed (victory)
+  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed
 ];
+
+/**
+ * Returns the wave definition for any wave index (0-based, infinite).
+ *
+ * Indices 0–17 map directly to the hand-authored WAVE_DEFINITIONS above.
+ * Indices 18+ enter the infinite phase: pure tier-3 enemies, all-rammer →
+ * all-shooter → mixed pattern, with enemy count increasing by
+ * WAVE_CONFIG.INFINITE_COUNT_PER_SET each set, capped at INFINITE_MAX_COUNT.
+ */
+export function generateWaveDef(index: number): { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null } {
+  if (index < WAVE_DEFINITIONS.length) return WAVE_DEFINITIONS[index];
+
+  const infiniteIdx = index - WAVE_DEFINITIONS.length;
+  const set     = Math.floor(infiniteIdx / WAVE_CONFIG.PATTERN_LENGTH);
+  const pattern = infiniteIdx % WAVE_CONFIG.PATTERN_LENGTH;
+
+  const count = Math.min(
+    WAVE_CONFIG.INFINITE_BASE_COUNT + set * WAVE_CONFIG.INFINITE_COUNT_PER_SET,
+    WAVE_CONFIG.INFINITE_MAX_COUNT,
+  );
+
+  const half = Math.ceil(count / 2);
+  const enemies: { subtype: EnemySubtype; count: number }[] =
+    pattern === 0 ? [{ subtype: EnemySubtype.RAMMER_3,  count }]
+    : pattern === 1 ? [{ subtype: EnemySubtype.SHOOTER_3, count }]
+    : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
+
+  return { enemies, powerup: null };
+}

@@ -252,6 +252,30 @@ export class FlowFieldGrid {
     return { x: this.eneFlowX[idx], y: this.eneFlowY[idx] };
   }
 
+  /**
+   * O(1) — returns an unnormalized repulsion vector away from any blocked
+   * cardinal neighbours of the given world position.  Used as a fallback
+   * steering correction when the enemy pursuit flow field has no vector for
+   * the current cell (e.g. inside or adjacent to a dense tile cluster).
+   * Returns {0,0} when the cell has no blocked neighbours.
+   */
+  sampleWallRepulsion(wx: number, wy: number): FlowVector {
+    const idx = this.worldToCell(wx, wy);
+    if (idx < 0) return { x: 0, y: 0 };
+    const row = (idx / FF_COLS) | 0;
+    const col =  idx % FF_COLS;
+    let rx = 0, ry = 0;
+    for (let k = 0; k < 4; k++) {
+      const nr = row + DR4[k], nc = col + DC4[k];
+      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      if (this.blocked[nr * FF_COLS + nc]) {
+        rx -= DC4[k]; // push away from the blocked neighbour
+        ry -= DR4[k];
+      }
+    }
+    return { x: rx, y: ry };
+  }
+
   // ─── internal BFS ────────────────────────────────────────────────────────
 
   /**

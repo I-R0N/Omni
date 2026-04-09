@@ -1,7 +1,7 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS } from '../../constants';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
@@ -121,7 +121,8 @@ export class RenderSystem {
     minimapExpanded: boolean = false,
     damageTexts?: DamageText[],
     playerPos?: Vector2,
-    playerMessages?: PlayerHUDMessage[]
+    playerMessages?: PlayerHUDMessage[],
+    player?: GameEntity
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -243,6 +244,11 @@ export class RenderSystem {
     // 8. Render Player HUD messages (Screen Space)
     if (playerMessages && playerMessages.length > 0) {
         this.renderPlayerMessages(ctx, playerMessages, width, height);
+    }
+
+    // 9. Render Ammo HUD (Screen Space)
+    if (player) {
+        this.renderAmmoHUD(ctx, player, width, height);
     }
   }
 
@@ -889,13 +895,11 @@ export class RenderSystem {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, width, height);
 
-      // Fill Color
+      // Fill Color — player health bar is always red; enemy bars match enemy color
       if (isPlayer) {
-          if (healthPct > 0.6) ctx.fillStyle = '#4ade80'; // Green
-          else if (healthPct > 0.3) ctx.fillStyle = '#facc15'; // Yellow
-          else ctx.fillStyle = '#f87171'; // Red
+          ctx.fillStyle = '#ef4444';
       } else {
-          ctx.fillStyle = '#ef4444'; // Red
+          ctx.fillStyle = '#ef4444';
       }
 
       ctx.fillRect(x, y, width * healthPct, height);
@@ -1087,6 +1091,79 @@ export class RenderSystem {
       ctx.restore();
   }
 
+  private renderAmmoHUD(
+      ctx: CanvasRenderingContext2D,
+      player: GameEntity,
+      width: number,
+      height: number
+  ) {
+      const { SLOT_H, SLOT_GAP, SLOT_RADIUS: RADIUS } = AMMO_HUD_CONSTANTS;
+      const { startX, startY, slotW } = computeAmmoHUDLayout(width, height);
+      const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
+
+      ctx.save();
+      ctx.textAlign  = 'center';
+      ctx.textBaseline = 'middle';
+
+      for (let i = 0; i < WEAPON_LIST.length; i++) {
+          const wType  = WEAPON_LIST[i];
+          const wCfg   = WEAPONS[wType];
+          const x      = startX + i * (slotW + SLOT_GAP);
+          const y      = startY;
+          const isBlaster = wType === WeaponType.BLASTER;
+          const ammo   = player.ammo?.[wType];
+          const owned  = isBlaster || ammo !== undefined;
+          const empty  = !isBlaster && (ammo ?? 0) <= 0;
+          const active = wType === activeWeapon;
+
+          // Slot background
+          ctx.globalAlpha = owned ? (active ? 0.92 : 0.65) : 0.28;
+          ctx.fillStyle   = owned ? (active ? wCfg.color : '#1e293b') : '#0f172a';
+          ctx.beginPath();
+          roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
+          ctx.fill();
+
+          // Slot border
+          ctx.globalAlpha = owned ? (active ? 1.0 : 0.5) : 0.2;
+          ctx.strokeStyle = active ? wCfg.color : (owned ? '#475569' : '#1e293b');
+          ctx.lineWidth   = active ? 2 : 1;
+          ctx.beginPath();
+          roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
+          ctx.stroke();
+
+          // Color pip
+          ctx.globalAlpha = owned ? 1.0 : 0.3;
+          ctx.fillStyle   = wCfg.color;
+          ctx.beginPath();
+          ctx.arc(x + slotW / 2, y + 10, Math.max(3, slotW * 0.11), 0, Math.PI * 2);
+          ctx.fill();
+
+          // Ammo count / infinity symbol
+          const ammoLabel = isBlaster ? '∞' : empty ? '0' : String(ammo ?? 0);
+          const fontSize  = Math.max(9, Math.min(12, slotW * 0.28));
+          ctx.font        = `bold ${fontSize}px monospace`;
+          ctx.globalAlpha = owned ? (empty ? 0.45 : 1.0) : 0.25;
+          ctx.fillStyle   = active ? '#ffffff' : (owned ? wCfg.color : '#475569');
+          ctx.shadowColor = 'rgba(0,0,0,0.8)';
+          ctx.shadowBlur  = 3;
+          ctx.fillText(ammoLabel, x + slotW / 2, y + SLOT_H - 10);
+          ctx.shadowBlur  = 0;
+
+          // Weapon abbreviation label
+          if (slotW >= 28) {
+              const label = wCfg.name.split(' ').map((w: string) => w[0]).join('').substring(0, 3);
+              ctx.font        = `bold ${Math.max(7, Math.min(8, slotW * 0.19))}px monospace`;
+              ctx.globalAlpha = owned ? 0.7 : 0.2;
+              ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';
+              ctx.fillText(label, x + slotW / 2, y + SLOT_H - 24);
+          }
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur  = 0;
+      ctx.restore();
+  }
+
   private renderMinimap(
       ctx: CanvasRenderingContext2D,
       items: { entity: GameEntity, dx: number, dy: number }[],
@@ -1106,7 +1183,7 @@ export class RenderSystem {
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
-      const mapY = screenHeight - currentSize - MARGIN;
+      const mapY = screenHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
 
       ctx.save();
 

@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -109,8 +109,7 @@ export class GameEngine {
       burstTimer: 0,
       trail: [],
       sprite: ASSETS.PLAYER_SHIP,
-      fuel: 100,
-      maxFuel: 100,
+      ammo: {},  // BLASTER is always ∞ (no entry); other weapons stored here when unlocked
       gold: 0
     };
 
@@ -170,7 +169,7 @@ export class GameEngine {
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
-      this.player.fuel = this.player.maxFuel;
+      this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
       this.damageTexts = [];
@@ -186,11 +185,43 @@ export class GameEngine {
       this.prepareFrameEntities();
   }
 
+  /**
+   * Select a weapon by slot tap.
+   * - Tapping an unowned / empty slot does nothing.
+   * - Tapping the already-active non-blaster weapon toggles it off (switches to blaster).
+   * - Tapping any other owned weapon switches to it.
+   * At level 1 only one weapon is active at a time (exclusive selection).
+   */
+  private selectWeapon(wType: WeaponType) {
+    const isBlaster = wType === WeaponType.BLASTER;
+    const ammo      = this.player.ammo?.[wType] ?? 0;
+    if (!isBlaster && ammo <= 0) return; // unowned / empty — ignore tap
+
+    if (!isBlaster && this.player.currentWeapon === wType) {
+      // Toggle off: deselect and fall back to blaster
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex   = WEAPON_LIST.indexOf(WeaponType.BLASTER);
+      this.player.burstQueue    = 0;
+      return;
+    }
+
+    this.player.currentWeapon = wType;
+    this.currentWeaponIndex   = WEAPON_LIST.indexOf(wType);
+    this.player.burstQueue    = 0;
+  }
+
   public cycleWeapon() {
     if (this.gameState !== GameState.PLAYING) return;
-    this.currentWeaponIndex = (this.currentWeaponIndex + 1) % WEAPON_LIST.length;
-    const newWeapon = WEAPON_LIST[this.currentWeaponIndex];
-    this.player.currentWeapon = newWeapon;
+    // Only cycle through blaster (always owned) + weapons with ammo
+    const owned = WEAPON_LIST.filter(w =>
+      w === WeaponType.BLASTER ||
+      ((this.player.ammo?.[w] ?? 0) > 0)
+    );
+    if (owned.length <= 1) return;
+    const currentIdx = owned.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
+    const nextIdx = (currentIdx + 1) % owned.length;
+    this.player.currentWeapon = owned[nextIdx];
+    this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon);
     this.player.burstQueue = 0;
   }
 
@@ -220,14 +251,10 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
-      fuel: this.player.fuel,
-      maxFuel: this.player.maxFuel,
-      gold: this.player.gold
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -276,21 +303,32 @@ export class GameEngine {
           if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
           // Cooldown management
-          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
+          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
           if (enemy.weaponCooldown > 0) continue;
 
           const dx = this.player.position.x - enemy.position.x;
           const dy = this.player.position.y - enemy.position.y;
-          const distSq = dx*dx + dy*dy;
+          const distSq = dx * dx + dy * dy;
           if (distSq > rangeSq) continue;
 
-          // Slight inaccuracy
-          const leadAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
-          const targetX = enemy.position.x + Math.cos(leadAngle) * 500;
-          const targetY = enemy.position.y + Math.sin(leadAngle) * 500;
+          // Lazily init burst state — first trigger starts a fresh burst
+          if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
 
-          enemy.weaponCooldown = weapon.cooldown;
+          // Slight inaccuracy
+          const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+          const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
+          const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
           this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+
+          // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
+          // then wait BURST_RELOAD before starting the next burst.
+          if (enemy.burstQueue > 1) {
+              enemy.burstQueue--;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+          } else {
+              enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+          }
       }
   }
 
@@ -616,37 +654,38 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
-        const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+        const waveDef = generateWaveDef(this.waveIndex);
 
-        // Auto-grant weapon unlock
+        // Auto-grant weapon unlock — assign initial ammo and equip (hand-authored waves only)
         if (waveDef.powerup !== null) {
+          const INITIAL_AMMO: Partial<Record<WeaponType, number>> = {
+            [WeaponType.BURST]:     60,
+            [WeaponType.SHOTGUN]:   30,
+            [WeaponType.LASER]:     40,
+            [WeaponType.LIGHTNING]: 25,
+            [WeaponType.HOMING]:    20,
+            [WeaponType.CANNON]:    15,
+          };
+          const grant = INITIAL_AMMO[waveDef.powerup] ?? 20;
+          if (!this.player.ammo) this.player.ammo = {};
+          this.player.ammo[waveDef.powerup] = (this.player.ammo[waveDef.powerup] ?? 0) + grant;
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
           this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
         }
 
-        // Start grace period or mark complete
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-        } else {
-          this.waveState = 'complete';
-        }
+        // Always start the grace period — waves are infinite
+        this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
       }
     }
 
-    // Grace period countdown — spawn next wave when timer expires
+    // Grace period countdown — spawn next wave when timer expires (infinite)
     if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
       this.waveGraceTimer -= dt;
       if (this.waveGraceTimer <= 0) {
         this.waveGraceTimer = 0;
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.spawnWave(nextIdx);
-        } else {
-          this.waveState = 'complete';
-        }
+        this.spawnWave(this.waveIndex + 1);
       }
     }
 
@@ -669,17 +708,9 @@ export class GameEngine {
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
     // Normalized to 60fps (dt * 60)
     const timeScale = dt * 60;
-    const hasFuel = (this.player.fuel ?? 0) > 0;
-    if (hasFuel) {
-        this.player.velocity.x += moveDir.x * acc * timeScale;
-        this.player.velocity.y += moveDir.y * acc * timeScale;
-    }
-
-    // Drain fuel proportional to throttle magnitude (0 at rest, full rate at full throttle)
+    this.player.velocity.x += moveDir.x * acc * timeScale;
+    this.player.velocity.y += moveDir.y * acc * timeScale;
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
-    if (throttle > 0 && hasFuel) {
-        this.player.fuel = Math.max(0, (this.player.fuel ?? 0) - DROP_CONFIG.FUEL_DRAIN_RATE * throttle * dt);
-    }
 
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {
@@ -696,7 +727,7 @@ export class GameEngine {
         }
     }
 
-    const thrusting = hasFuel && throttle > 0;
+    const thrusting = throttle > 0;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
     } else {
@@ -733,17 +764,32 @@ export class GameEngine {
         const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
         const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
         const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - MARGIN;
+        const mapY = window.innerHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
-            
+
             if (this.minimapDebounce > 0) return;
-            
+
             this.minimapExpanded = !this.minimapExpanded;
-            this.minimapTimer = this.minimapExpanded ? 5.0 : 0; 
-            this.minimapDebounce = 0.3; 
+            this.minimapTimer = this.minimapExpanded ? 5.0 : 0;
+            this.minimapDebounce = 0.3;
             return;
+        }
+
+        // Ammo HUD slot selection — intercept taps on the weapon slots
+        const { SLOT_H, SLOT_GAP } = AMMO_HUD_CONSTANTS;
+        const { startX: slotStartX, startY: slotStartY, slotW } =
+            computeAmmoHUDLayout(window.innerWidth, window.innerHeight);
+
+        if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
+            for (let i = 0; i < WEAPON_LIST.length; i++) {
+                const sx = slotStartX + i * (slotW + SLOT_GAP);
+                if (evt.x >= sx && evt.x <= sx + slotW) {
+                    this.selectWeapon(WEAPON_LIST[i]);
+                    return;
+                }
+            }
         }
 
         if (!this.minimapExpanded) {
@@ -1001,8 +1047,28 @@ export class GameEngine {
 
   private handleShooting(target: Vector2) {
       if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
-      const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
+
+      let weaponType = this.player.currentWeapon || WeaponType.BLASTER;
+
+      // If non-blaster and out of ammo, auto-fallback to blaster
+      if (weaponType !== WeaponType.BLASTER && (this.player.ammo?.[weaponType] ?? 0) <= 0) {
+          weaponType = WeaponType.BLASTER;
+          this.player.currentWeapon = WeaponType.BLASTER;
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(WeaponType.BLASTER);
+          this.player.burstQueue = 0;
+      }
+
+      const config = WEAPONS[weaponType];
       this.player.weaponCooldown = config.cooldown;
+
+      // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
+      if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
+          const before = this.player.ammo[weaponType] ?? 0;
+          this.player.ammo[weaponType] = Math.max(0, before - 1);
+          if (this.player.ammo[weaponType] === 0) {
+              // Will auto-switch on next shot; leave current active until then
+          }
+      }
 
       if (config.type === WeaponType.SHOTGUN) {
           this.handleScreenShake(5);
@@ -1013,7 +1079,7 @@ export class GameEngine {
       }
 
       if (config.type === WeaponType.BURST && config.burstCount) {
-          this.player.burstQueue = config.burstCount - 1; 
+          this.player.burstQueue = config.burstCount - 1;
           this.player.burstTimer = config.burstDelay;
       }
 
@@ -1599,17 +1665,26 @@ export class GameEngine {
   }
 
   private spawnWave(index: number) {
-    if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
+    if (!this.currentMap) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
-    const waveDef = WAVE_DEFINITIONS[index];
-    const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
+    const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const waveDef = generateWaveDef(index);
+    const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
+    const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;
 
-    for (const group of waveDef.enemies) {
+    // Flanking: divide enemies into groups arriving from evenly-spaced angles.
+    // A random base rotation ensures no two waves look the same.
+    const numFlanks = totalEnemies >= 5 ? 3 : 2;
+    const flankSpacing = (Math.PI * 2) / numFlanks;
+    const flankBaseRotation = Math.random() * Math.PI * 2;
+
+    for (const group of scaledGroups) {
       for (let i = 0; i < group.count; i++) {
-        const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const flankIdx = enemyIdx % numFlanks;
+        const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
         let x = 0, y = 0;
         // Try up to 8 candidate positions; pick first one clear of static tiles
@@ -1630,6 +1705,7 @@ export class GameEngine {
         };
         const enemyTier = tierMap[group.subtype] ?? 1;
 
+        const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
         this.currentMap.entities.push({
           id,
           type: EntityType.ENEMY,
@@ -1641,8 +1717,9 @@ export class GameEngine {
           rotation: Math.random() * Math.PI * 2,
           color: config.color,
           active: true,
-          health: config.health,
-          maxHealth: config.health,
+          health: scaledHealth,
+          maxHealth: scaledHealth,
+          maxSpeed: config.maxSpeed * statScale.speed,
           mass: config.mass,
           visionRange: ENEMY_CONSTANTS.VISION_RANGE,
           sprite: config.sprite
@@ -1664,12 +1741,7 @@ export class GameEngine {
    */
   private applyDropEffect(entity: GameEntity) {
     if (entity.dropType === 'fuel') {
-      const gained = Math.min(
-        (this.player.maxFuel ?? 100) - (this.player.fuel ?? 0),
-        entity.dropValue ?? 0
-      );
-      this.player.fuel = (this.player.fuel ?? 0) + gained;
-      this.pushPlayerMessage(`+${Math.round(gained)}`, '#00e5ff');
+      // Fuel system removed — fuel drops are no-ops until PR 2 drop overhaul
     } else if (entity.dropType === 'gold') {
       const amount = entity.dropValue ?? 0;
       this.player.gold = (this.player.gold ?? 0) + amount;
@@ -1724,6 +1796,26 @@ export class GameEngine {
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
         this.spawnRandomPowerupDrop(pos, pv);
       }
+
+      // Enrage nearby survivors — losing a packmate makes the rest angrier.
+      this.triggerAggroNearby(entity.position);
+    }
+  }
+
+  /**
+   * Set aggroTimer on all active enemies within AGGRO_RANGE of a kill position.
+   * Called whenever an enemy is destroyed; nearby survivors become enraged,
+   * gaining a speed boost and shortened idle time for AGGRO_DURATION seconds.
+   */
+  private triggerAggroNearby(position: Vector2) {
+    if (!this.currentMap) return;
+    const rangeSq = AI_CONFIG.AGGRO_RANGE * AI_CONFIG.AGGRO_RANGE;
+    for (const e of this.currentMap.entities) {
+      if (!e.active || e.type !== EntityType.ENEMY) continue;
+      const dx = e.position.x - position.x;
+      const dy = e.position.y - position.y;
+      if (dx * dx + dy * dy > rangeSq) continue;
+      e.aggroTimer = AI_CONFIG.AGGRO_DURATION;
     }
   }
 
@@ -1763,7 +1855,7 @@ export class GameEngine {
           ? goldPerShard
           : dropType === 'health'
             ? DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE
-            : DROP_CONFIG.FUEL_FROM_TILE / SHARDS_PER_TYPE;
+            : DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE; // fuel removed; extra health shard
         this.spawnDrop(pos, dropType, value, { x: vx * 5, y: vy * 5 });
       } else {
         // Physical shard — tile or asteroid
@@ -1923,11 +2015,6 @@ export class GameEngine {
       });
     }
 
-    // ~35 % chance: also eject a fuel shard
-    if (Math.random() < 0.35) {
-      this.spawnDrop(tile.position, 'fuel', DROP_CONFIG.FUEL_FROM_TILE, tile.velocity);
-    }
-
     // Impact sparks: tile-colored chips + bright white hot sparks
     const tileImpactAngle = tile.lastImpactVelocity
       ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
@@ -2044,7 +2131,7 @@ export class GameEngine {
 
   private draw() {
       if (!this.currentMap) return;
-      
+
       this.renderer.render(
           this.frameEntities,
           this.camera,
@@ -2052,7 +2139,8 @@ export class GameEngine {
           this.minimapExpanded,
           this.damageTexts,
           this.player.position,
-          this.playerMessages
+          this.playerMessages,
+          this.player
       );
   }
 }
