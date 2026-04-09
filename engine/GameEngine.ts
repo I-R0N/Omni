@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -673,6 +673,15 @@ export class GameEngine {
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
           this.player.burstQueue = 0;
           this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
+        }
+
+        // Every HEALTH_WAVE_INTERVAL waves, drop a health pickup near the player
+        if ((this.waveIndex + 1) % DROP_CONFIG.HEALTH_WAVE_INTERVAL === 0) {
+          const hPos = {
+            x: this.player.position.x + (Math.random() - 0.5) * 80,
+            y: this.player.position.y + (Math.random() - 0.5) * 80,
+          };
+          this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
         }
 
         // Always start the grace period — waves are infinite
@@ -1539,8 +1548,16 @@ export class GameEngine {
           mass:          newSize,
           polygonPoints: points,
           dropComposition: [
-              { type: dropA.dropType as 'fuel' | 'gold' | 'health', value: dropA.dropValue ?? 1 },
-              { type: dropB.dropType as 'fuel' | 'gold' | 'health', value: dropB.dropValue ?? 1 },
+              ...(dropA.dropType === 'ammo' && dropA.dropWeapon
+                  ? [{ type: 'ammo' as const, value: dropA.dropValue ?? 1, weapon: dropA.dropWeapon }]
+                  : dropA.dropType === 'health'
+                  ? [{ type: 'health' as const, value: dropA.dropValue ?? 1 }]
+                  : []),
+              ...(dropB.dropType === 'ammo' && dropB.dropWeapon
+                  ? [{ type: 'ammo' as const, value: dropB.dropValue ?? 1, weapon: dropB.dropWeapon }]
+                  : dropB.dropType === 'health'
+                  ? [{ type: 'health' as const, value: dropB.dropValue ?? 1 }]
+                  : []),
           ],
       });
   }
@@ -1740,24 +1757,30 @@ export class GameEngine {
    * and previously from the contact-collection loop.
    */
   private applyDropEffect(entity: GameEntity) {
-    if (entity.dropType === 'fuel') {
-      // Fuel system removed — fuel drops are no-ops until PR 2 drop overhaul
-    } else if (entity.dropType === 'gold') {
-      const amount = entity.dropValue ?? 0;
-      this.player.gold = (this.player.gold ?? 0) + amount;
-      this.pushPlayerMessage(`+${Math.round(amount)}`, '#ffd700');
+    if (entity.dropType === 'ammo' && entity.dropWeapon !== undefined) {
+      const wType  = entity.dropWeapon;
+      const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
+      if (!this.player.ammo) this.player.ammo = {};
+      this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + amount;
+      this.pushPlayerMessage(`+${amount}`, WEAPONS[wType].color);
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
       const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
       if (healed > 0) {
         this.player.health += healed;
-        this.pushPlayerMessage(`+${Math.round(healed)}`, '#4ade80');
+        this.pushPlayerMessage(`+${Math.round(healed)}`, '#ef4444');
       }
     } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
-      this.player.currentWeapon = entity.dropWeapon;
-      this.currentWeaponIndex = WEAPON_LIST.indexOf(entity.dropWeapon);
-      this.player.burstQueue = 0;
-      this.pushPlayerMessage(`+${WEAPONS[entity.dropWeapon].name}`, WEAPONS[entity.dropWeapon].color, 2.5);
+      const wType = entity.dropWeapon;
+      const grant = DROP_CONFIG.AMMO_PER_ENEMY_OWN * 4; // bonus on powerup pickup
+      if (!this.player.ammo) this.player.ammo = {};
+      this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + grant;
+      if (this.player.ammo[wType]! > 0) {
+        this.player.currentWeapon = wType;
+        this.currentWeaponIndex = WEAPON_LIST.indexOf(wType);
+        this.player.burstQueue = 0;
+      }
+      this.pushPlayerMessage(`+${WEAPONS[wType].name}`, WEAPONS[wType].color, 2.5);
     }
   }
 
@@ -1774,17 +1797,19 @@ export class GameEngine {
 
     } else if (entity.type === EntityType.ASTEROID) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
-        // Release all stored drop payloads (fuel/gold/health as drops; powerups as weapon drops)
         for (const comp of entity.dropComposition) {
           if (comp.type === 'powerup') {
             this.spawnPowerupDrop(pos, pv, comp.weapon);
-          } else {
-            this.spawnDrop(pos, comp.type, comp.value, pv);
+          } else if (comp.type === 'ammo') {
+            this.spawnAmmoDrop(pos, comp.weapon, comp.value, pv);
+          } else if (comp.type === 'health') {
+            this.spawnHealthDrop(pos, comp.value, pv);
           }
         }
       } else {
-        const goldAmt = DROP_CONFIG.GOLD_PER_ASTEROID_SIZE * (entity.size.x ?? 40);
-        this.spawnDrop(pos, 'gold', goldAmt, pv);
+        // Wave-scaled ammo drop — higher waves give rarer ammo types
+        const waveAmmoType = this.getAsteroidAmmoType();
+        this.spawnAmmoDrop(pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
       }
 
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
@@ -1820,80 +1845,88 @@ export class GameEngine {
   }
 
   /**
-   * Break a dead enemy into small shards: equal counts of tile, asteroid, and drop types.
-   * Replaces the flat gold/health drop with physical debris that can be collected or
-   * observed, and inherits the enemy's velocity so pieces fly in the same direction.
+   * Break a dead enemy into debris using the 70/15/10/5 split:
+   *   70% tile shards  — visual debris only
+   *   15% own-color ammo drop
+   *   10% next-color ammo drop
+   *    5% empty asteroid shard
    */
   private spawnEnemyShards(enemy: GameEntity) {
     if (!this.currentMap) return;
 
-    const SHARDS_PER_TYPE = 3;
-    const TOTAL = SHARDS_PER_TYPE * 3;
-    const pos = enemy.position;
-    const pv  = enemy.velocity;
-    const tier = enemy.enemyTier ?? 1;
+    const pos    = enemy.position;
+    const pv     = enemy.velocity;
+    const subtype = enemy.enemySubtype;
+    const ammoMap = subtype ? ENEMY_AMMO_DROP[subtype] : null;
 
-    // Drop payloads: gold split across gold shards, one health shard, one fuel shard
-    const goldPerShard  = (DROP_CONFIG.GOLD_PER_ENEMY_TIER * tier) / SHARDS_PER_TYPE;
-    const dropCycle: ('fuel' | 'gold' | 'health')[] = ['fuel', 'gold', 'health'];
+    // Plan: 6 tile shards + 1 own ammo + 1 next ammo + 1 empty asteroid (50 % chance)
+    const TOTAL_PHYSICAL = 6 + 1 + 1 + (Math.random() < 0.5 ? 1 : 0);
 
-    for (let i = 0; i < TOTAL; i++) {
-      // Evenly distribute angles around a full circle with a small random jitter
-      const baseAngle = (i / TOTAL) * Math.PI * 2;
-      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / TOTAL) * 1.5;
+    // Build the spawn list: 'tile' | 'asteroid' | 'own' | 'next'
+    type SlotKind = 'tile' | 'asteroid' | 'own' | 'next';
+    const slots: SlotKind[] = [];
+    for (let i = 0; i < 6; i++) slots.push('tile');
+    if (ammoMap) { slots.push('own'); slots.push('next'); }
+    if (TOTAL_PHYSICAL > 8) slots.push('asteroid');
+    // Shuffle so drops aren't always last
+    for (let i = slots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [slots[i], slots[j]] = [slots[j], slots[i]];
+    }
+
+    const total = slots.length;
+    for (let i = 0; i < total; i++) {
+      const baseAngle = (i / total) * Math.PI * 2;
+      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / total) * 1.5;
       const speed     = 1.5 + Math.random() * 3.0;
       const vx = pv.x * 0.2 + Math.cos(angle) * speed;
       const vy = pv.y * 0.2 + Math.sin(angle) * speed;
 
-      // Cycle: 0-2 = tile, 3-5 = asteroid, 6-8 = drop
-      const typeIdx = Math.floor(i / SHARDS_PER_TYPE);
+      const kind = slots[i];
 
-      if (typeIdx === 2) {
-        // Drop shard — use the existing drop system so it's collectable
-        const dropType = dropCycle[i % SHARDS_PER_TYPE];
-        const value    = dropType === 'gold'
-          ? goldPerShard
-          : dropType === 'health'
-            ? DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE
-            : DROP_CONFIG.HEALTH_HEAL_AMOUNT / SHARDS_PER_TYPE; // fuel removed; extra health shard
-        this.spawnDrop(pos, dropType, value, { x: vx * 5, y: vy * 5 });
-      } else {
-        // Physical shard — tile or asteroid
-        const shardType: ShardType = typeIdx === 0 ? 'tile' : 'asteroid';
-        const isTile   = shardType === 'tile';
-        const size     = 12 + Math.random() * 10; // 12–22 px, always below min-respawn size
-
-        const numPts      = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
-        const angleJitterK = isTile ? 0.25 : 0.8;
-        const rMin         = isTile ? 0.60 : 0.55;
-        const rRange       = isTile ? 0.55 : 0.70;
-        const baseR        = (size / 2) * 0.8;
-        const rawPts: { angle: number; r: number }[] = [];
-        for (let j = 0; j < numPts; j++) {
-          const ba = (j / numPts) * Math.PI * 2;
-          const aj = (Math.random() - 0.5) * (Math.PI / numPts) * angleJitterK;
-          rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
-        }
-        rawPts.sort((a, b) => a.angle - b.angle);
-        const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-        this.currentMap.entities.push({
-          id:            `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
-          type:           EntityType.ASTEROID,
-          shardType,
-          position:      { x: pos.x, y: pos.y },
-          velocity:      { x: vx, y: vy },
-          size:          { x: size, y: size },
-          rotation:       Math.random() * Math.PI * 2,
-          rotationSpeed:  (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
-          color:          isTile ? '#b4e6fd' : COLORS.ASTEROID,
-          active:         true,
-          health:         1,
-          maxHealth:      1,
-          mass:           size,
-          polygonPoints:  pts,
-        });
+      if (kind === 'own' && ammoMap) {
+        this.spawnAmmoDrop(pos, ammoMap.own, DROP_CONFIG.AMMO_PER_ENEMY_OWN, { x: vx * 5, y: vy * 5 });
+        continue;
       }
+      if (kind === 'next' && ammoMap) {
+        this.spawnAmmoDrop(pos, ammoMap.next, DROP_CONFIG.AMMO_PER_ENEMY_NEXT, { x: vx * 5, y: vy * 5 });
+        continue;
+      }
+
+      // Physical shard
+      const isTile = kind === 'tile';
+      const shardType: ShardType = isTile ? 'tile' : 'asteroid';
+      const size    = 12 + Math.random() * 10;
+      const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
+      const jitterK = isTile ? 0.25 : 0.8;
+      const rMin    = isTile ? 0.60 : 0.55;
+      const rRange  = isTile ? 0.55 : 0.70;
+      const baseR   = (size / 2) * 0.8;
+      const rawPts: { angle: number; r: number }[] = [];
+      for (let j = 0; j < numPts; j++) {
+        const ba = (j / numPts) * Math.PI * 2;
+        const aj = (Math.random() - 0.5) * (Math.PI / numPts) * jitterK;
+        rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
+      }
+      rawPts.sort((a, b) => a.angle - b.angle);
+      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+      this.currentMap.entities.push({
+        id:           `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
+        type:          EntityType.ASTEROID,
+        shardType,
+        position:     { x: pos.x, y: pos.y },
+        velocity:     { x: vx, y: vy },
+        size:         { x: size, y: size },
+        rotation:      Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
+        color:         isTile ? '#b4e6fd' : COLORS.ASTEROID,
+        active:        true,
+        health:        1,
+        maxHealth:     1,
+        mass:          size,
+        polygonPoints: pts,
+      });
     }
   }
 
@@ -1902,16 +1935,13 @@ export class GameEngine {
    * baseR controls visual size and should scale with the drop's value so
    * larger-value drops are physically bigger.
    */
-  private generateShardPolygon(type: 'fuel' | 'gold' | 'health' | 'powerup', baseR: number): Vector2[] {
+  private generateShardPolygon(type: 'ammo' | 'health' | 'powerup', baseR: number): Vector2[] {
     let numPoints: number;
     let radMin: number;
     let radMax: number;
     let angleJitterScale: number;
-    if (type === 'fuel') {
-      numPoints = 4 + Math.floor(Math.random() * 2);   // 4-5, chunky tile piece
-      radMin = 0.6; radMax = 1.1; angleJitterScale = 0.3;
-    } else if (type === 'gold') {
-      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, asteroid shard
+    if (type === 'ammo') {
+      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, jagged crystal
       radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
     } else if (type === 'health') {
       numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
@@ -2031,43 +2061,55 @@ export class GameEngine {
     });
   }
 
-  private spawnDrop(pos: Vector2, type: 'fuel' | 'gold' | 'health', value: number, parentVelocity?: Vector2) {
+  /** Returns the ammo type asteroids should drop for the current wave. */
+  private getAsteroidAmmoType(): WeaponType {
+    const idx = Math.min(
+      Math.floor(this.waveIndex / 3),
+      ASTEROID_AMMO_PROGRESSION.length - 1
+    );
+    return ASTEROID_AMMO_PROGRESSION[idx];
+  }
+
+  private spawnAmmoDrop(pos: Vector2, weapon: WeaponType, amount: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const scatter = 20;
-    const scatterAngle = Math.random() * Math.PI * 2;
-    const scatterSpeed = 0.5 + Math.random() * 1.5;
-    const pvx = parentVelocity?.x ?? 0;
-    const pvy = parentVelocity?.y ?? 0;
-    const maxSpin = 2.5;
-    // Visual radius scales linearly with value so larger drops are physically bigger.
-    // Range: value=10 → r≈4.2, value=80 → r≈9.5
-    const dropRadius = Math.min(10, Math.max(4, 3.5 + value * 0.075));
-    const drop: GameEntity = {
-      id: `drop_${type}_${Date.now()}_${Math.random()}`,
-      type: EntityType.INTERACTABLE,
-      position: {
-        x: pos.x + (Math.random() - 0.5) * scatter * 2,
-        y: pos.y + (Math.random() - 0.5) * scatter * 2,
-      },
-      velocity: {
-        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
-        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
-      },
-      size: { x: dropRadius * 3, y: dropRadius * 3 },
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-      color: type === 'fuel' ? '#00e5ff' : type === 'health' ? '#4ade80' : '#ffd700',
-      active: true,
-      health: 1,
-      maxHealth: 1,
-      mass: 5,
-      dropType: type,
-      dropValue: value,
-      polygonPoints: this.generateShardPolygon(type, dropRadius),
-    };
+    const drop = this.makeDropEntity(`drop_ammo_${weapon}_${Date.now()}_${Math.random()}`,
+      pos, parentVelocity, WEAPONS[weapon].color, amount, 'ammo');
+    drop.dropWeapon = weapon;
+    drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
+  }
+
+  private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {
+    if (!this.currentMap) return;
+    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    const drop = this.makeDropEntity(`drop_health_${Date.now()}_${Math.random()}`,
+      pos, parentVelocity, '#ef4444', value, 'health');
+    drop.polygonPoints = this.generateShardPolygon('health', Math.min(10, Math.max(5, 4 + value * 0.1)));
+    this.currentMap.entities.push(drop);
+    this.activeDrops.push(drop);
+  }
+
+  private makeDropEntity(
+    id: string, pos: Vector2, pv: Vector2 | undefined,
+    color: string, value: number, dropType: 'ammo' | 'health'
+  ): GameEntity {
+    const scatter = 20;
+    const angle   = Math.random() * Math.PI * 2;
+    const speed   = 0.5 + Math.random() * 1.5;
+    const r       = Math.min(10, Math.max(4, 3.5 + value * 0.075));
+    return {
+      id, type: EntityType.INTERACTABLE,
+      position: { x: pos.x + (Math.random() - 0.5) * scatter * 2, y: pos.y + (Math.random() - 0.5) * scatter * 2 },
+      velocity: { x: (pv?.x ?? 0) * 0.3 + Math.cos(angle) * speed, y: (pv?.y ?? 0) * 0.3 + Math.sin(angle) * speed },
+      size: { x: r * 3, y: r * 3 },
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 2 * 2.5,
+      color, active: true, health: 1, maxHealth: 1, mass: 5,
+      dropType, dropValue: value,
+      polygonPoints: [],
+    };
   }
 
   // Spawn a powerup drop for a specific weapon (used when a composite asteroid releases its stored weapons).

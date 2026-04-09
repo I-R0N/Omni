@@ -93,7 +93,8 @@ export type ShardType = 'asteroid' | 'tile';
 // ── Drop composition entry ────────────────────────────────────────────────────
 // Tracks drops stored inside a composite asteroid, including absorbed power-ups.
 export type DropCompositionEntry =
-  | { type: 'fuel' | 'gold' | 'health'; value: number }
+  | { type: 'ammo'; value: number; weapon: WeaponType }
+  | { type: 'health'; value: number }
   | { type: 'powerup'; value: number; weapon: WeaponType };
 
 export interface GameEntity {
@@ -182,7 +183,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'fuel' | 'gold' | 'powerup' | 'health' | 'glass';
+  dropType?: 'ammo' | 'health' | 'powerup' | 'glass';
   dropValue?: number;
   dropWeapon?: WeaponType;
 

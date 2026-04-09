@@ -710,16 +710,11 @@ export class RenderSystem {
                 let coreColor: string;
                 let rimColor: string;
                 let glowRgb: [number, number, number];
-                if (entity.dropType === 'fuel') {
-                    coreColor = '#33eeff'; rimColor = '#00c8d8';
-                    glowRgb = [0, 229, 255];
-                } else if (entity.dropType === 'gold') {
-                    coreColor = '#ffe033'; rimColor = '#c8a000';
-                    glowRgb = [255, 215, 0];
-                } else if (entity.dropType === 'health') {
+                if (entity.dropType === 'health') {
                     coreColor = '#6ef09a'; rimColor = '#22c55e';
                     glowRgb = [74, 222, 128];
                 } else {
+                    // 'ammo', 'powerup', or any other — use entity.color (weapon color)
                     coreColor = entity.color; rimColor = entity.color;
                     glowRgb = hexToRgb(entity.color);
                 }
