@@ -43,8 +43,8 @@ export const SPRITE_CONSTANTS = {
 
 export const AI_CONFIG = {
   // Reaction time simulation
-  REACTION_TIME_BASE: 0.3,
-  REACTION_TIME_VAR: 0.5,
+  REACTION_TIME_BASE: 0.2,
+  REACTION_TIME_VAR: 0.3,
 
   // State switching timers (used by SHOOTING enemies and default)
   IDLE_TIME_BASE: 1.0,
@@ -55,21 +55,48 @@ export const AI_CONFIG = {
   // Flight Physics
   ROTATION_THRESHOLD: 20, // Speed at which enemy rotates to face velocity instead of target
 
-  // Rammer-specific overrides: minimal idle, long aggressive charge bursts
+  // Rammer-specific overrides: short idle pause, long aggressive charge bursts
   RAMMER: {
-    IDLE_TIME_BASE: 0.1,
-    IDLE_TIME_VAR: 0.2,
+    IDLE_TIME_BASE: 0.4,
+    IDLE_TIME_VAR: 0.3,
     CHASE_TIME_BASE: 4.0,
     CHASE_TIME_VAR: 1.5,
     ROTATION_THRESHOLD: Infinity, // Always steer toward the player, even at speed
+    // Retreat arc: when transitioning chase→idle within this distance, apply a
+    // lateral impulse so the rammer circles away instead of stopping dead.
+    RETREAT_TRIGGER_DIST: 280,
+    RETREAT_IMPULSE: 0.6,        // perpendicular kick as fraction of maxSpeed
   },
+
+  // Pack behavior — rammers within PACK_SYNC_RANGE of a chasing rammer get
+  // their idle timer capped to PACK_SYNC_WINDOW, forcing a near-simultaneous charge.
+  PACK_SYNC_RANGE: 450,
+  PACK_SYNC_WINDOW: 0.2,
 
   // Skirmisher specific behavior
   SKIRMISHER: {
     PREFERRED_DIST: 300,
     DEADZONE: 50,
-    STRAFE_MODIFIER: 0.5
-  }
+    STRAFE_MODIFIER: 0.75,
+    LEAD_FACTOR: 0.8,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
+    PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
+  },
+
+  // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
+  // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
+  AGGRO_RANGE: 500,
+  AGGRO_DURATION: 4.0,
+  AGGRO_SPEED_MULT: 1.35,
+  AGGRO_IDLE_MULT: 0.35, // idle time multiplier while aggroed (shorter pauses)
+
+  // Distance beyond which enemies always seek the player, overriding idle state.
+  // Prevents waves from stalling when the player moves away from the spawn location.
+  LONG_RANGE_SEEK_DIST: 700,
+
+  // Stuck detection: if an enemy travels less than STUCK_DIST_THRESHOLD units
+  // over STUCK_CHECK_INTERVAL seconds while chasing, it gets a random nudge.
+  STUCK_CHECK_INTERVAL: 1.5,
+  STUCK_DIST_THRESHOLD: 50,
 };
 
 export const COLLISION_CONFIG = {
@@ -81,7 +108,7 @@ export const COLLISION_CONFIG = {
   // Damage Values
   DAMAGE: {
     ASTEROID_CRUSH: 999, // Instant kill
-    PLAYER_RAM_ENEMY: 5,
+    PLAYER_RAM_ENEMY: 15,
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
   },
@@ -315,13 +342,21 @@ export const WEAPON_LIST = [
   WeaponType.CANNON
 ];
 
+// Burst-fire parameters for shooting enemies.
+// Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
+export const ENEMY_BURST_CONFIG = {
+  BURST_SIZE: 2,        // shots per burst
+  BURST_GAP: 0.15,      // seconds between shots within a burst
+  BURST_RELOAD: 2.5,    // seconds between bursts
+};
+
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
   speed: 5.0,
-  damage: 5,
+  damage: 10,
   lifetime: 3.5,
   color: '#f97316',
   size: 6,
@@ -336,6 +371,17 @@ export { ASSETS };
 
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
+};
+
+// Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
+// The pattern is always: rammer → shooter → mixed (every PATTERN_LENGTH waves).
+// Enemy count starts at INFINITE_BASE_COUNT and grows by INFINITE_COUNT_PER_SET
+// each set (group of PATTERN_LENGTH waves), capped at INFINITE_MAX_COUNT.
+export const WAVE_CONFIG = {
+  PATTERN_LENGTH: 3,           // waves per set (rammer, shooter, mixed)
+  INFINITE_BASE_COUNT: 4,      // enemy count for the first infinite set
+  INFINITE_COUNT_PER_SET: 1,   // +1 enemy per set (every 3 waves)
+  INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
 };
 
 export const DROP_CONFIG = {
@@ -358,6 +404,14 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   1: 0.35, // Low
   2: 0.65, // Moderate
   3: 1     // High (current default)
+};
+
+// Difficulty stat multipliers — scale individual enemy health and speed
+export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number }> = {
+  0: { health: 1.0, speed: 1.0 }, // N/A (no enemies)
+  1: { health: 0.7, speed: 0.8 }, // Low — weaker, slower enemies
+  2: { health: 0.85, speed: 0.9 }, // Moderate
+  3: { health: 1.0, speed: 1.0 }, // Full difficulty
 };
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────
@@ -453,8 +507,37 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
               { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
 
-  // ── Set 6 — Level 3 only (final) ─────────────────────────────────────────
+  // ── Set 6 — Level 3 only ─────────────────────────────────────────────────
   { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
   { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed (victory)
+  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed
 ];
+
+/**
+ * Returns the wave definition for any wave index (0-based, infinite).
+ *
+ * Indices 0–17 map directly to the hand-authored WAVE_DEFINITIONS above.
+ * Indices 18+ enter the infinite phase: pure tier-3 enemies, all-rammer →
+ * all-shooter → mixed pattern, with enemy count increasing by
+ * WAVE_CONFIG.INFINITE_COUNT_PER_SET each set, capped at INFINITE_MAX_COUNT.
+ */
+export function generateWaveDef(index: number): { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null } {
+  if (index < WAVE_DEFINITIONS.length) return WAVE_DEFINITIONS[index];
+
+  const infiniteIdx = index - WAVE_DEFINITIONS.length;
+  const set     = Math.floor(infiniteIdx / WAVE_CONFIG.PATTERN_LENGTH);
+  const pattern = infiniteIdx % WAVE_CONFIG.PATTERN_LENGTH;
+
+  const count = Math.min(
+    WAVE_CONFIG.INFINITE_BASE_COUNT + set * WAVE_CONFIG.INFINITE_COUNT_PER_SET,
+    WAVE_CONFIG.INFINITE_MAX_COUNT,
+  );
+
+  const half = Math.ceil(count / 2);
+  const enemies: { subtype: EnemySubtype; count: number }[] =
+    pattern === 0 ? [{ subtype: EnemySubtype.RAMMER_3,  count }]
+    : pattern === 1 ? [{ subtype: EnemySubtype.SHOOTER_3, count }]
+    : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
+
+  return { enemies, powerup: null };
+}

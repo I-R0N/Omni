@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_DEFINITIONS, WAVE_CONSTANTS, DROP_CONFIG, STRUCTURE_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -220,7 +220,6 @@ export class GameEngine {
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
-      waveTotal: WAVE_DEFINITIONS.length,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
@@ -276,21 +275,32 @@ export class GameEngine {
           if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
           // Cooldown management
-          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown || 0) - dt);
+          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
           if (enemy.weaponCooldown > 0) continue;
 
           const dx = this.player.position.x - enemy.position.x;
           const dy = this.player.position.y - enemy.position.y;
-          const distSq = dx*dx + dy*dy;
+          const distSq = dx * dx + dy * dy;
           if (distSq > rangeSq) continue;
 
-          // Slight inaccuracy
-          const leadAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
-          const targetX = enemy.position.x + Math.cos(leadAngle) * 500;
-          const targetY = enemy.position.y + Math.sin(leadAngle) * 500;
+          // Lazily init burst state — first trigger starts a fresh burst
+          if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
 
-          enemy.weaponCooldown = weapon.cooldown;
+          // Slight inaccuracy
+          const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+          const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
+          const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
           this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+
+          // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
+          // then wait BURST_RELOAD before starting the next burst.
+          if (enemy.burstQueue > 1) {
+              enemy.burstQueue--;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+          } else {
+              enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
+              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+          }
       }
   }
 
@@ -616,9 +626,9 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
-        const waveDef = WAVE_DEFINITIONS[this.waveIndex];
+        const waveDef = generateWaveDef(this.waveIndex);
 
-        // Auto-grant weapon unlock
+        // Auto-grant weapon unlock (only first 18 hand-authored waves carry powerups)
         if (waveDef.powerup !== null) {
           this.player.currentWeapon = waveDef.powerup;
           this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
@@ -626,27 +636,17 @@ export class GameEngine {
           this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
         }
 
-        // Start grace period or mark complete
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-        } else {
-          this.waveState = 'complete';
-        }
+        // Always start the grace period — waves are infinite
+        this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
       }
     }
 
-    // Grace period countdown — spawn next wave when timer expires
+    // Grace period countdown — spawn next wave when timer expires (infinite)
     if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
       this.waveGraceTimer -= dt;
       if (this.waveGraceTimer <= 0) {
         this.waveGraceTimer = 0;
-        const nextIdx = this.waveIndex + 1;
-        if (nextIdx < WAVE_DEFINITIONS.length) {
-          this.spawnWave(nextIdx);
-        } else {
-          this.waveState = 'complete';
-        }
+        this.spawnWave(this.waveIndex + 1);
       }
     }
 
@@ -1599,17 +1599,26 @@ export class GameEngine {
   }
 
   private spawnWave(index: number) {
-    if (!this.currentMap || index >= WAVE_DEFINITIONS.length) return;
+    if (!this.currentMap) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
-    const waveDef = WAVE_DEFINITIONS[index];
-    const totalEnemies = waveDef.enemies.reduce((s, g) => s + g.count, 0);
+    const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const waveDef = generateWaveDef(index);
+    const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
+    const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
     let enemyIdx = 0;
 
-    for (const group of waveDef.enemies) {
+    // Flanking: divide enemies into groups arriving from evenly-spaced angles.
+    // A random base rotation ensures no two waves look the same.
+    const numFlanks = totalEnemies >= 5 ? 3 : 2;
+    const flankSpacing = (Math.PI * 2) / numFlanks;
+    const flankBaseRotation = Math.random() * Math.PI * 2;
+
+    for (const group of scaledGroups) {
       for (let i = 0; i < group.count; i++) {
-        const baseAngle = (enemyIdx / totalEnemies) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const flankIdx = enemyIdx % numFlanks;
+        const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
         let x = 0, y = 0;
         // Try up to 8 candidate positions; pick first one clear of static tiles
@@ -1630,6 +1639,7 @@ export class GameEngine {
         };
         const enemyTier = tierMap[group.subtype] ?? 1;
 
+        const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
         this.currentMap.entities.push({
           id,
           type: EntityType.ENEMY,
@@ -1641,8 +1651,9 @@ export class GameEngine {
           rotation: Math.random() * Math.PI * 2,
           color: config.color,
           active: true,
-          health: config.health,
-          maxHealth: config.health,
+          health: scaledHealth,
+          maxHealth: scaledHealth,
+          maxSpeed: config.maxSpeed * statScale.speed,
           mass: config.mass,
           visionRange: ENEMY_CONSTANTS.VISION_RANGE,
           sprite: config.sprite
@@ -1724,6 +1735,26 @@ export class GameEngine {
       if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
         this.spawnRandomPowerupDrop(pos, pv);
       }
+
+      // Enrage nearby survivors — losing a packmate makes the rest angrier.
+      this.triggerAggroNearby(entity.position);
+    }
+  }
+
+  /**
+   * Set aggroTimer on all active enemies within AGGRO_RANGE of a kill position.
+   * Called whenever an enemy is destroyed; nearby survivors become enraged,
+   * gaining a speed boost and shortened idle time for AGGRO_DURATION seconds.
+   */
+  private triggerAggroNearby(position: Vector2) {
+    if (!this.currentMap) return;
+    const rangeSq = AI_CONFIG.AGGRO_RANGE * AI_CONFIG.AGGRO_RANGE;
+    for (const e of this.currentMap.entities) {
+      if (!e.active || e.type !== EntityType.ENEMY) continue;
+      const dx = e.position.x - position.x;
+      const dy = e.position.y - position.y;
+      if (dx * dx + dy * dy > rangeSq) continue;
+      e.aggroTimer = AI_CONFIG.AGGRO_DURATION;
     }
   }
 
