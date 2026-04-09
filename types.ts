@@ -132,6 +132,7 @@ export interface GameEntity {
   polygonPoints?: Vector2[]; // For physics/collision shape
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
+  isImpactRing?: boolean; // Renders as an expanding stroke ring instead of a filled dot (used for shockwave particles)
   sprite?: string; // URL or DataURI for image rendering
   lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
   lastImpactDamage?: number;   // Damage of the killing blow (used to scale shard count/size)

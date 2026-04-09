@@ -927,10 +927,36 @@ export class GameEngine {
     }
   }
 
+  /** Spawn an expanding impact-ring shockwave at the hit point in the projectile's color. */
+  private spawnImpactRing(pos: Vector2, color: string, startRadius: number, duration: number = 0.2) {
+    if (!this.currentMap) return;
+    const maxR = startRadius * 3.5;
+    this.currentMap.entities.push({
+      id:          `ring_${Date.now()}_${Math.random()}`,
+      type:        EntityType.PARTICLE,
+      isImpactRing: true,
+      position:    { x: pos.x, y: pos.y },
+      velocity:    { x: 0, y: 0 },
+      size:        { x: startRadius, y: maxR },  // x=startR, y=maxR — renderer lerps between them
+      rotation:    0,
+      color,
+      active:      true,
+      health:      1,
+      maxHealth:   1,
+      lifetime:    duration,
+      maxLifetime: duration,
+      mass:        0,
+    });
+  }
+
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Derive impact direction for a slight forward cone bias
     const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
     const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+    // Impact ring in the projectile's weapon color — fires for any meaningful hit
+    const ringRadius = Math.max(5, (proj.size?.x ?? 4) * 2.5);
+    this.spawnImpactRing(impactPos, proj.color || '#ffffff', ringRadius, 0.18);
 
     switch (target.type) {
       case EntityType.ENEMY:

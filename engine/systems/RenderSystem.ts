@@ -343,11 +343,26 @@ export class RenderSystem {
       for (let i = 0; i < particles.length; i++) {
           const p = particles[i];
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
-          ctx.globalAlpha = lifeRatio;
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.position.x, p.position.y, p.size.x, 0, Math.PI * 2);
-          ctx.fill();
+
+          if (p.isImpactRing) {
+              // Expanding shockwave ring: grows from startR (size.x) to maxR (size.y)
+              // as lifeRatio falls from 1 → 0; fades out sharply.
+              const t      = 1 - lifeRatio;
+              const radius = p.size.x + (p.size.y - p.size.x) * t;
+              const alpha  = lifeRatio * Math.min(1, lifeRatio * 2.5);
+              ctx.globalAlpha = alpha;
+              ctx.strokeStyle = p.color;
+              ctx.lineWidth   = Math.max(0.5, 2.5 * lifeRatio);
+              ctx.beginPath();
+              ctx.arc(p.position.x, p.position.y, radius, 0, Math.PI * 2);
+              ctx.stroke();
+          } else {
+              ctx.globalAlpha = lifeRatio;
+              ctx.fillStyle = p.color;
+              ctx.beginPath();
+              ctx.arc(p.position.x, p.position.y, p.size.x, 0, Math.PI * 2);
+              ctx.fill();
+          }
       }
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
