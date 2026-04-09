@@ -1466,27 +1466,24 @@ export class GameEngine {
           const drop = aIsAst ? b : a;
           const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
 
-          // Color keyed to drop type — matches what the renderer uses for drop glows
-          const DROP_COLORS: Partial<Record<string, string>> = {
-              fuel:   '#00e5ff',
-              gold:   '#ffd700',
-              health: '#4ade80',
-          };
-
           if (drop.dropType === 'powerup' && drop.dropWeapon !== undefined) {
               comp.push({ type: 'powerup', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
               const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
               ast.powerupGlowColor = ast.powerupGlowColor
                   ? blendHexColors(ast.powerupGlowColor, wColor)
                   : wColor;
-          } else if (drop.dropType && drop.dropType !== 'glass') {
-              comp.push({ type: drop.dropType as 'fuel' | 'gold' | 'health', value: drop.dropValue ?? 1 });
-              const dColor = DROP_COLORS[drop.dropType];
-              if (dColor) {
-                  ast.powerupGlowColor = ast.powerupGlowColor
-                      ? blendHexColors(ast.powerupGlowColor, dColor)
-                      : dColor;
-              }
+          } else if (drop.dropType === 'ammo' && drop.dropWeapon !== undefined) {
+              comp.push({ type: 'ammo', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
+              const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
+              ast.powerupGlowColor = ast.powerupGlowColor
+                  ? blendHexColors(ast.powerupGlowColor, wColor)
+                  : wColor;
+          } else if (drop.dropType === 'health') {
+              comp.push({ type: 'health', value: drop.dropValue ?? 1 });
+              const dColor = '#4ade80';
+              ast.powerupGlowColor = ast.powerupGlowColor
+                  ? blendHexColors(ast.powerupGlowColor, dColor)
+                  : dColor;
           }
 
           ast.dropComposition = comp.length > 0 ? comp : undefined;
