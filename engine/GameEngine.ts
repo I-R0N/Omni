@@ -2072,6 +2072,7 @@ export class GameEngine {
 
   private spawnAmmoDrop(pos: Vector2, weapon: WeaponType, amount: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
+    if (weapon === WeaponType.BLASTER) return; // Blaster is always infinite — no drops
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const drop = this.makeDropEntity(`drop_ammo_${weapon}_${Date.now()}_${Math.random()}`,
       pos, parentVelocity, WEAPONS[weapon].color, amount, 'ammo');
@@ -2122,7 +2123,11 @@ export class GameEngine {
   private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2, specificWeapon?: WeaponType) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const weaponType = specificWeapon ?? WEAPON_LIST[Math.floor(Math.random() * WEAPON_LIST.length)];
+    // BLASTER is always infinite — never drop it; pick from index 1 onward.
+    const pool = WEAPON_LIST.filter(w => w !== WeaponType.BLASTER);
+    const weaponType = (specificWeapon && specificWeapon !== WeaponType.BLASTER)
+      ? specificWeapon
+      : pool[Math.floor(Math.random() * pool.length)];
     const weaponConfig = WEAPONS[weaponType];
     const scatter = 20;
     const scatterAngle = Math.random() * Math.PI * 2;
