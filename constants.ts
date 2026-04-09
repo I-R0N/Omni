@@ -427,16 +427,20 @@ export const WAVE_CONFIG = {
 
 export const DROP_CONFIG = {
   // Ammo drop values
-  AMMO_PER_ENEMY_OWN:      5,    // own-color ammo units per enemy drop
-  AMMO_PER_ENEMY_NEXT:     3,    // next-color ammo units per enemy drop
-  AMMO_PER_ASTEROID:       4,    // ammo units per asteroid drop
+  AMMO_PER_ENEMY_OWN:         3,    // own-color ammo units per enemy drop
+  AMMO_PER_ENEMY_NEXT:        2,    // next-color ammo units per enemy drop
+  AMMO_PER_ASTEROID:          4,    // ammo units per asteroid drop
+  // Drop-spawn probabilities
+  AMMO_DROP_CHANCE_ASTEROID:  0.45, // 45 % chance an asteroid drops ammo
+  AMMO_DROP_CHANCE_ENEMY_OWN: 0.55, // 55 % chance an enemy drops its own-color ammo
+  AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
   // Health
-  HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
-  HEALTH_WAVE_INTERVAL:    10,   // spawn one health drop every N waves (wave 10, 20, ...)
+  HEALTH_HEAL_AMOUNT:         10,   // HP restored per health drop
+  HEALTH_WAVE_INTERVAL:       10,   // spawn one health drop every N waves (wave 10, 20, ...)
   // General
-  POWERUP_CHANCE_ASTEROID:  0.01, // 1 % chance of weapon powerup per asteroid
-  POWERUP_CHANCE_ENEMY:     0.05, // 5 % × tier → 5/10/15 %
-  COLLECT_RADIUS:          45,   // world units
+  POWERUP_CHANCE_ASTEROID:    0.01, // 1 % chance of weapon powerup per asteroid
+  POWERUP_CHANCE_ENEMY:       0.05, // 5 % × tier → 5/10/15 %
+  COLLECT_RADIUS:             45,   // world units
   LIFETIME:                20.0, // seconds before drop despawns
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };

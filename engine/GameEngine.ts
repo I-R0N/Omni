@@ -654,26 +654,6 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
-        const waveDef = generateWaveDef(this.waveIndex);
-
-        // Auto-grant weapon unlock — assign initial ammo and equip (hand-authored waves only)
-        if (waveDef.powerup !== null) {
-          const INITIAL_AMMO: Partial<Record<WeaponType, number>> = {
-            [WeaponType.BURST]:     60,
-            [WeaponType.SHOTGUN]:   30,
-            [WeaponType.LASER]:     40,
-            [WeaponType.LIGHTNING]: 25,
-            [WeaponType.HOMING]:    20,
-            [WeaponType.CANNON]:    15,
-          };
-          const grant = INITIAL_AMMO[waveDef.powerup] ?? 20;
-          if (!this.player.ammo) this.player.ammo = {};
-          this.player.ammo[waveDef.powerup] = (this.player.ammo[waveDef.powerup] ?? 0) + grant;
-          this.player.currentWeapon = waveDef.powerup;
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(waveDef.powerup);
-          this.player.burstQueue = 0;
-          this.pushPlayerMessage(`+${WEAPONS[waveDef.powerup].name}`, WEAPONS[waveDef.powerup].color, 2.5);
-        }
 
         // Every HEALTH_WAVE_INTERVAL waves, drop a health pickup near the player
         if ((this.waveIndex + 1) % DROP_CONFIG.HEALTH_WAVE_INTERVAL === 0) {
@@ -849,8 +829,22 @@ export class GameEngine {
     }
     this.playerMessages.length = msgIdx;
 
-    // Remove drops that were deactivated (shot by player).
-    // Collection is now triggered by player projectile hits, not magnetic contact.
+    // Proximity collection — player absorbs any drop within COLLECT_RADIUS
+    if (!this.player.isExploding) {
+      const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
+      for (let i = 0; i < this.activeDrops.length; i++) {
+        const drop = this.activeDrops[i];
+        if (!drop.active) continue;
+        const dx = drop.position.x - this.player.position.x;
+        const dy = drop.position.y - this.player.position.y;
+        if (dx * dx + dy * dy <= collectRadSq) {
+          this.applyDropEffect(drop);
+          drop.active = false;
+        }
+      }
+    }
+
+    // Remove drops that were deactivated (collected, shot, or expired).
     let dropWriteIdx = 0;
     for (let i = 0; i < this.activeDrops.length; i++) {
         if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
@@ -1803,8 +1797,8 @@ export class GameEngine {
             this.spawnHealthDrop(pos, comp.value, pv);
           }
         }
-      } else {
-        // Wave-scaled ammo drop — higher waves give rarer ammo types
+      } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
+        // Wave-scaled ammo drop — only some asteroids drop ammo
         const waveAmmoType = this.getAsteroidAmmoType();
         this.spawnAmmoDrop(pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
       }
@@ -1881,11 +1875,11 @@ export class GameEngine {
 
       const kind = slots[i];
 
-      if (kind === 'own' && ammoMap) {
+      if (kind === 'own' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_OWN) {
         this.spawnAmmoDrop(pos, ammoMap.own, DROP_CONFIG.AMMO_PER_ENEMY_OWN, { x: vx * 5, y: vy * 5 });
         continue;
       }
-      if (kind === 'next' && ammoMap) {
+      if (kind === 'next' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_NEXT) {
         this.spawnAmmoDrop(pos, ammoMap.next, DROP_CONFIG.AMMO_PER_ENEMY_NEXT, { x: vx * 5, y: vy * 5 });
         continue;
       }
@@ -2106,6 +2100,7 @@ export class GameEngine {
       rotationSpeed: (Math.random() - 0.5) * 2 * 2.5,
       color, active: true, health: 1, maxHealth: 1, mass: 5,
       dropType, dropValue: value,
+      lifetime: DROP_CONFIG.LIFETIME, maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: [],
     };
   }
@@ -2155,6 +2150,7 @@ export class GameEngine {
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
+      lifetime: DROP_CONFIG.LIFETIME, maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: this.generateShardPolygon('powerup', dropRadius),
     };
     this.currentMap.entities.push(drop);
