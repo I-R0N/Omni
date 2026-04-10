@@ -436,11 +436,11 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
   // Health
   HEALTH_HEAL_AMOUNT:         10,   // HP restored per health drop
-  HEALTH_WAVE_INTERVAL:       10,   // spawn one health drop every N waves (wave 10, 20, ...)
+  HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
   // General
   POWERUP_CHANCE_ASTEROID:    0.01, // 1 % chance of weapon powerup per asteroid
   POWERUP_CHANCE_ENEMY:       0.05, // 5 % × tier → 5/10/15 %
-  COLLECT_RADIUS:             45,   // world units
+  COLLECT_RADIUS:             30,   // world units
   LIFETIME:                20.0, // seconds before drop despawns
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };

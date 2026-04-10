@@ -657,9 +657,11 @@ export class GameEngine {
 
         // Every HEALTH_WAVE_INTERVAL waves, drop a health pickup near the player
         if ((this.waveIndex + 1) % DROP_CONFIG.HEALTH_WAVE_INTERVAL === 0) {
-          const hPos = {
-            x: this.player.position.x + (Math.random() - 0.5) * 80,
-            y: this.player.position.y + (Math.random() - 0.5) * 80,
+          const hAngle = Math.random() * Math.PI * 2;
+          const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+          const hPos   = {
+            x: this.player.position.x + Math.cos(hAngle) * hDist,
+            y: this.player.position.y + Math.sin(hAngle) * hDist,
           };
           this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
         }
@@ -2100,7 +2102,6 @@ export class GameEngine {
       rotationSpeed: (Math.random() - 0.5) * 2 * 2.5,
       color, active: true, health: 1, maxHealth: 1, mass: 5,
       dropType, dropValue: value,
-      lifetime: DROP_CONFIG.LIFETIME, maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: [],
     };
   }
@@ -2150,7 +2151,6 @@ export class GameEngine {
       name: weaponConfig.name,
       dropType: 'powerup',
       dropWeapon: weaponType,
-      lifetime: DROP_CONFIG.LIFETIME, maxLifetime: DROP_CONFIG.LIFETIME,
       polygonPoints: this.generateShardPolygon('powerup', dropRadius),
     };
     this.currentMap.entities.push(drop);
