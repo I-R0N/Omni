@@ -399,7 +399,7 @@ export class GameEngine {
       const entities = this.currentMap.entities;
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType;
+          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType && e.dropType !== 'health';
           if ((e.type !== EntityType.ASTEROID && !isDropShard) || !e.active) continue;
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
@@ -1309,7 +1309,7 @@ export class GameEngine {
       }
       for (let i = 0; i < this.activeDrops.length; i++) {
           const d = this.activeDrops[i];
-          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup') candidates.push(d);
+          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup' && d.dropType !== 'health') candidates.push(d);
       }
       if (candidates.length < 2) return;
 
@@ -2078,9 +2078,22 @@ export class GameEngine {
   private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
     if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop = this.makeDropEntity(`drop_health_${Date.now()}_${Math.random()}`,
-      pos, parentVelocity, '#ef4444', value, 'health');
-    drop.polygonPoints = this.generateShardPolygon('health', Math.min(10, Math.max(5, 4 + value * 0.1)));
+    const drop: GameEntity = {
+      id:          `drop_health_${Date.now()}_${Math.random()}`,
+      type:        EntityType.INTERACTABLE,
+      position:    { x: pos.x, y: pos.y },
+      velocity:    { x: 0, y: 0 },
+      size:        { x: 48, y: 48 },
+      rotation:    0,
+      rotationSpeed: 0,
+      color:       '#ef4444',
+      active:      true,
+      health:      1,
+      maxHealth:   1,
+      mass:        Infinity, // static — never moved by physics or flow field
+      dropType:    'health',
+      dropValue:   value,
+    };
     this.currentMap.entities.push(drop);
     this.activeDrops.push(drop);
   }

@@ -435,7 +435,7 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_OWN: 0.55, // 55 % chance an enemy drops its own-color ammo
   AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
   // Health
-  HEALTH_HEAL_AMOUNT:         10,   // HP restored per health drop
+  HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
   HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
   // General
   POWERUP_CHANCE_ASTEROID:    0.01, // 1 % chance of weapon powerup per asteroid

@@ -175,7 +175,7 @@ export class RenderSystem {
         }
 
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
-                && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
+                && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
 
@@ -698,6 +698,55 @@ export class RenderSystem {
                 ctx.strokeStyle = edgeColor;
                 ctx.lineWidth = 1.5;
                 buildShardPath();
+                ctx.stroke();
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.dropType === 'health') {
+                // ── Health heart — large static glowing heart ─────────────────
+                const r     = entity.size.x * 0.38;
+                const pulse = 0.88 + Math.sin(nowSec * 2.8) * 0.12;
+                const [hr, hg, hb] = [239, 68, 68]; // #ef4444
+
+                const drawHeart = () => {
+                    ctx.beginPath();
+                    ctx.moveTo(0, r * 0.38);
+                    ctx.bezierCurveTo( r,      -r * 0.38,  r * 1.05, -r * 1.05,  0, -r * 0.55);
+                    ctx.bezierCurveTo(-r * 1.05, -r * 1.05, -r,       -r * 0.38,  0,  r * 0.38);
+                    ctx.closePath();
+                };
+
+                // Outer bloom
+                const bloomR = r * 3.2 * pulse;
+                const bloom  = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
+                bloom.addColorStop(0,   `rgba(${hr},${hg},${hb},0.45)`);
+                bloom.addColorStop(0.5, `rgba(${hr},${hg},${hb},0.18)`);
+                bloom.addColorStop(1,   `rgba(${hr},${hg},${hb},0)`);
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
+                // Filled heart
+                ctx.globalAlpha = 0.92 * pulse;
+                ctx.fillStyle   = '#ef4444';
+                drawHeart();
+                ctx.fill();
+
+                // Bright core highlight
+                ctx.globalAlpha = 0.55 * pulse;
+                ctx.fillStyle   = '#fca5a5';
+                ctx.save();
+                ctx.scale(0.55, 0.55);
+                ctx.translate(0, -r * 0.1);
+                drawHeart();
+                ctx.restore();
+                ctx.fill();
+
+                // Crisp white outline
+                ctx.globalAlpha = 0.7 * pulse;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth   = 2;
+                drawHeart();
                 ctx.stroke();
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
