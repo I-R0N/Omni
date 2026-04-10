@@ -831,15 +831,37 @@ export class GameEngine {
     }
     this.playerMessages.length = msgIdx;
 
-    // Proximity collection — player absorbs any drop within COLLECT_RADIUS
+    // Proximity collection + magnetic pull — single pass over activeDrops
     if (!this.player.isExploding) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
+      const MAGNET_RANGE_SQ = 150 * 150;
+      const MAGNET_ACCEL    = 7; // world-units/s² toward player; scales up as dist shrinks
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
-        if (!drop.active) continue;
-        const dx = drop.position.x - this.player.position.x;
-        const dy = drop.position.y - this.player.position.y;
-        if (dx * dx + dy * dy <= collectRadSq) {
+        if (!drop.active || drop.dropType === 'health') continue;
+        const dx     = this.player.position.x - drop.position.x;
+        const dy     = this.player.position.y - drop.position.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= collectRadSq) {
+          this.applyDropEffect(drop);
+          drop.active = false;
+          continue;
+        }
+        if (distSq < MAGNET_RANGE_SQ) {
+          const dist = Math.sqrt(distSq);
+          const a    = MAGNET_ACCEL / dist; // inverse-linear: stronger when closer
+          drop.velocity.x += dx * a * dt;
+          drop.velocity.y += dy * a * dt;
+        }
+      }
+      // Health drop proximity check (no magnet — static heart)
+      const cr2 = collectRadSq;
+      for (let i = 0; i < this.activeDrops.length; i++) {
+        const drop = this.activeDrops[i];
+        if (!drop.active || drop.dropType !== 'health') continue;
+        const dx = this.player.position.x - drop.position.x;
+        const dy = this.player.position.y - drop.position.y;
+        if (dx * dx + dy * dy <= cr2) {
           this.applyDropEffect(drop);
           drop.active = false;
         }
