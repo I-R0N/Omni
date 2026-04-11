@@ -815,41 +815,6 @@ export class RenderSystem {
                 buildShardPath();
                 ctx.stroke();
 
-            } else if (entity.type === EntityType.INTERACTABLE && entity.powerupWeapon !== undefined) {
-                // Weapon powerup — glowing pulsing orb
-                const r = entity.size.x / 2;
-                const pulse = 0.65 + Math.sin(entity.rotation * 3) * 0.35;
-
-                // Outer ring
-                ctx.globalAlpha = 0.6 * pulse;
-                ctx.strokeStyle = entity.color;
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // Second ring
-                ctx.globalAlpha = 0.35 * pulse;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // Core fill
-                ctx.globalAlpha = 0.9;
-                ctx.fillStyle = entity.color;
-                ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Label
-                ctx.globalAlpha = 1.0;
-                ctx.rotate(-entity.rotation);
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 11px monospace';
-                ctx.textAlign = 'center';
-                ctx.fillText('▲ ' + (entity.name || 'WEAPON') + ' ▲', 0, r + 20);
-
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
                  if (Number.isFinite(r) && r > 0) {

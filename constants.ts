@@ -438,8 +438,6 @@ export const DROP_CONFIG = {
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
   HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
   // General
-  POWERUP_CHANCE_ASTEROID:    0.01, // 1 % chance of weapon powerup per asteroid
-  POWERUP_CHANCE_ENEMY:       0.05, // 5 % × tier → 5/10/15 %
   COLLECT_RADIUS:             30,   // world units
   LIFETIME:                20.0, // seconds before drop despawns
   MAX_ACTIVE_DROPS:       100,   // hard cap

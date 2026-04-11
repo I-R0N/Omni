@@ -1518,13 +1518,7 @@ export class GameEngine {
           const drop = aIsAst ? b : a;
           const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
 
-          if (drop.dropType === 'powerup' && drop.dropWeapon !== undefined) {
-              comp.push({ type: 'powerup', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
-              const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
-              ast.powerupGlowColor = ast.powerupGlowColor
-                  ? blendHexColors(ast.powerupGlowColor, wColor)
-                  : wColor;
-          } else if (drop.dropType === 'ammo' && drop.dropWeapon !== undefined) {
+          if (drop.dropType === 'ammo' && drop.dropWeapon !== undefined) {
               comp.push({ type: 'ammo', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
               const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
               ast.powerupGlowColor = ast.powerupGlowColor
@@ -1825,17 +1819,6 @@ export class GameEngine {
         this.player.health += healed;
         this.pushPlayerMessage(`+${Math.round(healed)}`, '#ef4444');
       }
-    } else if (entity.dropType === 'powerup' && entity.dropWeapon !== undefined) {
-      const wType = entity.dropWeapon;
-      const grant = DROP_CONFIG.AMMO_PER_ENEMY_OWN * 4; // bonus on powerup pickup
-      if (!this.player.ammo) this.player.ammo = {};
-      this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + grant;
-      if (this.player.ammo[wType]! > 0) {
-        this.player.currentWeapon = wType;
-        this.currentWeaponIndex = WEAPON_LIST.indexOf(wType);
-        this.player.burstQueue = 0;
-      }
-      this.pushPlayerMessage(`+${WEAPONS[wType].name}`, WEAPONS[wType].color, 2.5);
     }
   }
 
@@ -1853,13 +1836,12 @@ export class GameEngine {
     } else if (entity.type === EntityType.ASTEROID) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
         for (const comp of entity.dropComposition) {
-          if (comp.type === 'powerup') {
-            this.spawnPowerupDrop(pos, pv, comp.weapon);
-          } else if (comp.type === 'ammo') {
+          if (comp.type === 'ammo') {
             this.spawnAmmoDrop(pos, comp.weapon, comp.value, pv);
           } else if (comp.type === 'health') {
             this.spawnHealthDrop(pos, comp.value, pv);
           }
+          // 'powerup' entries no longer spawn — powerup drops have been removed
         }
       } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
         // Wave-scaled ammo drop — only some asteroids drop ammo
@@ -1867,18 +1849,6 @@ export class GameEngine {
         this.spawnAmmoDrop(pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
       }
 
-      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ASTEROID) {
-        this.spawnRandomPowerupDrop(pos, pv);
-      }
-
-    } else if (entity.type === EntityType.ENEMY) {
-      const tier = entity.enemyTier ?? 1;
-      if (Math.random() < DROP_CONFIG.POWERUP_CHANCE_ENEMY * tier) {
-        this.spawnRandomPowerupDrop(pos, pv);
-      }
-
-      // Enrage nearby survivors — losing a packmate makes the rest angrier.
-      this.triggerAggroNearby(entity.position);
     }
   }
 
@@ -1990,7 +1960,7 @@ export class GameEngine {
    * baseR controls visual size and should scale with the drop's value so
    * larger-value drops are physically bigger.
    */
-  private generateShardPolygon(type: 'ammo' | 'health' | 'powerup', baseR: number): Vector2[] {
+  private generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
     let numPoints: number;
     let radMin: number;
     let radMax: number;
@@ -2182,56 +2152,6 @@ export class GameEngine {
   }
 
   // Spawn a powerup drop for a specific weapon (used when a composite asteroid releases its stored weapons).
-  private spawnPowerupDrop(pos: Vector2, parentVelocity: Vector2 | undefined, weapon: WeaponType) {
-    if (!this.currentMap) return;
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    this.spawnRandomPowerupDrop(pos, parentVelocity, weapon);
-  }
-
-  private spawnRandomPowerupDrop(pos: Vector2, parentVelocity?: Vector2, specificWeapon?: WeaponType) {
-    if (!this.currentMap) return;
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    // BLASTER is always infinite — never drop it; pick from index 1 onward.
-    const pool = WEAPON_LIST.filter(w => w !== WeaponType.BLASTER);
-    const weaponType = (specificWeapon && specificWeapon !== WeaponType.BLASTER)
-      ? specificWeapon
-      : pool[Math.floor(Math.random() * pool.length)];
-    const weaponConfig = WEAPONS[weaponType];
-    const scatter = 20;
-    const scatterAngle = Math.random() * Math.PI * 2;
-    const scatterSpeed = 0.5 + Math.random() * 1.5;
-    const pvx = parentVelocity?.x ?? 0;
-    const pvy = parentVelocity?.y ?? 0;
-    const maxSpin = 2.5;
-    const dropRadius = 7; // fixed mid-range size for weapon powerups
-    const drop: GameEntity = {
-      id: `drop_powerup_${Date.now()}_${Math.random()}`,
-      type: EntityType.INTERACTABLE,
-      position: {
-        x: pos.x + (Math.random() - 0.5) * scatter * 2,
-        y: pos.y + (Math.random() - 0.5) * scatter * 2,
-      },
-      velocity: {
-        x: pvx * 0.3 + Math.cos(scatterAngle) * scatterSpeed,
-        y: pvy * 0.3 + Math.sin(scatterAngle) * scatterSpeed,
-      },
-      size: { x: dropRadius * 3, y: dropRadius * 3 },
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-      color: weaponConfig.color,
-      active: true,
-      health: 1,
-      maxHealth: 1,
-      mass: 5,
-      name: weaponConfig.name,
-      dropType: 'powerup',
-      dropWeapon: weaponType,
-      polygonPoints: this.generateShardPolygon('powerup', dropRadius),
-    };
-    this.currentMap.entities.push(drop);
-    this.activeDrops.push(drop);
-  }
-
   private loadMap(map: BaseMapLayer) {
       if (!map.initialized) {
           map.init();
