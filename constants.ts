@@ -453,7 +453,6 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
-  HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
   // General
   COLLECT_RADIUS:             30,   // world units
   LIFETIME:                20.0, // seconds before drop despawns
@@ -520,6 +519,15 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   1: 0.35, // Low
   2: 0.65, // Moderate
   3: 1     // High (current default)
+};
+
+// Health drop wave interval per difficulty — spawn one health drop every N waves.
+// Lower values = more frequent healing.  Add new keys here when adding difficulty levels.
+export const HEALTH_DROP_INTERVAL: Record<number, number> = {
+  0: 10,   // No enemies — same as easy (health drops still spawn for asteroid damage)
+  1: 10,   // Easy — every 10 waves
+  2: 15,   // Medium — every 15 waves
+  3: 20,   // Hard — every 20 waves
 };
 
 // Difficulty stat multipliers — scale individual enemy health and speed
