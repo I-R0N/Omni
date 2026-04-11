@@ -460,6 +460,9 @@ export class PhysicsSystem {
               const isPlayerShot = other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER;
               if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE
                       && other.type !== EntityType.PLAYER) return;
+              // Health drops: player passes through without a physics impulse.
+              // Collection is handled by proximity check in GameEngine each frame.
+              if (other.type === EntityType.PLAYER && drop.dropType === 'health') return;
           }
           // Glass shards: fall through — interact with all entity types.
       }

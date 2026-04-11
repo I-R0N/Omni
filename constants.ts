@@ -411,7 +411,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
 export { ASSETS };
 
 export const WAVE_CONSTANTS = {
-  GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
+  GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
 };
 
 // Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
@@ -426,16 +426,47 @@ export const WAVE_CONFIG = {
 };
 
 export const DROP_CONFIG = {
-  GOLD_PER_ASTEROID_SIZE:   0.2,  // gold = size * 0.2 → 4 (small) / 20 (large) — removed in PR 2
-  GOLD_PER_ENEMY_TIER:     10,    // gold = tier * 10 → 10/20/30 — removed in PR 2
-  POWERUP_CHANCE_ASTEROID:  0.01, // 1 % chance per asteroid
-  POWERUP_CHANCE_ENEMY:     0.05, // 5 % × tier → 5 %/10 %/15 %
-  COLLECT_RADIUS:          45,    // world units; matches existing weapon pickup
-  LIFETIME:                20.0,  // seconds before drop despawns
-  MAX_ACTIVE_DROPS:       100,    // hard cap; prevents spike from chain asteroid destruction
-  HEALTH_CHANCE_ENEMY:     0.2,  // 20% chance per enemy kill
-  HEALTH_HEAL_AMOUNT:      10,   // HP restored per health drop
+  // Ammo drop values
+  AMMO_PER_ENEMY_OWN:         3,    // own-color ammo units per enemy drop
+  AMMO_PER_ENEMY_NEXT:        2,    // next-color ammo units per enemy drop
+  AMMO_PER_ASTEROID:          4,    // ammo units per asteroid drop
+  // Drop-spawn probabilities
+  AMMO_DROP_CHANCE_ASTEROID:  0.45, // 45 % chance an asteroid drops ammo
+  AMMO_DROP_CHANCE_ENEMY_OWN: 0.55, // 55 % chance an enemy drops its own-color ammo
+  AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
+  // Health
+  HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
+  HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
+  // General
+  COLLECT_RADIUS:             30,   // world units
+  LIFETIME:                20.0, // seconds before drop despawns
+  MAX_ACTIVE_DROPS:       100,   // hard cap
 };
+
+// Maps each enemy subtype to the ammo type they drop (own-color) and the next tier.
+// RAMMER_1 is red (blaster color) — blaster is infinite, so they drop the first
+// ammo-based weapon (BURST) instead.
+export const ENEMY_AMMO_DROP: Record<EnemySubtype, { own: WeaponType; next: WeaponType }> = {
+  [EnemySubtype.RAMMER_1]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
+  [EnemySubtype.RAMMER_2]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
+  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.LASER     },
+  [EnemySubtype.SHOOTER_1]: { own: WeaponType.LASER,     next: WeaponType.LIGHTNING },
+  [EnemySubtype.SHOOTER_2]: { own: WeaponType.LIGHTNING, next: WeaponType.HOMING    },
+  [EnemySubtype.SHOOTER_3]: { own: WeaponType.HOMING,    next: WeaponType.CANNON    },
+};
+
+// Wave-scaled asteroid ammo progression — earlier waves give cheaper ammo,
+// later waves give rarer ammo.  Index into WEAPON_LIST (skip BLASTER at 0).
+export const ASTEROID_AMMO_PROGRESSION: WeaponType[] = [
+  WeaponType.BURST,     // waves 1–3
+  WeaponType.BURST,     // waves 4–6
+  WeaponType.SHOTGUN,   // waves 7–9
+  WeaponType.SHOTGUN,   // waves 10–12
+  WeaponType.LASER,     // waves 13–15
+  WeaponType.LIGHTNING, // waves 16–18
+  WeaponType.HOMING,    // waves 19–21
+  WeaponType.CANNON,    // waves 22+
+];
 
 /**
  * Compute the ammo-HUD slot layout for a given screen size.

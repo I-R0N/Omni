@@ -93,8 +93,8 @@ export type ShardType = 'asteroid' | 'tile';
 // ── Drop composition entry ────────────────────────────────────────────────────
 // Tracks drops stored inside a composite asteroid, including absorbed power-ups.
 export type DropCompositionEntry =
-  | { type: 'fuel' | 'gold' | 'health'; value: number }
-  | { type: 'powerup'; value: number; weapon: WeaponType };
+  | { type: 'ammo'; value: number; weapon: WeaponType }
+  | { type: 'health'; value: number };
 
 export interface GameEntity {
   id: string;
@@ -175,6 +175,9 @@ export interface GameEntity {
   // Powerup pickup
   powerupWeapon?: WeaponType;
 
+  // Per-weapon ammo-pickup flash: timer counts down from FLASH_DURATION → 0; amount shown as +N
+  ammoPickupFlash?: Partial<Record<WeaponType, { timer: number; amount: number }>>;
+
   // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
   ammo?: Partial<Record<WeaponType, number>>;
 
@@ -182,7 +185,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'fuel' | 'gold' | 'powerup' | 'health' | 'glass';
+  dropType?: 'ammo' | 'health' | 'glass';
   dropValue?: number;
   dropWeapon?: WeaponType;
 
