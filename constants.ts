@@ -252,7 +252,7 @@ export const LIGHTNING_RANGE = 500;                // initial target acquisition
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
 export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
 export const LIGHTNING_CHAIN_DAMAGE = [3, 2];       // damage per chain hop (index 0 = first chain, index 1 = second chain)
-export const LIGHTNING_ARC_LIFETIME = 0.2;          // seconds the visual arc persists
+export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 
 export const PROJECTILE_CONSTANTS = {
   SPEED: 3, // Reduced from 12
@@ -343,10 +343,10 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
-    cooldown: 0.8,
-    speed: 14,
-    damage: 4,         // direct hit damage; chain hops use LIGHTNING_DAMAGE_FALLOFF
-    lifetime: 1.5,
+    cooldown: 0.4,
+    speed: 8,
+    damage: 4,         // direct hit damage; chain hops use LIGHTNING_CHAIN_DAMAGE
+    lifetime: 2.5,
     color: '#22d3ee',  // Cyan — projectile that chains on impact
     size: 6,
     count: 1,

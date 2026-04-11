@@ -456,9 +456,9 @@ export class RenderSystem {
           }
           zigzag.push({ x: b.x, y: b.y });
 
-          // Draw outer glow
+          // Draw outer white glow
           ctx.globalAlpha = alpha * 0.5;
-          ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
           ctx.lineWidth = 6;
           ctx.beginPath();
           ctx.moveTo(zigzag[0].x, zigzag[0].y);
@@ -467,9 +467,9 @@ export class RenderSystem {
           }
           ctx.stroke();
 
-          // Draw bright core
+          // Draw cyan electric core
           ctx.globalAlpha = alpha;
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.9)';
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(zigzag[0].x, zigzag[0].y);
@@ -484,9 +484,9 @@ export class RenderSystem {
           const p = points[i];
           ctx.globalAlpha = alpha * 0.7;
           const nodeGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
-          nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-          nodeGrad.addColorStop(0.35, 'rgba(34, 211, 238, 0.5)');
-          nodeGrad.addColorStop(1, 'rgba(34, 211, 238, 0)');
+          nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+          nodeGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.4)');
+          nodeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
           ctx.fillStyle = nodeGrad;
           ctx.beginPath();
           ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
@@ -768,20 +768,20 @@ export class RenderSystem {
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
                     ctx.globalCompositeOperation = 'lighter';
 
-                    // Outer electric glow
+                    // Outer white glow
                     const elecR = r * 3.5;
                     const elecGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, elecR);
-                    elecGrad.addColorStop(0,   'rgba(255, 255, 255, 0.9)');
-                    elecGrad.addColorStop(0.15, 'rgba(34, 211, 238, 0.7)');
-                    elecGrad.addColorStop(0.4,  'rgba(34, 211, 238, 0.2)');
-                    elecGrad.addColorStop(1,    'rgba(34, 211, 238, 0)');
+                    elecGrad.addColorStop(0,   'rgba(255, 255, 255, 1.0)');
+                    elecGrad.addColorStop(0.15, 'rgba(255, 255, 255, 0.6)');
+                    elecGrad.addColorStop(0.4,  'rgba(255, 255, 255, 0.15)');
+                    elecGrad.addColorStop(1,    'rgba(255, 255, 255, 0)');
                     ctx.fillStyle = elecGrad;
                     ctx.beginPath();
                     ctx.arc(0, 0, elecR, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Small random electric tendrils around the projectile
-                    ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+                    // Cyan electric tendrils around the projectile
+                    ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)';
                     ctx.lineWidth = 1.5;
                     const tendrilCount = 4;
                     for (let ti = 0; ti < tendrilCount; ti++) {
