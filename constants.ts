@@ -242,7 +242,7 @@ export const PARTICLE_CONSTANTS = {
 };
 
 // ── Laser beam tuning ────────────────────────────────────────────────────────
-export const LASER_RANGE = 600;            // world units max beam length
+export const LASER_RANGE = 200;            // world units max beam length (short-range)
 export const LASER_DPS = 15;               // damage per second to each hit entity
 export const LASER_AMMO_DRAIN_RATE = 8;    // ammo units consumed per second while firing
 export const LASER_PIERCE = 3;             // max entities the beam can hit simultaneously

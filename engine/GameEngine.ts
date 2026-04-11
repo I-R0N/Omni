@@ -1391,7 +1391,8 @@ export class GameEngine {
       // Sort by distance, apply damage to first N within pierce count
       hitTargets.sort((a, b) => a.t - b.t);
 
-      let hitPoint: Vector2 | null = null;
+      let lastHitPoint: Vector2 | null = null;
+      let lastHitT = 0;
       const damageThisFrame = LASER_DPS * dt;
       const count = Math.min(hitTargets.length, LASER_PIERCE);
 
@@ -1400,9 +1401,8 @@ export class GameEngine {
           target.health -= damageThisFrame;
           target.hitFlash = 0.08;
 
-          if (!hitPoint) {
-              hitPoint = { x: target.position.x, y: target.position.y };
-          }
+          lastHitPoint = { x: target.position.x, y: target.position.y };
+          lastHitT = hitTargets[i].t;
 
           // Spawn damage text throttled (~4 per second per entity)
           if (Math.random() < dt * 4) {
@@ -1418,11 +1418,14 @@ export class GameEngine {
           }
       }
 
+      // Beam visual terminates at farthest hit entity, or max range if no hits
+      const beamLen = lastHitT > 0 ? lastHitT : LASER_RANGE;
+
       // Set beam state for renderer
       this.laserBeam.active = true;
       this.laserBeam.origin = { x: ox, y: oy };
-      this.laserBeam.end = { x: ex, y: ey };
-      this.laserBeam.hitPoint = hitPoint;
+      this.laserBeam.end = { x: ox + cosA * beamLen, y: oy + sinA * beamLen };
+      this.laserBeam.hitPoint = lastHitPoint;
 
       // Muzzle flash particles (1–2 per frame)
       this.spawnParticles({ x: ox, y: oy }, 1, '#ffffff', {
