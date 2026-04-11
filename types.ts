@@ -209,6 +209,17 @@ export interface GameEntity {
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.
   dropComposition?: DropCompositionEntry[];
+
+  // Lightning arc rendering — when true, arcPoints holds the chain vertices
+  isLightningArc?: boolean;
+  arcPoints?: Vector2[];
+}
+
+export interface LaserBeamState {
+  active: boolean;
+  origin: Vector2;
+  end: Vector2;
+  hitPoint: Vector2 | null; // world position of first blocked hit (for bloom)
 }
 
 export interface CameraState {

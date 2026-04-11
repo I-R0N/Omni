@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, LaserBeamState } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
@@ -122,7 +122,8 @@ export class RenderSystem {
     damageTexts?: DamageText[],
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
-    player?: GameEntity
+    player?: GameEntity,
+    laserBeam?: LaserBeamState
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -227,6 +228,11 @@ export class RenderSystem {
 
     // 4b. Render Particles — single composite-op switch for the whole batch
     this.renderParticles(ctx, this._particleBuffer);
+
+    // 4c. Render laser beam (world space, additive)
+    if (laserBeam?.active) {
+        this.renderLaserBeam(ctx, laserBeam);
+    }
 
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
@@ -342,6 +348,13 @@ export class RenderSystem {
       ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < particles.length; i++) {
           const p = particles[i];
+
+          // Lightning arc particles use a dedicated renderer
+          if (p.isLightningArc) {
+              this.renderLightningArc(ctx, p);
+              continue;
+          }
+
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
           ctx.globalAlpha = lifeRatio;
           ctx.fillStyle = p.color;
@@ -351,6 +364,138 @@ export class RenderSystem {
       }
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
+  }
+
+  // ── Laser beam rendering ──────────────────────────────────────────────────
+
+  private renderLaserBeam(ctx: CanvasRenderingContext2D, beam: LaserBeamState) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      const { origin, end, hitPoint } = beam;
+
+      // Outer green glow (~6px)
+      ctx.strokeStyle = 'rgba(74, 222, 128, 0.4)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+
+      // Inner white core (~2px)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+
+      // Muzzle flash at origin
+      const muzzleGrad = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 12);
+      muzzleGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      muzzleGrad.addColorStop(0.4, 'rgba(74, 222, 128, 0.6)');
+      muzzleGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
+      ctx.fillStyle = muzzleGrad;
+      ctx.beginPath();
+      ctx.arc(origin.x, origin.y, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hit point bloom
+      if (hitPoint) {
+          const bloomGrad = ctx.createRadialGradient(hitPoint.x, hitPoint.y, 0, hitPoint.x, hitPoint.y, 18);
+          bloomGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+          bloomGrad.addColorStop(0.3, 'rgba(74, 222, 128, 0.5)');
+          bloomGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
+          ctx.fillStyle = bloomGrad;
+          ctx.beginPath();
+          ctx.arc(hitPoint.x, hitPoint.y, 18, 0, Math.PI * 2);
+          ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+  }
+
+  // ── Lightning arc rendering ─────────────────────────────────────────────
+
+  private renderLightningArc(ctx: CanvasRenderingContext2D, particle: GameEntity) {
+      const points = particle.arcPoints;
+      if (!points || points.length < 2) return;
+
+      const lifeRatio = (particle.lifetime || 0) / (particle.maxLifetime || 1);
+      const alpha = lifeRatio; // fade over lifetime
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      // Draw jagged arc between each pair of chain points
+      for (let seg = 0; seg < points.length - 1; seg++) {
+          const a = points[seg];
+          const b = points[seg + 1];
+
+          // Generate zigzag midpoints perpendicular to the segment
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len < 1) continue;
+
+          // Perpendicular direction
+          const nx = -dy / len;
+          const ny = dx / len;
+
+          const segCount = 5; // number of subdivisions
+          const zigzag: Vector2[] = [{ x: a.x, y: a.y }];
+
+          for (let i = 1; i < segCount; i++) {
+              const t = i / segCount;
+              const mx = a.x + dx * t;
+              const my = a.y + dy * t;
+              // Random perpendicular offset (scales with segment length)
+              const offset = (Math.random() - 0.5) * len * 0.25;
+              zigzag.push({ x: mx + nx * offset, y: my + ny * offset });
+          }
+          zigzag.push({ x: b.x, y: b.y });
+
+          // Draw outer glow
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(zigzag[0].x, zigzag[0].y);
+          for (let i = 1; i < zigzag.length; i++) {
+              ctx.lineTo(zigzag[i].x, zigzag[i].y);
+          }
+          ctx.stroke();
+
+          // Draw bright core
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(zigzag[0].x, zigzag[0].y);
+          for (let i = 1; i < zigzag.length; i++) {
+              ctx.lineTo(zigzag[i].x, zigzag[i].y);
+          }
+          ctx.stroke();
+      }
+
+      // Small bloom at each chain node
+      for (let i = 1; i < points.length; i++) {
+          const p = points[i];
+          ctx.globalAlpha = alpha * 0.7;
+          const nodeGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
+          nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+          nodeGrad.addColorStop(0.35, 'rgba(34, 211, 238, 0.5)');
+          nodeGrad.addColorStop(1, 'rgba(34, 211, 238, 0)');
+          ctx.fillStyle = nodeGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+          ctx.fill();
+      }
+
+      ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
   }
 
   private renderEntities(

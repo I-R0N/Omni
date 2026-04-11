@@ -241,6 +241,18 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
+// ── Laser beam tuning ────────────────────────────────────────────────────────
+export const LASER_RANGE = 600;            // world units max beam length
+export const LASER_DPS = 15;               // damage per second to each hit entity
+export const LASER_AMMO_DRAIN_RATE = 8;    // ammo units consumed per second while firing
+export const LASER_PIERCE = 3;             // max entities the beam can hit simultaneously
+
+// ── Lightning chain tuning ───────────────────────────────────────────────────
+export const LIGHTNING_RANGE = 500;                // initial target acquisition range
+export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
+export const LIGHTNING_CHAIN_COUNT = 3;             // total chain hops (including first target)
+export const LIGHTNING_DAMAGE_FALLOFF = [4, 3, 2];  // damage per hop (index 0 = first target)
+
 export const PROJECTILE_CONSTANTS = {
   SPEED: 3, // Reduced from 12
   SIZE: 8,
@@ -316,29 +328,29 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.LASER]: {
     type: WeaponType.LASER,
     name: 'Laser',
-    cooldown: 0.08,
-    speed: 25,
-    damage: 1,
-    lifetime: 0.25,
-    color: '#4ade80', // Green — continuous short-range beam (full impl in PR 3)
+    cooldown: 0,       // continuous beam — no per-shot cooldown
+    speed: 0,          // not a projectile
+    damage: 0,         // damage handled by raycast DPS
+    lifetime: 0,
+    color: '#4ade80',  // Green — continuous beam weapon
     size: 4,
     count: 1,
     spread: 0,
     recoil: 0,
-    pierce: 999
+    pierce: 0
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.8,
-    speed: 20,
-    damage: 4,
-    lifetime: 0.5,
-    color: '#22d3ee', // Cyan — chain hop behavior in PR 3
+    speed: 0,          // not a projectile — chain raycast
+    damage: 4,         // base damage (hop 1); falloff in LIGHTNING_DAMAGE_FALLOFF
+    lifetime: 0.2,     // visual arc lifetime
+    color: '#22d3ee',  // Cyan — chain-hop weapon
     size: 5,
     count: 1,
-    spread: 5,
-    recoil: 0.2,
+    spread: 0,
+    recoil: 0,
     pierce: 0
   },
   [WeaponType.HOMING]: {

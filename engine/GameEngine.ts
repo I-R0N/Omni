@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, LaserBeamState } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LASER_RANGE, LASER_DPS, LASER_AMMO_DRAIN_RATE, LASER_PIERCE, LIGHTNING_RANGE, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_DAMAGE_FALLOFF } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -71,6 +71,11 @@ export class GameEngine {
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
   private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
+
+  // Laser beam state — shared with RenderSystem via getter
+  private laserBeam: LaserBeamState = { active: false, origin: { x: 0, y: 0 }, end: { x: 0, y: 0 }, hitPoint: null };
+
+  public getLaserBeamState(): LaserBeamState { return this.laserBeam; }
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -830,6 +835,7 @@ export class GameEngine {
 
     this.updateHomingProjectiles(dt);
     this.updateProjectileTrails(dt);
+    this.updateLaserBeam(dt);
 
     // Damage Text cleanup
     let dTextIdx = 0;
@@ -1111,6 +1117,9 @@ export class GameEngine {
 
       let weaponType = this.player.currentWeapon || WeaponType.BLASTER;
 
+      // Laser is handled continuously in updateLaserBeam — skip tap-fire
+      if (weaponType === WeaponType.LASER) return;
+
       // If non-blaster and out of ammo, auto-fallback to blaster
       if (weaponType !== WeaponType.BLASTER && (this.player.ammo?.[weaponType] ?? 0) <= 0) {
           weaponType = WeaponType.BLASTER;
@@ -1121,6 +1130,16 @@ export class GameEngine {
 
       const config = WEAPONS[weaponType];
       this.player.weaponCooldown = config.cooldown;
+
+      // Lightning: chain-raycast instead of spawning a projectile
+      if (weaponType === WeaponType.LIGHTNING) {
+          if (this.player.ammo) {
+              const before = this.player.ammo[weaponType] ?? 0;
+              this.player.ammo[weaponType] = Math.max(0, before - 1);
+          }
+          this.fireLightningChain();
+          return;
+      }
 
       // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
       if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
@@ -1294,6 +1313,216 @@ export class GameEngine {
               });
           }
       }
+  }
+
+  // ─── Laser beam (continuous raycast) ────────────────────────────────────────
+
+  private updateLaserBeam(dt: number) {
+      if (!this.currentMap) { this.laserBeam.active = false; return; }
+
+      const weaponType = this.player.currentWeapon || WeaponType.BLASTER;
+      const hasAmmo = (this.player.ammo?.[WeaponType.LASER] ?? 0) > 0;
+      const isFiring = this.input.isActionPressed()
+                    && weaponType === WeaponType.LASER
+                    && hasAmmo
+                    && !this.player.isExploding;
+
+      if (!isFiring) {
+          this.laserBeam.active = false;
+          return;
+      }
+
+      // Drain ammo continuously
+      if (this.player.ammo) {
+          const before = this.player.ammo[WeaponType.LASER] ?? 0;
+          this.player.ammo[WeaponType.LASER] = Math.max(0, before - LASER_AMMO_DRAIN_RATE * dt);
+          if (this.player.ammo[WeaponType.LASER] <= 0) {
+              this.laserBeam.active = false;
+              // Auto-fallback to blaster when ammo runs out
+              this.player.currentWeapon = WeaponType.BLASTER;
+              this.currentWeaponIndex = WEAPON_LIST.indexOf(WeaponType.BLASTER);
+              return;
+          }
+      }
+
+      // Beam direction = player rotation
+      const angle = this.player.rotation;
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+
+      // Muzzle offset (same as spawnProjectileFromConfig)
+      const muzzleBase = Math.max(this.player.size.x, this.player.size.y);
+      const muzzleOffset = muzzleBase * 0.6;
+      const ox = this.player.position.x + cosA * muzzleOffset;
+      const oy = this.player.position.y + sinA * muzzleOffset;
+
+      // Beam endpoint (full range)
+      const ex = ox + cosA * LASER_RANGE;
+      const ey = oy + sinA * LASER_RANGE;
+
+      // Raycast: find entities intersecting the beam segment
+      const entities = this.currentMap.entities;
+      const hitTargets: { entity: GameEntity; t: number }[] = [];
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.isExploding) continue;
+          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+
+          // Circle-vs-ray intersection
+          const radius = Math.max(e.size.x, e.size.y) / 2;
+          const dx = e.position.x - ox;
+          const dy = e.position.y - oy;
+          // Project entity center onto beam direction
+          const proj = dx * cosA + dy * sinA;
+          if (proj < 0 || proj > LASER_RANGE) continue;
+          // Perpendicular distance
+          const perp = Math.abs(dx * sinA - dy * cosA);
+          if (perp > radius) continue;
+
+          hitTargets.push({ entity: e, t: proj });
+      }
+
+      // Sort by distance, apply damage to first N within pierce count
+      hitTargets.sort((a, b) => a.t - b.t);
+
+      let hitPoint: Vector2 | null = null;
+      const damageThisFrame = LASER_DPS * dt;
+      const count = Math.min(hitTargets.length, LASER_PIERCE);
+
+      for (let i = 0; i < count; i++) {
+          const target = hitTargets[i].entity;
+          target.health -= damageThisFrame;
+          target.hitFlash = 0.08;
+
+          if (!hitPoint) {
+              hitPoint = { x: target.position.x, y: target.position.y };
+          }
+
+          // Spawn damage text throttled (~4 per second per entity)
+          if (Math.random() < dt * 4) {
+              this.spawnDamageText(target.position, damageThisFrame, target);
+          }
+
+          if (target.health <= 0) {
+              target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
+              target.lastImpactDamage = damageThisFrame;
+              if (!target.isExploding) {
+                  this.handleEntityDeath(target);
+              }
+          }
+      }
+
+      // Set beam state for renderer
+      this.laserBeam.active = true;
+      this.laserBeam.origin = { x: ox, y: oy };
+      this.laserBeam.end = { x: ex, y: ey };
+      this.laserBeam.hitPoint = hitPoint;
+
+      // Muzzle flash particles (1–2 per frame)
+      this.spawnParticles({ x: ox, y: oy }, 1, '#ffffff', {
+          speedMin: 1, speedMax: 3, sizeMin: 1, sizeMax: 2,
+          lifetimeMin: 0.05, lifetimeMax: 0.1,
+          spreadAngle: angle, spreadCone: Math.PI / 6,
+      });
+  }
+
+  // ─── Lightning chain (chain-hop raycast) ──────────────────────────────────
+
+  private fireLightningChain() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const px = this.player.position.x;
+      const py = this.player.position.y;
+
+      // Find nearest valid target within LIGHTNING_RANGE
+      let firstTarget: GameEntity | null = null;
+      let firstDistSq = LIGHTNING_RANGE * LIGHTNING_RANGE;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.isExploding) continue;
+          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+          const dx = e.position.x - px;
+          const dy = e.position.y - py;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < firstDistSq) {
+              firstDistSq = d2;
+              firstTarget = e;
+          }
+      }
+
+      if (!firstTarget) return; // No valid target in range
+
+      // Build chain
+      const chain: GameEntity[] = [firstTarget];
+      const hitSet = new Set<string>([firstTarget.id]);
+
+      for (let hop = 1; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+          const prev = chain[chain.length - 1];
+          let nextTarget: GameEntity | null = null;
+          let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
+
+          for (let i = 0; i < entities.length; i++) {
+              const e = entities[i];
+              if (!e.active || e.isExploding) continue;
+              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+              if (hitSet.has(e.id)) continue;
+              const dx = e.position.x - prev.position.x;
+              const dy = e.position.y - prev.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < nextDistSq) {
+                  nextDistSq = d2;
+                  nextTarget = e;
+              }
+          }
+
+          if (!nextTarget) break;
+          chain.push(nextTarget);
+          hitSet.add(nextTarget.id);
+      }
+
+      // Apply damage to each chain target
+      for (let i = 0; i < chain.length; i++) {
+          const target = chain[i];
+          const dmg = LIGHTNING_DAMAGE_FALLOFF[i] ?? LIGHTNING_DAMAGE_FALLOFF[LIGHTNING_DAMAGE_FALLOFF.length - 1];
+          target.health -= dmg;
+          target.hitFlash = 0.15;
+          this.spawnDamageText(target.position, dmg, target);
+
+          if (target.health <= 0 && !target.isExploding) {
+              target.lastImpactDamage = dmg;
+              this.handleEntityDeath(target);
+          }
+      }
+
+      // Build arc points: player → target1 → target2 → target3
+      const arcPoints: Vector2[] = [{ x: px, y: py }];
+      for (const t of chain) {
+          arcPoints.push({ x: t.position.x, y: t.position.y });
+      }
+
+      // Spawn a single PARTICLE entity carrying the arc data for rendering
+      const life = WEAPONS[WeaponType.LIGHTNING].lifetime;
+      this.currentMap.entities.push({
+          id: `lightning_${Date.now()}_${Math.random()}`,
+          type: EntityType.PARTICLE,
+          position: { x: px, y: py },
+          velocity: { x: 0, y: 0 },
+          size: { x: 1, y: 1 },
+          rotation: 0,
+          color: WEAPONS[WeaponType.LIGHTNING].color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: life,
+          maxLifetime: life,
+          mass: 0,
+          isLightningArc: true,
+          arcPoints,
+      });
+
+      this.handleScreenShake(3);
   }
 
   // ─── Collision-based stick bonds ───────────────────────────────────────────
@@ -2175,7 +2404,8 @@ export class GameEngine {
           this.damageTexts,
           this.player.position,
           this.playerMessages,
-          this.player
+          this.player,
+          this.laserBeam
       );
   }
 }
