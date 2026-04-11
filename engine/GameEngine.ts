@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -110,7 +110,11 @@ export class GameEngine {
       trail: [],
       sprite: ASSETS.PLAYER_SHIP,
       ammo: {},  // BLASTER is always ∞ (no entry); other weapons stored here when unlocked
-      gold: 0
+      gold: 0,
+      shield: SHIELD_CONSTANTS.MAX_CHARGE,
+      maxShield: SHIELD_CONSTANTS.MAX_CHARGE,
+      shieldRechargeTimer: 0,
+      shieldHitFlash: 0
     };
 
     this.camera = {
@@ -192,6 +196,9 @@ export class GameEngine {
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
+      this.player.shield = this.player.maxShield;
+      this.player.shieldRechargeTimer = 0;
+      this.player.shieldHitFlash = 0;
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
@@ -278,6 +285,8 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
+      shield: this.player.shield,
+      maxShield: this.player.maxShield,
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -1090,6 +1099,9 @@ export class GameEngine {
       this.player.isExploding = false;
       this.player.explosionTimer = undefined;
       this.player.health = this.player.maxHealth;
+      this.player.shield = this.player.maxShield;
+      this.player.shieldRechargeTimer = 0;
+      this.player.shieldHitFlash = 0;
       this.player.active = true;
       this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };

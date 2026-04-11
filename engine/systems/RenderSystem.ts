@@ -1,8 +1,12 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+
+const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
+const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+const SHIELD_COLLISION_MULT = SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
 // Results are cached to avoid per-frame string parsing.
@@ -836,6 +840,26 @@ export class RenderSystem {
           }
       }
 
+      // Shield hit ring — visible only on contact; radius matches physical collision
+      if (entity.type === EntityType.PLAYER && entity.shieldHitFlash && entity.shieldHitFlash > 0) {
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          // Exact match: collision uses (size/2) * COLLISION_MULTIPLIER as half-extent
+          const ringRadius = (maxDim / 2) * SHIELD_COLLISION_MULT;
+          const flashRatio = entity.shieldHitFlash / SHIELD_HIT_FLASH_DURATION;
+          // Instant full brightness that fades out
+          const alpha = Math.min(1.0, flashRatio * 3.0);
+          // Undo entity rotation so the ring is axis-aligned
+          const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          ctx.rotate(-rot);
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = SHIELD_COLOR;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.rotate(rot);
+      }
+
       ctx.restore();
 
       // Render Debug Acceleration Vector (debug mode only)
@@ -912,6 +936,17 @@ export class RenderSystem {
       }
 
       ctx.fillRect(x, y, width * healthPct, height);
+
+      // Shield bar — thin blue bar below health bar (player only)
+      if (isPlayer && entity.maxShield && entity.maxShield > 0) {
+          const shieldY = y + height + 1;
+          const shieldHeight = height - 1;
+          const shieldPct = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.fillRect(x, shieldY, width, shieldHeight);
+          ctx.fillStyle = SHIELD_COLOR;
+          ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
+      }
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[]) {

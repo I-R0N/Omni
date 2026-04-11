@@ -132,6 +132,10 @@ export interface GameEntity {
   polygonPoints?: Vector2[]; // For physics/collision shape
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
+  shield?: number;
+  maxShield?: number;
+  shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
+  shieldHitFlash?: number; // Visual timer for shield ring visibility
   sprite?: string; // URL or DataURI for image rendering
   lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
   lastImpactDamage?: number;   // Damage of the killing blow (used to scale shard count/size)
@@ -232,6 +236,8 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   weaponCount?: number;
+  shield?: number;
+  maxShield?: number;
 }
 
 export interface DamageText {
