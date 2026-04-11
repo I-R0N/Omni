@@ -584,7 +584,9 @@ export class GameEngine {
           });
       }
 
-      this.spawnDrops(entity);
+      if (!entity.suppressDrops) {
+          this.spawnDrops(entity);
+      }
   };
 
   private handleAsteroidRespawn(config: any) {
@@ -1372,7 +1374,7 @@ export class GameEngine {
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (!e.active || e.isExploding) continue;
-          if (e.type !== EntityType.ENEMY) continue;
+          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
 
           // Circle-vs-ray intersection
           const radius = Math.max(e.size.x, e.size.y) / 2;
@@ -1413,6 +1415,7 @@ export class GameEngine {
               target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
               target.lastImpactDamage = damageThisFrame;
               if (!target.isExploding) {
+                  target.suppressDrops = true;
                   target.active = false;
                   this.handleEntityDeath(target);
               }

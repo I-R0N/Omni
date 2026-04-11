@@ -216,6 +216,9 @@ export interface GameEntity {
 
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
+
+  // When true, handleEntityDeath skips drop spawning (e.g. laser kills)
+  suppressDrops?: boolean;
 }
 
 export interface LaserBeamState {
