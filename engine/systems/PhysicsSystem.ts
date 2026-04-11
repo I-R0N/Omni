@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -79,6 +79,18 @@ export class PhysicsSystem {
       // Visuals: Tick down flash timer
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
+      }
+      // Shield: tick down hit flash and recharge timer, then recharge
+      if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
+          entity.shieldHitFlash -= dt;
+      }
+      if (entity.shieldRechargeTimer !== undefined && entity.shieldRechargeTimer > 0) {
+          entity.shieldRechargeTimer -= dt;
+      }
+      if (entity.shield !== undefined && entity.maxShield !== undefined
+          && entity.shield < entity.maxShield
+          && (entity.shieldRechargeTimer ?? 0) <= 0) {
+          entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
       }
 
       // OPTIMIZATION: Skip Integration for Static Geometry
@@ -349,8 +361,11 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       // 0. BROADPHASE: Fast Circle Check
-      const rA = Math.max(a.size.x, a.size.y) / 2;
-      const rB = Math.max(b.size.x, b.size.y) / 2;
+      let rA = Math.max(a.size.x, a.size.y) / 2;
+      let rB = Math.max(b.size.x, b.size.y) / 2;
+      // Expand player radius when shield is active
+      if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       const dx = a.position.x - b.position.x;
       const dy = a.position.y - b.position.y;
       const distSq = dx*dx + dy*dy;
@@ -477,8 +492,20 @@ export class PhysicsSystem {
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
 
-          target.health -= (proj.damage || 1);
-          target.hitFlash = 0.1;
+          let projDmg = proj.damage || 1;
+
+          // Shield absorbs damage for the player
+          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+              const absorbed = Math.min(target.shield!, projDmg);
+              target.shield! -= absorbed;
+              projDmg -= absorbed;
+              target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+              target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+          }
+          if (projDmg > 0) {
+              target.health -= projDmg;
+              target.hitFlash = 0.1;
+          }
 
           if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
               const shakeAmount = target.type === EntityType.PLAYER
@@ -537,12 +564,31 @@ export class PhysicsSystem {
       if (a.type === EntityType.ENEMY || b.type === EntityType.ENEMY) {
           const target = a.type === EntityType.ENEMY ? b : a;
           if (target.type === EntityType.PLAYER) {
-              if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
-              target.health -= COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              target.hitFlash = 0.2;
-              if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-              if (target.health <= 0 && onDeath) {
-                  onDeath(target);
+              const enemy = a.type === EntityType.ENEMY ? a : b;
+              const rdx = enemy.velocity.x - target.velocity.x;
+              const rdy = enemy.velocity.y - target.velocity.y;
+              const ramImpact = Math.sqrt(rdx * rdx + rdy * rdy);
+              // Below shield damage threshold: contact flash only, no damage
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
+                  // flash already handled by the general contact flash below
+              } else {
+                  let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+                  if ((target.shield ?? 0) > 0) {
+                      const absorbed = Math.min(target.shield!, ramDmg);
+                      target.shield! -= absorbed;
+                      ramDmg -= absorbed;
+                      target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                      target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  }
+                  if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
+                  if (ramDmg > 0) {
+                      target.health -= ramDmg;
+                      target.hitFlash = 0.2;
+                  }
+                  if (onShake) onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+                  if (target.health <= 0 && onDeath) {
+                      onDeath(target);
+                  }
               }
           }
       }
@@ -595,13 +641,20 @@ export class PhysicsSystem {
               onShake(Math.min(impactSpeed, COLLISION_CONFIG.SHAKE.HEAVY) * COLLISION_CONFIG.SHAKE.CAP_MULTIPLIER);
           }
       }
+      // Shield contact flash — any collision lights up the shield ring
+      if (isPlayerCollision) {
+          const player = a.type === EntityType.PLAYER ? a : b;
+          if ((player.shield ?? 0) > 0) {
+              player.shieldHitFlash = Math.max(player.shieldHitFlash ?? 0, SHIELD_CONSTANTS.CONTACT_FLASH_DURATION);
+          }
+      }
 
       // Structure Crashing Logic
       if ((a.type === EntityType.PLAYER && b.type === EntityType.STRUCTURE) || (b.type === EntityType.PLAYER && a.type === EntityType.STRUCTURE)) {
           const player = a.type === EntityType.PLAYER ? a : b;
           const structure = a.type === EntityType.STRUCTURE ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
-          
+
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
               structure.health = 0;
               structure.active = false;
@@ -611,11 +664,22 @@ export class PhysicsSystem {
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
-              return; 
-          } else {
-              if (onDamage) onDamage(player.position, COLLISION_CONFIG.DAMAGE.MINOR_IMPACT, player);
-              player.health -= COLLISION_CONFIG.DAMAGE.MINOR_IMPACT;
-              player.hitFlash = 0.2;
+              return;
+          } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
+              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              player.health -= envDmg;
+              player.hitFlash = 0.1;
+          }
+      }
+
+      // Asteroid vs Player — speed-gated environmental damage (bypasses shield)
+      if ((a.type === EntityType.PLAYER && b.type === EntityType.ASTEROID) || (b.type === EntityType.PLAYER && a.type === EntityType.ASTEROID)) {
+          const player = a.type === EntityType.PLAYER ? a : b;
+          const impactSpeed = Math.abs(velAlongNormal);
+          if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
+              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              player.health -= envDmg;
+              player.hitFlash = 0.1;
           }
       }
       
@@ -638,20 +702,26 @@ export class PhysicsSystem {
   // --- OPTIMIZED SAT HELPERS ---
   private fillVertices(e: GameEntity, buffer: Vector2[]): number {
       let count = 0;
+      // Shield expands the player's collision shape
+      const shieldScale = (e.id === 'player' && (e.shield ?? 0) > 0)
+          ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
+
       if (e.polygonPoints && e.polygonPoints.length > 0) {
           const cos = Math.cos(e.rotation);
           const sin = Math.sin(e.rotation);
-          
+
           for (let i = 0; i < e.polygonPoints.length; i++) {
               if (count >= buffer.length) break;
               const p = e.polygonPoints[i];
-              buffer[count].x = e.position.x + (p.x * cos - p.y * sin);
-              buffer[count].y = e.position.y + (p.x * sin + p.y * cos);
+              const px = p.x * shieldScale;
+              const py = p.y * shieldScale;
+              buffer[count].x = e.position.x + (px * cos - py * sin);
+              buffer[count].y = e.position.y + (px * sin + py * cos);
               count++;
           }
       } else {
-          const w = e.size.x / 2;
-          const h = e.size.y / 2;
+          const w = (e.size.x / 2) * shieldScale;
+          const h = (e.size.y / 2) * shieldScale;
           buffer[0].x = e.position.x - w; buffer[0].y = e.position.y - h;
           buffer[1].x = e.position.x + w; buffer[1].y = e.position.y - h;
           buffer[2].x = e.position.x + w; buffer[2].y = e.position.y + h;

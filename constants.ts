@@ -112,6 +112,12 @@ export const COLLISION_CONFIG = {
     STRUCTURE_IMPACT: 10,
     MINOR_IMPACT: 1
   },
+  // Environmental damage (tiles & asteroids) — speed-gated so being
+  // stuck between objects doesn't drain health.
+  ENV_DAMAGE: {
+    SPEED_THRESHOLD: 1.5,  // Minimum impact speed to take any damage
+    MULTIPLIER: 0.15,      // damage = impactSpeed × multiplier (fractional HP)
+  },
 
   // Screen Shake Intensity
   SHAKE: {
@@ -410,6 +416,17 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // --- ASSETS ---
 export { ASSETS };
 
+export const SHIELD_CONSTANTS = {
+  MAX_CHARGE: 50,            // Shield capacity (half of 100 HP)
+  RECHARGE_RATE: 10,          // Points/sec — full recharge in ~5s
+  RECHARGE_DELAY: 2.0,       // Brief pause after last hit before recharge kicks in
+  HIT_FLASH_DURATION: 1.3,   // How long the shield ring stays visible after a hit
+  CONTACT_FLASH_DURATION: 0.45, // Shorter flash for non-damaging contact
+  COLOR: '#60a5fa',          // Blue-400
+  COLLISION_MULTIPLIER: 1.8, // Player collision radius multiplier when shield > 0
+  DAMAGE_THRESHOLD: 2.0,     // Min impact speed to actually drain shield (below = flash only)
+};
+
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
 };
@@ -436,7 +453,6 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
-  HEALTH_WAVE_INTERVAL:        5,   // spawn one health drop every N waves (wave 5, 10, ...)
   // General
   COLLECT_RADIUS:             30,   // world units
   LIFETIME:                20.0, // seconds before drop despawns
@@ -503,6 +519,15 @@ export const DIFFICULTY_SCALES: Record<number, number> = {
   1: 0.35, // Low
   2: 0.65, // Moderate
   3: 1     // High (current default)
+};
+
+// Health drop wave interval per difficulty — spawn one health drop every N waves.
+// Lower values = more frequent healing.  Add new keys here when adding difficulty levels.
+export const HEALTH_DROP_INTERVAL: Record<number, number> = {
+  0: 10,   // No enemies — same as easy (health drops still spawn for asteroid damage)
+  1: 10,   // Easy — every 10 waves
+  2: 15,   // Medium — every 15 waves
+  3: 20,   // Hard — every 20 waves
 };
 
 // Difficulty stat multipliers — scale individual enemy health and speed
