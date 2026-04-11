@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, LaserBeamState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LASER_RANGE, LASER_DPS, LASER_AMMO_DRAIN_RATE, LASER_PIERCE, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LASER_RANGE, LASER_DPS, LASER_AMMO_DRAIN_RATE, LASER_PIERCE, LASER_HEAT_RATE, LASER_HEAT_DECAY_RATE, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1334,6 +1334,13 @@ export class GameEngine {
                     && hasAmmo
                     && !this.player.isExploding;
 
+      // Decay laser heat on all asteroids every frame (even when not firing)
+      for (const e of this.currentMap.entities) {
+          if (e.type === EntityType.ASTEROID && e.laserHeat && e.laserHeat > 0) {
+              e.laserHeat = Math.max(0, e.laserHeat - LASER_HEAT_DECAY_RATE * dt);
+          }
+      }
+
       if (!isFiring) {
           this.laserBeam.active = false;
           return;
@@ -1375,9 +1382,7 @@ export class GameEngine {
           const e = entities[i];
           if (!e.active || e.isExploding) continue;
           if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
-
-          // Skip small asteroid shards — let debris scatter visually
-          if (e.type === EntityType.ASTEROID && e.size.x < 30) continue;
+          if (e.laserImmune) continue;
 
           // Circle-vs-ray intersection
           const radius = Math.max(e.size.x, e.size.y) / 2;
@@ -1393,7 +1398,7 @@ export class GameEngine {
           hitTargets.push({ entity: e, t: proj });
       }
 
-      // Sort by distance, apply damage to first N within pierce count
+      // Sort by distance, apply damage/heat to first N within pierce count
       hitTargets.sort((a, b) => a.t - b.t);
 
       let lastHitPoint: Vector2 | null = null;
@@ -1403,24 +1408,39 @@ export class GameEngine {
 
       for (let i = 0; i < count; i++) {
           const target = hitTargets[i].entity;
-          target.health -= damageThisFrame;
-          target.hitFlash = 0.08;
 
           lastHitPoint = { x: target.position.x, y: target.position.y };
           lastHitT = hitTargets[i].t;
 
-          // Show accumulated DPS as damage text (~2 per second per entity)
-          if (Math.random() < dt * 2) {
-              this.spawnDamageText(target.position, LASER_DPS * 0.5, target);
-          }
+          if (target.type === EntityType.ASTEROID) {
+              // Asteroids accumulate heat instead of taking direct damage
+              target.laserHeat = (target.laserHeat ?? 0) + LASER_HEAT_RATE * dt;
 
-          if (target.health <= 0) {
-              target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
-              target.lastImpactDamage = damageThisFrame;
-              if (!target.isExploding) {
+              if (target.laserHeat >= 1.0) {
+                  // Asteroid explodes from overheating — mark immune so shards inherit it
+                  target.laserImmune = true;
+                  target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
+                  target.lastImpactDamage = 5;
                   target.suppressDrops = true;
+                  target.health = 0;
                   target.active = false;
                   this.handleEntityDeath(target);
+              }
+          } else {
+              // Enemies take direct DPS
+              target.health -= damageThisFrame;
+              target.hitFlash = 0.08;
+
+              if (Math.random() < dt * 2) {
+                  this.spawnDamageText(target.position, LASER_DPS * 0.5, target);
+              }
+
+              if (target.health <= 0) {
+                  target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
+                  target.lastImpactDamage = damageThisFrame;
+                  if (!target.isExploding) {
+                      this.handleEntityDeath(target);
+                  }
               }
           }
       }
@@ -1920,6 +1940,7 @@ export class GameEngine {
               polygonPoints: points,
               mass:          newSize,
               sprite:        parent.sprite,
+              laserImmune:   parent.laserImmune || undefined,
           });
       }
 

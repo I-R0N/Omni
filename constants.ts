@@ -246,6 +246,8 @@ export const LASER_RANGE = 200;            // world units max beam length (short
 export const LASER_DPS = 15;               // damage per second to each hit entity
 export const LASER_AMMO_DRAIN_RATE = 20;   // ammo units consumed per second while firing
 export const LASER_PIERCE = 3;             // max entities the beam can hit simultaneously
+export const LASER_HEAT_RATE = 0.6;        // heat per second on asteroids (1.0 = explode)
+export const LASER_HEAT_DECAY_RATE = 0.2;  // heat lost per second when laser stops hitting
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_RANGE = 500;                // initial target acquisition range

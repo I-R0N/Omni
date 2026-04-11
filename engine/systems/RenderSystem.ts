@@ -726,6 +726,45 @@ export class RenderSystem {
                     ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
                     ctx.fill();
 
+                    // ── Laser heat glow (green → orange → white) ─────────────
+                    const heat = entity.laserHeat ?? 0;
+                    if (heat > 0.01 && !isFlash) {
+                        // Color ramp: green (0) → orange (0.5) → white (1.0)
+                        let hr: number, hg: number, hb: number;
+                        if (heat < 0.5) {
+                            const t = heat / 0.5;
+                            hr = Math.round(74 + (255 - 74) * t);
+                            hg = Math.round(222 + (165 - 222) * t);
+                            hb = Math.round(128 + (0 - 128) * t);
+                        } else {
+                            const t = (heat - 0.5) / 0.5;
+                            hr = 255;
+                            hg = Math.round(165 + (255 - 165) * t);
+                            hb = Math.round(0 + 255 * t);
+                        }
+
+                        // Inner color overlay on the asteroid body
+                        buildPath();
+                        ctx.globalAlpha = 0.3 + heat * 0.5;
+                        ctx.fillStyle   = `rgb(${hr},${hg},${hb})`;
+                        ctx.fill();
+
+                        // Outer radial bloom
+                        const pulse  = 0.85 + Math.sin(nowSec * 8) * 0.15;
+                        const bloomR = (entity.size.x / 2) * (1.5 + heat * 1.5) * pulse;
+                        ctx.globalCompositeOperation = 'lighter';
+                        const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
+                        bloom.addColorStop(0,   `rgba(${hr},${hg},${hb},${(0.25 + heat * 0.4).toFixed(2)})`);
+                        bloom.addColorStop(0.5, `rgba(${hr},${hg},${hb},${(0.1 + heat * 0.15).toFixed(2)})`);
+                        bloom.addColorStop(1,   `rgba(${hr},${hg},${hb},0)`);
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalCompositeOperation = 'source-over';
+                    }
+
                     if (glowColor && !isFlash) {
                         // Subtle powerup color overlay — semi-transparent, mixes with rock color
                         const [gr, gg, gb] = hexToRgb(glowColor);

@@ -219,6 +219,11 @@ export interface GameEntity {
 
   // When true, handleEntityDeath skips drop spawning (e.g. laser kills)
   suppressDrops?: boolean;
+
+  // Laser heat accumulation (0–1); asteroid explodes at 1.0
+  laserHeat?: number;
+  // Shards spawned from a laser-exploded asteroid are immune to the beam
+  laserImmune?: boolean;
 }
 
 export interface LaserBeamState {
