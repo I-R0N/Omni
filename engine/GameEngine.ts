@@ -210,8 +210,7 @@ export class GameEngine {
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
 
-      this.gameState = GameState.PLAYING;
-      this.initWaveSystem();
+      this.gameState = GameState.MENU;
       this.prepareFrameEntities();
   }
 
