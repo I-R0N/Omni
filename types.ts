@@ -176,6 +176,9 @@ export interface GameEntity {
   // Powerup pickup
   powerupWeapon?: WeaponType;
 
+  // Per-weapon ammo-pickup flash: timer counts down from FLASH_DURATION → 0; amount shown as +N
+  ammoPickupFlash?: Partial<Record<WeaponType, { timer: number; amount: number }>>;
+
   // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
   ammo?: Partial<Record<WeaponType, number>>;
 

@@ -1149,6 +1149,7 @@ export class RenderSystem {
       ctx.textAlign  = 'center';
       ctx.textBaseline = 'middle';
 
+      const FLASH_DURATION = 0.75;
       for (let i = 0; i < WEAPON_LIST.length; i++) {
           const wType  = WEAPON_LIST[i];
           const wCfg   = WEAPONS[wType];
@@ -1160,6 +1161,10 @@ export class RenderSystem {
           const empty  = !isBlaster && (ammo ?? 0) <= 0;
           const active = wType === activeWeapon;
 
+          const flash     = player.ammoPickupFlash?.[wType];
+          const flashT    = flash ? Math.max(0, flash.timer / FLASH_DURATION) : 0; // 1→0
+          const isFlashing = flashT > 0;
+
           // Slot background
           ctx.globalAlpha = owned ? (active ? 0.92 : 0.65) : 0.28;
           ctx.fillStyle   = owned ? (active ? wCfg.color : '#1e293b') : '#0f172a';
@@ -1167,10 +1172,20 @@ export class RenderSystem {
           roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
           ctx.fill();
 
+          // Flash glow overlay — bright weapon-color wash that fades out
+          if (isFlashing) {
+              const [fr, fg, fb] = hexToRgb(wCfg.color);
+              ctx.globalAlpha = flashT * 0.55;
+              ctx.fillStyle   = `rgb(${fr},${fg},${fb})`;
+              ctx.beginPath();
+              roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
+              ctx.fill();
+          }
+
           // Slot border
-          ctx.globalAlpha = owned ? (active ? 1.0 : 0.5) : 0.2;
-          ctx.strokeStyle = active ? wCfg.color : (owned ? '#475569' : '#1e293b');
-          ctx.lineWidth   = active ? 2 : 1;
+          ctx.globalAlpha = owned ? (active ? 1.0 : isFlashing ? 0.5 + flashT * 0.5 : 0.5) : 0.2;
+          ctx.strokeStyle = (active || isFlashing) ? wCfg.color : (owned ? '#475569' : '#1e293b');
+          ctx.lineWidth   = (active || isFlashing) ? 2 : 1;
           ctx.beginPath();
           roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
           ctx.stroke();
@@ -1200,6 +1215,20 @@ export class RenderSystem {
               ctx.globalAlpha = owned ? 0.7 : 0.2;
               ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';
               ctx.fillText(label, x + slotW / 2, y + SLOT_H - 24);
+          }
+
+          // Floating +N pickup text — rises above the slot and fades out
+          if (isFlashing && flash) {
+              const rise    = (1 - flashT) * 22; // float up 22px over lifetime
+              const alpha   = flashT > 0.5 ? 1.0 : flashT * 2; // fade in last half
+              const textY   = y - 6 - rise;
+              ctx.font        = `bold ${Math.max(10, slotW * 0.3)}px monospace`;
+              ctx.globalAlpha = alpha;
+              ctx.fillStyle   = wCfg.color;
+              ctx.shadowColor = 'rgba(0,0,0,0.9)';
+              ctx.shadowBlur  = 4;
+              ctx.fillText(`+${flash.amount}`, x + slotW / 2, textY);
+              ctx.shadowBlur  = 0;
           }
       }
 

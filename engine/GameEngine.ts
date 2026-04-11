@@ -854,6 +854,17 @@ export class GameEngine {
     }
     this.playerMessages.length = msgIdx;
 
+    // Tick down per-weapon ammo pickup flash timers
+    if (this.player.ammoPickupFlash) {
+      for (const wType of WEAPON_LIST) {
+        const f = this.player.ammoPickupFlash[wType];
+        if (f && f.timer > 0) {
+          f.timer -= dt;
+          if (f.timer <= 0) delete this.player.ammoPickupFlash[wType];
+        }
+      }
+    }
+
     // Proximity collection + magnetic pull — single pass over activeDrops
     if (!this.player.isExploding) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
@@ -1800,7 +1811,13 @@ export class GameEngine {
       const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
       if (!this.player.ammo) this.player.ammo = {};
       this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + amount;
-      this.pushPlayerMessage(`+${amount}`, WEAPONS[wType].color);
+      // Trigger slot flash — accumulate amount if picked up in quick succession
+      if (!this.player.ammoPickupFlash) this.player.ammoPickupFlash = {};
+      const prev = this.player.ammoPickupFlash[wType];
+      this.player.ammoPickupFlash[wType] = {
+        timer:  0.75,
+        amount: (prev && prev.timer > 0 ? prev.amount : 0) + amount,
+      };
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
       const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
