@@ -99,6 +99,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleDebug();
   };
 
+  const handleSkipWave = () => {
+      if (engineRef.current) engineRef.current.skipWave();
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
       <canvas 
@@ -113,6 +117,7 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
+        onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
       />

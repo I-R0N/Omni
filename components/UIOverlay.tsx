@@ -10,6 +10,7 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onToggleDebug?: () => void;
+  onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
 }
@@ -22,9 +23,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onToggleDebug,
+  onSkipWave,
   difficulty = 3,
   onSetDifficulty,
 }) => {
+  const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
@@ -61,14 +64,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
-            <div className="pointer-events-none flex flex-col items-end gap-1">
-              <div className="bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+            <div className="flex flex-col items-end gap-1">
+              <div
+                onClick={isGrace ? onSkipWave : undefined}
+                className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
+                  isGrace
+                    ? 'pointer-events-auto border-emerald-500/60 cursor-pointer hover:bg-emerald-900/40 active:scale-95'
+                    : 'pointer-events-none border-slate-600/50'
+                }`}
+              >
                 <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
                   Wave {stats.waveNumber ?? 1}
                 </span>
-                {stats.waveStatus === 'cleared' && stats.waveGraceTimer !== undefined && stats.waveGraceTimer > 0 && (
+                {isGrace && (
                   <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
-                    Next wave in {stats.waveGraceTimer}s
+                    Next in {stats.waveGraceTimer}s · tap to skip
                   </p>
                 )}
               </div>

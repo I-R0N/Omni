@@ -146,6 +146,13 @@ export class GameEngine {
     this.initWaveSystem();
   }
 
+  public skipWave() {
+    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
+      this.waveGraceTimer = 0;
+      this.spawnWave(this.waveIndex + 1);
+    }
+  }
+
   public pauseGame() {
     if (this.gameState === GameState.PLAYING) {
         this.gameState = GameState.PAUSED;

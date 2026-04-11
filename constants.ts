@@ -411,7 +411,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
 export { ASSETS };
 
 export const WAVE_CONSTANTS = {
-  GRACE_PERIOD: 8.0, // Seconds between wave clear and next wave spawn
+  GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
 };
 
 // Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
