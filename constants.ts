@@ -250,8 +250,9 @@ export const LASER_PIERCE = 3;             // max entities the beam can hit simu
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_RANGE = 500;                // initial target acquisition range
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
-export const LIGHTNING_CHAIN_COUNT = 3;             // total chain hops (including first target)
-export const LIGHTNING_DAMAGE_FALLOFF = [4, 3, 2];  // damage per hop (index 0 = first target)
+export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
+export const LIGHTNING_CHAIN_DAMAGE = [3, 2];       // damage per chain hop (index 0 = first chain, index 1 = second chain)
+export const LIGHTNING_ARC_LIFETIME = 0.2;          // seconds the visual arc persists
 
 export const PROJECTILE_CONSTANTS = {
   SPEED: 3, // Reduced from 12
@@ -343,15 +344,15 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.8,
-    speed: 0,          // not a projectile — chain raycast
-    damage: 4,         // base damage (hop 1); falloff in LIGHTNING_DAMAGE_FALLOFF
-    lifetime: 0.2,     // visual arc lifetime
-    color: '#22d3ee',  // Cyan — chain-hop weapon
-    size: 5,
+    speed: 14,
+    damage: 4,         // direct hit damage; chain hops use LIGHTNING_DAMAGE_FALLOFF
+    lifetime: 1.5,
+    color: '#22d3ee',  // Cyan — projectile that chains on impact
+    size: 6,
     count: 1,
-    spread: 0,
-    recoil: 0,
-    pierce: 0
+    spread: 3,
+    recoil: 0.3,
+    pierce: 0          // stops on first hit, then chains
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,

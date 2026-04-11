@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, LaserBeamState } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LASER_RANGE, LASER_DPS, LASER_AMMO_DRAIN_RATE, LASER_PIERCE, LIGHTNING_RANGE, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_DAMAGE_FALLOFF } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LASER_RANGE, LASER_DPS, LASER_AMMO_DRAIN_RATE, LASER_PIERCE, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1058,6 +1058,12 @@ export class GameEngine {
         });
         break;
     }
+
+    // Lightning projectile: chain to nearby entities on impact
+    if (proj.isLightningProjectile) {
+        this.fireLightningChainFromImpact(impactPos, target);
+    }
+
     void projSpeed; // suppress lint
   };
 
@@ -1138,16 +1144,6 @@ export class GameEngine {
 
       const config = WEAPONS[weaponType];
       this.player.weaponCooldown = config.cooldown;
-
-      // Lightning: chain-raycast instead of spawning a projectile
-      if (weaponType === WeaponType.LIGHTNING) {
-          if (this.player.ammo) {
-              const before = this.player.ammo[weaponType] ?? 0;
-              this.player.ammo[weaponType] = Math.max(0, before - 1);
-          }
-          this.fireLightningChain();
-          return;
-      }
 
       // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
       if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
@@ -1233,6 +1229,7 @@ export class GameEngine {
               ownerType,
               pierceCount: config.pierce,
               trail: [],
+              isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
           });
       }
   }
@@ -1435,38 +1432,17 @@ export class GameEngine {
       });
   }
 
-  // ─── Lightning chain (chain-hop raycast) ──────────────────────────────────
+  // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
-  private fireLightningChain() {
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
-      const px = this.player.position.x;
-      const py = this.player.position.y;
 
-      // Find nearest valid target within LIGHTNING_RANGE
-      let firstTarget: GameEntity | null = null;
-      let firstDistSq = LIGHTNING_RANGE * LIGHTNING_RANGE;
-
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active || e.isExploding) continue;
-          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
-          const dx = e.position.x - px;
-          const dy = e.position.y - py;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < firstDistSq) {
-              firstDistSq = d2;
-              firstTarget = e;
-          }
-      }
-
-      if (!firstTarget) return; // No valid target in range
-
-      // Build chain
+      // Build chain: hop from the initial target to nearby enemies/asteroids
       const chain: GameEntity[] = [firstTarget];
       const hitSet = new Set<string>([firstTarget.id]);
 
-      for (let hop = 1; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
           const prev = chain[chain.length - 1];
           let nextTarget: GameEntity | null = null;
           let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
@@ -1490,10 +1466,10 @@ export class GameEngine {
           hitSet.add(nextTarget.id);
       }
 
-      // Apply damage to each chain target
-      for (let i = 0; i < chain.length; i++) {
+      // Apply chain damage (skip index 0 — the first target already took projectile damage)
+      for (let i = 1; i < chain.length; i++) {
           const target = chain[i];
-          const dmg = LIGHTNING_DAMAGE_FALLOFF[i] ?? LIGHTNING_DAMAGE_FALLOFF[LIGHTNING_DAMAGE_FALLOFF.length - 1];
+          const dmg = LIGHTNING_CHAIN_DAMAGE[i - 1] ?? LIGHTNING_CHAIN_DAMAGE[LIGHTNING_CHAIN_DAMAGE.length - 1];
           target.health -= dmg;
           target.hitFlash = 0.15;
           this.spawnDamageText(target.position, dmg, target);
@@ -1504,18 +1480,20 @@ export class GameEngine {
           }
       }
 
-      // Build arc points: player → target1 → target2 → target3
-      const arcPoints: Vector2[] = [{ x: px, y: py }];
+      // Only spawn arc visual if there's at least one chain hop
+      if (chain.length < 2) return;
+
+      // Build arc points: impact → target1 → target2 (target 0 is the direct hit)
+      const arcPoints: Vector2[] = [];
       for (const t of chain) {
           arcPoints.push({ x: t.position.x, y: t.position.y });
       }
 
       // Spawn a single PARTICLE entity carrying the arc data for rendering
-      const life = WEAPONS[WeaponType.LIGHTNING].lifetime;
       this.currentMap.entities.push({
           id: `lightning_${Date.now()}_${Math.random()}`,
           type: EntityType.PARTICLE,
-          position: { x: px, y: py },
+          position: { x: impactPos.x, y: impactPos.y },
           velocity: { x: 0, y: 0 },
           size: { x: 1, y: 1 },
           rotation: 0,
@@ -1523,14 +1501,12 @@ export class GameEngine {
           active: true,
           health: 1,
           maxHealth: 1,
-          lifetime: life,
-          maxLifetime: life,
+          lifetime: LIGHTNING_ARC_LIFETIME,
+          maxLifetime: LIGHTNING_ARC_LIFETIME,
           mass: 0,
           isLightningArc: true,
           arcPoints,
       });
-
-      this.handleScreenShake(3);
   }
 
   // ─── Collision-based stick bonds ───────────────────────────────────────────

@@ -213,6 +213,9 @@ export interface GameEntity {
   // Lightning arc rendering — when true, arcPoints holds the chain vertices
   isLightningArc?: boolean;
   arcPoints?: Vector2[];
+
+  // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
+  isLightningProjectile?: boolean;
 }
 
 export interface LaserBeamState {

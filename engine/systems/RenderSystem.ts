@@ -757,43 +757,86 @@ export class RenderSystem {
           } else if (entity.type === EntityType.PROJECTILE) {
              const r = entity.size.x / 2;
              if (Number.isFinite(r) && r > 0) {
-                // Pulsing animation: fast oscillation tied to position for variety
-                const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
-                const glowR = r * pulse * 3.0;
-
                 // Fade out in the last 20% of lifetime
                 const lifetimeFrac = (entity.lifetime !== undefined && entity.maxLifetime !== undefined && entity.maxLifetime > 0)
                     ? Math.min(1, entity.lifetime / (entity.maxLifetime * 0.2))
                     : 1;
 
-                const isEnemy = entity.ownerType === EntityType.ENEMY;
-                const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+                if (entity.isLightningProjectile) {
+                    // ── Lightning projectile: electric crackling effect ──
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+                    ctx.globalCompositeOperation = 'lighter';
 
-                ctx.save();
-                ctx.globalAlpha = Math.min(1, lifetimeFrac);
+                    // Outer electric glow
+                    const elecR = r * 3.5;
+                    const elecGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, elecR);
+                    elecGrad.addColorStop(0,   'rgba(255, 255, 255, 0.9)');
+                    elecGrad.addColorStop(0.15, 'rgba(34, 211, 238, 0.7)');
+                    elecGrad.addColorStop(0.4,  'rgba(34, 211, 238, 0.2)');
+                    elecGrad.addColorStop(1,    'rgba(34, 211, 238, 0)');
+                    ctx.fillStyle = elecGrad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, elecR, 0, Math.PI * 2);
+                    ctx.fill();
 
-                // Single merged gradient: hot white core → weapon colour → transparent glow.
-                // One gradient object + one draw call instead of two.
-                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                if (isEnemy) {
-                    grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
-                    grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
-                    grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
-                    grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
-                    grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                    // Small random electric tendrils around the projectile
+                    ctx.strokeStyle = 'rgba(34, 211, 238, 0.6)';
+                    ctx.lineWidth = 1.5;
+                    const tendrilCount = 4;
+                    for (let ti = 0; ti < tendrilCount; ti++) {
+                        const tAngle = (nowSec * 20 + ti * (Math.PI * 2 / tendrilCount)) % (Math.PI * 2);
+                        const tLen = r * (1.5 + Math.sin(nowSec * 30 + ti * 7) * 1.0);
+                        const mx = Math.cos(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
+                        const my = Math.sin(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        ctx.lineTo(mx, my);
+                        ctx.lineTo(Math.cos(tAngle) * tLen, Math.sin(tAngle) * tLen);
+                        ctx.stroke();
+                    }
+
+                    // Bright white core
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.restore();
                 } else {
-                    grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
-                    grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
-                    grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
-                    grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
-                    grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
-                }
-                ctx.beginPath();
-                ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-                ctx.fillStyle = grad;
-                ctx.fill();
+                    // ── Standard projectile: radial gradient glow ──
+                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * 3.0;
 
-                ctx.restore();
+                    const isEnemy = entity.ownerType === EntityType.ENEMY;
+                    const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                    // Single merged gradient: hot white core → weapon colour → transparent glow.
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    if (isEnemy) {
+                        grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
+                        grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
+                        grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
+                        grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
+                        grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                    } else {
+                        grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
+                        grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                        grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                        grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
+                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                    }
+                    ctx.beginPath();
+                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+
+                    ctx.restore();
+                }
              }
           } else {
             ctx.fillStyle = entity.color;
