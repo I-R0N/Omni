@@ -1372,7 +1372,7 @@ export class GameEngine {
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (!e.active || e.isExploding) continue;
-          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+          if (e.type !== EntityType.ENEMY) continue;
 
           // Circle-vs-ray intersection
           const radius = Math.max(e.size.x, e.size.y) / 2;
@@ -1404,15 +1404,16 @@ export class GameEngine {
           lastHitPoint = { x: target.position.x, y: target.position.y };
           lastHitT = hitTargets[i].t;
 
-          // Spawn damage text throttled (~4 per second per entity)
-          if (Math.random() < dt * 4) {
-              this.spawnDamageText(target.position, damageThisFrame, target);
+          // Show accumulated DPS as damage text (~2 per second per entity)
+          if (Math.random() < dt * 2) {
+              this.spawnDamageText(target.position, LASER_DPS * 0.5, target);
           }
 
           if (target.health <= 0) {
               target.lastImpactVelocity = { x: cosA * 2, y: sinA * 2 };
               target.lastImpactDamage = damageThisFrame;
               if (!target.isExploding) {
+                  target.active = false;
                   this.handleEntityDeath(target);
               }
           }
