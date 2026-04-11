@@ -1376,6 +1376,9 @@ export class GameEngine {
           if (!e.active || e.isExploding) continue;
           if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
 
+          // Skip small asteroid shards — let debris scatter visually
+          if (e.type === EntityType.ASTEROID && e.size.x < 30) continue;
+
           // Circle-vs-ray intersection
           const radius = Math.max(e.size.x, e.size.y) / 2;
           const dx = e.position.x - ox;
