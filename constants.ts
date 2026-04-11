@@ -418,9 +418,9 @@ export { ASSETS };
 
 export const SHIELD_CONSTANTS = {
   MAX_CHARGE: 50,            // Shield capacity (half of 100 HP)
-  RECHARGE_RATE: 25,         // Points/sec — full recharge in ~2s (Halo-style fast regen)
+  RECHARGE_RATE: 10,          // Points/sec — full recharge in ~5s
   RECHARGE_DELAY: 2.0,       // Brief pause after last hit before recharge kicks in
-  HIT_FLASH_DURATION: 0.9,   // How long the shield ring stays visible after a hit
+  HIT_FLASH_DURATION: 1.3,   // How long the shield ring stays visible after a hit
   CONTACT_FLASH_DURATION: 0.45, // Shorter flash for non-damaging contact
   COLOR: '#60a5fa',          // Blue-400
   COLLISION_MULTIPLIER: 1.8, // Player collision radius multiplier when shield > 0
