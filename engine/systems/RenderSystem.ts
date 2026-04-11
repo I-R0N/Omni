@@ -852,6 +852,17 @@ export class RenderSystem {
           const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
           ctx.rotate(-rot);
           ctx.globalAlpha = alpha;
+
+          // Inner glow — radial gradient from transparent center to shield color at rim
+          const glowInner = ctx.createRadialGradient(0, 0, ringRadius * 0.55, 0, 0, ringRadius);
+          glowInner.addColorStop(0, 'rgba(96,165,250,0)');
+          glowInner.addColorStop(0.7, 'rgba(96,165,250,0.08)');
+          glowInner.addColorStop(1, 'rgba(96,165,250,0.25)');
+          ctx.fillStyle = glowInner;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+          ctx.fill();
+
           ctx.strokeStyle = SHIELD_COLOR;
           ctx.lineWidth = 2.5;
           ctx.beginPath();
