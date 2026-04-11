@@ -150,6 +150,22 @@ export class GameEngine {
     if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
       this.waveGraceTimer = 0;
       this.spawnWave(this.waveIndex + 1);
+      // Push stats immediately so the UI reflects the new wave number
+      // before the next rAF tick rather than lagging one frame.
+      this.onStatsUpdate({
+        fps: 0,
+        entityCount: (this.currentMap?.entities.length || 0) + 1,
+        currentMapName: this.currentMap?.name || '',
+        currentMapType: this.currentMap?.type || MapType.UNIVERSE,
+        currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+        gameState: this.gameState,
+        difficulty: this.difficultyLevel,
+        waveNumber: this.waveIndex + 1,
+        waveStatus: 'active',
+        waveGraceTimer: undefined,
+        debugMode: this.debugMode,
+        weaponCount: this.currentWeaponIndex + 1,
+      });
     }
   }
 
