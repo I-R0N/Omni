@@ -80,6 +80,14 @@ export class GameEngine {
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
+
+    // Fill all weapon ammo when entering debug mode
+    if (this.debugMode && this.player.ammo) {
+      for (const w of WEAPON_LIST) {
+        if (w === WeaponType.BLASTER) continue; // blaster is always infinite
+        this.player.ammo[w] = 999;
+      }
+    }
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
