@@ -370,45 +370,47 @@ export class RenderSystem {
 
   private renderLaserBeam(ctx: CanvasRenderingContext2D, beam: LaserBeamState) {
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
 
       const { origin, end, hitPoint } = beam;
 
-      // Outer green glow (~6px)
-      ctx.strokeStyle = 'rgba(74, 222, 128, 0.4)';
-      ctx.lineWidth = 6;
+      // Outer green glow (~6px) — additive for bloom
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = 'rgba(74, 222, 128, 0.35)';
+      ctx.lineWidth = 8;
       ctx.beginPath();
       ctx.moveTo(origin.x, origin.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
 
-      // Inner white core (~2px)
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      // Inner green core (~2px) — normal blend so it stays green
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = 'rgba(140, 255, 170, 0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(origin.x, origin.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
 
-      // Muzzle flash at origin
-      const muzzleGrad = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 12);
-      muzzleGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-      muzzleGrad.addColorStop(0.4, 'rgba(74, 222, 128, 0.6)');
+      // Muzzle flash at origin — additive
+      ctx.globalCompositeOperation = 'lighter';
+      const muzzleGrad = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 10);
+      muzzleGrad.addColorStop(0, 'rgba(180, 255, 200, 0.7)');
+      muzzleGrad.addColorStop(0.5, 'rgba(74, 222, 128, 0.4)');
       muzzleGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
       ctx.fillStyle = muzzleGrad;
       ctx.beginPath();
-      ctx.arc(origin.x, origin.y, 12, 0, Math.PI * 2);
+      ctx.arc(origin.x, origin.y, 10, 0, Math.PI * 2);
       ctx.fill();
 
       // Hit point bloom
       if (hitPoint) {
-          const bloomGrad = ctx.createRadialGradient(hitPoint.x, hitPoint.y, 0, hitPoint.x, hitPoint.y, 18);
-          bloomGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-          bloomGrad.addColorStop(0.3, 'rgba(74, 222, 128, 0.5)');
+          const bloomGrad = ctx.createRadialGradient(hitPoint.x, hitPoint.y, 0, hitPoint.x, hitPoint.y, 14);
+          bloomGrad.addColorStop(0, 'rgba(180, 255, 200, 0.6)');
+          bloomGrad.addColorStop(0.4, 'rgba(74, 222, 128, 0.3)');
           bloomGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
           ctx.fillStyle = bloomGrad;
           ctx.beginPath();
-          ctx.arc(hitPoint.x, hitPoint.y, 18, 0, Math.PI * 2);
+          ctx.arc(hitPoint.x, hitPoint.y, 14, 0, Math.PI * 2);
           ctx.fill();
       }
 

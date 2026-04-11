@@ -1327,7 +1327,7 @@ export class GameEngine {
 
       const weaponType = this.player.currentWeapon || WeaponType.BLASTER;
       const hasAmmo = (this.player.ammo?.[WeaponType.LASER] ?? 0) > 0;
-      const isFiring = this.input.isActionPressed()
+      const isFiring = this.input.isFireKeyHeld()
                     && weaponType === WeaponType.LASER
                     && hasAmmo
                     && !this.player.isExploding;
