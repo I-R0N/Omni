@@ -1396,6 +1396,7 @@ export class GameEngine {
 
               if (e.health <= 0 && !e.isExploding) {
                   e.lastImpactDamage = dmg;
+                  e.active = false;
                   this.handleEntityDeath(e);
               }
           }
