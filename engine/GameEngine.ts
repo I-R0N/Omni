@@ -630,6 +630,11 @@ export class GameEngine {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+      } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          // Nebula tiles fade out gracefully (see nebulaFadeTimer in the
+          // renderer) and nebula shards vanish silently — no spark burst
+          // on destruction.  Merge/transmute/regen events still emit the
+          // subtle glimmer via spawnNebulaGlimmer.
       } else {
           // Generic fallback (structures, misc)
           const numParticles = 4 + Math.floor(Math.random() * 3);
