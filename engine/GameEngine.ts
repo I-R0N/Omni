@@ -5,7 +5,7 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement } from '../types';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -89,6 +89,10 @@ export class GameEngine {
   // a fresh thrust event so we can reset the trail (otherwise a new bright
   // head stitched onto a decayed chain visually re-lights the old trail).
   private wasThrusting: boolean = false;
+  // Trails from previous thrust events — continue to drift and fade on their
+  // own, never have new points appended, so they visually detach from the
+  // player when a new thrust event begins.
+  private detachedTrails: TrailPoint[][] = [];
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -221,6 +225,7 @@ export class GameEngine {
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
+      this.detachedTrails = [];
       this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: 0, y: 0 };
       this.wasThrusting = false;
@@ -809,24 +814,25 @@ export class GameEngine {
     }
 
     if (this.player.trail) {
-        for (let i = this.player.trail.length - 1; i >= 0; i--) {
-            const tp = this.player.trail[i];
-            tp.lifetime -= dt;
-            // Drift each trail point along its stored velocity so the trail
-            // streams backward in the thrust direction rather than marking
-            // the player's past positions.
-            if (tp.vx !== undefined) tp.x += tp.vx;
-            if (tp.vy !== undefined) tp.y += tp.vy;
-            if (tp.lifetime <= 0) {
-                this.player.trail.splice(i, 1);
-            }
+        this.tickTrail(this.player.trail, dt);
+    }
+    // Tick detached trails (ones from prior thrust events) and drop empty arrays
+    for (let i = this.detachedTrails.length - 1; i >= 0; i--) {
+        this.tickTrail(this.detachedTrails[i], dt);
+        if (this.detachedTrails[i].length === 0) {
+            this.detachedTrails.splice(i, 1);
         }
     }
 
     const thrusting = throttle > 0;
-    // Start of a fresh thrust event — reset the trail so the new bright head
-    // doesn't visually re-light the old decaying chain via the spatial gradient.
+    // Start of a fresh thrust event — detach the old active trail so it
+    // continues to drift and fade on its own, then start a new empty trail
+    // for the new thrust event.  This prevents the spatial gradient fill
+    // from re-lighting faded old points when a new bright head is appended.
     if (thrusting && !this.wasThrusting) {
+        if (this.player.trail && this.player.trail.length > 0) {
+            this.detachedTrails.push(this.player.trail);
+        }
         this.player.trail = [];
         // Snap the thrust direction to the new input so the first emitted
         // point of the fresh trail uses the actual direction, not whatever
@@ -1121,6 +1127,23 @@ export class GameEngine {
   }
 
   /**
+   * Tick a trail array: decrement each point's lifetime, apply per-point
+   * drift velocity, and splice expired entries.  Shared between the active
+   * player trail and detached trails from prior thrust events.
+   */
+  private tickTrail(trail: TrailPoint[], dt: number) {
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const tp = trail[i];
+      tp.lifetime -= dt;
+      if (tp.vx !== undefined) tp.x += tp.vx;
+      if (tp.vy !== undefined) tp.y += tp.vy;
+      if (tp.lifetime <= 0) {
+        trail.splice(i, 1);
+      }
+    }
+  }
+
+  /**
    * Glitter trail — spawns tiny additive-blended sparkles trailing behind the
    * player along the current velocity vector.  Density is triangularly
    * distributed across the player's width (peaked on the center-line, falling
@@ -1290,6 +1313,7 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
+      this.detachedTrails = [];
       this.trailDecayTimer = 0;
       this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
@@ -2382,7 +2406,8 @@ export class GameEngine {
           this.player.position,
           this.playerMessages,
           this.player,
-          this.waveAnnouncements
+          this.waveAnnouncements,
+          this.detachedTrails
       );
   }
 }
