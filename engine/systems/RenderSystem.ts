@@ -749,34 +749,29 @@ export class RenderSystem {
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.restore();
                 } else if (entity.isBouncer) {
-                    // ── Bouncer projectile: thin glowing green laser beam ──
+                    // ── Bouncer projectile: semi-long green line ──
                     // Entity is already rotated so +X points along travel direction.
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
                     ctx.globalCompositeOperation = 'lighter';
 
-                    const halfLen = r * 2.2;   // elongated along travel
+                    const halfLen = r * 3.5;   // semi-long along travel
                     const halfThk = 0.7;        // thin perpendicular
 
-                    // Soft radial halo
-                    const glowR = halfLen * 1.4;
+                    // Subtle pure-green halo
+                    const glowR = halfLen * 1.1;
                     const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                    glowGrad.addColorStop(0,    'rgba(200, 255, 210, 0.85)');
-                    glowGrad.addColorStop(0.35, 'rgba(74, 222, 128, 0.50)');
-                    glowGrad.addColorStop(0.75, 'rgba(74, 222, 128, 0.12)');
-                    glowGrad.addColorStop(1,    'rgba(74, 222, 128, 0)');
+                    glowGrad.addColorStop(0,   'rgba(34, 197,  94, 0.35)');
+                    glowGrad.addColorStop(0.6, 'rgba(34, 197,  94, 0.08)');
+                    glowGrad.addColorStop(1,   'rgba(34, 197,  94, 0)');
                     ctx.fillStyle = glowGrad;
                     ctx.beginPath();
                     ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Beam body — thin green rectangle along X
-                    ctx.fillStyle = '#4ade80';
+                    // Beam body — pure green line
+                    ctx.fillStyle = '#22c55e';
                     ctx.fillRect(-halfLen, -halfThk, halfLen * 2, halfThk * 2);
-
-                    // Hot white core line
-                    ctx.fillStyle = 'rgba(220, 255, 220, 0.95)';
-                    ctx.fillRect(-halfLen * 0.92, -halfThk * 0.5, halfLen * 1.84, halfThk);
 
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.restore();

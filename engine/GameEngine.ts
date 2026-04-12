@@ -1325,6 +1325,11 @@ export class GameEngine {
       for (let i = 0; i < entities.length; i++) {
           const p = entities[i];
           if (!p.active || p.type !== EntityType.PROJECTILE) continue;
+          // Bouncer beams render as a crisp line — no trail
+          if (p.isBouncer) {
+              if (p.trail) p.trail.length = 0;
+              continue;
+          }
 
           // Decay existing trail points (write-index avoids O(n) splice shifts)
           if (p.trail) {
