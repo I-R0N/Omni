@@ -485,8 +485,6 @@ export class PhysicsSystem {
               const isTile = target.type === EntityType.STRUCTURE
                   || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
               if (isTile && proj.velocity) {
-                  if (onHit) onHit(proj.position, proj, target);
-
                   // Tiles are axis-aligned AABBs, and the projectile is thin and
                   // rotated along its travel direction — SAT's minimum-overlap axis
                   // is often the wrong reflection axis. Instead, infer the entry
@@ -525,19 +523,40 @@ export class PhysicsSystem {
                   if (vy >  0.0001) tY = (relY + dHY) / vy;
                   else if (vy < -0.0001) tY = (relY - dHY) / vy;
 
+                  // Contact point on the tile face, clamped to the tile's extent —
+                  // this is where sparks should spawn so they sit on the surface
+                  // rather than inside the tile.
+                  let contactX = 0;
+                  let contactY = 0;
+
                   // Pick the entry axis: the one with the SMALLER reverse-unwind
                   // time was crossed last, so that's the face we're reflecting off.
                   // Snap the projectile position to just outside that face + ε.
                   if (tX <= tY) {
-                      proj.velocity.x = -vx;
                       const nx = vx > 0 ? -1 : 1;
+                      contactX = target.position.x + nx * tileHX;
+                      contactY = Math.max(
+                          target.position.y - tileHY,
+                          Math.min(target.position.y + tileHY, proj.position.y)
+                      );
+                      proj.velocity.x = -vx;
                       proj.position.x = target.position.x + nx * (tileHX + hxEff + 0.5);
                   } else {
-                      proj.velocity.y = -vy;
                       const ny = vy > 0 ? -1 : 1;
+                      contactY = target.position.y + ny * tileHY;
+                      contactX = Math.max(
+                          target.position.x - tileHX,
+                          Math.min(target.position.x + tileHX, proj.position.x)
+                      );
+                      proj.velocity.y = -vy;
                       proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
                   }
                   proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+                  // Fire the impact callback AFTER the reflection so sparks spawn
+                  // on the tile's surface and spray along the outgoing (reflected)
+                  // velocity direction — away from the tile, not into it.
+                  if (onHit) onHit({ x: contactX, y: contactY }, proj, target);
                   return;
               }
           }
