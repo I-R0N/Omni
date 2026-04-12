@@ -188,7 +188,7 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 };
 
 export const TRAIL_CONSTANTS = {
-  LIFETIME: 1.2, // Seconds until trail part fades completely
+  LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
 };
 

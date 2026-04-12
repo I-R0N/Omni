@@ -73,7 +73,7 @@ export class GameEngine {
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
+  private static readonly TRAIL_DECAY_DURATION = 1.0; // seconds
   // Last unit-length thrust direction — stored so coasting trail emissions still
   // know which way "backward" is (moveDir is zero while coasting)
   private lastThrustDir: Vector2 = { x: 0, y: 0 };
