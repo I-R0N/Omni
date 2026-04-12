@@ -2486,29 +2486,42 @@ export class GameEngine {
         const spawnX = parent.position.x + dx * offsetMag;
         const spawnY = parent.position.y + dy * offsetMag;
 
-        // Initial velocity: gentle outward nudge along the rear-cone
-        // direction.  No carry term from the striker's velocity — we do
-        // NOT want shards to follow the striker forward into their own
-        // trajectory.  Heavy damping settles them within ~1 s.
-        const outwardX = dx * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
-        const outwardY = dy * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
-
-        // Tangent-rule rotation sign: z-component of cross(forward, dir).
-        // cross > 0 → shard is on the striker's visual right → CW (+).
-        // cross < 0 → shard is on the striker's visual left  → CCW (−).
-        // cross ≈ 0 → on-axis (the central shard) → random spin direction.
+        // Tangent-rule side: z-component of cross(forward, spawn-direction).
+        // cross > 0 → shard is on the striker's visual right (CW rotation).
+        // cross < 0 → shard is on the striker's visual left  (CCW rotation).
+        // cross ≈ 0 → on-axis (centre shard) → random spin direction.
         const cross = fx * dy - fy * dx;
         const spinSign = cross > 0.01 ? 1
                         : cross < -0.01 ? -1
                         : (Math.random() < 0.5 ? 1 : -1);
         const rotationSpeed = spinSign * spinK;
 
+        // Velocity: "dragged along" model.  The parallel component (in
+        // the striker's direction of travel) dominates; the perpendicular
+        // component is small and biased toward the shard's tangent side
+        // so left-spawned shards drift slightly left and right-spawned
+        // shards slightly right.  Forward drag is capped at a fraction
+        // of the striker's own speed, so shards never outpace the striker
+        // (no re-collision even if the player decelerates).
+        const parallelSpeed = Math.max(
+            NEBULA_CONSTANTS.MIN_PARALLEL_SPEED,
+            impactSpeed * NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR
+        );
+        const perpSpeed = impactSpeed * NEBULA_CONSTANTS.PERP_SCATTER_FACTOR;
+        // Right tangent in canvas y-down coords = (-fy, fx).  Flip sign
+        // for left-side shards.  Centre shards (side ≈ 0) get no perp.
+        const perpSign = cross > 0.01 ? 1 : cross < -0.01 ? -1 : 0;
+        const perpX = -fy * perpSign * perpSpeed;
+        const perpY =  fx * perpSign * perpSpeed;
+        const velX = fx * parallelSpeed + perpX;
+        const velY = fy * parallelSpeed + perpY;
+
         this.currentMap.entities.push({
             id:             `nebula_shard_${Date.now()}_${i}_${Math.random()}`,
             type:            EntityType.NEBULA_SHARD,
             shardType:      'nebula',
             position:       { x: spawnX, y: spawnY },
-            velocity:       { x: outwardX, y: outwardY },
+            velocity:       { x: velX, y: velY },
             size:           { x: childDiameter, y: childDiameter },
             rotation:        Math.random() * Math.PI * 2,
             rotationSpeed,

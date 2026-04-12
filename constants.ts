@@ -279,11 +279,18 @@ export const NEBULA_CONSTANTS = {
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
   SPIN_PER_UNIT_SPEED: 1.2,
   MAX_SPIN: 6.0,  // rad/s cap
-  // Initial rear-cone push speed: shards are nudged away from the parent
-  // in the rearward direction, then heavy damping stops them.  No carry
-  // term from the striker's velocity — we don't want debris following
-  // the striker forward into their own trajectory.
-  SCATTER_OUTWARD_SPEED: 0.35,
+  // Post-shatter shard velocity: shards are "dragged along" in the
+  // striker's direction of travel (forward-biased) rather than pushed
+  // away perpendicular to it.  Parallel component dominates; a tiny
+  // perpendicular push based on tangent side gives each shard a slight
+  // lateral drift that matches its rotation direction.
+  //
+  // parallel_velocity = max(MIN_PARALLEL_SPEED,
+  //                         impactSpeed × FORWARD_DRAG_FACTOR)
+  // perp_velocity     = impactSpeed × PERP_SCATTER_FACTOR
+  FORWARD_DRAG_FACTOR: 0.35,
+  PERP_SCATTER_FACTOR: 0.04,
+  MIN_PARALLEL_SPEED: 0.3,
   // Shatter fan half-angle — 3 children are spread symmetrically around
   // the striker's forward direction within ±FAN_HALF_ANGLE.
   FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)
