@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState } from './types';
 import UIOverlay from './components/UIOverlay';
+import MultiplayerMenu from './components/MultiplayerMenu';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,6 +19,7 @@ const App: React.FC = () => {
     difficulty: 3
   });
   const [difficulty, setDifficulty] = useState<number>(3);
+  const [showMultiplayer, setShowMultiplayer] = useState<boolean>(false);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -103,10 +105,25 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
 
+  const handleOpenMultiplayer = () => {
+      setShowMultiplayer(true);
+  };
+
+  const handleCloseMultiplayer = () => {
+      setShowMultiplayer(false);
+  };
+
+  const handleSessionStart = (_kind: 'host' | 'client') => {
+      // Session established by the menu — close the modal so gameplay is visible.
+      // HostSession / ClientSession own their own lifecycle from here; they call
+      // engine.startMultiplayerGame() on transport open.
+      setShowMultiplayer(false);
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
-      <canvas 
-        ref={canvasRef} 
+      <canvas
+        ref={canvasRef}
         className="block w-full h-full"
       />
       <UIOverlay
@@ -120,7 +137,15 @@ const App: React.FC = () => {
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
+        onOpenMultiplayer={handleOpenMultiplayer}
       />
+      {showMultiplayer && engineRef.current && (
+        <MultiplayerMenu
+          engine={engineRef.current}
+          onClose={handleCloseMultiplayer}
+          onSessionStart={handleSessionStart}
+        />
+      )}
     </div>
   );
 };

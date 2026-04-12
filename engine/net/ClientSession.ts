@@ -1,0 +1,133 @@
+// ── Client-side multiplayer session ─────────────────────────────────────────
+// Wires a WebRTCTransport to a GameEngine running in CLIENT mode.
+//
+// Responsibilities
+//   1. Accept the host's SDP offer and produce an answer (signalling).
+//   2. Forward local inputs upstream to the host at ~30 Hz.
+//   3. Apply incoming SNAPSHOT messages onto the engine.
+
+import type { GameEngine } from '../GameEngine';
+import { WebRTCTransport, TransportState } from './WebRTCTransport';
+import { NetMessage, PLAYER2_ID, PROTOCOL_VERSION } from './Protocol';
+
+export type ClientStatus =
+  | 'idle'
+  | 'awaiting-offer'    // waiting for user to paste offer
+  | 'answered'          // answer produced, waiting for host to accept
+  | 'connecting'
+  | 'connected'
+  | 'closed'
+  | 'error';
+
+// Send inputs at 30 Hz — half the render rate.  Phase 2 may move this to
+// per-frame (60 Hz) once delta encoding reduces the per-message overhead.
+const INPUT_HZ = 30;
+const INPUT_INTERVAL_MS = 1000 / INPUT_HZ;
+
+export class ClientSession {
+  private engine: GameEngine;
+  private transport: WebRTCTransport;
+  private inputTimer: number | null = null;
+  private inputSeq: number = 0;
+  private _status: ClientStatus = 'idle';
+
+  public onStatusChange: ((s: ClientStatus) => void) | null = null;
+
+  constructor(engine: GameEngine) {
+    this.engine = engine;
+    this.transport = new WebRTCTransport();
+    this.transport.onStateChange = (ts) => this.handleTransportState(ts);
+    this.transport.onMessage = (msg) => this.handleMessage(msg);
+    this.transport.onOpen = () => this.handleOpen();
+    this.transport.onClose = () => this.setStatus('closed');
+  }
+
+  public get status(): ClientStatus {
+    return this._status;
+  }
+
+  /** Accept a base64-encoded SDP offer from the host, produce an answer,
+   *  and enter CLIENT mode.  Returns the answer as a base64 JSON string. */
+  public async acceptOffer(offerB64: string): Promise<string> {
+    let decoded: string;
+    try {
+      decoded = atob(offerB64.trim());
+    } catch {
+      throw new Error('Offer is not valid base64');
+    }
+    this.setStatus('awaiting-offer');
+    const answer = await this.transport.createClientAnswer(decoded);
+    // Pre-emptively enter client mode so the engine loop is ready when the
+    // data channel opens a moment later.  The self id is the host's
+    // PLAYER2_ID by convention; a WELCOME message will confirm.
+    this.engine.enterClientMode(PLAYER2_ID);
+    this.setStatus('answered');
+    return btoa(answer);
+  }
+
+  public close() {
+    if (this.inputTimer !== null) {
+      clearInterval(this.inputTimer);
+      this.inputTimer = null;
+    }
+    try {
+      this.transport.send({ t: 'bye' });
+    } catch {}
+    this.transport.close();
+    this.engine.exitMultiplayer();
+    this.setStatus('closed');
+  }
+
+  // ── Internals ─────────────────────────────────────────────────────────────
+
+  private handleOpen() {
+    this.setStatus('connected');
+    this.engine.startMultiplayerGame();
+    // Greet host (optional — welcome is host-initiated, but a hello confirms
+    // a live channel at the application layer).
+    this.transport.send({ t: 'hello', v: PROTOCOL_VERSION });
+    this.startInputTimer();
+  }
+
+  private handleTransportState(ts: TransportState) {
+    if (ts === 'closed' && this._status !== 'closed') {
+      this.setStatus('closed');
+    }
+  }
+
+  private handleMessage(msg: NetMessage) {
+    switch (msg.t) {
+      case 'snap':
+        this.engine.applySnapshot(msg);
+        break;
+      case 'welcome':
+        // The yourId from the welcome confirms the provisional id used in
+        // acceptOffer().  Subsequent snapshots carry the same id so no
+        // mode re-entry is required.
+        break;
+      case 'bye':
+        this.close();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private startInputTimer() {
+    if (this.inputTimer !== null) return;
+    this.inputTimer = window.setInterval(() => {
+      try {
+        const msg = this.engine.getLocalInputMessage(++this.inputSeq);
+        this.transport.send(msg);
+      } catch (e) {
+        console.error('[ClientSession] input build/send failed', e);
+      }
+    }, INPUT_INTERVAL_MS);
+  }
+
+  private setStatus(s: ClientStatus) {
+    if (this._status === s) return;
+    this._status = s;
+    this.onStatusChange?.(s);
+  }
+}

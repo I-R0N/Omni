@@ -13,6 +13,16 @@ export enum GameState {
   PAUSED = 'PAUSED'
 }
 
+// Multiplayer role for this engine instance.
+//   SOLO   — single-player, no networking
+//   HOST   — authoritative simulation, broadcasts snapshots to clients
+//   CLIENT — renders host snapshots, forwards local inputs upstream
+export enum NetRole {
+  SOLO = 'SOLO',
+  HOST = 'HOST',
+  CLIENT = 'CLIENT',
+}
+
 export interface Vector2 {
   x: number;
   y: number;

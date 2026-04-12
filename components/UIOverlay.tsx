@@ -13,6 +13,7 @@ interface UIOverlayProps {
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
+  onOpenMultiplayer?: () => void;
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -26,6 +27,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
+  onOpenMultiplayer,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   return (
@@ -134,6 +136,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           >
             START
           </button>
+          {onOpenMultiplayer && (
+            <button
+              onClick={onOpenMultiplayer}
+              className="mt-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-indigo-400 text-slate-200 text-sm font-bold py-2 px-6 rounded-full transition-all active:scale-95"
+            >
+              MULTIPLAYER (PROTOTYPE)
+            </button>
+          )}
         </div>
       )}
 

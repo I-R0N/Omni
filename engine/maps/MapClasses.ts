@@ -118,6 +118,26 @@ export abstract class BaseMapLayer {
 }
 
 /**
+ * Empty spectator map used by multiplayer clients.  Clients don't run the
+ * simulation — their entity list is replaced wholesale by host snapshots
+ * every tick — so there's no reason to generate asteroids or tile clusters.
+ * Width/height mirror UniverseMap so the background renderer and minimap
+ * scale consistently with the host.
+ */
+export class ClientMap extends BaseMapLayer {
+  constructor() {
+    super('client_mirror', 'Deep Space', MapType.UNIVERSE);
+    this.width = 30000;
+    this.height = 30000;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  init() {
+    this.initialized = true;
+  }
+}
+
+/**
  * The single playable map — a large open universe used as an infinite arena.
  * Tile clusters act as visual landmarks. The player never leaves this map.
  */

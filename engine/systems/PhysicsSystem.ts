@@ -364,8 +364,8 @@ export class PhysicsSystem {
       let rA = Math.max(a.size.x, a.size.y) / 2;
       let rB = Math.max(b.size.x, b.size.y) / 2;
       // Expand player radius when shield is active
-      if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
-      if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      if (a.type === EntityType.PLAYER && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      if (b.type === EntityType.PLAYER && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       const dx = a.position.x - b.position.x;
       const dy = a.position.y - b.position.y;
       const distSq = dx*dx + dy*dy;
@@ -495,7 +495,7 @@ export class PhysicsSystem {
           let projDmg = proj.damage || 1;
 
           // Shield absorbs damage for the player
-          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+          if (target.type === EntityType.PLAYER && (target.shield ?? 0) > 0) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
@@ -703,7 +703,7 @@ export class PhysicsSystem {
   private fillVertices(e: GameEntity, buffer: Vector2[]): number {
       let count = 0;
       // Shield expands the player's collision shape
-      const shieldScale = (e.id === 'player' && (e.shield ?? 0) > 0)
+      const shieldScale = (e.type === EntityType.PLAYER && (e.shield ?? 0) > 0)
           ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
 
       if (e.polygonPoints && e.polygonPoints.length > 0) {

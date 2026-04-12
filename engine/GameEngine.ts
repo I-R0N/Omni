@@ -4,8 +4,11 @@ import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
-import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { BaseMapLayer, UniverseMap, ClientMap } from './maps/MapClasses';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NetRole } from '../types';
+import { RemoteInputSource } from './net/RemoteInputSource';
+import { serializeEntity, applySerializedEntity, serializeDamageText, deserializeDamageText, serializeWaveAnnouncement, deserializeWaveAnnouncement, SerializedPlayerStats } from './net/Snapshot';
+import { PLAYER1_ID, PLAYER2_ID, InputMessage, SnapshotMessage } from './net/Protocol';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -93,6 +96,29 @@ export class GameEngine {
   // own, never have new points appended, so they visually detach from the
   // player when a new thrust event begins.
   private detachedTrails: TrailPoint[][] = [];
+
+  // ── Multiplayer state ─────────────────────────────────────────────────────
+  // Set via setNetRole() before the game starts.  Drives whether the loop
+  // runs a full simulation (SOLO/HOST), accepts remote inputs (HOST), or
+  // skips simulation entirely and renders host snapshots (CLIENT).
+  private netRole: NetRole = NetRole.SOLO;
+  // Second player entity, spawned on the host when entering HOST mode.  Lives
+  // alongside the existing `player` field and is driven by `remoteInput`.
+  private player2: GameEntity | null = null;
+  // Remote client's latest input state — read by updatePlayer2Control on
+  // each tick.  Only populated in HOST mode.
+  private remoteInput: RemoteInputSource | null = null;
+  // Monotonic simulation tick used as the snapshot sequence number (HOST).
+  private hostTick: number = 0;
+  // Most recent snapshot tick applied on the client — used to reject
+  // out-of-order deliveries on the unreliable data channel.
+  private clientLastSnapshotTick: number = -1;
+  // Id of the entity the client considers "their" player.  Populated on the
+  // client from the WELCOME handshake and each SNAPSHOT message.
+  private clientSelfId: string | null = null;
+  // Mirrored UI stats from the host (CLIENT mode only) — the client's UI
+  // overlay reads from this rather than from the local simulation.
+  private clientStats: SerializedPlayerStats | null = null;
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -292,35 +318,385 @@ export class GameEngine {
       }
   }
 
+  // ── Multiplayer API ─────────────────────────────────────────────────────────
+  // Called by HostSession / ClientSession to transition the engine between
+  // solo, authoritative host, and spectator client modes.
+
+  public getNetRole(): NetRole {
+    return this.netRole;
+  }
+
+  /**
+   * Transition to HOST mode.  Resets the world to a fresh map, re-assigns
+   * the local player's id to PLAYER1_ID (so snapshots are stable), and
+   * spawns player2 as the remote client's ship.  Call before startGame().
+   */
+  public enterHostMode() {
+    this.netRole = NetRole.HOST;
+    this.hostTick = 0;
+    this.remoteInput = new RemoteInputSource();
+    // Re-initialise the world so the host starts from a clean slate every
+    // time multiplayer begins — avoids stale entities from a prior solo run.
+    this.pendingRegens = [];
+    this.activeDrops = [];
+    this.trailDecayTimer = 0;
+    this.waveAnnouncements = [];
+    this.damageTexts = [];
+    this.detachedTrails = [];
+    this.loadMap(new UniverseMap());
+
+    // Player1: keep local input, stable id for wire protocol
+    this.player.id = PLAYER1_ID;
+    this.player.position = { x: -40, y: 0 };
+    this.player.velocity = { x: 0, y: 0 };
+    this.player.health = this.player.maxHealth;
+    this.player.shield = this.player.maxShield;
+    this.player.shieldRechargeTimer = 0;
+    this.player.shieldHitFlash = 0;
+    this.player.ammo = {};
+    this.player.trail = [];
+    this.player.isExploding = false;
+    this.player.explosionTimer = undefined;
+    this.player.active = true;
+    this.player.currentWeapon = WeaponType.BLASTER;
+
+    // Spawn player2 as a sibling ship.  Uses the same base sprite / size /
+    // stats so collisions, rendering, and shield treatment all apply equally.
+    this.player2 = {
+      id: PLAYER2_ID,
+      type: EntityType.PLAYER,
+      position: { x: 40, y: 0 },
+      velocity: { x: 0, y: 0 },
+      size: { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE },
+      rotation: 0,
+      color: '#fbbf24', // amber — visually distinct from player1's cyan
+      active: true,
+      health: 100,
+      maxHealth: 100,
+      mass: PHYSICS_CONSTANTS.PLAYER_MASS,
+      currentWeapon: WeaponType.BLASTER,
+      weaponCooldown: 0,
+      burstQueue: 0,
+      burstTimer: 0,
+      sprite: ASSETS.PLAYER_SHIP,
+      ammo: {},
+      shield: SHIELD_CONSTANTS.MAX_CHARGE,
+      maxShield: SHIELD_CONSTANTS.MAX_CHARGE,
+      shieldRechargeTimer: 0,
+      shieldHitFlash: 0,
+    };
+
+    this.camera.targetId = PLAYER1_ID;
+    this.camera.position = { ...this.player.position };
+    this.gameState = GameState.MENU;
+    this.prepareFrameEntities();
+  }
+
+  /**
+   * Transition to CLIENT mode.  Drops local simulation state and loads an
+   * empty mirror map whose entities will be replaced by incoming snapshots.
+   * The client's own player is the entity passed as `selfId`; the camera
+   * tracks it via this.player (which is updated each snapshot).
+   */
+  public enterClientMode(selfId: string) {
+    this.netRole = NetRole.CLIENT;
+    this.clientSelfId = selfId;
+    this.clientLastSnapshotTick = -1;
+    this.clientStats = null;
+    this.pendingRegens = [];
+    this.activeDrops = [];
+    this.trailDecayTimer = 0;
+    this.waveAnnouncements = [];
+    this.damageTexts = [];
+    this.detachedTrails = [];
+    this.player2 = null;
+    this.remoteInput = null;
+    this.loadMap(new ClientMap());
+
+    // Repurpose the existing local player entity as the client's camera
+    // anchor.  Fields will be overwritten each snapshot, but we set sane
+    // defaults so the first few pre-snapshot frames render cleanly.
+    this.player.id = selfId;
+    this.player.position = { x: 0, y: 0 };
+    this.player.velocity = { x: 0, y: 0 };
+    this.player.health = 100;
+    this.player.maxHealth = 100;
+    this.player.shield = SHIELD_CONSTANTS.MAX_CHARGE;
+    this.player.maxShield = SHIELD_CONSTANTS.MAX_CHARGE;
+    this.player.trail = [];
+    this.player.active = true;
+    this.player.isExploding = false;
+    this.player.currentWeapon = WeaponType.BLASTER;
+
+    this.camera.targetId = selfId;
+    this.camera.position = { ...this.player.position };
+    this.gameState = GameState.MENU;
+    this.prepareFrameEntities();
+  }
+
+  /**
+   * Drop multiplayer state and return to single-player.  Called when a
+   * session ends (peer disconnect, user exit).
+   */
+  public exitMultiplayer() {
+    this.netRole = NetRole.SOLO;
+    this.player2 = null;
+    this.remoteInput = null;
+    this.clientSelfId = null;
+    this.clientStats = null;
+    this.player.id = 'player';
+    this.camera.targetId = 'player';
+    this.restartGame();
+  }
+
+  /**
+   * Host-side: queue an input message from the remote client.  The host's
+   * game loop consumes this via updatePlayer2Control on the next frame.
+   */
+  public feedRemoteInput(msg: InputMessage) {
+    if (this.netRole !== NetRole.HOST || !this.remoteInput) return;
+    this.remoteInput.apply(msg);
+  }
+
+  /**
+   * Host-side: serialise the full world to a snapshot message for broadcast.
+   * Includes all active entities plus damage texts, wave announcements, and
+   * the target client's UI stats.
+   */
+  public buildSnapshot(yourId: string): SnapshotMessage {
+    const entities: ReturnType<typeof serializeEntity>[] = [];
+    if (this.currentMap) {
+      const ents = this.currentMap.entities;
+      for (let i = 0; i < ents.length; i++) {
+        const e = ents[i];
+        if (!e.active) continue;
+        // Skip particles — they are cheap enough to regenerate locally and
+        // would dominate the snapshot payload.  Phase 2 may revisit this.
+        if (e.type === EntityType.PARTICLE) continue;
+        entities.push(serializeEntity(e));
+      }
+    }
+    entities.push(serializeEntity(this.player));
+    if (this.player2) entities.push(serializeEntity(this.player2));
+
+    // Stats for the requesting client — pull from whichever player matches
+    // their yourId (player1 = host local, player2 = remote client).
+    const self = yourId === PLAYER1_ID ? this.player : this.player2 ?? this.player;
+    const stats: SerializedPlayerStats = {
+      gameState: this.gameState,
+      mapType: this.currentMap?.type || MapType.UNIVERSE,
+      mapName: this.currentMap?.name || 'Deep Space',
+      currentWeapon: self.currentWeapon || WeaponType.BLASTER,
+      weaponCount: 1,
+      waveNumber: this.waveIndex + 1,
+      waveStatus: (this.waveState === 'inactive' ? 'active' : this.waveState) as 'active' | 'cleared' | 'complete',
+      waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+      difficulty: this.difficultyLevel,
+      health: self.health,
+      maxHealth: self.maxHealth,
+      shield: self.shield,
+      maxShield: self.maxShield,
+      ammo: self.ammo,
+    };
+
+    return {
+      t: 'snap',
+      tick: this.hostTick,
+      sentAt: performance.now(),
+      yourId,
+      entities,
+      damageTexts: this.damageTexts.map(serializeDamageText),
+      waveAnnouncements: this.waveAnnouncements.map(serializeWaveAnnouncement),
+      stats,
+    };
+  }
+
+  /**
+   * Client-side: apply a snapshot from the host.  Replaces the entity list
+   * in place (reusing existing entities where possible to preserve renderer
+   * pointers and trail arrays), and mirrors the client's player fields onto
+   * `this.player` so camera + UI keep working unchanged.
+   */
+  public applySnapshot(snap: SnapshotMessage) {
+    if (this.netRole !== NetRole.CLIENT || !this.currentMap) return;
+    if (snap.tick <= this.clientLastSnapshotTick) return; // stale — drop
+    this.clientLastSnapshotTick = snap.tick;
+    this.clientSelfId = snap.yourId;
+    this.clientStats = snap.stats;
+
+    // In-place merge: keep a map of existing entities by id so we can reuse
+    // instances (preserving their trail/polygon buffers) and only allocate
+    // on first appearance.
+    const existing = new Map<string, GameEntity>();
+    for (let i = 0; i < this.currentMap.entities.length; i++) {
+      existing.set(this.currentMap.entities[i].id, this.currentMap.entities[i]);
+    }
+    // Also index player/player2 if present so they round-trip through
+    // applySerializedEntity without reallocating.
+    existing.set(this.player.id, this.player);
+    if (this.player2) existing.set(this.player2.id, this.player2);
+
+    const nextEnts: GameEntity[] = [];
+    let selfEntity: GameEntity | null = null;
+    for (let i = 0; i < snap.entities.length; i++) {
+      const se = snap.entities[i];
+      const prev = existing.get(se.id);
+      const ent = applySerializedEntity(se, prev);
+      ent.id = se.id;
+      // Keep all entities (including self) in the map list so prepareFrameEntities
+      // renders everything in a single pass.  selfEntity is a reference, not a
+      // removal — we still need this.player mirrored for camera tracking below.
+      nextEnts.push(ent);
+      if (se.id === snap.yourId) {
+        selfEntity = ent;
+      }
+    }
+    this.currentMap.entities = nextEnts;
+
+    // Mirror the client's own player onto this.player so camera and existing
+    // render code paths keep working without a branching rewrite.
+    if (selfEntity) {
+      this.player.id = selfEntity.id;
+      this.player.type = EntityType.PLAYER;
+      this.player.position.x = selfEntity.position.x;
+      this.player.position.y = selfEntity.position.y;
+      this.player.velocity.x = selfEntity.velocity.x;
+      this.player.velocity.y = selfEntity.velocity.y;
+      // Preserve locally-computed rotation (set by updateClientLocalAim) so
+      // aim feels responsive; host rotation overrides only when significantly
+      // behind (e.g. wraparound).
+      const dr = Math.abs(selfEntity.rotation - this.player.rotation);
+      if (dr > Math.PI) this.player.rotation = selfEntity.rotation;
+      this.player.size.x = selfEntity.size.x;
+      this.player.size.y = selfEntity.size.y;
+      this.player.color = selfEntity.color;
+      this.player.health = selfEntity.health;
+      this.player.maxHealth = selfEntity.maxHealth;
+      this.player.shield = selfEntity.shield;
+      this.player.maxShield = selfEntity.maxShield;
+      this.player.shieldHitFlash = selfEntity.shieldHitFlash;
+      this.player.active = selfEntity.active;
+      this.player.isExploding = selfEntity.isExploding;
+      this.player.explosionTimer = selfEntity.explosionTimer;
+      this.player.sprite = selfEntity.sprite;
+      this.player.currentWeapon = selfEntity.currentWeapon;
+      this.player.hitFlash = selfEntity.hitFlash;
+    }
+
+    // Replace damage texts and wave announcements wholesale (cheap lists).
+    this.damageTexts = (snap.damageTexts || []).map(deserializeDamageText);
+    this.waveAnnouncements = (snap.waveAnnouncements || []).map(deserializeWaveAnnouncement);
+
+    // Camera tracks this.player in draw() so no additional work needed.
+    this.camera.position.x = this.player.position.x;
+    this.camera.position.y = this.player.position.y;
+  }
+
+  /**
+   * Client-side: build an input message from the local InputSystem.  Called
+   * by ClientSession each tick; the seq number is externally-managed so the
+   * session can control send rate without coupling back into the engine.
+   */
+  public getLocalInputMessage(seq: number): InputMessage {
+    const move = this.input.getMovementVector();
+    // Aim is computed from the mouse relative to the viewport centre.  On
+    // the client the camera tracks this.player so the centre = player.
+    const mousePos = this.input.getMousePosition();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const aim = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+
+    // Drain any fire events into a single "fire" flag — host reacts to one
+    // shot per message, which is fine at 30+ Hz send rate.
+    const fireEvents = this.input.getFireEvents();
+    const fire = fireEvents.length > 0;
+
+    return {
+      t: 'input',
+      seq,
+      moveX: move.x,
+      moveY: move.y,
+      aim,
+      fire,
+    };
+  }
+
+  public startMultiplayerGame() {
+    // Host starts the wave system as normal; client just enters PLAYING so
+    // the loop stops drawing the static menu frame.
+    if (this.netRole === NetRole.HOST) {
+      this.gameState = GameState.PLAYING;
+      this.initWaveSystem();
+    } else if (this.netRole === NetRole.CLIENT) {
+      this.gameState = GameState.PLAYING;
+    } else {
+      this.startGame();
+    }
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
-    
+
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
 
-    // Report stats
-    const wsMap: Record<string, 'active' | 'cleared' | 'complete'> = {
-      inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
-    };
-    this.onStatsUpdate({
-      fps: Math.round(1000 / ((performance.now() - time) + 1)),
-      entityCount: (this.currentMap?.entities.length || 0) + 1,
-      currentMapName: this.currentMap?.name || 'Loading...',
-      currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
-      gameState: this.gameState,
-      difficulty: this.difficultyLevel,
-      waveNumber: this.waveIndex + 1,
-      waveStatus: wsMap[this.waveState],
-      waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
-      debugMode: this.debugMode,
-      weaponCount: this.currentWeaponIndex + 1,
-      shield: this.player.shield,
-      maxShield: this.player.maxShield,
-    });
+    // Stats reporting: CLIENT mode surfaces host-sent stats verbatim so the
+    // UIOverlay reflects host authority.  SOLO/HOST build stats locally.
+    if (this.netRole === NetRole.CLIENT && this.clientStats) {
+        const cs = this.clientStats;
+        this.onStatsUpdate({
+          fps: Math.round(1000 / ((performance.now() - time) + 1)),
+          entityCount: this.currentMap?.entities.length || 0,
+          currentMapName: cs.mapName,
+          currentMapType: cs.mapType,
+          currentWeapon: WEAPONS[cs.currentWeapon || WeaponType.BLASTER].name,
+          gameState: cs.gameState,
+          difficulty: cs.difficulty,
+          waveNumber: cs.waveNumber,
+          waveStatus: cs.waveStatus,
+          waveGraceTimer: cs.waveGraceTimer,
+          debugMode: this.debugMode,
+          weaponCount: cs.weaponCount,
+          shield: cs.shield,
+          maxShield: cs.maxShield,
+        });
+    } else {
+        const wsMap: Record<string, 'active' | 'cleared' | 'complete'> = {
+          inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
+        };
+        this.onStatsUpdate({
+          fps: Math.round(1000 / ((performance.now() - time) + 1)),
+          entityCount: (this.currentMap?.entities.length || 0) + 1 + (this.player2 ? 1 : 0),
+          currentMapName: this.currentMap?.name || 'Loading...',
+          currentMapType: this.currentMap?.type || MapType.UNIVERSE,
+          currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+          gameState: this.gameState,
+          difficulty: this.difficultyLevel,
+          waveNumber: this.waveIndex + 1,
+          waveStatus: wsMap[this.waveState],
+          waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+          debugMode: this.debugMode,
+          weaponCount: this.currentWeaponIndex + 1,
+          shield: this.player.shield,
+          maxShield: this.player.maxShield,
+        });
+    }
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // CLIENT mode: no simulation.  Entity state was replaced in-place by the
+    // most recent snapshot; the InputSystem is still collecting local keys /
+    // mouse / touch so ClientSession.pollInput() can forward them upstream.
+    if (this.netRole === NetRole.CLIENT) {
+        // Client still needs to update its rotation locally based on the
+        // mouse so aim feels responsive pre-ack (the host will echo back).
+        this.updateClientLocalAim();
+        this.prepareFrameEntities();
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         requestAnimationFrame(this.loop);
         return;
@@ -337,12 +713,131 @@ export class GameEngine {
     // with a fixed-timestep accumulator at 60 Hz display.
     try { this.updatePhysics(safeFrameTime); } catch (e) { console.error('[PhysicsSystem] update error:', e); }
     try { this.updateGameLogic(safeFrameTime); } catch (e) { console.error('[GameLogic] update error:', e); }
+    // HOST mode: drive the remote player's ship after local logic runs so
+    // player2 gets the same frame-rate as the local player.
+    if (this.netRole === NetRole.HOST && this.player2 && this.remoteInput) {
+        try { this.updatePlayer2Control(safeFrameTime); } catch (e) { console.error('[Player2] control error:', e); }
+    }
     // Include entities spawned during game logic (e.g., projectiles) before rendering
     this.prepareFrameEntities();
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
 
+    // Advance host simulation tick (used as snapshot sequence number)
+    if (this.netRole === NetRole.HOST) this.hostTick++;
+
     requestAnimationFrame(this.loop);
   };
+
+  // ── Multiplayer: remote player control (HOST only) ──────────────────────────
+  // Mirrors the player movement / rotation / firing logic from updateGameLogic,
+  // but reads from `remoteInput` instead of the local InputSystem.  Kept as
+  // a separate method so updateGameLogic stays untouched and player1 behaviour
+  // is unaffected when running in HOST mode.
+  private updatePlayer2Control(dt: number) {
+    if (!this.player2 || !this.remoteInput || !this.currentMap) return;
+    if (this.player2.isExploding) {
+        if (this.player2.explosionTimer !== undefined) {
+            this.player2.explosionTimer -= dt;
+            if (this.player2.explosionTimer <= 0) {
+                this.respawnPlayer2();
+            }
+        }
+        return;
+    }
+    if (this.player2.health <= 0 && !this.player2.isExploding) {
+        this.startExplosion(this.player2);
+        return;
+    }
+
+    const moveDir = this.remoteInput.getMovementVector();
+    this.player2.inputVector = moveDir;
+
+    const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+    const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
+    const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+    const timeScale = dt * 60;
+    this.player2.velocity.x += moveDir.x * acc * timeScale;
+    this.player2.velocity.y += moveDir.y * acc * timeScale;
+    const sp = Math.sqrt(this.player2.velocity.x ** 2 + this.player2.velocity.y ** 2);
+    if (sp > maxSpeed) {
+        this.player2.velocity.x = (this.player2.velocity.x / sp) * maxSpeed;
+        this.player2.velocity.y = (this.player2.velocity.y / sp) * maxSpeed;
+    }
+
+    this.player2.rotation = this.remoteInput.getAim();
+
+    if (this.player2.weaponCooldown && this.player2.weaponCooldown > 0) {
+        this.player2.weaponCooldown -= dt;
+    }
+
+    // Cooldown-gated shield regen so a dropped connection doesn't leave
+    // the remote player defenceless forever.
+    if ((this.player2.shield ?? 0) < (this.player2.maxShield ?? 0)) {
+        if ((this.player2.shieldRechargeTimer ?? 0) > 0) {
+            this.player2.shieldRechargeTimer! -= dt;
+        } else {
+            this.player2.shield = Math.min(
+                this.player2.maxShield ?? 0,
+                (this.player2.shield ?? 0) + SHIELD_CONSTANTS.RECHARGE_RATE * dt
+            );
+        }
+    }
+    if ((this.player2.shieldHitFlash ?? 0) > 0) {
+        this.player2.shieldHitFlash! -= dt;
+    }
+
+    if (this.remoteInput.consumeFire()) {
+        this.fireWeaponFromAngle(this.player2, this.remoteInput.getAim());
+    }
+  }
+
+  // Local-only aim update on the CLIENT: even though simulation is skipped,
+  // setting the local player's rotation from the mouse position each frame
+  // keeps the aim indicator feeling responsive while we wait for host echoes.
+  private updateClientLocalAim() {
+    if (!this.player) return;
+    const mousePos = this.input.getMousePosition();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+  }
+
+  private respawnPlayer2() {
+    if (!this.player2 || !this.currentMap) return;
+    const spawn = this.currentMap.playerSpawn || { x: 0, y: 0 };
+    this.player2.isExploding = false;
+    this.player2.explosionTimer = undefined;
+    this.player2.health = this.player2.maxHealth;
+    this.player2.shield = this.player2.maxShield;
+    this.player2.shieldRechargeTimer = 0;
+    this.player2.shieldHitFlash = 0;
+    this.player2.active = true;
+    this.player2.sprite = ASSETS.PLAYER_SHIP;
+    this.player2.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
+    // Offset spawn from player1 so the two don't collide on respawn
+    this.player2.position = { x: spawn.x + 80, y: spawn.y };
+    this.player2.velocity = { x: 0, y: 0 };
+    this.player2.rotation = 0;
+    this.player2.weaponCooldown = 0;
+  }
+
+  // Weapon fire helper used by both player2's remote input and any future
+  // scripted firing paths.  Derives the target point from an aim angle rather
+  // than a screen-space coordinate, since remote inputs don't know about
+  // the host's viewport.
+  private fireWeaponFromAngle(shooter: GameEntity, aim: number) {
+    if ((shooter.weaponCooldown ?? 0) > 0) return;
+    const wType = shooter.currentWeapon || WeaponType.BLASTER;
+    const config = WEAPONS[wType];
+    shooter.weaponCooldown = config.cooldown;
+    const targetX = shooter.position.x + Math.cos(aim) * 100;
+    const targetY = shooter.position.y + Math.sin(aim) * 100;
+    this.spawnProjectileFromConfig(shooter, { x: targetX, y: targetY }, config, EntityType.PLAYER);
+    if (config.type === WeaponType.BURST && config.burstCount) {
+        shooter.burstQueue = config.burstCount - 1;
+        shooter.burstTimer = config.burstDelay;
+    }
+  }
 
   private prepareFrameEntities() {
       if (!this.currentMap) return;
@@ -351,7 +846,13 @@ export class GameEngine {
       for (let i = 0; i < ents.length; i++) {
           this.frameEntities.push(ents[i]);
       }
-      this.frameEntities.push(this.player);
+      // In CLIENT mode the full entity list (including both players) already
+      // comes in via snapshots and is stored directly in currentMap.entities;
+      // we don't push this.player again to avoid a duplicate.
+      if (this.netRole !== NetRole.CLIENT) {
+          this.frameEntities.push(this.player);
+          if (this.player2) this.frameEntities.push(this.player2);
+      }
   }
 
   private handleEnemyShooting(dt: number) {
