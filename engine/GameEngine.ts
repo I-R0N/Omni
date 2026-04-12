@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_EXPLOSION_RADIUS, MISSILE_EXPLOSION_DAMAGE, MISSILE_HOMING_STRENGTH, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1328,50 +1328,11 @@ export class GameEngine {
       }
   }
 
-  // ─── Missile detonation (AoE explosion on impact or lifetime expiry) ────────
+  // ─── Missile detonation (visual explosion on impact or lifetime expiry) ─────
 
-  private detonateMissile(pos: Vector2, ownerType: EntityType) {
-      if (!this.currentMap) return;
-
-      const r2 = MISSILE_EXPLOSION_RADIUS * MISSILE_EXPLOSION_RADIUS;
-
-      for (const e of this.currentMap.entities) {
-          if (!e.active || e.isExploding) continue;
-          if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID && e.type !== EntityType.STRUCTURE) continue;
-          // Don't damage friendlies
-          if (ownerType === EntityType.ENEMY && e.type === EntityType.ENEMY) continue;
-
-          const dx = e.position.x - pos.x;
-          const dy = e.position.y - pos.y;
-          const d2 = dx * dx + dy * dy;
-          const hitR = MISSILE_EXPLOSION_RADIUS + Math.max(e.size.x, e.size.y) / 2;
-
-          if (d2 < hitR * hitR) {
-              // Damage falls off linearly with distance
-              const dist = Math.sqrt(d2);
-              const falloff = 1 - Math.min(1, dist / MISSILE_EXPLOSION_RADIUS);
-              const dmg = MISSILE_EXPLOSION_DAMAGE * falloff;
-
-              e.health -= dmg;
-              e.hitFlash = 0.12;
-
-              // Knockback away from explosion center
-              if (dist > 1) {
-                  const kbStr = falloff * 4;
-                  e.velocity.x += (dx / dist) * kbStr;
-                  e.velocity.y += (dy / dist) * kbStr;
-              }
-
-              this.spawnDamageText(e.position, dmg, e);
-
-              if (e.health <= 0 && !e.isExploding) {
-                  e.lastImpactDamage = dmg;
-                  this.handleEntityDeath(e);
-              }
-          }
-      }
-
-      // Explosion VFX — green radiation burst
+  private detonateMissile(pos: Vector2, _ownerType: EntityType) {
+      // Explosion VFX — green radiation burst (damage is handled by normal
+      // projectile collision; no AoE loop to avoid mass-shard perf spikes).
       this.spawnParticles(pos, 20, '#4ade80', {
           speedMin: 3, speedMax: 10,
           sizeMin: 2, sizeMax: 4,
