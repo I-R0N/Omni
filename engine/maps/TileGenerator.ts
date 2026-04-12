@@ -255,7 +255,11 @@ export class TileGenerator {
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 },
-        rotation: Math.random() * Math.PI * 2, // random sprite rotation for variety
+        // Rotation: 0 so every tile's hex polygon aligns to the shared grid
+        // orientation — adjacent tiles share edges exactly, producing a
+        // continuous connected cloud instead of a scattered look.  Visual
+        // variety comes from the 9 nebula sprites + per-cluster random hue.
+        rotation: 0,
         color: composition[0].hex, // legacy single-colour field, kept in sync
         active: true,
         health: 1,
