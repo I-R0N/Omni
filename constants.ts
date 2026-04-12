@@ -327,7 +327,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     cooldown: 0.005,   // matches BLASTER
     speed: 9,          // matches BLASTER
     damage: 2,         // matches BLASTER
-    lifetime: 1.5,     // matches BLASTER
+    lifetime: 20,      // long-range beam — persists across many bounces
     color: '#4ade80',  // Green — thin laser beam that bounces off tiles
     size: 6,
     count: 1,

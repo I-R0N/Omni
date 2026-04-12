@@ -484,28 +484,50 @@ export class PhysicsSystem {
           if (proj.isBouncer) {
               const isTile = target.type === EntityType.STRUCTURE
                   || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
-              if (isTile) {
+              if (isTile && proj.velocity) {
                   if (onHit) onHit(proj.position, proj, target);
 
-                  // Reflect velocity off the surface normal (out of target, toward projectile).
-                  // mtv points from a → b, so the outward normal toward the projectile is
-                  // -mtv when proj is `a`, and +mtv when proj is `b`.
-                  const mtvLen = Math.sqrt(mtv.x * mtv.x + mtv.y * mtv.y);
-                  if (mtvLen > 0.0001 && proj.velocity) {
-                      const sign = proj === a ? -1 : 1;
-                      const nx = sign * mtv.x / mtvLen;
-                      const ny = sign * mtv.y / mtvLen;
-                      const dot = proj.velocity.x * nx + proj.velocity.y * ny;
-                      if (dot < 0) {
-                          proj.velocity.x -= 2 * dot * nx;
-                          proj.velocity.y -= 2 * dot * ny;
-                          proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
-                      }
-                      // Push projectile fully out of the tile's AABB so the next
-                      // frame's broadphase doesn't re-collide with the same tile.
-                      proj.position.x += nx * (mtvLen + 0.5);
-                      proj.position.y += ny * (mtvLen + 0.5);
+                  // Tiles are axis-aligned AABBs, and the projectile is thin and
+                  // rotated along its travel direction — SAT's minimum-overlap axis
+                  // is often the wrong reflection axis. Instead, infer the entry
+                  // face from the projectile's velocity direction and the tile's
+                  // dilated AABB: for each axis, compute the reverse-unwind time
+                  // to exit the corresponding entry face. The axis with the smaller
+                  // unwind time was the most-recently-crossed face → that's the
+                  // face we bounce off of.
+                  const tileHX = target.size.x / 2;
+                  const tileHY = target.size.y / 2;
+                  // Use a conservative projectile radius so the push-out always
+                  // clears the tile regardless of projectile rotation.
+                  const projR = Math.max(proj.size.x, proj.size.y) / 2;
+                  const dHX = tileHX + projR;
+                  const dHY = tileHY + projR;
+
+                  const vx = proj.velocity.x;
+                  const vy = proj.velocity.y;
+                  const relX = proj.position.x - target.position.x;
+                  const relY = proj.position.y - target.position.y;
+
+                  let tX = Infinity;
+                  let tY = Infinity;
+                  if (vx >  0.0001) tX = (relX + dHX) / vx;  // entered through left face
+                  else if (vx < -0.0001) tX = (relX - dHX) / vx;  // entered through right face
+                  if (vy >  0.0001) tY = (relY + dHY) / vy;
+                  else if (vy < -0.0001) tY = (relY - dHY) / vy;
+
+                  // Pick the entry axis: the one with the SMALLER reverse-unwind
+                  // time was crossed last, so that's the face we're reflecting off.
+                  if (tX <= tY) {
+                      proj.velocity.x = -vx;
+                      // Push out along X so next frame doesn't re-collide with this tile
+                      const nx = vx > 0 ? -1 : 1;
+                      proj.position.x = target.position.x + nx * dHX + nx * 0.5;
+                  } else {
+                      proj.velocity.y = -vy;
+                      const ny = vy > 0 ? -1 : 1;
+                      proj.position.y = target.position.y + ny * dHY + ny * 0.5;
                   }
+                  proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
                   return;
               }
           }
