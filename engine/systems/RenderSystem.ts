@@ -212,10 +212,17 @@ export class RenderSystem {
     // Pass attractors and ZOOM to background for star warping
     this.backgroundManager.render(ctx, camera.position, this._attractors, camera.zoom);
 
-    // 1b. Gravitational lens distortion — warp the background around the player when thrusting.
+    // 1b. Gravitational lens distortion — directional warp aligned to thrust vector.
     // Always called when player exists so the smoothed decay can fade out gracefully.
     if (player) {
-        this.lensEffect.render(ctx, player.thrust ?? 0, dpr, width, height);
+        const iv = player.inputVector;
+        this.lensEffect.render(
+            ctx,
+            player.thrust ?? 0,
+            iv ? iv.x : 0,
+            iv ? iv.y : 0,
+            dpr, width, height
+        );
     }
 
     // 2. Camera Transform
