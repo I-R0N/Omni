@@ -82,6 +82,9 @@ export class GameEngine {
   private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };
   // Per-frame drift speed of thrust-trail points along the -thrust direction
   private static readonly THRUST_TRAIL_DRIFT = 1.2;
+  // Per-frame lerp factor for easing lastThrustDir toward the current input
+  // direction — keeps the trail smooth through rapid input direction changes
+  private static readonly THRUST_DIR_SMOOTH = 0.2;
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -818,10 +821,25 @@ export class GameEngine {
     const thrusting = throttle > 0;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
-        // Cache the current (normalized) thrust direction for use during the
-        // post-thrust decay window when moveDir is zero.
-        this.lastThrustDir.x = moveDir.x / throttle;
-        this.lastThrustDir.y = moveDir.y / throttle;
+        // Target (normalized) thrust direction from current input
+        const tx = moveDir.x / throttle;
+        const ty = moveDir.y / throttle;
+        // Smoothly ease the stored direction toward the target so rapid input
+        // changes produce curves rather than sharp corners in the trail.  A
+        // framerate-compensated lerp keeps the feel consistent across dt.
+        const alpha = 1 - Math.pow(1 - GameEngine.THRUST_DIR_SMOOTH, dt * 60);
+        this.lastThrustDir.x += (tx - this.lastThrustDir.x) * alpha;
+        this.lastThrustDir.y += (ty - this.lastThrustDir.y) * alpha;
+        // Re-normalize
+        const dl = Math.sqrt(this.lastThrustDir.x * this.lastThrustDir.x + this.lastThrustDir.y * this.lastThrustDir.y);
+        if (dl > 0.0001) {
+            this.lastThrustDir.x /= dl;
+            this.lastThrustDir.y /= dl;
+        } else {
+            // Fallback if interpolation collapsed to zero (e.g. 180° reversal)
+            this.lastThrustDir.x = tx;
+            this.lastThrustDir.y = ty;
+        }
     } else {
         this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
     }
