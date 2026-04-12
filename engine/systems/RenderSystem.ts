@@ -3,6 +3,7 @@
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+import { GravitationalLensEffect } from './GravitationalLensEffect';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -53,6 +54,7 @@ function roundRectPath(
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
+  private lensEffect: GravitationalLensEffect;
   private debugMode: boolean = false;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
@@ -69,6 +71,7 @@ export class RenderSystem {
 
   constructor() {
     this.backgroundManager = new BackgroundManager();
+    this.lensEffect = new GravitationalLensEffect();
     // Preload basic assets
     Object.values(ASSETS).forEach(src => this.getImage(src));
   }
@@ -208,6 +211,12 @@ export class RenderSystem {
     
     // Pass attractors and ZOOM to background for star warping
     this.backgroundManager.render(ctx, camera.position, this._attractors, camera.zoom);
+
+    // 1b. Gravitational lens distortion — warp the background around the player when thrusting.
+    // Always called when player exists so the smoothed decay can fade out gracefully.
+    if (player) {
+        this.lensEffect.render(ctx, player.thrust ?? 0, dpr, width, height);
+    }
 
     // 2. Camera Transform
     ctx.save();

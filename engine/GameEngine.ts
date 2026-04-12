@@ -738,6 +738,7 @@ export class GameEngine {
     this.player.velocity.x += moveDir.x * acc * timeScale;
     this.player.velocity.y += moveDir.y * acc * timeScale;
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
+    this.player.thrust = throttle;
 
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {

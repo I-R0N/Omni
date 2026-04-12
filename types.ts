@@ -167,6 +167,9 @@ export interface GameEntity {
   pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
+  // Thrust intensity (0..1) — set by GameEngine each frame for the player entity
+  thrust?: number;
+
   // Debug Visuals
   inputVector?: Vector2;
 

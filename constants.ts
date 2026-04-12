@@ -199,6 +199,18 @@ export const SHOOTING_STAR_CONSTANTS = {
   SPEED_MAX: 900
 };
 
+export const GRAVITATIONAL_LENS_CONSTANTS = {
+  RADIUS: 160,             // Max effect radius (CSS pixels)
+  TILE_SIZE: 10,           // Displacement grid tile size — smaller = smoother but more drawImage calls
+  PEAK_DISPLACEMENT: 18,   // Max pixel displacement at Einstein ring radius
+  SOFTENING: 55,           // Einstein ring radius (CSS pixels) — where displacement peaks
+  ONSET_SPEED: 8,          // Thrust smoothing onset rate (per second)
+  DECAY_SPEED: 3,          // Thrust smoothing decay rate (per second)
+  MIN_THRESHOLD: 0.02,     // Below this smoothed thrust, effect is skipped entirely
+  RING_OPACITY: 0.18,      // Peak opacity of Einstein ring glow at full thrust
+  RING_COLOR: '180,220,255', // RGB string for the ring glow (cool white-blue)
+};
+
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
     maxSpeed: 140,
