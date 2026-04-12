@@ -129,7 +129,8 @@ export class GravitationalLensEffect {
                 if (alpha < 0.01) continue;
 
                 // --- Directional modulation (Alcubierre warp) ---
-                // dirFactor = -cos(tileAngle - thrustAngle)
+                // Raw cosine (-1..+1) is raised to FOCUS exponent to narrow the
+                // active cone along the thrust axis while preserving sign.
                 //   +1 behind the ship  → outward displacement (space expands)
                 //   -1 in front          → inward displacement (space contracts)
                 //    0 at the sides      → no displacement
@@ -137,7 +138,8 @@ export class GravitationalLensEffect {
                 let dy = 0;
                 if (dist > 0.5) {
                     const tileAngle = Math.atan2(tcy, tcx);
-                    const dirFactor = -Math.cos(tileAngle - thrustAngle);
+                    const rawCos = -Math.cos(tileAngle - thrustAngle);
+                    const dirFactor = Math.sign(rawCos) * Math.pow(Math.abs(rawCos), C.FOCUS);
 
                     // Lens profile: peaks at r = soft, falls off as 1/r
                     const d = peakDisp * (2 * soft * dist) / (distSq + softSq) * dirFactor;

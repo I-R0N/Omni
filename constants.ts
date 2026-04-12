@@ -210,6 +210,7 @@ export const GRAVITATIONAL_LENS_CONSTANTS = {
   RING_OPACITY: 0.07,      // Peak opacity of Einstein ring glow at full thrust
   RING_COLOR: '180,220,255', // RGB string for the ring glow (cool white-blue)
   EDGE_FADE: 20,           // Soft-edge fade width (CSS pixels) — eliminates boundary aliasing
+  FOCUS: 3,                // Directional focus exponent — higher = tighter cone along thrust axis
 };
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
