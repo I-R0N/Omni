@@ -5,6 +5,7 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
+import { HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NebulaColorStop } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
@@ -550,11 +551,14 @@ export class GameEngine {
       this.updateNebulaDynamics(dt);
 
       // In-place compaction (Garbage Free)
-      // Inactive tiles with regenProgress set are kept as ghost placeholders.
+      // Inactive tiles with regenProgress set are kept as ghost placeholders
+      // — applies to both glass (STRUCTURE) and nebula (NEBULA) tiles.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
-          if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
+          const isRegenGhost = (ent.type === EntityType.STRUCTURE || ent.type === EntityType.NEBULA)
+                               && ent.regenProgress !== undefined;
+          if (ent.active || isRegenGhost) {
               this.currentMap.entities[writeIdx++] = ent;
           }
       }
@@ -575,13 +579,22 @@ export class GameEngine {
       }
 
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          // Nebula tiles and shards both shatter into 3 children at 75%
-          // of the parent's linear size (total area ~1.69× parent — the
-          // cloud gains coverage per collision).  The merge-gravity pass
-          // re-equilibrates by absorbing small shards into larger ones.
-          // No regen: nebulae are replenished via the merge cycle or on
-          // map reload.
+          // Both tiles and shards shatter into N children at
+          // SHARD_LINEAR_RATIO of parent diameter.  Tile regen (below)
+          // caps permanent growth by resetting tile size to the canonical
+          // hex dimensions on respawn.
           this.spawnNebulaShards(entity);
+      }
+
+      if (entity.type === EntityType.NEBULA) {
+          // Nebula tiles regenerate on the same cadence as glass tiles.
+          // The entity stays in currentMap.entities as an inactive
+          // placeholder (preserved by the compaction check below) until
+          // the regen timer expires, at which point it pops back with
+          // its canonical hex size — this is how merge-grown tiles
+          // revert to original dimensions (otherwise area would compound).
+          entity.regenProgress = 0;
+          this.pendingRegens.push({ entity, timer: NEBULA_CONSTANTS.REGEN_DELAY });
       }
 
       if (entity.type === EntityType.ENEMY) {
@@ -688,29 +701,51 @@ export class GameEngine {
         this.minimapDebounce -= dt;
     }
 
-    // Tile regeneration tick
+    // Tile regeneration tick — handles both STRUCTURE (glass) and NEBULA.
     for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
         const regen = this.pendingRegens[i];
         regen.timer -= dt;
-        regen.entity.regenProgress = 1 - (regen.timer / STRUCTURE_CONSTANTS.TILE_REGEN_DELAY);
+        // Progress is normalised against the per-type delay so both tile
+        // types can share this loop with their own timing constants.
+        const delay = regen.entity.type === EntityType.NEBULA
+            ? NEBULA_CONSTANTS.REGEN_DELAY
+            : STRUCTURE_CONSTANTS.TILE_REGEN_DELAY;
+        regen.entity.regenProgress = 1 - (regen.timer / delay);
 
         if (regen.timer <= 0) {
-            // Restore tile to full health and re-add to physics static grid
             regen.entity.health = regen.entity.maxHealth;
             regen.entity.active = true;
             regen.entity.regenProgress = undefined;
-            regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
+
+            if (regen.entity.type === EntityType.NEBULA) {
+                // Snap back to canonical hex dimensions so any merge
+                // growth accumulated before shatter is discarded on regen.
+                // This is the cap that keeps per-cluster area from
+                // compounding across shatter/merge cycles.
+                regen.entity.size.x = HEX_WIDTH * 0.95;
+                regen.entity.size.y = HEX_HEIGHT * 0.95;
+                // Small tint-coloured puff as a "reappear" effect.
+                const tint = blendCompositionToHex(regen.entity.nebulaColorComposition) || regen.entity.color;
+                this.spawnParticles(regen.entity.position, 5, tint, {
+                    speedMin: 0.5, speedMax: 2.0,
+                    sizeMin: 1, sizeMax: 2,
+                    lifetimeMin: 0.3, lifetimeMax: 0.6,
+                });
+            } else {
+                // Glass tile: existing pop-in animation.
+                regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
+                this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
+                    speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
+                    speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
+                    lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                    lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                    sizeMin: 1, sizeMax: 2,
+                });
+            }
+
+            // Re-add to the static grid so collisions start hitting again.
             this.physics.addStaticEntity(regen.entity);
             this.pendingRegens.splice(i, 1);
-
-            // Pop-in particle burst: tile-colored chips scattering outward
-            this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
-                speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
-                speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
-                lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                sizeMin: 1, sizeMax: 2,
-            });
         }
     }
 
@@ -2336,18 +2371,20 @@ export class GameEngine {
 
   /**
    * Shatter a destroyed nebula entity (tile OR shard) into
-   * SHARDS_PER_SHATTER smaller children whose total disc area equals the
-   * parent's disc area (scaled by SHARD_TOTAL_AREA_RATIO, default 1.0).
+   * SHARDS_PER_SHATTER smaller children at SHARD_LINEAR_RATIO of the
+   * parent's diameter.  With N = 3 and ratio = 0.6, total child area
+   * ≈ 1.08 × parent — a modest ~8 % inflation per shatter, kept bounded
+   * by tile regeneration (grown tiles revert to canonical hex size).
    *
-   * With exact conservation (ratio = 1) and N = 3, each child's diameter
-   * is parent / sqrt(3) ≈ 0.577 × parent — 3 × (0.577)² = 1.0 area.  This
-   * avoids the inflation cascade where naive per-child ratios grow the
-   * total area on every collision.
+   * Children are fan-spread in the REARWARD cone (180° ± FAN_HALF_ANGLE)
+   * at an offset of SHARD_SPAWN_OFFSET_RATIO × parentRadius.  This puts
+   * every child behind the striker's trajectory (away from both the
+   * striker and the destroyed tile centre), so the striker doesn't
+   * immediately plow into its own debris.
    *
-   * Shards are fan-spread around the striker's forward direction (±60°)
-   * and spin via the tangent rule: shards on the striker's visual right
-   * spin CW (positive rotationSpeed in canvas coords), shards on the left
-   * spin CCW.  The on-axis forward shard gets a random spin direction.
+   * Rotation sign follows the tangent rule: shards on the striker's
+   * visual right spin CW (positive rotationSpeed in canvas coords),
+   * shards on the left spin CCW.  Colinear shards get a random sign.
    *
    * Parent's colour composition is cloned into every child so shatter →
    * merge preserves hue through many cycles (see NebulaColor.blendCompositions).
@@ -2361,14 +2398,11 @@ export class GameEngine {
     if (!this.currentMap) return;
 
     const parentDiameter = Math.max(parent.size.x, parent.size.y);
-    // Derive child diameter from area conservation: π (r_child)² × N =
-    // π r_parent² × ratio → r_child = r_parent × sqrt(ratio / N).
-    const linearRatio = Math.sqrt(
-        NEBULA_CONSTANTS.SHARD_TOTAL_AREA_RATIO / NEBULA_CONSTANTS.SHARDS_PER_SHATTER
-    );
-    const childDiameter = parentDiameter * linearRatio;
+    const parentRadius   = parentDiameter / 2;
+    // Explicit per-child linear ratio — 0.60 by default.  Total child
+    // area = N × ratio² × parent_area; tile regen caps permanent growth.
+    const childDiameter = parentDiameter * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
     if (childDiameter < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
-    const childRadius = childDiameter / 2;
 
     const composition = parent.nebulaColorComposition;
     const count       = NEBULA_CONSTANTS.SHARDS_PER_SHATTER;
@@ -2390,34 +2424,35 @@ export class GameEngine {
         1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED
     );
 
-    // Fan the children symmetrically around the forward direction.  For
-    // count = 3 this produces angles [-60°, 0°, +60°] — one shard
-    // continues straight through, the other two split left/right.
-    const fan = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
-    // Guard: for count=1 we'd divide by zero; generalise safely.
+    // REARWARD fan: children spawn behind the striker's motion direction
+    // so they're not in the striker's forward path.  Base angle = π (180°
+    // from forward), spread symmetrically by ± FAN_HALF_ANGLE.  With
+    // count = 3 and FAN = 60°, rear angles are [120°, 180°, 240°] — a
+    // wide rear arc that clears the striker's trajectory on both sides.
+    const fan  = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
     const step = count > 1 ? (2 * fan) / (count - 1) : 0;
+    const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
 
     for (let i = 0; i < count; i++) {
-        const offsetAngle = count > 1 ? -fan + step * i : 0;
+        // Rear-cone angle: π + (−fan … +fan) relative to forward.
+        const offsetAngle = Math.PI + (count > 1 ? -fan + step * i : 0);
         const cosA = Math.cos(offsetAngle);
         const sinA = Math.sin(offsetAngle);
         // Rotate forward vector by offsetAngle → this shard's direction
         const dx = fx * cosA - fy * sinA;
         const dy = fx * sinA + fy * cosA;
 
-        // Spawn offset from parent centre so children don't all stack on
-        // top of each other on frame one.  Scales with child radius.
-        const offsetMag = childRadius * 0.6;
+        // Spawn position: offset from parent centre along the rear-cone
+        // direction by ~2 × parent radius, well outside the tile footprint.
         const spawnX = parent.position.x + dx * offsetMag;
         const spawnY = parent.position.y + dy * offsetMag;
 
-        // Initial velocity: gentle outward nudge + a small fraction of the
-        // striker's velocity so the cloud feels carried-along.  Damping
-        // decays this toward zero within ~1 s.
+        // Initial velocity: gentle outward nudge along the rear-cone
+        // direction.  No carry term from the striker's velocity — we do
+        // NOT want shards to follow the striker forward into their own
+        // trajectory.  Heavy damping settles them within ~1 s.
         const outwardX = dx * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
         const outwardY = dy * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
-        const carryX = (iv?.x ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
-        const carryY = (iv?.y ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
 
         // Tangent-rule rotation sign: z-component of cross(forward, dir).
         // cross > 0 → shard is on the striker's visual right → CW (+).
@@ -2434,7 +2469,7 @@ export class GameEngine {
             type:            EntityType.NEBULA_SHARD,
             shardType:      'nebula',
             position:       { x: spawnX, y: spawnY },
-            velocity:       { x: outwardX + carryX, y: outwardY + carryY },
+            velocity:       { x: outwardX, y: outwardY },
             size:           { x: childDiameter, y: childDiameter },
             rotation:        Math.random() * Math.PI * 2,
             rotationSpeed,

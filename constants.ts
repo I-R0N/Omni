@@ -242,16 +242,30 @@ export const STRUCTURE_CONSTANTS = {
 // coverage constant on impact, and a gravity-driven merge pass re-absorbs
 // small shards back into larger neighbours to re-form tiles over time.
 export const NEBULA_CONSTANTS = {
-  // Per-shatter child count and total-area preservation ratio.
-  // With SHARD_TOTAL_AREA_RATIO = 1.0, children collectively have the same
-  // disc area as the parent, so shatter is exactly area-conserving.
-  // child_diameter = parent_diameter × sqrt(SHARD_TOTAL_AREA_RATIO / N)
+  // Per-shatter child count and explicit linear size ratio.
+  // child_diameter = parent_diameter × SHARD_LINEAR_RATIO.  At 0.60 with
+  // N = 3, total child area = 3 × 0.36 = 1.08 × parent — a modest 8 %
+  // growth per shatter.  Permanent area inflation is checked by tile
+  // regeneration (grown tiles revert to canonical hex size on respawn).
   SHARDS_PER_SHATTER: 3,
-  SHARD_TOTAL_AREA_RATIO: 1.0,
+  SHARD_LINEAR_RATIO: 0.60,
   // Minimum diameter below which a shard is no longer shatter-able.  Keeps
   // the system bounded under repeated impacts — sub-min shards simply
   // pass-through without fragmenting further.
   MIN_SHATTER_DIAMETER: 10,
+  // Seconds a PLAYER/ENEMY must wait after shattering a nebula before they
+  // can shatter another.  Prevents a single fly-through from ripping an
+  // entire cluster apart simultaneously.  140 px/s × 0.2 s ≈ 28 px traversal
+  // ≈ one tile width, so roughly every other tile gets broken in a row.
+  IMPACT_COOLDOWN: 0.2,
+  // How far from the destroyed parent's centre to spawn new shards, in
+  // multiples of the parent's radius.  At 2.0 they sit ~1 full tile width
+  // behind the striker — outside the striker's forward path.
+  SHARD_SPAWN_OFFSET_RATIO: 2.0,
+  // Regen delay: nebula tiles reappear after this many seconds, matching
+  // the glass-tile regen cadence.  Grown tiles snap back to their hex size
+  // on regen so merge growth can't compound across cycles.
+  REGEN_DELAY: 12,
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
@@ -265,10 +279,11 @@ export const NEBULA_CONSTANTS = {
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
   SPIN_PER_UNIT_SPEED: 1.2,
   MAX_SPIN: 6.0,  // rad/s cap
-  // Initial scatter velocity as a fraction of striker speed (cloud should
-  // barely drift — keep very low so damping catches it immediately).
-  SCATTER_VELOCITY_FACTOR: 0.08,
-  SCATTER_OUTWARD_SPEED: 0.35, // extra push outward from centre
+  // Initial rear-cone push speed: shards are nudged away from the parent
+  // in the rearward direction, then heavy damping stops them.  No carry
+  // term from the striker's velocity — we don't want debris following
+  // the striker forward into their own trajectory.
+  SCATTER_OUTWARD_SPEED: 0.35,
   // Shatter fan half-angle — 3 children are spread symmetrically around
   // the striker's forward direction within ±FAN_HALF_ANGLE.
   FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)

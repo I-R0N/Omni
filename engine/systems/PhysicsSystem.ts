@@ -80,6 +80,11 @@ export class PhysicsSystem {
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
       }
+      // Nebula shatter cooldown — strikers (PLAYER/ENEMY) that just broke
+      // a nebula can't break another until this expires.
+      if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
+          entity.nebulaImpactCooldown -= dt;
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;
@@ -493,17 +498,17 @@ export class PhysicsSystem {
           const nebula = aIsNebula ? a : b;
           const other  = aIsNebula ? b : a;
 
-          const shatters = other.type === EntityType.PLAYER || other.type === EntityType.ENEMY;
+          // Striker must be PLAYER or ENEMY to shatter, AND must not be
+          // in the post-shatter cooldown window.  The cooldown gives a
+          // perceivable delay between hits when flying through a cluster
+          // so the entire cluster doesn't explode in a single frame.
+          const shatters = (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+                            && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
-              // Derive the linear ratio the same way spawnNebulaShards does
-              // (area conservation: child = parent × sqrt(ratio / N)).
               const parentD = Math.max(nebula.size.x, nebula.size.y);
-              const linearRatio = Math.sqrt(
-                  NEBULA_CONSTANTS.SHARD_TOTAL_AREA_RATIO / NEBULA_CONSTANTS.SHARDS_PER_SHATTER
-              );
-              const childD = parentD * linearRatio;
+              const childD  = parentD * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
               if (childD >= NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) {
                   if (other.velocity) {
                       nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
@@ -516,6 +521,8 @@ export class PhysicsSystem {
                   if (nebula.type === EntityType.NEBULA) {
                       this.removeStaticEntity(nebula);
                   }
+                  // Arm the striker's post-shatter cooldown.
+                  other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
                   if (onDeath) onDeath(nebula);
               }
           }

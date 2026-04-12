@@ -254,6 +254,11 @@ export interface GameEntity {
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
   angularDamping?: number;
+  // Per-entity cooldown for nebula shatter triggering.  Set to
+  // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
+  // shatter a nebula; ticked down each frame in PhysicsSystem.update.
+  // While > 0, subsequent nebula contacts pass through without shattering.
+  nebulaImpactCooldown?: number;
 }
 
 export interface CameraState {
