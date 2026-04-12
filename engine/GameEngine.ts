@@ -1068,9 +1068,11 @@ export class GameEngine {
         this.fireLightningChainFromImpact(impactPos, target);
     }
 
-    // Missile projectile: AoE explosion on impact
+    // Missile projectile: visual explosion on impact; clear flag so the
+    // post-physics expired-missile scan doesn't detonate a second time.
     if (proj.isMissile) {
         this.detonateMissile(impactPos, proj.ownerType || EntityType.PLAYER);
+        proj.isMissile = false;
     }
 
     void projSpeed; // suppress lint

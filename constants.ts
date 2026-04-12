@@ -242,8 +242,6 @@ export const PARTICLE_CONSTANTS = {
 };
 
 // ── Missile (radiation bomb) tuning ──────────────────────────────────────────
-export const MISSILE_EXPLOSION_RADIUS = 80;   // world units — AoE blast radius on detonation
-export const MISSILE_EXPLOSION_DAMAGE = 10;   // damage dealt to entities inside the blast
 export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = full homing, 0.2 = very mild)
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
@@ -330,7 +328,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     name: 'Missile',
     cooldown: 0.8,     // slower fire rate — heavy ordnance
     speed: 4,          // slow-moving projectile
-    damage: 3,         // direct hit damage (AoE explosion deals the bulk)
+    damage: 3,         // direct hit damage (explosion is visual only)
     lifetime: 3.0,     // detonates on expiry if it hasn't hit anything
     color: '#4ade80',  // Green — radiation bomb
     size: 6,
