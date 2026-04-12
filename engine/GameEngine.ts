@@ -5,7 +5,7 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
+import { HEX_SIZE, HEX_AREA, TileGenerator, pixelToHexCoord, hexCoordToPixel } from './maps/TileGenerator';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NebulaColorStop } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
@@ -718,13 +718,9 @@ export class GameEngine {
             regen.entity.regenProgress = undefined;
 
             if (regen.entity.type === EntityType.NEBULA) {
-                // Snap back to canonical hex dimensions so any merge
-                // growth accumulated before shatter is discarded on regen.
-                // This is the cap that keeps per-cluster area from
-                // compounding across shatter/merge cycles.
-                regen.entity.size.x = HEX_WIDTH * 0.95;
-                regen.entity.size.y = HEX_HEIGHT * 0.95;
-                // Small tint-coloured puff as a "reappear" effect.
+                // Tiles never grow (only shards do), so size is already
+                // canonical — no restore needed.  Just emit a small
+                // reappear puff tinted by the tile's composition.
                 const tint = blendCompositionToHex(regen.entity.nebulaColorComposition) || regen.entity.color;
                 this.spawnParticles(regen.entity.position, 5, tint, {
                     speedMin: 0.5, speedMax: 2.0,
@@ -2492,31 +2488,31 @@ export class GameEngine {
   /**
    * Per-frame gravity + merge pass for nebula shards.
    *
-   * Each shard is pulled toward the nearest LARGER active nebula entity
-   * (tile or shard) within GRAVITY_RANGE.  When the shard crosses the
-   * merge proximity threshold, the larger target absorbs it:
-   *   - target.size grows so combined disc area is conserved
-   *   - target colour composition is blended weighted by the two areas
-   *   - small shard becomes inactive and emits a brief merge-particle burst
-   *   - target.position and target.sprite are unchanged
+   * Only NEBULA_SHARD entities participate — nebula TILES are immutable
+   * sinks that never grow or absorb.  New tiles are born by shard
+   * coalescence: when two shards merge and the combined disc area reaches
+   * canonical HEX_AREA, the merged shard transmutes into a brand-new
+   * NEBULA tile at the nearest clear grid cell (see tryTransmuteShardToTile).
    *
-   * Tiles are static and grid-locked, so their collision polygon is not
-   * resized — only the display sprite (driven by `size`) grows.  Shard
-   * targets grow their full size (both visual and merge-detection radius).
+   * Each shard is pulled toward the nearest larger-or-equal neighbouring
+   * shard within GRAVITY_RANGE.  Equal-sized pairs merge too — the
+   * mergedThisFrame Set prevents duplicate processing within a single
+   * frame, and the id check in the inner loop handles the rare exact-tie
+   * case without infinite loops.
    *
-   * Broadphase uses a cell grid over all nebula entities to avoid O(n²).
+   * Broadphase uses a cell grid over shards to avoid O(n²).
    */
   private updateNebulaDynamics(dt: number) {
     if (!this.currentMap) return;
     const ents = this.currentMap.entities;
 
-    // Collect active nebula entities and split shards from the rest.
-    // Only shards iterate for gravity; tiles act as targets only.
+    // Collect active nebula shards ONLY.  Tiles are not targets and
+    // don't need to be spatially indexed for this pass.
     const all: GameEntity[] = [];
     for (let i = 0; i < ents.length; i++) {
         const e = ents[i];
         if (!e.active) continue;
-        if (e.type === EntityType.NEBULA || e.type === EntityType.NEBULA_SHARD) {
+        if (e.type === EntityType.NEBULA_SHARD) {
             all.push(e);
         }
     }
@@ -2572,7 +2568,11 @@ export class GameEngine {
                     if (!target.active) continue;
                     if (mergedThisFrame.has(target)) continue; // one merge/target/frame
                     const targetR = Math.max(target.size.x, target.size.y) / 2;
-                    if (targetR <= shardR) continue; // only strictly larger targets
+                    // Allow equal-size merges (relaxed from strictly larger).
+                    // mergedThisFrame + inactive-check combine to prevent
+                    // the race where A and B see each other as valid targets
+                    // in the same frame and double-merge.
+                    if (targetR < shardR) continue;
 
                     const dx = target.position.x - shard.position.x;
                     const dy = target.position.y - shard.position.y;
@@ -2599,6 +2599,9 @@ export class GameEngine {
         if (dist <= mergeDist) {
             this.mergeNebulas(bestTarget, shard);
             mergedThisFrame.add(bestTarget);
+            // Post-merge: if the grown shard is now large enough to form
+            // a tile (disc area ≥ canonical hex area), try transmuting it.
+            this.tryTransmuteShardToTile(bestTarget);
             continue;
         }
 
@@ -2614,13 +2617,17 @@ export class GameEngine {
   }
 
   /**
-   * Absorb a smaller nebula shard into a larger nebula entity.
+   * Absorb a smaller nebula shard into a larger-or-equal nebula shard.
+   * Only called on NEBULA_SHARD pairs (tiles are not merge targets).
    *
-   * - larger.size grows so circle-area (π r²) adds the smaller's area
+   * - larger.size grows so its disc area gains the smaller's disc area
    * - larger's position and sprite remain unchanged
-   * - colour composition is blended weighted by each entity's area
+   * - colour composition is blended weighted by each shard's area
    * - smaller becomes inactive and emits a brief particle puff as a
    *   "simple merge animation"
+   *
+   * Post-merge, the caller checks whether the grown shard should
+   * transmute into a fresh NEBULA tile (see tryTransmuteShardToTile).
    */
   private mergeNebulas(larger: GameEntity, smaller: GameEntity) {
     const largeR = Math.max(larger.size.x, larger.size.y) / 2;
@@ -2630,11 +2637,12 @@ export class GameEngine {
     const newArea = largeArea + smallArea;
     const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
 
-    // Grow size — for tiles this only affects the sprite render scale
-    // (the collision polygon is grid-locked); for shards it also grows
-    // the merge/gravity radius used on subsequent frames.
+    // Grow the larger shard's size so its disc area gains the smaller's.
+    // Shards are circles (polygon is absent), so size.x === size.y and
+    // both the visual sprite and the gravity/merge radius scale up.
     larger.size.x = newDiameter;
     larger.size.y = newDiameter;
+    larger.mass   = newDiameter;
 
     // Blend colour compositions weighted by area; larger dominates.
     larger.nebulaColorComposition = blendCompositions(
@@ -2643,9 +2651,8 @@ export class GameEngine {
     );
     larger.color = blendCompositionToHex(larger.nebulaColorComposition);
 
-    // Tile merge animation: brief tint-coloured puff at the absorption
-    // point.  Uses the existing particle spawner for consistency with
-    // other feedback bursts in the game.
+    // Simple merge animation: brief tint-coloured particle puff at the
+    // absorption point, using the blended composition as the tint.
     const tint = blendCompositionToHex(larger.nebulaColorComposition);
     this.spawnParticles(smaller.position, NEBULA_CONSTANTS.MERGE_PARTICLES, tint, {
         speedMin: 0.5, speedMax: 2.5,
@@ -2655,6 +2662,106 @@ export class GameEngine {
 
     // Smaller vanishes; compaction pass at end of physics removes it.
     smaller.active = false;
+  }
+
+  /**
+   * If the given nebula shard has grown large enough (disc area ≥
+   * HEX_AREA), transmute it into a brand-new NEBULA tile at the nearest
+   * unoccupied grid cell.  Returns true if the transmutation succeeded.
+   *
+   * The shard's accumulated colour composition is passed to the new
+   * tile, so the palette that multiple shards mixed together carries
+   * over to the tile that finally condenses out of them.
+   *
+   * If no candidate cell is clear (the shard's own cell and all 6
+   * neighbours are occupied), the transmutation aborts and the shard
+   * stays as a shard — a later frame may find a clear cell as it drifts.
+   */
+  private tryTransmuteShardToTile(shard: GameEntity): boolean {
+    if (!this.currentMap) return false;
+    if (shard.type !== EntityType.NEBULA_SHARD) return false;
+
+    // Disc-area threshold: the shard must cover at least one full hex
+    // worth of area before condensing into a tile.
+    const shardR = Math.max(shard.size.x, shard.size.y) / 2;
+    const shardArea = Math.PI * shardR * shardR;
+    if (shardArea < HEX_AREA) return false;
+
+    // Candidate cells: the shard's current hex cell + 6 neighbours,
+    // sorted by distance from the shard's position so we snap to the
+    // nearest free slot.
+    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+        const p = hexCoordToPixel(c, r);
+        const dx = p.x - shard.position.x;
+        const dy = p.y - shard.position.y;
+        candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+        pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+        if (this.isGridCellFreeForNebula(cand.c, cand.r)) {
+            chosen = cand;
+            break;
+        }
+    }
+    if (!chosen) return false;
+
+    // Create the new tile at the chosen grid cell, carrying over the
+    // shard's colour composition as the tile's palette.
+    const composition = shard.nebulaColorComposition
+        ? cloneComposition(shard.nebulaColorComposition)
+        : undefined;
+    const tile = TileGenerator.createNebulaTileEntity(
+        chosen.c,
+        chosen.r,
+        composition ?? [{ hex: shard.color || NEBULA_CONSTANTS.DEFAULT_HEX, weight: 1 }],
+        HEX_AREA
+    );
+
+    this.currentMap.entities.push(tile);
+    this.physics.addStaticEntity(tile);
+
+    // Shard collapses into the new tile — deactivate and leave a brief
+    // particle puff at the old shard position as the "condense" effect.
+    shard.active = false;
+    const tint = blendCompositionToHex(tile.nebulaColorComposition);
+    this.spawnParticles(shard.position, NEBULA_CONSTANTS.MERGE_PARTICLES * 2, tint, {
+        speedMin: 0.5, speedMax: 3.0,
+        sizeMin: 1.0, sizeMax: 2.5,
+        lifetimeMin: 0.3, lifetimeMax: 0.6,
+    });
+    return true;
+  }
+
+  /**
+   * Check whether the given grid cell (odd-r offset) has no active or
+   * regenerating nebula tile already occupying it, and is also clear of
+   * static-grid collision geometry (glass tiles etc.).
+   */
+  private isGridCellFreeForNebula(col: number, row: number): boolean {
+    if (!this.currentMap) return false;
+    const pos = hexCoordToPixel(col, row);
+
+    // Any nebula entity pinned to this grid cell — active or regenerating.
+    const ents = this.currentMap.entities;
+    for (let i = 0; i < ents.length; i++) {
+        const e = ents[i];
+        if (e.type !== EntityType.NEBULA) continue;
+        if (e.nebulaGridCol === col && e.nebulaGridRow === row) return false;
+    }
+
+    // Any other static geometry (glass tiles) overlapping this cell —
+    // check a radius slightly smaller than the hex so touching neighbours
+    // don't register as collisions.
+    if (!this.physics.isPositionClear(pos.x, pos.y, HEX_SIZE * 0.5)) return false;
+    return true;
   }
 
   /** Returns the ammo type asteroids should drop for the current wave. */

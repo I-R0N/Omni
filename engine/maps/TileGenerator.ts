@@ -227,6 +227,28 @@ export class TileGenerator {
       composition: NebulaColorStop[],
       tileArea: number
     ) {
+    entities.push(TileGenerator.createNebulaTileEntity(c, r, composition, tileArea));
+  }
+
+  /**
+   * Public factory for a single nebula tile at the given grid cell.  Used
+   * both by the cluster generator at map-init time and by the shard
+   * transmutation path (when accumulated shard mass is large enough to
+   * spawn a brand-new tile at the shard's nearest clear grid cell).
+   *
+   * Hex dimensions are derived from the shared HEX_SIZE constant, so the
+   * resulting tile snaps to the same grid as every other tile on the map.
+   */
+  public static createNebulaTileEntity(
+      c: number,
+      r: number,
+      composition: NebulaColorStop[],
+      tileArea: number = HEX_AREA
+  ): GameEntity {
+    const hexSize = HEX_SIZE;
+    const w = Math.sqrt(3) * hexSize;
+    const h = 2 * hexSize;
+
     const offset = (r % 2 !== 0) ? (w / 2) : 0;
     const cx = (c * w) + offset;
     const cy = r * (h * 0.75);
@@ -249,7 +271,7 @@ export class TileGenerator {
         ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
         : ASSETS.NEBULA_PUFF;
 
-    entities.push({
+    return {
         id: `nebula_${r}_${c}_${Math.random().toString(36).substr(2, 9)}`,
         type: EntityType.NEBULA,
         position: { x: cx, y: cy },
@@ -271,7 +293,16 @@ export class TileGenerator {
         nebulaTileArea: tileArea,
         nebulaGridCol: c,
         nebulaGridRow: r,
-    });
+    };
+  }
+
+  /**
+   * Public wrapper for the internal odd-r offset neighbour lookup.
+   * Used by the shard transmutation code to check adjacent grid cells
+   * when the shard's own cell is already occupied.
+   */
+  public static getHexNeighbors(col: number, row: number): { c: number, r: number }[] {
+    return this.getNeighbors(col, row);
   }
 
   private static getNeighbors(col: number, row: number): { c: number, r: number }[] {
