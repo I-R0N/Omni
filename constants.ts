@@ -251,10 +251,12 @@ export const PARTICLE_CONSTANTS = {
 export const SPARK_CONSTANTS = {
   COUNT_MIN: 6,
   COUNT_MAX: 10,
-  SPEED_MIN: 80,
-  SPEED_MAX: 160,
-  LIFETIME_MIN: 0.2,
-  LIFETIME_MAX: 0.4,
+  // Speeds are per-frame (engine integrates position += velocity without dt).
+  // 3-6 per frame ≈ 180-360 units/sec at 60fps — visible but not off-screen instantly.
+  SPEED_MIN: 3,
+  SPEED_MAX: 6,
+  LIFETIME_MIN: 0.3,
+  LIFETIME_MAX: 0.5,
   SIZE: 3,
   FRICTION: 0.9, // velocity *= FRICTION per dt (deceleration)
 };
