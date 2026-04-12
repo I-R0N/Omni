@@ -1376,18 +1376,21 @@ export class RenderSystem {
           ctx.save();
           ctx.globalAlpha = alpha;
           ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.textBaseline = 'bottom';
+
+          // Position above the minimap: bottom edge minus minimap area minus comfortable gap
+          const baseY = height - MINIMAP_CONSTANTS.MARGIN - MINIMAP_CONSTANTS.SIZE - 30;
 
           // Main text
           ctx.font = 'bold 48px monospace';
           ctx.fillStyle = a.color;
-          ctx.fillText(a.text, width / 2, height / 2 - (a.subtext ? 18 : 0));
+          ctx.fillText(a.text, width / 2, baseY - (a.subtext ? 28 : 0));
 
           // Subtext (smaller, cyan)
           if (a.subtext) {
               ctx.font = 'bold 24px monospace';
               ctx.fillStyle = '#22d3ee';
-              ctx.fillText(a.subtext, width / 2, height / 2 + 28);
+              ctx.fillText(a.subtext, width / 2, baseY);
           }
 
           ctx.restore();
