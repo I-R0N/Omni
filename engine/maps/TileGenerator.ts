@@ -1,11 +1,50 @@
 
-import { GameEntity, EntityType } from '../../types';
-import { COLORS, STRUCTURE_CONSTANTS, ASSETS } from '../../constants';
+import { GameEntity, EntityType, NebulaColorStop } from '../../types';
+import { COLORS, STRUCTURE_CONSTANTS, ASSETS, NEBULA_CONSTANTS } from '../../constants';
+import { NEBULA_IMAGES } from '../../assets';
+import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
+
+// Hex-grid geometric constants for the standard pointy-topped layout used
+// across the map.  Exposed so other systems (nebula coalescence, spawn
+// validation) can share the same pixel↔grid math.
+export const HEX_SIZE = 22;
+export const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
+export const HEX_HEIGHT = 2 * HEX_SIZE;
+export const HEX_V_SPACING = HEX_HEIGHT * 0.75;
+
+// Regular hexagon area (side length = HEX_SIZE).  Used by nebula shard/merge
+// math to keep area conservation exact through shatter → reassembly cycles.
+export const HEX_AREA = (3 * Math.sqrt(3) / 2) * HEX_SIZE * HEX_SIZE;
+
+/**
+ * Convert a pixel position to the nearest odd-r offset grid cell.
+ * Approximate (uses simple rounding rather than fractional-axial rounding);
+ * good enough for snapping nebula shards back to an adjacent cell.
+ */
+export function pixelToHexCoord(px: number, py: number): { c: number; r: number } {
+    const r = Math.round(py / HEX_V_SPACING);
+    const offset = (r % 2 !== 0) ? (HEX_WIDTH / 2) : 0;
+    const c = Math.round((px - offset) / HEX_WIDTH);
+    return { c, r };
+}
+
+/**
+ * Convert an odd-r offset grid cell to its pixel centre.
+ */
+export function hexCoordToPixel(c: number, r: number): { x: number; y: number } {
+    const offset = (r % 2 !== 0) ? (HEX_WIDTH / 2) : 0;
+    return { x: c * HEX_WIDTH + offset, y: r * HEX_V_SPACING };
+}
 
 export class TileGenerator {
   /**
    * Generates discrete clusters of hexagonal tiles spread across the map.
    * Ensures all tiles align to the same global grid.
+   *
+   * @param occupiedCoords  Optional shared "col,row" set.  When supplied, the
+   *   generator skips any cell already in it and adds every new tile it
+   *   creates.  Passing the same set to sequential calls (glass first, then
+   *   nebula) guarantees non-overlapping placement on the shared grid.
    */
   public static generateClusteredMesh(
     mapWidth: number,
@@ -13,43 +52,31 @@ export class TileGenerator {
     hexSize: number,
     clusterCount: number,
     minClusterSize: number,
-    maxClusterSize: number
+    maxClusterSize: number,
+    occupiedCoords?: Set<string>
   ): GameEntity[] {
     const entities: GameEntity[] = [];
-    const usedCoords = new Set<string>(); // "col,row"
+    const usedCoords = occupiedCoords ?? new Set<string>();
 
     // Hexagon geometric constants (Pointy topped)
-    // Width = sqrt(3) * size
-    // Height = 2 * size
-    // Horizontal spacing = Width
-    // Vertical spacing = 3/4 * Height
     const w = Math.sqrt(3) * hexSize;
     const h = 2 * hexSize;
     const hDist = w;
     const vDist = 0.75 * h;
 
-    // Estimate grid bounds based on map size
-    // We center the grid at 0,0. 
-    // Max column index roughly width / w
-    // Max row index roughly height / vDist
     const maxCol = Math.ceil((mapWidth / 2) / hDist);
     const maxRow = Math.ceil((mapHeight / 2) / vDist);
 
     for (let i = 0; i < clusterCount; i++) {
-      // 1. Pick a random seed location on the grid
       let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
       let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
 
-      // 2. Determine cluster size
       const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
-      
-      // 3. Grow cluster (BFS/Random Traversal)
+
       const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
       let createdInCluster = 0;
 
       while (openSet.length > 0 && createdInCluster < targetSize) {
-        // Pick a random hex from the open set to grow organically (blob-like)
-        // Picking index 0 would be BFS (circular), picking last would be DFS (snakey)
         const idx = Math.floor(Math.random() * openSet.length);
         const current = openSet[idx];
         openSet.splice(idx, 1);
@@ -60,32 +87,100 @@ export class TileGenerator {
         usedCoords.add(key);
         createdInCluster++;
 
-        // Add Entity
         this.createHexEntity(entities, current.c, current.r, hexSize, w, h);
 
-        // Add Neighbors to Open Set
         const neighbors = this.getNeighbors(current.c, current.r);
         for (const n of neighbors) {
           const nKey = `${n.c},${n.r}`;
           if (!usedCoords.has(nKey)) {
-             // Optional: Chance to skip adding neighbor to open set for more ragged edges
-             if (Math.random() > 0.1) { 
+             if (Math.random() > 0.1) {
                  openSet.push(n);
              }
           }
         }
       }
     }
-    
+
+    return entities;
+  }
+
+  /**
+   * Generate nebula-tile clusters sharing the same hex grid as glass tiles.
+   * Pass the same occupiedCoords set that was used for the glass pass so
+   * nebula cells never overlap with glass cells.
+   *
+   * Nebula tiles are pass-through (no collision impulse) and shatter into
+   * NEBULA_SHARDs on player/enemy contact.  Each cluster shares a single
+   * random-hue composition so adjacent tiles blend visually.
+   */
+  public static generateNebulaClusters(
+    mapWidth: number,
+    mapHeight: number,
+    hexSize: number,
+    clusterCount: number,
+    minClusterSize: number,
+    maxClusterSize: number,
+    occupiedCoords: Set<string>
+  ): GameEntity[] {
+    const entities: GameEntity[] = [];
+
+    const w = Math.sqrt(3) * hexSize;
+    const h = 2 * hexSize;
+    const hDist = w;
+    const vDist = 0.75 * h;
+
+    const maxCol = Math.ceil((mapWidth / 2) / hDist);
+    const maxRow = Math.ceil((mapHeight / 2) / vDist);
+
+    // Regular hex area (matches HEX_AREA constant when hexSize === HEX_SIZE).
+    const tileArea = (3 * Math.sqrt(3) / 2) * hexSize * hexSize;
+
+    for (let i = 0; i < clusterCount; i++) {
+      // Each cluster gets its own random-hue palette entry so adjacent
+      // tiles read as a single continuous cloud of one colour.
+      const composition: NebulaColorStop[] = randomNebulaComposition();
+
+      let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
+      let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
+
+      const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
+      const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
+      let createdInCluster = 0;
+
+      while (openSet.length > 0 && createdInCluster < targetSize) {
+        const idx = Math.floor(Math.random() * openSet.length);
+        const current = openSet[idx];
+        openSet.splice(idx, 1);
+
+        const key = `${current.c},${current.r}`;
+        if (occupiedCoords.has(key)) continue;
+
+        occupiedCoords.add(key);
+        createdInCluster++;
+
+        this.createNebulaEntity(entities, current.c, current.r, hexSize, w, h, cloneComposition(composition), tileArea);
+
+        const neighbors = this.getNeighbors(current.c, current.r);
+        for (const n of neighbors) {
+          const nKey = `${n.c},${n.r}`;
+          if (!occupiedCoords.has(nKey)) {
+             if (Math.random() > 0.1) {
+                 openSet.push(n);
+             }
+          }
+        }
+      }
+    }
+
     return entities;
   }
 
   private static createHexEntity(
-      entities: GameEntity[], 
-      c: number, 
-      r: number, 
-      size: number, 
-      w: number, 
+      entities: GameEntity[],
+      c: number,
+      r: number,
+      size: number,
+      w: number,
       h: number
     ) {
     // Odd-r offset coordinate to pixel conversion
@@ -111,7 +206,7 @@ export class TileGenerator {
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 }, // Slight gap
-        rotation: 0, 
+        rotation: 0,
         color: Math.random() > 0.8 ? COLORS.STRUCTURE_BORDER : COLORS.STRUCTURE,
         active: true,
         health: STRUCTURE_CONSTANTS.HEALTH,
@@ -119,6 +214,59 @@ export class TileGenerator {
         mass: STRUCTURE_CONSTANTS.MASS,
         polygonPoints: pts,
         sprite: ASSETS.HEX_STRUCTURE
+    });
+  }
+
+  private static createNebulaEntity(
+      entities: GameEntity[],
+      c: number,
+      r: number,
+      size: number,
+      w: number,
+      h: number,
+      composition: NebulaColorStop[],
+      tileArea: number
+    ) {
+    const offset = (r % 2 !== 0) ? (w / 2) : 0;
+    const cx = (c * w) + offset;
+    const cy = r * (h * 0.75);
+
+    // Same hex vertices as a glass tile — the interactable shape is a
+    // standard hex so collision detection is symmetric with the grid.
+    const pts = [
+        { x: 0, y: -h/2 },
+        { x: w/2, y: -h/4 },
+        { x: w/2, y: h/4 },
+        { x: 0, y: h/2 },
+        { x: -w/2, y: h/4 },
+        { x: -w/2, y: -h/4 }
+    ];
+
+    // Pick a random nebula sprite from the existing background-nebula asset
+    // set so they match the existing art style.  Fallback is the procedural
+    // puff marker used elsewhere in the codebase.
+    const sprite = NEBULA_IMAGES.length > 0
+        ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+        : ASSETS.NEBULA_PUFF;
+
+    entities.push({
+        id: `nebula_${r}_${c}_${Math.random().toString(36).substr(2, 9)}`,
+        type: EntityType.NEBULA,
+        position: { x: cx, y: cy },
+        velocity: { x: 0, y: 0 },
+        size: { x: w * 0.95, y: h * 0.95 },
+        rotation: Math.random() * Math.PI * 2, // random sprite rotation for variety
+        color: composition[0].hex, // legacy single-colour field, kept in sync
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        mass: Infinity, // static — integrated into staticGrid like glass tiles
+        polygonPoints: pts,
+        sprite,
+        nebulaColorComposition: composition,
+        nebulaTileArea: tileArea,
+        nebulaGridCol: c,
+        nebulaGridRow: r,
     });
   }
 
@@ -136,7 +284,8 @@ export class TileGenerator {
     ];
 
     const dirs = (row % 2 === 0) ? evenDirs : oddDirs;
-    
+
     return dirs.map(d => ({ c: col + d.c, r: row + d.r }));
   }
 }
+

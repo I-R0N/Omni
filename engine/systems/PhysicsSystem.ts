@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -109,7 +109,7 @@ export class PhysicsSystem {
           entity.velocity.y = 0;
       } else {
           // STANDARD PHYSICS
-          
+
           // Skip movement for exploding entities
           if (entity.isExploding) continue;
 
@@ -117,13 +117,29 @@ export class PhysicsSystem {
           entity.position.y += entity.velocity.y;
 
           // Apply Friction
-          // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
-          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
+          if (entity.type === EntityType.NEBULA_SHARD) {
+            // Nebula shards: custom heavy linear & angular damping (cloud drag).
+            // Uses per-entity damping factors so individual shards can vary if
+            // needed, with a sane default from NEBULA_CONSTANTS.
+            const linearD = entity.linearDamping ?? NEBULA_CONSTANTS.LINEAR_DAMPING;
+            const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
+            const lin = Math.pow(linearD, timeScale);
+            const ang = Math.pow(angularD, timeScale);
+            entity.velocity.x *= lin;
+            entity.velocity.y *= lin;
+            if (Math.abs(entity.velocity.x) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.x = 0;
+            if (Math.abs(entity.velocity.y) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.y = 0;
+            if (entity.rotationSpeed !== undefined) {
+                entity.rotationSpeed *= ang;
+                if (Math.abs(entity.rotationSpeed) < NEBULA_CONSTANTS.REST_SPIN) entity.rotationSpeed = 0;
+                entity.rotation += entity.rotationSpeed * dt;
+            }
+          } else if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
               && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             // Apply standard friction to all dynamic entities (Player, Enemies, etc)
             entity.velocity.x *= friction;
             entity.velocity.y *= friction;
-            
+
             // Snap to zero at very low speeds to prevent micro-drift calculations
             if (Math.abs(entity.velocity.x) < 0.01) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < 0.01) entity.velocity.y = 0;
@@ -235,9 +251,13 @@ export class PhysicsSystem {
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
-        
+
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
+
+        // Nebula shards are visual debris — pass-through to everything, so
+        // they never participate in broadphase or SAT at all.
+        if (e.type === EntityType.NEBULA_SHARD) continue;
 
         dynamicEntities.push(e);
         
@@ -454,6 +474,38 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
+
+      // ── NEBULA TILE: pass-through with conditional shatter ─────────────
+      // Nebula tiles never apply an impulse.  Player/enemy bodies shatter
+      // them into NEBULA_SHARDs on contact; projectiles and everything else
+      // pass straight through without touching the tile.
+      if (a.type === EntityType.NEBULA || b.type === EntityType.NEBULA) {
+          const nebula = a.type === EntityType.NEBULA ? a : b;
+          const other  = a.type === EntityType.NEBULA ? b : a;
+
+          const shatters = other.type === EntityType.PLAYER || other.type === EntityType.ENEMY;
+          if (shatters) {
+              // Stamp impact metadata so the shard spawner knows which
+              // direction the striker came from (drives the tangent-based
+              // rotation assignment for left/right shards).
+              if (other.velocity) {
+                  nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
+              }
+              nebula.lastImpactDamage = 1;
+              nebula.health = 0;
+              nebula.active = false;
+              this.removeStaticEntity(nebula);
+              if (onDeath) onDeath(nebula);
+          }
+          // Either way: no impulse, no positional correction — entities drift
+          // straight through the nebula cell.
+          return;
+      }
+
+      // Nebula shards are pass-through to everything (should already be
+      // filtered out of broadphase, but guard here for safety).
+      if (a.type === EntityType.NEBULA_SHARD || b.type === EntityType.NEBULA_SHARD) return;
+
       // INTERACTABLE collision rules:
       // - Non-drop interactables (POIs, etc.): skip entirely.
       // - Glass shards are full physics participants — they interact with everything

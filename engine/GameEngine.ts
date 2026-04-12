@@ -5,10 +5,11 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NebulaColorStop } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { cloneComposition, blendCompositionToHex } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -564,6 +565,13 @@ export class GameEngine {
           // an inactive ghost so we can render an outline during regen.
           entity.regenProgress = 0;
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
+      }
+
+      if (entity.type === EntityType.NEBULA) {
+          // Nebula tiles spawn their deterministic [40/40/10/10] shard
+          // split immediately.  No regen; nebulas are replenished only by
+          // shard coalescence (parked for post-testing) or on map reload.
+          this.spawnNebulaShards(entity);
       }
 
       if (entity.type === EntityType.ENEMY) {
@@ -2314,6 +2322,123 @@ export class GameEngine {
       lifetimeMin: 0.1, lifetimeMax: 0.25,
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
+  }
+
+  /**
+   * Break a destroyed nebula tile into four pass-through cloud shards using
+   * the deterministic [40%, 40%, 10%, 10%] area split.  Area is conserved
+   * exactly (resultant shard areas sum to the parent tile area).
+   *
+   * Rotation direction uses the tangent rule: shards on the striker's
+   * visual right spin CW, shards on the striker's left spin CCW, mimicking
+   * turbulence as the striker plows through the cloud.
+   *
+   * The parent tile's colour composition is deep-copied into every shard
+   * so a shatter → merge cycle preserves the original hue exactly (no
+   * averaging loss) when coalescence is eventually enabled.
+   */
+  private spawnNebulaShards(tile: GameEntity) {
+    if (!this.currentMap) return;
+
+    const tileArea   = tile.nebulaTileArea ?? (tile.size.x * tile.size.y);
+    const composition = tile.nebulaColorComposition;
+    const fractions  = NEBULA_CONSTANTS.SHARD_AREA_FRACTIONS;
+
+    // Striker direction (forward vector) and tangent axis (perpendicular).
+    // In canvas coords (y-down), tangent "right" is (-v̂.y, v̂.x), so the
+    // sign of (v̂ × d) tells us which side of the striker each shard is on.
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    let fx = 1, fy = 0;
+    if (iv && impactSpeed > 0.001) {
+        fx = iv.x / impactSpeed;
+        fy = iv.y / impactSpeed;
+    }
+    // Right tangent: 90° CW rotation of the forward vector in canvas space
+    const tx = -fy;
+    const ty =  fx;
+
+    // Spawn offsets: two 40% shards along ±tangent, two 10% shards along ±forward.
+    // Using a fraction of the tile half-size so the 4 shards are clearly
+    // visible around the tile centre immediately after shatter.
+    const halfSize  = Math.max(tile.size.x, tile.size.y) * 0.35;
+    // directions: +tangent, -tangent, +forward, -forward
+    const dirs: { dx: number; dy: number }[] = [
+        { dx:  tx, dy:  ty },
+        { dx: -tx, dy: -ty },
+        { dx:  fx, dy:  fy },
+        { dx: -fx, dy: -fy },
+    ];
+
+    const spinK = Math.min(NEBULA_CONSTANTS.MAX_SPIN, 1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED);
+
+    for (let i = 0; i < fractions.length; i++) {
+        const areaFrac = fractions[i];
+        const shardArea = tileArea * areaFrac;
+        // Approximate each shard as a disc (area = π r²) for size, then
+        // generate a soft 6-vertex polygon for SAT-safe rendering.
+        const radius = Math.sqrt(shardArea / Math.PI);
+        const diameter = radius * 2;
+
+        const dir = dirs[i];
+        const offsetMag = halfSize * (0.4 + areaFrac);
+        const spawnX = tile.position.x + dir.dx * offsetMag;
+        const spawnY = tile.position.y + dir.dy * offsetMag;
+
+        // Initial velocity: tiny scatter plus a nudge along the striker's
+        // direction so the cloud parts around the striker naturally.  Heavy
+        // damping (applied next frame) will slow it almost immediately.
+        const outwardX = dir.dx * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
+        const outwardY = dir.dy * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
+        const carryX = (iv?.x ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
+        const carryY = (iv?.y ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
+
+        // Tangent-rule rotation sign: cross(forward, shard-offset).  In
+        // canvas coords positive cross = shard on striker's visual right,
+        // which should rotate visually clockwise = positive rotationSpeed.
+        const cross = fx * dir.dy - fy * dir.dx;
+        const spinSign = cross > 0 ? 1 : (cross < 0 ? -1 : (Math.random() < 0.5 ? 1 : -1));
+        const rotationSpeed = spinSign * spinK;
+
+        // Soft, cloud-like polygon — 6 vertices with gentle jitter.  Kept
+        // approximately convex so SAT would still work if we ever decided
+        // to make nebula shards collidable.
+        const numPoints = 6;
+        const rawPts: { angle: number; r: number }[] = [];
+        for (let j = 0; j < numPoints; j++) {
+            const baseAngle = (j / numPoints) * Math.PI * 2;
+            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.3;
+            rawPts.push({ angle: baseAngle + jitter, r: radius * (0.85 + Math.random() * 0.3) });
+        }
+        rawPts.sort((a, b) => a.angle - b.angle);
+        const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+
+        // Inherit sprite & composition from the parent tile so the cloud
+        // visually hangs together even as the shards drift apart.
+        this.currentMap.entities.push({
+            id:             `nebula_shard_${Date.now()}_${i}_${Math.random()}`,
+            type:            EntityType.NEBULA_SHARD,
+            shardType:      'nebula',
+            position:       { x: spawnX, y: spawnY },
+            velocity:       { x: outwardX + carryX, y: outwardY + carryY },
+            size:           { x: diameter, y: diameter },
+            rotation:        Math.random() * Math.PI * 2,
+            rotationSpeed,
+            color:           composition ? blendCompositionToHex(composition) : (tile.color || NEBULA_CONSTANTS.DEFAULT_HEX),
+            active:          true,
+            health:          1,
+            maxHealth:       1,
+            mass:            diameter,
+            polygonPoints:   pts,
+            sprite:          tile.sprite,
+            nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
+            nebulaTileArea:  tileArea,
+            nebulaGridCol:   tile.nebulaGridCol,
+            nebulaGridRow:   tile.nebulaGridRow,
+            linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
+            angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
+        });
+    }
   }
 
   /** Returns the ammo type asteroids should drop for the current wave. */

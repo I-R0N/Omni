@@ -1,8 +1,9 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+import { blendCompositionToHex } from '../NebulaColor';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -61,6 +62,11 @@ export class RenderSystem {
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
+  // Tinted sprite cache: `${src}|${hex}` → pre-tinted offscreen canvas.
+  // Nebula tiles/shards re-use the background nebula PNGs with per-tile
+  // colour composition applied via source-atop, so tinting happens once per
+  // (sprite, colour) pair instead of every frame.
+  private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _particleBuffer: GameEntity[] = [];
@@ -88,6 +94,40 @@ export class RenderSystem {
       cx.arc(6, 6, 6, 0, Math.PI * 2);
       cx.fill();
       this._specularBitmap = c;
+      return c;
+  }
+
+  /**
+   * Return a canvas of `src` tinted to `hex` using a source-atop pass.
+   * Result is cached forever per (src, hex) pair; cache is bounded to ~256
+   * entries to avoid unbounded growth when many nebula tiles mix hues.
+   * Returns null while the underlying image is still loading.
+   */
+  private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
+      const key = `${src}|${hex}`;
+      const cached = this._tintedSprites.get(key);
+      if (cached) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return null;
+
+      const size = 256; // power of 2 to keep upscaling crisp enough
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const cx = c.getContext('2d');
+      if (!cx) return null;
+      cx.drawImage(img, 0, 0, size, size);
+      cx.globalCompositeOperation = 'source-atop';
+      cx.fillStyle = hex;
+      cx.fillRect(0, 0, size, size);
+      cx.globalCompositeOperation = 'source-over';
+
+      if (this._tintedSprites.size >= 256) {
+          // Evict the oldest entry (Map preserves insertion order) to cap memory.
+          const firstKey = this._tintedSprites.keys().next().value;
+          if (firstKey !== undefined) this._tintedSprites.delete(firstKey);
+      }
+      this._tintedSprites.set(key, c);
       return c;
   }
 
@@ -181,6 +221,7 @@ export class RenderSystem {
         }
 
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
+                && entity.type !== EntityType.NEBULA && entity.type !== EntityType.NEBULA_SHARD
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -405,7 +446,7 @@ export class RenderSystem {
       if (entity.type === EntityType.PARTICLE) return;
 
       ctx.save();
-      
+
       // Transform logic
       ctx.translate(entity.position.x, entity.position.y);
       const rotation = entity.rotation + (
@@ -416,7 +457,48 @@ export class RenderSystem {
             : 0
       );
       ctx.rotate(rotation);
-      
+
+      // --- NEBULA TILES & SHARDS ---
+      // Cloud-like rendering: tinted sprite drawn at a display-scale larger
+      // than the physics size so adjacent tiles blend seamlessly across
+      // their shared hex-grid boundaries.  Tinted sprites are cached.
+      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          const tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          const spriteSrc = entity.sprite;
+          if (spriteSrc) {
+              const tinted = this.getTintedSprite(spriteSrc, tintHex);
+              if (tinted) {
+                  const isTile = entity.type === EntityType.NEBULA;
+                  const scale = isTile
+                      ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
+                      : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE;
+                  const maxDim = Math.max(entity.size.x, entity.size.y);
+                  const drawSize = maxDim * scale;
+                  const dOffset = -(drawSize / 2);
+                  // Soft alpha — tiles slightly more opaque so the cloud
+                  // reads as solid, shards slightly less so they feel light.
+                  ctx.globalAlpha = isTile ? 0.55 : 0.45;
+                  ctx.drawImage(tinted, dOffset, dOffset, drawSize, drawSize);
+                  ctx.globalAlpha = 1.0;
+              } else {
+                  // Fallback: procedural soft circle in the tint colour
+                  // while the nebula sprite is still loading.
+                  const r = Math.max(entity.size.x, entity.size.y) * 0.9;
+                  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+                  grad.addColorStop(0, tintHex);
+                  grad.addColorStop(1, 'rgba(0,0,0,0)');
+                  ctx.fillStyle = grad;
+                  ctx.globalAlpha = 0.45;
+                  ctx.beginPath();
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.globalAlpha = 1.0;
+              }
+          }
+          ctx.restore();
+          return;
+      }
+
       let drawn = false;
 
       // --- SPRITE RENDERING ---

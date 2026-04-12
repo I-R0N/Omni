@@ -233,6 +233,53 @@ export const STRUCTURE_CONSTANTS = {
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 
+// ── Nebula tile configuration ──────────────────────────────────────────────
+// Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
+// pass-through debris: players and enemies drift through them, shattering
+// them into 4 cloud-like shards with heavy linear & angular damping.
+export const NEBULA_CONSTANTS = {
+  // Fraction-of-tile-area distribution for the four shards spawned when a
+  // nebula tile is destroyed.  Must sum to ≤ 1.0 (rounding safe).
+  SHARD_AREA_FRACTIONS: [0.4, 0.4, 0.1, 0.1] as number[],
+  // Per-frame damping (60Hz reference).  Applied as
+  //   velocity *= Math.pow(damping, dt * 60)
+  // so behaviour is framerate-independent.
+  LINEAR_DAMPING: 0.86,   // very draggy — shards drift to a halt in ~1 s
+  ANGULAR_DAMPING: 0.88,  // spin decays even faster
+  // Velocity below which shards snap to rest (prevents infinite micro-drift).
+  REST_SPEED: 0.01,
+  REST_SPIN: 0.02,
+  // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
+  SPIN_PER_UNIT_SPEED: 1.2,
+  MAX_SPIN: 6.0,  // rad/s cap
+  // Initial scatter velocity as a fraction of striker speed (cloud should
+  // barely drift — keep very low so damping catches it immediately).
+  SCATTER_VELOCITY_FACTOR: 0.08,
+  SCATTER_OUTWARD_SPEED: 0.35, // extra push outward from centre
+  // Display-sprite scale multiplier for nebula tiles (visual only; the
+  // interactable polygon is always the standard hex size).  Setting this
+  // above 1 makes the cloud read as continuous between adjacent tiles.
+  TILE_SPRITE_SCALE: 2.2,
+  // Display scale for shards (visual only; physics uses raw shard size).
+  SHARD_SPRITE_SCALE: 2.6,
+  // Cluster generation — mirrors glass-tile generator parameters.
+  CLUSTER_COUNT: 45,
+  MIN_CLUSTER_SIZE: 10,
+  MAX_CLUSTER_SIZE: 35,
+  // Outer-zone cluster pass (sparser landmarks).
+  OUTER_CLUSTER_COUNT: 70,
+  OUTER_MIN_CLUSTER_SIZE: 5,
+  OUTER_MAX_CLUSTER_SIZE: 18,
+  // Base palette — random hue is generated at tile creation time, then
+  // carried through shatter/merge cycles via NebulaColorStop compositions.
+  // SATURATION and LIGHTNESS match the existing background nebula aesthetic
+  // (see BackgroundManager.createPuffVariants which uses 100%/60%).
+  PALETTE_SATURATION: 100,
+  PALETTE_LIGHTNESS: 62,
+  // Default composition hex used if a tile spawns with no palette selection.
+  DEFAULT_HEX: '#a78bfa',
+};
+
 export const EXPLOSION_CONSTANTS = {
   DURATION: 0.6, // Seconds
   SIZE_MULTIPLIER: -1.8

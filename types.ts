@@ -44,6 +44,12 @@ export enum EntityType {
   ASTEROID = 'ASTEROID',
   STRUCTURE = 'STRUCTURE', // Destructible walls/blocks
   PARTICLE = 'PARTICLE',
+  // Nebula tile: occupies a hex grid cell like STRUCTURE, but is pass-through
+  // (no collision impulse) and shatters into NEBULA_SHARDs on player/enemy contact.
+  NEBULA = 'NEBULA',
+  // Cloud-like debris spawned from a destroyed nebula tile.  Heavily damped
+  // translation and rotation; pass-through to all entities.
+  NEBULA_SHARD = 'NEBULA_SHARD',
 }
 
 export enum EnemySubtype {
@@ -93,7 +99,17 @@ export interface WeaponConfig {
 // ── Shard type ────────────────────────────────────────────────────────────────
 // Discriminates the visual and physical origin of an asteroid-type entity.
 // Add new variants here as the game gains new destructible material types.
-export type ShardType = 'asteroid' | 'tile';
+export type ShardType = 'asteroid' | 'tile' | 'nebula';
+
+// ── Nebula colour composition ────────────────────────────────────────────────
+// Weighted list of base-palette hexes that make up a nebula tile or shard.
+// Weights sum to 1 (within rounding).  Stored rather than pre-blended so that
+// a shatter → merge cycle is lossless and future coalescence logic can
+// recombine hues without drifting toward gray.
+export interface NebulaColorStop {
+  hex: string;
+  weight: number;
+}
 
 // ── Drop composition entry ────────────────────────────────────────────────────
 // Tracks drops stored inside a composite asteroid, including absorbed power-ups.
@@ -221,6 +237,23 @@ export interface GameEntity {
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.
   dropComposition?: DropCompositionEntry[];
+
+  // ── Nebula fields ────────────────────────────────────────────────────────
+  // Set on NEBULA tiles and NEBULA_SHARD shards; carries the palette-blended
+  // colour composition and the total polygon area (in world units²) that
+  // drives the coalescence merge threshold.
+  nebulaColorComposition?: NebulaColorStop[];
+  // Cached polygon area (used as merge target for shards).  Shards inherit
+  // this from their parent tile so they know the reassembly threshold.
+  nebulaTileArea?: number;
+  // Hex grid coordinate (odd-r offset) of the source tile — preserved on
+  // shards so coalescence can snap back to the same column/row layout.
+  nebulaGridCol?: number;
+  nebulaGridRow?: number;
+  // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
+  // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
+  linearDamping?: number;
+  angularDamping?: number;
 }
 
 export interface CameraState {

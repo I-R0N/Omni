@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator } from './TileGenerator';
-import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS } from '../../constants';
+import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS } from '../../constants';
 import { sampleFlow } from '../systems/FlowField';
 
 export abstract class BaseMapLayer {
@@ -137,6 +137,12 @@ export class UniverseMap extends BaseMapLayer {
     const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
 
+    // Shared occupancy set — every tile pass (glass inner, glass outer,
+    // nebula inner, nebula outer) writes to this set so later passes
+    // cannot place a tile on top of an earlier one.  Guarantees nebula
+    // and glass tiles never overlap on the shared hex grid.
+    const occupied = new Set<string>();
+
     // Landmark clusters in the inner zone — sparse enough to leave clear
     // flow corridors between chunks for asteroids to stream through
     this.entities.push(...TileGenerator.generateClusteredMesh(
@@ -144,7 +150,8 @@ export class UniverseMap extends BaseMapLayer {
         22,          // hexSize
         100,         // clusterCount  (was 70)
         15,          // minClusterSize (was 12)
-        45           // maxClusterSize (was 40)
+        45,          // maxClusterSize (was 40)
+        occupied
     ));
 
     // Sparse outer landmarks — well-separated chunks across deep space
@@ -153,7 +160,27 @@ export class UniverseMap extends BaseMapLayer {
         22,
         130,         // was 100
         8,           // was 6
-        28           // was 24
+        28,          // was 24
+        occupied
+    ));
+
+    // Nebula cloud clusters — inner zone (denser) + outer (sparser).
+    // Pass the same occupied set so nebula cells never overlap glass cells.
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        8000, 8000,
+        22,
+        NEBULA_CONSTANTS.CLUSTER_COUNT,
+        NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
+        NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
+        occupied
+    ));
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        this.width, this.height,
+        22,
+        NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
+        NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
+        NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
+        occupied
     ));
 
     // Clear a safe open area around spawn
