@@ -248,7 +248,7 @@ export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = ful
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
 export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
-export const LIGHTNING_GRAVITY_STRENGTH = 150;      // acceleration toward nearest target (gravity-like pull)
+export const LIGHTNING_GRAVITY_STRENGTH = 250;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
 
 export const PROJECTILE_CONSTANTS = {
@@ -342,7 +342,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.2,     // fast fire rate
-    speed: 4,          // slow — same as missile; gravity pull curves it toward targets
+    speed: 3,          // slow drifting projectile; gravity pull curves it toward targets
     damage: 1,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 999,     // effectively infinite — projectile persists until it hits something
     color: '#22d3ee',  // Cyan — projectile that chains on impact
