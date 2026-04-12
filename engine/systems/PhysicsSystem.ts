@@ -119,9 +119,10 @@ export class PhysicsSystem {
           entity.position.x += entity.velocity.x;
           entity.position.y += entity.velocity.y;
 
-          // Collision sparks decelerate over their lifetime
+          // Collision sparks decelerate over their lifetime — aggressive damping
+          // keeps total travel to ≤ ~1 tile radius
           if (entity.type === EntityType.PARTICLE && entity.isCollisionSpark) {
-              const sparkFriction = Math.pow(0.9, timeScale);
+              const sparkFriction = Math.pow(0.82, timeScale);
               entity.velocity.x *= sparkFriction;
               entity.velocity.y *= sparkFriction;
           }

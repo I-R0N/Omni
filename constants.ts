@@ -252,13 +252,13 @@ export const SPARK_CONSTANTS = {
   COUNT_MIN: 6,
   COUNT_MAX: 10,
   // Speeds are per-frame (engine integrates position += velocity without dt).
-  // 3-6 per frame ≈ 180-360 units/sec at 60fps — visible but not off-screen instantly.
-  SPEED_MIN: 3,
-  SPEED_MAX: 6,
-  LIFETIME_MIN: 0.3,
-  LIFETIME_MAX: 0.5,
+  // Tuned so total travel distance ≤ ~1 tile radius (15 world units).
+  SPEED_MIN: 1,
+  SPEED_MAX: 2.5,
+  LIFETIME_MIN: 0.25,
+  LIFETIME_MAX: 0.35,
   SIZE: 3,
-  FRICTION: 0.9, // velocity *= FRICTION per dt (deceleration)
+  FRICTION: 0.82, // velocity *= FRICTION per frame — aggressive damping
 };
 
 // Tile regeneration pop-in burst
