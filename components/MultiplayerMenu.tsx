@@ -17,7 +17,11 @@ import { GameEngine } from '../engine/GameEngine';
 interface MultiplayerMenuProps {
   engine: GameEngine;
   onClose: () => void;
-  onSessionStart: (kind: 'host' | 'client') => void;
+  // Called when a session reaches 'connected' state.  The session is
+  // handed over to the parent so it can be kept alive beyond the modal's
+  // lifecycle (timers, transport, etc.) and explicitly closed on app
+  // shutdown or user-initiated exit.
+  onSessionStart: (kind: 'host' | 'client', session: HostSession | ClientSession) => void;
 }
 
 type Mode = 'choose' | 'host' | 'join';
@@ -27,6 +31,11 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
 
   // Host flow state
   const hostSessionRef = useRef<HostSession | null>(null);
+  // Ref-based "did connect" flag.  React state would be stale-captured by
+  // the unmount cleanup (empty-deps useEffect closes over initial state),
+  // which previously closed both sessions the instant they reached
+  // 'connected' and dumped both devices back to the main menu.
+  const hostConnectedRef = useRef<boolean>(false);
   const [hostOffer, setHostOffer] = useState<string>('');
   const [hostAnswerInput, setHostAnswerInput] = useState<string>('');
   const [hostStatus, setHostStatus] = useState<HostStatus>('idle');
@@ -34,24 +43,25 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
 
   // Client flow state
   const clientSessionRef = useRef<ClientSession | null>(null);
+  const clientConnectedRef = useRef<boolean>(false);
   const [clientOfferInput, setClientOfferInput] = useState<string>('');
   const [clientAnswer, setClientAnswer] = useState<string>('');
   const [clientStatus, setClientStatus] = useState<ClientStatus>('idle');
   const [clientError, setClientError] = useState<string | null>(null);
 
   // Cleanup sessions if the modal unmounts mid-flow without reaching
-  // 'connected'.  Once connected, the session survives beyond this modal
-  // and is owned by App.tsx.
+  // 'connected'.  Once connected, the session survives beyond this modal.
+  // We read the ref-based connect flags here (not state) so we see the
+  // latest value instead of the stale closure value.
   useEffect(() => {
     return () => {
-      if (hostSessionRef.current && hostStatus !== 'connected') {
+      if (hostSessionRef.current && !hostConnectedRef.current) {
         hostSessionRef.current.close();
       }
-      if (clientSessionRef.current && clientStatus !== 'connected') {
+      if (clientSessionRef.current && !clientConnectedRef.current) {
         clientSessionRef.current.close();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Host flow handlers ────────────────────────────────────────────────────
@@ -62,7 +72,8 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     session.onStatusChange = (s) => {
       setHostStatus(s);
       if (s === 'connected') {
-        onSessionStart('host');
+        hostConnectedRef.current = true;
+        onSessionStart('host', session);
       }
     };
     hostSessionRef.current = session;
@@ -93,7 +104,8 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     session.onStatusChange = (s) => {
       setClientStatus(s);
       if (s === 'connected') {
-        onSessionStart('client');
+        clientConnectedRef.current = true;
+        onSessionStart('client', session);
       }
     };
     clientSessionRef.current = session;

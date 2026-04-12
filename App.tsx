@@ -4,6 +4,8 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState } from './types';
 import UIOverlay from './components/UIOverlay';
 import MultiplayerMenu from './components/MultiplayerMenu';
+import type { HostSession } from './engine/net/HostSession';
+import type { ClientSession } from './engine/net/ClientSession';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -20,6 +22,9 @@ const App: React.FC = () => {
   });
   const [difficulty, setDifficulty] = useState<number>(3);
   const [showMultiplayer, setShowMultiplayer] = useState<boolean>(false);
+  // Live multiplayer session, lifted out of MultiplayerMenu so it survives
+  // modal unmount.  Null when no session is connected.
+  const netSessionRef = useRef<HostSession | ClientSession | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -113,12 +118,25 @@ const App: React.FC = () => {
       setShowMultiplayer(false);
   };
 
-  const handleSessionStart = (_kind: 'host' | 'client') => {
+  const handleSessionStart = (_kind: 'host' | 'client', session: HostSession | ClientSession) => {
       // Session established by the menu — close the modal so gameplay is visible.
-      // HostSession / ClientSession own their own lifecycle from here; they call
-      // engine.startMultiplayerGame() on transport open.
+      // Keep a reference so the session lives beyond the modal's React lifecycle
+      // and so we can explicitly close it on app unmount (or any future
+      // user-initiated disconnect).
+      netSessionRef.current = session;
       setShowMultiplayer(false);
   };
+
+  // App-level cleanup: close any live multiplayer session when App unmounts,
+  // so timers and transports are released cleanly.
+  useEffect(() => {
+    return () => {
+      if (netSessionRef.current) {
+        try { netSessionRef.current.close(); } catch {}
+        netSessionRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
