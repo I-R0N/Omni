@@ -257,7 +257,7 @@ export const SPARK_CONSTANTS = {
   SPEED_MAX: 2.5,
   LIFETIME_MIN: 0.25,
   LIFETIME_MAX: 0.35,
-  SIZE: 3,
+  SIZE: 1, // world-unit radius — small, sharp specks rather than puffs
   FRICTION: 0.82, // velocity *= FRICTION per frame — aggressive damping
 };
 
