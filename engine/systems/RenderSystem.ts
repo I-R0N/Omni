@@ -118,6 +118,20 @@ export class RenderSystem {
     this.backgroundManager.setMapType(type);
   }
 
+  /**
+   * Force the background manager to (re)generate nebulae and star bands
+   * immediately using the current canvas size.  Multiplayer uses this so
+   * nebula placement runs inside a seeded-random window alongside map
+   * generation, producing identical scenery across peers.
+   */
+  public primeBackground() {
+    if (!this.ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const width = (this.ctx.canvas.width || 0) / dpr;
+    const height = (this.ctx.canvas.height || 0) / dpr;
+    this.backgroundManager.primeBackground(width, height);
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,

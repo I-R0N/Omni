@@ -113,6 +113,7 @@ export class HostSession {
       v: PROTOCOL_VERSION,
       yourId: PLAYER2_ID,
       hostTick: 0,
+      worldSeed: this.engine.getWorldSeed(),
     });
     // Start the game immediately — Phase 1 skips any lobby UX.
     this.engine.startMultiplayerGame();

@@ -9,6 +9,7 @@ import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, V
 import { RemoteInputSource } from './net/RemoteInputSource';
 import { serializeEntity, applySerializedEntity, serializeDamageText, deserializeDamageText, serializeWaveAnnouncement, deserializeWaveAnnouncement, SerializedPlayerStats } from './net/Snapshot';
 import { PLAYER1_ID, PLAYER2_ID, InputMessage, SnapshotMessage } from './net/Protocol';
+import { withSeededRandom, randomSeed } from './net/SeededRandom';
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -119,6 +120,10 @@ export class GameEngine {
   // Mirrored UI stats from the host (CLIENT mode only) — the client's UI
   // overlay reads from this rather than from the local simulation.
   private clientStats: SerializedPlayerStats | null = null;
+  // 32-bit seed for deterministic world generation.  Set on the host
+  // when entering HOST mode and sent to the client via the welcome
+  // message so both peers render identical static scenery.
+  private worldSeed: number = 0;
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -326,6 +331,45 @@ export class GameEngine {
     return this.netRole;
   }
 
+  /** The 32-bit seed driving static world generation (host-authoritative).
+   *  Read by HostSession to include in the welcome message. */
+  public getWorldSeed(): number {
+    return this.worldSeed;
+  }
+
+  /**
+   * Client-side: regenerate the static world using a seed received from
+   * the host.  Called when the welcome message arrives so the client's
+   * asteroids, tile landmarks, and nebula match the host exactly.
+   *
+   * Preserves any dynamic entities that were already applied from early
+   * snapshots (rare — welcome usually arrives before the first snapshot).
+   */
+  public applyWorldSeed(seed: number) {
+    if (this.netRole !== NetRole.CLIENT) return;
+    if (seed === this.worldSeed) return; // already the right seed
+    // Preserve dynamic entities (non-STRUCTURE, non-ASTEROID) before
+    // regenerating — if a snapshot happened to arrive before welcome.
+    const preservedDynamic: GameEntity[] = [];
+    if (this.currentMap) {
+      for (let i = 0; i < this.currentMap.entities.length; i++) {
+        const e = this.currentMap.entities[i];
+        if (e.type !== EntityType.STRUCTURE && e.type !== EntityType.ASTEROID) {
+          preservedDynamic.push(e);
+        }
+      }
+    }
+    this.worldSeed = seed;
+    withSeededRandom(seed, () => {
+      this.loadMap(new UniverseMap());
+      this.renderer.primeBackground();
+    });
+    // Re-attach preserved dynamics after the fresh static scenery.
+    if (this.currentMap && preservedDynamic.length > 0) {
+      for (const e of preservedDynamic) this.currentMap.entities.push(e);
+    }
+  }
+
   // ── Multiplayer debug telemetry ─────────────────────────────────────────
   // Lightweight snapshot of the engine's network-facing state, polled by
   // the on-screen NetDebugOverlay once per frame.  Purely diagnostic — no
@@ -367,7 +411,14 @@ export class GameEngine {
     this.waveAnnouncements = [];
     this.damageTexts = [];
     this.detachedTrails = [];
-    this.loadMap(new UniverseMap());
+    // Generate a fresh seed and run map + background init under it so the
+    // client can reproduce identical static scenery after receiving the
+    // seed via the welcome message.
+    this.worldSeed = randomSeed();
+    withSeededRandom(this.worldSeed, () => {
+      this.loadMap(new UniverseMap());
+      this.renderer.primeBackground();
+    });
 
     // Player1: keep local input, stable id for wire protocol
     this.player.id = PLAYER1_ID;
@@ -437,7 +488,16 @@ export class GameEngine {
     this.detachedTrails = [];
     this.player2 = null;
     this.remoteInput = null;
-    this.loadMap(new UniverseMap());
+    // Load a placeholder map with a temporary seed — the welcome message
+    // will carry the host's real seed and trigger applyWorldSeed(), which
+    // regenerates both the map and the background so both peers match.
+    // Using a temporary seed here (rather than no map) means the client
+    // still has a valid game state if a welcome never arrives.
+    this.worldSeed = randomSeed();
+    withSeededRandom(this.worldSeed, () => {
+      this.loadMap(new UniverseMap());
+      this.renderer.primeBackground();
+    });
 
     // Repurpose the existing local player entity as the client's camera
     // anchor.  Fields will be overwritten each snapshot, but we set sane

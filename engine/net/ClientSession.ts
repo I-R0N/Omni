@@ -119,9 +119,12 @@ export class ClientSession {
         this.engine.applySnapshot(msg);
         break;
       case 'welcome':
-        // The yourId from the welcome confirms the provisional id used in
-        // acceptOffer().  Subsequent snapshots carry the same id so no
-        // mode re-entry is required.
+        // Apply the host's world seed so our static scenery regenerates
+        // byte-identically.  Other fields (yourId, hostTick) confirm the
+        // provisional values we already set in enterClientMode().
+        if (typeof msg.worldSeed === 'number') {
+          this.engine.applyWorldSeed(msg.worldSeed);
+        }
         break;
       case 'bye':
         this.close();

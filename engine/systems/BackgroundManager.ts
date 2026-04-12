@@ -98,6 +98,20 @@ public setMapType(type: MapType) {
     this.mapType = type;
   }
 
+  /**
+   * Force (re)generation of nebulae, star bands, and the milky way band
+   * immediately instead of waiting for the first render() call.  Used by
+   * multiplayer host/client transitions so world generation happens inside
+   * a withSeededRandom() window and both peers see byte-identical scenery.
+   * Pass the current viewport size in CSS pixels.  If the viewport isn't
+   * known yet (width/height <= 0), this is a no-op; lazy init will still
+   * happen on the first render.
+   */
+  public primeBackground(width: number, height: number) {
+    if (width <= 0 || height <= 0) return;
+    this.initContent(width, height);
+  }
+
   private createPuffVariants() {
     const numVariants = 5;
     const size = 128;

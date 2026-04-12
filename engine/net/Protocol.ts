@@ -40,6 +40,10 @@ export interface WelcomeMessage {
   v: number;
   yourId: string;  // which player entity belongs to this client
   hostTick: number;
+  // 32-bit seed the host used to generate its static scenery.  The client
+  // reseeds its own map + background generation with this value so both
+  // peers render identical asteroid fields, tile clusters, and nebulae.
+  worldSeed: number;
 }
 
 export interface InputMessage {
