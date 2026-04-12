@@ -22,6 +22,11 @@ export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
   scale: number; // Width multiplier: 1.0 during thrust, tapers toward 0 during decay
+  // Optional per-point drift velocity (per-frame).  Used by the player thrust
+  // trail so emitted points stream backward along the thrust direction rather
+  // than following the player's motion path.
+  vx?: number;
+  vy?: number;
 }
 
 export interface Rect {
@@ -200,6 +205,9 @@ export interface GameEntity {
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
 
+  // Tile regen pop-in scale overshoot timer (counts down from REGEN_POP_DURATION)
+  regenPopTimer?: number;
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.
@@ -249,6 +257,15 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+}
+
+// Full-screen wave announcement banner rendered on the canvas.
+export interface WaveAnnouncement {
+  text: string;
+  subtext?: string;
+  color: string;
+  lifetime: number;
+  maxLifetime: number;
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).

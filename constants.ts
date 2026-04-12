@@ -188,7 +188,7 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 };
 
 export const TRAIL_CONSTANTS = {
-  LIFETIME: 1.2, // Seconds until trail part fades completely
+  LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
 };
 
@@ -245,6 +245,35 @@ export const PARTICLE_CONSTANTS = {
   SPEED_MAX: 5,
   SIZE_MIN: 1,
   SIZE_MAX: 3
+};
+
+// Tile regeneration pop-in burst
+export const REGEN_POP_CONSTANTS = {
+  DURATION: 0.2,      // seconds for scale overshoot animation
+  CHIP_COUNT: 6,      // particles on regen complete
+  CHIP_SPEED_MIN: 40,
+  CHIP_SPEED_MAX: 80,
+  CHIP_LIFETIME: 0.4,
+};
+
+// Wave announcement banners
+export const WAVE_ANNOUNCE_CONSTANTS = {
+  FADEIN: 0.3,
+  HOLD: 1.0,
+  FADEOUT: 0.5,
+};
+
+// Glitter trail — bright points trailing behind the player along travel path.
+// Separate from the thrust trail; emits whenever the player is in motion.
+export const GLITTER_TRAIL_CONSTANTS = {
+  COUNT_PER_FRAME: 3,     // particles spawned per frame while moving
+  MIN_SPEED_SQ: 0.04,     // below this (per-frame speed²), stop emitting
+  LIFETIME_MIN: 0.25,
+  LIFETIME_MAX: 0.55,
+  SIZE_MIN: 0.4,
+  SIZE_MAX: 1.2,
+  // Palette of bright, cool-white hues for the sparkle
+  COLORS: ['#ffffff', '#e0f2fe', '#bae6fd'] as string[],
 };
 
 export const PROJECTILE_CONSTANTS = {

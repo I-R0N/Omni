@@ -9,7 +9,7 @@ export class PhysicsSystem {
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
-  
+
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
   private bufferVerticesA: Vector2[] = Array.from({ length: 16 }, () => ({ x: 0, y: 0 }));
   private bufferVerticesB: Vector2[] = Array.from({ length: 16 }, () => ({ x: 0, y: 0 }));

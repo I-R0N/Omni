@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -66,11 +66,33 @@ export class GameEngine {
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
 
+  // Wave announcement banners rendered on the canvas
+  public waveAnnouncements: WaveAnnouncement[] = [];
+
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
+  private static readonly TRAIL_DECAY_DURATION = 1.0; // seconds
+  // Last unit-length thrust direction — stored so coasting trail emissions still
+  // know which way "backward" is (moveDir is zero while coasting)
+  private lastThrustDir: Vector2 = { x: 0, y: 0 };
+  // Last world position a trail point was emitted from (used for distance-gated
+  // emission; trail point positions themselves drift and can't be used directly)
+  private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };
+  // Per-frame drift speed of thrust-trail points along the -thrust direction
+  private static readonly THRUST_TRAIL_DRIFT = 1.2;
+  // Per-frame lerp factor for easing lastThrustDir toward the current input
+  // direction — keeps the trail smooth through rapid input direction changes
+  private static readonly THRUST_DIR_SMOOTH = 0.2;
+  // Tracks whether thrust was active last frame; used to detect the start of
+  // a fresh thrust event so we can reset the trail (otherwise a new bright
+  // head stitched onto a decayed chain visually re-lights the old trail).
+  private wasThrusting: boolean = false;
+  // Trails from previous thrust events — continue to drift and fade on their
+  // own, never have new points appended, so they visually detach from the
+  // player when a new thrust event begins.
+  private detachedTrails: TrailPoint[][] = [];
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -190,6 +212,7 @@ export class GameEngine {
       this.pendingRegens = [];
       this.activeDrops = [];
       this.trailDecayTimer = 0;
+      this.waveAnnouncements = [];
       this.loadMap(new UniverseMap());
 
       // Reset Player
@@ -202,6 +225,10 @@ export class GameEngine {
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
+      this.detachedTrails = [];
+      this.lastThrustDir = { x: 0, y: 0 };
+      this.lastTrailEmitPos = { x: 0, y: 0 };
+      this.wasThrusting = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -654,8 +681,40 @@ export class GameEngine {
             regen.entity.health = regen.entity.maxHealth;
             regen.entity.active = true;
             regen.entity.regenProgress = undefined;
+            regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
             this.physics.addStaticEntity(regen.entity);
             this.pendingRegens.splice(i, 1);
+
+            // Pop-in particle burst: tile-colored chips scattering outward
+            this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
+                speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
+                speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
+                lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                sizeMin: 1, sizeMax: 2,
+            });
+        }
+    }
+
+    // Tick down regenPopTimer on tiles
+    if (this.currentMap) {
+        const ents = this.currentMap.entities;
+        for (let i = 0; i < ents.length; i++) {
+            const e = ents[i];
+            if (e.regenPopTimer !== undefined && e.regenPopTimer > 0) {
+                e.regenPopTimer -= dt;
+                if (e.regenPopTimer <= 0) {
+                    e.regenPopTimer = undefined;
+                }
+            }
+        }
+    }
+
+    // Tick down wave announcements
+    for (let i = this.waveAnnouncements.length - 1; i >= 0; i--) {
+        this.waveAnnouncements[i].lifetime -= dt;
+        if (this.waveAnnouncements[i].lifetime <= 0) {
+            this.waveAnnouncements.splice(i, 1);
         }
     }
 
@@ -689,6 +748,15 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
+
+        // Wave clear announcement
+        const clearLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+        this.waveAnnouncements.push({
+          text: `WAVE ${this.waveIndex + 1} CLEAR`,
+          color: '#4ade80',
+          lifetime: clearLife,
+          maxLifetime: clearLife,
+        });
 
         // Difficulty-scaled health drop interval
         const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
@@ -746,40 +814,97 @@ export class GameEngine {
     }
 
     if (this.player.trail) {
-        for (let i = this.player.trail.length - 1; i >= 0; i--) {
-            this.player.trail[i].lifetime -= dt;
-            if (this.player.trail[i].lifetime <= 0) {
-                this.player.trail.splice(i, 1);
-            }
+        this.tickTrail(this.player.trail, dt);
+    }
+    // Tick detached trails (ones from prior thrust events) and drop empty arrays
+    for (let i = this.detachedTrails.length - 1; i >= 0; i--) {
+        this.tickTrail(this.detachedTrails[i], dt);
+        if (this.detachedTrails[i].length === 0) {
+            this.detachedTrails.splice(i, 1);
         }
     }
 
     const thrusting = throttle > 0;
+    // Start of a fresh thrust event — detach the old active trail so it
+    // continues to drift and fade on its own, then start a new empty trail
+    // for the new thrust event.  This prevents the spatial gradient fill
+    // from re-lighting faded old points when a new bright head is appended.
+    if (thrusting && !this.wasThrusting) {
+        if (this.player.trail && this.player.trail.length > 0) {
+            this.detachedTrails.push(this.player.trail);
+        }
+        this.player.trail = [];
+        // Snap the thrust direction to the new input so the first emitted
+        // point of the fresh trail uses the actual direction, not whatever
+        // was cached from the previous thrust event.
+        this.lastThrustDir.x = moveDir.x / throttle;
+        this.lastThrustDir.y = moveDir.y / throttle;
+        this.lastTrailEmitPos.x = this.player.position.x;
+        this.lastTrailEmitPos.y = this.player.position.y;
+    }
+    this.wasThrusting = thrusting;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+        // Target (normalized) thrust direction from current input
+        const tx = moveDir.x / throttle;
+        const ty = moveDir.y / throttle;
+        // Smoothly ease the stored direction toward the target so rapid input
+        // changes produce curves rather than sharp corners in the trail.  A
+        // framerate-compensated lerp keeps the feel consistent across dt.
+        const alpha = 1 - Math.pow(1 - GameEngine.THRUST_DIR_SMOOTH, dt * 60);
+        this.lastThrustDir.x += (tx - this.lastThrustDir.x) * alpha;
+        this.lastThrustDir.y += (ty - this.lastThrustDir.y) * alpha;
+        // Re-normalize
+        const dl = Math.sqrt(this.lastThrustDir.x * this.lastThrustDir.x + this.lastThrustDir.y * this.lastThrustDir.y);
+        if (dl > 0.0001) {
+            this.lastThrustDir.x /= dl;
+            this.lastThrustDir.y /= dl;
+        } else {
+            // Fallback if interpolation collapsed to zero (e.g. 180° reversal)
+            this.lastThrustDir.x = tx;
+            this.lastThrustDir.y = ty;
+        }
     } else {
         this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
     }
 
-    const lastPos = this.player.trail && this.player.trail.length > 0
-        ? this.player.trail[this.player.trail.length - 1]
-        : null;
+    // Distance-gated emission — compare against the last EMISSION position
+    // rather than the last trail point, since points drift after emission.
+    const emitDx = this.player.position.x - this.lastTrailEmitPos.x;
+    const emitDy = this.player.position.y - this.lastTrailEmitPos.y;
+    const emitDistSq = emitDx * emitDx + emitDy * emitDy;
+    const hasTrail = !!this.player.trail && this.player.trail.length > 0;
 
     if (this.trailDecayTimer > 0 &&
-            (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
+            (!hasTrail || emitDistSq > TRAIL_CONSTANTS.MIN_DISTANCE_SQ)) {
         // t: 1.0 while thrusting, tapers to 0 over the decay window.
         // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
         const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
         const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
+        // Offset emission to the ship's rear relative to thrust direction so
+        // the trail visibly comes out the back, not the center of the sprite.
+        const halfSize = this.player.size.x / 2;
+        const tdx = this.lastThrustDir.x;
+        const tdy = this.lastThrustDir.y;
+        const drift = GameEngine.THRUST_TRAIL_DRIFT;
         this.player.trail = this.player.trail || [];
         this.player.trail.push({
-            x: this.player.position.x,
-            y: this.player.position.y,
+            x: this.player.position.x - tdx * halfSize,
+            y: this.player.position.y - tdy * halfSize,
             lifetime: pointLifetime,
             maxLifetime: pointLifetime,
             scale: t,
+            // Per-frame backward drift so consecutive points form a strip
+            // aligned with the thrust axis regardless of player motion.
+            vx: -tdx * drift,
+            vy: -tdy * drift,
         });
+        this.lastTrailEmitPos.x = this.player.position.x;
+        this.lastTrailEmitPos.y = this.player.position.y;
     }
+
+    // Glitter trail — emits independently of thrust, based purely on motion
+    this.spawnGlitterTrail();
 
     const mousePos = this.input.getMousePosition();
     const cx = window.innerWidth / 2;
@@ -1001,6 +1126,81 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Tick a trail array: decrement each point's lifetime, apply per-point
+   * drift velocity, and splice expired entries.  Shared between the active
+   * player trail and detached trails from prior thrust events.
+   */
+  private tickTrail(trail: TrailPoint[], dt: number) {
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const tp = trail[i];
+      tp.lifetime -= dt;
+      if (tp.vx !== undefined) tp.x += tp.vx;
+      if (tp.vy !== undefined) tp.y += tp.vy;
+      if (tp.lifetime <= 0) {
+        trail.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Glitter trail — spawns tiny additive-blended sparkles trailing behind the
+   * player along the current velocity vector.  Density is triangularly
+   * distributed across the player's width (peaked on the center-line, falling
+   * off toward the edges).  Particles have zero velocity so they stay put
+   * while the player moves forward, naturally forming a trail.
+   */
+  private spawnGlitterTrail() {
+    if (!this.currentMap) return;
+    const v = this.player.velocity;
+    const speedSq = v.x * v.x + v.y * v.y;
+    if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
+
+    const speed = Math.sqrt(speedSq);
+    // Forward unit vector (direction of travel) and its perpendicular
+    const fx = v.x / speed;
+    const fy = v.y / speed;
+    const perpX = -fy;
+    const perpY = fx;
+
+    const halfWidth = this.player.size.x / 2;
+    // Spawn at the player's tail so particles appear behind, not on top of, the sprite
+    const tailX = this.player.position.x - fx * halfWidth;
+    const tailY = this.player.position.y - fy * halfWidth;
+
+    const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
+
+    for (let i = 0; i < COUNT_PER_FRAME; i++) {
+      // Triangular distribution in [-1, 1] peaked at 0 — gives denser center,
+      // sparser edges across the player's width.
+      const u = Math.random() - Math.random();
+      const lateral = u * halfWidth;
+
+      const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
+      const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
+      const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
+
+      this.currentMap.entities.push({
+        id: `glit_${Date.now()}_${i}_${Math.random()}`,
+        type: EntityType.PARTICLE,
+        position: {
+          x: tailX + perpX * lateral,
+          y: tailY + perpY * lateral,
+        },
+        velocity: { x: 0, y: 0 },
+        size: { x: size, y: size },
+        rotation: 0,
+        color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        lifetime: life,
+        maxLifetime: life,
+        mass: 0.01,
+      });
+    }
+  }
+
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Derive impact direction for a slight forward cone bias
     const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
@@ -1113,7 +1313,11 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
+      this.detachedTrails = [];
       this.trailDecayTimer = 0;
+      this.lastThrustDir = { x: 0, y: 0 };
+      this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
+      this.wasThrusting = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
@@ -1807,6 +2011,16 @@ export class GameEngine {
     }
 
     this.waveState = 'active';
+
+    // Wave start announcement
+    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    this.waveAnnouncements.push({
+      text: `WAVE ${index + 1}`,
+      subtext: 'GET READY',
+      color: '#ffffff',
+      lifetime: totalLife,
+      maxLifetime: totalLife,
+    });
   }
 
 
@@ -2191,7 +2405,9 @@ export class GameEngine {
           this.damageTexts,
           this.player.position,
           this.playerMessages,
-          this.player
+          this.player,
+          this.waveAnnouncements,
+          this.detachedTrails
       );
   }
 }
