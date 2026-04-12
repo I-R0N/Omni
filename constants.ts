@@ -257,6 +257,12 @@ export const PROJECTILE_CONSTANTS = {
   MASS: 1, // Light projectile
 };
 
+// ── Global entity caps ───────────────────────────────────────────────────────
+// Hard ceilings on live projectiles and particles to bound per-frame cost.
+// When exceeded, oldest entries of that type are dropped first (FIFO).
+export const MAX_PROJECTILES = 600;
+export const MAX_PARTICLES   = 400;
+
 export const ENEMY_CONSTANTS = {
   HEALTH: 30,
   SIZE: 20,
@@ -327,7 +333,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     cooldown: 0.005,   // matches BLASTER
     speed: 9,          // matches BLASTER
     damage: 2,         // matches BLASTER
-    lifetime: 20,      // long-range beam — persists across many bounces
+    lifetime: 7,       // bounded beam life — cuts steady-state count ~3× vs 20s
     color: '#22c55e',  // Green — thin laser beam that bounces off tiles
     size: 6,
     count: 1,
@@ -341,7 +347,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     cooldown: 0.2,     // fast fire rate
     speed: 3,          // slow drifting projectile; gravity pull curves it toward targets
     damage: 1,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
-    lifetime: 999,     // effectively infinite — projectile persists until it hits something
+    lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
     size: 6,
     count: 1,

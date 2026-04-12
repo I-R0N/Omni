@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE, MAX_PROJECTILES, MAX_PARTICLES } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -997,6 +997,32 @@ export class GameEngine {
         mass:      0.1,
       });
     }
+
+    this.enforceParticleCap();
+  }
+
+  /**
+   * Hard cap on live particles. If exceeded, deactivates the oldest
+   * particles first (FIFO by entity-list order). Purely visual entities,
+   * so dropping old ones is safe.
+   */
+  private enforceParticleCap() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      let count = 0;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PARTICLE) count++;
+      }
+      if (count <= MAX_PARTICLES) return;
+      let toDrop = count - MAX_PARTICLES;
+      for (let i = 0; i < entities.length && toDrop > 0; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PARTICLE) {
+              e.active = false;
+              toDrop--;
+          }
+      }
   }
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
@@ -1227,6 +1253,32 @@ export class GameEngine {
               isBouncer: config.type === WeaponType.BOUNCER || undefined,
           });
       }
+
+      this.enforceProjectileCap();
+  }
+
+  /**
+   * Hard cap on live projectiles. If exceeded, deactivates the oldest
+   * projectiles first (FIFO by entity-list order). Physics/render passes
+   * skip inactive entities and the cleanup pass removes them next frame.
+   */
+  private enforceProjectileCap() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      let count = 0;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PROJECTILE) count++;
+      }
+      if (count <= MAX_PROJECTILES) return;
+      let toDrop = count - MAX_PROJECTILES;
+      for (let i = 0; i < entities.length && toDrop > 0; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PROJECTILE) {
+              e.active = false;
+              toDrop--;
+          }
+      }
   }
 
   private updateHomingProjectiles(dt: number) {
@@ -1277,6 +1329,24 @@ export class GameEngine {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
       const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
+
+      // Fast-path: single O(N) scan to check whether any work is needed.
+      // Skips the O(L × N) nested loop entirely when there are no lightning
+      // projectiles or no valid targets on the map.
+      let hasLightning = false;
+      let hasTarget = false;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active) continue;
+          if (!hasLightning && e.type === EntityType.PROJECTILE && e.isLightningProjectile) {
+              hasLightning = true;
+          } else if (!hasTarget && !e.isExploding &&
+                     (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
+              hasTarget = true;
+          }
+          if (hasLightning && hasTarget) break;
+      }
+      if (!hasLightning || !hasTarget) return;
 
       for (let i = 0; i < entities.length; i++) {
           const p = entities[i];
