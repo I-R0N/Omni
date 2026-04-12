@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_DAMAGE, LIGHTNING_ARC_LIFETIME } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -847,6 +847,7 @@ export class GameEngine {
     }
 
     this.updateHomingProjectiles(dt);
+    this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup
@@ -1288,6 +1289,48 @@ export class GameEngine {
       }
   }
 
+  private updateLightningGravity(dt: number) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
+
+      for (let i = 0; i < entities.length; i++) {
+          const p = entities[i];
+          if (!p.active || p.type !== EntityType.PROJECTILE || !p.isLightningProjectile) continue;
+
+          // Find nearest enemy or asteroid within gravity range
+          let target: GameEntity | null = null;
+          let minD2 = rangeSq;
+          for (let j = 0; j < entities.length; j++) {
+              const e = entities[j];
+              if (!e.active || e.isExploding) continue;
+              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+              const dx = e.position.x - p.position.x;
+              const dy = e.position.y - p.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < minD2) { minD2 = d2; target = e; }
+          }
+
+          if (target) {
+              const dx = target.position.x - p.position.x;
+              const dy = target.position.y - p.position.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist > 1) {
+                  // Gravity-like acceleration: stronger when closer
+                  const accel = LIGHTNING_GRAVITY_STRENGTH / Math.max(dist, 30);
+                  p.velocity.x += (dx / dist) * accel * dt;
+                  p.velocity.y += (dy / dist) * accel * dt;
+              }
+          }
+
+          // Keep rotation aligned with velocity
+          const sp = Math.sqrt(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y);
+          if (sp > 0.1) {
+              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+          }
+      }
+  }
+
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
@@ -1383,10 +1426,17 @@ export class GameEngine {
           hitSet.add(nextTarget.id);
       }
 
-      // Apply chain damage (skip index 0 — the first target already took projectile damage)
+      // Apply chain damage (skip index 0 — the first target already took projectile damage).
+      // Damage reduces by 1/(totalHops-1) per hop: e.g. 3 total → 0.5× on hop 1, 0× on hop 2.
+      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
+      const totalHops = chain.length; // includes direct hit at index 0
+      const reductionPerHop = totalHops > 1 ? 1 / (totalHops - 1) : 1;
+
       for (let i = 1; i < chain.length; i++) {
           const target = chain[i];
-          const dmg = LIGHTNING_CHAIN_DAMAGE[i - 1] ?? LIGHTNING_CHAIN_DAMAGE[LIGHTNING_CHAIN_DAMAGE.length - 1];
+          const dmg = Math.max(0, baseDmg * (1 - i * reductionPerHop));
+          if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
+
           target.health -= dmg;
           target.hitFlash = 0.15;
           this.spawnDamageText(target.position, dmg, target);
