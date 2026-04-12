@@ -2335,11 +2335,14 @@ export class GameEngine {
   }
 
   /**
-   * Shatter a destroyed nebula entity (tile OR shard) into 3 smaller shards
-   * at NEBULA_CONSTANTS.SHARD_SIZE_RATIO of the parent's linear size each.
-   * Total child area ≈ 1.69× parent area — coverage strictly grows per
-   * collision, and the gravity-driven merge pass in updateNebulaDynamics
-   * re-equilibrates by absorbing small shards back into larger neighbours.
+   * Shatter a destroyed nebula entity (tile OR shard) into
+   * SHARDS_PER_SHATTER smaller children whose total disc area equals the
+   * parent's disc area (scaled by SHARD_TOTAL_AREA_RATIO, default 1.0).
+   *
+   * With exact conservation (ratio = 1) and N = 3, each child's diameter
+   * is parent / sqrt(3) ≈ 0.577 × parent — 3 × (0.577)² = 1.0 area.  This
+   * avoids the inflation cascade where naive per-child ratios grow the
+   * total area on every collision.
    *
    * Shards are fan-spread around the striker's forward direction (±60°)
    * and spin via the tangent rule: shards on the striker's visual right
@@ -2358,7 +2361,12 @@ export class GameEngine {
     if (!this.currentMap) return;
 
     const parentDiameter = Math.max(parent.size.x, parent.size.y);
-    const childDiameter  = parentDiameter * NEBULA_CONSTANTS.SHARD_SIZE_RATIO;
+    // Derive child diameter from area conservation: π (r_child)² × N =
+    // π r_parent² × ratio → r_child = r_parent × sqrt(ratio / N).
+    const linearRatio = Math.sqrt(
+        NEBULA_CONSTANTS.SHARD_TOTAL_AREA_RATIO / NEBULA_CONSTANTS.SHARDS_PER_SHATTER
+    );
+    const childDiameter = parentDiameter * linearRatio;
     if (childDiameter < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
     const childRadius = childDiameter / 2;
 
@@ -2497,6 +2505,13 @@ export class GameEngine {
     const GRAV_MIN      = NEBULA_CONSTANTS.GRAVITY_MIN_DIST;
     const MERGE_K       = NEBULA_CONSTANTS.MERGE_PROXIMITY_K;
 
+    // Per-frame set of targets that have already absorbed a shard.
+    // Enforces "at most one merge per target per frame" so the three
+    // children of a single shatter distribute across multiple neighbours
+    // instead of all stacking into the same nearest tile.  Combined with
+    // area-conserving shatter this keeps cluster growth bounded.
+    const mergedThisFrame = new Set<GameEntity>();
+
     for (let i = 0; i < all.length; i++) {
         const shard = all[i];
         if (!shard.active) continue;
@@ -2520,6 +2535,7 @@ export class GameEngine {
                     if (j === i) continue;
                     const target = all[j];
                     if (!target.active) continue;
+                    if (mergedThisFrame.has(target)) continue; // one merge/target/frame
                     const targetR = Math.max(target.size.x, target.size.y) / 2;
                     if (targetR <= shardR) continue; // only strictly larger targets
 
@@ -2547,6 +2563,7 @@ export class GameEngine {
 
         if (dist <= mergeDist) {
             this.mergeNebulas(bestTarget, shard);
+            mergedThisFrame.add(bestTarget);
             continue;
         }
 

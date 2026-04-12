@@ -237,14 +237,17 @@ export const STRUCTURE_CONSTANTS = {
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
 // pass-through debris: players and enemies drift through them, shattering
 // them into cloud-like shards with heavy linear & angular damping.  Each
-// collision spawns 3 children at 75% parent diameter, so total area grows
-// by ~1.7× per shatter — the cloud gains coverage on every impact and
-// re-equilibrates via a gravity-driven merge pass (smaller shards are
-// pulled into larger neighbours and absorbed).
+// collision spawns SHARDS_PER_SHATTER children whose total disc area equals
+// the parent's area (scaled by SHARD_TOTAL_AREA_RATIO) — the cloud keeps
+// coverage constant on impact, and a gravity-driven merge pass re-absorbs
+// small shards back into larger neighbours to re-form tiles over time.
 export const NEBULA_CONSTANTS = {
-  // Per-shatter child count & size ratio.  3 × 0.75² = 1.6875× area.
+  // Per-shatter child count and total-area preservation ratio.
+  // With SHARD_TOTAL_AREA_RATIO = 1.0, children collectively have the same
+  // disc area as the parent, so shatter is exactly area-conserving.
+  // child_diameter = parent_diameter × sqrt(SHARD_TOTAL_AREA_RATIO / N)
   SHARDS_PER_SHATTER: 3,
-  SHARD_SIZE_RATIO: 0.75,       // each child's linear size = 0.75 × parent
+  SHARD_TOTAL_AREA_RATIO: 1.0,
   // Minimum diameter below which a shard is no longer shatter-able.  Keeps
   // the system bounded under repeated impacts — sub-min shards simply
   // pass-through without fragmenting further.

@@ -497,8 +497,13 @@ export class PhysicsSystem {
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
+              // Derive the linear ratio the same way spawnNebulaShards does
+              // (area conservation: child = parent × sqrt(ratio / N)).
               const parentD = Math.max(nebula.size.x, nebula.size.y);
-              const childD  = parentD * NEBULA_CONSTANTS.SHARD_SIZE_RATIO;
+              const linearRatio = Math.sqrt(
+                  NEBULA_CONSTANTS.SHARD_TOTAL_AREA_RATIO / NEBULA_CONSTANTS.SHARDS_PER_SHATTER
+              );
+              const childD = parentD * linearRatio;
               if (childD >= NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) {
                   if (other.velocity) {
                       nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
