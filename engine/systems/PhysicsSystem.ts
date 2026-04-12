@@ -487,11 +487,31 @@ export class PhysicsSystem {
                   || (sz <= MISSILE_PASSTHROUGH_MEDIUM && tSpeed < MISSILE_PASSTHROUGH_SPEED);
 
               if (passThrough) {
-                  // Knock the shard aside with missile momentum
+                  // Shove the shard aside as if the missile had real physical bulk.
+                  // Forward push along missile direction + lateral scatter based on
+                  // which side of the missile line the shard is on.
                   if (proj.velocity) {
-                      const pushStr = 0.6;
-                      target.velocity.x += proj.velocity.x * pushStr;
-                      target.velocity.y += proj.velocity.y * pushStr;
+                      const vx = proj.velocity.x;
+                      const vy = proj.velocity.y;
+                      const speed = Math.sqrt(vx * vx + vy * vy);
+                      if (speed > 0.01) {
+                          const dirX = vx / speed;
+                          const dirY = vy / speed;
+
+                          // Offset from missile center to shard center
+                          const ox = target.position.x - proj.position.x;
+                          const oy = target.position.y - proj.position.y;
+                          // Perpendicular component (scalar, signed) — which side of the beam
+                          const perp = ox * -dirY + oy * dirX;
+                          const perpSign = perp >= 0 ? 1 : -1;
+
+                          // Strong shove: forward = 2.5× missile speed, lateral = 1.5× missile speed
+                          const forward = speed * 2.5;
+                          const lateral = speed * 1.5 * perpSign;
+
+                          target.velocity.x = dirX * forward + (-dirY) * lateral;
+                          target.velocity.y = dirY * forward + ( dirX) * lateral;
+                      }
                   }
                   if (!proj.hitEntityIds) proj.hitEntityIds = [];
                   proj.hitEntityIds.push(target.id);
