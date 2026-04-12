@@ -427,6 +427,15 @@ export const SHIELD_CONSTANTS = {
   DAMAGE_THRESHOLD: 2.0,     // Min impact speed to actually drain shield (below = flash only)
 };
 
+export const XP_CONFIG = {
+  XP_PER_ENEMY_BASE: 10,    // base XP for tier-1 enemy
+  XP_TIER_MULTIPLIER: 2,    // ×2 per tier (tier1=10, tier2=20, tier3=40)
+  XP_PER_ASTEROID: 2,       // small reward
+  XP_LEVEL_BASE: 100,       // XP required for level 2
+  XP_LEVEL_SCALE: 1.4,      // each level requires ×1.4 more XP than previous
+  MAX_LEVEL: 20,
+};
+
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
 };

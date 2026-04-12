@@ -254,6 +254,11 @@ export class RenderSystem {
     if (player) {
         this.renderAmmoHUD(ctx, player, width, height);
     }
+
+    // 10. Render XP Bar (Screen Space)
+    if (player) {
+        this.renderXPBar(ctx, player, width, height);
+    }
   }
 
   private renderTrails(ctx: CanvasRenderingContext2D, entities: GameEntity[]) {
@@ -1245,6 +1250,36 @@ export class RenderSystem {
 
       ctx.globalAlpha = 1;
       ctx.shadowBlur  = 0;
+      ctx.restore();
+  }
+
+  private renderXPBar(
+      ctx: CanvasRenderingContext2D,
+      player: GameEntity,
+      width: number,
+      height: number
+  ) {
+      const xp = player.xp ?? 0;
+      const xpToNext = player.xpToNext ?? 100;
+      const level = player.level ?? 1;
+      const fill = Math.min(1, xp / xpToNext);
+
+      const barHeight = 4;
+      const barY = height - barHeight;
+
+      // Filled portion
+      ctx.save();
+      ctx.fillStyle = '#f59e0b';
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(0, barY, width * fill, barHeight);
+
+      // Label
+      ctx.globalAlpha = 1;
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`LVL ${level}`, 4, barY - 2);
       ctx.restore();
   }
 

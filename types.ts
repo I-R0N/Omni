@@ -185,6 +185,11 @@ export interface GameEntity {
   // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
   ammo?: Partial<Record<WeaponType, number>>;
 
+  // Player XP / Level
+  xp?: number;          // current accumulated XP (player only)
+  level?: number;       // current level (player only)
+  xpToNext?: number;    // XP needed to reach next level (player only)
+
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
 
@@ -238,6 +243,9 @@ export interface EngineStats {
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
+  playerXP?: number;
+  playerLevel?: number;
+  playerXPToNext?: number;
 }
 
 export interface DamageText {

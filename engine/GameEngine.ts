@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, XP_CONFIG } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -111,6 +111,9 @@ export class GameEngine {
       sprite: ASSETS.PLAYER_SHIP,
       ammo: {},  // BLASTER is always ∞ (no entry); other weapons stored here when unlocked
       gold: 0,
+      xp: 0,
+      level: 1,
+      xpToNext: XP_CONFIG.XP_LEVEL_BASE,
       shield: SHIELD_CONSTANTS.MAX_CHARGE,
       maxShield: SHIELD_CONSTANTS.MAX_CHARGE,
       shieldRechargeTimer: 0,
@@ -290,6 +293,9 @@ export class GameEngine {
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
+      playerXP: this.player.xp,
+      playerLevel: this.player.level,
+      playerXPToNext: this.player.xpToNext,
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -541,6 +547,13 @@ export class GameEngine {
 
       if (entity.type === EntityType.ENEMY) {
           this.spawnEnemyShards(entity);
+          const tier = entity.enemyTier || 1;
+          const xpAmount = XP_CONFIG.XP_PER_ENEMY_BASE * Math.pow(XP_CONFIG.XP_TIER_MULTIPLIER, tier - 1);
+          this.grantXP(xpAmount);
+      }
+
+      if (entity.type === EntityType.ASTEROID) {
+          this.grantXP(XP_CONFIG.XP_PER_ASTEROID);
       }
 
       // Death burst particles — size/color tuned per entity type
@@ -585,6 +598,34 @@ export class GameEngine {
 
       this.spawnDrops(entity);
   };
+
+  private grantXP(amount: number) {
+      if (!this.player.active || (this.player.level ?? 1) >= XP_CONFIG.MAX_LEVEL) return;
+      this.player.xp = (this.player.xp ?? 0) + amount;
+      while (this.player.xp >= (this.player.xpToNext ?? XP_CONFIG.XP_LEVEL_BASE)) {
+          if ((this.player.level ?? 1) >= XP_CONFIG.MAX_LEVEL) {
+              this.player.xp = this.player.xpToNext!;
+              break;
+          }
+          this.player.xp -= this.player.xpToNext!;
+          this.player.level = (this.player.level ?? 1) + 1;
+          this.player.xpToNext = Math.round(
+              XP_CONFIG.XP_LEVEL_BASE * Math.pow(XP_CONFIG.XP_LEVEL_SCALE, this.player.level - 1)
+          );
+          this.onLevelUp(this.player.level);
+      }
+  }
+
+  private onLevelUp(level: number) {
+      this.playerMessages.push({
+          id: `lvlup-${level}-${Date.now()}`,
+          text: `LEVEL UP — ${level}`,
+          color: '#f59e0b',
+          lifetime: 2.0,
+          maxLifetime: 2.0,
+      });
+      // TODO PR-combo: grant combo ability at level N
+  }
 
   private handleAsteroidRespawn(config: any) {
       // Collect POIs once outside the placement-attempt loop.
