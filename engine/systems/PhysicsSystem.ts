@@ -270,6 +270,11 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
+        // Fading nebulas (tiles and shards alike) are in their death
+        // animation — drop them out of broadphase so they can't be
+        // re-shattered mid-fade even after the striker's cooldown expires.
+        if (e.nebulaFadeTimer !== undefined) continue;
+
         // Nebula shards re-enter the dynamic grid so player/enemy contact
         // can trigger a shatter.  The nebula branch in resolveCollision is
         // still pass-through (no impulse), so they never exchange momentum
@@ -525,18 +530,22 @@ export class PhysicsSystem {
                   }
                   nebula.lastImpactDamage = 1;
                   nebula.health = 0;
-                  // Tiles fade out over FADE_DURATION instead of vanishing
-                  // instantly — the renderer multiplies alpha by
-                  // fadeTimer/FADE_DURATION, and the per-frame tick above
-                  // clears the timer and sets active=false when it expires.
-                  // Shards keep the instant-vanish behaviour (they're small,
-                  // fast, and being absorbed by the striker's path).
+                  // Tiles AND shards fade out over FADE_DURATION instead
+                  // of vanishing instantly — the renderer multiplies the
+                  // base alpha by fadeTimer/FADE_DURATION, and the
+                  // per-frame tick above clears the timer and sets
+                  // active=false when it expires.
+                  nebula.nebulaFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
                   if (nebula.type === EntityType.NEBULA) {
-                      nebula.nebulaFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
+                      // Tiles live in the static grid — pull them out so
+                      // the player can drift through the fading cell.
                       this.removeStaticEntity(nebula);
-                  } else {
-                      nebula.active = false;
                   }
+                  // Shards live in the dynamic grid which is rebuilt
+                  // each frame; the populate loop below skips entities
+                  // with nebulaFadeTimer set, so fading shards drop out
+                  // of broadphase automatically on the next frame.
+                  //
                   // Arm the striker's post-shatter cooldown.
                   other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
                   if (onDeath) onDeath(nebula);

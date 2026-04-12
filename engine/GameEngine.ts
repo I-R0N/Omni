@@ -2568,11 +2568,14 @@ export class GameEngine {
     const ents = this.currentMap.entities;
 
     // Collect active nebula shards ONLY.  Tiles are not targets and
-    // don't need to be spatially indexed for this pass.
+    // don't need to be spatially indexed for this pass.  Fading shards
+    // are skipped — they're in their death animation and should not
+    // iterate as sources or be valid merge targets.
     const all: GameEntity[] = [];
     for (let i = 0; i < ents.length; i++) {
         const e = ents[i];
         if (!e.active) continue;
+        if (e.nebulaFadeTimer !== undefined) continue;
         if (e.type === EntityType.NEBULA_SHARD) {
             all.push(e);
         }
