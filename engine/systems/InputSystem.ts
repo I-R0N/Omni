@@ -180,6 +180,11 @@ export class InputSystem {
   public isActionPressed(): boolean {
     return this.keys.has('Space') || this.keys.has('Enter') || this.mouseDown;
   }
+
+  /** Returns true only when a keyboard fire key (Space/Enter) is held — excludes mouse/touch. */
+  public isFireKeyHeld(): boolean {
+    return this.keys.has('Space') || this.keys.has('Enter');
+  }
   
   public getMousePosition(): Vector2 {
     return this.mousePosition;

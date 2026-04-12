@@ -247,6 +247,14 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
+
+// ── Lightning chain tuning ───────────────────────────────────────────────────
+export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
+export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
+export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
+export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
+export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
+
 // Tile regeneration pop-in burst
 export const REGEN_POP_CONSTANTS = {
   DURATION: 0.2,      // seconds for scale overshoot animation
@@ -283,6 +291,12 @@ export const PROJECTILE_CONSTANTS = {
   LIFETIME: 1.5, // Seconds
   MASS: 1, // Light projectile
 };
+
+// ── Global entity caps ───────────────────────────────────────────────────────
+// Hard ceilings on live projectiles and particles to bound per-frame cost.
+// When exceeded, oldest entries of that type are dropped first (FIFO).
+export const MAX_PROJECTILES = 600;
+export const MAX_PARTICLES   = 400;
 
 export const ENEMY_CONSTANTS = {
   HEALTH: 30,
@@ -348,33 +362,33 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 3.0,
     pierce: 1
   },
-  [WeaponType.LASER]: {
-    type: WeaponType.LASER,
-    name: 'Laser',
-    cooldown: 0.08,
-    speed: 25,
-    damage: 1,
-    lifetime: 0.25,
-    color: '#4ade80', // Green — continuous short-range beam (full impl in PR 3)
-    size: 4,
+  [WeaponType.BOUNCER]: {
+    type: WeaponType.BOUNCER,
+    name: 'Bouncer',
+    cooldown: 0.005,   // matches BLASTER
+    speed: 9,          // matches BLASTER
+    damage: 2,         // matches BLASTER
+    lifetime: 7,       // bounded beam life — cuts steady-state count ~3× vs 20s
+    color: '#22c55e',  // Green — thin laser beam that bounces off tiles
+    size: 6,
     count: 1,
-    spread: 0,
-    recoil: 0,
-    pierce: 999
+    spread: 2,
+    recoil: 0.5,
+    pierce: 0,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
-    cooldown: 0.8,
-    speed: 20,
-    damage: 4,
-    lifetime: 0.5,
-    color: '#22d3ee', // Cyan — chain hop behavior in PR 3
-    size: 5,
+    cooldown: 0.2,     // fast fire rate
+    speed: 3,          // slow drifting projectile; gravity pull curves it toward targets
+    damage: 1,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
+    lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
+    color: '#22d3ee',  // Cyan — projectile that chains on impact
+    size: 6,
     count: 1,
-    spread: 5,
-    recoil: 0.2,
-    pierce: 0
+    spread: 3,
+    recoil: 0.3,
+    pierce: 0          // stops on first hit, then chains
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -412,7 +426,7 @@ export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
   WeaponType.SHOTGUN,
-  WeaponType.LASER,
+  WeaponType.BOUNCER,
   WeaponType.LIGHTNING,
   WeaponType.HOMING,
   WeaponType.CANNON,
@@ -494,8 +508,8 @@ export const DROP_CONFIG = {
 export const ENEMY_AMMO_DROP: Record<EnemySubtype, { own: WeaponType; next: WeaponType }> = {
   [EnemySubtype.RAMMER_1]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
   [EnemySubtype.RAMMER_2]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
-  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.LASER     },
-  [EnemySubtype.SHOOTER_1]: { own: WeaponType.LASER,     next: WeaponType.LIGHTNING },
+  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.BOUNCER   },
+  [EnemySubtype.SHOOTER_1]: { own: WeaponType.BOUNCER,   next: WeaponType.LIGHTNING },
   [EnemySubtype.SHOOTER_2]: { own: WeaponType.LIGHTNING, next: WeaponType.HOMING    },
   [EnemySubtype.SHOOTER_3]: { own: WeaponType.HOMING,    next: WeaponType.CANNON    },
 };
@@ -507,7 +521,7 @@ export const ASTEROID_AMMO_PROGRESSION: WeaponType[] = [
   WeaponType.BURST,     // waves 4–6
   WeaponType.SHOTGUN,   // waves 7–9
   WeaponType.SHOTGUN,   // waves 10–12
-  WeaponType.LASER,     // waves 13–15
+  WeaponType.BOUNCER,     // waves 13–15
   WeaponType.LIGHTNING, // waves 16–18
   WeaponType.HOMING,    // waves 19–21
   WeaponType.CANNON,    // waves 22+

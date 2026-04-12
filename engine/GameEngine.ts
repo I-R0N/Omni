@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE, MAX_PROJECTILES, MAX_PARTICLES, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -97,6 +97,14 @@ export class GameEngine {
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
+
+    // Fill all weapon ammo when entering debug mode
+    if (this.debugMode && this.player.ammo) {
+      for (const w of WEAPON_LIST) {
+        if (w === WeaponType.BLASTER) continue; // blaster is always infinite
+        this.player.ammo[w] = 999;
+      }
+    }
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -610,7 +618,9 @@ export class GameEngine {
           });
       }
 
-      this.spawnDrops(entity);
+      if (!entity.suppressDrops) {
+          this.spawnDrops(entity);
+      }
   };
 
   private handleAsteroidRespawn(config: any) {
@@ -967,6 +977,7 @@ export class GameEngine {
     }
 
     this.updateHomingProjectiles(dt);
+    this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup
@@ -1124,6 +1135,32 @@ export class GameEngine {
         mass:      0.1,
       });
     }
+
+    this.enforceParticleCap();
+  }
+
+  /**
+   * Hard cap on live particles. If exceeded, deactivates the oldest
+   * particles first (FIFO by entity-list order). Purely visual entities,
+   * so dropping old ones is safe.
+   */
+  private enforceParticleCap() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      let count = 0;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PARTICLE) count++;
+      }
+      if (count <= MAX_PARTICLES) return;
+      let toDrop = count - MAX_PARTICLES;
+      for (let i = 0; i < entities.length && toDrop > 0; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PARTICLE) {
+              e.active = false;
+              toDrop--;
+          }
+      }
   }
 
   /**
@@ -1257,6 +1294,12 @@ export class GameEngine {
         });
         break;
     }
+
+    // Lightning projectile: chain to nearby entities on impact
+    if (proj.isLightningProjectile) {
+        this.fireLightningChainFromImpact(impactPos, target);
+    }
+
     void projSpeed; // suppress lint
   };
 
@@ -1426,7 +1469,35 @@ export class GameEngine {
               ownerType,
               pierceCount: config.pierce,
               trail: [],
+              isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
+              isBouncer: config.type === WeaponType.BOUNCER || undefined,
           });
+      }
+
+      this.enforceProjectileCap();
+  }
+
+  /**
+   * Hard cap on live projectiles. If exceeded, deactivates the oldest
+   * projectiles first (FIFO by entity-list order). Physics/render passes
+   * skip inactive entities and the cleanup pass removes them next frame.
+   */
+  private enforceProjectileCap() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      let count = 0;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PROJECTILE) count++;
+      }
+      if (count <= MAX_PROJECTILES) return;
+      let toDrop = count - MAX_PROJECTILES;
+      for (let i = 0; i < entities.length && toDrop > 0; i++) {
+          const e = entities[i];
+          if (e.active && e.type === EntityType.PROJECTILE) {
+              e.active = false;
+              toDrop--;
+          }
       }
   }
 
@@ -1459,7 +1530,7 @@ export class GameEngine {
                   while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                   while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-                  const turnRate = 5 * dt; 
+                  const turnRate = 5 * (p.homingStrength ?? 1) * dt;
                   if (Math.abs(angleDiff) < turnRate) {
                       p.rotation = desiredAngle;
                   } else {
@@ -1474,16 +1545,84 @@ export class GameEngine {
       }
   }
 
+  private updateLightningGravity(dt: number) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
+
+      // Fast-path: single O(N) scan to check whether any work is needed.
+      // Skips the O(L × N) nested loop entirely when there are no lightning
+      // projectiles or no valid targets on the map.
+      let hasLightning = false;
+      let hasTarget = false;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active) continue;
+          if (!hasLightning && e.type === EntityType.PROJECTILE && e.isLightningProjectile) {
+              hasLightning = true;
+          } else if (!hasTarget && !e.isExploding &&
+                     (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
+              hasTarget = true;
+          }
+          if (hasLightning && hasTarget) break;
+      }
+      if (!hasLightning || !hasTarget) return;
+
+      for (let i = 0; i < entities.length; i++) {
+          const p = entities[i];
+          if (!p.active || p.type !== EntityType.PROJECTILE || !p.isLightningProjectile) continue;
+
+          // Find nearest enemy or asteroid within gravity range
+          let target: GameEntity | null = null;
+          let minD2 = rangeSq;
+          for (let j = 0; j < entities.length; j++) {
+              const e = entities[j];
+              if (!e.active || e.isExploding) continue;
+              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+              const dx = e.position.x - p.position.x;
+              const dy = e.position.y - p.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < minD2) { minD2 = d2; target = e; }
+          }
+
+          if (target) {
+              const dx = target.position.x - p.position.x;
+              const dy = target.position.y - p.position.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist > 1) {
+                  // Gravity-like acceleration: stronger when closer
+                  const accel = LIGHTNING_GRAVITY_STRENGTH / Math.max(dist, 30);
+                  p.velocity.x += (dx / dist) * accel * dt;
+                  p.velocity.y += (dy / dist) * accel * dt;
+              }
+          }
+
+          // Keep rotation aligned with velocity
+          const sp = Math.sqrt(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y);
+          if (sp > 0.1) {
+              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+          }
+      }
+  }
+
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
       const TRAIL_LIFETIME = 0.25; // shorter than player trail
       const TRAIL_SCALE = 0.5;
+      // Bouncer beams are visualized entirely by their trail, which fades
+      // almost instantly so the beam reads as a short moving line segment.
+      // Target visible beam length ≈ 50 units at speed 9 ≈ 540 units/sec.
+      const BOUNCER_TRAIL_LIFETIME = 0.09;
+      const BOUNCER_TRAIL_SCALE = 0.55;
       const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
 
       for (let i = 0; i < entities.length; i++) {
           const p = entities[i];
           if (!p.active || p.type !== EntityType.PROJECTILE) continue;
+
+          const lifetime = p.isBouncer ? BOUNCER_TRAIL_LIFETIME : TRAIL_LIFETIME;
+          const scale = p.isBouncer ? BOUNCER_TRAIL_SCALE : TRAIL_SCALE;
 
           // Decay existing trail points (write-index avoids O(n) splice shifts)
           if (p.trail) {
@@ -1508,12 +1647,96 @@ export class GameEngine {
               t.push({
                   x: p.position.x,
                   y: p.position.y,
-                  lifetime: TRAIL_LIFETIME,
-                  maxLifetime: TRAIL_LIFETIME,
-                  scale: TRAIL_SCALE,
+                  lifetime,
+                  maxLifetime: lifetime,
+                  scale,
               });
           }
       }
+  }
+
+  // ─── Lightning chain (triggered on projectile impact) ───────────────────
+
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+
+      // Build chain: hop from the initial target to nearby enemies/asteroids
+      const chain: GameEntity[] = [firstTarget];
+      const hitSet = new Set<string>([firstTarget.id]);
+
+      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+          const prev = chain[chain.length - 1];
+          let nextTarget: GameEntity | null = null;
+          let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
+
+          for (let i = 0; i < entities.length; i++) {
+              const e = entities[i];
+              if (!e.active || e.isExploding) continue;
+              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+              if (hitSet.has(e.id)) continue;
+              const dx = e.position.x - prev.position.x;
+              const dy = e.position.y - prev.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < nextDistSq) {
+                  nextDistSq = d2;
+                  nextTarget = e;
+              }
+          }
+
+          if (!nextTarget) break;
+          chain.push(nextTarget);
+          hitSet.add(nextTarget.id);
+      }
+
+      // Apply chain damage (skip index 0 — the first target already took projectile damage).
+      // Damage reduces by 1/(totalHops-1) per hop: e.g. 3 total → 0.5× on hop 1, 0× on hop 2.
+      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
+      const totalHops = chain.length; // includes direct hit at index 0
+      const reductionPerHop = totalHops > 1 ? 1 / (totalHops - 1) : 1;
+
+      for (let i = 1; i < chain.length; i++) {
+          const target = chain[i];
+          const dmg = Math.max(0, baseDmg * (1 - i * reductionPerHop));
+          if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
+
+          target.health -= dmg;
+          target.hitFlash = 0.15;
+          this.spawnDamageText(target.position, dmg, target);
+
+          if (target.health <= 0 && !target.isExploding) {
+              target.lastImpactDamage = dmg;
+              this.handleEntityDeath(target);
+          }
+      }
+
+      // Only spawn arc visual if there's at least one chain hop
+      if (chain.length < 2) return;
+
+      // Build arc points: impact → target1 → target2 (target 0 is the direct hit)
+      const arcPoints: Vector2[] = [];
+      for (const t of chain) {
+          arcPoints.push({ x: t.position.x, y: t.position.y });
+      }
+
+      // Spawn a single PARTICLE entity carrying the arc data for rendering
+      this.currentMap.entities.push({
+          id: `lightning_${Date.now()}_${Math.random()}`,
+          type: EntityType.PARTICLE,
+          position: { x: impactPos.x, y: impactPos.y },
+          velocity: { x: 0, y: 0 },
+          size: { x: 1, y: 1 },
+          rotation: 0,
+          color: WEAPONS[WeaponType.LIGHTNING].color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: LIGHTNING_ARC_LIFETIME,
+          maxLifetime: LIGHTNING_ARC_LIFETIME,
+          mass: 0,
+          isLightningArc: true,
+          arcPoints,
+      });
   }
 
   // ─── Collision-based stick bonds ───────────────────────────────────────────

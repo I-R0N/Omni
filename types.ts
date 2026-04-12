@@ -66,7 +66,7 @@ export enum WeaponType {
   BLASTER   = 'BLASTER',
   BURST     = 'BURST',
   SHOTGUN   = 'SHOTGUN',
-  LASER     = 'LASER',
+  BOUNCER   = 'BOUNCER',
   LIGHTNING = 'LIGHTNING',
   HOMING    = 'HOMING',
   CANNON    = 'CANNON',
@@ -221,6 +221,21 @@ export interface GameEntity {
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.
   dropComposition?: DropCompositionEntry[];
+
+  // Lightning arc rendering — when true, arcPoints holds the chain vertices
+  isLightningArc?: boolean;
+  arcPoints?: Vector2[];
+
+  // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
+  isLightningProjectile?: boolean;
+
+  // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
+  suppressDrops?: boolean;
+
+  // Marks a projectile as a bouncer (thin green laser that reflects off tiles)
+  isBouncer?: boolean;
+  // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
+  homingStrength?: number;
 }
 
 export interface CameraState {
