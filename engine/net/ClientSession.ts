@@ -9,6 +9,7 @@
 import type { GameEngine } from '../GameEngine';
 import { WebRTCTransport, TransportState } from './WebRTCTransport';
 import { NetMessage, PLAYER2_ID, PROTOCOL_VERSION } from './Protocol';
+import { SignalingRelay, normalizeRoomCode } from './SignalingRelay';
 
 export type ClientStatus =
   | 'idle'
@@ -57,12 +58,29 @@ export class ClientSession {
     }
     this.setStatus('awaiting-offer');
     const answer = await this.transport.createClientAnswer(decoded);
-    // Pre-emptively enter client mode so the engine loop is ready when the
-    // data channel opens a moment later.  The self id is the host's
-    // PLAYER2_ID by convention; a WELCOME message will confirm.
     this.engine.enterClientMode(PLAYER2_ID);
     this.setStatus('answered');
     return btoa(answer);
+  }
+
+  /** Join a room end-to-end via the ntfy.sh signalling relay.  Fetches
+   *  the host's offer, produces an answer, publishes it back.  Resolves
+   *  once the answer has been sent; the data channel will open shortly
+   *  after once the host accepts.
+   */
+  public async joinRoom(rawCode: string): Promise<void> {
+    const code = normalizeRoomCode(rawCode);
+    if (code.length === 0) throw new Error('Enter a room code first');
+    const relay = new SignalingRelay();
+    this.setStatus('awaiting-offer');
+    const offer = await relay.fetchOffer(code);
+    if (!offer) {
+      throw new Error(`No offer found for room ${code}. Ask the host to start a new game.`);
+    }
+    const answer = await this.transport.createClientAnswer(offer);
+    this.engine.enterClientMode(PLAYER2_ID);
+    await relay.publishAnswer(code, answer);
+    this.setStatus('answered');
   }
 
   public close() {

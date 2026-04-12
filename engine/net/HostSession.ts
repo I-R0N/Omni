@@ -12,6 +12,7 @@
 import type { GameEngine } from '../GameEngine';
 import { WebRTCTransport, TransportState } from './WebRTCTransport';
 import { PLAYER2_ID, PROTOCOL_VERSION, NetMessage } from './Protocol';
+import { SignalingRelay, generateRoomCode } from './SignalingRelay';
 
 export type HostStatus =
   | 'idle'
@@ -21,10 +22,11 @@ export type HostStatus =
   | 'closed'
   | 'error';
 
-// Snapshot send rate: 20 Hz balances responsiveness (50ms update cadence) vs.
-// bandwidth (~480 KB/s JSON for ~800 entities).  Phase 2 with binary + deltas
-// will support 30-60 Hz comfortably.
-const SNAPSHOT_HZ = 20;
+// Snapshot send rate: 30 Hz gives a 33ms update cadence that feels noticeably
+// smoother than 20 Hz on the joiner without blowing up bandwidth now that we
+// strip static entities from the payload.  Between ticks, the client
+// extrapolates positions from snapshot velocities to bridge the gap.
+const SNAPSHOT_HZ = 30;
 const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_HZ;
 
 export class HostSession {
@@ -68,6 +70,26 @@ export class HostSession {
     }
     await this.transport.acceptAnswer(decoded);
     this.setStatus('connecting');
+  }
+
+  /** Host a room end-to-end via the ntfy.sh signalling relay.  Generates
+   *  a short room code, publishes the offer, and waits for the client to
+   *  publish an answer.  Returns the code so the caller can display it.
+   *  The optional onCode callback fires as soon as the code is known, so
+   *  the UI can show it while ICE is still gathering.
+   */
+  public async hostRoom(onCode?: (code: string) => void): Promise<string> {
+    const relay = new SignalingRelay();
+    const code = generateRoomCode();
+    if (onCode) onCode(code);
+    this.engine.enterHostMode();
+    const sdp = await this.transport.createHostOffer();
+    this.setStatus('awaiting-answer');
+    await relay.publishOffer(code, sdp);
+    const answer = await relay.waitForAnswer(code);
+    await this.transport.acceptAnswer(answer);
+    this.setStatus('connecting');
+    return code;
   }
 
   public close() {

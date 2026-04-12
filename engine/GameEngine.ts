@@ -5,7 +5,7 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap, ClientMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NetRole } from '../types';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NetRole, NetDebugInfo } from '../types';
 import { RemoteInputSource } from './net/RemoteInputSource';
 import { serializeEntity, applySerializedEntity, serializeDamageText, deserializeDamageText, serializeWaveAnnouncement, deserializeWaveAnnouncement, SerializedPlayerStats } from './net/Snapshot';
 import { PLAYER1_ID, PLAYER2_ID, InputMessage, SnapshotMessage } from './net/Protocol';
@@ -324,6 +324,30 @@ export class GameEngine {
 
   public getNetRole(): NetRole {
     return this.netRole;
+  }
+
+  // ── Multiplayer debug telemetry ─────────────────────────────────────────
+  // Lightweight snapshot of the engine's network-facing state, polled by
+  // the on-screen NetDebugOverlay once per frame.  Purely diagnostic — no
+  // gameplay code should read from this.
+  public getNetDebugInfo(): NetDebugInfo {
+    return {
+      role: this.netRole,
+      gameState: this.gameState,
+      hostTick: this.hostTick,
+      clientLastTick: this.clientLastSnapshotTick,
+      selfId: this.player.id,
+      selfX: this.player.position.x,
+      selfY: this.player.position.y,
+      cameraX: this.camera.position.x,
+      cameraY: this.camera.position.y,
+      entityCount: this.currentMap?.entities.length ?? 0,
+      player2Present: this.player2 !== null,
+      player2X: this.player2?.position.x,
+      player2Y: this.player2?.position.y,
+      remoteMoveX: this.remoteInput?.getMovementVector().x,
+      remoteMoveY: this.remoteInput?.getMovementVector().y,
+    };
   }
 
   /**
@@ -703,6 +727,28 @@ export class GameEngine {
         // Client still needs to update its rotation locally based on the
         // mouse so aim feels responsive pre-ack (the host will echo back).
         this.updateClientLocalAim();
+        // Extrapolate entity positions forward from their snapshot velocity
+        // so motion looks smooth between snapshot ticks (33ms at 30Hz).
+        // Each applySnapshot() re-anchors positions to the authoritative
+        // host values, so drift is self-correcting.
+        const cdt = Math.min(frameTime, 0.05);
+        if (this.currentMap) {
+            const ents = this.currentMap.entities;
+            for (let i = 0; i < ents.length; i++) {
+                const e = ents[i];
+                if (!e.active || e.isExploding) continue;
+                // Skip entities with zero velocity (drops, tiles) — nothing to
+                // extrapolate and it avoids tiny floating-point drift.
+                if (e.velocity.x === 0 && e.velocity.y === 0) continue;
+                e.position.x += e.velocity.x * cdt;
+                e.position.y += e.velocity.y * cdt;
+                if (e.rotationSpeed) e.rotation += e.rotationSpeed * cdt;
+            }
+        }
+        // Camera follows this.player, which is mirrored from snapshot.yourId.
+        // Re-set here too so extrapolation (above) on this.player is reflected.
+        this.camera.position.x = this.player.position.x;
+        this.camera.position.y = this.player.position.y;
         this.prepareFrameEntities();
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         requestAnimationFrame(this.loop);

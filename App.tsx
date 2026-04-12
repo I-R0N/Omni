@@ -4,6 +4,7 @@ import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState } from './types';
 import UIOverlay from './components/UIOverlay';
 import MultiplayerMenu from './components/MultiplayerMenu';
+import NetDebugOverlay from './components/NetDebugOverlay';
 import type { HostSession } from './engine/net/HostSession';
 import type { ClientSession } from './engine/net/ClientSession';
 
@@ -164,6 +165,7 @@ const App: React.FC = () => {
           onSessionStart={handleSessionStart}
         />
       )}
+      {engineRef.current && <NetDebugOverlay engine={engineRef.current} />}
     </div>
   );
 };

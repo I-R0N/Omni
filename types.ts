@@ -23,6 +23,26 @@ export enum NetRole {
   CLIENT = 'CLIENT',
 }
 
+// On-screen diagnostic surface for multiplayer sessions.  Polled once per
+// frame by NetDebugOverlay — strictly diagnostic, not gameplay state.
+export interface NetDebugInfo {
+  role: NetRole;
+  gameState: GameState;
+  hostTick: number;
+  clientLastTick: number;
+  selfId: string;
+  selfX: number;
+  selfY: number;
+  cameraX: number;
+  cameraY: number;
+  entityCount: number;
+  player2Present: boolean;
+  player2X?: number;
+  player2Y?: number;
+  remoteMoveX?: number;
+  remoteMoveY?: number;
+}
+
 export interface Vector2 {
   x: number;
   y: number;

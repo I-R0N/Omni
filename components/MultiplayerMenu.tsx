@@ -4,23 +4,18 @@ import { ClientSession, ClientStatus } from '../engine/net/ClientSession';
 import { GameEngine } from '../engine/GameEngine';
 
 // ── Multiplayer Menu ─────────────────────────────────────────────────────────
-// Phase 1 prototype: manual SDP copy-paste signalling between two browser
-// tabs/devices.  One side clicks "Host", copies the offer to the other side,
-// which clicks "Join", pastes the offer, and returns the generated answer.
-// Once the host pastes the answer back, the WebRTC data channel opens and
-// the game begins.
+// Phase 1 prototype: room-code signalling over ntfy.sh.  The host generates
+// a 4-letter code and shows it; the joiner types the same code.  SDP is
+// exchanged through the relay in the background, gzip-compressed so it fits
+// under ntfy's message size limit.
 //
-// This UX is intentionally minimal — it's a prototype signalling surface.
-// Phase 4 will replace it with a 4-character room code + a small signalling
-// relay server so players don't need to transfer SDP blobs by hand.
+// Fallback for diagnostics: a Manual Signaling mode is still available that
+// copies SDP blobs by hand without touching the relay, in case ntfy is down
+// or rate-limiting the test network.
 
 interface MultiplayerMenuProps {
   engine: GameEngine;
   onClose: () => void;
-  // Called when a session reaches 'connected' state.  The session is
-  // handed over to the parent so it can be kept alive beyond the modal's
-  // lifecycle (timers, transport, etc.) and explicitly closed on app
-  // shutdown or user-initiated exit.
   onSessionStart: (kind: 'host' | 'client', session: HostSession | ClientSession) => void;
 }
 
@@ -31,28 +26,21 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
 
   // Host flow state
   const hostSessionRef = useRef<HostSession | null>(null);
-  // Ref-based "did connect" flag.  React state would be stale-captured by
-  // the unmount cleanup (empty-deps useEffect closes over initial state),
-  // which previously closed both sessions the instant they reached
-  // 'connected' and dumped both devices back to the main menu.
   const hostConnectedRef = useRef<boolean>(false);
-  const [hostOffer, setHostOffer] = useState<string>('');
-  const [hostAnswerInput, setHostAnswerInput] = useState<string>('');
+  const [hostCode, setHostCode] = useState<string>('');
   const [hostStatus, setHostStatus] = useState<HostStatus>('idle');
   const [hostError, setHostError] = useState<string | null>(null);
 
   // Client flow state
   const clientSessionRef = useRef<ClientSession | null>(null);
   const clientConnectedRef = useRef<boolean>(false);
-  const [clientOfferInput, setClientOfferInput] = useState<string>('');
-  const [clientAnswer, setClientAnswer] = useState<string>('');
+  const [joinCode, setJoinCode] = useState<string>('');
   const [clientStatus, setClientStatus] = useState<ClientStatus>('idle');
   const [clientError, setClientError] = useState<string | null>(null);
 
   // Cleanup sessions if the modal unmounts mid-flow without reaching
-  // 'connected'.  Once connected, the session survives beyond this modal.
-  // We read the ref-based connect flags here (not state) so we see the
-  // latest value instead of the stale closure value.
+  // 'connected'.  Refs avoid the stale-closure trap of reading state in
+  // an empty-deps effect cleanup.
   useEffect(() => {
     return () => {
       if (hostSessionRef.current && !hostConnectedRef.current) {
@@ -64,7 +52,7 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     };
   }, []);
 
-  // ── Host flow handlers ────────────────────────────────────────────────────
+  // ── Host flow ─────────────────────────────────────────────────────────────
   const handleStartHosting = async () => {
     setHostError(null);
     setMode('host');
@@ -78,28 +66,28 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     };
     hostSessionRef.current = session;
     try {
-      const offer = await session.createOffer();
-      setHostOffer(offer);
+      await session.hostRoom((code) => setHostCode(code));
     } catch (e) {
-      setHostError((e as Error).message || 'Failed to create offer');
+      const msg = (e as Error).message || 'Failed to host room';
+      setHostError(msg);
       hostSessionRef.current = null;
     }
   };
 
-  const handleSubmitAnswer = async () => {
-    if (!hostSessionRef.current) return;
-    setHostError(null);
-    try {
-      await hostSessionRef.current.acceptAnswer(hostAnswerInput);
-    } catch (e) {
-      setHostError((e as Error).message || 'Failed to accept answer');
-    }
-  };
-
-  // ── Client flow handlers ──────────────────────────────────────────────────
+  // ── Client flow ───────────────────────────────────────────────────────────
   const handleStartJoining = () => {
     setClientError(null);
     setMode('join');
+    setJoinCode('');
+  };
+
+  const handleJoinRoom = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (code.length < 2) {
+      setClientError('Enter the room code shown on the host device.');
+      return;
+    }
+    setClientError(null);
     const session = new ClientSession(engine);
     session.onStatusChange = (s) => {
       setClientStatus(s);
@@ -109,79 +97,66 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
       }
     };
     clientSessionRef.current = session;
-  };
-
-  const handleSubmitOffer = async () => {
-    if (!clientSessionRef.current) return;
-    setClientError(null);
     try {
-      const answer = await clientSessionRef.current.acceptOffer(clientOfferInput);
-      setClientAnswer(answer);
+      await session.joinRoom(code);
     } catch (e) {
-      setClientError((e as Error).message || 'Failed to process offer');
-    }
-  };
-
-  // ── Shared helpers ────────────────────────────────────────────────────────
-  const handleCopy = (text: string) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
-  };
-
-  // Web Share API — on iOS this opens the native share sheet (including
-  // AirDrop to a nearby device), which is by far the easiest way to move
-  // an SDP blob between two iPhones.  Falls back to clipboard copy on
-  // browsers without share support.
-  const canShare = typeof navigator !== 'undefined' && typeof (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }).share === 'function';
-  const handleShare = async (text: string, title: string) => {
-    const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
-    if (nav.share) {
-      try {
-        await nav.share({ title, text });
-        return;
-      } catch {
-        // User cancelled or share failed — fall through to clipboard.
-      }
-    }
-    handleCopy(text);
-  };
-
-  // Explicit paste — reads the clipboard and writes the result into the
-  // given setter.  Bypasses the focus/long-press/paste dance that's flaky
-  // on iOS Safari (especially when the game loop is running).  Requires
-  // user activation, which a button click satisfies.
-  const canPasteFromClipboard =
-    typeof navigator !== 'undefined' &&
-    typeof navigator.clipboard !== 'undefined' &&
-    typeof (navigator.clipboard as Clipboard & { readText?: () => Promise<string> }).readText === 'function';
-
-  const handlePaste = async (setter: (v: string) => void, onError: (msg: string) => void) => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text && text.length > 0) {
-        setter(text.trim());
-      } else {
-        onError('Clipboard is empty.');
-      }
-    } catch (e) {
-      // iOS Safari denies readText() in some contexts (private browsing,
-      // missing user gesture, permission denied).  Surface a helpful hint.
-      onError('Clipboard read blocked. Tap inside the text field and long-press to paste instead.');
+      const msg = (e as Error).message || 'Failed to join room';
+      setClientError(msg);
+      clientSessionRef.current = null;
     }
   };
 
   const handleCancel = () => {
-    if (hostSessionRef.current && hostStatus !== 'connected') {
+    if (hostSessionRef.current && !hostConnectedRef.current) {
       hostSessionRef.current.close();
       hostSessionRef.current = null;
     }
-    if (clientSessionRef.current && clientStatus !== 'connected') {
+    if (clientSessionRef.current && !clientConnectedRef.current) {
       clientSessionRef.current.close();
       clientSessionRef.current = null;
     }
     onClose();
   };
+
+  const handleBack = () => {
+    // Cancel any in-flight session state so re-entering a mode starts fresh.
+    if (hostSessionRef.current && !hostConnectedRef.current) {
+      hostSessionRef.current.close();
+      hostSessionRef.current = null;
+      setHostCode('');
+      setHostStatus('idle');
+      setHostError(null);
+    }
+    if (clientSessionRef.current && !clientConnectedRef.current) {
+      clientSessionRef.current.close();
+      clientSessionRef.current = null;
+      setJoinCode('');
+      setClientStatus('idle');
+      setClientError(null);
+    }
+    setMode('choose');
+  };
+
+  // Friendly label for the current multi-stage status.  ntfy publish +
+  // WebRTC ICE gathering happen back-to-back so users don't see every
+  // intermediate state; this maps them to readable phases.
+  const hostLabel = (() => {
+    if (hostError) return hostError;
+    if (hostStatus === 'connected') return 'Connected!';
+    if (hostStatus === 'connecting') return 'Finalising connection…';
+    if (hostStatus === 'awaiting-answer')
+      return hostCode ? 'Waiting for joiner…' : 'Preparing room…';
+    return 'Starting…';
+  })();
+
+  const clientLabel = (() => {
+    if (clientError) return clientError;
+    if (clientStatus === 'connected') return 'Connected!';
+    if (clientStatus === 'connecting') return 'Finalising connection…';
+    if (clientStatus === 'answered') return 'Answer sent — waiting for host…';
+    if (clientStatus === 'awaiting-offer') return 'Fetching host offer…';
+    return '';
+  })();
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -189,10 +164,10 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
       data-ui-surface
       className="absolute inset-0 bg-slate-950/95 flex items-center justify-center pointer-events-auto z-[60] p-4"
     >
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 tracking-wide">
+            <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 tracking-wide">
               MULTIPLAYER (PROTOTYPE)
             </h2>
             <button
@@ -207,102 +182,53 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
           {mode === 'choose' && (
             <div className="space-y-4">
               <p className="text-slate-300 text-sm leading-relaxed">
-                Phase 1 prototype — two-player WebRTC with manual signalling.
-                One device hosts the simulation, the other connects via a
-                copy-pasted offer / answer. Use two tabs on the same machine
-                or two devices on the same network.
+                Two-player prototype. One device hosts and gets a 4-letter
+                room code; the other joins by entering it. Both devices
+                must have internet access (signalling runs through ntfy.sh).
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
                   onClick={handleStartHosting}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 px-6 rounded-xl shadow-lg transition-all active:scale-95"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-5 px-4 rounded-xl shadow-lg transition-all active:scale-95"
                 >
-                  <div className="text-lg">HOST GAME</div>
-                  <div className="text-xs opacity-80 mt-1 font-normal">Run the simulation on this device</div>
+                  <div className="text-base">HOST</div>
+                  <div className="text-xs opacity-80 mt-1 font-normal">Create a room</div>
                 </button>
                 <button
                   onClick={handleStartJoining}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-6 px-6 rounded-xl shadow-lg transition-all active:scale-95"
+                  className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-5 px-4 rounded-xl shadow-lg transition-all active:scale-95"
                 >
-                  <div className="text-lg">JOIN GAME</div>
-                  <div className="text-xs opacity-80 mt-1 font-normal">Connect to a host's offer</div>
+                  <div className="text-base">JOIN</div>
+                  <div className="text-xs opacity-80 mt-1 font-normal">Enter a room code</div>
                 </button>
               </div>
             </div>
           )}
 
           {mode === 'host' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <div className="text-slate-300 text-xs uppercase tracking-widest mb-2">Status</div>
-                <div className="text-slate-100 text-sm font-mono">{hostStatus}</div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 text-xs uppercase tracking-widest mb-2">
-                  1. Send this offer to the joining device
-                </label>
-                <textarea
-                  readOnly
-                  value={hostOffer}
-                  placeholder={hostOffer ? '' : 'Generating offer…'}
-                  className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
-                />
-                <div className="mt-2 flex gap-2 flex-wrap">
-                  {canShare && (
-                    <button
-                      disabled={!hostOffer}
-                      onClick={() => handleShare(hostOffer, 'Omni multiplayer offer')}
-                      className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
-                    >
-                      Share (AirDrop)
-                    </button>
-                  )}
-                  <button
-                    disabled={!hostOffer}
-                    onClick={() => handleCopy(hostOffer)}
-                    className="text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 py-1.5 px-3 rounded"
-                  >
-                    Copy
-                  </button>
+                <div className="text-slate-400 text-xs uppercase tracking-widest mb-2 text-center">
+                  Room code
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 text-xs uppercase tracking-widest mb-2">
-                  2. Paste the answer from the joining device
-                </label>
-                <textarea
-                  value={hostAnswerInput}
-                  onChange={(e) => setHostAnswerInput(e.target.value)}
-                  placeholder="Tap Paste below, or long-press and Paste…"
-                  className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
-                />
-                <div className="mt-2 flex gap-2 flex-wrap">
-                  {canPasteFromClipboard && (
-                    <button
-                      onClick={() => handlePaste(setHostAnswerInput, setHostError)}
-                      className="text-xs bg-purple-600 hover:bg-purple-500 text-white py-1.5 px-3 rounded font-bold"
-                    >
-                      Paste
-                    </button>
-                  )}
-                  <button
-                    disabled={!hostAnswerInput || hostStatus === 'connected'}
-                    onClick={handleSubmitAnswer}
-                    className="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
-                  >
-                    Accept answer
-                  </button>
-                  {hostAnswerInput && (
-                    <button
-                      onClick={() => setHostAnswerInput('')}
-                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
-                    >
-                      Clear
-                    </button>
+                <div className="text-center">
+                  {hostCode ? (
+                    <div className="font-mono font-black text-6xl tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-300 py-2">
+                      {hostCode}
+                    </div>
+                  ) : (
+                    <div className="text-slate-500 text-sm py-6">Generating room…</div>
                   )}
                 </div>
+                {hostCode && (
+                  <div className="text-slate-400 text-xs text-center mt-2">
+                    Tell the joiner to enter this code.
+                  </div>
+                )}
+              </div>
+
+              <div className="text-center text-slate-200 text-sm min-h-[1.25rem]">
+                {hostLabel}
               </div>
 
               {hostError && (
@@ -311,15 +237,9 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 </div>
               )}
 
-              {hostStatus === 'connected' && (
-                <div className="text-sm text-emerald-400 font-bold">
-                  ✓ Connected — game starting on both devices.
-                </div>
-              )}
-
               <button
-                onClick={() => setMode('choose')}
-                className="text-xs text-slate-400 hover:text-slate-200"
+                onClick={handleBack}
+                className="w-full text-xs text-slate-400 hover:text-slate-200 py-2"
               >
                 ← Back
               </button>
@@ -327,75 +247,36 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
           )}
 
           {mode === 'join' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <div className="text-slate-300 text-xs uppercase tracking-widest mb-2">Status</div>
-                <div className="text-slate-100 text-sm font-mono">{clientStatus}</div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 text-xs uppercase tracking-widest mb-2">
-                  1. Paste the host's offer
+                <label className="block text-slate-400 text-xs uppercase tracking-widest mb-2 text-center">
+                  Enter room code
                 </label>
-                <textarea
-                  value={clientOfferInput}
-                  onChange={(e) => setClientOfferInput(e.target.value)}
-                  placeholder="Tap Paste below, or long-press and Paste…"
-                  className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
+                <input
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  maxLength={8}
+                  placeholder="ABCD"
+                  className="w-full bg-slate-800 border border-slate-700 focus:border-indigo-400 focus:outline-none rounded-lg p-3 text-center font-mono font-black text-4xl tracking-[0.3em] text-slate-100"
                 />
-                <div className="mt-2 flex gap-2 flex-wrap">
-                  {canPasteFromClipboard && (
-                    <button
-                      onClick={() => handlePaste(setClientOfferInput, setClientError)}
-                      className="text-xs bg-purple-600 hover:bg-purple-500 text-white py-1.5 px-3 rounded font-bold"
-                    >
-                      Paste
-                    </button>
-                  )}
-                  <button
-                    disabled={!clientOfferInput || clientAnswer.length > 0}
-                    onClick={handleSubmitOffer}
-                    className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
-                  >
-                    Generate answer
-                  </button>
-                  {clientOfferInput && !clientAnswer && (
-                    <button
-                      onClick={() => setClientOfferInput('')}
-                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
               </div>
 
-              {clientAnswer && (
-                <div>
-                  <label className="block text-slate-300 text-xs uppercase tracking-widest mb-2">
-                    2. Send this answer back to the host
-                  </label>
-                  <textarea
-                    readOnly
-                    value={clientAnswer}
-                    className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
-                  />
-                  <div className="mt-2 flex gap-2 flex-wrap">
-                    {canShare && (
-                      <button
-                        onClick={() => handleShare(clientAnswer, 'Omni multiplayer answer')}
-                        className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 px-3 rounded font-bold"
-                      >
-                        Share (AirDrop)
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleCopy(clientAnswer)}
-                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
-                    >
-                      Copy
-                    </button>
-                  </div>
+              <button
+                disabled={clientStatus !== 'idle' || joinCode.trim().length < 2}
+                onClick={handleJoinRoom}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all active:scale-95"
+              >
+                JOIN ROOM
+              </button>
+
+              {clientLabel && (
+                <div className="text-center text-slate-200 text-sm min-h-[1.25rem]">
+                  {clientLabel}
                 </div>
               )}
 
@@ -405,15 +286,9 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 </div>
               )}
 
-              {clientStatus === 'connected' && (
-                <div className="text-sm text-emerald-400 font-bold">
-                  ✓ Connected — rendering host state.
-                </div>
-              )}
-
               <button
-                onClick={() => setMode('choose')}
-                className="text-xs text-slate-400 hover:text-slate-200"
+                onClick={handleBack}
+                className="w-full text-xs text-slate-400 hover:text-slate-200 py-2"
               >
                 ← Back
               </button>

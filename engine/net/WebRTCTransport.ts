@@ -119,7 +119,10 @@ export class WebRTCTransport {
     // a send() overflow can put the channel into an error state from
     // which no further messages flow in either direction.  We drop the
     // message and report via onError so the app layer can surface it.
-    const maxBytes = this.channel.maxMessageSize || 65535;
+    // `maxMessageSize` is part of the WebRTC spec but missing from TS's
+    // default lib.dom types, so we access it via a structural cast.
+    const chWithMax = this.channel as RTCDataChannel & { maxMessageSize?: number };
+    const maxBytes = chWithMax.maxMessageSize || 65535;
     // Rough UTF-8 byte count upper bound — JSON is ASCII-heavy so length
     // is within a few % of byte count.  Use length * 4 as a safe ceiling.
     if (payload.length > maxBytes) {
@@ -152,10 +155,12 @@ export class WebRTCTransport {
     ch.binaryType = 'arraybuffer';
     ch.onopen = () => {
       // Log negotiated SCTP limits so we can diagnose iOS-specific
-      // behaviour via the web inspector.
+      // behaviour via the web inspector.  `maxMessageSize` is missing
+      // from TS's default lib.dom types despite being in the WebRTC spec.
+      const chAny = ch as RTCDataChannel & { maxMessageSize?: number };
       console.info(
         '[WebRTCTransport] data channel open — maxMessageSize=%s, ordered=%s, maxRetransmits=%s',
-        ch.maxMessageSize,
+        chAny.maxMessageSize,
         ch.ordered,
         ch.maxRetransmits
       );
