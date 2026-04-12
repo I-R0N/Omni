@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, MISSILE_PASSTHROUGH_MEDIUM } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -476,47 +476,6 @@ export class PhysicsSystem {
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
-
-          // Missile pass-through: push aside small/slow asteroid shards instead of detonating
-          if (proj.isMissile && target.type === EntityType.ASTEROID) {
-              if (proj.hitEntityIds?.includes(target.id)) return; // already pushed aside
-
-              const sz = Math.max(target.size.x, target.size.y);
-              // Small and medium shards always pass through; the missile nudges
-              // them out of its path rather than detonating on them.
-              const passThrough = sz <= MISSILE_PASSTHROUGH_MEDIUM;
-
-              if (passThrough) {
-                  // Gentle sideways nudge — the shard drifts out of the missile's
-                  // path rather than being launched away.
-                  if (proj.velocity) {
-                      const vx = proj.velocity.x;
-                      const vy = proj.velocity.y;
-                      const speed = Math.sqrt(vx * vx + vy * vy);
-                      if (speed > 0.01) {
-                          const dirX = vx / speed;
-                          const dirY = vy / speed;
-
-                          // Offset from missile center to shard center
-                          const ox = target.position.x - proj.position.x;
-                          const oy = target.position.y - proj.position.y;
-                          // Perpendicular component (scalar, signed) — which side of the beam
-                          const perp = ox * -dirY + oy * dirX;
-                          const perpSign = perp >= 0 ? 1 : -1;
-
-                          // Light nudge: mostly lateral, barely any forward drag
-                          const forward = 0.15;
-                          const lateral = 0.35 * perpSign;
-
-                          target.velocity.x += dirX * forward + (-dirY) * lateral;
-                          target.velocity.y += dirY * forward + ( dirX) * lateral;
-                      }
-                  }
-                  if (!proj.hitEntityIds) proj.hitEntityIds = [];
-                  proj.hitEntityIds.push(target.id);
-                  return;
-              }
-          }
 
           target.health -= (proj.damage || 1);
           target.hitFlash = 0.1;
