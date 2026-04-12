@@ -10,7 +10,7 @@ import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, V
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { cloneComposition, blendCompositionToHex, blendCompositions } from './NebulaColor';
+import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -719,10 +719,15 @@ export class GameEngine {
 
             if (regen.entity.type === EntityType.NEBULA) {
                 // Tiles never grow (only shards do), so size is already
-                // canonical.  Emit a glittery glimmer cluster centred on
-                // the tile as the "reappear" effect, tinted by the
-                // tile's colour composition.
-                const tint = blendCompositionToHex(regen.entity.nebulaColorComposition) || regen.entity.color;
+                // canonical.  On regen, assign a fresh random-hue palette
+                // so the cloud cycles through new colours across
+                // shatter/respawn cycles rather than always reappearing
+                // in its prior hue.
+                regen.entity.nebulaColorComposition = randomNebulaComposition();
+                regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
+                // Emit a glittery glimmer cluster centred on the tile as
+                // the "reappear" effect, tinted by the new composition.
+                const tint = blendCompositionToHex(regen.entity.nebulaColorComposition);
                 const glimmerR = Math.max(regen.entity.size.x, regen.entity.size.y) * 0.55;
                 this.spawnNebulaGlimmer(regen.entity.position, glimmerR, tint);
             } else {
