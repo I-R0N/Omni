@@ -465,6 +465,12 @@ export class RenderSystem {
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
           const tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
           const spriteSrc = entity.sprite;
+          // Fade multiplier for shattered nebula tiles — stays at 1.0
+          // for anything without a fade timer set (so shards and
+          // unbroken tiles render at full base alpha).
+          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0
+              ? Math.max(0, entity.nebulaFadeTimer / NEBULA_CONSTANTS.FADE_DURATION)
+              : 1.0;
           if (spriteSrc) {
               const tinted = this.getTintedSprite(spriteSrc, tintHex);
               if (tinted) {
@@ -477,7 +483,7 @@ export class RenderSystem {
                   const dOffset = -(drawSize / 2);
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
-                  ctx.globalAlpha = isTile ? 0.55 : 0.45;
+                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul;
                   ctx.drawImage(tinted, dOffset, dOffset, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
               } else {
@@ -488,7 +494,7 @@ export class RenderSystem {
                   grad.addColorStop(0, tintHex);
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   ctx.fillStyle = grad;
-                  ctx.globalAlpha = 0.45;
+                  ctx.globalAlpha = 0.45 * fadeMul;
                   ctx.beginPath();
                   ctx.arc(0, 0, r, 0, Math.PI * 2);
                   ctx.fill();

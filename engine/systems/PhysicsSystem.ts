@@ -85,6 +85,16 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
+      // Nebula tile fade — shattered tiles stay active+rendered while
+      // this counts down, then deactivate and enter the regen wait.
+      // Must tick before the mass=Infinity skip so static tiles get it.
+      if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
+          entity.nebulaFadeTimer -= dt;
+          if (entity.nebulaFadeTimer <= 0) {
+              entity.nebulaFadeTimer = undefined;
+              entity.active = false;
+          }
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;
@@ -515,11 +525,17 @@ export class PhysicsSystem {
                   }
                   nebula.lastImpactDamage = 1;
                   nebula.health = 0;
-                  nebula.active = false;
-                  // Only NEBULA tiles live in the static grid; shards live
-                  // in the dynamic grid and are compacted by end-of-frame.
+                  // Tiles fade out over FADE_DURATION instead of vanishing
+                  // instantly — the renderer multiplies alpha by
+                  // fadeTimer/FADE_DURATION, and the per-frame tick above
+                  // clears the timer and sets active=false when it expires.
+                  // Shards keep the instant-vanish behaviour (they're small,
+                  // fast, and being absorbed by the striker's path).
                   if (nebula.type === EntityType.NEBULA) {
+                      nebula.nebulaFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
                       this.removeStaticEntity(nebula);
+                  } else {
+                      nebula.active = false;
                   }
                   // Arm the striker's post-shatter cooldown.
                   other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;

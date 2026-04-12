@@ -1192,28 +1192,28 @@ export class GameEngine {
   }
 
   /**
-   * Glittery glimmer burst used for nebula merge / transmute / regen
-   * feedback.  Spawns two staggered passes of tiny additive particles
+   * Subtle glittery glimmer burst used for nebula merge / transmute /
+   * regen feedback.  Spawns two small passes of tiny additive particles
    * scattered within a radius around the centre point:
-   *   - half in pure white for bright sparkle highlights
-   *   - half in the provided tint for colour continuity with the cloud
+   *   - 3 white highlight motes
+   *   - 4 tint-coloured softer motes
    *
-   * Particles are tiny, long-lived, and drift almost-stationary, so the
-   * effect reads as a twinkling cluster of motes rather than a spark.
+   * Kept deliberately sparse so cloud events read as a quiet twinkle
+   * rather than a bright particle burst.
    */
   private spawnNebulaGlimmer(position: Vector2, radius: number, tint: string) {
-    // White highlight pass — bright punctuation points
-    this.spawnParticles(position, 8, '#ffffff', {
-      speedMin: 0.1, speedMax: 0.6,
-      sizeMin: 0.4, sizeMax: 1.2,
-      lifetimeMin: 0.5, lifetimeMax: 1.1,
+    // White highlight pass — sparse punctuation points
+    this.spawnParticles(position, 3, '#ffffff', {
+      speedMin: 0.1, speedMax: 0.5,
+      sizeMin: 0.3, sizeMax: 0.9,
+      lifetimeMin: 0.4, lifetimeMax: 0.8,
       positionJitter: radius,
     });
     // Tinted pass — softer, slightly larger coloured motes around/between
-    this.spawnParticles(position, 10, tint, {
-      speedMin: 0.1, speedMax: 0.5,
-      sizeMin: 0.6, sizeMax: 1.6,
-      lifetimeMin: 0.7, lifetimeMax: 1.3,
+    this.spawnParticles(position, 4, tint, {
+      speedMin: 0.1, speedMax: 0.4,
+      sizeMin: 0.4, sizeMax: 1.1,
+      lifetimeMin: 0.5, lifetimeMax: 1.0,
       positionJitter: radius * 1.2,
     });
   }

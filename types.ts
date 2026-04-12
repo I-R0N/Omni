@@ -259,6 +259,11 @@ export interface GameEntity {
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
   // While > 0, subsequent nebula contacts pass through without shattering.
   nebulaImpactCooldown?: number;
+  // Post-shatter fade timer on NEBULA tiles.  While > 0 the tile stays
+  // active and rendered but with alpha = timer / FADE_DURATION.  On
+  // reaching 0 the tile becomes inactive and enters the regen wait.
+  // Only set on tiles; shards still vanish instantly when shattered.
+  nebulaFadeTimer?: number;
 }
 
 export interface CameraState {
