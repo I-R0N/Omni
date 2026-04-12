@@ -243,12 +243,13 @@ export const PARTICLE_CONSTANTS = {
 
 // ── Missile (radiation bomb) tuning ──────────────────────────────────────────
 export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = full homing, 0.2 = very mild)
+export const MISSILE_EXPLOSION_RADIUS = 60;   // 2-tile blast radius (STRUCTURE_CONSTANTS.SIZE * 2)
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
 export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
-export const LIGHTNING_GRAVITY_STRENGTH = 250;      // acceleration toward nearest target (gravity-like pull)
+export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
 
 export const PROJECTILE_CONSTANTS = {

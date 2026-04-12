@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, MISSILE_EXPLOSION_RADIUS, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1373,11 +1373,35 @@ export class GameEngine {
       }
   }
 
-  // ─── Missile detonation (visual explosion on impact or lifetime expiry) ─────
+  // ─── Missile detonation (AoE single-hit damage + VFX) ──────────────────────
 
-  private detonateMissile(pos: Vector2, _ownerType: EntityType) {
-      // Explosion VFX — green radiation burst (damage is handled by normal
-      // projectile collision; no AoE loop to avoid mass-shard perf spikes).
+  private detonateMissile(pos: Vector2, ownerType: EntityType) {
+      if (this.currentMap) {
+          const dmg = WEAPONS[WeaponType.MISSILE].damage;
+
+          for (const e of this.currentMap.entities) {
+              if (!e.active || e.isExploding) continue;
+              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID && e.type !== EntityType.STRUCTURE) continue;
+              if (ownerType === EntityType.ENEMY && e.type === EntityType.ENEMY) continue;
+
+              const dx = e.position.x - pos.x;
+              const dy = e.position.y - pos.y;
+              const hitR = MISSILE_EXPLOSION_RADIUS + Math.max(e.size.x, e.size.y) / 2;
+              if (dx * dx + dy * dy > hitR * hitR) continue;
+
+              // Flat single-hit damage — same as one projectile impact
+              e.health -= dmg;
+              e.hitFlash = 0.1;
+              this.spawnDamageText(e.position, dmg, e);
+
+              if (e.health <= 0 && !e.isExploding) {
+                  e.lastImpactDamage = dmg;
+                  this.handleEntityDeath(e);
+              }
+          }
+      }
+
+      // Explosion VFX — green radiation burst
       this.spawnParticles(pos, 20, '#4ade80', {
           speedMin: 3, speedMax: 10,
           sizeMin: 2, sizeMax: 4,
