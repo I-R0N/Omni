@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, MISSILE_PASSTHROUGH_SMALL, MISSILE_PASSTHROUGH_MEDIUM, MISSILE_PASSTHROUGH_SPEED } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, MISSILE_PASSTHROUGH_MEDIUM } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -482,14 +482,13 @@ export class PhysicsSystem {
               if (proj.hitEntityIds?.includes(target.id)) return; // already pushed aside
 
               const sz = Math.max(target.size.x, target.size.y);
-              const tSpeed = Math.sqrt(target.velocity.x * target.velocity.x + target.velocity.y * target.velocity.y);
-              const passThrough = sz <= MISSILE_PASSTHROUGH_SMALL
-                  || (sz <= MISSILE_PASSTHROUGH_MEDIUM && tSpeed < MISSILE_PASSTHROUGH_SPEED);
+              // Small and medium shards always pass through; the missile nudges
+              // them out of its path rather than detonating on them.
+              const passThrough = sz <= MISSILE_PASSTHROUGH_MEDIUM;
 
               if (passThrough) {
-                  // Shove the shard aside as if the missile had real physical bulk.
-                  // Forward push along missile direction + lateral scatter based on
-                  // which side of the missile line the shard is on.
+                  // Gentle sideways nudge — the shard drifts out of the missile's
+                  // path rather than being launched away.
                   if (proj.velocity) {
                       const vx = proj.velocity.x;
                       const vy = proj.velocity.y;
@@ -505,12 +504,12 @@ export class PhysicsSystem {
                           const perp = ox * -dirY + oy * dirX;
                           const perpSign = perp >= 0 ? 1 : -1;
 
-                          // Strong shove: forward = 2.5× missile speed, lateral = 1.5× missile speed
-                          const forward = speed * 2.5;
-                          const lateral = speed * 1.5 * perpSign;
+                          // Light nudge: mostly lateral, barely any forward drag
+                          const forward = 0.15;
+                          const lateral = 0.35 * perpSign;
 
-                          target.velocity.x = dirX * forward + (-dirY) * lateral;
-                          target.velocity.y = dirY * forward + ( dirX) * lateral;
+                          target.velocity.x += dirX * forward + (-dirY) * lateral;
+                          target.velocity.y += dirY * forward + ( dirX) * lateral;
                       }
                   }
                   if (!proj.hitEntityIds) proj.hitEntityIds = [];
