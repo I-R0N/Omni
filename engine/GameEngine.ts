@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, MISSILE_HOMING_STRENGTH, MISSILE_EXPLOSION_RADIUS, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -401,14 +401,6 @@ export class GameEngine {
               }
           }
       });
-
-      // Missiles that expired (lifetime ran out) still detonate
-      for (const e of this.currentMap.entities) {
-          if (!e.active && e.isMissile && e.type === EntityType.PROJECTILE) {
-              this.detonateMissile(e.position, e.ownerType || EntityType.PLAYER);
-              e.isMissile = false; // prevent double-detonation
-          }
-      }
 
       // Single pass: collect destroyed asteroids + count all, avoiding two filter() allocations.
       // createAsteroidShards() pushes to entities so we must collect before iterating.
@@ -1069,13 +1061,6 @@ export class GameEngine {
         this.fireLightningChainFromImpact(impactPos, target);
     }
 
-    // Missile projectile: visual explosion on impact; clear flag so the
-    // post-physics expired-missile scan doesn't detonate a second time.
-    if (proj.isMissile) {
-        this.detonateMissile(impactPos, proj.ownerType || EntityType.PLAYER);
-        proj.isMissile = false;
-    }
-
     void projSpeed; // suppress lint
   };
 
@@ -1239,8 +1224,7 @@ export class GameEngine {
               pierceCount: config.pierce,
               trail: [],
               isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
-              isMissile: config.type === WeaponType.MISSILE || undefined,
-              homingStrength: config.type === WeaponType.MISSILE ? MISSILE_HOMING_STRENGTH : undefined,
+              isBouncer: config.type === WeaponType.BOUNCER || undefined,
           });
       }
   }
@@ -1371,50 +1355,6 @@ export class GameEngine {
               });
           }
       }
-  }
-
-  // ─── Missile detonation (AoE single-hit damage + VFX) ──────────────────────
-
-  private detonateMissile(pos: Vector2, ownerType: EntityType) {
-      if (this.currentMap) {
-          const dmg = WEAPONS[WeaponType.MISSILE].damage;
-
-          for (const e of this.currentMap.entities) {
-              if (!e.active || e.isExploding) continue;
-              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID && e.type !== EntityType.STRUCTURE) continue;
-              if (ownerType === EntityType.ENEMY && e.type === EntityType.ENEMY) continue;
-
-              const dx = e.position.x - pos.x;
-              const dy = e.position.y - pos.y;
-              const hitR = MISSILE_EXPLOSION_RADIUS + Math.max(e.size.x, e.size.y) / 2;
-              if (dx * dx + dy * dy > hitR * hitR) continue;
-
-              // Flat single-hit damage — same as one projectile impact
-              e.health -= dmg;
-              e.hitFlash = 0.1;
-              this.spawnDamageText(e.position, dmg, e);
-
-              if (e.health <= 0 && !e.isExploding) {
-                  e.lastImpactDamage = dmg;
-                  e.active = false;
-                  this.handleEntityDeath(e);
-              }
-          }
-      }
-
-      // Explosion VFX — green radiation burst
-      this.spawnParticles(pos, 20, '#4ade80', {
-          speedMin: 3, speedMax: 10,
-          sizeMin: 2, sizeMax: 4,
-          lifetimeMin: 0.3, lifetimeMax: 0.6,
-      });
-      this.spawnParticles(pos, 10, '#bbf7d0', {
-          speedMin: 5, speedMax: 14,
-          sizeMin: 1, sizeMax: 2.5,
-          lifetimeMin: 0.15, lifetimeMax: 0.35,
-      });
-
-      this.handleScreenShake(6);
   }
 
   // ─── Lightning chain (triggered on projectile impact) ───────────────────

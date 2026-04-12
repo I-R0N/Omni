@@ -241,9 +241,6 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
-// ── Missile (radiation bomb) tuning ──────────────────────────────────────────
-export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = full homing, 0.2 = very mild)
-export const MISSILE_EXPLOSION_RADIUS = 60;   // 2-tile blast radius (STRUCTURE_CONSTANTS.SIZE * 2)
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
@@ -324,20 +321,19 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 3.0,
     pierce: 1
   },
-  [WeaponType.MISSILE]: {
-    type: WeaponType.MISSILE,
-    name: 'Missile',
-    cooldown: 0.8,     // slower fire rate — heavy ordnance
-    speed: 4,          // slow-moving projectile
-    damage: 3,         // direct hit damage (explosion is visual only)
-    lifetime: 3.0,     // detonates on expiry if it hasn't hit anything
-    color: '#4ade80',  // Green — radiation bomb
+  [WeaponType.BOUNCER]: {
+    type: WeaponType.BOUNCER,
+    name: 'Bouncer',
+    cooldown: 0.005,   // matches BLASTER
+    speed: 9,          // matches BLASTER
+    damage: 2,         // matches BLASTER
+    lifetime: 1.5,     // matches BLASTER
+    color: '#4ade80',  // Green — thin laser beam that bounces off tiles
     size: 6,
     count: 1,
     spread: 2,
-    recoil: 1.5,
-    pierce: 0,         // explodes on first contact
-    homing: true,      // mild homing (strength set per-projectile)
+    recoil: 0.5,
+    pierce: 0,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -389,7 +385,7 @@ export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
   WeaponType.SHOTGUN,
-  WeaponType.MISSILE,
+  WeaponType.BOUNCER,
   WeaponType.LIGHTNING,
   WeaponType.HOMING,
   WeaponType.CANNON,
@@ -461,8 +457,8 @@ export const DROP_CONFIG = {
 export const ENEMY_AMMO_DROP: Record<EnemySubtype, { own: WeaponType; next: WeaponType }> = {
   [EnemySubtype.RAMMER_1]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
   [EnemySubtype.RAMMER_2]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
-  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.MISSILE     },
-  [EnemySubtype.SHOOTER_1]: { own: WeaponType.MISSILE,     next: WeaponType.LIGHTNING },
+  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.BOUNCER   },
+  [EnemySubtype.SHOOTER_1]: { own: WeaponType.BOUNCER,   next: WeaponType.LIGHTNING },
   [EnemySubtype.SHOOTER_2]: { own: WeaponType.LIGHTNING, next: WeaponType.HOMING    },
   [EnemySubtype.SHOOTER_3]: { own: WeaponType.HOMING,    next: WeaponType.CANNON    },
 };
@@ -474,7 +470,7 @@ export const ASTEROID_AMMO_PROGRESSION: WeaponType[] = [
   WeaponType.BURST,     // waves 4–6
   WeaponType.SHOTGUN,   // waves 7–9
   WeaponType.SHOTGUN,   // waves 10–12
-  WeaponType.MISSILE,     // waves 13–15
+  WeaponType.BOUNCER,     // waves 13–15
   WeaponType.LIGHTNING, // waves 16–18
   WeaponType.HOMING,    // waves 19–21
   WeaponType.CANNON,    // waves 22+

@@ -748,37 +748,35 @@ export class RenderSystem {
 
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.restore();
-                } else if (entity.isMissile) {
-                    // ── Missile projectile: green warhead with toxic glow ──
+                } else if (entity.isBouncer) {
+                    // ── Bouncer projectile: thin glowing green laser beam ──
+                    // Entity is already rotated so +X points along travel direction.
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
-
-                    // Outer radiation glow — additive
                     ctx.globalCompositeOperation = 'lighter';
-                    const missR = r * 4;
-                    const pulse = 0.8 + Math.sin(nowSec * 6) * 0.2;
-                    const missGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, missR * pulse);
-                    missGrad.addColorStop(0,    'rgba(180, 255, 200, 0.9)');
-                    missGrad.addColorStop(0.2,  'rgba(74, 222, 128, 0.6)');
-                    missGrad.addColorStop(0.5,  'rgba(74, 222, 128, 0.15)');
-                    missGrad.addColorStop(1,    'rgba(74, 222, 128, 0)');
-                    ctx.fillStyle = missGrad;
+
+                    const halfLen = r * 2.2;   // elongated along travel
+                    const halfThk = 0.7;        // thin perpendicular
+
+                    // Soft radial halo
+                    const glowR = halfLen * 1.4;
+                    const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    glowGrad.addColorStop(0,    'rgba(200, 255, 210, 0.85)');
+                    glowGrad.addColorStop(0.35, 'rgba(74, 222, 128, 0.50)');
+                    glowGrad.addColorStop(0.75, 'rgba(74, 222, 128, 0.12)');
+                    glowGrad.addColorStop(1,    'rgba(74, 222, 128, 0)');
+                    ctx.fillStyle = glowGrad;
                     ctx.beginPath();
-                    ctx.arc(0, 0, missR * pulse, 0, Math.PI * 2);
+                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Missile body — elongated shape along travel direction
-                    ctx.globalCompositeOperation = 'source-over';
-                    ctx.fillStyle = '#bbf7d0';
-                    ctx.beginPath();
-                    ctx.ellipse(0, 0, r * 1.4, r * 0.6, 0, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    // Bright green core
+                    // Beam body — thin green rectangle along X
                     ctx.fillStyle = '#4ade80';
-                    ctx.beginPath();
-                    ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.fillRect(-halfLen, -halfThk, halfLen * 2, halfThk * 2);
+
+                    // Hot white core line
+                    ctx.fillStyle = 'rgba(220, 255, 220, 0.95)';
+                    ctx.fillRect(-halfLen * 0.92, -halfThk * 0.5, halfLen * 1.84, halfThk);
 
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.restore();

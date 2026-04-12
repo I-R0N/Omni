@@ -61,7 +61,7 @@ export enum WeaponType {
   BLASTER   = 'BLASTER',
   BURST     = 'BURST',
   SHOTGUN   = 'SHOTGUN',
-  MISSILE   = 'MISSILE',
+  BOUNCER   = 'BOUNCER',
   LIGHTNING = 'LIGHTNING',
   HOMING    = 'HOMING',
   CANNON    = 'CANNON',
@@ -220,8 +220,8 @@ export interface GameEntity {
   // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
   suppressDrops?: boolean;
 
-  // Marks a projectile as a missile (for explosion-on-impact/expiry and green rendering)
-  isMissile?: boolean;
+  // Marks a projectile as a bouncer (thin green laser that reflects off tiles)
+  isBouncer?: boolean;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
   homingStrength?: number;
 }

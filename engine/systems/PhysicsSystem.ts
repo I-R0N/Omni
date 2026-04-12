@@ -477,6 +477,52 @@ export class PhysicsSystem {
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
 
+          // Bouncer projectiles reflect off tiles (STRUCTURE) and tile shards
+          // (ASTEROID with shardType === 'tile') instead of being consumed.
+          if (proj.isBouncer) {
+              const isTile = target.type === EntityType.STRUCTURE
+                  || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
+              if (isTile) {
+                  target.health -= (proj.damage || 1);
+                  target.hitFlash = 0.1;
+                  if (onHit) onHit(proj.position, proj, target);
+                  if (onDamage) onDamage(target.position, proj.damage || 1, target);
+
+                  // Tile destroyed — projectile continues straight through
+                  if (target.health <= 0) {
+                      if (proj.velocity) target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+                      target.lastImpactDamage = proj.damage ?? 1;
+                      if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
+                          this.removeStaticEntity(target);
+                      }
+                      if (onDeath) onDeath(target);
+                      if (!target.isExploding) target.active = false;
+                      return;
+                  }
+
+                  // Reflect velocity off the surface normal (out of target, toward projectile).
+                  // mtv points from a → b, so the outward normal toward the projectile is
+                  // -mtv when proj is `a`, and +mtv when proj is `b`.
+                  const mtvLen = Math.sqrt(mtv.x * mtv.x + mtv.y * mtv.y);
+                  if (mtvLen > 0.0001 && proj.velocity) {
+                      const sign = proj === a ? -1 : 1;
+                      const nx = sign * mtv.x / mtvLen;
+                      const ny = sign * mtv.y / mtvLen;
+                      const dot = proj.velocity.x * nx + proj.velocity.y * ny;
+                      if (dot < 0) {
+                          proj.velocity.x -= 2 * dot * nx;
+                          proj.velocity.y -= 2 * dot * ny;
+                          proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+                      }
+                      // Push projectile fully out of the tile's AABB so the next
+                      // frame's broadphase doesn't re-collide with the same tile.
+                      proj.position.x += nx * (mtvLen + 0.5);
+                      proj.position.y += ny * (mtvLen + 0.5);
+                  }
+                  return;
+              }
+          }
+
           target.health -= (proj.damage || 1);
           target.hitFlash = 0.1;
 
