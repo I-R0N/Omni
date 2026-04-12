@@ -61,7 +61,7 @@ export enum WeaponType {
   BLASTER   = 'BLASTER',
   BURST     = 'BURST',
   SHOTGUN   = 'SHOTGUN',
-  LASER     = 'LASER',
+  MISSILE   = 'MISSILE',
   LIGHTNING = 'LIGHTNING',
   HOMING    = 'HOMING',
   CANNON    = 'CANNON',
@@ -217,20 +217,13 @@ export interface GameEntity {
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
 
-  // When true, handleEntityDeath skips drop spawning (e.g. laser kills)
+  // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
   suppressDrops?: boolean;
 
-  // Laser heat accumulation (0–1); asteroid explodes at 1.0
-  laserHeat?: number;
-  // Shards spawned from a laser-exploded asteroid are immune to the beam
-  laserImmune?: boolean;
-}
-
-export interface LaserBeamState {
-  active: boolean;
-  origin: Vector2;
-  end: Vector2;
-  hitPoint: Vector2 | null; // world position of first blocked hit (for bloom)
+  // Marks a projectile as a missile (for explosion-on-impact/expiry and green rendering)
+  isMissile?: boolean;
+  // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
+  homingStrength?: number;
 }
 
 export interface CameraState {

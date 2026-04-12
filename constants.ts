@@ -241,13 +241,10 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
-// ── Laser beam tuning ────────────────────────────────────────────────────────
-export const LASER_RANGE = 200;            // world units max beam length (short-range)
-export const LASER_DPS = 15;               // damage per second to each hit entity
-export const LASER_AMMO_DRAIN_RATE = 20;   // ammo units consumed per second while firing
-export const LASER_PIERCE = 3;             // max entities the beam can hit simultaneously
-export const LASER_HEAT_RATE = 0.6;        // heat per second on asteroids (1.0 = explode)
-export const LASER_HEAT_DECAY_RATE = 0.2;  // heat lost per second when laser stops hitting
+// ── Missile (radiation bomb) tuning ──────────────────────────────────────────
+export const MISSILE_EXPLOSION_RADIUS = 80;   // world units — AoE blast radius on detonation
+export const MISSILE_EXPLOSION_DAMAGE = 10;   // damage dealt to entities inside the blast
+export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = full homing, 0.2 = very mild)
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_RANGE = 500;                // initial target acquisition range
@@ -328,19 +325,20 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 3.0,
     pierce: 1
   },
-  [WeaponType.LASER]: {
-    type: WeaponType.LASER,
-    name: 'Laser',
-    cooldown: 0,       // continuous beam — no per-shot cooldown
-    speed: 0,          // not a projectile
-    damage: 0,         // damage handled by raycast DPS
-    lifetime: 0,
-    color: '#4ade80',  // Green — continuous beam weapon
-    size: 4,
+  [WeaponType.MISSILE]: {
+    type: WeaponType.MISSILE,
+    name: 'Missile',
+    cooldown: 0.8,     // slower fire rate — heavy ordnance
+    speed: 4,          // slow-moving projectile
+    damage: 3,         // direct hit damage (AoE explosion deals the bulk)
+    lifetime: 3.0,     // detonates on expiry if it hasn't hit anything
+    color: '#4ade80',  // Green — radiation bomb
+    size: 6,
     count: 1,
-    spread: 0,
-    recoil: 0,
-    pierce: 0
+    spread: 2,
+    recoil: 1.5,
+    pierce: 0,         // explodes on first contact
+    homing: true,      // mild homing (strength set per-projectile)
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -392,7 +390,7 @@ export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
   WeaponType.SHOTGUN,
-  WeaponType.LASER,
+  WeaponType.MISSILE,
   WeaponType.LIGHTNING,
   WeaponType.HOMING,
   WeaponType.CANNON,
@@ -464,8 +462,8 @@ export const DROP_CONFIG = {
 export const ENEMY_AMMO_DROP: Record<EnemySubtype, { own: WeaponType; next: WeaponType }> = {
   [EnemySubtype.RAMMER_1]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
   [EnemySubtype.RAMMER_2]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
-  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.LASER     },
-  [EnemySubtype.SHOOTER_1]: { own: WeaponType.LASER,     next: WeaponType.LIGHTNING },
+  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.MISSILE     },
+  [EnemySubtype.SHOOTER_1]: { own: WeaponType.MISSILE,     next: WeaponType.LIGHTNING },
   [EnemySubtype.SHOOTER_2]: { own: WeaponType.LIGHTNING, next: WeaponType.HOMING    },
   [EnemySubtype.SHOOTER_3]: { own: WeaponType.HOMING,    next: WeaponType.CANNON    },
 };
@@ -477,7 +475,7 @@ export const ASTEROID_AMMO_PROGRESSION: WeaponType[] = [
   WeaponType.BURST,     // waves 4–6
   WeaponType.SHOTGUN,   // waves 7–9
   WeaponType.SHOTGUN,   // waves 10–12
-  WeaponType.LASER,     // waves 13–15
+  WeaponType.MISSILE,     // waves 13–15
   WeaponType.LIGHTNING, // waves 16–18
   WeaponType.HOMING,    // waves 19–21
   WeaponType.CANNON,    // waves 22+

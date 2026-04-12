@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, LaserBeamState } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
@@ -122,8 +122,7 @@ export class RenderSystem {
     damageTexts?: DamageText[],
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
-    player?: GameEntity,
-    laserBeam?: LaserBeamState
+    player?: GameEntity
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -228,11 +227,6 @@ export class RenderSystem {
 
     // 4b. Render Particles — single composite-op switch for the whole batch
     this.renderParticles(ctx, this._particleBuffer);
-
-    // 4c. Render laser beam (world space, additive)
-    if (laserBeam?.active) {
-        this.renderLaserBeam(ctx, laserBeam);
-    }
 
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
@@ -364,58 +358,6 @@ export class RenderSystem {
       }
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
-  }
-
-  // ── Laser beam rendering ──────────────────────────────────────────────────
-
-  private renderLaserBeam(ctx: CanvasRenderingContext2D, beam: LaserBeamState) {
-      ctx.save();
-
-      const { origin, end, hitPoint } = beam;
-
-      // Outer green glow (~6px) — additive for bloom
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = 'rgba(74, 222, 128, 0.35)';
-      ctx.lineWidth = 8;
-      ctx.beginPath();
-      ctx.moveTo(origin.x, origin.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.stroke();
-
-      // Inner green core (~2px) — normal blend so it stays green
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = 'rgba(140, 255, 170, 0.9)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(origin.x, origin.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.stroke();
-
-      // Muzzle flash at origin — additive
-      ctx.globalCompositeOperation = 'lighter';
-      const muzzleGrad = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 10);
-      muzzleGrad.addColorStop(0, 'rgba(180, 255, 200, 0.7)');
-      muzzleGrad.addColorStop(0.5, 'rgba(74, 222, 128, 0.4)');
-      muzzleGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
-      ctx.fillStyle = muzzleGrad;
-      ctx.beginPath();
-      ctx.arc(origin.x, origin.y, 10, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Hit point bloom
-      if (hitPoint) {
-          const bloomGrad = ctx.createRadialGradient(hitPoint.x, hitPoint.y, 0, hitPoint.x, hitPoint.y, 14);
-          bloomGrad.addColorStop(0, 'rgba(180, 255, 200, 0.6)');
-          bloomGrad.addColorStop(0.4, 'rgba(74, 222, 128, 0.3)');
-          bloomGrad.addColorStop(1, 'rgba(74, 222, 128, 0)');
-          ctx.fillStyle = bloomGrad;
-          ctx.beginPath();
-          ctx.arc(hitPoint.x, hitPoint.y, 14, 0, Math.PI * 2);
-          ctx.fill();
-      }
-
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.restore();
   }
 
   // ── Lightning arc rendering ─────────────────────────────────────────────
@@ -726,45 +668,6 @@ export class RenderSystem {
                     ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
                     ctx.fill();
 
-                    // ── Laser heat glow (green → orange → white) ─────────────
-                    const heat = entity.laserHeat ?? 0;
-                    if (heat > 0.01 && !isFlash) {
-                        // Color ramp: green (0) → orange (0.5) → white (1.0)
-                        let hr: number, hg: number, hb: number;
-                        if (heat < 0.5) {
-                            const t = heat / 0.5;
-                            hr = Math.round(74 + (255 - 74) * t);
-                            hg = Math.round(222 + (165 - 222) * t);
-                            hb = Math.round(128 + (0 - 128) * t);
-                        } else {
-                            const t = (heat - 0.5) / 0.5;
-                            hr = 255;
-                            hg = Math.round(165 + (255 - 165) * t);
-                            hb = Math.round(0 + 255 * t);
-                        }
-
-                        // Inner color overlay on the asteroid body
-                        buildPath();
-                        ctx.globalAlpha = 0.3 + heat * 0.5;
-                        ctx.fillStyle   = `rgb(${hr},${hg},${hb})`;
-                        ctx.fill();
-
-                        // Outer radial bloom
-                        const pulse  = 0.85 + Math.sin(nowSec * 8) * 0.15;
-                        const bloomR = (entity.size.x / 2) * (1.5 + heat * 1.5) * pulse;
-                        ctx.globalCompositeOperation = 'lighter';
-                        const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
-                        bloom.addColorStop(0,   `rgba(${hr},${hg},${hb},${(0.25 + heat * 0.4).toFixed(2)})`);
-                        bloom.addColorStop(0.5, `rgba(${hr},${hg},${hb},${(0.1 + heat * 0.15).toFixed(2)})`);
-                        bloom.addColorStop(1,   `rgba(${hr},${hg},${hb},0)`);
-                        ctx.globalAlpha = 1.0;
-                        ctx.fillStyle   = bloom;
-                        ctx.beginPath();
-                        ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.globalCompositeOperation = 'source-over';
-                    }
-
                     if (glowColor && !isFlash) {
                         // Subtle powerup color overlay — semi-transparent, mixes with rock color
                         const [gr, gg, gb] = hexToRgb(glowColor);
@@ -841,6 +744,40 @@ export class RenderSystem {
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
                     ctx.beginPath();
                     ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.restore();
+                } else if (entity.isMissile) {
+                    // ── Missile projectile: green warhead with toxic glow ──
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                    // Outer radiation glow — additive
+                    ctx.globalCompositeOperation = 'lighter';
+                    const missR = r * 4;
+                    const pulse = 0.8 + Math.sin(nowSec * 6) * 0.2;
+                    const missGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, missR * pulse);
+                    missGrad.addColorStop(0,    'rgba(180, 255, 200, 0.9)');
+                    missGrad.addColorStop(0.2,  'rgba(74, 222, 128, 0.6)');
+                    missGrad.addColorStop(0.5,  'rgba(74, 222, 128, 0.15)');
+                    missGrad.addColorStop(1,    'rgba(74, 222, 128, 0)');
+                    ctx.fillStyle = missGrad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, missR * pulse, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Missile body — elongated shape along travel direction
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.fillStyle = '#bbf7d0';
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, r * 1.4, r * 0.6, 0, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Bright green core
+                    ctx.fillStyle = '#4ade80';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
                     ctx.fill();
 
                     ctx.globalCompositeOperation = 'source-over';
