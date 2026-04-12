@@ -301,14 +301,19 @@ export const NEBULA_CONSTANTS = {
   // and read as a continuous cloud rather than discrete cells/puffs.
   TILE_SPRITE_SCALE: 2.0,
   SHARD_SPRITE_SCALE: 2.0,
-  // Cluster generation — mirrors glass-tile generator parameters.
-  CLUSTER_COUNT: 45,
-  MIN_CLUSTER_SIZE: 10,
-  MAX_CLUSTER_SIZE: 35,
-  // Outer-zone cluster pass (sparser landmarks).
-  OUTER_CLUSTER_COUNT: 70,
-  OUTER_MIN_CLUSTER_SIZE: 5,
-  OUTER_MAX_CLUSTER_SIZE: 18,
+  // Cluster generation — tuned for heavy coverage across the map so that
+  // nebula clusters naturally fill empty gaps between glass-tile clusters
+  // and statistically overlap with some of the procedurally placed
+  // background nebula puffs (which live in world space at ±~20 000 units).
+  // The generator shares an "occupied coords" set with the glass pass so
+  // adjacency conflicts are avoided; empty cells get priority naturally.
+  CLUSTER_COUNT: 130,
+  MIN_CLUSTER_SIZE: 14,
+  MAX_CLUSTER_SIZE: 42,
+  // Outer-zone cluster pass (sparser landmarks spread across the full map).
+  OUTER_CLUSTER_COUNT: 240,
+  OUTER_MIN_CLUSTER_SIZE: 7,
+  OUTER_MAX_CLUSTER_SIZE: 26,
   // Base palette — random hue is generated at tile creation time, then
   // carried through shatter/merge cycles via NebulaColorStop compositions.
   // SATURATION and LIGHTNESS match the existing background nebula aesthetic

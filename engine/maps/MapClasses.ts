@@ -164,10 +164,18 @@ export class UniverseMap extends BaseMapLayer {
         occupied
     ));
 
-    // Nebula cloud clusters — inner zone (denser) + outer (sparser).
-    // Pass the same occupied set so nebula cells never overlap glass cells.
+    // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
+    // (sparser, spread across the full map).  The generator shares the
+    // `occupied` set from the glass passes so nebula cells naturally fill
+    // the gaps glass left behind.  With high enough cluster counts some
+    // will statistically coincide with background nebula puffs in world
+    // space (the background system scatters puffs across ±~20 000), giving
+    // the cluster + background nebulae overlap the user asked for.
+    //
+    // Inner-zone bounds widened from 8000 to 12000 so the dense-cluster
+    // treatment covers more of the playable core.
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        8000, 8000,
+        12000, 12000,
         22,
         NEBULA_CONSTANTS.CLUSTER_COUNT,
         NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
