@@ -211,11 +211,6 @@ export const GRAVITATIONAL_LENS_CONSTANTS = {
   RING_COLOR: '180,220,255', // RGB string for the ring glow (cool white-blue)
   EDGE_FADE: 20,           // Soft-edge fade width (CSS pixels) — eliminates boundary aliasing
   FOCUS: 3,                // Directional focus exponent — higher = tighter cone along thrust axis
-
-  // --- Physics interaction (entities affected by the warp field) ---
-  PHYSICS_RADIUS: 220,       // World-space radius of physical influence
-  PHYSICS_SOFTENING: 90,     // World-space softening — where peak force is applied
-  PHYSICS_ACCELERATION: 420, // Peak acceleration magnitude (world units / second^2)
 };
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
