@@ -244,6 +244,9 @@ export const PARTICLE_CONSTANTS = {
 // ── Missile (radiation bomb) tuning ──────────────────────────────────────────
 export const MISSILE_HOMING_STRENGTH = 0.2;   // turn-rate multiplier (1.0 = full homing, 0.2 = very mild)
 export const MISSILE_EXPLOSION_RADIUS = 60;   // 2-tile blast radius (STRUCTURE_CONSTANTS.SIZE * 2)
+export const MISSILE_PASSTHROUGH_SMALL = 30;  // asteroids ≤ this size: missile always pushes through
+export const MISSILE_PASSTHROUGH_MEDIUM = 60; // asteroids ≤ this size: missile pushes through if slow
+export const MISSILE_PASSTHROUGH_SPEED = 3;   // asteroid speed threshold for medium pass-through
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains

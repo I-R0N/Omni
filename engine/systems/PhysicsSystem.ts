@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, MISSILE_PASSTHROUGH_SMALL, MISSILE_PASSTHROUGH_MEDIUM, MISSILE_PASSTHROUGH_SPEED } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -476,6 +476,28 @@ export class PhysicsSystem {
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
+
+          // Missile pass-through: push aside small/slow asteroid shards instead of detonating
+          if (proj.isMissile && target.type === EntityType.ASTEROID) {
+              if (proj.hitEntityIds?.includes(target.id)) return; // already pushed aside
+
+              const sz = Math.max(target.size.x, target.size.y);
+              const tSpeed = Math.sqrt(target.velocity.x * target.velocity.x + target.velocity.y * target.velocity.y);
+              const passThrough = sz <= MISSILE_PASSTHROUGH_SMALL
+                  || (sz <= MISSILE_PASSTHROUGH_MEDIUM && tSpeed < MISSILE_PASSTHROUGH_SPEED);
+
+              if (passThrough) {
+                  // Knock the shard aside with missile momentum
+                  if (proj.velocity) {
+                      const pushStr = 0.6;
+                      target.velocity.x += proj.velocity.x * pushStr;
+                      target.velocity.y += proj.velocity.y * pushStr;
+                  }
+                  if (!proj.hitEntityIds) proj.hitEntityIds = [];
+                  proj.hitEntityIds.push(target.id);
+                  return;
+              }
+          }
 
           target.health -= (proj.damage || 1);
           target.hitFlash = 0.1;
