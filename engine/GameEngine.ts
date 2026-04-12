@@ -85,6 +85,10 @@ export class GameEngine {
   // Per-frame lerp factor for easing lastThrustDir toward the current input
   // direction — keeps the trail smooth through rapid input direction changes
   private static readonly THRUST_DIR_SMOOTH = 0.2;
+  // Tracks whether thrust was active last frame; used to detect the start of
+  // a fresh thrust event so we can reset the trail (otherwise a new bright
+  // head stitched onto a decayed chain visually re-lights the old trail).
+  private wasThrusting: boolean = false;
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -219,6 +223,7 @@ export class GameEngine {
       this.player.trail = [];
       this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: 0, y: 0 };
+      this.wasThrusting = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -819,6 +824,19 @@ export class GameEngine {
     }
 
     const thrusting = throttle > 0;
+    // Start of a fresh thrust event — reset the trail so the new bright head
+    // doesn't visually re-light the old decaying chain via the spatial gradient.
+    if (thrusting && !this.wasThrusting) {
+        this.player.trail = [];
+        // Snap the thrust direction to the new input so the first emitted
+        // point of the fresh trail uses the actual direction, not whatever
+        // was cached from the previous thrust event.
+        this.lastThrustDir.x = moveDir.x / throttle;
+        this.lastThrustDir.y = moveDir.y / throttle;
+        this.lastTrailEmitPos.x = this.player.position.x;
+        this.lastTrailEmitPos.y = this.player.position.y;
+    }
+    this.wasThrusting = thrusting;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
         // Target (normalized) thrust direction from current input
@@ -1275,6 +1293,7 @@ export class GameEngine {
       this.trailDecayTimer = 0;
       this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
+      this.wasThrusting = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
