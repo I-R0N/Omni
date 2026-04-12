@@ -135,10 +135,28 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     handleCopy(text);
   };
 
-  // Auto-select text on tap for manual copy flows on devices without a
-  // working share/clipboard path (older iOS, private browsing, etc.)
-  const handleTextareaFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
-    e.currentTarget.select();
+  // Explicit paste — reads the clipboard and writes the result into the
+  // given setter.  Bypasses the focus/long-press/paste dance that's flaky
+  // on iOS Safari (especially when the game loop is running).  Requires
+  // user activation, which a button click satisfies.
+  const canPasteFromClipboard =
+    typeof navigator !== 'undefined' &&
+    typeof navigator.clipboard !== 'undefined' &&
+    typeof (navigator.clipboard as Clipboard & { readText?: () => Promise<string> }).readText === 'function';
+
+  const handlePaste = async (setter: (v: string) => void, onError: (msg: string) => void) => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.length > 0) {
+        setter(text.trim());
+      } else {
+        onError('Clipboard is empty.');
+      }
+    } catch (e) {
+      // iOS Safari denies readText() in some contexts (private browsing,
+      // missing user gesture, permission denied).  Surface a helpful hint.
+      onError('Clipboard read blocked. Tap inside the text field and long-press to paste instead.');
+    }
   };
 
   const handleCancel = () => {
@@ -215,11 +233,10 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 <textarea
                   readOnly
                   value={hostOffer}
-                  onFocus={handleTextareaFocus}
                   placeholder={hostOffer ? '' : 'Generating offer…'}
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex gap-2 flex-wrap">
                   {canShare && (
                     <button
                       disabled={!hostOffer}
@@ -246,17 +263,34 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 <textarea
                   value={hostAnswerInput}
                   onChange={(e) => setHostAnswerInput(e.target.value)}
-                  onFocus={handleTextareaFocus}
-                  placeholder="Paste answer here…"
+                  placeholder="Tap Paste below, or long-press and Paste…"
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
-                <button
-                  disabled={!hostAnswerInput || hostStatus === 'connected'}
-                  onClick={handleSubmitAnswer}
-                  className="mt-2 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
-                >
-                  Accept answer
-                </button>
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {canPasteFromClipboard && (
+                    <button
+                      onClick={() => handlePaste(setHostAnswerInput, setHostError)}
+                      className="text-xs bg-purple-600 hover:bg-purple-500 text-white py-1.5 px-3 rounded font-bold"
+                    >
+                      Paste
+                    </button>
+                  )}
+                  <button
+                    disabled={!hostAnswerInput || hostStatus === 'connected'}
+                    onClick={handleSubmitAnswer}
+                    className="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
+                  >
+                    Accept answer
+                  </button>
+                  {hostAnswerInput && (
+                    <button
+                      onClick={() => setHostAnswerInput('')}
+                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               {hostError && (
@@ -294,17 +328,34 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 <textarea
                   value={clientOfferInput}
                   onChange={(e) => setClientOfferInput(e.target.value)}
-                  onFocus={handleTextareaFocus}
-                  placeholder="Paste offer here…"
+                  placeholder="Tap Paste below, or long-press and Paste…"
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
-                <button
-                  disabled={!clientOfferInput || clientAnswer.length > 0}
-                  onClick={handleSubmitOffer}
-                  className="mt-2 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
-                >
-                  Generate answer
-                </button>
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {canPasteFromClipboard && (
+                    <button
+                      onClick={() => handlePaste(setClientOfferInput, setClientError)}
+                      className="text-xs bg-purple-600 hover:bg-purple-500 text-white py-1.5 px-3 rounded font-bold"
+                    >
+                      Paste
+                    </button>
+                  )}
+                  <button
+                    disabled={!clientOfferInput || clientAnswer.length > 0}
+                    onClick={handleSubmitOffer}
+                    className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
+                  >
+                    Generate answer
+                  </button>
+                  {clientOfferInput && !clientAnswer && (
+                    <button
+                      onClick={() => setClientOfferInput('')}
+                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               {clientAnswer && (
@@ -315,10 +366,9 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                   <textarea
                     readOnly
                     value={clientAnswer}
-                    onFocus={handleTextareaFocus}
                     className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                   />
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex gap-2 flex-wrap">
                     {canShare && (
                       <button
                         onClick={() => handleShare(clientAnswer, 'Omni multiplayer answer')}
