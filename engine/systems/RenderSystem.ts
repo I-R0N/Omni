@@ -1,8 +1,12 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout } from '../../constants';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+
+const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
+const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+const SHIELD_COLLISION_MULT = SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
 
 // Converts a 6-digit hex color string to an [r, g, b] tuple.
 // Results are cached to avoid per-frame string parsing.
@@ -122,7 +126,9 @@ export class RenderSystem {
     damageTexts?: DamageText[],
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
-    player?: GameEntity
+    player?: GameEntity,
+    waveAnnouncements?: WaveAnnouncement[],
+    detachedTrails?: TrailPoint[][]
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -220,7 +226,7 @@ export class RenderSystem {
     }
 
     // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities);
+    this.renderTrails(ctx, this._trailEntities, detachedTrails);
 
     // 4. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -234,6 +240,11 @@ export class RenderSystem {
     }
 
     ctx.restore();
+
+    // 5c. Render Wave Announcements (Screen Space, above game entities)
+    if (waveAnnouncements && waveAnnouncements.length > 0) {
+        this.renderWaveAnnouncements(ctx, waveAnnouncements, width, height);
+    }
 
     // 6. Render POI Indicators (Screen Space)
     this.renderIndicators(ctx, this._indicatorBuffer, camera, width, height);
@@ -252,97 +263,120 @@ export class RenderSystem {
     }
   }
 
-  private renderTrails(ctx: CanvasRenderingContext2D, entities: GameEntity[]) {
+  private renderTrails(
+      ctx: CanvasRenderingContext2D,
+      entities: GameEntity[],
+      detachedTrails?: TrailPoint[][]
+  ) {
       entities.forEach(entity => {
           if (!entity.active || !entity.trail || entity.trail.length < 2) return;
           if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
-
-          const t = entity.trail;
-          
-          // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
-          ctx.beginPath();
-          
-          // Forward pass: Right side of trail
-          for (let i = 0; i < t.length; i++) {
-              const p = t[i];
-              const ratio = p.lifetime / p.maxLifetime;
-              if (ratio <= 0) continue;
-              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
-              
-              // Simple normal calculation (perpendicular to velocity approximation)
-              // For first point, use next point. For last, use prev.
-              let nx = 0, ny = 0;
-              if (i < t.length - 1) {
-                  const dx = t[i+1].x - p.x;
-                  const dy = t[i+1].y - p.y;
-                  const len = Math.sqrt(dx*dx + dy*dy) || 1;
-                  nx = -dy / len;
-                  ny = dx / len;
-              } else if (i > 0) {
-                  const dx = p.x - t[i-1].x;
-                  const dy = p.y - t[i-1].y;
-                  const len = Math.sqrt(dx*dx + dy*dy) || 1;
-                  nx = -dy / len;
-                  ny = dx / len;
-              }
-
-              ctx.lineTo(p.x + nx * width, p.y + ny * width);
-          }
-          
-          // Backward pass: Left side of trail
-          for (let i = t.length - 1; i >= 0; i--) {
-              const p = t[i];
-              const ratio = p.lifetime / p.maxLifetime;
-              if (ratio <= 0) continue;
-              const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
-
-              let nx = 0, ny = 0;
-              if (i < t.length - 1) {
-                  const dx = t[i+1].x - p.x;
-                  const dy = t[i+1].y - p.y;
-                  const len = Math.sqrt(dx*dx + dy*dy) || 1;
-                  nx = -dy / len;
-                  ny = dx / len;
-              } else if (i > 0) {
-                  const dx = p.x - t[i-1].x;
-                  const dy = p.y - t[i-1].y;
-                  const len = Math.sqrt(dx*dx + dy*dy) || 1;
-                  nx = -dy / len;
-                  ny = dx / len;
-              }
-              
-              ctx.lineTo(p.x - nx * width, p.y - ny * width);
-          }
-
-          ctx.closePath();
-          
-          // Create gradient for fade effect
-          if (t.length > 0) {
-              const head = t[t.length-1];
-              const tail = t[0];
-              if (entity.type === EntityType.PROJECTILE) {
-                  const [r, g, b] = hexToRgb(entity.color || '#facc15');
-                  if (entity.isBouncer) {
-                      // Bouncer beam: solid pure-green line with no fade along
-                      // the trail. The short lifetime already makes the beam
-                      // self-limiting; we want it sharp while it's visible.
-                      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
-                  } else {
-                      const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-                      grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-                      grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.75)`);
-                      ctx.fillStyle = grad;
-                  }
-              } else {
-                  // Player: cyan engine exhaust
-                  const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-                  grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-                  grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
-                  ctx.fillStyle = grad;
-              }
-              ctx.fill();
-          }
+          const mode: 'player' | 'projectile' = entity.type === EntityType.PROJECTILE ? 'projectile' : 'player';
+          this.drawTrailStrip(ctx, entity.trail, mode, entity.color, entity.isBouncer);
       });
+
+      // Detached trails from prior thrust events — always rendered as player
+      // exhaust since only the player creates them.
+      if (detachedTrails) {
+          for (let i = 0; i < detachedTrails.length; i++) {
+              const t = detachedTrails[i];
+              if (t.length >= 2) {
+                  this.drawTrailStrip(ctx, t, 'player');
+              }
+          }
+      }
+  }
+
+  private drawTrailStrip(
+      ctx: CanvasRenderingContext2D,
+      t: TrailPoint[],
+      mode: 'player' | 'projectile',
+      entityColor?: string,
+      isBouncer?: boolean
+  ) {
+      // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
+      ctx.beginPath();
+
+      // Forward pass: Right side of trail
+      for (let i = 0; i < t.length; i++) {
+          const p = t[i];
+          const ratio = p.lifetime / p.maxLifetime;
+          if (ratio <= 0) continue;
+          const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
+
+          // Simple normal calculation (perpendicular to velocity approximation)
+          // For first point, use next point. For last, use prev.
+          let nx = 0, ny = 0;
+          if (i < t.length - 1) {
+              const dx = t[i+1].x - p.x;
+              const dy = t[i+1].y - p.y;
+              const len = Math.sqrt(dx*dx + dy*dy) || 1;
+              nx = -dy / len;
+              ny = dx / len;
+          } else if (i > 0) {
+              const dx = p.x - t[i-1].x;
+              const dy = p.y - t[i-1].y;
+              const len = Math.sqrt(dx*dx + dy*dy) || 1;
+              nx = -dy / len;
+              ny = dx / len;
+          }
+
+          ctx.lineTo(p.x + nx * width, p.y + ny * width);
+      }
+
+      // Backward pass: Left side of trail
+      for (let i = t.length - 1; i >= 0; i--) {
+          const p = t[i];
+          const ratio = p.lifetime / p.maxLifetime;
+          if (ratio <= 0) continue;
+          const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
+
+          let nx = 0, ny = 0;
+          if (i < t.length - 1) {
+              const dx = t[i+1].x - p.x;
+              const dy = t[i+1].y - p.y;
+              const len = Math.sqrt(dx*dx + dy*dy) || 1;
+              nx = -dy / len;
+              ny = dx / len;
+          } else if (i > 0) {
+              const dx = p.x - t[i-1].x;
+              const dy = p.y - t[i-1].y;
+              const len = Math.sqrt(dx*dx + dy*dy) || 1;
+              nx = -dy / len;
+              ny = dx / len;
+          }
+
+          ctx.lineTo(p.x - nx * width, p.y - ny * width);
+      }
+
+      ctx.closePath();
+
+      // Create gradient for fade effect — alpha max scales with the head
+      // point's own lifetime so detached, fading trails dim uniformly as
+      // their newest point ages out.
+      const head = t[t.length - 1];
+      const tail = t[0];
+      const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
+      if (isBouncer) {
+          // Bouncer beam: solid pure-green line with no fade along the trail.
+          // The short lifetime already makes the beam self-limiting; we want
+          // it sharp while it's visible.
+          const [r, g, b] = hexToRgb(entityColor || '#22c55e');
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
+      } else {
+          const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+          if (mode === 'projectile') {
+              const [r, g, b] = hexToRgb(entityColor || '#facc15');
+              grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+              grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
+          } else {
+              // Player: cyan engine exhaust
+              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
+              grad.addColorStop(1, `rgba(56, 189, 248, ${0.6 * headRatio})`);
+          }
+          ctx.fillStyle = grad;
+      }
+      ctx.fill();
   }
 
   private renderParticles(ctx: CanvasRenderingContext2D, particles: GameEntity[]) {
@@ -570,6 +604,13 @@ export class RenderSystem {
             };
 
             if (entity.type === EntityType.STRUCTURE) {
+                // ── Regen pop-in scale overshoot ─────────────────────────────
+                if (entity.regenPopTimer !== undefined && entity.regenPopTimer > 0) {
+                    const popT = entity.regenPopTimer / REGEN_POP_CONSTANTS.DURATION; // 1→0
+                    const scale = 1 + 0.15 * Math.sin(popT * Math.PI);
+                    ctx.scale(scale, scale);
+                }
+
                 // ── Regen ghost outline (tile not yet active) ────────────────
                 if (!entity.active && entity.regenProgress !== undefined) {
                     // Only show ghost during final 3 s (regenProgress > threshold)
@@ -989,6 +1030,37 @@ export class RenderSystem {
           }
       }
 
+      // Shield hit ring — visible only on contact; radius matches physical collision
+      if (entity.type === EntityType.PLAYER && entity.shieldHitFlash && entity.shieldHitFlash > 0) {
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          // Exact match: collision uses (size/2) * COLLISION_MULTIPLIER as half-extent
+          const ringRadius = (maxDim / 2) * SHIELD_COLLISION_MULT;
+          const flashRatio = entity.shieldHitFlash / SHIELD_HIT_FLASH_DURATION;
+          // Instant full brightness that fades out
+          const alpha = Math.min(1.0, flashRatio * 3.0);
+          // Undo entity rotation so the ring is axis-aligned
+          const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          ctx.rotate(-rot);
+          ctx.globalAlpha = alpha;
+
+          // Inner glow — radial gradient from transparent center to shield color at rim
+          const glowInner = ctx.createRadialGradient(0, 0, ringRadius * 0.55, 0, 0, ringRadius);
+          glowInner.addColorStop(0, 'rgba(96,165,250,0)');
+          glowInner.addColorStop(0.7, 'rgba(96,165,250,0.08)');
+          glowInner.addColorStop(1, 'rgba(96,165,250,0.25)');
+          ctx.fillStyle = glowInner;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = SHIELD_COLOR;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.rotate(rot);
+      }
+
       ctx.restore();
 
       // Render Debug Acceleration Vector (debug mode only)
@@ -1065,6 +1137,17 @@ export class RenderSystem {
       }
 
       ctx.fillRect(x, y, width * healthPct, height);
+
+      // Shield bar — thin blue bar below health bar (player only)
+      if (isPlayer && entity.maxShield && entity.maxShield > 0) {
+          const shieldY = y + height + 1;
+          const shieldHeight = height - 1;
+          const shieldPct = Math.max(0, Math.min(1, (entity.shield ?? 0) / entity.maxShield));
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.fillRect(x, shieldY, width, shieldHeight);
+          ctx.fillStyle = SHIELD_COLOR;
+          ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
+      }
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[]) {
@@ -1440,5 +1523,54 @@ export class RenderSystem {
       ctx.fill();
 
       ctx.restore();
+  }
+
+  private renderWaveAnnouncements(
+      ctx: CanvasRenderingContext2D,
+      announcements: WaveAnnouncement[],
+      width: number,
+      height: number
+  ) {
+      const { FADEIN, HOLD, FADEOUT } = WAVE_ANNOUNCE_CONSTANTS;
+      const totalLife = FADEIN + HOLD + FADEOUT;
+
+      for (let i = 0; i < announcements.length; i++) {
+          const a = announcements[i];
+          const elapsed = totalLife - a.lifetime;
+
+          // Compute alpha: fade in → hold → fade out
+          let alpha: number;
+          if (elapsed < FADEIN) {
+              alpha = elapsed / FADEIN;
+          } else if (elapsed < FADEIN + HOLD) {
+              alpha = 1;
+          } else {
+              alpha = 1 - (elapsed - FADEIN - HOLD) / FADEOUT;
+          }
+          alpha = Math.max(0, Math.min(1, alpha));
+          if (alpha <= 0) continue;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+
+          // Position above the minimap: bottom edge minus minimap area minus comfortable gap
+          const baseY = height - MINIMAP_CONSTANTS.MARGIN - MINIMAP_CONSTANTS.SIZE - 30;
+
+          // Main text
+          ctx.font = 'bold 48px monospace';
+          ctx.fillStyle = a.color;
+          ctx.fillText(a.text, width / 2, baseY - (a.subtext ? 28 : 0));
+
+          // Subtext (smaller, cyan)
+          if (a.subtext) {
+              ctx.font = 'bold 24px monospace';
+              ctx.fillStyle = '#22d3ee';
+              ctx.fillText(a.subtext, width / 2, baseY);
+          }
+
+          ctx.restore();
+      }
   }
 }

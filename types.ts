@@ -22,6 +22,11 @@ export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
   scale: number; // Width multiplier: 1.0 during thrust, tapers toward 0 during decay
+  // Optional per-point drift velocity (per-frame).  Used by the player thrust
+  // trail so emitted points stream backward along the thrust direction rather
+  // than following the player's motion path.
+  vx?: number;
+  vy?: number;
 }
 
 export interface Rect {
@@ -132,6 +137,10 @@ export interface GameEntity {
   polygonPoints?: Vector2[]; // For physics/collision shape
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
+  shield?: number;
+  maxShield?: number;
+  shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
+  shieldHitFlash?: number; // Visual timer for shield ring visibility
   sprite?: string; // URL or DataURI for image rendering
   lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
   lastImpactDamage?: number;   // Damage of the killing blow (used to scale shard count/size)
@@ -196,6 +205,9 @@ export interface GameEntity {
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
 
+  // Tile regen pop-in scale overshoot timer (counts down from REGEN_POP_DURATION)
+  regenPopTimer?: number;
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.
@@ -247,6 +259,8 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   weaponCount?: number;
+  shield?: number;
+  maxShield?: number;
 }
 
 export interface DamageText {
@@ -258,6 +272,15 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+}
+
+// Full-screen wave announcement banner rendered on the canvas.
+export interface WaveAnnouncement {
+  text: string;
+  subtext?: string;
+  color: string;
+  lifetime: number;
+  maxLifetime: number;
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).
