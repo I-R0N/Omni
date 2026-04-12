@@ -495,6 +495,35 @@ export class RenderSystem {
                   ctx.globalAlpha = 1.0;
               }
           }
+
+          // --- DEBUG OVERLAY ---
+          // Nebula tiles: draw the hex outline so the invisible interactable
+          // footprint is visible during debug.
+          // Nebula shards: draw the implicit circular physics shape.
+          if (this.debugMode) {
+              ctx.globalAlpha = 0.9;
+              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
+              ctx.lineWidth = 1;
+              if (entity.type === EntityType.NEBULA && entity.polygonPoints && entity.polygonPoints.length > 0) {
+                  ctx.beginPath();
+                  const p0 = entity.polygonPoints[0];
+                  ctx.moveTo(p0.x, p0.y);
+                  for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                      const p = entity.polygonPoints[pi];
+                      ctx.lineTo(p.x, p.y);
+                  }
+                  ctx.closePath();
+                  ctx.stroke();
+              } else if (entity.type === EntityType.NEBULA_SHARD) {
+                  // Implicit circle defined by `size`
+                  const r = Math.max(entity.size.x, entity.size.y) / 2;
+                  ctx.beginPath();
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.stroke();
+              }
+              ctx.globalAlpha = 1.0;
+          }
+
           ctx.restore();
           return;
       }

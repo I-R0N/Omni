@@ -243,12 +243,14 @@ export const NEBULA_CONSTANTS = {
   SHARD_AREA_FRACTIONS: [0.4, 0.4, 0.1, 0.1] as number[],
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
-  // so behaviour is framerate-independent.
-  LINEAR_DAMPING: 0.86,   // very draggy — shards drift to a halt in ~1 s
-  ANGULAR_DAMPING: 0.88,  // spin decays even faster
+  // so behaviour is framerate-independent.  Values closer to 1.0 = less
+  // damping = shards drift longer.  At 0.988, velocity halves in ~58 frames
+  // (~0.95s) giving a long, drifty cloud that lingers through the playfield.
+  LINEAR_DAMPING: 0.988,
+  ANGULAR_DAMPING: 0.988,
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
-  REST_SPEED: 0.01,
-  REST_SPIN: 0.02,
+  REST_SPEED: 0.005,
+  REST_SPIN: 0.01,
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
   SPIN_PER_UNIT_SPEED: 1.2,
   MAX_SPIN: 6.0,  // rad/s cap
