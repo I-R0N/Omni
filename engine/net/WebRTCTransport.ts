@@ -106,12 +106,35 @@ export class WebRTCTransport {
 
   public send(msg: NetMessage): void {
     if (!this.channel || this.channel.readyState !== 'open') return;
+    let payload: string;
     try {
-      this.channel.send(JSON.stringify(msg));
+      payload = JSON.stringify(msg);
     } catch (e) {
-      // Channel may have raced into a closing state between the readyState
-      // check and send().  Treat as soft failure; keep the game running.
+      console.warn('[WebRTCTransport] serialize failed', e);
+      return;
+    }
+    // Guard against sends larger than the negotiated SCTP message size.
+    // iOS Safari caps unordered/unreliable RTCDataChannel messages at a
+    // much lower value than Chrome/Firefox (often ~64 KB vs 256 KB), and
+    // a send() overflow can put the channel into an error state from
+    // which no further messages flow in either direction.  We drop the
+    // message and report via onError so the app layer can surface it.
+    const maxBytes = this.channel.maxMessageSize || 65535;
+    // Rough UTF-8 byte count upper bound — JSON is ASCII-heavy so length
+    // is within a few % of byte count.  Use length * 4 as a safe ceiling.
+    if (payload.length > maxBytes) {
+      const err = new Error(
+        `Payload ${payload.length} bytes exceeds channel max ${maxBytes} bytes (msg.t=${(msg as { t: string }).t})`
+      );
+      console.warn('[WebRTCTransport] oversized send dropped', err.message);
+      this.onError?.(err);
+      return;
+    }
+    try {
+      this.channel.send(payload);
+    } catch (e) {
       console.warn('[WebRTCTransport] send failed', e);
+      this.onError?.(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
@@ -128,6 +151,14 @@ export class WebRTCTransport {
   private wireChannel(ch: RTCDataChannel) {
     ch.binaryType = 'arraybuffer';
     ch.onopen = () => {
+      // Log negotiated SCTP limits so we can diagnose iOS-specific
+      // behaviour via the web inspector.
+      console.info(
+        '[WebRTCTransport] data channel open — maxMessageSize=%s, ordered=%s, maxRetransmits=%s',
+        ch.maxMessageSize,
+        ch.ordered,
+        ch.maxRetransmits
+      );
       this.setState('open');
       this.onOpen?.();
     };

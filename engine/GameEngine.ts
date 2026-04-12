@@ -470,9 +470,16 @@ export class GameEngine {
       for (let i = 0; i < ents.length; i++) {
         const e = ents[i];
         if (!e.active) continue;
-        // Skip particles — they are cheap enough to regenerate locally and
-        // would dominate the snapshot payload.  Phase 2 may revisit this.
+        // Phase 1 snapshot scope: dynamic, gameplay-critical entities only.
+        // Excluding static tiles (~5000 per map), asteroids (~280 per map),
+        // and particles keeps the message well under iOS Safari's ~64 KB
+        // RTCDataChannel ceiling.  The client doesn't render its own copy
+        // of these yet, so asteroids/tiles won't be visible to the joiner.
+        // Phase 2 will either send a static-world handshake once at connect
+        // time or switch to a binary format that fits the full world.
         if (e.type === EntityType.PARTICLE) continue;
+        if (e.type === EntityType.STRUCTURE) continue;
+        if (e.type === EntityType.ASTEROID) continue;
         entities.push(serializeEntity(e));
       }
     }
