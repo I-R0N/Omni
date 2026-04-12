@@ -1049,11 +1049,18 @@ export class GameEngine {
     }
   }
 
-  private spawnCollisionSparks(pos: Vector2, _normal: Vector2) {
+  private spawnCollisionSparks(pos: Vector2, normal: Vector2) {
     if (!this.currentMap) return;
     const count = SPARK_CONSTANTS.COUNT_MIN + Math.floor(Math.random() * (SPARK_CONSTANTS.COUNT_MAX - SPARK_CONSTANTS.COUNT_MIN + 1));
+    // Tangent directions (perpendicular to the collision normal)
+    const tangentAngle = Math.atan2(normal.y, normal.x) + Math.PI / 2;
+    const spreadMin = 10 * Math.PI / 180;
+    const spreadMax = 20 * Math.PI / 180;
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
+      // Pick a random tangent side (+/-) and a random offset within 10–20 degrees
+      const side = Math.random() < 0.5 ? 0 : Math.PI;
+      const offset = (spreadMin + Math.random() * (spreadMax - spreadMin)) * (Math.random() < 0.5 ? 1 : -1);
+      const angle = tangentAngle + side + offset;
       const speed = SPARK_CONSTANTS.SPEED_MIN + Math.random() * (SPARK_CONSTANTS.SPEED_MAX - SPARK_CONSTANTS.SPEED_MIN);
       const life = SPARK_CONSTANTS.LIFETIME_MIN + Math.random() * (SPARK_CONSTANTS.LIFETIME_MAX - SPARK_CONSTANTS.LIFETIME_MIN);
       // Mix of player indigo and white
