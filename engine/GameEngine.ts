@@ -2400,18 +2400,12 @@ export class GameEngine {
         const spinSign = cross > 0 ? 1 : (cross < 0 ? -1 : (Math.random() < 0.5 ? 1 : -1));
         const rotationSpeed = spinSign * spinK;
 
-        // Soft, cloud-like polygon — 6 vertices with gentle jitter.  Kept
-        // approximately convex so SAT would still work if we ever decided
-        // to make nebula shards collidable.
-        const numPoints = 6;
-        const rawPts: { angle: number; r: number }[] = [];
-        for (let j = 0; j < numPoints; j++) {
-            const baseAngle = (j / numPoints) * Math.PI * 2;
-            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.3;
-            rawPts.push({ angle: baseAngle + jitter, r: radius * (0.85 + Math.random() * 0.3) });
-        }
-        rawPts.sort((a, b) => a.angle - b.angle);
-        const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+        // Physics shape: implicit circle of `diameter` derived from size.
+        // polygonPoints is intentionally omitted — the nebula shard doesn't
+        // participate in SAT (it's pass-through to everything), so the
+        // circle defined by its size is sufficient for any future logic
+        // (visibility, coalescence proximity, etc.) and keeps the sprite
+        // free to be the sole visual representation.
 
         // Inherit sprite & composition from the parent tile so the cloud
         // visually hangs together even as the shards drift apart.
@@ -2429,7 +2423,6 @@ export class GameEngine {
             health:          1,
             maxHealth:       1,
             mass:            diameter,
-            polygonPoints:   pts,
             sprite:          tile.sprite,
             nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
             nebulaTileArea:  tileArea,

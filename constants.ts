@@ -260,8 +260,11 @@ export const NEBULA_CONSTANTS = {
   // interactable polygon is always the standard hex size).  Setting this
   // above 1 makes the cloud read as continuous between adjacent tiles.
   TILE_SPRITE_SCALE: 2.2,
-  // Display scale for shards (visual only; physics uses raw shard size).
-  SHARD_SPRITE_SCALE: 2.6,
+  // Display scale for shards — slightly larger than the shard's physics
+  // diameter so the sprite provides a soft fuzz border around the implicit
+  // circular physics shape.  Keep low (~1.1–1.3) so sprite size closely
+  // matches shard size and a cluster of shards reads as individual puffs.
+  SHARD_SPRITE_SCALE: 1.2,
   // Cluster generation — mirrors glass-tile generator parameters.
   CLUSTER_COUNT: 45,
   MIN_CLUSTER_SIZE: 10,
