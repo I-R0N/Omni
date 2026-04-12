@@ -320,18 +320,26 @@ export class RenderSystem {
           if (t.length > 0) {
               const head = t[t.length-1];
               const tail = t[0];
-              const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
               if (entity.type === EntityType.PROJECTILE) {
-                  // Use weapon color for projectile trails
                   const [r, g, b] = hexToRgb(entity.color || '#facc15');
-                  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-                  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.75)`);
+                  if (entity.isBouncer) {
+                      // Bouncer beam: solid pure-green line with no fade along
+                      // the trail. The short lifetime already makes the beam
+                      // self-limiting; we want it sharp while it's visible.
+                      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
+                  } else {
+                      const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+                      grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                      grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.75)`);
+                      ctx.fillStyle = grad;
+                  }
               } else {
                   // Player: cyan engine exhaust
+                  const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
                   grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
                   grad.addColorStop(1, `rgba(56, 189, 248, 0.6)`);
+                  ctx.fillStyle = grad;
               }
-              ctx.fillStyle = grad;
               ctx.fill();
           }
       });

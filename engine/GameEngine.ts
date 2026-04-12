@@ -1322,7 +1322,7 @@ export class GameEngine {
       const TRAIL_SCALE = 0.5;
       // Bouncer beams are visualized entirely by their trail, which fades
       // almost instantly so the beam reads as a short moving line segment.
-      const BOUNCER_TRAIL_LIFETIME = 0.08;
+      const BOUNCER_TRAIL_LIFETIME = 0.2;
       const BOUNCER_TRAIL_SCALE = 0.55;
       const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
 
