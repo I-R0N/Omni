@@ -5,8 +5,8 @@ import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL } from '../constants';
+import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SPARK_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -66,6 +66,9 @@ export class GameEngine {
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
 
+  // Wave announcement banners rendered on the canvas
+  public waveAnnouncements: WaveAnnouncement[] = [];
+
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
@@ -90,6 +93,9 @@ export class GameEngine {
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
     this.flowField = new FlowFieldGrid();
+
+    // Wire collision-spark callback so PhysicsSystem doesn't depend on GameEngine
+    this.physics.onCollisionSparks = (pos, normal) => this.spawnCollisionSparks(pos, normal);
 
     this.player = {
       id: 'player',
@@ -190,6 +196,7 @@ export class GameEngine {
       this.pendingRegens = [];
       this.activeDrops = [];
       this.trailDecayTimer = 0;
+      this.waveAnnouncements = [];
       this.loadMap(new UniverseMap());
 
       // Reset Player
@@ -654,8 +661,40 @@ export class GameEngine {
             regen.entity.health = regen.entity.maxHealth;
             regen.entity.active = true;
             regen.entity.regenProgress = undefined;
+            regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
             this.physics.addStaticEntity(regen.entity);
             this.pendingRegens.splice(i, 1);
+
+            // Pop-in particle burst: tile-colored chips scattering outward
+            this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
+                speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
+                speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
+                lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                sizeMin: 1, sizeMax: 2,
+            });
+        }
+    }
+
+    // Tick down regenPopTimer on tiles
+    if (this.currentMap) {
+        const ents = this.currentMap.entities;
+        for (let i = 0; i < ents.length; i++) {
+            const e = ents[i];
+            if (e.regenPopTimer !== undefined && e.regenPopTimer > 0) {
+                e.regenPopTimer -= dt;
+                if (e.regenPopTimer <= 0) {
+                    e.regenPopTimer = undefined;
+                }
+            }
+        }
+    }
+
+    // Tick down wave announcements
+    for (let i = this.waveAnnouncements.length - 1; i >= 0; i--) {
+        this.waveAnnouncements[i].lifetime -= dt;
+        if (this.waveAnnouncements[i].lifetime <= 0) {
+            this.waveAnnouncements.splice(i, 1);
         }
     }
 
@@ -689,6 +728,15 @@ export class GameEngine {
       }
       if (allDead) {
         this.waveState = 'cleared';
+
+        // Wave clear announcement
+        const clearLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+        this.waveAnnouncements.push({
+          text: `WAVE ${this.waveIndex + 1} CLEAR`,
+          color: '#4ade80',
+          lifetime: clearLife,
+          maxLifetime: clearLife,
+        });
 
         // Difficulty-scaled health drop interval
         const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
@@ -997,6 +1045,34 @@ export class GameEngine {
         lifetime:  life,
         maxLifetime: life,
         mass:      0.1,
+      });
+    }
+  }
+
+  private spawnCollisionSparks(pos: Vector2, _normal: Vector2) {
+    if (!this.currentMap) return;
+    const count = SPARK_CONSTANTS.COUNT_MIN + Math.floor(Math.random() * (SPARK_CONSTANTS.COUNT_MAX - SPARK_CONSTANTS.COUNT_MIN + 1));
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = SPARK_CONSTANTS.SPEED_MIN + Math.random() * (SPARK_CONSTANTS.SPEED_MAX - SPARK_CONSTANTS.SPEED_MIN);
+      const life = SPARK_CONSTANTS.LIFETIME_MIN + Math.random() * (SPARK_CONSTANTS.LIFETIME_MAX - SPARK_CONSTANTS.LIFETIME_MIN);
+      // Mix of player indigo and white
+      const color = Math.random() < 0.5 ? '#6366f1' : '#ffffff';
+      this.currentMap.entities.push({
+        id: `spark_${Date.now()}_${i}_${Math.random()}`,
+        type: EntityType.PARTICLE,
+        position: { x: pos.x, y: pos.y },
+        velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size: { x: SPARK_CONSTANTS.SIZE, y: SPARK_CONSTANTS.SIZE },
+        rotation: 0,
+        color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        lifetime: life,
+        maxLifetime: life,
+        mass: 0.1,
+        isCollisionSpark: true,
       });
     }
   }
@@ -1807,6 +1883,16 @@ export class GameEngine {
     }
 
     this.waveState = 'active';
+
+    // Wave start announcement
+    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    this.waveAnnouncements.push({
+      text: `WAVE ${index + 1}`,
+      subtext: 'GET READY',
+      color: '#ffffff',
+      lifetime: totalLife,
+      maxLifetime: totalLife,
+    });
   }
 
 
@@ -2191,7 +2277,8 @@ export class GameEngine {
           this.damageTexts,
           this.player.position,
           this.playerMessages,
-          this.player
+          this.player,
+          this.waveAnnouncements
       );
   }
 }

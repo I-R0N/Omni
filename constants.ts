@@ -247,6 +247,34 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
+// Collision sparks (player ↔ enemy body contact)
+export const SPARK_CONSTANTS = {
+  COUNT_MIN: 6,
+  COUNT_MAX: 10,
+  SPEED_MIN: 80,
+  SPEED_MAX: 160,
+  LIFETIME_MIN: 0.2,
+  LIFETIME_MAX: 0.4,
+  SIZE: 3,
+  FRICTION: 0.9, // velocity *= FRICTION per dt (deceleration)
+};
+
+// Tile regeneration pop-in burst
+export const REGEN_POP_CONSTANTS = {
+  DURATION: 0.2,      // seconds for scale overshoot animation
+  CHIP_COUNT: 6,      // particles on regen complete
+  CHIP_SPEED_MIN: 40,
+  CHIP_SPEED_MAX: 80,
+  CHIP_LIFETIME: 0.4,
+};
+
+// Wave announcement banners
+export const WAVE_ANNOUNCE_CONSTANTS = {
+  FADEIN: 0.3,
+  HOLD: 1.0,
+  FADEOUT: 0.5,
+};
+
 export const PROJECTILE_CONSTANTS = {
   SPEED: 3, // Reduced from 12
   SIZE: 8,

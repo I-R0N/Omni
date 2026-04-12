@@ -1,7 +1,7 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS } from '../../constants';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement } from '../../types';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
@@ -126,7 +126,8 @@ export class RenderSystem {
     damageTexts?: DamageText[],
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
-    player?: GameEntity
+    player?: GameEntity,
+    waveAnnouncements?: WaveAnnouncement[]
   ) {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -238,6 +239,11 @@ export class RenderSystem {
     }
 
     ctx.restore();
+
+    // 5c. Render Wave Announcements (Screen Space, above game entities)
+    if (waveAnnouncements && waveAnnouncements.length > 0) {
+        this.renderWaveAnnouncements(ctx, waveAnnouncements, width, height);
+    }
 
     // 6. Render POI Indicators (Screen Space)
     this.renderIndicators(ctx, this._indicatorBuffer, camera, width, height);
@@ -477,6 +483,13 @@ export class RenderSystem {
             };
 
             if (entity.type === EntityType.STRUCTURE) {
+                // ── Regen pop-in scale overshoot ─────────────────────────────
+                if (entity.regenPopTimer !== undefined && entity.regenPopTimer > 0) {
+                    const popT = entity.regenPopTimer / REGEN_POP_CONSTANTS.DURATION; // 1→0
+                    const scale = 1 + 0.15 * Math.sin(popT * Math.PI);
+                    ctx.scale(scale, scale);
+                }
+
                 // ── Regen ghost outline (tile not yet active) ────────────────
                 if (!entity.active && entity.regenProgress !== undefined) {
                     // Only show ghost during final 3 s (regenProgress > threshold)
@@ -1333,5 +1346,51 @@ export class RenderSystem {
       ctx.fill();
 
       ctx.restore();
+  }
+
+  private renderWaveAnnouncements(
+      ctx: CanvasRenderingContext2D,
+      announcements: WaveAnnouncement[],
+      width: number,
+      height: number
+  ) {
+      const { FADEIN, HOLD, FADEOUT } = WAVE_ANNOUNCE_CONSTANTS;
+      const totalLife = FADEIN + HOLD + FADEOUT;
+
+      for (let i = 0; i < announcements.length; i++) {
+          const a = announcements[i];
+          const elapsed = totalLife - a.lifetime;
+
+          // Compute alpha: fade in → hold → fade out
+          let alpha: number;
+          if (elapsed < FADEIN) {
+              alpha = elapsed / FADEIN;
+          } else if (elapsed < FADEIN + HOLD) {
+              alpha = 1;
+          } else {
+              alpha = 1 - (elapsed - FADEIN - HOLD) / FADEOUT;
+          }
+          alpha = Math.max(0, Math.min(1, alpha));
+          if (alpha <= 0) continue;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // Main text
+          ctx.font = 'bold 48px monospace';
+          ctx.fillStyle = a.color;
+          ctx.fillText(a.text, width / 2, height / 2 - (a.subtext ? 18 : 0));
+
+          // Subtext (smaller, cyan)
+          if (a.subtext) {
+              ctx.font = 'bold 24px monospace';
+              ctx.fillStyle = '#22d3ee';
+              ctx.fillText(a.subtext, width / 2, height / 2 + 28);
+          }
+
+          ctx.restore();
+      }
   }
 }

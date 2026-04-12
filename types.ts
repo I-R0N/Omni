@@ -200,6 +200,12 @@ export interface GameEntity {
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
 
+  // Tile regen pop-in scale overshoot timer (counts down from REGEN_POP_DURATION)
+  regenPopTimer?: number;
+
+  // Collision spark flag — rendered as small filled circles instead of default particle
+  isCollisionSpark?: boolean;
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.
@@ -249,6 +255,15 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+}
+
+// Full-screen wave announcement banner rendered on the canvas.
+export interface WaveAnnouncement {
+  text: string;
+  subtext?: string;
+  color: string;
+  lifetime: number;
+  maxLifetime: number;
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).
