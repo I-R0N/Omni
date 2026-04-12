@@ -117,6 +117,30 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
     }
   };
 
+  // Web Share API — on iOS this opens the native share sheet (including
+  // AirDrop to a nearby device), which is by far the easiest way to move
+  // an SDP blob between two iPhones.  Falls back to clipboard copy on
+  // browsers without share support.
+  const canShare = typeof navigator !== 'undefined' && typeof (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }).share === 'function';
+  const handleShare = async (text: string, title: string) => {
+    const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+    if (nav.share) {
+      try {
+        await nav.share({ title, text });
+        return;
+      } catch {
+        // User cancelled or share failed — fall through to clipboard.
+      }
+    }
+    handleCopy(text);
+  };
+
+  // Auto-select text on tap for manual copy flows on devices without a
+  // working share/clipboard path (older iOS, private browsing, etc.)
+  const handleTextareaFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    e.currentTarget.select();
+  };
+
   const handleCancel = () => {
     if (hostSessionRef.current && hostStatus !== 'connected') {
       hostSessionRef.current.close();
@@ -183,21 +207,33 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
 
               <div>
                 <label className="block text-slate-300 text-xs uppercase tracking-widest mb-2">
-                  1. Copy this offer to the joining device
+                  1. Send this offer to the joining device
                 </label>
                 <textarea
                   readOnly
                   value={hostOffer}
+                  onFocus={handleTextareaFocus}
                   placeholder={hostOffer ? '' : 'Generating offer…'}
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
-                <button
-                  disabled={!hostOffer}
-                  onClick={() => handleCopy(hostOffer)}
-                  className="mt-2 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 py-1.5 px-3 rounded"
-                >
-                  Copy offer
-                </button>
+                <div className="mt-2 flex gap-2">
+                  {canShare && (
+                    <button
+                      disabled={!hostOffer}
+                      onClick={() => handleShare(hostOffer, 'Omni multiplayer offer')}
+                      className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-1.5 px-3 rounded font-bold"
+                    >
+                      Share (AirDrop)
+                    </button>
+                  )}
+                  <button
+                    disabled={!hostOffer}
+                    onClick={() => handleCopy(hostOffer)}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 py-1.5 px-3 rounded"
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -207,6 +243,7 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 <textarea
                   value={hostAnswerInput}
                   onChange={(e) => setHostAnswerInput(e.target.value)}
+                  onFocus={handleTextareaFocus}
                   placeholder="Paste answer here…"
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
@@ -254,6 +291,7 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                 <textarea
                   value={clientOfferInput}
                   onChange={(e) => setClientOfferInput(e.target.value)}
+                  onFocus={handleTextareaFocus}
                   placeholder="Paste offer here…"
                   className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                 />
@@ -274,14 +312,25 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
                   <textarea
                     readOnly
                     value={clientAnswer}
+                    onFocus={handleTextareaFocus}
                     className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 font-mono resize-none"
                   />
-                  <button
-                    onClick={() => handleCopy(clientAnswer)}
-                    className="mt-2 text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
-                  >
-                    Copy answer
-                  </button>
+                  <div className="mt-2 flex gap-2">
+                    {canShare && (
+                      <button
+                        onClick={() => handleShare(clientAnswer, 'Omni multiplayer answer')}
+                        className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 px-3 rounded font-bold"
+                      >
+                        Share (AirDrop)
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleCopy(clientAnswer)}
+                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-3 rounded"
+                    >
+                      Copy
+                    </button>
+                  </div>
                 </div>
               )}
 
