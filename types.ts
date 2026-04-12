@@ -203,9 +203,6 @@ export interface GameEntity {
   // Tile regen pop-in scale overshoot timer (counts down from REGEN_POP_DURATION)
   regenPopTimer?: number;
 
-  // Collision spark flag — rendered as small filled circles instead of default particle
-  isCollisionSpark?: boolean;
-
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.

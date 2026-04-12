@@ -247,20 +247,6 @@ export const PARTICLE_CONSTANTS = {
   SIZE_MAX: 3
 };
 
-// Collision sparks (player ↔ enemy body contact)
-export const SPARK_CONSTANTS = {
-  COUNT_MIN: 6,
-  COUNT_MAX: 10,
-  // Speeds are per-frame (engine integrates position += velocity without dt).
-  // Tuned so total travel distance ≤ ~1 tile radius (15 world units).
-  SPEED_MIN: 1,
-  SPEED_MAX: 2.5,
-  LIFETIME_MIN: 0.25,
-  LIFETIME_MAX: 0.35,
-  SIZE: 1, // world-unit radius — small, sharp specks rather than puffs
-  FRICTION: 0.82, // velocity *= FRICTION per frame — aggressive damping
-};
-
 // Tile regeneration pop-in burst
 export const REGEN_POP_CONSTANTS = {
   DURATION: 0.2,      // seconds for scale overshoot animation

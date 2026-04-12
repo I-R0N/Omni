@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SPARK_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -93,9 +93,6 @@ export class GameEngine {
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
     this.flowField = new FlowFieldGrid();
-
-    // Wire collision-spark callback so PhysicsSystem doesn't depend on GameEngine
-    this.physics.onCollisionSparks = (pos, normal) => this.spawnCollisionSparks(pos, normal);
 
     this.player = {
       id: 'player',
@@ -1045,41 +1042,6 @@ export class GameEngine {
         lifetime:  life,
         maxLifetime: life,
         mass:      0.1,
-      });
-    }
-  }
-
-  private spawnCollisionSparks(pos: Vector2, normal: Vector2) {
-    if (!this.currentMap) return;
-    const count = SPARK_CONSTANTS.COUNT_MIN + Math.floor(Math.random() * (SPARK_CONSTANTS.COUNT_MAX - SPARK_CONSTANTS.COUNT_MIN + 1));
-    // Tangent directions (perpendicular to the collision normal)
-    const tangentAngle = Math.atan2(normal.y, normal.x) + Math.PI / 2;
-    const spreadMin = 10 * Math.PI / 180;
-    const spreadMax = 20 * Math.PI / 180;
-    for (let i = 0; i < count; i++) {
-      // Pick a random tangent side (+/-) and a random offset within 10–20 degrees
-      const side = Math.random() < 0.5 ? 0 : Math.PI;
-      const offset = (spreadMin + Math.random() * (spreadMax - spreadMin)) * (Math.random() < 0.5 ? 1 : -1);
-      const angle = tangentAngle + side + offset;
-      const speed = SPARK_CONSTANTS.SPEED_MIN + Math.random() * (SPARK_CONSTANTS.SPEED_MAX - SPARK_CONSTANTS.SPEED_MIN);
-      const life = SPARK_CONSTANTS.LIFETIME_MIN + Math.random() * (SPARK_CONSTANTS.LIFETIME_MAX - SPARK_CONSTANTS.LIFETIME_MIN);
-      // Mix of player indigo and white
-      const color = Math.random() < 0.5 ? '#6366f1' : '#ffffff';
-      this.currentMap.entities.push({
-        id: `spark_${Date.now()}_${i}_${Math.random()}`,
-        type: EntityType.PARTICLE,
-        position: { x: pos.x, y: pos.y },
-        velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-        size: { x: SPARK_CONSTANTS.SIZE, y: SPARK_CONSTANTS.SIZE },
-        rotation: 0,
-        color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: life,
-        maxLifetime: life,
-        mass: 0.1,
-        isCollisionSpark: true,
       });
     }
   }

@@ -16,9 +16,6 @@ export class PhysicsSystem {
   private bufferAxes: Vector2[] = Array.from({ length: 32 }, () => ({ x: 0, y: 0 }));
   private bufferMtv: Vector2 = { x: 0, y: 0 };
 
-  // Callback for spawning collision sparks — set by GameEngine to avoid coupling
-  public onCollisionSparks?: (pos: Vector2, normal: Vector2) => void;
-
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
@@ -118,14 +115,6 @@ export class PhysicsSystem {
 
           entity.position.x += entity.velocity.x;
           entity.position.y += entity.velocity.y;
-
-          // Collision sparks decelerate over their lifetime — aggressive damping
-          // keeps total travel to ≤ ~1 tile radius
-          if (entity.type === EntityType.PARTICLE && entity.isCollisionSpark) {
-              const sparkFriction = Math.pow(0.82, timeScale);
-              entity.velocity.x *= sparkFriction;
-              entity.velocity.y *= sparkFriction;
-          }
 
           // Apply Friction
           // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
@@ -600,18 +589,6 @@ export class PhysicsSystem {
                   if (target.health <= 0 && onDeath) {
                       onDeath(target);
                   }
-              }
-              // Spawn collision sparks at the contact midpoint
-              if (this.onCollisionSparks) {
-                  const midX = (a.position.x + b.position.x) / 2;
-                  const midY = (a.position.y + b.position.y) / 2;
-                  const ndx = enemy.position.x - target.position.x;
-                  const ndy = enemy.position.y - target.position.y;
-                  const nLen = Math.sqrt(ndx * ndx + ndy * ndy) || 1;
-                  this.onCollisionSparks(
-                      { x: midX, y: midY },
-                      { x: ndx / nLen, y: ndy / nLen }
-                  );
               }
           }
       }
