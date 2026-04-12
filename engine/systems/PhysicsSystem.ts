@@ -255,10 +255,10 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
-        // Nebula shards are visual debris — pass-through to everything, so
-        // they never participate in broadphase or SAT at all.
-        if (e.type === EntityType.NEBULA_SHARD) continue;
-
+        // Nebula shards re-enter the dynamic grid so player/enemy contact
+        // can trigger a shatter.  The nebula branch in resolveCollision is
+        // still pass-through (no impulse), so they never exchange momentum
+        // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
         
         const cx = Math.floor(e.position.x / cellSize);
@@ -475,36 +475,48 @@ export class PhysicsSystem {
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
 
-      // ── NEBULA TILE: pass-through with conditional shatter ─────────────
-      // Nebula tiles never apply an impulse.  Player/enemy bodies shatter
-      // them into NEBULA_SHARDs on contact; projectiles and everything else
-      // pass straight through without touching the tile.
-      if (a.type === EntityType.NEBULA || b.type === EntityType.NEBULA) {
-          const nebula = a.type === EntityType.NEBULA ? a : b;
-          const other  = a.type === EntityType.NEBULA ? b : a;
+      // ── NEBULA: pass-through with conditional shatter ──────────────────
+      // Nebula tiles AND nebula shards never apply a collision impulse.
+      // PLAYER/ENEMY contact shatters them into 3 children at 75% of the
+      // parent's linear size (handled in GameEngine.spawnNebulaShards).
+      // Projectiles and everything else pass straight through without
+      // touching the nebula.  Sub-minimum shards pass through without
+      // even shattering (the caller returns early in spawnNebulaShards).
+      const aIsNebula = a.type === EntityType.NEBULA || a.type === EntityType.NEBULA_SHARD;
+      const bIsNebula = b.type === EntityType.NEBULA || b.type === EntityType.NEBULA_SHARD;
+      if (aIsNebula || bIsNebula) {
+          // If both sides are nebula (tile/shard vs tile/shard), no shatter —
+          // those interactions belong to the gravity/merge pass in
+          // GameEngine.updateNebulaDynamics.
+          if (aIsNebula && bIsNebula) return;
+
+          const nebula = aIsNebula ? a : b;
+          const other  = aIsNebula ? b : a;
 
           const shatters = other.type === EntityType.PLAYER || other.type === EntityType.ENEMY;
           if (shatters) {
-              // Stamp impact metadata so the shard spawner knows which
-              // direction the striker came from (drives the tangent-based
-              // rotation assignment for left/right shards).
-              if (other.velocity) {
-                  nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
+              // Size floor check: below MIN_SHATTER_DIAMETER the child
+              // diameter would be too small to spawn, so just pass through.
+              const parentD = Math.max(nebula.size.x, nebula.size.y);
+              const childD  = parentD * NEBULA_CONSTANTS.SHARD_SIZE_RATIO;
+              if (childD >= NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) {
+                  if (other.velocity) {
+                      nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
+                  }
+                  nebula.lastImpactDamage = 1;
+                  nebula.health = 0;
+                  nebula.active = false;
+                  // Only NEBULA tiles live in the static grid; shards live
+                  // in the dynamic grid and are compacted by end-of-frame.
+                  if (nebula.type === EntityType.NEBULA) {
+                      this.removeStaticEntity(nebula);
+                  }
+                  if (onDeath) onDeath(nebula);
               }
-              nebula.lastImpactDamage = 1;
-              nebula.health = 0;
-              nebula.active = false;
-              this.removeStaticEntity(nebula);
-              if (onDeath) onDeath(nebula);
           }
-          // Either way: no impulse, no positional correction — entities drift
-          // straight through the nebula cell.
+          // No impulse / no positional correction regardless of outcome.
           return;
       }
-
-      // Nebula shards are pass-through to everything (should already be
-      // filtered out of broadphase, but guard here for safety).
-      if (a.type === EntityType.NEBULA_SHARD || b.type === EntityType.NEBULA_SHARD) return;
 
       // INTERACTABLE collision rules:
       // - Non-drop interactables (POIs, etc.): skip entirely.

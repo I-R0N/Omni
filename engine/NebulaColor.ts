@@ -157,3 +157,61 @@ export function cloneComposition(composition: NebulaColorStop[] | undefined): Ne
     if (!composition) return randomNebulaComposition();
     return composition.map(s => ({ hex: s.hex, weight: s.weight }));
 }
+
+// Cap on how many distinct hex stops a composition may retain.  Prevents
+// unbounded list growth as many small nebulas merge into one large one.
+const MAX_COMPOSITION_STOPS = 5;
+
+/**
+ * Weighted-merge two colour compositions, biasing by the external `weightA`
+ * and `weightB` values (typically the entities' respective areas).  Each
+ * composition is first normalised internally, then scaled by its external
+ * weight, then concatenated and deduped by hex.  Result weights sum to 1.
+ *
+ * If the merged list exceeds MAX_COMPOSITION_STOPS, the smallest-weight
+ * entries are folded into the largest until the cap is met — this keeps
+ * the composition bounded without losing the dominant hues.
+ */
+export function blendCompositions(
+    a: NebulaColorStop[] | undefined,
+    weightA: number,
+    b: NebulaColorStop[] | undefined,
+    weightB: number
+): NebulaColorStop[] {
+    const listA = a && a.length > 0 ? a : randomNebulaComposition();
+    const listB = b && b.length > 0 ? b : randomNebulaComposition();
+
+    const totalExt = Math.max(1e-6, weightA + weightB);
+    const fracA = weightA / totalExt;
+    const fracB = weightB / totalExt;
+
+    // Normalise internal weights.
+    const internalSum = (list: NebulaColorStop[]) =>
+        Math.max(1e-6, list.reduce((s, e) => s + e.weight, 0));
+    const sA = internalSum(listA);
+    const sB = internalSum(listB);
+
+    const merged = new Map<string, number>();
+    for (const stop of listA) {
+        merged.set(stop.hex, (merged.get(stop.hex) ?? 0) + (stop.weight / sA) * fracA);
+    }
+    for (const stop of listB) {
+        merged.set(stop.hex, (merged.get(stop.hex) ?? 0) + (stop.weight / sB) * fracB);
+    }
+
+    let result: NebulaColorStop[] = Array.from(merged.entries())
+        .map(([hex, weight]) => ({ hex, weight }))
+        .sort((x, y) => y.weight - x.weight);
+
+    // Cap stop count by folding the smallest into the largest.
+    while (result.length > MAX_COMPOSITION_STOPS) {
+        const tail = result.pop()!;
+        result[0].weight += tail.weight;
+    }
+
+    // Re-normalise to sum to 1 (defensive against rounding drift).
+    const total = result.reduce((s, e) => s + e.weight, 0) || 1;
+    for (const stop of result) stop.weight /= total;
+
+    return result;
+}

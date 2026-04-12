@@ -9,7 +9,7 @@ import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, V
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { cloneComposition, blendCompositionToHex } from './NebulaColor';
+import { cloneComposition, blendCompositionToHex, blendCompositions } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -542,6 +542,13 @@ export class GameEngine {
       // Stick bonds: detect contact and merge entities after threshold
       this.handleEntitySticking(dt);
 
+      // Nebula dynamics: strong gravity pull of small shards toward larger
+      // nebula neighbours, plus merge-on-contact absorption.  Runs after
+      // physics integration so shard positions are up-to-date, and before
+      // compaction so absorbed shards are dropped from the entities array
+      // on the same frame.
+      this.updateNebulaDynamics(dt);
+
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
       let writeIdx = 0;
@@ -567,10 +574,13 @@ export class GameEngine {
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
-      if (entity.type === EntityType.NEBULA) {
-          // Nebula tiles spawn their deterministic [40/40/10/10] shard
-          // split immediately.  No regen; nebulas are replenished only by
-          // shard coalescence (parked for post-testing) or on map reload.
+      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          // Nebula tiles and shards both shatter into 3 children at 75%
+          // of the parent's linear size (total area ~1.69× parent — the
+          // cloud gains coverage per collision).  The merge-gravity pass
+          // re-equilibrates by absorbing small shards into larger ones.
+          // No regen: nebulae are replenished via the merge cycle or on
+          // map reload.
           this.spawnNebulaShards(entity);
       }
 
@@ -2325,113 +2335,274 @@ export class GameEngine {
   }
 
   /**
-   * Break a destroyed nebula tile into four pass-through cloud shards using
-   * the deterministic [40%, 40%, 10%, 10%] area split.  Area is conserved
-   * exactly (resultant shard areas sum to the parent tile area).
+   * Shatter a destroyed nebula entity (tile OR shard) into 3 smaller shards
+   * at NEBULA_CONSTANTS.SHARD_SIZE_RATIO of the parent's linear size each.
+   * Total child area ≈ 1.69× parent area — coverage strictly grows per
+   * collision, and the gravity-driven merge pass in updateNebulaDynamics
+   * re-equilibrates by absorbing small shards back into larger neighbours.
    *
-   * Rotation direction uses the tangent rule: shards on the striker's
-   * visual right spin CW, shards on the striker's left spin CCW, mimicking
-   * turbulence as the striker plows through the cloud.
+   * Shards are fan-spread around the striker's forward direction (±60°)
+   * and spin via the tangent rule: shards on the striker's visual right
+   * spin CW (positive rotationSpeed in canvas coords), shards on the left
+   * spin CCW.  The on-axis forward shard gets a random spin direction.
    *
-   * The parent tile's colour composition is deep-copied into every shard
-   * so a shatter → merge cycle preserves the original hue exactly (no
-   * averaging loss) when coalescence is eventually enabled.
+   * Parent's colour composition is cloned into every child so shatter →
+   * merge preserves hue through many cycles (see NebulaColor.blendCompositions).
+   *
+   * If the computed child diameter would fall below MIN_SHATTER_DIAMETER,
+   * the shatter is skipped entirely — the parent is too small to break
+   * further, and the caller should leave it alive (or have already passed
+   * the check).  This keeps the shard population bounded.
    */
-  private spawnNebulaShards(tile: GameEntity) {
+  private spawnNebulaShards(parent: GameEntity) {
     if (!this.currentMap) return;
 
-    const tileArea   = tile.nebulaTileArea ?? (tile.size.x * tile.size.y);
-    const composition = tile.nebulaColorComposition;
-    const fractions  = NEBULA_CONSTANTS.SHARD_AREA_FRACTIONS;
+    const parentDiameter = Math.max(parent.size.x, parent.size.y);
+    const childDiameter  = parentDiameter * NEBULA_CONSTANTS.SHARD_SIZE_RATIO;
+    if (childDiameter < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
+    const childRadius = childDiameter / 2;
 
-    // Striker direction (forward vector) and tangent axis (perpendicular).
-    // In canvas coords (y-down), tangent "right" is (-v̂.y, v̂.x), so the
-    // sign of (v̂ × d) tells us which side of the striker each shard is on.
-    const iv = tile.lastImpactVelocity;
+    const composition = parent.nebulaColorComposition;
+    const count       = NEBULA_CONSTANTS.SHARDS_PER_SHATTER;
+
+    // Striker direction (forward vector).  Canvas uses y-down, so "right"
+    // of the striker's travel direction (as drawn on screen) corresponds
+    // to a positive z-component of cross(forward, shard-offset) — the
+    // tangent rule the user specified.
+    const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     let fx = 1, fy = 0;
     if (iv && impactSpeed > 0.001) {
         fx = iv.x / impactSpeed;
         fy = iv.y / impactSpeed;
     }
-    // Right tangent: 90° CW rotation of the forward vector in canvas space
-    const tx = -fy;
-    const ty =  fx;
 
-    // Spawn offsets: two 40% shards along ±tangent, two 10% shards along ±forward.
-    // Using a fraction of the tile half-size so the 4 shards are clearly
-    // visible around the tile centre immediately after shatter.
-    const halfSize  = Math.max(tile.size.x, tile.size.y) * 0.35;
-    // directions: +tangent, -tangent, +forward, -forward
-    const dirs: { dx: number; dy: number }[] = [
-        { dx:  tx, dy:  ty },
-        { dx: -tx, dy: -ty },
-        { dx:  fx, dy:  fy },
-        { dx: -fx, dy: -fy },
-    ];
+    const spinK = Math.min(
+        NEBULA_CONSTANTS.MAX_SPIN,
+        1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED
+    );
 
-    const spinK = Math.min(NEBULA_CONSTANTS.MAX_SPIN, 1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED);
+    // Fan the children symmetrically around the forward direction.  For
+    // count = 3 this produces angles [-60°, 0°, +60°] — one shard
+    // continues straight through, the other two split left/right.
+    const fan = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
+    // Guard: for count=1 we'd divide by zero; generalise safely.
+    const step = count > 1 ? (2 * fan) / (count - 1) : 0;
 
-    for (let i = 0; i < fractions.length; i++) {
-        const areaFrac = fractions[i];
-        const shardArea = tileArea * areaFrac;
-        // Approximate each shard as a disc (area = π r²) for size, then
-        // generate a soft 6-vertex polygon for SAT-safe rendering.
-        const radius = Math.sqrt(shardArea / Math.PI);
-        const diameter = radius * 2;
+    for (let i = 0; i < count; i++) {
+        const offsetAngle = count > 1 ? -fan + step * i : 0;
+        const cosA = Math.cos(offsetAngle);
+        const sinA = Math.sin(offsetAngle);
+        // Rotate forward vector by offsetAngle → this shard's direction
+        const dx = fx * cosA - fy * sinA;
+        const dy = fx * sinA + fy * cosA;
 
-        const dir = dirs[i];
-        const offsetMag = halfSize * (0.4 + areaFrac);
-        const spawnX = tile.position.x + dir.dx * offsetMag;
-        const spawnY = tile.position.y + dir.dy * offsetMag;
+        // Spawn offset from parent centre so children don't all stack on
+        // top of each other on frame one.  Scales with child radius.
+        const offsetMag = childRadius * 0.6;
+        const spawnX = parent.position.x + dx * offsetMag;
+        const spawnY = parent.position.y + dy * offsetMag;
 
-        // Initial velocity: tiny scatter plus a nudge along the striker's
-        // direction so the cloud parts around the striker naturally.  Heavy
-        // damping (applied next frame) will slow it almost immediately.
-        const outwardX = dir.dx * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
-        const outwardY = dir.dy * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
+        // Initial velocity: gentle outward nudge + a small fraction of the
+        // striker's velocity so the cloud feels carried-along.  Damping
+        // decays this toward zero within ~1 s.
+        const outwardX = dx * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
+        const outwardY = dy * NEBULA_CONSTANTS.SCATTER_OUTWARD_SPEED;
         const carryX = (iv?.x ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
         const carryY = (iv?.y ?? 0) * NEBULA_CONSTANTS.SCATTER_VELOCITY_FACTOR;
 
-        // Tangent-rule rotation sign: cross(forward, shard-offset).  In
-        // canvas coords positive cross = shard on striker's visual right,
-        // which should rotate visually clockwise = positive rotationSpeed.
-        const cross = fx * dir.dy - fy * dir.dx;
-        const spinSign = cross > 0 ? 1 : (cross < 0 ? -1 : (Math.random() < 0.5 ? 1 : -1));
+        // Tangent-rule rotation sign: z-component of cross(forward, dir).
+        // cross > 0 → shard is on the striker's visual right → CW (+).
+        // cross < 0 → shard is on the striker's visual left  → CCW (−).
+        // cross ≈ 0 → on-axis (the central shard) → random spin direction.
+        const cross = fx * dy - fy * dx;
+        const spinSign = cross > 0.01 ? 1
+                        : cross < -0.01 ? -1
+                        : (Math.random() < 0.5 ? 1 : -1);
         const rotationSpeed = spinSign * spinK;
 
-        // Physics shape: implicit circle of `diameter` derived from size.
-        // polygonPoints is intentionally omitted — the nebula shard doesn't
-        // participate in SAT (it's pass-through to everything), so the
-        // circle defined by its size is sufficient for any future logic
-        // (visibility, coalescence proximity, etc.) and keeps the sprite
-        // free to be the sole visual representation.
-
-        // Inherit sprite & composition from the parent tile so the cloud
-        // visually hangs together even as the shards drift apart.
         this.currentMap.entities.push({
             id:             `nebula_shard_${Date.now()}_${i}_${Math.random()}`,
             type:            EntityType.NEBULA_SHARD,
             shardType:      'nebula',
             position:       { x: spawnX, y: spawnY },
             velocity:       { x: outwardX + carryX, y: outwardY + carryY },
-            size:           { x: diameter, y: diameter },
+            size:           { x: childDiameter, y: childDiameter },
             rotation:        Math.random() * Math.PI * 2,
             rotationSpeed,
-            color:           composition ? blendCompositionToHex(composition) : (tile.color || NEBULA_CONSTANTS.DEFAULT_HEX),
+            color:           composition ? blendCompositionToHex(composition) : (parent.color || NEBULA_CONSTANTS.DEFAULT_HEX),
             active:          true,
             health:          1,
             maxHealth:       1,
-            mass:            diameter,
-            sprite:          tile.sprite,
+            mass:            childDiameter,
+            sprite:          parent.sprite,
             nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-            nebulaTileArea:  tileArea,
-            nebulaGridCol:   tile.nebulaGridCol,
-            nebulaGridRow:   tile.nebulaGridRow,
+            nebulaTileArea:  parent.nebulaTileArea,
+            nebulaGridCol:   parent.nebulaGridCol,
+            nebulaGridRow:   parent.nebulaGridRow,
             linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
             angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
         });
     }
+  }
+
+  /**
+   * Per-frame gravity + merge pass for nebula shards.
+   *
+   * Each shard is pulled toward the nearest LARGER active nebula entity
+   * (tile or shard) within GRAVITY_RANGE.  When the shard crosses the
+   * merge proximity threshold, the larger target absorbs it:
+   *   - target.size grows so combined disc area is conserved
+   *   - target colour composition is blended weighted by the two areas
+   *   - small shard becomes inactive and emits a brief merge-particle burst
+   *   - target.position and target.sprite are unchanged
+   *
+   * Tiles are static and grid-locked, so their collision polygon is not
+   * resized — only the display sprite (driven by `size`) grows.  Shard
+   * targets grow their full size (both visual and merge-detection radius).
+   *
+   * Broadphase uses a cell grid over all nebula entities to avoid O(n²).
+   */
+  private updateNebulaDynamics(dt: number) {
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+
+    // Collect active nebula entities and split shards from the rest.
+    // Only shards iterate for gravity; tiles act as targets only.
+    const all: GameEntity[] = [];
+    for (let i = 0; i < ents.length; i++) {
+        const e = ents[i];
+        if (!e.active) continue;
+        if (e.type === EntityType.NEBULA || e.type === EntityType.NEBULA_SHARD) {
+            all.push(e);
+        }
+    }
+    if (all.length < 2) return;
+
+    // Spatial hash over GRAVITY_RANGE cells.
+    const CELL = NEBULA_CONSTANTS.GRAVITY_RANGE;
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < all.length; i++) {
+        const e = all[i];
+        const cx = Math.floor(e.position.x / CELL);
+        const cy = Math.floor(e.position.y / CELL);
+        const key = (cx << 16) | (cy & 0xFFFF);
+        let cell = grid.get(key);
+        if (!cell) { cell = []; grid.set(key, cell); }
+        cell.push(i);
+    }
+
+    const GRAV_RANGE_SQ = CELL * CELL;
+    const GRAV_K        = NEBULA_CONSTANTS.GRAVITY_STRENGTH;
+    const GRAV_MIN      = NEBULA_CONSTANTS.GRAVITY_MIN_DIST;
+    const MERGE_K       = NEBULA_CONSTANTS.MERGE_PROXIMITY_K;
+
+    for (let i = 0; i < all.length; i++) {
+        const shard = all[i];
+        if (!shard.active) continue;
+        if (shard.type !== EntityType.NEBULA_SHARD) continue;
+
+        const shardR = Math.max(shard.size.x, shard.size.y) / 2;
+
+        // Find nearest larger neighbour across the 3×3 cell block.
+        const acx = Math.floor(shard.position.x / CELL);
+        const acy = Math.floor(shard.position.y / CELL);
+
+        let bestTarget: GameEntity | null = null;
+        let bestDistSq = Infinity;
+
+        for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+            for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+                const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                if (!cell) continue;
+                for (let k = 0; k < cell.length; k++) {
+                    const j = cell[k];
+                    if (j === i) continue;
+                    const target = all[j];
+                    if (!target.active) continue;
+                    const targetR = Math.max(target.size.x, target.size.y) / 2;
+                    if (targetR <= shardR) continue; // only strictly larger targets
+
+                    const dx = target.position.x - shard.position.x;
+                    const dy = target.position.y - shard.position.y;
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq > GRAV_RANGE_SQ) continue;
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        bestTarget = target;
+                    }
+                }
+            }
+        }
+
+        if (!bestTarget) continue;
+
+        const dx = bestTarget.position.x - shard.position.x;
+        const dy = bestTarget.position.y - shard.position.y;
+        const dist = Math.sqrt(bestDistSq);
+        if (dist < 0.0001) continue;
+
+        const targetR   = Math.max(bestTarget.size.x, bestTarget.size.y) / 2;
+        const mergeDist = (targetR + shardR) * MERGE_K;
+
+        if (dist <= mergeDist) {
+            this.mergeNebulas(bestTarget, shard);
+            continue;
+        }
+
+        // Strong linear-radial gravity: force ∝ 1 / max(dist, MIN_DIST).
+        // Combined with the damping pass, this produces a steady terminal
+        // drift toward the target rather than a runaway acceleration.
+        const effDist = Math.max(dist, GRAV_MIN);
+        const accel   = (GRAV_K * dt) / effDist;
+        const invDist = 1 / dist;
+        shard.velocity.x += (dx * invDist) * accel;
+        shard.velocity.y += (dy * invDist) * accel;
+    }
+  }
+
+  /**
+   * Absorb a smaller nebula shard into a larger nebula entity.
+   *
+   * - larger.size grows so circle-area (π r²) adds the smaller's area
+   * - larger's position and sprite remain unchanged
+   * - colour composition is blended weighted by each entity's area
+   * - smaller becomes inactive and emits a brief particle puff as a
+   *   "simple merge animation"
+   */
+  private mergeNebulas(larger: GameEntity, smaller: GameEntity) {
+    const largeR = Math.max(larger.size.x, larger.size.y) / 2;
+    const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
+    const largeArea = Math.PI * largeR * largeR;
+    const smallArea = Math.PI * smallR * smallR;
+    const newArea = largeArea + smallArea;
+    const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
+
+    // Grow size — for tiles this only affects the sprite render scale
+    // (the collision polygon is grid-locked); for shards it also grows
+    // the merge/gravity radius used on subsequent frames.
+    larger.size.x = newDiameter;
+    larger.size.y = newDiameter;
+
+    // Blend colour compositions weighted by area; larger dominates.
+    larger.nebulaColorComposition = blendCompositions(
+        larger.nebulaColorComposition, largeArea,
+        smaller.nebulaColorComposition, smallArea
+    );
+    larger.color = blendCompositionToHex(larger.nebulaColorComposition);
+
+    // Tile merge animation: brief tint-coloured puff at the absorption
+    // point.  Uses the existing particle spawner for consistency with
+    // other feedback bursts in the game.
+    const tint = blendCompositionToHex(larger.nebulaColorComposition);
+    this.spawnParticles(smaller.position, NEBULA_CONSTANTS.MERGE_PARTICLES, tint, {
+        speedMin: 0.5, speedMax: 2.5,
+        sizeMin: 1.0, sizeMax: 2.0,
+        lifetimeMin: 0.25, lifetimeMax: 0.5,
+    });
+
+    // Smaller vanishes; compaction pass at end of physics removes it.
+    smaller.active = false;
   }
 
   /** Returns the ammo type asteroids should drop for the current wave. */

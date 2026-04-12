@@ -236,11 +236,19 @@ export const STRUCTURE_CONSTANTS = {
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
 // pass-through debris: players and enemies drift through them, shattering
-// them into 4 cloud-like shards with heavy linear & angular damping.
+// them into cloud-like shards with heavy linear & angular damping.  Each
+// collision spawns 3 children at 75% parent diameter, so total area grows
+// by ~1.7× per shatter — the cloud gains coverage on every impact and
+// re-equilibrates via a gravity-driven merge pass (smaller shards are
+// pulled into larger neighbours and absorbed).
 export const NEBULA_CONSTANTS = {
-  // Fraction-of-tile-area distribution for the four shards spawned when a
-  // nebula tile is destroyed.  Must sum to ≤ 1.0 (rounding safe).
-  SHARD_AREA_FRACTIONS: [0.4, 0.4, 0.1, 0.1] as number[],
+  // Per-shatter child count & size ratio.  3 × 0.75² = 1.6875× area.
+  SHARDS_PER_SHATTER: 3,
+  SHARD_SIZE_RATIO: 0.75,       // each child's linear size = 0.75 × parent
+  // Minimum diameter below which a shard is no longer shatter-able.  Keeps
+  // the system bounded under repeated impacts — sub-min shards simply
+  // pass-through without fragmenting further.
+  MIN_SHATTER_DIAMETER: 10,
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
@@ -258,6 +266,19 @@ export const NEBULA_CONSTANTS = {
   // barely drift — keep very low so damping catches it immediately).
   SCATTER_VELOCITY_FACTOR: 0.08,
   SCATTER_OUTWARD_SPEED: 0.35, // extra push outward from centre
+  // Shatter fan half-angle — 3 children are spread symmetrically around
+  // the striker's forward direction within ±FAN_HALF_ANGLE.
+  FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)
+  // Gravity pull: each shard is attracted to the nearest larger nebula
+  // entity within GRAVITY_RANGE.  The force curve is G / max(dist, MIN).
+  GRAVITY_RANGE: 380,
+  GRAVITY_STRENGTH: 650,
+  GRAVITY_MIN_DIST: 15,
+  // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
+  // the larger nebula absorbs the smaller one.
+  MERGE_PROXIMITY_K: 0.9,
+  // Particles emitted when a shard is absorbed.
+  MERGE_PARTICLES: 5,
   // Display-sprite scale multiplier for nebula tiles (visual only; the
   // interactable polygon is always the standard hex size).  Setting this
   // above 1 makes the cloud read as continuous between adjacent tiles.
