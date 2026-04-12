@@ -719,14 +719,12 @@ export class GameEngine {
 
             if (regen.entity.type === EntityType.NEBULA) {
                 // Tiles never grow (only shards do), so size is already
-                // canonical — no restore needed.  Just emit a small
-                // reappear puff tinted by the tile's composition.
+                // canonical.  Emit a glittery glimmer cluster centred on
+                // the tile as the "reappear" effect, tinted by the
+                // tile's colour composition.
                 const tint = blendCompositionToHex(regen.entity.nebulaColorComposition) || regen.entity.color;
-                this.spawnParticles(regen.entity.position, 5, tint, {
-                    speedMin: 0.5, speedMax: 2.0,
-                    sizeMin: 1, sizeMax: 2,
-                    lifetimeMin: 0.3, lifetimeMax: 0.6,
-                });
+                const glimmerR = Math.max(regen.entity.size.x, regen.entity.size.y) * 0.55;
+                this.spawnNebulaGlimmer(regen.entity.position, glimmerR, tint);
             } else {
                 // Glass tile: existing pop-in animation.
                 regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
@@ -1133,6 +1131,7 @@ export class GameEngine {
       spreadAngle?: number; // center angle (radians); undefined = full circle
       spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
       baseVelocity?: Vector2;
+      positionJitter?: number; // random offset radius around `position` (default 0)
     }
   ) {
     if (!this.currentMap) return;
@@ -1142,6 +1141,7 @@ export class GameEngine {
       lifetimeMin = 0.2, lifetimeMax = 0.45,
       spreadAngle, spreadCone,
       baseVelocity,
+      positionJitter = 0,
     } = options ?? {};
 
     const halfCone = spreadCone ?? Math.PI;
@@ -1154,10 +1154,21 @@ export class GameEngine {
       const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
       const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
 
+      // Optional position scatter — useful for spawning glittery clouds
+      // over an area (e.g. nebula merge glimmer) instead of a single point.
+      let px = position.x;
+      let py = position.y;
+      if (positionJitter > 0) {
+        const jAngle = Math.random() * Math.PI * 2;
+        const jDist  = Math.sqrt(Math.random()) * positionJitter; // uniform area
+        px += Math.cos(jAngle) * jDist;
+        py += Math.sin(jAngle) * jDist;
+      }
+
       this.currentMap.entities.push({
         id: `part_${Date.now()}_${i}_${Math.random()}`,
         type: EntityType.PARTICLE,
-        position: { x: position.x, y: position.y },
+        position: { x: px, y: py },
         velocity: {
           x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
           y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
@@ -1173,6 +1184,33 @@ export class GameEngine {
         mass:      0.1,
       });
     }
+  }
+
+  /**
+   * Glittery glimmer burst used for nebula merge / transmute / regen
+   * feedback.  Spawns two staggered passes of tiny additive particles
+   * scattered within a radius around the centre point:
+   *   - half in pure white for bright sparkle highlights
+   *   - half in the provided tint for colour continuity with the cloud
+   *
+   * Particles are tiny, long-lived, and drift almost-stationary, so the
+   * effect reads as a twinkling cluster of motes rather than a spark.
+   */
+  private spawnNebulaGlimmer(position: Vector2, radius: number, tint: string) {
+    // White highlight pass — bright punctuation points
+    this.spawnParticles(position, 8, '#ffffff', {
+      speedMin: 0.1, speedMax: 0.6,
+      sizeMin: 0.4, sizeMax: 1.2,
+      lifetimeMin: 0.5, lifetimeMax: 1.1,
+      positionJitter: radius,
+    });
+    // Tinted pass — softer, slightly larger coloured motes around/between
+    this.spawnParticles(position, 10, tint, {
+      speedMin: 0.1, speedMax: 0.5,
+      sizeMin: 0.6, sizeMax: 1.6,
+      lifetimeMin: 0.7, lifetimeMax: 1.3,
+      positionJitter: radius * 1.2,
+    });
   }
 
   /**
@@ -2651,14 +2689,11 @@ export class GameEngine {
     );
     larger.color = blendCompositionToHex(larger.nebulaColorComposition);
 
-    // Simple merge animation: brief tint-coloured particle puff at the
-    // absorption point, using the blended composition as the tint.
+    // Simple merge animation: glittery glimmer burst at the absorption
+    // point, scattered within a radius matching the larger shard.
     const tint = blendCompositionToHex(larger.nebulaColorComposition);
-    this.spawnParticles(smaller.position, NEBULA_CONSTANTS.MERGE_PARTICLES, tint, {
-        speedMin: 0.5, speedMax: 2.5,
-        sizeMin: 1.0, sizeMax: 2.0,
-        lifetimeMin: 0.25, lifetimeMax: 0.5,
-    });
+    const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
+    this.spawnNebulaGlimmer(smaller.position, glimmerR, tint);
 
     // Smaller vanishes; compaction pass at end of physics removes it.
     smaller.active = false;
@@ -2728,15 +2763,13 @@ export class GameEngine {
     this.currentMap.entities.push(tile);
     this.physics.addStaticEntity(tile);
 
-    // Shard collapses into the new tile — deactivate and leave a brief
-    // particle puff at the old shard position as the "condense" effect.
+    // Shard collapses into the new tile — deactivate and leave a
+    // glittery glimmer cluster at the shard's old position as the
+    // "condense" effect.  Use a larger jitter radius so the glimmer
+    // spans roughly the new tile footprint.
     shard.active = false;
     const tint = blendCompositionToHex(tile.nebulaColorComposition);
-    this.spawnParticles(shard.position, NEBULA_CONSTANTS.MERGE_PARTICLES * 2, tint, {
-        speedMin: 0.5, speedMax: 3.0,
-        sizeMin: 1.0, sizeMax: 2.5,
-        lifetimeMin: 0.3, lifetimeMax: 0.6,
-    });
+    this.spawnNebulaGlimmer(shard.position, Math.max(tile.size.x, tile.size.y) * 0.6, tint);
     return true;
   }
 

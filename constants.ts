@@ -295,8 +295,6 @@ export const NEBULA_CONSTANTS = {
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.
   MERGE_PROXIMITY_K: 0.9,
-  // Particles emitted when a shard is absorbed.
-  MERGE_PARTICLES: 5,
   // Display-sprite scale multiplier for nebula tiles and shards.  Both
   // draw at 2× the entity's physics size, so adjacent tiles in a cluster
   // (and nearby shards) have sprites that visibly bleed into each other
