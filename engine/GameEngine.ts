@@ -74,6 +74,14 @@ export class GameEngine {
   // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
   private trailDecayTimer: number = 0;
   private static readonly TRAIL_DECAY_DURATION = 0.6; // seconds
+  // Last unit-length thrust direction — stored so coasting trail emissions still
+  // know which way "backward" is (moveDir is zero while coasting)
+  private lastThrustDir: Vector2 = { x: 0, y: 0 };
+  // Last world position a trail point was emitted from (used for distance-gated
+  // emission; trail point positions themselves drift and can't be used directly)
+  private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };
+  // Per-frame drift speed of thrust-trail points along the -thrust direction
+  private static readonly THRUST_TRAIL_DRIFT = 1.2;
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -206,6 +214,8 @@ export class GameEngine {
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
+      this.lastThrustDir = { x: 0, y: 0 };
+      this.lastTrailEmitPos = { x: 0, y: 0 };
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -792,8 +802,14 @@ export class GameEngine {
 
     if (this.player.trail) {
         for (let i = this.player.trail.length - 1; i >= 0; i--) {
-            this.player.trail[i].lifetime -= dt;
-            if (this.player.trail[i].lifetime <= 0) {
+            const tp = this.player.trail[i];
+            tp.lifetime -= dt;
+            // Drift each trail point along its stored velocity so the trail
+            // streams backward in the thrust direction rather than marking
+            // the player's past positions.
+            if (tp.vx !== undefined) tp.x += tp.vx;
+            if (tp.vy !== undefined) tp.y += tp.vy;
+            if (tp.lifetime <= 0) {
                 this.player.trail.splice(i, 1);
             }
         }
@@ -802,28 +818,47 @@ export class GameEngine {
     const thrusting = throttle > 0;
     if (thrusting) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+        // Cache the current (normalized) thrust direction for use during the
+        // post-thrust decay window when moveDir is zero.
+        this.lastThrustDir.x = moveDir.x / throttle;
+        this.lastThrustDir.y = moveDir.y / throttle;
     } else {
         this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
     }
 
-    const lastPos = this.player.trail && this.player.trail.length > 0
-        ? this.player.trail[this.player.trail.length - 1]
-        : null;
+    // Distance-gated emission — compare against the last EMISSION position
+    // rather than the last trail point, since points drift after emission.
+    const emitDx = this.player.position.x - this.lastTrailEmitPos.x;
+    const emitDy = this.player.position.y - this.lastTrailEmitPos.y;
+    const emitDistSq = emitDx * emitDx + emitDy * emitDy;
+    const hasTrail = !!this.player.trail && this.player.trail.length > 0;
 
     if (this.trailDecayTimer > 0 &&
-            (!lastPos || ((this.player.position.x - lastPos.x)**2 + (this.player.position.y - lastPos.y)**2 > TRAIL_CONSTANTS.MIN_DISTANCE_SQ))) {
+            (!hasTrail || emitDistSq > TRAIL_CONSTANTS.MIN_DISTANCE_SQ)) {
         // t: 1.0 while thrusting, tapers to 0 over the decay window.
         // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
         const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
         const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
+        // Offset emission to the ship's rear relative to thrust direction so
+        // the trail visibly comes out the back, not the center of the sprite.
+        const halfSize = this.player.size.x / 2;
+        const tdx = this.lastThrustDir.x;
+        const tdy = this.lastThrustDir.y;
+        const drift = GameEngine.THRUST_TRAIL_DRIFT;
         this.player.trail = this.player.trail || [];
         this.player.trail.push({
-            x: this.player.position.x,
-            y: this.player.position.y,
+            x: this.player.position.x - tdx * halfSize,
+            y: this.player.position.y - tdy * halfSize,
             lifetime: pointLifetime,
             maxLifetime: pointLifetime,
             scale: t,
+            // Per-frame backward drift so consecutive points form a strip
+            // aligned with the thrust axis regardless of player motion.
+            vx: -tdx * drift,
+            vy: -tdy * drift,
         });
+        this.lastTrailEmitPos.x = this.player.position.x;
+        this.lastTrailEmitPos.y = this.player.position.y;
     }
 
     // Glitter trail — emits independently of thrust, based purely on motion
@@ -1220,6 +1255,8 @@ export class GameEngine {
       this.player.rotation = 0;
       this.player.trail = [];
       this.trailDecayTimer = 0;
+      this.lastThrustDir = { x: 0, y: 0 };
+      this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;

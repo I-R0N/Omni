@@ -22,6 +22,11 @@ export interface TrailPoint extends Vector2 {
   lifetime: number;
   maxLifetime: number;
   scale: number; // Width multiplier: 1.0 during thrust, tapers toward 0 during decay
+  // Optional per-point drift velocity (per-frame).  Used by the player thrust
+  // trail so emitted points stream backward along the thrust direction rather
+  // than following the player's motion path.
+  vx?: number;
+  vy?: number;
 }
 
 export interface Rect {
