@@ -497,17 +497,27 @@ export class PhysicsSystem {
                   // face we bounce off of.
                   const tileHX = target.size.x / 2;
                   const tileHY = target.size.y / 2;
-                  // Use a conservative projectile radius so the push-out always
-                  // clears the tile regardless of projectile rotation.
-                  const projR = Math.max(proj.size.x, proj.size.y) / 2;
-                  const dHX = tileHX + projR;
-                  const dHY = tileHY + projR;
+
+                  // Effective projectile half-extents along world X and Y,
+                  // accounting for the projectile's rotation. This lets us push
+                  // the projectile out just enough to clear the tile face,
+                  // avoiding big visual teleports that break the trail.
+                  const cosR = Math.abs(Math.cos(proj.rotation));
+                  const sinR = Math.abs(Math.sin(proj.rotation));
+                  const hw = proj.size.x / 2;
+                  const hh = proj.size.y / 2;
+                  const hxEff = cosR * hw + sinR * hh;
+                  const hyEff = sinR * hw + cosR * hh;
 
                   const vx = proj.velocity.x;
                   const vy = proj.velocity.y;
                   const relX = proj.position.x - target.position.x;
                   const relY = proj.position.y - target.position.y;
 
+                  // Reverse-unwind time to the entry face along each axis, using
+                  // a conservative dilated AABB (use max effective half-extent).
+                  const dHX = tileHX + hxEff;
+                  const dHY = tileHY + hyEff;
                   let tX = Infinity;
                   let tY = Infinity;
                   if (vx >  0.0001) tX = (relX + dHX) / vx;  // entered through left face
@@ -517,15 +527,15 @@ export class PhysicsSystem {
 
                   // Pick the entry axis: the one with the SMALLER reverse-unwind
                   // time was crossed last, so that's the face we're reflecting off.
+                  // Snap the projectile position to just outside that face + ε.
                   if (tX <= tY) {
                       proj.velocity.x = -vx;
-                      // Push out along X so next frame doesn't re-collide with this tile
                       const nx = vx > 0 ? -1 : 1;
-                      proj.position.x = target.position.x + nx * dHX + nx * 0.5;
+                      proj.position.x = target.position.x + nx * (tileHX + hxEff + 0.5);
                   } else {
                       proj.velocity.y = -vy;
                       const ny = vy > 0 ? -1 : 1;
-                      proj.position.y = target.position.y + ny * dHY + ny * 0.5;
+                      proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
                   }
                   proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
                   return;

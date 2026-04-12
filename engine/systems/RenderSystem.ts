@@ -749,31 +749,17 @@ export class RenderSystem {
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.restore();
                 } else if (entity.isBouncer) {
-                    // ── Bouncer projectile: semi-long green line ──
-                    // Entity is already rotated so +X points along travel direction.
+                    // ── Bouncer projectile: the beam body is drawn entirely by
+                    // the fast-fading trail in renderTrails. All we draw here
+                    // is a small green head dot so the beam has a visible tip
+                    // even before the trail accumulates its first couple of
+                    // points (first 1–2 frames after spawn).
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
-                    ctx.globalCompositeOperation = 'lighter';
-
-                    const halfLen = r * 3.5;   // semi-long along travel
-                    const halfThk = 0.7;        // thin perpendicular
-
-                    // Subtle pure-green halo
-                    const glowR = halfLen * 1.1;
-                    const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                    glowGrad.addColorStop(0,   'rgba(34, 197,  94, 0.35)');
-                    glowGrad.addColorStop(0.6, 'rgba(34, 197,  94, 0.08)');
-                    glowGrad.addColorStop(1,   'rgba(34, 197,  94, 0)');
-                    ctx.fillStyle = glowGrad;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    // Beam body — pure green line
                     ctx.fillStyle = '#22c55e';
-                    ctx.fillRect(-halfLen, -halfThk, halfLen * 2, halfThk * 2);
-
-                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
+                    ctx.fill();
                     ctx.restore();
                 } else {
                     // ── Standard projectile: radial gradient glow ──

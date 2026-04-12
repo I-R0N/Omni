@@ -1320,16 +1320,18 @@ export class GameEngine {
       const entities = this.currentMap.entities;
       const TRAIL_LIFETIME = 0.25; // shorter than player trail
       const TRAIL_SCALE = 0.5;
+      // Bouncer beams are visualized entirely by their trail, which fades
+      // almost instantly so the beam reads as a short moving line segment.
+      const BOUNCER_TRAIL_LIFETIME = 0.08;
+      const BOUNCER_TRAIL_SCALE = 0.55;
       const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
 
       for (let i = 0; i < entities.length; i++) {
           const p = entities[i];
           if (!p.active || p.type !== EntityType.PROJECTILE) continue;
-          // Bouncer beams render as a crisp line — no trail
-          if (p.isBouncer) {
-              if (p.trail) p.trail.length = 0;
-              continue;
-          }
+
+          const lifetime = p.isBouncer ? BOUNCER_TRAIL_LIFETIME : TRAIL_LIFETIME;
+          const scale = p.isBouncer ? BOUNCER_TRAIL_SCALE : TRAIL_SCALE;
 
           // Decay existing trail points (write-index avoids O(n) splice shifts)
           if (p.trail) {
@@ -1354,9 +1356,9 @@ export class GameEngine {
               t.push({
                   x: p.position.x,
                   y: p.position.y,
-                  lifetime: TRAIL_LIFETIME,
-                  maxLifetime: TRAIL_LIFETIME,
-                  scale: TRAIL_SCALE,
+                  lifetime,
+                  maxLifetime: lifetime,
+                  scale,
               });
           }
       }
