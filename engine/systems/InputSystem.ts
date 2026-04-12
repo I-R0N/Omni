@@ -23,17 +23,25 @@ export class InputSystem {
   }
 
   private initListeners() {
-    // Keyboard
-    window.addEventListener('keydown', (e) => this.keys.add(e.code));
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    
+    // Keyboard — skip events targeted at text inputs so the multiplayer
+    // menu (and any future text field) can be typed into without the ship
+    // also responding to WASD.
+    window.addEventListener('keydown', (e) => {
+      if (this.isTextInputTarget(e.target)) return;
+      this.keys.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => {
+      if (this.isTextInputTarget(e.target)) return;
+      this.keys.delete(e.code);
+    });
+
     // Mouse
     window.addEventListener('mousemove', (e) => {
       this.mousePosition = { x: e.clientX, y: e.clientY };
     });
     window.addEventListener('mousedown', this.handleMouseDown);
     window.addEventListener('mouseup', this.handleMouseUp);
-    
+
     // Note: We removed 'click' listener to handle timing manually in mouseup
 
     // Touch (Passive false allows us to prevent scrolling)
@@ -43,12 +51,32 @@ export class InputSystem {
     window.addEventListener('touchcancel', this.handleTouchEnd);
   }
 
-  // Helper to detect if we should ignore input (e.g. clicking UI buttons)
+  // True if the event target is a text-editing element.  Used to skip
+  // keyboard captures so the user can type normally.
+  private isTextInputTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el || !el.tagName) return false;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return true;
+    if ((el as HTMLElement).isContentEditable) return true;
+    return false;
+  }
+
+  // Helper to detect if we should ignore input (e.g. clicking UI buttons,
+  // typing in a multiplayer SDP textarea, tapping inside any surface marked
+  // as data-ui-surface).  Without this, InputSystem.handleTouchStart would
+  // preventDefault() on the tap and block iOS Safari from focusing the text
+  // field.
   private shouldIgnoreEvent(e: Event): boolean {
-    const target = e.target as HTMLElement;
-    // Check if clicking on a button or inside a button (e.g. span inside button)
-    if (target && (target.tagName === 'BUTTON' || target.closest('button'))) {
-      return true;
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName;
+    if (tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return true;
+    if (typeof target.closest === 'function') {
+      if (target.closest('button')) return true;
+      if (target.closest('textarea')) return true;
+      if (target.closest('input')) return true;
+      if (target.closest('[data-ui-surface]')) return true;
     }
     return false;
   }

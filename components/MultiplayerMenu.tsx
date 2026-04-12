@@ -155,7 +155,10 @@ const MultiplayerMenu: React.FC<MultiplayerMenuProps> = ({ engine, onClose, onSe
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="absolute inset-0 bg-slate-950/95 flex items-center justify-center pointer-events-auto z-[60] p-4">
+    <div
+      data-ui-surface
+      className="absolute inset-0 bg-slate-950/95 flex items-center justify-center pointer-events-auto z-[60] p-4"
+    >
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-y-auto">
         <div className="p-6">
           <div className="flex justify-between items-center mb-6">
