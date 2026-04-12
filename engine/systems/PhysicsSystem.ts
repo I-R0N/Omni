@@ -479,26 +479,13 @@ export class PhysicsSystem {
 
           // Bouncer projectiles reflect off tiles (STRUCTURE) and tile shards
           // (ASTEROID with shardType === 'tile') instead of being consumed.
+          // They do NOT damage tiles — a damaged tile dies in one shot (HEALTH=1),
+          // which would leave nothing to bounce off of.
           if (proj.isBouncer) {
               const isTile = target.type === EntityType.STRUCTURE
                   || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
               if (isTile) {
-                  target.health -= (proj.damage || 1);
-                  target.hitFlash = 0.1;
                   if (onHit) onHit(proj.position, proj, target);
-                  if (onDamage) onDamage(target.position, proj.damage || 1, target);
-
-                  // Tile destroyed — projectile continues straight through
-                  if (target.health <= 0) {
-                      if (proj.velocity) target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
-                      target.lastImpactDamage = proj.damage ?? 1;
-                      if (target.type === EntityType.STRUCTURE && target.mass === Infinity) {
-                          this.removeStaticEntity(target);
-                      }
-                      if (onDeath) onDeath(target);
-                      if (!target.isExploding) target.active = false;
-                      return;
-                  }
 
                   // Reflect velocity off the surface normal (out of target, toward projectile).
                   // mtv points from a → b, so the outward normal toward the projectile is
