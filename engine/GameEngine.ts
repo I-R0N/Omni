@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -826,6 +826,9 @@ export class GameEngine {
         });
     }
 
+    // Glitter trail — emits independently of thrust, based purely on motion
+    this.spawnGlitterTrail();
+
     const mousePos = this.input.getMousePosition();
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
@@ -1042,6 +1045,64 @@ export class GameEngine {
         lifetime:  life,
         maxLifetime: life,
         mass:      0.1,
+      });
+    }
+  }
+
+  /**
+   * Glitter trail — spawns tiny additive-blended sparkles trailing behind the
+   * player along the current velocity vector.  Density is triangularly
+   * distributed across the player's width (peaked on the center-line, falling
+   * off toward the edges).  Particles have zero velocity so they stay put
+   * while the player moves forward, naturally forming a trail.
+   */
+  private spawnGlitterTrail() {
+    if (!this.currentMap) return;
+    const v = this.player.velocity;
+    const speedSq = v.x * v.x + v.y * v.y;
+    if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
+
+    const speed = Math.sqrt(speedSq);
+    // Forward unit vector (direction of travel) and its perpendicular
+    const fx = v.x / speed;
+    const fy = v.y / speed;
+    const perpX = -fy;
+    const perpY = fx;
+
+    const halfWidth = this.player.size.x / 2;
+    // Spawn at the player's tail so particles appear behind, not on top of, the sprite
+    const tailX = this.player.position.x - fx * halfWidth;
+    const tailY = this.player.position.y - fy * halfWidth;
+
+    const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
+
+    for (let i = 0; i < COUNT_PER_FRAME; i++) {
+      // Triangular distribution in [-1, 1] peaked at 0 — gives denser center,
+      // sparser edges across the player's width.
+      const u = Math.random() - Math.random();
+      const lateral = u * halfWidth;
+
+      const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
+      const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
+      const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
+
+      this.currentMap.entities.push({
+        id: `glit_${Date.now()}_${i}_${Math.random()}`,
+        type: EntityType.PARTICLE,
+        position: {
+          x: tailX + perpX * lateral,
+          y: tailY + perpY * lateral,
+        },
+        velocity: { x: 0, y: 0 },
+        size: { x: size, y: size },
+        rotation: 0,
+        color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        lifetime: life,
+        maxLifetime: life,
+        mass: 0.01,
       });
     }
   }
