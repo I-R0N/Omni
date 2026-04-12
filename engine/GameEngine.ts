@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, GRAVITATIONAL_LENS_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -375,6 +375,65 @@ export class GameEngine {
       }
   }
 
+  /**
+   * Apply the gravitational-lens warp field as a physical force on nearby entities.
+   * Mirrors the visual lens profile exactly: same radial falloff, same -cos^FOCUS
+   * directional modulation. Entities behind the ship are pushed outward (space
+   * expands in the wake), entities ahead are pulled inward (space contracts), and
+   * entities at the sides feel nothing. Force is mass-independent (spacetime warp
+   * carries everything along equally), and skipped entirely when thrust is idle.
+   * Structures (Infinity mass) and the player itself are excluded.
+   */
+  private applyThrustGravity(dt: number) {
+      const thrust = this.player.thrust ?? 0;
+      if (thrust < GRAVITATIONAL_LENS_CONSTANTS.MIN_THRESHOLD) return;
+
+      const iv = this.player.inputVector;
+      if (!iv) return;
+      const ivMag = Math.sqrt(iv.x * iv.x + iv.y * iv.y);
+      if (ivMag < 0.01) return;
+
+      const thrustAngle = Math.atan2(iv.y, iv.x);
+      const px = this.player.position.x;
+      const py = this.player.position.y;
+
+      const radius = GRAVITATIONAL_LENS_CONSTANTS.PHYSICS_RADIUS;
+      const radiusSq = radius * radius;
+      const soft = GRAVITATIONAL_LENS_CONSTANTS.PHYSICS_SOFTENING;
+      const softSq = soft * soft;
+      const peakAccel = GRAVITATIONAL_LENS_CONSTANTS.PHYSICS_ACCELERATION * thrust;
+      const focus = GRAVITATIONAL_LENS_CONSTANTS.FOCUS;
+
+      for (let i = 0; i < this.frameEntities.length; i++) {
+          const e = this.frameEntities[i];
+          if (!e.active) continue;
+          if (e.type !== EntityType.ASTEROID &&
+              e.type !== EntityType.ENEMY &&
+              !(e.type === EntityType.INTERACTABLE && e.dropType)) continue;
+          if (!Number.isFinite(e.mass)) continue; // Skip immovable structures
+
+          const dx = e.position.x - px;
+          const dy = e.position.y - py;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > radiusSq || distSq < 1) continue;
+
+          const dist = Math.sqrt(distSq);
+
+          // Directional focus — same formula as the visual shader
+          const entAngle = Math.atan2(dy, dx);
+          const rawCos = -Math.cos(entAngle - thrustAngle);
+          const dirFactor = Math.sign(rawCos) * Math.pow(Math.abs(rawCos), focus);
+
+          // Lens profile: peaks at r = soft, falls off as 1/r at large r
+          const a = peakAccel * (2 * soft * dist) / (distSq + softSq) * dirFactor;
+
+          const nx = dx / dist;
+          const ny = dy / dist;
+          e.velocity.x += nx * a * dt;
+          e.velocity.y += ny * a * dt;
+      }
+  }
+
   private updatePhysics(dt: number) {
       if (!this.currentMap) return;
 
@@ -739,6 +798,9 @@ export class GameEngine {
     this.player.velocity.y += moveDir.y * acc * timeScale;
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
     this.player.thrust = throttle;
+
+    // Warp-field force on nearby entities — physically mirrors the visual lens
+    this.applyThrustGravity(dt);
 
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
     if (currentSpeed > maxSpeed) {
