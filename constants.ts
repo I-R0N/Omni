@@ -259,9 +259,11 @@ export const NEBULA_CONSTANTS = {
   // ≈ one tile width, so roughly every other tile gets broken in a row.
   IMPACT_COOLDOWN: 0.2,
   // How far from the destroyed parent's centre to spawn new shards, in
-  // multiples of the parent's radius.  At 2.0 they sit ~1 full tile width
-  // behind the striker — outside the striker's forward path.
-  SHARD_SPAWN_OFFSET_RATIO: 2.0,
+  // multiples of the parent's radius.  At 1.5 they sit ~0.75 tile-widths
+  // behind the striker — close enough that the "dragged along" visual
+  // reads well, far enough that the re-collision cooldown (IMPACT_COOLDOWN)
+  // safely clears before the player overlaps the shard again.
+  SHARD_SPAWN_OFFSET_RATIO: 1.5,
   // Regen delay: nebula tiles reappear after this many seconds, matching
   // the glass-tile regen cadence.  Grown tiles snap back to their hex size
   // on regen so merge growth can't compound across cycles.
@@ -285,10 +287,18 @@ export const NEBULA_CONSTANTS = {
   // perpendicular push based on tangent side gives each shard a slight
   // lateral drift that matches its rotation direction.
   //
+  // At FORWARD_DRAG_FACTOR = 1.2, shards launch at 120% of the striker's
+  // speed — slightly *faster* than the striker initially, so damping
+  // (0.988) pulls them toward matching the striker's speed around t=0.25s.
+  // During that catch-up window they appear to move with the player
+  // instead of falling straight behind.  After ~0.25s damping has taken
+  // over and shards gradually fall behind (visually "left in the wake"),
+  // which is the natural "dragged along" arc.
+  //
   // parallel_velocity = max(MIN_PARALLEL_SPEED,
   //                         impactSpeed × FORWARD_DRAG_FACTOR)
   // perp_velocity     = impactSpeed × PERP_SCATTER_FACTOR
-  FORWARD_DRAG_FACTOR: 0.35,
+  FORWARD_DRAG_FACTOR: 1.2,
   PERP_SCATTER_FACTOR: 0.04,
   MIN_PARALLEL_SPEED: 0.3,
   // Shatter fan half-angle — 3 children are spread symmetrically around
