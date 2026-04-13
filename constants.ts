@@ -268,10 +268,11 @@ export const NEBULA_CONSTANTS = {
   // the glass-tile regen cadence.  Grown tiles snap back to their hex size
   // on regen so merge growth can't compound across cycles.
   REGEN_DELAY: 12,
-  // Seconds a shattered nebula tile takes to fade from full alpha to
-  // invisible before entering the regen wait.  Shards still vanish
-  // instantly — only tile destruction fades.
-  FADE_DURATION: 0.4,
+  // Seconds a shattered nebula tile or shard takes to fade from full
+  // alpha to invisible before entering the regen wait (tiles) or being
+  // compacted out (shards).  Longer than the old 0.4 s for a more
+  // graceful dissolution.
+  FADE_DURATION: 1.0,
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
