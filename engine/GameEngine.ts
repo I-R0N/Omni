@@ -707,6 +707,29 @@ export class GameEngine {
     }
 
     // Tile regeneration tick — handles both STRUCTURE (glass) and NEBULA.
+    // Nebula regen uses a rule-based color pass that reads its neighbours'
+    // compositions from a lazily-built grid index (one scan per frame, not
+    // one per regen, so the cost stays O(n) at worst).
+    let nebulaGridIndex: Map<number, GameEntity> | null = null;
+    const buildNebulaIndex = (): Map<number, GameEntity> => {
+        if (nebulaGridIndex) return nebulaGridIndex;
+        const map = new Map<number, GameEntity>();
+        if (this.currentMap) {
+            const ents = this.currentMap.entities;
+            for (let k = 0; k < ents.length; k++) {
+                const e = ents[k];
+                if (e.type !== EntityType.NEBULA) continue;
+                if (!e.active) continue;
+                if (e.nebulaFadeTimer !== undefined) continue;
+                if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
+                const key = (e.nebulaGridCol << 16) | (e.nebulaGridRow & 0xFFFF);
+                map.set(key, e);
+            }
+        }
+        nebulaGridIndex = map;
+        return map;
+    };
+
     for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
         const regen = this.pendingRegens[i];
         regen.timer -= dt;
@@ -724,11 +747,17 @@ export class GameEngine {
 
             if (regen.entity.type === EntityType.NEBULA) {
                 // Tiles never grow (only shards do), so size is already
-                // canonical.  On regen, assign a fresh random-hue palette
-                // so the cloud cycles through new colours across
-                // shatter/respawn cycles rather than always reappearing
-                // in its prior hue.
-                regen.entity.nebulaColorComposition = randomNebulaComposition();
+                // canonical.  Rule-based colour regeneration (see
+                // computeRegeneratedNebulaComposition) reads the
+                // regenerating tile's 6 hex neighbours and blends their
+                // compositions with the old tile's composition based on
+                // isolation level — interior tiles smooth toward the
+                // cluster average, edge tiles drift less, isolated
+                // tiles keep their old hue exactly.
+                regen.entity.nebulaColorComposition = this.computeRegeneratedNebulaComposition(
+                    regen.entity,
+                    buildNebulaIndex()
+                );
                 regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
                 // Emit a glittery glimmer cluster centred on the tile as
                 // the "reappear" effect, tinted by the new composition.
@@ -750,6 +779,16 @@ export class GameEngine {
             // Re-add to the static grid so collisions start hitting again.
             this.physics.addStaticEntity(regen.entity);
             this.pendingRegens.splice(i, 1);
+
+            // The just-regenerated tile should now count as a neighbour for
+            // any later regens in this same frame (cluster-wide shatter).
+            if (regen.entity.type === EntityType.NEBULA
+                && regen.entity.nebulaGridCol !== undefined
+                && regen.entity.nebulaGridRow !== undefined) {
+                const key = (regen.entity.nebulaGridCol << 16)
+                          | (regen.entity.nebulaGridRow & 0xFFFF);
+                buildNebulaIndex().set(key, regen.entity);
+            }
         }
     }
 
@@ -2723,6 +2762,98 @@ export class GameEngine {
 
     // Smaller vanishes; compaction pass at end of physics removes it.
     smaller.active = false;
+  }
+
+  /**
+   * Deterministic, neighbourhood-aware colour rule for regenerating
+   * nebula tiles.
+   *
+   * Reads the regenerating tile's 6 hex neighbours from the supplied
+   * grid index, collects the compositions of those that are active
+   * (non-fading) NEBULA tiles, and blends them area-weighted into a
+   * single "neighbour average" composition.  The final composition is
+   * a mix of the tile's OLD composition and that neighbour average,
+   * weighted by how isolated the tile is:
+   *
+   *   emptyCount    = 6 − activeNeighbours.length
+   *   oldWeight     = emptyCount / 6      // 0 = surrounded, 1 = isolated
+   *   neighborWeight = 1 − oldWeight
+   *
+   * Consequences:
+   * - Fully surrounded interior tiles adopt the local cluster average
+   *   exactly (oldWeight = 0, old colour forgotten).  Interior
+   *   homogenises over many regens.
+   * - Edge tiles retain most of their old colour while drifting
+   *   slightly toward their few active neighbours — edges change
+   *   slowly, preserving variation at cluster boundaries.
+   * - Tiles with no active neighbours (transient fully-broken state)
+   *   keep their old colour unchanged, so an isolated regen never
+   *   randomises.
+   * - No RNG — identical map state yields identical regen colours,
+   *   so the cloud evolves along a deterministic rule instead of
+   *   sliding into noise after repeated player flythroughs.
+   */
+  private computeRegeneratedNebulaComposition(
+    tile: GameEntity,
+    nebulaIndex: Map<number, GameEntity>
+  ): NebulaColorStop[] {
+    // Fallback if the tile has no existing composition — should not
+    // happen in practice (tiles always get one at generation time)
+    // but keeps the path safe.
+    const oldComp = tile.nebulaColorComposition ?? randomNebulaComposition();
+
+    if (tile.nebulaGridCol === undefined || tile.nebulaGridRow === undefined) {
+        return cloneComposition(oldComp);
+    }
+
+    // Collect active-neighbour compositions, area-weighted.
+    const neighbors = TileGenerator.getHexNeighbors(tile.nebulaGridCol, tile.nebulaGridRow);
+    const entries: Array<{ comp: NebulaColorStop[]; weight: number }> = [];
+    for (const n of neighbors) {
+        const key = (n.c << 16) | (n.r & 0xFFFF);
+        const nTile = nebulaIndex.get(key);
+        if (!nTile || !nTile.nebulaColorComposition) continue;
+        // Skip the regenerating tile itself if it somehow ended up in
+        // the index (defensive — the buildNebulaIndex pass filters on
+        // active tiles and the regen hasn't re-added itself yet).
+        if (nTile === tile) continue;
+        const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+        entries.push({ comp: nTile.nebulaColorComposition, weight: Math.PI * r * r });
+    }
+
+    if (entries.length === 0) {
+        // No active neighbours — keep the old composition exactly.
+        return cloneComposition(oldComp);
+    }
+
+    // Area-weighted blend of all active neighbours.
+    let neighborBlend = cloneComposition(entries[0].comp);
+    let accumWeight = entries[0].weight;
+    for (let i = 1; i < entries.length; i++) {
+        neighborBlend = blendCompositions(
+            neighborBlend, accumWeight,
+            entries[i].comp, entries[i].weight
+        );
+        accumWeight += entries[i].weight;
+    }
+
+    // Mix with old composition based on isolation level.  The ratio
+    // oldWeight : neighborWeight is all that matters for blendCompositions
+    // so we can pass the fractions directly as external weights.
+    const NUM_NEIGHBORS = 6;
+    const emptyCount = NUM_NEIGHBORS - entries.length;
+    const oldWeight = emptyCount / NUM_NEIGHBORS;
+    const neighborWeight = 1 - oldWeight;
+
+    if (oldWeight <= 0) {
+        // Fully surrounded: adopt the neighbour blend exactly.
+        return neighborBlend;
+    }
+
+    return blendCompositions(
+        oldComp, oldWeight,
+        neighborBlend, neighborWeight
+    );
   }
 
   /**
