@@ -269,17 +269,19 @@ export const NEBULA_CONSTANTS = {
   // "soft" cloud layer, they should heal quickly so clusters don't
   // stay punched-out behind the player for long.
   REGEN_DELAY: 3,
-  // Seconds a shattered nebula tile or shard takes to fade from full
-  // alpha to invisible before entering the regen wait (tiles) or being
-  // compacted out (shards).  Longer than the old 0.4 s for a more
-  // graceful dissolution.
+  // Base (slow-collision) fade durations.  Actual per-entity durations
+  // scale inversely with impact speed via nebulaFadeRateScale() — a
+  // fast collision produces a shorter, snappier fade while a gentle
+  // drift-through keeps the slow graceful dissolution.
   FADE_DURATION: 1.0,
-  // Seconds for a newly-created tile/shard to fade IN from alpha 0 to
-  // full.  Applied at map init, regen completion, shard shatter, and
-  // shard→tile transmutation, so every birth event is a slow reveal
-  // rather than an instant pop.  Slightly longer than fade-out so the
-  // cloud's arrivals feel gentler than its dissipations.
   FADE_IN_DURATION: 1.5,
+  // Impact-speed → fade-rate mapping.  impactSpeed/REFERENCE_SPEED gives
+  // the rate scale, clamped to [1, MAX_SCALE].  At rateScale = 1 the
+  // base durations above are used; higher scales divide the duration
+  // (faster fade).  REFERENCE_SPEED is in px/frame — a "moderate"
+  // collision (about half player max thrust) maps to rateScale > 1.
+  FADE_RATE_REFERENCE_SPEED: 1.0,
+  FADE_RATE_MAX_SCALE: 3.0,
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
@@ -360,6 +362,22 @@ export const NEBULA_CONSTANTS = {
   // Default composition hex used if a tile spawns with no palette selection.
   DEFAULT_HEX: '#a78bfa',
 };
+
+/**
+ * Map an impact speed (px/frame) to a nebula fade rate scale in
+ * [1, NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE].  Higher scales produce
+ * faster fade-out AND fade-in durations (duration = base / scale).
+ *
+ * Shared by PhysicsSystem (when arming a tile/shard's fade-out timer)
+ * and GameEngine (when arming a newly-spawned shard's fade-in timer)
+ * so destruction and rebirth feel synchronized for the same hit.
+ */
+export function nebulaFadeRateScale(impactSpeed: number): number {
+  const raw = impactSpeed / NEBULA_CONSTANTS.FADE_RATE_REFERENCE_SPEED;
+  if (raw <= 1) return 1;
+  if (raw >= NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE) return NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE;
+  return raw;
+}
 
 export const EXPLOSION_CONSTANTS = {
   DURATION: 0.6, // Seconds

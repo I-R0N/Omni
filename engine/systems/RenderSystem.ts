@@ -548,17 +548,22 @@ export class RenderSystem {
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
           const tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
           const spriteSrc = entity.sprite;
-          // Fade multiplier for shattered nebula tiles/shards — stays
-          // at 1.0 for anything without a fade timer set.
-          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0
-              ? Math.max(0, entity.nebulaFadeTimer / NEBULA_CONSTANTS.FADE_DURATION)
+          // Fade-out multiplier — per-entity duration lets fast-collision
+          // shatters use a shorter, snappier fade than slow drift-through
+          // collisions.  Falls back to the base constant for legacy tiles
+          // without the per-entity duration field set.
+          const fadeDuration = entity.nebulaFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
+          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0 && fadeDuration > 0
+              ? Math.max(0, entity.nebulaFadeTimer / fadeDuration)
               : 1.0;
-          // Birth fade-in multiplier — starts at 0 when the spawn timer
-          // is full and ramps to 1 as it counts down.  Combines with
-          // fadeMul multiplicatively so a tile shattered mid-birth
-          // smoothly crossfades from its current alpha toward zero.
-          const spawnMul = entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0
-              ? Math.max(0, 1 - entity.nebulaSpawnTimer / NEBULA_CONSTANTS.FADE_IN_DURATION)
+          // Fade-in multiplier — same per-entity duration treatment so
+          // child shards from a fast collision fade in fast, matching
+          // their parent tile's fade-out rate.  Combines multiplicatively
+          // with fadeMul so a tile shattered mid-birth smoothly crossfades
+          // from its current alpha toward zero.
+          const spawnDuration = entity.nebulaSpawnDuration ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
+          const spawnMul = entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0 && spawnDuration > 0
+              ? Math.max(0, 1 - entity.nebulaSpawnTimer / spawnDuration)
               : 1.0;
           if (spriteSrc) {
               const tinted = this.getTintedSprite(spriteSrc, tintHex);

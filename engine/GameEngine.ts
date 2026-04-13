@@ -7,7 +7,7 @@ import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { HEX_SIZE, HEX_AREA, TileGenerator, pixelToHexCoord, hexCoordToPixel } from './maps/TileGenerator';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NebulaColorStop } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition, hexToHueDeg, paletteHueToHex, clampHueToPalette, circularHueDistance, circularHueAverage, circularLerpHue } from './NebulaColor';
@@ -760,7 +760,10 @@ export class GameEngine {
                 );
                 regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
                 // Fade in slowly instead of popping — no glimmer burst.
-                regen.entity.nebulaSpawnTimer = NEBULA_CONSTANTS.FADE_IN_DURATION;
+                // Regen is not a collision event, so the base (slow) fade-in
+                // is used regardless of how fast the original shatter was.
+                regen.entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
+                regen.entity.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
             } else {
                 // Glass tile: existing pop-in animation.
                 regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
@@ -2504,6 +2507,13 @@ export class GameEngine {
         1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED
     );
 
+    // Effective birth fade-in duration — scales inversely with the
+    // striker's impact speed.  Uses the same rateScale the PhysicsSystem
+    // used for the parent's fade-out duration, so destruction and rebirth
+    // animations feel synchronized for the same collision.
+    const shardRateScale = nebulaFadeRateScale(impactSpeed);
+    const shardSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION / shardRateScale;
+
     // REARWARD fan: children spawn behind the striker's motion direction
     // so they're not in the striker's forward path.  Base angle = π (180°
     // from forward), spread symmetrically by ± FAN_HALF_ANGLE.  With
@@ -2579,8 +2589,11 @@ export class GameEngine {
             linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
             angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
             // Fade-in on birth — shards slowly materialize behind the
-            // striker instead of popping in instantly.
-            nebulaSpawnTimer: NEBULA_CONSTANTS.FADE_IN_DURATION,
+            // striker instead of popping in instantly.  Duration scales
+            // with striker impact speed (matching the parent tile's
+            // fade-out rate) so fast hits produce fast rebirths.
+            nebulaSpawnTimer:    shardSpawnDuration,
+            nebulaSpawnDuration: shardSpawnDuration,
         });
     }
   }
@@ -2916,10 +2929,11 @@ export class GameEngine {
     this.physics.addStaticEntity(tile);
 
     // New tile fades in slowly instead of popping — no glimmer burst.
-    // createNebulaTileEntity already sets nebulaSpawnTimer, but we
-    // re-set it here for clarity (and to future-proof if the factory
-    // default ever changes).
-    tile.nebulaSpawnTimer = NEBULA_CONSTANTS.FADE_IN_DURATION;
+    // createNebulaTileEntity already sets both spawn fields, but we
+    // re-set them here for clarity.  Transmutation is a soft "condense"
+    // event (no striker impact), so the base slow fade-in is used.
+    tile.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
+    tile.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
 
     // Shard collapses into the new tile.
     shard.active = false;

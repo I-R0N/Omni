@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -539,12 +539,19 @@ export class PhysicsSystem {
                   }
                   nebula.lastImpactDamage = 1;
                   nebula.health = 0;
-                  // Tiles AND shards fade out over FADE_DURATION instead
-                  // of vanishing instantly — the renderer multiplies the
-                  // base alpha by fadeTimer/FADE_DURATION, and the
-                  // per-frame tick above clears the timer and sets
-                  // active=false when it expires.
-                  nebula.nebulaFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
+                  // Effective fade-out duration scales with impact speed —
+                  // a fast collision snaps through the fade, while slow
+                  // drift-through keeps the graceful 1s dissolution.
+                  // Both the duration AND the initial timer value get
+                  // the scaled value so the renderer's alpha = timer /
+                  // duration normalisation stays correct.
+                  const impactSpeed = other.velocity
+                      ? Math.sqrt(other.velocity.x * other.velocity.x + other.velocity.y * other.velocity.y)
+                      : 0;
+                  const rateScale = nebulaFadeRateScale(impactSpeed);
+                  const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
+                  nebula.nebulaFadeTimer = scaledFadeDuration;
+                  nebula.nebulaFadeDuration = scaledFadeDuration;
                   if (nebula.type === EntityType.NEBULA) {
                       // Tiles live in the static grid — pull them out so
                       // the player can drift through the fading cell.

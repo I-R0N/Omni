@@ -295,7 +295,11 @@ export class TileGenerator {
         nebulaGridRow: r,
         // Fade-in on birth — all newly-created tiles (including map-init
         // clusters) slowly materialize rather than popping in instantly.
-        nebulaSpawnTimer: NEBULA_CONSTANTS.FADE_IN_DURATION,
+        // Factory-built tiles use the base duration (no collision context
+        // → nothing to scale against).  Runtime tiles from collision
+        // events override both fields with a faster-scaled duration.
+        nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
+        nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
     };
   }
 
