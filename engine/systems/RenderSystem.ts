@@ -67,6 +67,12 @@ export class RenderSystem {
   // colour composition applied via source-atop, so tinting happens once per
   // (sprite, colour) pair instead of every frame.
   private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
+  // Normalized (range [-0.5, 0.5]) alpha-weighted centroid offset of the
+  // visible content within each sprite's bitmap bounds.  Computed once
+  // per source URL at first draw, then reused to shift drawImage so the
+  // content's visual centre lands on the rotation pivot.  Prevents
+  // sprite "orbiting" when the art isn't perfectly centred in its frame.
+  private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
   private _visibleEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _particleBuffer: GameEntity[] = [];
@@ -95,6 +101,67 @@ export class RenderSystem {
       cx.fill();
       this._specularBitmap = c;
       return c;
+  }
+
+  /**
+   * Return the normalized (range [-0.5, 0.5]) alpha-weighted centroid
+   * offset of the image's visible content from its bitmap centre.
+   * Computed once per source URL on first call, then cached.
+   *
+   * Used by the nebula draw path to shift drawImage so the cloud
+   * content's visual centre lands on the rotation pivot, eliminating
+   * the "orbit around an off-centre point" artefact you'd otherwise
+   * see when rotating PNGs whose visible pixels aren't centred.
+   *
+   * Returns (0, 0) if the image hasn't loaded yet or if getImageData
+   * is blocked (e.g. cross-origin canvas taint).  Both cases just fall
+   * back to drawing at the geometric bitmap centre — same as before.
+   */
+  private getSpriteCentroid(src: string): { dx: number, dy: number } {
+      const cached = this._spriteCentroids.get(src);
+      if (cached) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return { dx: 0, dy: 0 };
+
+      // Scan a fixed 256-square render of the source image so the
+      // centroid is independent of the natural resolution.  Matches
+      // the tinted-sprite canvas size used in getTintedSprite.
+      const size = 256;
+      const tmp = document.createElement('canvas');
+      tmp.width = size;
+      tmp.height = size;
+      const tctx = tmp.getContext('2d');
+      if (!tctx) return { dx: 0, dy: 0 };
+      tctx.drawImage(img, 0, 0, size, size);
+
+      let imageData: ImageData;
+      try {
+          imageData = tctx.getImageData(0, 0, size, size);
+      } catch {
+          // Canvas tainted — skip centroid adjustment, fall back to centre.
+          return { dx: 0, dy: 0 };
+      }
+
+      const data = imageData.data;
+      let sumX = 0, sumY = 0, sumA = 0;
+      for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+              const a = data[(y * size + x) * 4 + 3];
+              if (a > 0) {
+                  sumX += x * a;
+                  sumY += y * a;
+                  sumA += a;
+              }
+          }
+      }
+      if (sumA === 0) return { dx: 0, dy: 0 };
+
+      const offset = {
+          dx: (sumX / sumA / size) - 0.5,
+          dy: (sumY / sumA / size) - 0.5,
+      };
+      this._spriteCentroids.set(src, offset);
+      return offset;
   }
 
   /**
@@ -480,11 +547,19 @@ export class RenderSystem {
                       : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE;
                   const maxDim = Math.max(entity.size.x, entity.size.y);
                   const drawSize = maxDim * scale;
+                  // Content-centroid correction: shift the draw so the
+                  // sprite's visible-pixel centroid lands on the pivot.
+                  // Without this, asymmetric source PNGs appear to orbit
+                  // around their bitmap centre when rotated.  Fallback is
+                  // (0, 0) if the centroid isn't computable yet.
+                  const centroid = this.getSpriteCentroid(spriteSrc);
                   const dOffset = -(drawSize / 2);
+                  const dx = dOffset - centroid.dx * drawSize;
+                  const dy = dOffset - centroid.dy * drawSize;
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul;
-                  ctx.drawImage(tinted, dOffset, dOffset, drawSize, drawSize);
+                  ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
               } else {
                   // Fallback: procedural soft circle in the tint colour
