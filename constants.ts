@@ -373,6 +373,16 @@ export const NEBULA_CONSTANTS = {
   TWINKLE_INTERVAL_MAX: 9.0,
   TWINKLE_STAR_SIZE: 10,
   TWINKLE_PLACEMENT_RANGE: 0.35,
+  // ── Standard drops (ammo) ────────────────────────────────────────
+  // Nebula tiles and shards occasionally release a standard ammo
+  // drop on shatter — low frequency so breaking a cluster yields the
+  // occasional reward without flooding the map.  The roll is
+  // independent of shard creation: shard count/size math is
+  // untouched, the ammo drop (if any) is a bonus that spawns
+  // alongside the usual shards.  Ammo type follows the same
+  // wave-scaled ASTEROID_AMMO_PROGRESSION used by asteroids.
+  AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
+  AMMO_PER_NEBULA: 3,     // ammo units per nebula drop
 };
 
 /**

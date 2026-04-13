@@ -584,6 +584,19 @@ export class GameEngine {
           // caps permanent growth by resetting tile size to the canonical
           // hex dimensions on respawn.
           this.spawnNebulaShards(entity);
+          // Low-frequency standard ammo drop — independent of the shard
+          // math above, so shard count/size is unaffected.  Wave-scaled
+          // ammo type matches asteroid progression.  This is the ONLY
+          // standard drop produced by nebulae (no glass/asteroid shards).
+          if (Math.random() < NEBULA_CONSTANTS.AMMO_DROP_CHANCE) {
+              const ammoType = this.getAsteroidAmmoType();
+              this.spawnAmmoDrop(
+                  entity.position,
+                  ammoType,
+                  NEBULA_CONSTANTS.AMMO_PER_NEBULA,
+                  entity.lastImpactVelocity
+              );
+          }
       }
 
       if (entity.type === EntityType.NEBULA) {
