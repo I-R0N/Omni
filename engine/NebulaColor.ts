@@ -118,13 +118,21 @@ export function blendCompositionToHex(composition: NebulaColorStop[] | undefined
 }
 
 // ── HSL palette generation ───────────────────────────────────────────────
-// Nebula tiles are constrained to a linear hue arc from blue (~210°) to
-// pink (~340°), covering the blue / indigo / violet / pink family.  This
-// range is treated LINEARLY (not circularly) — we never wrap around through
-// red/orange/green, since those don't belong to the nebula palette.
-export const NEBULA_PALETTE_HUE_MIN = 210; // blue
-export const NEBULA_PALETTE_HUE_MAX = 340; // pink
-export const NEBULA_PALETTE_HUE_RANGE = NEBULA_PALETTE_HUE_MAX - NEBULA_PALETTE_HUE_MIN;
+// Nebula tiles cover the FULL 360° hue wheel — blue, indigo, violet, pink,
+// red, yellow, green — all available.  The palette is treated circularly,
+// so the rule-based regen code averages and interpolates neighbour hues
+// via unit vectors to handle wraparound correctly (e.g., averaging 350°
+// and 10° gives 0°, not 180°).
+//
+// The old linear [210, 340] constants are kept only for backward
+// compatibility with any external callers; within this module the
+// full-wheel helpers below are the canonical API.
+export const NEBULA_PALETTE_HUE_MIN = 0;
+export const NEBULA_PALETTE_HUE_MAX = 360;
+export const NEBULA_PALETTE_HUE_RANGE = 360;
+
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
 
 function hslToHex(h: number, s: number, l: number): string {
     const sFrac = s / 100;
@@ -144,7 +152,7 @@ function hslToHex(h: number, s: number, l: number): string {
 }
 
 // Extract the hue (degrees, [0, 360)) from an sRGB hex string.
-// Used by the regen rule to do direct hue arithmetic inside the palette.
+// Used by the regen rule to do direct hue arithmetic.
 export function hexToHueDeg(hex: string): number {
     const [r, g, b] = hexToRgb01(hex);
     const max = Math.max(r, g, b);
@@ -166,29 +174,69 @@ export function paletteHueToHex(hueDeg: number): string {
     return hslToHex(hueDeg, NEBULA_CONSTANTS.PALETTE_SATURATION, NEBULA_CONSTANTS.PALETTE_LIGHTNESS);
 }
 
-// Map an arbitrary hue into the palette arc [HUE_MIN, HUE_MAX] by modular
-// reduction.  Hues already in range pass through unchanged; hues outside
-// are folded into the arc so the palette constraint is always honoured.
+// Normalize an arbitrary hue to the standard [0, 360) range.  Renamed
+// from its old "clamp to palette arc" meaning — the palette now spans
+// the full wheel, so this is a pure wraparound normalisation.
 export function clampHueToPalette(hueDeg: number): number {
-    const normalized = ((hueDeg % 360) + 360) % 360;
-    if (normalized >= NEBULA_PALETTE_HUE_MIN && normalized <= NEBULA_PALETTE_HUE_MAX) {
-        return normalized;
-    }
-    // Shift so the palette arc starts at 0, modulo into the arc length,
-    // then shift back.  Produces a linear wrap inside [MIN, MAX].
-    const offset = (normalized - NEBULA_PALETTE_HUE_MIN + 360) % 360;
-    const folded = offset % NEBULA_PALETTE_HUE_RANGE;
-    return NEBULA_PALETTE_HUE_MIN + folded;
+    return ((hueDeg % 360) + 360) % 360;
 }
 
-// Pick a random hue uniformly from the blue-pink palette arc.
+// Shortest-arc distance between two hues, in [0, 180].  Used by the
+// regen min-shift check so "close" and "far" are measured along the
+// shorter direction around the wheel.
+export function circularHueDistance(a: number, b: number): number {
+    const diff = Math.abs(a - b) % 360;
+    return diff > 180 ? 360 - diff : diff;
+}
+
+// Unit-vector weighted average of a list of hues.  The input's `weight`
+// field scales each contribution; the sum-of-vectors atan2 result lands
+// in [0, 360) and handles wraparound correctly (e.g., averaging 350° +
+// 10° → 0°).  Returns undefined for an empty list or a sum vector near
+// zero (happens when opposing hues cancel out).
+export function circularHueAverage(
+    entries: Array<{ hue: number; weight: number }>
+): number | undefined {
+    if (entries.length === 0) return undefined;
+    let sumX = 0, sumY = 0;
+    for (const e of entries) {
+        const rad = e.hue * DEG_TO_RAD;
+        sumX += Math.cos(rad) * e.weight;
+        sumY += Math.sin(rad) * e.weight;
+    }
+    // Near-zero vector (opposing hues cancel) — average is undefined.
+    if (Math.abs(sumX) < 1e-6 && Math.abs(sumY) < 1e-6) return undefined;
+    return clampHueToPalette(Math.atan2(sumY, sumX) * RAD_TO_DEG);
+}
+
+// Circular weighted interpolation between two hues.  `weightA + weightB`
+// do not need to sum to any particular value — only the ratio matters.
+// Takes the shorter arc from a toward b, so lerping 350° toward 10° with
+// any positive weights produces a result near 0°, not near 180°.
+export function circularLerpHue(
+    a: number,
+    weightA: number,
+    b: number,
+    weightB: number
+): number {
+    const total = weightA + weightB;
+    if (total < 1e-6) return a;
+    const aRad = a * DEG_TO_RAD;
+    const bRad = b * DEG_TO_RAD;
+    const x = (weightA * Math.cos(aRad) + weightB * Math.cos(bRad)) / total;
+    const y = (weightA * Math.sin(aRad) + weightB * Math.sin(bRad)) / total;
+    if (Math.abs(x) < 1e-6 && Math.abs(y) < 1e-6) return a;
+    return clampHueToPalette(Math.atan2(y, x) * RAD_TO_DEG);
+}
+
+// Pick a random hue uniformly from the full 360° wheel.
 export function randomPaletteHueDeg(): number {
-    return NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE;
+    return Math.random() * 360;
 }
 
 /**
- * Pick a fresh random-hue palette entry from the blue / indigo / violet /
- * pink arc (210°–340°), matching the constrained nebula palette.  Returns
+ * Pick a fresh random-hue palette entry.  Full 360° wheel — blue,
+ * indigo, violet, pink, red, yellow, green all available.  Returns
  * a single-stop composition suitable for a newly generated nebula tile.
  */
 export function randomNebulaComposition(): NebulaColorStop[] {

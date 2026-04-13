@@ -264,10 +264,11 @@ export const NEBULA_CONSTANTS = {
   // reads well, far enough that the re-collision cooldown (IMPACT_COOLDOWN)
   // safely clears before the player overlaps the shard again.
   SHARD_SPAWN_OFFSET_RATIO: 1.5,
-  // Regen delay: nebula tiles reappear after this many seconds, matching
-  // the glass-tile regen cadence.  Grown tiles snap back to their hex size
-  // on regen so merge growth can't compound across cycles.
-  REGEN_DELAY: 12,
+  // Regen delay: nebula tiles reappear after this many seconds.  Much
+  // shorter than the glass-tile cadence (12 s) — nebulae are the
+  // "soft" cloud layer, they should heal quickly so clusters don't
+  // stay punched-out behind the player for long.
+  REGEN_DELAY: 3,
   // Seconds a shattered nebula tile or shard takes to fade from full
   // alpha to invisible before entering the regen wait (tiles) or being
   // compacted out (shards).  Longer than the old 0.4 s for a more
@@ -343,9 +344,10 @@ export const NEBULA_CONSTANTS = {
   OUTER_CLUSTER_COUNT: 240,
   OUTER_MIN_CLUSTER_SIZE: 7,
   OUTER_MAX_CLUSTER_SIZE: 26,
-  // Base palette — nebula tiles are constrained to a blue / indigo /
-  // violet / pink hue arc (see NEBULA_PALETTE_HUE_MIN/MAX in NebulaColor.ts).
-  // SATURATION and LIGHTNESS match the existing background nebula aesthetic
+  // Base palette — nebula tiles draw from the full 360° hue wheel
+  // (blue / indigo / violet / pink / red / yellow / green all available).
+  // Regen uses circular hue math so wraparound is handled correctly.
+  // SATURATION and LIGHTNESS match the background nebula aesthetic
   // (BackgroundManager.createPuffVariants uses 100%/60%).
   PALETTE_SATURATION: 100,
   PALETTE_LIGHTNESS: 62,

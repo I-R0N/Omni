@@ -10,7 +10,7 @@ import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, V
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition, hexToHueDeg, paletteHueToHex, clampHueToPalette, NEBULA_PALETTE_HUE_MIN, NEBULA_PALETTE_HUE_RANGE } from './NebulaColor';
+import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition, hexToHueDeg, paletteHueToHex, clampHueToPalette, circularHueDistance, circularHueAverage, circularLerpHue } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -2766,31 +2766,29 @@ export class GameEngine {
 
   /**
    * Deterministic, neighbourhood-aware colour rule for regenerating
-   * nebula tiles.  Works directly in hue space over the blue / indigo /
-   * violet / pink palette arc (NEBULA_PALETTE_HUE_MIN..MAX).
+   * nebula tiles.  Works in hue space over the full 360° wheel — all
+   * hues are available (blue / indigo / violet / pink / red / yellow /
+   * green).  All hue arithmetic is circular (unit-vector sums +
+   * shortest-arc distances) so averages handle wraparound correctly.
    *
    * Algorithm:
    *   1. Read old hue from the tile's previous composition.
    *   2. Gather 6 neighbour hues (active, non-fading NEBULA tiles) from
    *      the supplied grid index, weighted by each neighbour's disc area.
-   *   3. Compute a linear area-weighted average of the neighbour hues.
-   *      (Linear average is safe because the palette is a clamped [210,
-   *      340] arc — no circular wraparound issues.)
-   *   4. Mix with the old hue based on the tile's isolation:
+   *   3. Compute the circular area-weighted average of neighbour hues
+   *      (unit-vector sum, atan2 back to degrees).
+   *   4. Circularly lerp between old and neighbour average based on
+   *      tile isolation:
    *        emptyCount     = 6 − activeNeighbours
    *        oldWeight      = emptyCount / 6
    *        neighborWeight = 1 − oldWeight
-   *      So a fully surrounded tile adopts the neighbour average
-   *      exactly; an isolated tile would stick with its old hue.
-   *   5. Enforce a minimum hue shift: if the rule's natural output is
-   *      closer than REGEN_MIN_HUE_SHIFT degrees to the old hue, step
-   *      forward (or backward, based on a deterministic grid-parity
-   *      sign) along the palette arc by exactly that minimum.  This
-   *      guarantees every regeneration is visibly different from the
-   *      previous colour — no silent "same hue" respawns.
-   *   6. Clamp to the palette arc (defensive — stays within blue→pink).
-   *   7. Return a single-stop composition at the configured palette
-   *      saturation / lightness.
+   *      A fully surrounded tile adopts the neighbour average; an
+   *      isolated tile keeps its old hue exactly.
+   *   5. Enforce a minimum hue shift: if the rule's natural output
+   *      lands within REGEN_MIN_HUE_SHIFT° of the old hue (shortest
+   *      arc), step forward by exactly that minimum in a deterministic
+   *      direction chosen by grid parity, wrapping modulo 360.
+   *   6. Normalise to [0, 360) and return a single-stop composition.
    *
    * The rule is fully deterministic — identical map state yields
    * identical regen colours, so the cloud evolves along a predictable
@@ -2801,8 +2799,7 @@ export class GameEngine {
     nebulaIndex: Map<number, GameEntity>
   ): NebulaColorStop[] {
     // Derive the tile's previous hue.  If the tile has no composition
-    // (shouldn't happen, but defensive), fall back to a fresh palette
-    // pick so the new hue is still within range.
+    // (shouldn't happen, but defensive), fall back to a fresh random hue.
     const oldComp = tile.nebulaColorComposition;
     const oldHue = clampHueToPalette(
         oldComp && oldComp[0]
@@ -2810,14 +2807,11 @@ export class GameEngine {
             : hexToHueDeg(randomNebulaComposition()[0].hex)
     );
 
-    // Collect neighbour hues, area-weighted.
-    let avgNeighborHue = oldHue;
-    let activeCount = 0;
-
+    // Collect active-neighbour hues with area weights for the
+    // circular weighted average.
+    const neighborEntries: Array<{ hue: number; weight: number }> = [];
     if (tile.nebulaGridCol !== undefined && tile.nebulaGridRow !== undefined) {
         const neighbors = TileGenerator.getHexNeighbors(tile.nebulaGridCol, tile.nebulaGridRow);
-        let hueSum = 0;
-        let weightSum = 0;
         for (const n of neighbors) {
             const key = (n.c << 16) | (n.r & 0xFFFF);
             const nTile = nebulaIndex.get(key);
@@ -2826,40 +2820,33 @@ export class GameEngine {
             if (!hex) continue;
             const nHue = clampHueToPalette(hexToHueDeg(hex));
             const r = Math.max(nTile.size.x, nTile.size.y) / 2;
-            const weight = Math.PI * r * r;
-            hueSum += nHue * weight;
-            weightSum += weight;
-            activeCount++;
-        }
-        if (activeCount > 0) {
-            avgNeighborHue = hueSum / weightSum;
+            neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
         }
     }
 
-    // Isolation-based mix between old and neighbour average.
+    // Circular weighted average of neighbour hues.  Falls back to the
+    // old hue when there are no neighbours, or when opposing hues
+    // cancel to a near-zero sum vector (degenerate).
+    const avgNeighborHue = circularHueAverage(neighborEntries) ?? oldHue;
+
+    // Isolation-based circular lerp between old and neighbour average.
     const NUM_NEIGHBORS = 6;
-    const emptyCount = NUM_NEIGHBORS - activeCount;
+    const emptyCount = NUM_NEIGHBORS - neighborEntries.length;
     const oldWeight = emptyCount / NUM_NEIGHBORS;
     const neighborWeight = 1 - oldWeight;
-    let targetHue = oldHue * oldWeight + avgNeighborHue * neighborWeight;
+    let targetHue = circularLerpHue(oldHue, oldWeight, avgNeighborHue, neighborWeight);
 
     // Enforce minimum hue shift so every regen is visibly distinct.
-    // Linear distance is sufficient — all palette hues live in the
-    // contiguous [HUE_MIN, HUE_MAX] arc, no circular wraparound.
+    // Uses shortest-arc distance so wraparound is handled correctly.
     const minShift = NEBULA_CONSTANTS.REGEN_MIN_HUE_SHIFT;
-    if (Math.abs(targetHue - oldHue) < minShift) {
+    if (circularHueDistance(targetHue, oldHue) < minShift) {
         // Deterministic direction: parity of (col + row) picks + or −.
-        // Using grid coords instead of a counter keeps the rule stateless.
+        // Using grid coords instead of a counter keeps the rule stateless;
+        // adjacent tiles step in opposite directions, producing a natural
+        // wave pattern across successive regens.
         const sign = (((tile.nebulaGridCol ?? 0) + (tile.nebulaGridRow ?? 0)) & 1) === 0 ? 1 : -1;
-        // Step forward by minShift, then fold back into the palette
-        // arc via modular reduction so we always land in [MIN, MAX].
-        const shifted = oldHue + sign * minShift;
-        const offset = ((shifted - NEBULA_PALETTE_HUE_MIN) % NEBULA_PALETTE_HUE_RANGE + NEBULA_PALETTE_HUE_RANGE) % NEBULA_PALETTE_HUE_RANGE;
-        targetHue = NEBULA_PALETTE_HUE_MIN + offset;
+        targetHue = clampHueToPalette(oldHue + sign * minShift);
     }
-
-    // Defensive final clamp (in case of upstream drift).
-    targetHue = clampHueToPalette(targetHue);
 
     return [{ hex: paletteHueToHex(targetHue), weight: 1 }];
   }
