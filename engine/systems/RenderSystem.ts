@@ -62,6 +62,10 @@ export class RenderSystem {
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
+  // Pre-rendered nebula twinkle star (created once, reused for every nebula
+  // tile/shard).  Soft radial glow with a 4-point spike cross drawn additively
+  // so it reads as a tiny far-away star sparkling inside the cloud.
+  private _twinkleBitmap: HTMLCanvasElement | null = null;
   // Tinted sprite cache: `${src}|${hex}` → pre-tinted offscreen canvas.
   // Nebula tiles/shards re-use the background nebula PNGs with per-tile
   // colour composition applied via source-atop, so tinting happens once per
@@ -106,6 +110,50 @@ export class RenderSystem {
       cx.arc(6, 6, 6, 0, Math.PI * 2);
       cx.fill();
       this._specularBitmap = c;
+      return c;
+  }
+
+  /**
+   * Return a 32×32 offscreen canvas with a soft white star: a radial-gradient
+   * glow plus a 4-point spike cross drawn additively.  Created once, reused
+   * for every nebula twinkle.  Drawn at NEBULA_CONSTANTS.TWINKLE_STAR_SIZE
+   * world-units in the render path.
+   */
+  private getTwinkleBitmap(): HTMLCanvasElement {
+      if (this._twinkleBitmap) return this._twinkleBitmap;
+      const size = 32;
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const cx = c.getContext('2d')!;
+      const mid = size / 2;
+      // Additive composite so the glow + spikes blend smoothly
+      cx.globalCompositeOperation = 'lighter';
+      // Soft radial glow
+      const glow = cx.createRadialGradient(mid, mid, 0, mid, mid, mid);
+      glow.addColorStop(0,    'rgba(255,255,255,1)');
+      glow.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+      glow.addColorStop(0.6,  'rgba(255,255,255,0.12)');
+      glow.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = glow;
+      cx.beginPath();
+      cx.arc(mid, mid, mid, 0, Math.PI * 2);
+      cx.fill();
+      // 4-point spike cross — long horizontal + vertical narrow gradients
+      const spikeH = cx.createLinearGradient(0, mid, size, mid);
+      spikeH.addColorStop(0,    'rgba(255,255,255,0)');
+      spikeH.addColorStop(0.5,  'rgba(255,255,255,0.85)');
+      spikeH.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = spikeH;
+      cx.fillRect(0, mid - 0.8, size, 1.6);
+      const spikeV = cx.createLinearGradient(mid, 0, mid, size);
+      spikeV.addColorStop(0,    'rgba(255,255,255,0)');
+      spikeV.addColorStop(0.5,  'rgba(255,255,255,0.85)');
+      spikeV.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = spikeV;
+      cx.fillRect(mid - 0.8, 0, 1.6, size);
+      cx.globalCompositeOperation = 'source-over';
+      this._twinkleBitmap = c;
       return c;
   }
 
@@ -630,6 +678,58 @@ export class RenderSystem {
                   ctx.stroke();
               }
               ctx.globalAlpha = 1.0;
+          }
+
+          // --- TWINKLE STAR ---
+          // Each tile/shard hosts an occasional fading-in/out star at a
+          // random in-sprite position.  Scheduling is render-driven so it
+          // costs nothing in the sim loop: lazy-init on first draw, then
+          // each cycle picks a random duration delay before the next.
+          // Alpha curve sin(t·π) gives a smooth fade in → peak → fade out.
+          {
+              const now = performance.now() / 1000;
+              if (entity.nebulaTwinkleNextAt === undefined) {
+                  // First sighting — stagger the initial twinkle randomly
+                  // across the [MIN, MAX] interval so a freshly-spawned
+                  // cluster doesn't all twinkle in unison.
+                  entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
+                      + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+                  entity.nebulaTwinkleX = (Math.random() * 2 - 1);
+                  entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+              }
+              const elapsed = now - entity.nebulaTwinkleNextAt;
+              if (elapsed >= 0) {
+                  if (elapsed < NEBULA_CONSTANTS.TWINKLE_DURATION) {
+                      // Active twinkle — sin curve over the duration
+                      const t = elapsed / NEBULA_CONSTANTS.TWINKLE_DURATION;
+                      const twinkleAlpha = Math.sin(t * Math.PI) * fadeMul * spawnMul;
+                      if (twinkleAlpha > 0.01) {
+                          const star = this.getTwinkleBitmap();
+                          // Place the star within the sprite footprint —
+                          // half-extent × placement-range keeps it inside.
+                          const isTile = entity.type === EntityType.NEBULA;
+                          const scale = isTile
+                              ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
+                              : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE;
+                          const maxDim = Math.max(entity.size.x, entity.size.y);
+                          const drawSize = maxDim * scale;
+                          const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
+                          const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
+                          const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;
+                          const starSize = NEBULA_CONSTANTS.TWINKLE_STAR_SIZE;
+                          ctx.globalAlpha = twinkleAlpha;
+                          ctx.drawImage(star, tx - starSize / 2, ty - starSize / 2, starSize, starSize);
+                          ctx.globalAlpha = 1.0;
+                      }
+                  } else {
+                      // Cycle complete — schedule the next one with a fresh
+                      // random delay and reroll the in-sprite position.
+                      entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
+                          + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+                      entity.nebulaTwinkleX = (Math.random() * 2 - 1);
+                      entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+                  }
+              }
           }
 
           ctx.restore();

@@ -361,6 +361,18 @@ export const NEBULA_CONSTANTS = {
   REGEN_MIN_HUE_SHIFT: 40,
   // Default composition hex used if a tile spawns with no palette selection.
   DEFAULT_HEX: '#a78bfa',
+  // ── Twinkle (random fading-in/out star within the sprite) ────────
+  // Each tile and shard maintains its own next-twinkle schedule; the
+  // renderer draws a pre-rendered star bitmap at a random position
+  // within the sprite, alpha-curved as sin(t·π) so it smoothly fades
+  // in and out over TWINKLE_DURATION seconds, then waits a random
+  // interval in [TWINKLE_INTERVAL_MIN, TWINKLE_INTERVAL_MAX] before
+  // the next one.  Star positions reroll per cycle.
+  TWINKLE_DURATION: 1.2,
+  TWINKLE_INTERVAL_MIN: 4.0,
+  TWINKLE_INTERVAL_MAX: 9.0,
+  TWINKLE_STAR_SIZE: 10,
+  TWINKLE_PLACEMENT_RANGE: 0.35,
 };
 
 /**

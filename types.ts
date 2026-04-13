@@ -276,6 +276,17 @@ export interface GameEntity {
   nebulaSpawnTimer?: number;
   // Effective duration for this particular fade-in (see nebulaFadeDuration).
   nebulaSpawnDuration?: number;
+  // Twinkle scheduling — each nebula tile and shard hosts an occasional
+  // fading-in/out star at a random in-sprite position.  The renderer
+  // lazily initializes these fields on first draw, then advances the
+  // schedule itself (no sim cost).  nebulaTwinkleNextAt is an absolute
+  // time (seconds since epoch) at which the next twinkle starts; the
+  // twinkle is "active" while now ∈ [nextAt, nextAt + TWINKLE_DURATION].
+  // nebulaTwinkleX/Y are normalized [-1, 1] offsets within the sprite,
+  // rerolled at the start of each twinkle cycle.
+  nebulaTwinkleNextAt?: number;
+  nebulaTwinkleX?: number;
+  nebulaTwinkleY?: number;
 }
 
 export interface CameraState {
