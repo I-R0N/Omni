@@ -759,11 +759,8 @@ export class GameEngine {
                     buildNebulaIndex()
                 );
                 regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
-                // Emit a glittery glimmer cluster centred on the tile as
-                // the "reappear" effect, tinted by the new composition.
-                const tint = blendCompositionToHex(regen.entity.nebulaColorComposition);
-                const glimmerR = Math.max(regen.entity.size.x, regen.entity.size.y) * 0.55;
-                this.spawnNebulaGlimmer(regen.entity.position, glimmerR, tint);
+                // Fade in slowly instead of popping — no glimmer burst.
+                regen.entity.nebulaSpawnTimer = NEBULA_CONSTANTS.FADE_IN_DURATION;
             } else {
                 // Glass tile: existing pop-in animation.
                 regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
@@ -2581,6 +2578,9 @@ export class GameEngine {
             nebulaGridRow:   parent.nebulaGridRow,
             linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
             angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
+            // Fade-in on birth — shards slowly materialize behind the
+            // striker instead of popping in instantly.
+            nebulaSpawnTimer: NEBULA_CONSTANTS.FADE_IN_DURATION,
         });
     }
   }
@@ -2928,13 +2928,14 @@ export class GameEngine {
     this.currentMap.entities.push(tile);
     this.physics.addStaticEntity(tile);
 
-    // Shard collapses into the new tile — deactivate and leave a
-    // glittery glimmer cluster at the shard's old position as the
-    // "condense" effect.  Use a larger jitter radius so the glimmer
-    // spans roughly the new tile footprint.
+    // New tile fades in slowly instead of popping — no glimmer burst.
+    // createNebulaTileEntity already sets nebulaSpawnTimer, but we
+    // re-set it here for clarity (and to future-proof if the factory
+    // default ever changes).
+    tile.nebulaSpawnTimer = NEBULA_CONSTANTS.FADE_IN_DURATION;
+
+    // Shard collapses into the new tile.
     shard.active = false;
-    const tint = blendCompositionToHex(tile.nebulaColorComposition);
-    this.spawnNebulaGlimmer(shard.position, Math.max(tile.size.x, tile.size.y) * 0.6, tint);
     return true;
   }
 

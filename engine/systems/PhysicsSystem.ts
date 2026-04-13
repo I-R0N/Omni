@@ -95,6 +95,15 @@ export class PhysicsSystem {
               entity.active = false;
           }
       }
+      // Nebula birth fade-in — newly-created tiles and shards count this
+      // down from FADE_IN_DURATION to 0; the renderer scales alpha by
+      // 1 − (timer / FADE_IN_DURATION) so they slowly materialise.
+      if (entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0) {
+          entity.nebulaSpawnTimer -= dt;
+          if (entity.nebulaSpawnTimer <= 0) {
+              entity.nebulaSpawnTimer = undefined;
+          }
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;

@@ -273,6 +273,12 @@ export const NEBULA_CONSTANTS = {
   // compacted out (shards).  Longer than the old 0.4 s for a more
   // graceful dissolution.
   FADE_DURATION: 1.0,
+  // Seconds for a newly-created tile/shard to fade IN from alpha 0 to
+  // full.  Applied at map init, regen completion, shard shatter, and
+  // shard→tile transmutation, so every birth event is a slow reveal
+  // rather than an instant pop.  Slightly longer than fade-out so the
+  // cloud's arrivals feel gentler than its dissipations.
+  FADE_IN_DURATION: 1.5,
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
