@@ -275,10 +275,12 @@ export const NEBULA_CONSTANTS = {
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
-  // damping = shards drift longer.  At 0.988, velocity halves in ~58 frames
-  // (~0.95s) giving a long, drifty cloud that lingers through the playfield.
-  LINEAR_DAMPING: 0.988,
-  ANGULAR_DAMPING: 0.988,
+  // damping = shards drift longer.  At 0.991, velocity halves in ~77
+  // frames (~1.28 s) — paired with the reduced launch velocities below,
+  // the total coast distance is preserved while making shards *move*
+  // more slowly (same travel distance, ~33 % longer wall-clock time).
+  LINEAR_DAMPING: 0.991,
+  ANGULAR_DAMPING: 0.991,
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
   REST_SPEED: 0.005,
   REST_SPIN: 0.01,
@@ -291,20 +293,19 @@ export const NEBULA_CONSTANTS = {
   // perpendicular push based on tangent side gives each shard a slight
   // lateral drift that matches its rotation direction.
   //
-  // At FORWARD_DRAG_FACTOR = 1.2, shards launch at 120% of the striker's
-  // speed — slightly *faster* than the striker initially, so damping
-  // (0.988) pulls them toward matching the striker's speed around t=0.25s.
-  // During that catch-up window they appear to move with the player
-  // instead of falling straight behind.  After ~0.25s damping has taken
-  // over and shards gradually fall behind (visually "left in the wake"),
-  // which is the natural "dragged along" arc.
+  // At FORWARD_DRAG_FACTOR = 0.9 with LINEAR_DAMPING = 0.991, shards
+  // launch a bit slower than the striker and decay more gently, so the
+  // total coast distance is preserved while per-frame motion feels
+  // noticeably slower.  The 0.75× scaling of launch velocities is
+  // matched by a 0.75× scaling of (1 − damping), keeping
+  // ∫V₀·d^t·dt = V₀/(1−d) constant.
   //
   // parallel_velocity = max(MIN_PARALLEL_SPEED,
   //                         impactSpeed × FORWARD_DRAG_FACTOR)
   // perp_velocity     = impactSpeed × PERP_SCATTER_FACTOR
-  FORWARD_DRAG_FACTOR: 1.2,
-  PERP_SCATTER_FACTOR: 0.04,
-  MIN_PARALLEL_SPEED: 0.3,
+  FORWARD_DRAG_FACTOR: 0.9,
+  PERP_SCATTER_FACTOR: 0.03,
+  MIN_PARALLEL_SPEED: 0.225,
   // Shatter fan half-angle — 3 children are spread symmetrically around
   // the striker's forward direction within ±FAN_HALF_ANGLE.
   FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)

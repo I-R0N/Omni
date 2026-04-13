@@ -74,6 +74,12 @@ export class RenderSystem {
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
   private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
   private _visibleEntities: GameEntity[] = [];
+  // Separate render bucket for nebula tiles and shards so they always
+  // render BELOW asteroids / actors / other entities regardless of their
+  // order in currentMap.entities.  Runtime-spawned nebula tiles (from
+  // shard transmutation) get pushed to the end of the entities array, so
+  // a naive single-pass loop would render them on top of asteroids.
+  private _nebulaEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _particleBuffer: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -252,6 +258,7 @@ export class RenderSystem {
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
+    this._nebulaEntities.length = 0;
     this._trailEntities.length = 0;
     this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
@@ -301,6 +308,11 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push(entity);
+        } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+            // Nebula entities render as a dedicated bottom layer so
+            // asteroids / actors / projectiles always draw on top of
+            // them, regardless of entity array order.
+            this._nebulaEntities.push(entity);
         } else {
             this._visibleEntities.push(entity);
         }
@@ -336,7 +348,11 @@ export class RenderSystem {
     // 3. Render Trails (Behind Entities)
     this.renderTrails(ctx, this._trailEntities, detachedTrails);
 
-    // 4. Render Entities (Culling logic added)
+    // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
+    // asteroids and everything else render on top of the nebula cloud.
+    this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+
+    // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
 
     // 4b. Render Particles — single composite-op switch for the whole batch
