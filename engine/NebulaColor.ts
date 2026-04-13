@@ -118,9 +118,14 @@ export function blendCompositionToHex(composition: NebulaColorStop[] | undefined
 }
 
 // ── HSL palette generation ───────────────────────────────────────────────
-// Matches the existing background-nebula aesthetic (BackgroundManager uses
-// hsla(random, 100%, 60%, ...)).  We generate a single random hue here so
-// each tile starts with an on-palette base colour.
+// Nebula tiles are constrained to a linear hue arc from blue (~210°) to
+// pink (~340°), covering the blue / indigo / violet / pink family.  This
+// range is treated LINEARLY (not circularly) — we never wrap around through
+// red/orange/green, since those don't belong to the nebula palette.
+export const NEBULA_PALETTE_HUE_MIN = 210; // blue
+export const NEBULA_PALETTE_HUE_MAX = 340; // pink
+export const NEBULA_PALETTE_HUE_RANGE = NEBULA_PALETTE_HUE_MAX - NEBULA_PALETTE_HUE_MIN;
+
 function hslToHex(h: number, s: number, l: number): string {
     const sFrac = s / 100;
     const lFrac = l / 100;
@@ -138,14 +143,57 @@ function hslToHex(h: number, s: number, l: number): string {
     return rgb01ToHex(r + m, g + m, b + m);
 }
 
+// Extract the hue (degrees, [0, 360)) from an sRGB hex string.
+// Used by the regen rule to do direct hue arithmetic inside the palette.
+export function hexToHueDeg(hex: string): number {
+    const [r, g, b] = hexToRgb01(hex);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    if (d < 1e-6) return 0;
+    let h: number;
+    if (max === r)      h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else                h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+    return h;
+}
+
+// Convert a hue (degrees) to a palette-standard hex using the configured
+// saturation and lightness from NEBULA_CONSTANTS.
+export function paletteHueToHex(hueDeg: number): string {
+    return hslToHex(hueDeg, NEBULA_CONSTANTS.PALETTE_SATURATION, NEBULA_CONSTANTS.PALETTE_LIGHTNESS);
+}
+
+// Map an arbitrary hue into the palette arc [HUE_MIN, HUE_MAX] by modular
+// reduction.  Hues already in range pass through unchanged; hues outside
+// are folded into the arc so the palette constraint is always honoured.
+export function clampHueToPalette(hueDeg: number): number {
+    const normalized = ((hueDeg % 360) + 360) % 360;
+    if (normalized >= NEBULA_PALETTE_HUE_MIN && normalized <= NEBULA_PALETTE_HUE_MAX) {
+        return normalized;
+    }
+    // Shift so the palette arc starts at 0, modulo into the arc length,
+    // then shift back.  Produces a linear wrap inside [MIN, MAX].
+    const offset = (normalized - NEBULA_PALETTE_HUE_MIN + 360) % 360;
+    const folded = offset % NEBULA_PALETTE_HUE_RANGE;
+    return NEBULA_PALETTE_HUE_MIN + folded;
+}
+
+// Pick a random hue uniformly from the blue-pink palette arc.
+export function randomPaletteHueDeg(): number {
+    return NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE;
+}
+
 /**
- * Pick a fresh random-hue palette entry, matching the background nebula
- * aesthetic (100% saturation, ~62% lightness).  Returns a single-stop
- * composition suitable for a newly generated nebula tile.
+ * Pick a fresh random-hue palette entry from the blue / indigo / violet /
+ * pink arc (210°–340°), matching the constrained nebula palette.  Returns
+ * a single-stop composition suitable for a newly generated nebula tile.
  */
 export function randomNebulaComposition(): NebulaColorStop[] {
-    const hue = Math.random() * 360;
-    const hex = hslToHex(hue, NEBULA_CONSTANTS.PALETTE_SATURATION, NEBULA_CONSTANTS.PALETTE_LIGHTNESS);
+    const hue = randomPaletteHueDeg();
+    const hex = paletteHueToHex(hue);
     return [{ hex, weight: 1 }];
 }
 

@@ -336,12 +336,18 @@ export const NEBULA_CONSTANTS = {
   OUTER_CLUSTER_COUNT: 240,
   OUTER_MIN_CLUSTER_SIZE: 7,
   OUTER_MAX_CLUSTER_SIZE: 26,
-  // Base palette — random hue is generated at tile creation time, then
-  // carried through shatter/merge cycles via NebulaColorStop compositions.
+  // Base palette — nebula tiles are constrained to a blue / indigo /
+  // violet / pink hue arc (see NEBULA_PALETTE_HUE_MIN/MAX in NebulaColor.ts).
   // SATURATION and LIGHTNESS match the existing background nebula aesthetic
-  // (see BackgroundManager.createPuffVariants which uses 100%/60%).
+  // (BackgroundManager.createPuffVariants uses 100%/60%).
   PALETTE_SATURATION: 100,
   PALETTE_LIGHTNESS: 62,
+  // Minimum hue delta (in degrees) a regenerated nebula tile must have
+  // from its previous hue.  If the rule-based blend produces a result
+  // closer than this to the old hue, the regen code forces a step of
+  // at least this many degrees along the palette arc so every
+  // regeneration is visibly distinct from the last.
+  REGEN_MIN_HUE_SHIFT: 40,
   // Default composition hex used if a tile spawns with no palette selection.
   DEFAULT_HEX: '#a78bfa',
 };

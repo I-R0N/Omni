@@ -10,7 +10,7 @@ import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, V
 import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition } from './NebulaColor';
+import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition, hexToHueDeg, paletteHueToHex, clampHueToPalette, NEBULA_PALETTE_HUE_MIN, NEBULA_PALETTE_HUE_RANGE } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -2766,94 +2766,102 @@ export class GameEngine {
 
   /**
    * Deterministic, neighbourhood-aware colour rule for regenerating
-   * nebula tiles.
+   * nebula tiles.  Works directly in hue space over the blue / indigo /
+   * violet / pink palette arc (NEBULA_PALETTE_HUE_MIN..MAX).
    *
-   * Reads the regenerating tile's 6 hex neighbours from the supplied
-   * grid index, collects the compositions of those that are active
-   * (non-fading) NEBULA tiles, and blends them area-weighted into a
-   * single "neighbour average" composition.  The final composition is
-   * a mix of the tile's OLD composition and that neighbour average,
-   * weighted by how isolated the tile is:
+   * Algorithm:
+   *   1. Read old hue from the tile's previous composition.
+   *   2. Gather 6 neighbour hues (active, non-fading NEBULA tiles) from
+   *      the supplied grid index, weighted by each neighbour's disc area.
+   *   3. Compute a linear area-weighted average of the neighbour hues.
+   *      (Linear average is safe because the palette is a clamped [210,
+   *      340] arc — no circular wraparound issues.)
+   *   4. Mix with the old hue based on the tile's isolation:
+   *        emptyCount     = 6 − activeNeighbours
+   *        oldWeight      = emptyCount / 6
+   *        neighborWeight = 1 − oldWeight
+   *      So a fully surrounded tile adopts the neighbour average
+   *      exactly; an isolated tile would stick with its old hue.
+   *   5. Enforce a minimum hue shift: if the rule's natural output is
+   *      closer than REGEN_MIN_HUE_SHIFT degrees to the old hue, step
+   *      forward (or backward, based on a deterministic grid-parity
+   *      sign) along the palette arc by exactly that minimum.  This
+   *      guarantees every regeneration is visibly different from the
+   *      previous colour — no silent "same hue" respawns.
+   *   6. Clamp to the palette arc (defensive — stays within blue→pink).
+   *   7. Return a single-stop composition at the configured palette
+   *      saturation / lightness.
    *
-   *   emptyCount    = 6 − activeNeighbours.length
-   *   oldWeight     = emptyCount / 6      // 0 = surrounded, 1 = isolated
-   *   neighborWeight = 1 − oldWeight
-   *
-   * Consequences:
-   * - Fully surrounded interior tiles adopt the local cluster average
-   *   exactly (oldWeight = 0, old colour forgotten).  Interior
-   *   homogenises over many regens.
-   * - Edge tiles retain most of their old colour while drifting
-   *   slightly toward their few active neighbours — edges change
-   *   slowly, preserving variation at cluster boundaries.
-   * - Tiles with no active neighbours (transient fully-broken state)
-   *   keep their old colour unchanged, so an isolated regen never
-   *   randomises.
-   * - No RNG — identical map state yields identical regen colours,
-   *   so the cloud evolves along a deterministic rule instead of
-   *   sliding into noise after repeated player flythroughs.
+   * The rule is fully deterministic — identical map state yields
+   * identical regen colours, so the cloud evolves along a predictable
+   * neighbourhood walk rather than into RNG noise.
    */
   private computeRegeneratedNebulaComposition(
     tile: GameEntity,
     nebulaIndex: Map<number, GameEntity>
   ): NebulaColorStop[] {
-    // Fallback if the tile has no existing composition — should not
-    // happen in practice (tiles always get one at generation time)
-    // but keeps the path safe.
-    const oldComp = tile.nebulaColorComposition ?? randomNebulaComposition();
+    // Derive the tile's previous hue.  If the tile has no composition
+    // (shouldn't happen, but defensive), fall back to a fresh palette
+    // pick so the new hue is still within range.
+    const oldComp = tile.nebulaColorComposition;
+    const oldHue = clampHueToPalette(
+        oldComp && oldComp[0]
+            ? hexToHueDeg(oldComp[0].hex)
+            : hexToHueDeg(randomNebulaComposition()[0].hex)
+    );
 
-    if (tile.nebulaGridCol === undefined || tile.nebulaGridRow === undefined) {
-        return cloneComposition(oldComp);
+    // Collect neighbour hues, area-weighted.
+    let avgNeighborHue = oldHue;
+    let activeCount = 0;
+
+    if (tile.nebulaGridCol !== undefined && tile.nebulaGridRow !== undefined) {
+        const neighbors = TileGenerator.getHexNeighbors(tile.nebulaGridCol, tile.nebulaGridRow);
+        let hueSum = 0;
+        let weightSum = 0;
+        for (const n of neighbors) {
+            const key = (n.c << 16) | (n.r & 0xFFFF);
+            const nTile = nebulaIndex.get(key);
+            if (!nTile || !nTile.nebulaColorComposition || nTile === tile) continue;
+            const hex = nTile.nebulaColorComposition[0]?.hex;
+            if (!hex) continue;
+            const nHue = clampHueToPalette(hexToHueDeg(hex));
+            const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+            const weight = Math.PI * r * r;
+            hueSum += nHue * weight;
+            weightSum += weight;
+            activeCount++;
+        }
+        if (activeCount > 0) {
+            avgNeighborHue = hueSum / weightSum;
+        }
     }
 
-    // Collect active-neighbour compositions, area-weighted.
-    const neighbors = TileGenerator.getHexNeighbors(tile.nebulaGridCol, tile.nebulaGridRow);
-    const entries: Array<{ comp: NebulaColorStop[]; weight: number }> = [];
-    for (const n of neighbors) {
-        const key = (n.c << 16) | (n.r & 0xFFFF);
-        const nTile = nebulaIndex.get(key);
-        if (!nTile || !nTile.nebulaColorComposition) continue;
-        // Skip the regenerating tile itself if it somehow ended up in
-        // the index (defensive — the buildNebulaIndex pass filters on
-        // active tiles and the regen hasn't re-added itself yet).
-        if (nTile === tile) continue;
-        const r = Math.max(nTile.size.x, nTile.size.y) / 2;
-        entries.push({ comp: nTile.nebulaColorComposition, weight: Math.PI * r * r });
-    }
-
-    if (entries.length === 0) {
-        // No active neighbours — keep the old composition exactly.
-        return cloneComposition(oldComp);
-    }
-
-    // Area-weighted blend of all active neighbours.
-    let neighborBlend = cloneComposition(entries[0].comp);
-    let accumWeight = entries[0].weight;
-    for (let i = 1; i < entries.length; i++) {
-        neighborBlend = blendCompositions(
-            neighborBlend, accumWeight,
-            entries[i].comp, entries[i].weight
-        );
-        accumWeight += entries[i].weight;
-    }
-
-    // Mix with old composition based on isolation level.  The ratio
-    // oldWeight : neighborWeight is all that matters for blendCompositions
-    // so we can pass the fractions directly as external weights.
+    // Isolation-based mix between old and neighbour average.
     const NUM_NEIGHBORS = 6;
-    const emptyCount = NUM_NEIGHBORS - entries.length;
+    const emptyCount = NUM_NEIGHBORS - activeCount;
     const oldWeight = emptyCount / NUM_NEIGHBORS;
     const neighborWeight = 1 - oldWeight;
+    let targetHue = oldHue * oldWeight + avgNeighborHue * neighborWeight;
 
-    if (oldWeight <= 0) {
-        // Fully surrounded: adopt the neighbour blend exactly.
-        return neighborBlend;
+    // Enforce minimum hue shift so every regen is visibly distinct.
+    // Linear distance is sufficient — all palette hues live in the
+    // contiguous [HUE_MIN, HUE_MAX] arc, no circular wraparound.
+    const minShift = NEBULA_CONSTANTS.REGEN_MIN_HUE_SHIFT;
+    if (Math.abs(targetHue - oldHue) < minShift) {
+        // Deterministic direction: parity of (col + row) picks + or −.
+        // Using grid coords instead of a counter keeps the rule stateless.
+        const sign = (((tile.nebulaGridCol ?? 0) + (tile.nebulaGridRow ?? 0)) & 1) === 0 ? 1 : -1;
+        // Step forward by minShift, then fold back into the palette
+        // arc via modular reduction so we always land in [MIN, MAX].
+        const shifted = oldHue + sign * minShift;
+        const offset = ((shifted - NEBULA_PALETTE_HUE_MIN) % NEBULA_PALETTE_HUE_RANGE + NEBULA_PALETTE_HUE_RANGE) % NEBULA_PALETTE_HUE_RANGE;
+        targetHue = NEBULA_PALETTE_HUE_MIN + offset;
     }
 
-    return blendCompositions(
-        oldComp, oldWeight,
-        neighborBlend, neighborWeight
-    );
+    // Defensive final clamp (in case of upstream drift).
+    targetHue = clampHueToPalette(targetHue);
+
+    return [{ hex: paletteHueToHex(targetHue), weight: 1 }];
   }
 
   /**
