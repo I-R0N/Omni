@@ -279,6 +279,15 @@ export class RenderSystem {
     this.backgroundManager.setMapType(type);
   }
 
+  /**
+   * Forward the map's nebula cluster-center seed list to the background
+   * layer so it renders puffs at the same world-space positions as the
+   * interactable tile clusters (single unified cloud, no visual split).
+   */
+  public setNebulaClusterCenters(centers: Vector2[] | null) {
+    this.backgroundManager.setNebulaClusterCenters(centers);
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,
