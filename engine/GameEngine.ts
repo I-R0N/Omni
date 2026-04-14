@@ -4,9 +4,12 @@ import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
+import { ParticleSystem } from './systems/ParticleSystem';
+import { TrailSystem } from './systems/TrailSystem';
+import { ProjectileSystem } from './systems/ProjectileSystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE, MAX_PROJECTILES, MAX_PARTICLES, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -22,6 +25,9 @@ export class GameEngine {
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
   private ai: AISystem;
+  private particles: ParticleSystem;
+  private trails: TrailSystem;
+  private projectiles: ProjectileSystem;
   private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
@@ -125,6 +131,9 @@ export class GameEngine {
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
+    this.particles = new ParticleSystem();
+    this.trails = new TrailSystem();
+    this.projectiles = new ProjectileSystem();
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -1108,161 +1117,29 @@ export class GameEngine {
 
   // ── Particle helpers ────────────────────────────────────────────────────────
 
+  // Thin wrapper kept for call-site compatibility — delegates to ParticleSystem.
   private spawnParticles(
     position: Vector2,
     count: number,
     color: string,
-    options?: {
-      speedMin?: number;
-      speedMax?: number;
-      sizeMin?: number;
-      sizeMax?: number;
-      lifetimeMin?: number;
-      lifetimeMax?: number;
-      spreadAngle?: number; // center angle (radians); undefined = full circle
-      spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
-      baseVelocity?: Vector2;
-    }
+    options?: Parameters<ParticleSystem['spawn']>[4]
   ) {
     if (!this.currentMap) return;
-    const {
-      speedMin = 2, speedMax = 5,
-      sizeMin = 1, sizeMax = 3,
-      lifetimeMin = 0.2, lifetimeMax = 0.45,
-      spreadAngle, spreadCone,
-      baseVelocity,
-    } = options ?? {};
-
-    const halfCone = spreadCone ?? Math.PI;
-
-    for (let i = 0; i < count; i++) {
-      const angle = spreadAngle !== undefined
-        ? spreadAngle + (Math.random() - 0.5) * 2 * halfCone
-        : Math.random() * Math.PI * 2;
-      const speed = speedMin + Math.random() * (speedMax - speedMin);
-      const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
-      const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
-
-      this.currentMap.entities.push({
-        id: `part_${Date.now()}_${i}_${Math.random()}`,
-        type: EntityType.PARTICLE,
-        position: { x: position.x, y: position.y },
-        velocity: {
-          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
-          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
-        },
-        size:      { x: size, y: size },
-        rotation:  0,
-        color,
-        active:    true,
-        health:    1,
-        maxHealth: 1,
-        lifetime:  life,
-        maxLifetime: life,
-        mass:      0.1,
-      });
-    }
-
-    this.enforceParticleCap();
+    this.particles.spawn(this.currentMap.entities, position, count, color, options);
   }
 
   /**
-   * Hard cap on live particles. If exceeded, deactivates the oldest
-   * particles first (FIFO by entity-list order). Purely visual entities,
-   * so dropping old ones is safe.
-   */
-  private enforceParticleCap() {
-      if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      let count = 0;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.PARTICLE) count++;
-      }
-      if (count <= MAX_PARTICLES) return;
-      let toDrop = count - MAX_PARTICLES;
-      for (let i = 0; i < entities.length && toDrop > 0; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.PARTICLE) {
-              e.active = false;
-              toDrop--;
-          }
-      }
-  }
-
-  /**
-   * Tick a trail array: decrement each point's lifetime, apply per-point
-   * drift velocity, and splice expired entries.  Shared between the active
-   * player trail and detached trails from prior thrust events.
+   * Thin wrappers kept so existing call sites in updateGameLogic don't have
+   * to reach into subsystems directly.  Logic lives in TrailSystem /
+   * ParticleSystem.
    */
   private tickTrail(trail: TrailPoint[], dt: number) {
-    for (let i = trail.length - 1; i >= 0; i--) {
-      const tp = trail[i];
-      tp.lifetime -= dt;
-      if (tp.vx !== undefined) tp.x += tp.vx;
-      if (tp.vy !== undefined) tp.y += tp.vy;
-      if (tp.lifetime <= 0) {
-        trail.splice(i, 1);
-      }
-    }
+    this.trails.tickTrail(trail, dt);
   }
 
-  /**
-   * Glitter trail — spawns tiny additive-blended sparkles trailing behind the
-   * player along the current velocity vector.  Density is triangularly
-   * distributed across the player's width (peaked on the center-line, falling
-   * off toward the edges).  Particles have zero velocity so they stay put
-   * while the player moves forward, naturally forming a trail.
-   */
   private spawnGlitterTrail() {
     if (!this.currentMap) return;
-    const v = this.player.velocity;
-    const speedSq = v.x * v.x + v.y * v.y;
-    if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
-
-    const speed = Math.sqrt(speedSq);
-    // Forward unit vector (direction of travel) and its perpendicular
-    const fx = v.x / speed;
-    const fy = v.y / speed;
-    const perpX = -fy;
-    const perpY = fx;
-
-    const halfWidth = this.player.size.x / 2;
-    // Spawn at the player's tail so particles appear behind, not on top of, the sprite
-    const tailX = this.player.position.x - fx * halfWidth;
-    const tailY = this.player.position.y - fy * halfWidth;
-
-    const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
-
-    for (let i = 0; i < COUNT_PER_FRAME; i++) {
-      // Triangular distribution in [-1, 1] peaked at 0 — gives denser center,
-      // sparser edges across the player's width.
-      const u = Math.random() - Math.random();
-      const lateral = u * halfWidth;
-
-      const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
-      const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
-      const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
-
-      this.currentMap.entities.push({
-        id: `glit_${Date.now()}_${i}_${Math.random()}`,
-        type: EntityType.PARTICLE,
-        position: {
-          x: tailX + perpX * lateral,
-          y: tailY + perpY * lateral,
-        },
-        velocity: { x: 0, y: 0 },
-        size: { x: size, y: size },
-        rotation: 0,
-        color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: life,
-        maxLifetime: life,
-        mass: 0.01,
-      });
-    }
+    this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
@@ -1442,244 +1319,26 @@ export class GameEngine {
       this.spawnProjectileFromConfig(this.player, {x: worldX, y: worldY}, config, EntityType.PLAYER);
   }
 
+  // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
+  // existing GameEngine call sites stay unchanged during the Phase 2 split.
   private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
-      const angle = Math.atan2(target.y - shooter.position.y, target.x - shooter.position.x);
-
-      // Only apply recoil to player for now
-      if (ownerType === EntityType.PLAYER) {
-          const recoilImpulse = (PROJECTILE_CONSTANTS.MASS * config.speed * config.recoil) / (shooter.mass || 1);
-          shooter.velocity.x -= Math.cos(angle) * recoilImpulse;
-          shooter.velocity.y -= Math.sin(angle) * recoilImpulse;
-      }
-
-      const halfSpread = (config.spread * (Math.PI / 180)) / 2;
-
-      for (let i = 0; i < config.count; i++) {
-          let currentAngle = angle;
-          if (config.count > 1) {
-             const step = (halfSpread * 2) / (config.count - 1);
-             currentAngle = (angle - halfSpread) + (step * i);
-          } else if (config.spread > 0) {
-             currentAngle += (Math.random() - 0.5) * (config.spread * (Math.PI / 180));
-          }
-
-          const vx = Math.cos(currentAngle) * config.speed;
-          const vy = Math.sin(currentAngle) * config.speed;
-
-          const pSize = { 
-              x: config.size * 2.5, 
-              y: config.size * 0.4
-          };
-
-          // Spawn slightly forward from the ship nose based on entity size
-          const muzzleBase = Math.max(shooter.size?.x || SPRITE_CONSTANTS.PLAYER_BASE_SIZE, shooter.size?.y || SPRITE_CONSTANTS.PLAYER_BASE_SIZE);
-          const muzzleOffset = muzzleBase * 0.6;
-          const startX = shooter.position.x + Math.cos(currentAngle) * muzzleOffset;
-          const startY = shooter.position.y + Math.sin(currentAngle) * muzzleOffset;
-
-          this.currentMap?.entities.push({
-              id: `proj_${Date.now()}_${i}`,
-              type: EntityType.PROJECTILE,
-              position: { x: startX, y: startY },
-              velocity: { x: vx, y: vy },
-              size: pSize,
-              rotation: currentAngle,
-              color: config.color,
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: config.lifetime,
-              maxLifetime: config.lifetime,
-              mass: PROJECTILE_CONSTANTS.MASS,
-              damage: config.damage,
-              homing: config.homing,
-              ownerType,
-              pierceCount: config.pierce,
-              trail: [],
-              isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
-              isBouncer: config.type === WeaponType.BOUNCER || undefined,
-          });
-      }
-
-      this.enforceProjectileCap();
-  }
-
-  /**
-   * Hard cap on live projectiles. If exceeded, deactivates the oldest
-   * projectiles first (FIFO by entity-list order). Physics/render passes
-   * skip inactive entities and the cleanup pass removes them next frame.
-   */
-  private enforceProjectileCap() {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      let count = 0;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.PROJECTILE) count++;
-      }
-      if (count <= MAX_PROJECTILES) return;
-      let toDrop = count - MAX_PROJECTILES;
-      for (let i = 0; i < entities.length && toDrop > 0; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.PROJECTILE) {
-              e.active = false;
-              toDrop--;
-          }
-      }
+      this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
   }
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      // Filter-less optimization
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const p = entities[i];
-          if (p.active && p.type === EntityType.PROJECTILE && p.homing) {
-             
-              let target: GameEntity | null = null;
-              let minDist = 400 * 400; 
-
-              for (let j = 0; j < entities.length; j++) {
-                  const e = entities[j];
-                  if (e.active && e.type === EntityType.ENEMY) {
-                      const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
-                      if (d2 < minDist) {
-                          minDist = d2;
-                          target = e;
-                      }
-                  }
-              }
-
-              if (target) {
-                  const desiredAngle = Math.atan2(target.position.y - p.position.y, target.position.x - p.position.x);
-                  let angleDiff = desiredAngle - p.rotation;
-                  
-                  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-                  const turnRate = 5 * (p.homingStrength ?? 1) * dt;
-                  if (Math.abs(angleDiff) < turnRate) {
-                      p.rotation = desiredAngle;
-                  } else {
-                      p.rotation += Math.sign(angleDiff) * turnRate;
-                  }
-
-                  const speed = Math.sqrt(p.velocity.x**2 + p.velocity.y**2);
-                  p.velocity.x = Math.cos(p.rotation) * speed;
-                  p.velocity.y = Math.sin(p.rotation) * speed;
-              }
-          }
-      }
+      this.projectiles.updateHoming(this.currentMap.entities, dt);
   }
 
   private updateLightningGravity(dt: number) {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
-
-      // Fast-path: single O(N) scan to check whether any work is needed.
-      // Skips the O(L × N) nested loop entirely when there are no lightning
-      // projectiles or no valid targets on the map.
-      let hasLightning = false;
-      let hasTarget = false;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active) continue;
-          if (!hasLightning && e.type === EntityType.PROJECTILE && e.isLightningProjectile) {
-              hasLightning = true;
-          } else if (!hasTarget && !e.isExploding &&
-                     (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
-              hasTarget = true;
-          }
-          if (hasLightning && hasTarget) break;
-      }
-      if (!hasLightning || !hasTarget) return;
-
-      for (let i = 0; i < entities.length; i++) {
-          const p = entities[i];
-          if (!p.active || p.type !== EntityType.PROJECTILE || !p.isLightningProjectile) continue;
-
-          // Find nearest enemy or asteroid within gravity range
-          let target: GameEntity | null = null;
-          let minD2 = rangeSq;
-          for (let j = 0; j < entities.length; j++) {
-              const e = entities[j];
-              if (!e.active || e.isExploding) continue;
-              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
-              const dx = e.position.x - p.position.x;
-              const dy = e.position.y - p.position.y;
-              const d2 = dx * dx + dy * dy;
-              if (d2 < minD2) { minD2 = d2; target = e; }
-          }
-
-          if (target) {
-              const dx = target.position.x - p.position.x;
-              const dy = target.position.y - p.position.y;
-              const dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist > 1) {
-                  // Gravity-like acceleration: stronger when closer
-                  const accel = LIGHTNING_GRAVITY_STRENGTH / Math.max(dist, 30);
-                  p.velocity.x += (dx / dist) * accel * dt;
-                  p.velocity.y += (dy / dist) * accel * dt;
-              }
-          }
-
-          // Keep rotation aligned with velocity
-          const sp = Math.sqrt(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y);
-          if (sp > 0.1) {
-              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
-          }
-      }
+      this.projectiles.updateLightningGravity(this.currentMap.entities, dt);
   }
 
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      const TRAIL_LIFETIME = 0.25; // shorter than player trail
-      const TRAIL_SCALE = 0.5;
-      // Bouncer beams are visualized entirely by their trail, which fades
-      // almost instantly so the beam reads as a short moving line segment.
-      // Target visible beam length ≈ 50 units at speed 9 ≈ 540 units/sec.
-      const BOUNCER_TRAIL_LIFETIME = 0.09;
-      const BOUNCER_TRAIL_SCALE = 0.55;
-      const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
-
-      for (let i = 0; i < entities.length; i++) {
-          const p = entities[i];
-          if (!p.active || p.type !== EntityType.PROJECTILE) continue;
-
-          const lifetime = p.isBouncer ? BOUNCER_TRAIL_LIFETIME : TRAIL_LIFETIME;
-          const scale = p.isBouncer ? BOUNCER_TRAIL_SCALE : TRAIL_SCALE;
-
-          // Decay existing trail points (write-index avoids O(n) splice shifts)
-          if (p.trail) {
-              let writeIdx = 0;
-              for (let j = 0; j < p.trail.length; j++) {
-                  p.trail[j].lifetime -= dt;
-                  if (p.trail[j].lifetime > 0) {
-                      p.trail[writeIdx++] = p.trail[j];
-                  }
-              }
-              p.trail.length = writeIdx;
-          } else {
-              p.trail = [];
-          }
-
-          // Add new trail point if far enough from last
-          const t = p.trail;
-          const lastPos = t.length > 0 ? t[t.length - 1] : null;
-          const dx = p.position.x - (lastPos?.x ?? p.position.x - 1);
-          const dy = p.position.y - (lastPos?.y ?? p.position.y - 1);
-          if (!lastPos || (dx * dx + dy * dy > MIN_DIST_SQ)) {
-              t.push({
-                  x: p.position.x,
-                  y: p.position.y,
-                  lifetime,
-                  maxLifetime: lifetime,
-                  scale,
-              });
-          }
-      }
+      this.trails.updateProjectileTrails(this.currentMap.entities, dt);
   }
 
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
