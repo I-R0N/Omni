@@ -1,5 +1,5 @@
 
-import { GameEntity, EntityType, NebulaColorStop } from '../../types';
+import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { COLORS, STRUCTURE_CONSTANTS, ASSETS, NEBULA_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
@@ -112,6 +112,11 @@ export class TileGenerator {
    * Nebula tiles are pass-through (no collision impulse) and shatter into
    * NEBULA_SHARDs on player/enemy contact.  Each cluster shares a single
    * random-hue composition so adjacent tiles blend visually.
+   *
+   * Optionally records each cluster's world-space start position into
+   * `recordedCenters` — used by the background-nebula layer to render
+   * puffs at the same positions as the tile clusters (single unified
+   * cloud instead of two independently-random layers).
    */
   public static generateNebulaClusters(
     mapWidth: number,
@@ -120,7 +125,8 @@ export class TileGenerator {
     clusterCount: number,
     minClusterSize: number,
     maxClusterSize: number,
-    occupiedCoords: Set<string>
+    occupiedCoords: Set<string>,
+    recordedCenters?: Vector2[]
   ): GameEntity[] {
     const entities: GameEntity[] = [];
 
@@ -142,6 +148,16 @@ export class TileGenerator {
 
       let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
       let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
+
+      // Record this cluster's world-space start position for the
+      // background-nebula layer to consume as a puff seed.
+      if (recordedCenters) {
+          const rowOffset = (startRow % 2 !== 0) ? (w / 2) : 0;
+          recordedCenters.push({
+              x: startCol * w + rowOffset,
+              y: startRow * (h * 0.75),
+          });
+      }
 
       const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
       const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];

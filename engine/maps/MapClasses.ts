@@ -15,6 +15,13 @@ export abstract class BaseMapLayer {
   public parentId: string | null = null;
   public initialized: boolean = false;
   public enemyScale: number = 1;
+  // World-space start positions of every generated nebula tile cluster.
+  // Populated by `TileGenerator.generateNebulaClusters` when given this
+  // array as a recording slot.  GameEngine forwards the list to the
+  // background-nebula layer so BG puffs render at the same positions
+  // as the interactable tile clusters — one unified cloud rather than
+  // two independently-random layers.
+  public nebulaClusterCenters: Vector2[] = [];
 
   constructor(id: string, name: string, type: MapType) {
     this.id = id;
@@ -167,10 +174,13 @@ export class UniverseMap extends BaseMapLayer {
     // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
     // (sparser, spread across the full map).  The generator shares the
     // `occupied` set from the glass passes so nebula cells naturally fill
-    // the gaps glass left behind.  With high enough cluster counts some
-    // will statistically coincide with background nebula puffs in world
-    // space (the background system scatters puffs across ±~20 000), giving
-    // the cluster + background nebulae overlap the user asked for.
+    // the gaps glass left behind.
+    //
+    // Both passes record their world-space cluster start positions into
+    // `nebulaClusterCenters`, which GameEngine pipes into BackgroundManager
+    // so the background-nebula layer renders puffs at the exact same
+    // positions — one unified cloud, with parallax drift of the backdrop
+    // as the camera moves.
     //
     // Inner-zone bounds widened from 8000 to 12000 so the dense-cluster
     // treatment covers more of the playable core.
@@ -180,7 +190,8 @@ export class UniverseMap extends BaseMapLayer {
         NEBULA_CONSTANTS.CLUSTER_COUNT,
         NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
         NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
-        occupied
+        occupied,
+        this.nebulaClusterCenters
     ));
     this.entities.push(...TileGenerator.generateNebulaClusters(
         this.width, this.height,
@@ -188,7 +199,8 @@ export class UniverseMap extends BaseMapLayer {
         NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
         NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
         NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
-        occupied
+        occupied,
+        this.nebulaClusterCenters
     ));
 
     // Clear a safe open area around spawn

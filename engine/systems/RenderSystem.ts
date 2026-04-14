@@ -279,6 +279,16 @@ export class RenderSystem {
     this.backgroundManager.setMapType(type);
   }
 
+  /**
+   * Forward the map's recorded nebula cluster-center positions to the
+   * background layer so its puffs render at the same world positions
+   * as the interactable tile clusters (one unified cloud, with the
+   * backdrop still parallaxing as the camera moves).
+   */
+  public setNebulaClusterCenters(centers: Vector2[] | null) {
+    this.backgroundManager.setNebulaClusterCenters(centers);
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,

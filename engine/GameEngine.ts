@@ -3053,6 +3053,11 @@ export class GameEngine {
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
+      // Hand the map's recorded nebula cluster positions to the
+      // background layer so its puffs render at the same world
+      // positions as the interactable tile clusters (one unified
+      // cloud, BG backdrop still parallaxes as the camera moves).
+      this.renderer.setNebulaClusterCenters(map.nebulaClusterCenters);
   }
 
   private draw() {
