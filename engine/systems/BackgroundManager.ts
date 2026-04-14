@@ -164,20 +164,24 @@ public setMapType(type: MapType) {
     this.milkyWay = [];
 
     // Nebula puffs — if the map provided a shared cluster-center list,
-    // use those positions (depth = 1.0 → stays aligned with the world
-    // so the background puffs and the interactable tile clusters read
-    // as one unified cloud).  Otherwise fall back to the legacy random
-    // distribution for maps that don't have tile nebulae.
+    // use those positions but KEEP the original random parallax depth
+    // (0.2–1.0) so the background layer still drifts as the camera
+    // moves.  At camera (0, 0) the BG puffs align with the world-space
+    // tile clusters; as the player moves, parallax separates them and
+    // the tile clusters appear on top of a drifting nebular backdrop.
+    // Otherwise fall back to the legacy random distribution for maps
+    // that don't have tile nebulae.
     if (this.nebulaClusterCenters) {
         for (const seed of this.nebulaClusterCenters) {
             const size = 150 + Math.random() * 250; // 150–400px
+            const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0 parallax
             const hue = Math.random() * 360;
             const color = `hsla(${hue}, 100%, 60%,`;
             this.nebulaPuffs.push({
                 x: seed.x,
                 y: seed.y,
                 size: size,
-                depth: 1.0, // world-space lock — no parallax drift
+                depth: depth,
                 opacity: 0.1 + Math.random() * 0.55,
                 color: color,
                 hue: hue,
