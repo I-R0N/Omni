@@ -113,8 +113,14 @@ export class PhysicsSystem {
           // Skip movement for exploding entities
           if (entity.isExploding) continue;
 
-          entity.position.x += entity.velocity.x;
-          entity.position.y += entity.velocity.y;
+          // Position integration — normalized to 60 Hz so that changing
+          // FIXED_DT (and therefore the number of substeps per render frame)
+          // does not alter the effective travel rate of any entity.  With
+          // timeScale = dt * 60, dt = 1/60 yields ×1 (legacy behavior) and
+          // dt = 1/120 yields ×0.5 per step × 2 steps per frame = same net
+          // displacement per wall-clock second.
+          entity.position.x += entity.velocity.x * timeScale;
+          entity.position.y += entity.velocity.y * timeScale;
 
           // Apply Friction
           // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
@@ -170,7 +176,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
     const attractors: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
@@ -355,7 +361,7 @@ export class PhysicsSystem {
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void

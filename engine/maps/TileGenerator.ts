@@ -1,6 +1,7 @@
 
 import { GameEntity, EntityType } from '../../types';
 import { COLORS, STRUCTURE_CONSTANTS, ASSETS } from '../../constants';
+import { nextId } from '../systems/IdAllocator';
 
 export class TileGenerator {
   /**
@@ -106,7 +107,7 @@ export class TileGenerator {
     ];
 
     entities.push({
-        id: `tile_${r}_${c}_${Math.random().toString(36).substr(2, 9)}`,
+        id: nextId(`tile_${r}_${c}`),
         type: EntityType.STRUCTURE,
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
