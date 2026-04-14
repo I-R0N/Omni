@@ -8,9 +8,11 @@ import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
 import { ProjectileSystem } from './systems/ProjectileSystem';
 import { WeaponSystem } from './systems/WeaponSystem';
+import { DropSystem } from './systems/DropSystem';
+import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -30,6 +32,8 @@ export class GameEngine {
   private trails: TrailSystem;
   private projectiles: ProjectileSystem;
   private weapons: WeaponSystem;
+  private drops: DropSystem;
+  private waves: WaveSystem;
   private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
@@ -64,11 +68,17 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Wave system
-  private waveIndex: number = 0;
-  private waveEnemyIds: Set<string> = new Set();
-  private waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
-  private waveGraceTimer: number = 0;
+  // Wave system state lives on this.waves (WaveSystem) — these accessors
+  // preserve the old GameEngine.waveX field ergonomics for the handful of
+  // call sites that still read/write them directly.
+  private get waveIndex(): number { return this.waves.waveIndex; }
+  private set waveIndex(v: number) { this.waves.waveIndex = v; }
+  private get waveEnemyIds(): Set<string> { return this.waves.waveEnemyIds; }
+  private set waveEnemyIds(v: Set<string>) { this.waves.waveEnemyIds = v; }
+  private get waveState(): 'inactive' | 'active' | 'cleared' | 'complete' { return this.waves.waveState; }
+  private set waveState(v: 'inactive' | 'active' | 'cleared' | 'complete') { this.waves.waveState = v; }
+  private get waveGraceTimer(): number { return this.waves.waveGraceTimer; }
+  private set waveGraceTimer(v: number) { this.waves.waveGraceTimer = v; }
 
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -80,8 +90,10 @@ export class GameEngine {
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
 
-  // Wave announcement banners rendered on the canvas
-  public waveAnnouncements: WaveAnnouncement[] = [];
+  // Wave announcement banners rendered on the canvas — forwarded from
+  // WaveSystem so existing call sites keep working verbatim.
+  public get waveAnnouncements(): WaveAnnouncement[] { return this.waves.announcements; }
+  public set waveAnnouncements(v: WaveAnnouncement[]) { this.waves.announcements = v; }
 
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
@@ -137,6 +149,8 @@ export class GameEngine {
     this.trails = new TrailSystem();
     this.projectiles = new ProjectileSystem();
     this.weapons = new WeaponSystem(this.projectiles);
+    this.drops = new DropSystem(this.particles);
+    this.waves = new WaveSystem();
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -200,26 +214,25 @@ export class GameEngine {
   }
 
   public skipWave() {
-    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
-      this.waveGraceTimer = 0;
-      this.spawnWave(this.waveIndex + 1);
-      // Push stats immediately so the UI reflects the new wave number
-      // before the next rAF tick rather than lagging one frame.
-      this.onStatsUpdate({
-        fps: 0,
-        entityCount: (this.currentMap?.entities.length || 0) + 1,
-        currentMapName: this.currentMap?.name || '',
-        currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-        currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
-        gameState: this.gameState,
-        difficulty: this.difficultyLevel,
-        waveNumber: this.waveIndex + 1,
-        waveStatus: 'active',
-        waveGraceTimer: undefined,
-        debugMode: this.debugMode,
-        weaponCount: this.currentWeaponIndex + 1,
-      });
-    }
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    if (!this.waves.skip(ctx)) return;
+    // Push stats immediately so the UI reflects the new wave number before
+    // the next rAF tick rather than lagging one frame.
+    this.onStatsUpdate({
+      fps: 0,
+      entityCount: (this.currentMap?.entities.length || 0) + 1,
+      currentMapName: this.currentMap?.name || '',
+      currentMapType: this.currentMap?.type || MapType.UNIVERSE,
+      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      gameState: this.gameState,
+      difficulty: this.difficultyLevel,
+      waveNumber: this.waveIndex + 1,
+      waveStatus: 'active',
+      waveGraceTimer: undefined,
+      debugMode: this.debugMode,
+      weaponCount: this.currentWeaponIndex + 1,
+    });
   }
 
   public pauseGame() {
@@ -694,12 +707,7 @@ export class GameEngine {
     }
 
     // Tick down wave announcements
-    for (let i = this.waveAnnouncements.length - 1; i >= 0; i--) {
-        this.waveAnnouncements[i].lifetime -= dt;
-        if (this.waveAnnouncements[i].lifetime <= 0) {
-            this.waveAnnouncements.splice(i, 1);
-        }
-    }
+    this.waves.tickAnnouncements(dt);
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -718,32 +726,12 @@ export class GameEngine {
         return; // Skip controls while exploding
     }
 
-    // Wave completion check
-    if (this.waveState === 'active' && this.currentMap) {
-      const entities = this.currentMap.entities;
-      let allDead = true;
-      for (let i = 0; i < entities.length; i++) {
-        const e = entities[i];
-        if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding) {
-          allDead = false;
-          break;
-        }
-      }
-      if (allDead) {
-        this.waveState = 'cleared';
-
-        // Wave clear announcement
-        const clearLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-        this.waveAnnouncements.push({
-          text: `WAVE ${this.waveIndex + 1} CLEAR`,
-          color: '#4ade80',
-          lifetime: clearLife,
-          maxLifetime: clearLife,
-        });
-
-        // Difficulty-scaled health drop interval
+    // Wave completion + grace-period countdown — delegated to WaveSystem.
+    // On wave clear we drop a health pickup every Nth wave (difficulty-scaled).
+    if (this.currentMap) {
+      this.waves.checkCompletion(this.currentMap.entities, (clearedIndex) => {
         const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
-        if ((this.waveIndex + 1) % healthInterval === 0) {
+        if ((clearedIndex + 1) % healthInterval === 0) {
           const hAngle = Math.random() * Math.PI * 2;
           const hDist  = 20 + Math.random() * 80; // 20–100 units from player
           const hPos   = {
@@ -752,19 +740,10 @@ export class GameEngine {
           };
           this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
         }
+      });
 
-        // Always start the grace period — waves are infinite
-        this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-      }
-    }
-
-    // Grace period countdown — spawn next wave when timer expires (infinite)
-    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
-      this.waveGraceTimer -= dt;
-      if (this.waveGraceTimer <= 0) {
-        this.waveGraceTimer = 0;
-        this.spawnWave(this.waveIndex + 1);
-      }
+      const graceCtx = this.waveContext();
+      if (graceCtx) this.waves.tickGrace(dt, graceCtx);
     }
 
     // Auto-collapse minimap
@@ -1748,150 +1727,53 @@ export class GameEngine {
 
   // --- WAVE SYSTEM ---
 
+  /** Build the per-call spawn context that WaveSystem needs.  Kept as a
+   *  tiny helper so every wave entry point (init / grace tick / skip) goes
+   *  through the same factory. */
+  private waveContext(): WaveSpawnContext | null {
+    if (!this.currentMap) return null;
+    return {
+      entities: this.currentMap.entities,
+      player: this.player,
+      physics: this.physics,
+      enemyScale: this.enemyScale,
+      difficultyLevel: this.difficultyLevel,
+    };
+  }
+
+  // Thin wrappers kept for internal call-site compatibility — delegate to WaveSystem.
   private initWaveSystem() {
-    this.waveIndex = 0;
-    this.waveEnemyIds = new Set();
-    this.waveState = 'inactive';
-    this.waveGraceTimer = 0;
-    this.spawnWave(0);
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    this.waves.init(ctx);
   }
 
   private spawnWave(index: number) {
-    if (!this.currentMap) return;
-    this.waveIndex = index;
-    this.waveEnemyIds.clear();
-
-    const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
-    const waveDef = generateWaveDef(index);
-    const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
-    const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
-    let enemyIdx = 0;
-
-    // Flanking: divide enemies into groups arriving from evenly-spaced angles.
-    // A random base rotation ensures no two waves look the same.
-    const numFlanks = totalEnemies >= 5 ? 3 : 2;
-    const flankSpacing = (Math.PI * 2) / numFlanks;
-    const flankBaseRotation = Math.random() * Math.PI * 2;
-
-    for (const group of scaledGroups) {
-      for (let i = 0; i < group.count; i++) {
-        const flankIdx = enemyIdx % numFlanks;
-        const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
-        const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
-        let x = 0, y = 0;
-        // Try up to 8 candidate positions; pick first one clear of static tiles
-        for (let attempt = 0; attempt < 8; attempt++) {
-          const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
-          const dist = 550 + Math.random() * 200;
-          x = this.player.position.x + Math.cos(a) * dist;
-          y = this.player.position.y + Math.sin(a) * dist;
-          if (this.physics.isPositionClear(x, y, safeRadius)) break;
-        }
-        const config = ENEMY_VARIANTS[group.subtype];
-        const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
-
-        const tierMap: Partial<Record<string, number>> = {
-          RAMMER_1: 1, SHOOTER_1: 1,
-          RAMMER_2: 2, SHOOTER_2: 2,
-          RAMMER_3: 3, SHOOTER_3: 3,
-        };
-        const enemyTier = tierMap[group.subtype] ?? 1;
-
-        const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
-        this.currentMap.entities.push({
-          id,
-          type: EntityType.ENEMY,
-          enemySubtype: group.subtype,
-          enemyTier,
-          position: { x, y },
-          velocity: { x: 0, y: 0 },
-          size: { x: config.size, y: config.size },
-          rotation: Math.random() * Math.PI * 2,
-          color: config.color,
-          active: true,
-          health: scaledHealth,
-          maxHealth: scaledHealth,
-          maxSpeed: config.maxSpeed * statScale.speed,
-          mass: config.mass,
-          visionRange: ENEMY_CONSTANTS.VISION_RANGE,
-          sprite: config.sprite
-        });
-
-        this.waveEnemyIds.add(id);
-        enemyIdx++;
-      }
-    }
-
-    this.waveState = 'active';
-
-    // Wave start announcement
-    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-    this.waveAnnouncements.push({
-      text: `WAVE ${index + 1}`,
-      subtext: 'GET READY',
-      color: '#ffffff',
-      lifetime: totalLife,
-      maxLifetime: totalLife,
-    });
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    this.waves.spawn(index, ctx);
   }
 
 
-  /**
-   * Apply the reward of a collected/broken drop directly to the player.
-   * Called both from spawnDrops (when a drop is destroyed by a player projectile)
-   * and previously from the contact-collection loop.
-   */
+  // --- Drop / shard thin wrappers ────────────────────────────────────────
+  //
+  // Logic lives in DropSystem; these wrappers preserve the existing call
+  // sites in updateGameLogic / handleEntityDeath / collection paths.
+
   private applyDropEffect(entity: GameEntity) {
-    if (entity.dropType === 'ammo' && entity.dropWeapon !== undefined) {
-      const wType  = entity.dropWeapon;
-      const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
-      if (!this.player.ammo) this.player.ammo = {};
-      this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + amount;
-      // Trigger slot flash — accumulate amount if picked up in quick succession
-      if (!this.player.ammoPickupFlash) this.player.ammoPickupFlash = {};
-      const prev = this.player.ammoPickupFlash[wType];
-      this.player.ammoPickupFlash[wType] = {
-        timer:  0.75,
-        amount: (prev && prev.timer > 0 ? prev.amount : 0) + amount,
-      };
-    } else if (entity.dropType === 'health') {
-      const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
-      const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
-      if (healed > 0) {
-        this.player.health += healed;
-        this.pushPlayerMessage(`+${Math.round(healed)}`, '#ef4444');
-      }
-    }
+    this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
   }
 
   private spawnDrops(entity: GameEntity) {
-    const pos = entity.position;
-    const pv = entity.velocity;
-
-    if (entity.type === EntityType.STRUCTURE) {
-      this.spawnGlassShards(entity);
-
-    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
-      // Drop was destroyed by a player projectile — apply its reward immediately.
-      this.applyDropEffect(entity);
-
-    } else if (entity.type === EntityType.ASTEROID) {
-      if (entity.dropComposition && entity.dropComposition.length > 0) {
-        for (const comp of entity.dropComposition) {
-          if (comp.type === 'ammo') {
-            this.spawnAmmoDrop(pos, comp.weapon, comp.value, pv);
-          } else if (comp.type === 'health') {
-            this.spawnHealthDrop(pos, comp.value, pv);
-          }
-          // 'powerup' entries no longer spawn — powerup drops have been removed
-        }
-      } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
-        // Wave-scaled ammo drop — only some asteroids drop ammo
-        const waveAmmoType = this.getAsteroidAmmoType();
-        this.spawnAmmoDrop(pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
-      }
-
-    }
+    if (!this.currentMap) return;
+    this.drops.spawnDrops(
+      this.currentMap.entities,
+      this.activeDrops,
+      this.player,
+      entity,
+      this.waveIndex,
+      (t, c) => this.pushPlayerMessage(t, c),
+    );
   }
 
   /**
@@ -1911,289 +1793,26 @@ export class GameEngine {
     }
   }
 
-  /**
-   * Break a dead enemy into debris using the 70/15/10/5 split:
-   *   70% tile shards  — visual debris only
-   *   15% own-color ammo drop
-   *   10% next-color ammo drop
-   *    5% empty asteroid shard
-   */
   private spawnEnemyShards(enemy: GameEntity) {
     if (!this.currentMap) return;
-
-    const pos    = enemy.position;
-    const pv     = enemy.velocity;
-    const subtype = enemy.enemySubtype;
-    const ammoMap = subtype ? ENEMY_AMMO_DROP[subtype] : null;
-
-    // Plan: 6 tile shards + 1 own ammo + 1 next ammo + 1 empty asteroid (50 % chance)
-    const TOTAL_PHYSICAL = 6 + 1 + 1 + (Math.random() < 0.5 ? 1 : 0);
-
-    // Build the spawn list: 'tile' | 'asteroid' | 'own' | 'next'
-    type SlotKind = 'tile' | 'asteroid' | 'own' | 'next';
-    const slots: SlotKind[] = [];
-    for (let i = 0; i < 6; i++) slots.push('tile');
-    if (ammoMap) { slots.push('own'); slots.push('next'); }
-    if (TOTAL_PHYSICAL > 8) slots.push('asteroid');
-    // Shuffle so drops aren't always last
-    for (let i = slots.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [slots[i], slots[j]] = [slots[j], slots[i]];
-    }
-
-    const total = slots.length;
-    for (let i = 0; i < total; i++) {
-      const baseAngle = (i / total) * Math.PI * 2;
-      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / total) * 1.5;
-      const speed     = 1.5 + Math.random() * 3.0;
-      const vx = pv.x * 0.2 + Math.cos(angle) * speed;
-      const vy = pv.y * 0.2 + Math.sin(angle) * speed;
-
-      const kind = slots[i];
-
-      if (kind === 'own' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_OWN) {
-        this.spawnAmmoDrop(pos, ammoMap.own, DROP_CONFIG.AMMO_PER_ENEMY_OWN, { x: vx * 5, y: vy * 5 });
-        continue;
-      }
-      if (kind === 'next' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_NEXT) {
-        this.spawnAmmoDrop(pos, ammoMap.next, DROP_CONFIG.AMMO_PER_ENEMY_NEXT, { x: vx * 5, y: vy * 5 });
-        continue;
-      }
-
-      // Physical shard
-      const isTile = kind === 'tile';
-      const shardType: ShardType = isTile ? 'tile' : 'asteroid';
-      const size    = 12 + Math.random() * 10;
-      const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
-      const jitterK = isTile ? 0.25 : 0.8;
-      const rMin    = isTile ? 0.60 : 0.55;
-      const rRange  = isTile ? 0.55 : 0.70;
-      const baseR   = (size / 2) * 0.8;
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPts; j++) {
-        const ba = (j / numPts) * Math.PI * 2;
-        const aj = (Math.random() - 0.5) * (Math.PI / numPts) * jitterK;
-        rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-      this.currentMap.entities.push({
-        id:           `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
-        type:          EntityType.ASTEROID,
-        shardType,
-        position:     { x: pos.x, y: pos.y },
-        velocity:     { x: vx, y: vy },
-        size:         { x: size, y: size },
-        rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
-        color:         isTile ? '#b4e6fd' : COLORS.ASTEROID,
-        active:        true,
-        health:        1,
-        maxHealth:     1,
-        mass:          size,
-        polygonPoints: pts,
-      });
-    }
+    this.drops.spawnEnemyShards(this.currentMap.entities, this.activeDrops, enemy);
   }
 
-  /**
-   * Generate an irregular shard polygon for a drop.
-   * baseR controls visual size and should scale with the drop's value so
-   * larger-value drops are physically bigger.
-   */
-  private generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
-    let numPoints: number;
-    let radMin: number;
-    let radMax: number;
-    let angleJitterScale: number;
-    if (type === 'ammo') {
-      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, jagged crystal
-      radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
-    } else if (type === 'health') {
-      numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
-      radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
-    } else {
-      numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
-      radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
-    }
-    const rawPts: { angle: number; r: number }[] = [];
-    for (let i = 0; i < numPoints; i++) {
-      const baseAngle = (i / numPoints) * Math.PI * 2;
-      const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 2 * angleJitterScale;
-      rawPts.push({ angle: baseAngle + jitter, r: baseR * (radMin + Math.random() * (radMax - radMin)) });
-    }
-    rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-  }
-
-  /**
-   * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel shard.
-   * Glass shards look like tile fragments (same glass rendering), drift with the
-   * flow field, and persist as permanent debris.  They are NOT added to activeDrops so
-   * they cannot be collected — they are purely environmental debris.
-   */
   private spawnGlassShards(tile: GameEntity) {
     if (!this.currentMap) return;
-
-    // Damage biases count and size distribution.
-    // damageNorm 0 → 4–6 shards, mostly large; 1 → 9–11, mostly small.
-    const damage     = tile.lastImpactDamage ?? 1;
-    const damageNorm = Math.min(1, (damage - 1) / 4);
-    const count      = Math.round(4 + damageNorm * 6) + Math.floor(Math.random() * 3);
-
-    // Tile is approximated as a square with half-side 11 → area = 11² = 121.
-    const TILE_HALF = 11;
-    const parentArea = TILE_HALF * TILE_HALF;
-    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
-
-    // Power-law area distribution — same principle as asteroids.
-    const alpha    = 0.3 + damageNorm * 1.5; // 0.3 → few large; 1.8 → many small
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-    // Radii derived from normalised areas (area = r²).
-    const radii: number[] = rawAreas
-      .map(a => Math.sqrt((a / rawSum) * parentArea))
-      .filter(r => r >= MIN_RADIUS);
-
-    if (radii.length < 2) return;
-
-    const iv = tile.lastImpactVelocity;
-    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
-    const HALF_CONE   = Math.PI * 0.6;
-    const scatter     = 12;
-
-    for (let i = 0; i < radii.length; i++) {
-      const radius = radii[i];
-
-      let angle: number;
-      let speed: number;
-      if (impactAngle !== null) {
-        angle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-        speed = impactSpeed * 0.2 + 0.3 + Math.random() * 1.2;
-      } else {
-        angle = Math.random() * Math.PI * 2;
-        speed = 0.4 + Math.random() * 1.5;
-      }
-
-      // Tile shard polygon — 4–6 vertices, low angular jitter, moderate radius
-      // variation.  More blocky/faceted than asteroid shards (which use 5–7 pts
-      // with higher jitter) to hint at their manufactured origin.
-      const numPoints = 4 + Math.floor(Math.random() * 3);
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPoints; j++) {
-        const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-      const size = radius * 4; // diameter; slightly larger so physics feel solid
-      this.currentMap.entities.push({
-        id:            `tile_shard_${Date.now()}_${i}_${Math.random()}`,
-        type:           EntityType.ASTEROID,
-        shardType:     'tile',
-        position:      {
-          x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
-          y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
-        },
-        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-        size:          { x: size, y: size },
-        rotation:       Math.random() * Math.PI * 2,
-        rotationSpeed:  (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
-        color:          '#b4e6fd',   // blue-white tile hue
-        active:         true,
-        health:         1,
-        maxHealth:      1,
-        mass:           size,
-        polygonPoints:  pts,
-      });
-    }
-
-    // Impact sparks: tile-colored chips + bright white hot sparks
-    const tileImpactAngle = tile.lastImpactVelocity
-      ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
-      : undefined;
-    this.spawnParticles(tile.position, 6, tile.color || '#6366f1', {
-      speedMin: 2, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
-      lifetimeMin: 0.2, lifetimeMax: 0.45,
-      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.65,
-    });
-    this.spawnParticles(tile.position, 4, '#ffffff', {
-      speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
-      lifetimeMin: 0.1, lifetimeMax: 0.25,
-      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
-    });
-  }
-
-  /** Returns the ammo type asteroids should drop for the current wave. */
-  private getAsteroidAmmoType(): WeaponType {
-    const idx = Math.min(
-      Math.floor(this.waveIndex / 3),
-      ASTEROID_AMMO_PROGRESSION.length - 1
-    );
-    return ASTEROID_AMMO_PROGRESSION[idx];
+    this.drops.spawnGlassShards(this.currentMap.entities, tile);
   }
 
   private spawnAmmoDrop(pos: Vector2, weapon: WeaponType, amount: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    if (weapon === WeaponType.BLASTER) return; // Blaster is always infinite — no drops
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop = this.makeDropEntity(`drop_ammo_${weapon}_${Date.now()}_${Math.random()}`,
-      pos, parentVelocity, WEAPONS[weapon].color, amount, 'ammo');
-    drop.dropWeapon = weapon;
-    drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
-    this.currentMap.entities.push(drop);
-    this.activeDrops.push(drop);
+    this.drops.spawnAmmoDrop(this.currentMap.entities, this.activeDrops, pos, weapon, amount, parentVelocity);
   }
 
   private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop: GameEntity = {
-      id:          `drop_health_${Date.now()}_${Math.random()}`,
-      type:        EntityType.INTERACTABLE,
-      position:    { x: pos.x, y: pos.y },
-      velocity:    { x: 0, y: 0 },
-      size:        { x: 48, y: 48 },
-      rotation:    0,
-      rotationSpeed: 0,
-      color:       '#ef4444',
-      active:      true,
-      health:      1,
-      maxHealth:   1,
-      mass:        Infinity, // static — never moved by physics or flow field
-      dropType:    'health',
-      dropValue:   value,
-    };
-    this.currentMap.entities.push(drop);
-    this.activeDrops.push(drop);
+    this.drops.spawnHealthDrop(this.currentMap.entities, this.activeDrops, pos, value, parentVelocity);
   }
 
-  private makeDropEntity(
-    id: string, pos: Vector2, pv: Vector2 | undefined,
-    color: string, value: number, dropType: 'ammo' | 'health'
-  ): GameEntity {
-    const scatter = 20;
-    const angle   = Math.random() * Math.PI * 2;
-    const speed   = 0.5 + Math.random() * 1.5;
-    const r       = Math.min(10, Math.max(4, 3.5 + value * 0.075));
-    return {
-      id, type: EntityType.INTERACTABLE,
-      position: { x: pos.x + (Math.random() - 0.5) * scatter * 2, y: pos.y + (Math.random() - 0.5) * scatter * 2 },
-      velocity: { x: (pv?.x ?? 0) * 0.3 + Math.cos(angle) * speed, y: (pv?.y ?? 0) * 0.3 + Math.sin(angle) * speed },
-      size: { x: r * 3, y: r * 3 },
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 2 * 2.5,
-      color, active: true, health: 1, maxHealth: 1, mass: 5,
-      dropType, dropValue: value,
-      polygonPoints: [],
-    };
-  }
-
-  // Spawn a powerup drop for a specific weapon (used when a composite asteroid releases its stored weapons).
   private loadMap(map: BaseMapLayer) {
       if (!map.initialized) {
           map.init();
