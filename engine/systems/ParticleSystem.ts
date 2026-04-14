@@ -1,5 +1,6 @@
 import { GameEntity, EntityType, Vector2 } from '../../types';
 import { GLITTER_TRAIL_CONSTANTS, MAX_PARTICLES } from '../../constants';
+import { nextId } from './IdAllocator';
 
 /**
  * ParticleSystem — spawns and manages decorative particle entities.
@@ -52,7 +53,7 @@ export class ParticleSystem {
       const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
 
       entities.push({
-        id: `part_${Date.now()}_${i}_${Math.random()}`,
+        id: nextId('part'),
         type: EntityType.PARTICLE,
         position: { x: position.x, y: position.y },
         velocity: {
@@ -109,7 +110,7 @@ export class ParticleSystem {
       const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
 
       entities.push({
-        id: `glit_${Date.now()}_${i}_${Math.random()}`,
+        id: nextId('glit'),
         type: EntityType.PARTICLE,
         position: {
           x: tailX + perpX * lateral,

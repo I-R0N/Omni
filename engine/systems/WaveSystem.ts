@@ -8,6 +8,7 @@ import {
   generateWaveDef,
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
+import { nextId } from './IdAllocator';
 
 /**
  * WaveSystem — owns wave state (current index, live enemy ids, phase,
@@ -75,7 +76,7 @@ export class WaveSystem {
           if (physics.isPositionClear(x, y, safeRadius)) break;
         }
         const config = ENEMY_VARIANTS[group.subtype];
-        const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
+        const id = nextId(`wave_${index}_${enemyIdx}`);
 
         const tierMap: Partial<Record<string, number>> = {
           RAMMER_1: 1, SHOOTER_1: 1,

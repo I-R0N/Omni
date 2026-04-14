@@ -7,6 +7,7 @@ import {
   ASTEROID_AMMO_PROGRESSION,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
+import { nextId } from './IdAllocator';
 
 /**
  * DropSystem — owns collectible drops and breakage debris.
@@ -182,7 +183,7 @@ export class DropSystem {
       const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
 
       entities.push({
-        id:           `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
+        id:           nextId('enemy_shard'),
         type:          EntityType.ASTEROID,
         shardType,
         position:     { x: pos.x, y: pos.y },
@@ -264,7 +265,7 @@ export class DropSystem {
 
       const size = radius * 4; // diameter; slightly larger so physics feel solid
       entities.push({
-        id:            `tile_shard_${Date.now()}_${i}_${Math.random()}`,
+        id:            nextId('tile_shard'),
         type:           EntityType.ASTEROID,
         shardType:     'tile',
         position:      {
@@ -317,7 +318,7 @@ export class DropSystem {
     if (weapon === WeaponType.BLASTER) return;
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const drop = this.makeDropEntity(
-      `drop_ammo_${weapon}_${Date.now()}_${Math.random()}`,
+      nextId(`drop_ammo_${weapon}`),
       pos,
       parentVelocity,
       WEAPONS[weapon].color,
@@ -340,7 +341,7 @@ export class DropSystem {
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const drop: GameEntity = {
-      id:          `drop_health_${Date.now()}_${Math.random()}`,
+      id:          nextId('drop_health'),
       type:        EntityType.INTERACTABLE,
       position:    { x: pos.x, y: pos.y },
       velocity:    { x: 0, y: 0 },

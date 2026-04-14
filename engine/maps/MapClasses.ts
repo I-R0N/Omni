@@ -3,6 +3,7 @@ import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../ty
 import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS } from '../../constants';
 import { sampleFlow } from '../systems/FlowField';
+import { nextId } from '../systems/IdAllocator';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -99,7 +100,7 @@ export abstract class BaseMapLayer {
     const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
 
     return {
-        id: `ast_${Date.now()}_${Math.random()}`,
+        id: nextId('ast'),
         type: EntityType.ASTEROID,
         position: { x, y },
         velocity: { x: vx, y: vy },

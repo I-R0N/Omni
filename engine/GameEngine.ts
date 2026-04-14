@@ -11,6 +11,7 @@ import { WeaponSystem } from './systems/WeaponSystem';
 import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { EntityIndex } from './systems/EntityIndex';
+import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
@@ -1021,7 +1022,7 @@ export class GameEngine {
 
   private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
     this.playerMessages.push({
-      id: `hud_${Date.now()}_${Math.random()}`,
+      id: nextId('hud'),
       text,
       color,
       lifetime,
@@ -1138,7 +1139,7 @@ export class GameEngine {
       }
       const isCrit = amount > 3;
       this.damageTexts.push({
-          id: `dmg_${Date.now()}_${Math.random()}`,
+          id: nextId('dmg'),
           position: { ...pos },
           text: Math.round(amount).toString(),
           velocity: {
@@ -1317,7 +1318,7 @@ export class GameEngine {
 
       // Spawn a single PARTICLE entity carrying the arc data for rendering
       this.currentMap.entities.push({
-          id: `lightning_${Date.now()}_${Math.random()}`,
+          id: nextId('lightning'),
           type: EntityType.PARTICLE,
           position: { x: impactPos.x, y: impactPos.y },
           velocity: { x: 0, y: 0 },
@@ -1613,7 +1614,7 @@ export class GameEngine {
       }));
 
       this.currentMap.entities.push({
-          id:            `composite_${Date.now()}_${Math.random()}`,
+          id:            nextId('composite'),
           type:          EntityType.ASTEROID,
           shardType:    'asteroid',
           position:      { x: mx, y: my },
@@ -1719,7 +1720,7 @@ export class GameEngine {
           const maxSpin = 2.0 / (newSize / 20);
 
           this.currentMap?.entities.push({
-              id:           `shard_${Date.now()}_${i}`,
+              id:           nextId('shard'),
               type:          EntityType.ASTEROID,
               shardType:     parentShardType,
               position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },

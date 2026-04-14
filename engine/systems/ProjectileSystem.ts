@@ -6,6 +6,7 @@ import {
   LIGHTNING_GRAVITY_RANGE,
   MAX_PROJECTILES,
 } from '../../constants';
+import { nextId } from './IdAllocator';
 
 /**
  * ProjectileSystem — owns projectile lifecycle: spawning, homing steering,
@@ -64,7 +65,7 @@ export class ProjectileSystem {
       const startY = shooter.position.y + Math.sin(currentAngle) * muzzleOffset;
 
       entities.push({
-        id: `proj_${Date.now()}_${i}`,
+        id: nextId('proj'),
         type: EntityType.PROJECTILE,
         position: { x: startX, y: startY },
         velocity: { x: vx, y: vy },
