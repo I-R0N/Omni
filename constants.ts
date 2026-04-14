@@ -327,12 +327,23 @@ export const NEBULA_CONSTANTS = {
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.
   MERGE_PROXIMITY_K: 0.9,
-  // Display-sprite scale multiplier for nebula tiles and shards.  Both
-  // draw at 2× the entity's physics size, so adjacent tiles in a cluster
-  // (and nearby shards) have sprites that visibly bleed into each other
-  // and read as a continuous cloud rather than discrete cells/puffs.
+  // Display-sprite scale multiplier for nebula tiles.  Draws at 2× the
+  // entity's physics size, so adjacent tiles in a cluster have sprites
+  // that visibly bleed into each other and read as a continuous cloud
+  // rather than discrete cells.
   TILE_SPRITE_SCALE: 2.0,
+  // Legacy: kept for back-compat with any code path still referencing it.
+  // Nebula shards now set an explicit `nebulaSpriteWorldSize` at spawn
+  // time (derived from the parent tile's sprite size × ratio below), so
+  // this constant is no longer the primary driver of shard sprite size.
   SHARD_SPRITE_SCALE: 2.0,
+  // Ratio of a nebula shard's sprite to its parent tile's sprite.
+  // Shards draw at this fraction of the parent tile's sprite world
+  // size, so the sprite is noticeably larger than the shard's small
+  // polygonal physics footprint (which mirrors glass-tile shards) but
+  // only slightly smaller than a full nebula tile — they read as
+  // soft cloud fragments, not scattered debris dots.
+  SHARD_TO_TILE_SPRITE_RATIO: 0.9,
   // Cluster generation — tuned for heavy coverage across the map so that
   // nebula clusters naturally fill empty gaps between glass-tile clusters
   // and statistically overlap with some of the procedurally placed

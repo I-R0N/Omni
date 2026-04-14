@@ -287,6 +287,12 @@ export interface GameEntity {
   nebulaTwinkleNextAt?: number;
   nebulaTwinkleX?: number;
   nebulaTwinkleY?: number;
+  // Explicit sprite world size for nebula shards — decouples the cloud
+  // sprite from the small polygonal physics footprint so shards can
+  // still read as soft nebula fragments.  Set at shard-spawn time to
+  // `parentTileSpriteSize × NEBULA_CONSTANTS.SHARD_TO_TILE_SPRITE_RATIO`.
+  // When undefined, the renderer falls back to `size × SHARD_SPRITE_SCALE`.
+  nebulaSpriteWorldSize?: number;
 }
 
 export interface CameraState {

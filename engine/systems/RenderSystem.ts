@@ -627,11 +627,17 @@ export class RenderSystem {
               const tinted = this.getTintedSprite(spriteSrc, tintHex);
               if (tinted) {
                   const isTile = entity.type === EntityType.NEBULA;
-                  const scale = isTile
-                      ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
-                      : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE;
+                  // Shards explicitly store their target sprite world size
+                  // (set at spawn-time from the parent tile's sprite size ×
+                  // SHARD_TO_TILE_SPRITE_RATIO) so the rendered sprite is
+                  // decoupled from the small polygonal physics footprint.
+                  // Tiles and legacy shards without the field fall back to
+                  // the physics-size × scale convention.
                   const maxDim = Math.max(entity.size.x, entity.size.y);
-                  const drawSize = maxDim * scale;
+                  const drawSize = entity.nebulaSpriteWorldSize
+                      ?? (maxDim * (isTile
+                          ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
+                          : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE));
                   // Content-centroid correction: shift the draw so the
                   // sprite's visible-pixel centroid lands on the pivot.
                   // Without this, asymmetric source PNGs appear to orbit
@@ -665,12 +671,14 @@ export class RenderSystem {
           // --- DEBUG OVERLAY ---
           // Nebula tiles: draw the hex outline so the invisible interactable
           // footprint is visible during debug.
-          // Nebula shards: draw the implicit circular physics shape.
+          // Nebula shards: draw the polygon outline (same glass-shard style
+          // polygon set at spawn).  Legacy shards without polygonPoints fall
+          // back to an implicit circle defined by `size`.
           if (this.debugMode) {
               ctx.globalAlpha = 0.9;
               ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
               ctx.lineWidth = 1;
-              if (entity.type === EntityType.NEBULA && entity.polygonPoints && entity.polygonPoints.length > 0) {
+              if (entity.polygonPoints && entity.polygonPoints.length > 0) {
                   ctx.beginPath();
                   const p0 = entity.polygonPoints[0];
                   ctx.moveTo(p0.x, p0.y);
@@ -681,7 +689,7 @@ export class RenderSystem {
                   ctx.closePath();
                   ctx.stroke();
               } else if (entity.type === EntityType.NEBULA_SHARD) {
-                  // Implicit circle defined by `size`
+                  // Legacy fallback: implicit circle defined by `size`.
                   const r = Math.max(entity.size.x, entity.size.y) / 2;
                   ctx.beginPath();
                   ctx.arc(0, 0, r, 0, Math.PI * 2);

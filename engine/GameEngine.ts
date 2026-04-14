@@ -2493,15 +2493,48 @@ export class GameEngine {
   private spawnNebulaShards(parent: GameEntity) {
     if (!this.currentMap) return;
 
+    // Shards never spawn further child shards — they're already small
+    // polygonal debris and should simply fade when struck.  Only nebula
+    // TILES spawn the glass-style shard burst below.
+    if (parent.type === EntityType.NEBULA_SHARD) return;
+
+    // Glass-tile-style shard generation: small polygonal debris with a
+    // power-law area distribution.  The resulting physics footprint is
+    // similar in scale to glass shards, but each shard also carries an
+    // explicit `nebulaSpriteWorldSize` so the rendered nebula sprite is
+    // visibly larger than the polygon and only slightly smaller than the
+    // parent tile's own sprite — cloud fragments, not scattered dots.
     const parentDiameter = Math.max(parent.size.x, parent.size.y);
     const parentRadius   = parentDiameter / 2;
-    // Explicit per-child linear ratio — 0.60 by default.  Total child
-    // area = N × ratio² × parent_area; tile regen caps permanent growth.
-    const childDiameter = parentDiameter * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
-    if (childDiameter < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
+    // Parent area in r² units (matches the glass-shard convention —
+    // TILE_HALF² = 121 for glass; nebulae use whatever the actual tile
+    // radius happens to be).
+    const parentArea = parentRadius * parentRadius;
+    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
+
+    // 4–6 shards per shatter (matches glass shard base range).
+    const count = 4 + Math.floor(Math.random() * 3);
+
+    // Power-law area distribution normalised to the parent's area.
+    const alpha    = 1.0; // moderate skew: some large shards, some small
+    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
+    const radii: number[] = rawAreas
+      .map(a => Math.sqrt((a / rawSum) * parentArea))
+      .filter(r => r >= MIN_RADIUS);
+
+    if (radii.length < 1) return;
 
     const composition = parent.nebulaColorComposition;
-    const count       = NEBULA_CONSTANTS.SHARDS_PER_SHATTER;
+
+    // Nebula sprite world size for every shard in this shatter — all
+    // children draw at the same fixed world-space size (slightly smaller
+    // than the parent tile's sprite) so they read as a continuous cloud
+    // even as their underlying polygon sizes vary.
+    const parentSpriteWorldSize = parent.nebulaSpriteWorldSize
+        ?? (parentDiameter * NEBULA_CONSTANTS.TILE_SPRITE_SCALE);
+    const shardSpriteWorldSize = parentSpriteWorldSize
+        * NEBULA_CONSTANTS.SHARD_TO_TILE_SPRITE_RATIO;
 
     // Striker direction (forward vector).  Canvas uses y-down, so "right"
     // of the striker's travel direction (as drawn on screen) corresponds
@@ -2529,16 +2562,42 @@ export class GameEngine {
 
     // REARWARD fan: children spawn behind the striker's motion direction
     // so they're not in the striker's forward path.  Base angle = π (180°
-    // from forward), spread symmetrically by ± FAN_HALF_ANGLE.  With
-    // count = 3 and FAN = 60°, rear angles are [120°, 180°, 240°] — a
-    // wide rear arc that clears the striker's trajectory on both sides.
+    // from forward), spread symmetrically by ± FAN_HALF_ANGLE.
     const fan  = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
-    const step = count > 1 ? (2 * fan) / (count - 1) : 0;
+    const shardCount = radii.length;
+    const step = shardCount > 1 ? (2 * fan) / (shardCount - 1) : 0;
+    // Offset uses the parent-tile radius (not the shard radius) so every
+    // child spawns well clear of the tile footprint, matching previous
+    // behaviour regardless of the smaller shard sizes.
     const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < shardCount; i++) {
+        const radius = radii[i];
+        const diameter = radius * 2;
+
+        // Glass-shard polygon: 4–6 vertices, low angular jitter, moderate
+        // radius variation.  Identical generation math to spawnGlassShards
+        // so the resulting hit shapes are indistinguishable in scale/shape
+        // from the glass debris the user already likes.
+        const numPoints = 4 + Math.floor(Math.random() * 3);
+        const rawPts: { angle: number; r: number }[] = [];
+        for (let j = 0; j < numPoints; j++) {
+            const baseAngle = (j / numPoints) * Math.PI * 2;
+            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
+            rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
+        }
+        rawPts.sort((a, b) => a.angle - b.angle);
+        const pts: Vector2[] = rawPts.map(p => ({
+            x: Math.cos(p.angle) * p.r,
+            y: Math.sin(p.angle) * p.r,
+        }));
+        // Size stored on the entity is a slightly-larger diameter so
+        // physics feels solid, mirroring the glass-shard convention
+        // (size = radius × 4).
+        const size = radius * 4;
+
         // Rear-cone angle: π + (−fan … +fan) relative to forward.
-        const offsetAngle = Math.PI + (count > 1 ? -fan + step * i : 0);
+        const offsetAngle = Math.PI + (shardCount > 1 ? -fan + step * i : 0);
         const cosA = Math.cos(offsetAngle);
         const sinA = Math.sin(offsetAngle);
         // Rotate forward vector by offsetAngle → this shard's direction
@@ -2564,9 +2623,7 @@ export class GameEngine {
         // the striker's direction of travel) dominates; the perpendicular
         // component is small and biased toward the shard's tangent side
         // so left-spawned shards drift slightly left and right-spawned
-        // shards slightly right.  Forward drag is capped at a fraction
-        // of the striker's own speed, so shards never outpace the striker
-        // (no re-collision even if the player decelerates).
+        // shards slightly right.
         const parallelSpeed = Math.max(
             NEBULA_CONSTANTS.MIN_PARALLEL_SPEED,
             impactSpeed * NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR
@@ -2586,19 +2643,21 @@ export class GameEngine {
             shardType:      'nebula',
             position:       { x: spawnX, y: spawnY },
             velocity:       { x: velX, y: velY },
-            size:           { x: childDiameter, y: childDiameter },
+            size:           { x: size, y: size },
             rotation:        Math.random() * Math.PI * 2,
             rotationSpeed,
             color:           composition ? blendCompositionToHex(composition) : (parent.color || NEBULA_CONSTANTS.DEFAULT_HEX),
             active:          true,
             health:          1,
             maxHealth:       1,
-            mass:            childDiameter,
+            mass:            size,
+            polygonPoints:   pts,
             sprite:          parent.sprite,
             nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
             nebulaTileArea:  parent.nebulaTileArea,
             nebulaGridCol:   parent.nebulaGridCol,
             nebulaGridRow:   parent.nebulaGridRow,
+            nebulaSpriteWorldSize: shardSpriteWorldSize,
             linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
             angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
             // Fade-in on birth — shards slowly materialize behind the
@@ -2767,11 +2826,14 @@ export class GameEngine {
     const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
 
     // Grow the larger shard's size so its disc area gains the smaller's.
-    // Shards are circles (polygon is absent), so size.x === size.y and
-    // both the visual sprite and the gravity/merge radius scale up.
+    // Once a shard has absorbed another it transitions from "glass-style
+    // polygonal fragment" back to "circular cloud blob" — clearing the
+    // polygon makes the debug view draw an implicit circle from `size`,
+    // keeping the merged hit shape consistent with the grown area.
     larger.size.x = newDiameter;
     larger.size.y = newDiameter;
     larger.mass   = newDiameter;
+    larger.polygonPoints = undefined;
 
     // Blend colour compositions weighted by area; larger dominates.
     larger.nebulaColorComposition = blendCompositions(
