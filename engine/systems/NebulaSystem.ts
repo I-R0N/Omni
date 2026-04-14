@@ -171,8 +171,16 @@ export class NebulaSystem {
 
         const parentDiameter = Math.max(parent.size.x, parent.size.y);
         const parentRadius   = parentDiameter / 2;
-        // Parent area in r² units (matches glass-shard convention).
-        const parentArea = parentRadius * parentRadius;
+        // Parent area budget for the shard power-law distribution.  We
+        // intentionally use the glass-shard convention (TILE_HALF² = 121
+        // for TILE_HALF = 11) regardless of the actual nebula tile size
+        // so the resulting shards are the SAME scale as glass shards —
+        // small enough to avoid mass re-merging on spawn and small
+        // enough that the debug polygon outline reads as a polygon and
+        // not a large circle.  Using the nebula tile's actual radius²
+        // produced ~9-unit radii and rapid merges that wiped polygons.
+        const GLASS_TILE_HALF = 11;
+        const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF;
         const MIN_RADIUS = 2; // don't spawn sub-pixel shards
 
         // 4–6 shards per shatter (matches glass base range).
