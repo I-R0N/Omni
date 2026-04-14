@@ -3,6 +3,7 @@ import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { COLORS, STRUCTURE_CONSTANTS, ASSETS, NEBULA_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
+import { nextId } from '../systems/IdAllocator';
 
 // Hex-grid geometric constants for the standard pointy-topped layout used
 // across the map.  Exposed so other systems (nebula coalescence, spawn
@@ -217,7 +218,7 @@ export class TileGenerator {
     ];
 
     entities.push({
-        id: `tile_${r}_${c}_${Math.random().toString(36).substr(2, 9)}`,
+        id: nextId(`tile_${r}_${c}`),
         type: EntityType.STRUCTURE,
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
@@ -288,7 +289,7 @@ export class TileGenerator {
         : ASSETS.NEBULA_PUFF;
 
     return {
-        id: `nebula_${r}_${c}_${Math.random().toString(36).substr(2, 9)}`,
+        id: nextId(`nebula_${r}_${c}`),
         type: EntityType.NEBULA,
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },

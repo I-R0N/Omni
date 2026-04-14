@@ -4,13 +4,20 @@ import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
+import { ParticleSystem } from './systems/ParticleSystem';
+import { TrailSystem } from './systems/TrailSystem';
+import { ProjectileSystem } from './systems/ProjectileSystem';
+import { WeaponSystem } from './systems/WeaponSystem';
+import { DropSystem } from './systems/DropSystem';
+import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
+import { NebulaSystem } from './systems/NebulaSystem';
+import { EntityIndex } from './systems/EntityIndex';
+import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { HEX_SIZE, HEX_AREA, TileGenerator, pixelToHexCoord, hexCoordToPixel } from './maps/TileGenerator';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, NebulaColorStop } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { cloneComposition, blendCompositionToHex, blendCompositions, randomNebulaComposition, hexToHueDeg, paletteHueToHex, clampHueToPalette, circularHueDistance, circularHueAverage, circularLerpHue } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -24,11 +31,25 @@ export class GameEngine {
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
   private ai: AISystem;
+  private particles: ParticleSystem;
+  private trails: TrailSystem;
+  private projectiles: ProjectileSystem;
+  private weapons: WeaponSystem;
+  private drops: DropSystem;
+  private waves: WaveSystem;
+  private nebulas: NebulaSystem;
+  private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
+  // Fixed-timestep accumulator (Phase 1).  Frame delta is accumulated and the
+  // simulation is stepped at SIMULATION_CONSTANTS.FIXED_DT until the
+  // accumulator is drained; any remainder carries to the next frame.  This
+  // decouples gameplay speed from display refresh rate so physics outcomes
+  // are deterministic across devices.
+  private simAccumulator: number = 0;
   
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
@@ -52,11 +73,17 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Wave system
-  private waveIndex: number = 0;
-  private waveEnemyIds: Set<string> = new Set();
-  private waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
-  private waveGraceTimer: number = 0;
+  // Wave system state lives on this.waves (WaveSystem) — these accessors
+  // preserve the old GameEngine.waveX field ergonomics for the handful of
+  // call sites that still read/write them directly.
+  private get waveIndex(): number { return this.waves.waveIndex; }
+  private set waveIndex(v: number) { this.waves.waveIndex = v; }
+  private get waveEnemyIds(): Set<string> { return this.waves.waveEnemyIds; }
+  private set waveEnemyIds(v: Set<string>) { this.waves.waveEnemyIds = v; }
+  private get waveState(): 'inactive' | 'active' | 'cleared' | 'complete' { return this.waves.waveState; }
+  private set waveState(v: 'inactive' | 'active' | 'cleared' | 'complete') { this.waves.waveState = v; }
+  private get waveGraceTimer(): number { return this.waves.waveGraceTimer; }
+  private set waveGraceTimer(v: number) { this.waves.waveGraceTimer = v; }
 
   // Screen Shake State
   private shakeTimer: number = 0;
@@ -68,8 +95,10 @@ export class GameEngine {
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
 
-  // Wave announcement banners rendered on the canvas
-  public waveAnnouncements: WaveAnnouncement[] = [];
+  // Wave announcement banners rendered on the canvas — forwarded from
+  // WaveSystem so existing call sites keep working verbatim.
+  public get waveAnnouncements(): WaveAnnouncement[] { return this.waves.announcements; }
+  public set waveAnnouncements(v: WaveAnnouncement[]) { this.waves.announcements = v; }
 
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
@@ -99,6 +128,14 @@ export class GameEngine {
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
+
+    // Fill all weapon ammo when entering debug mode
+    if (this.debugMode && this.player.ammo) {
+      for (const w of WEAPON_LIST) {
+        if (w === WeaponType.BLASTER) continue; // blaster is always infinite
+        this.player.ammo[w] = 999;
+      }
+    }
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -113,6 +150,14 @@ export class GameEngine {
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
     this.ai = new AISystem();
+    this.particles = new ParticleSystem();
+    this.trails = new TrailSystem();
+    this.projectiles = new ProjectileSystem();
+    this.weapons = new WeaponSystem(this.projectiles);
+    this.drops = new DropSystem(this.particles);
+    this.waves = new WaveSystem();
+    this.nebulas = new NebulaSystem(this.particles, this.drops);
+    this.entityIndex = new EntityIndex();
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -160,6 +205,7 @@ export class GameEngine {
     if (this.isRunning) return;
     this.isRunning = true;
     this.lastTime = performance.now();
+    this.simAccumulator = 0;
     this.prepareFrameEntities();
     requestAnimationFrame(this.loop);
   }
@@ -175,26 +221,25 @@ export class GameEngine {
   }
 
   public skipWave() {
-    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
-      this.waveGraceTimer = 0;
-      this.spawnWave(this.waveIndex + 1);
-      // Push stats immediately so the UI reflects the new wave number
-      // before the next rAF tick rather than lagging one frame.
-      this.onStatsUpdate({
-        fps: 0,
-        entityCount: (this.currentMap?.entities.length || 0) + 1,
-        currentMapName: this.currentMap?.name || '',
-        currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-        currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
-        gameState: this.gameState,
-        difficulty: this.difficultyLevel,
-        waveNumber: this.waveIndex + 1,
-        waveStatus: 'active',
-        waveGraceTimer: undefined,
-        debugMode: this.debugMode,
-        weaponCount: this.currentWeaponIndex + 1,
-      });
-    }
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    if (!this.waves.skip(ctx)) return;
+    // Push stats immediately so the UI reflects the new wave number before
+    // the next rAF tick rather than lagging one frame.
+    this.onStatsUpdate({
+      fps: 0,
+      entityCount: (this.currentMap?.entities.length || 0) + 1,
+      currentMapName: this.currentMap?.name || '',
+      currentMapType: this.currentMap?.type || MapType.UNIVERSE,
+      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      gameState: this.gameState,
+      difficulty: this.difficultyLevel,
+      waveNumber: this.waveIndex + 1,
+      waveStatus: 'active',
+      waveGraceTimer: undefined,
+      debugMode: this.debugMode,
+      weaponCount: this.currentWeaponIndex + 1,
+    });
   }
 
   public pauseGame() {
@@ -207,6 +252,7 @@ export class GameEngine {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
         this.lastTime = performance.now(); // Prevent physics jump
+        this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
   }
 
@@ -243,44 +289,13 @@ export class GameEngine {
       this.prepareFrameEntities();
   }
 
-  /**
-   * Select a weapon by slot tap.
-   * - Tapping an unowned / empty slot does nothing.
-   * - Tapping the already-active non-blaster weapon toggles it off (switches to blaster).
-   * - Tapping any other owned weapon switches to it.
-   * At level 1 only one weapon is active at a time (exclusive selection).
-   */
   private selectWeapon(wType: WeaponType) {
-    const isBlaster = wType === WeaponType.BLASTER;
-    const ammo      = this.player.ammo?.[wType] ?? 0;
-    if (!isBlaster && ammo <= 0) return; // unowned / empty — ignore tap
-
-    if (!isBlaster && this.player.currentWeapon === wType) {
-      // Toggle off: deselect and fall back to blaster
-      this.player.currentWeapon = WeaponType.BLASTER;
-      this.currentWeaponIndex   = WEAPON_LIST.indexOf(WeaponType.BLASTER);
-      this.player.burstQueue    = 0;
-      return;
-    }
-
-    this.player.currentWeapon = wType;
-    this.currentWeaponIndex   = WEAPON_LIST.indexOf(wType);
-    this.player.burstQueue    = 0;
+    this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
 
   public cycleWeapon() {
     if (this.gameState !== GameState.PLAYING) return;
-    // Only cycle through blaster (always owned) + weapons with ammo
-    const owned = WEAPON_LIST.filter(w =>
-      w === WeaponType.BLASTER ||
-      ((this.player.ammo?.[w] ?? 0) > 0)
-    );
-    if (owned.length <= 1) return;
-    const currentIdx = owned.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
-    const nextIdx = (currentIdx + 1) % owned.length;
-    this.player.currentWeapon = owned[nextIdx];
-    this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon);
-    this.player.burstQueue = 0;
+    this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
   }
 
   public setDifficulty(level: number) {
@@ -296,7 +311,7 @@ export class GameEngine {
 
   private loop = (time: number) => {
     if (!this.isRunning) return;
-    
+
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
 
@@ -328,18 +343,37 @@ export class GameEngine {
         return;
     }
 
-    // Cap dt to prevent physics explosion after tab switch / GPU stall
-    const safeFrameTime = Math.min(frameTime, 0.05);
+    // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
+    // Drain the accumulator at a fixed simulation rate regardless of the
+    // render frame rate.  Any leftover time carries to the next frame.
+    //
+    // A MAX_FRAME_TIME clamp drops excess time from tab-switch / GPU stalls
+    // so we never try to simulate several seconds worth of physics in one
+    // frame.  A MAX_SUBSTEPS clamp on the inner loop is the spiral-of-death
+    // safeguard: if the sim is genuinely slower than real time the extra
+    // time is silently discarded rather than compounding.
+    const { FIXED_DT, MAX_SUBSTEPS, MAX_FRAME_TIME } = SIMULATION_CONSTANTS;
+    this.simAccumulator += Math.min(frameTime, MAX_FRAME_TIME);
 
-    // Refresh working set for physics/AI without reallocating each call
-    this.prepareFrameEntities();
+    let steps = 0;
+    while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+        // Refresh working set for physics/AI before each sim step so
+        // entities spawned during the previous step are visible to this one.
+        this.prepareFrameEntities();
+        try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.simAccumulator -= FIXED_DT;
+        steps++;
+    }
+    // If we hit the substep cap there's still leftover time we can't afford
+    // to simulate this frame — discard it so the accumulator can't grow
+    // unboundedly and trigger a death spiral on the next frame.
+    if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
+        this.simAccumulator = 0;
+    }
 
-    // One physics step per rendered frame at the actual frame rate.
-    // This eliminates the 1-vs-2 step alternation that caused visual jitter
-    // with a fixed-timestep accumulator at 60 Hz display.
-    try { this.updatePhysics(safeFrameTime); } catch (e) { console.error('[PhysicsSystem] update error:', e); }
-    try { this.updateGameLogic(safeFrameTime); } catch (e) { console.error('[GameLogic] update error:', e); }
-    // Include entities spawned during game logic (e.g., projectiles) before rendering
+    // Refresh the frame entity list one more time so anything spawned during
+    // the final sim step is included in the render pass.
     this.prepareFrameEntities();
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
 
@@ -354,46 +388,16 @@ export class GameEngine {
           this.frameEntities.push(ents[i]);
       }
       this.frameEntities.push(this.player);
+      // Phase 4: rebuild type-filtered candidate lists so every downstream
+      // system scan runs on the minimal relevant slice instead of the full
+      // master entity list.  Rebuilt once per sim substep; consumers must
+      // not cache these references across steps.
+      this.entityIndex.rebuild(this.currentMap.entities);
   }
 
   private handleEnemyShooting(dt: number) {
       if (!this.currentMap) return;
-      const weapon = ENEMY_WEAPON;
-      const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
-
-      for (let i = 0; i < this.currentMap.entities.length; i++) {
-          const enemy = this.currentMap.entities[i];
-          if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
-          if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
-
-          // Cooldown management
-          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
-          if (enemy.weaponCooldown > 0) continue;
-
-          const dx = this.player.position.x - enemy.position.x;
-          const dy = this.player.position.y - enemy.position.y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > rangeSq) continue;
-
-          // Lazily init burst state — first trigger starts a fresh burst
-          if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-
-          // Slight inaccuracy
-          const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
-          const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
-          const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-          this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
-
-          // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
-          // then wait BURST_RELOAD before starting the next burst.
-          if (enemy.burstQueue > 1) {
-              enemy.burstQueue--;
-              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
-          } else {
-              enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
-          }
-      }
+      this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
   }
 
   private handleScreenShake = (amount: number) => {
@@ -435,8 +439,10 @@ export class GameEngine {
           }
       });
 
-      // Single pass: collect destroyed asteroids + count all, avoiding two filter() allocations.
-      // createAsteroidShards() pushes to entities so we must collect before iterating.
+      // Asteroid census + shard generation.  EntityIndex only contains
+      // active asteroids, so we still need a master-list scan to catch
+      // asteroids that were just deactivated this step (they're no longer
+      // in the index) and to preserve the original total-count semantics.
       const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
       const newlyDestroyed: GameEntity[] = [];
       let currentAsteroidCount = 0;
@@ -460,11 +466,8 @@ export class GameEngine {
       // any hard velocity override (no teleporting).
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType && e.dropType !== 'health';
-          if ((e.type !== EntityType.ASTEROID && !isDropShard) || !e.active) continue;
+      const asteroids = this.entityIndex.asteroids;
+      const applyFlow = (e: GameEntity) => {
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
@@ -474,9 +477,14 @@ export class GameEngine {
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+      };
+      for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
+      // Drops are a subset of activeDrops that are ammo shards (not glass, not health).
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (!d.active || !d.dropType || d.dropType === 'health') continue;
+          applyFlow(d);
       }
-
-      // Gentle flow-field current on the player — adds a subtle drift bias in
 
       // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
       // causing gradual clustering as they drift through the flow field.
@@ -489,13 +497,10 @@ export class GameEngine {
       const GRAV_MIN_SQ   = 12 * 12;
 
       const gravCandidates: GameEntity[] = [this.player];
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active) continue;
-          if (e.type === EntityType.ASTEROID) { gravCandidates.push(e); continue; }
-          if (e.type === EntityType.INTERACTABLE && e.dropType && e.dropType !== 'glass') {
-              gravCandidates.push(e);
-          }
+      for (let i = 0; i < asteroids.length; i++) gravCandidates.push(asteroids[i]);
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
       }
 
       // Bucket candidate indices by grid cell
@@ -543,22 +548,12 @@ export class GameEngine {
       // Stick bonds: detect contact and merge entities after threshold
       this.handleEntitySticking(dt);
 
-      // Nebula dynamics: strong gravity pull of small shards toward larger
-      // nebula neighbours, plus merge-on-contact absorption.  Runs after
-      // physics integration so shard positions are up-to-date, and before
-      // compaction so absorbed shards are dropped from the entities array
-      // on the same frame.
-      this.updateNebulaDynamics(dt);
-
       // In-place compaction (Garbage Free)
-      // Inactive tiles with regenProgress set are kept as ghost placeholders
-      // — applies to both glass (STRUCTURE) and nebula (NEBULA) tiles.
+      // Inactive tiles with regenProgress set are kept as ghost placeholders.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
-          const isRegenGhost = (ent.type === EntityType.STRUCTURE || ent.type === EntityType.NEBULA)
-                               && ent.regenProgress !== undefined;
-          if (ent.active || isRegenGhost) {
+          if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
               this.currentMap.entities[writeIdx++] = ent;
           }
       }
@@ -578,40 +573,24 @@ export class GameEngine {
           this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
       }
 
-      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          // Both tiles and shards shatter into N children at
-          // SHARD_LINEAR_RATIO of parent diameter.  Tile regen (below)
-          // caps permanent growth by resetting tile size to the canonical
-          // hex dimensions on respawn.
-          this.spawnNebulaShards(entity);
-          // Low-frequency standard ammo drop — independent of the shard
-          // math above, so shard count/size is unaffected.  Wave-scaled
-          // ammo type matches asteroid progression.  This is the ONLY
-          // standard drop produced by nebulae (no glass/asteroid shards).
-          if (Math.random() < NEBULA_CONSTANTS.AMMO_DROP_CHANCE) {
-              const ammoType = this.getAsteroidAmmoType();
-              this.spawnAmmoDrop(
-                  entity.position,
-                  ammoType,
-                  NEBULA_CONSTANTS.AMMO_PER_NEBULA,
-                  entity.lastImpactVelocity
-              );
-          }
-      }
-
-      if (entity.type === EntityType.NEBULA) {
-          // Nebula tiles regenerate on the same cadence as glass tiles.
-          // The entity stays in currentMap.entities as an inactive
-          // placeholder (preserved by the compaction check below) until
-          // the regen timer expires, at which point it pops back with
-          // its canonical hex size — this is how merge-grown tiles
-          // revert to original dimensions (otherwise area would compound).
-          entity.regenProgress = 0;
-          this.pendingRegens.push({ entity, timer: NEBULA_CONSTANTS.REGEN_DELAY });
-      }
-
       if (entity.type === EntityType.ENEMY) {
           this.spawnEnemyShards(entity);
+      }
+
+      // Nebula tiles and shards route through NebulaSystem: polygonal
+      // shard burst + occasional ammo drop + regen queueing are all
+      // handled there.  They also skip the generic death-burst particles
+      // below (nebulae fade out gracefully via nebulaFadeTimer) AND skip
+      // the generic spawnDrops path since the ammo roll lives inside
+      // NebulaSystem.handleDeath.
+      const isNebula = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
+      if (isNebula && this.currentMap) {
+          this.nebulas.handleDeath(
+              this.currentMap.entities,
+              this.activeDrops,
+              entity,
+              this.waveIndex,
+          );
       }
 
       // Death burst particles — size/color tuned per entity type
@@ -643,11 +622,10 @@ export class GameEngine {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
-      } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          // Nebula tiles fade out gracefully (see nebulaFadeTimer in the
-          // renderer) and nebula shards vanish silently — no spark burst
-          // on destruction.  Merge/transmute/regen events still emit the
-          // subtle glimmer via spawnNebulaGlimmer.
+      } else if (isNebula) {
+          // Nebulae fade out gracefully via nebulaFadeTimer in the
+          // renderer — no spark burst on destruction.  Merge/transmute
+          // events emit a subtle glimmer instead (see NebulaSystem).
       } else {
           // Generic fallback (structures, misc)
           const numParticles = 4 + Math.floor(Math.random() * 3);
@@ -659,7 +637,11 @@ export class GameEngine {
           });
       }
 
-      this.spawnDrops(entity);
+      // Nebulae run their own drop logic inside NebulaSystem.handleDeath
+      // (above), so we skip the generic drops path for them.
+      if (!entity.suppressDrops && !isNebula) {
+          this.spawnDrops(entity);
+      }
   };
 
   private handleAsteroidRespawn(config: any) {
@@ -719,89 +701,29 @@ export class GameEngine {
         this.minimapDebounce -= dt;
     }
 
-    // Tile regeneration tick — handles both STRUCTURE (glass) and NEBULA.
-    // Nebula regen uses a rule-based color pass that reads its neighbours'
-    // compositions from a lazily-built grid index (one scan per frame, not
-    // one per regen, so the cost stays O(n) at worst).
-    let nebulaGridIndex: Map<number, GameEntity> | null = null;
-    const buildNebulaIndex = (): Map<number, GameEntity> => {
-        if (nebulaGridIndex) return nebulaGridIndex;
-        const map = new Map<number, GameEntity>();
-        if (this.currentMap) {
-            const ents = this.currentMap.entities;
-            for (let k = 0; k < ents.length; k++) {
-                const e = ents[k];
-                if (e.type !== EntityType.NEBULA) continue;
-                if (!e.active) continue;
-                if (e.nebulaFadeTimer !== undefined) continue;
-                if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
-                const key = (e.nebulaGridCol << 16) | (e.nebulaGridRow & 0xFFFF);
-                map.set(key, e);
-            }
-        }
-        nebulaGridIndex = map;
-        return map;
-    };
-
+    // Tile regeneration tick
     for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
         const regen = this.pendingRegens[i];
         regen.timer -= dt;
-        // Progress is normalised against the per-type delay so both tile
-        // types can share this loop with their own timing constants.
-        const delay = regen.entity.type === EntityType.NEBULA
-            ? NEBULA_CONSTANTS.REGEN_DELAY
-            : STRUCTURE_CONSTANTS.TILE_REGEN_DELAY;
-        regen.entity.regenProgress = 1 - (regen.timer / delay);
+        regen.entity.regenProgress = 1 - (regen.timer / STRUCTURE_CONSTANTS.TILE_REGEN_DELAY);
 
         if (regen.timer <= 0) {
+            // Restore tile to full health and re-add to physics static grid
             regen.entity.health = regen.entity.maxHealth;
             regen.entity.active = true;
             regen.entity.regenProgress = undefined;
-
-            if (regen.entity.type === EntityType.NEBULA) {
-                // Tiles never grow (only shards do), so size is already
-                // canonical.  Rule-based colour regeneration (see
-                // computeRegeneratedNebulaComposition) reads the
-                // regenerating tile's 6 hex neighbours and blends their
-                // compositions with the old tile's composition based on
-                // isolation level — interior tiles smooth toward the
-                // cluster average, edge tiles drift less, isolated
-                // tiles keep their old hue exactly.
-                regen.entity.nebulaColorComposition = this.computeRegeneratedNebulaComposition(
-                    regen.entity,
-                    buildNebulaIndex()
-                );
-                regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
-                // Fade in slowly instead of popping — no glimmer burst.
-                // Regen is not a collision event, so the base (slow) fade-in
-                // is used regardless of how fast the original shatter was.
-                regen.entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
-                regen.entity.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
-            } else {
-                // Glass tile: existing pop-in animation.
-                regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
-                this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
-                    speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
-                    speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
-                    lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                    lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                    sizeMin: 1, sizeMax: 2,
-                });
-            }
-
-            // Re-add to the static grid so collisions start hitting again.
+            regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
             this.physics.addStaticEntity(regen.entity);
             this.pendingRegens.splice(i, 1);
 
-            // The just-regenerated tile should now count as a neighbour for
-            // any later regens in this same frame (cluster-wide shatter).
-            if (regen.entity.type === EntityType.NEBULA
-                && regen.entity.nebulaGridCol !== undefined
-                && regen.entity.nebulaGridRow !== undefined) {
-                const key = (regen.entity.nebulaGridCol << 16)
-                          | (regen.entity.nebulaGridRow & 0xFFFF);
-                buildNebulaIndex().set(key, regen.entity);
-            }
+            // Pop-in particle burst: tile-colored chips scattering outward
+            this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
+                speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
+                speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
+                lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+                sizeMin: 1, sizeMax: 2,
+            });
         }
     }
 
@@ -820,11 +742,14 @@ export class GameEngine {
     }
 
     // Tick down wave announcements
-    for (let i = this.waveAnnouncements.length - 1; i >= 0; i--) {
-        this.waveAnnouncements[i].lifetime -= dt;
-        if (this.waveAnnouncements[i].lifetime <= 0) {
-            this.waveAnnouncements.splice(i, 1);
-        }
+    this.waves.tickAnnouncements(dt);
+
+    // Nebula per-frame pass: regen timer tick, shard gravity/merge
+    // dynamics, shard→tile transmutation.  Runs after glass regen so
+    // a just-regenerated nebula tile can already count as a neighbour
+    // for same-frame nebula regens.
+    if (this.currentMap) {
+        this.nebulas.update(this.currentMap.entities, dt, this.physics);
     }
 
     // Death handling
@@ -844,32 +769,12 @@ export class GameEngine {
         return; // Skip controls while exploding
     }
 
-    // Wave completion check
-    if (this.waveState === 'active' && this.currentMap) {
-      const entities = this.currentMap.entities;
-      let allDead = true;
-      for (let i = 0; i < entities.length; i++) {
-        const e = entities[i];
-        if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding) {
-          allDead = false;
-          break;
-        }
-      }
-      if (allDead) {
-        this.waveState = 'cleared';
-
-        // Wave clear announcement
-        const clearLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-        this.waveAnnouncements.push({
-          text: `WAVE ${this.waveIndex + 1} CLEAR`,
-          color: '#4ade80',
-          lifetime: clearLife,
-          maxLifetime: clearLife,
-        });
-
-        // Difficulty-scaled health drop interval
+    // Wave completion + grace-period countdown — delegated to WaveSystem.
+    // On wave clear we drop a health pickup every Nth wave (difficulty-scaled).
+    if (this.currentMap) {
+      this.waves.checkCompletion(this.currentMap.entities, (clearedIndex) => {
         const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
-        if ((this.waveIndex + 1) % healthInterval === 0) {
+        if ((clearedIndex + 1) % healthInterval === 0) {
           const hAngle = Math.random() * Math.PI * 2;
           const hDist  = 20 + Math.random() * 80; // 20–100 units from player
           const hPos   = {
@@ -878,19 +783,10 @@ export class GameEngine {
           };
           this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
         }
+      });
 
-        // Always start the grace period — waves are infinite
-        this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-      }
-    }
-
-    // Grace period countdown — spawn next wave when timer expires (infinite)
-    if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
-      this.waveGraceTimer -= dt;
-      if (this.waveGraceTimer <= 0) {
-        this.waveGraceTimer = 0;
-        this.spawnWave(this.waveIndex + 1);
-      }
+      const graceCtx = this.waveContext();
+      if (graceCtx) this.waves.tickGrace(dt, graceCtx);
     }
 
     // Auto-collapse minimap
@@ -1058,24 +954,18 @@ export class GameEngine {
         }
     });
 
-    if (this.player.weaponCooldown && this.player.weaponCooldown > 0) {
-        this.player.weaponCooldown -= dt;
+    // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    if (this.currentMap) {
+        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
 
-    if (this.player.burstQueue && this.player.burstQueue > 0) {
-        this.player.burstTimer = (this.player.burstTimer || 0) - dt;
-        if (this.player.burstTimer <= 0) {
-            this.player.burstQueue--;
-            const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
-            this.player.burstTimer = config.burstDelay || 0.1;
-            const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
-            const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
-            this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
-            if (config.type === WeaponType.BURST) this.handleScreenShake(3);
-        }
-    }
+    // Refresh the candidate index before projectile post-processing: the
+    // physics / AI / burst pass above may have spawned new projectiles or
+    // destroyed enemies since the last rebuild in prepareFrameEntities.
+    if (this.currentMap) this.entityIndex.rebuild(this.currentMap.entities);
 
     this.updateHomingProjectiles(dt);
+    this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup
@@ -1165,7 +1055,7 @@ export class GameEngine {
 
   private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
     this.playerMessages.push({
-      id: `hud_${Date.now()}_${Math.random()}`,
+      id: nextId('hud'),
       text,
       color,
       lifetime,
@@ -1179,175 +1069,29 @@ export class GameEngine {
 
   // ── Particle helpers ────────────────────────────────────────────────────────
 
+  // Thin wrapper kept for call-site compatibility — delegates to ParticleSystem.
   private spawnParticles(
     position: Vector2,
     count: number,
     color: string,
-    options?: {
-      speedMin?: number;
-      speedMax?: number;
-      sizeMin?: number;
-      sizeMax?: number;
-      lifetimeMin?: number;
-      lifetimeMax?: number;
-      spreadAngle?: number; // center angle (radians); undefined = full circle
-      spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
-      baseVelocity?: Vector2;
-      positionJitter?: number; // random offset radius around `position` (default 0)
-    }
+    options?: Parameters<ParticleSystem['spawn']>[4]
   ) {
     if (!this.currentMap) return;
-    const {
-      speedMin = 2, speedMax = 5,
-      sizeMin = 1, sizeMax = 3,
-      lifetimeMin = 0.2, lifetimeMax = 0.45,
-      spreadAngle, spreadCone,
-      baseVelocity,
-      positionJitter = 0,
-    } = options ?? {};
-
-    const halfCone = spreadCone ?? Math.PI;
-
-    for (let i = 0; i < count; i++) {
-      const angle = spreadAngle !== undefined
-        ? spreadAngle + (Math.random() - 0.5) * 2 * halfCone
-        : Math.random() * Math.PI * 2;
-      const speed = speedMin + Math.random() * (speedMax - speedMin);
-      const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
-      const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
-
-      // Optional position scatter — useful for spawning glittery clouds
-      // over an area (e.g. nebula merge glimmer) instead of a single point.
-      let px = position.x;
-      let py = position.y;
-      if (positionJitter > 0) {
-        const jAngle = Math.random() * Math.PI * 2;
-        const jDist  = Math.sqrt(Math.random()) * positionJitter; // uniform area
-        px += Math.cos(jAngle) * jDist;
-        py += Math.sin(jAngle) * jDist;
-      }
-
-      this.currentMap.entities.push({
-        id: `part_${Date.now()}_${i}_${Math.random()}`,
-        type: EntityType.PARTICLE,
-        position: { x: px, y: py },
-        velocity: {
-          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
-          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
-        },
-        size:      { x: size, y: size },
-        rotation:  0,
-        color,
-        active:    true,
-        health:    1,
-        maxHealth: 1,
-        lifetime:  life,
-        maxLifetime: life,
-        mass:      0.1,
-      });
-    }
+    this.particles.spawn(this.currentMap.entities, position, count, color, options);
   }
 
   /**
-   * Subtle glittery glimmer burst used for nebula merge / transmute /
-   * regen feedback.  Spawns two small passes of tiny additive particles
-   * scattered within a radius around the centre point:
-   *   - 3 white highlight motes
-   *   - 4 tint-coloured softer motes
-   *
-   * Kept deliberately sparse so cloud events read as a quiet twinkle
-   * rather than a bright particle burst.
-   */
-  private spawnNebulaGlimmer(position: Vector2, radius: number, tint: string) {
-    // White highlight pass — sparse punctuation points
-    this.spawnParticles(position, 3, '#ffffff', {
-      speedMin: 0.1, speedMax: 0.5,
-      sizeMin: 0.3, sizeMax: 0.9,
-      lifetimeMin: 0.4, lifetimeMax: 0.8,
-      positionJitter: radius,
-    });
-    // Tinted pass — softer, slightly larger coloured motes around/between
-    this.spawnParticles(position, 4, tint, {
-      speedMin: 0.1, speedMax: 0.4,
-      sizeMin: 0.4, sizeMax: 1.1,
-      lifetimeMin: 0.5, lifetimeMax: 1.0,
-      positionJitter: radius * 1.2,
-    });
-  }
-
-  /**
-   * Tick a trail array: decrement each point's lifetime, apply per-point
-   * drift velocity, and splice expired entries.  Shared between the active
-   * player trail and detached trails from prior thrust events.
+   * Thin wrappers kept so existing call sites in updateGameLogic don't have
+   * to reach into subsystems directly.  Logic lives in TrailSystem /
+   * ParticleSystem.
    */
   private tickTrail(trail: TrailPoint[], dt: number) {
-    for (let i = trail.length - 1; i >= 0; i--) {
-      const tp = trail[i];
-      tp.lifetime -= dt;
-      if (tp.vx !== undefined) tp.x += tp.vx;
-      if (tp.vy !== undefined) tp.y += tp.vy;
-      if (tp.lifetime <= 0) {
-        trail.splice(i, 1);
-      }
-    }
+    this.trails.tickTrail(trail, dt);
   }
 
-  /**
-   * Glitter trail — spawns tiny additive-blended sparkles trailing behind the
-   * player along the current velocity vector.  Density is triangularly
-   * distributed across the player's width (peaked on the center-line, falling
-   * off toward the edges).  Particles have zero velocity so they stay put
-   * while the player moves forward, naturally forming a trail.
-   */
   private spawnGlitterTrail() {
     if (!this.currentMap) return;
-    const v = this.player.velocity;
-    const speedSq = v.x * v.x + v.y * v.y;
-    if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
-
-    const speed = Math.sqrt(speedSq);
-    // Forward unit vector (direction of travel) and its perpendicular
-    const fx = v.x / speed;
-    const fy = v.y / speed;
-    const perpX = -fy;
-    const perpY = fx;
-
-    const halfWidth = this.player.size.x / 2;
-    // Spawn at the player's tail so particles appear behind, not on top of, the sprite
-    const tailX = this.player.position.x - fx * halfWidth;
-    const tailY = this.player.position.y - fy * halfWidth;
-
-    const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
-
-    for (let i = 0; i < COUNT_PER_FRAME; i++) {
-      // Triangular distribution in [-1, 1] peaked at 0 — gives denser center,
-      // sparser edges across the player's width.
-      const u = Math.random() - Math.random();
-      const lateral = u * halfWidth;
-
-      const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
-      const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
-      const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
-
-      this.currentMap.entities.push({
-        id: `glit_${Date.now()}_${i}_${Math.random()}`,
-        type: EntityType.PARTICLE,
-        position: {
-          x: tailX + perpX * lateral,
-          y: tailY + perpY * lateral,
-        },
-        velocity: { x: 0, y: 0 },
-        size: { x: size, y: size },
-        rotation: 0,
-        color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: life,
-        maxLifetime: life,
-        mass: 0.01,
-      });
-    }
+    this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
@@ -1406,6 +1150,12 @@ export class GameEngine {
         });
         break;
     }
+
+    // Lightning projectile: chain to nearby entities on impact
+    if (proj.isLightningProjectile) {
+        this.fireLightningChainFromImpact(impactPos, target);
+    }
+
     void projSpeed; // suppress lint
   };
 
@@ -1422,7 +1172,7 @@ export class GameEngine {
       }
       const isCrit = amount > 3;
       this.damageTexts.push({
-          id: `dmg_${Date.now()}_${Math.random()}`,
+          id: nextId('dmg'),
           position: { ...pos },
           text: Math.round(amount).toString(),
           velocity: {
@@ -1476,193 +1226,147 @@ export class GameEngine {
   }
 
   private handleShooting(target: Vector2) {
-      if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
+      if (!this.currentMap) return;
 
-      let weaponType = this.player.currentWeapon || WeaponType.BLASTER;
-
-      // If non-blaster and out of ammo, auto-fallback to blaster
-      if (weaponType !== WeaponType.BLASTER && (this.player.ammo?.[weaponType] ?? 0) <= 0) {
-          weaponType = WeaponType.BLASTER;
-          this.player.currentWeapon = WeaponType.BLASTER;
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(WeaponType.BLASTER);
-          this.player.burstQueue = 0;
-      }
-
-      const config = WEAPONS[weaponType];
-      this.player.weaponCooldown = config.cooldown;
-
-      // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
-      if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
-          const before = this.player.ammo[weaponType] ?? 0;
-          this.player.ammo[weaponType] = Math.max(0, before - 1);
-          if (this.player.ammo[weaponType] === 0) {
-              // Will auto-switch on next shot; leave current active until then
-          }
-      }
-
-      if (config.type === WeaponType.SHOTGUN) {
-          this.handleScreenShake(5);
-      } else if (config.type === WeaponType.CANNON) {
-          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-      } else if (config.type === WeaponType.BURST) {
-          this.handleScreenShake(3);
-      }
-
-      if (config.type === WeaponType.BURST && config.burstCount) {
-          this.player.burstQueue = config.burstCount - 1;
-          this.player.burstTimer = config.burstDelay;
-      }
-
+      // Convert screen-space target to world coords once; the rest of the
+      // firing flow lives in WeaponSystem.
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
       const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
       const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
 
-      this.spawnProjectileFromConfig(this.player, {x: worldX, y: worldY}, config, EntityType.PLAYER);
+      const fired = this.weapons.firePlayerWeapon(
+          this.currentMap.entities,
+          this.player,
+          { x: worldX, y: worldY },
+          this.handleScreenShake,
+      );
+
+      // Keep the HUD weapon index aligned with the player's current weapon in
+      // case WeaponSystem auto-fell back to blaster on an empty mag.
+      if (fired) {
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
+      }
   }
 
+  // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
+  // existing GameEngine call sites stay unchanged during the Phase 2 split.
   private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
-      const angle = Math.atan2(target.y - shooter.position.y, target.x - shooter.position.x);
-
-      // Only apply recoil to player for now
-      if (ownerType === EntityType.PLAYER) {
-          const recoilImpulse = (PROJECTILE_CONSTANTS.MASS * config.speed * config.recoil) / (shooter.mass || 1);
-          shooter.velocity.x -= Math.cos(angle) * recoilImpulse;
-          shooter.velocity.y -= Math.sin(angle) * recoilImpulse;
-      }
-
-      const halfSpread = (config.spread * (Math.PI / 180)) / 2;
-
-      for (let i = 0; i < config.count; i++) {
-          let currentAngle = angle;
-          if (config.count > 1) {
-             const step = (halfSpread * 2) / (config.count - 1);
-             currentAngle = (angle - halfSpread) + (step * i);
-          } else if (config.spread > 0) {
-             currentAngle += (Math.random() - 0.5) * (config.spread * (Math.PI / 180));
-          }
-
-          const vx = Math.cos(currentAngle) * config.speed;
-          const vy = Math.sin(currentAngle) * config.speed;
-
-          const pSize = { 
-              x: config.size * 2.5, 
-              y: config.size * 0.4
-          };
-
-          // Spawn slightly forward from the ship nose based on entity size
-          const muzzleBase = Math.max(shooter.size?.x || SPRITE_CONSTANTS.PLAYER_BASE_SIZE, shooter.size?.y || SPRITE_CONSTANTS.PLAYER_BASE_SIZE);
-          const muzzleOffset = muzzleBase * 0.6;
-          const startX = shooter.position.x + Math.cos(currentAngle) * muzzleOffset;
-          const startY = shooter.position.y + Math.sin(currentAngle) * muzzleOffset;
-
-          this.currentMap?.entities.push({
-              id: `proj_${Date.now()}_${i}`,
-              type: EntityType.PROJECTILE,
-              position: { x: startX, y: startY },
-              velocity: { x: vx, y: vy },
-              size: pSize,
-              rotation: currentAngle,
-              color: config.color,
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: config.lifetime,
-              maxLifetime: config.lifetime,
-              mass: PROJECTILE_CONSTANTS.MASS,
-              damage: config.damage,
-              homing: config.homing,
-              ownerType,
-              pierceCount: config.pierce,
-              trail: [],
-          });
-      }
+      if (!this.currentMap) return;
+      this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
   }
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      // Filter-less optimization
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const p = entities[i];
-          if (p.active && p.type === EntityType.PROJECTILE && p.homing) {
-             
-              let target: GameEntity | null = null;
-              let minDist = 400 * 400; 
+      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, dt);
+  }
 
-              for (let j = 0; j < entities.length; j++) {
-                  const e = entities[j];
-                  if (e.active && e.type === EntityType.ENEMY) {
-                      const d2 = (e.position.x - p.position.x)**2 + (e.position.y - p.position.y)**2;
-                      if (d2 < minDist) {
-                          minDist = d2;
-                          target = e;
-                      }
-                  }
-              }
-
-              if (target) {
-                  const desiredAngle = Math.atan2(target.position.y - p.position.y, target.position.x - p.position.x);
-                  let angleDiff = desiredAngle - p.rotation;
-                  
-                  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-                  const turnRate = 5 * dt; 
-                  if (Math.abs(angleDiff) < turnRate) {
-                      p.rotation = desiredAngle;
-                  } else {
-                      p.rotation += Math.sign(angleDiff) * turnRate;
-                  }
-
-                  const speed = Math.sqrt(p.velocity.x**2 + p.velocity.y**2);
-                  p.velocity.x = Math.cos(p.rotation) * speed;
-                  p.velocity.y = Math.sin(p.rotation) * speed;
-              }
-          }
-      }
+  private updateLightningGravity(dt: number) {
+      if (!this.currentMap) return;
+      this.projectiles.updateLightningGravity(
+          this.entityIndex.projectiles,
+          this.entityIndex.enemies,
+          this.entityIndex.asteroids,
+          dt,
+      );
   }
 
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
-      const TRAIL_LIFETIME = 0.25; // shorter than player trail
-      const TRAIL_SCALE = 0.5;
-      const MIN_DIST_SQ = TRAIL_CONSTANTS.MIN_DISTANCE_SQ;
+      this.trails.updateProjectileTrails(this.currentMap.entities, dt);
+  }
 
-      for (let i = 0; i < entities.length; i++) {
-          const p = entities[i];
-          if (!p.active || p.type !== EntityType.PROJECTILE) continue;
+  // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
-          // Decay existing trail points (write-index avoids O(n) splice shifts)
-          if (p.trail) {
-              let writeIdx = 0;
-              for (let j = 0; j < p.trail.length; j++) {
-                  p.trail[j].lifetime -= dt;
-                  if (p.trail[j].lifetime > 0) {
-                      p.trail[writeIdx++] = p.trail[j];
-                  }
-              }
-              p.trail.length = writeIdx;
-          } else {
-              p.trail = [];
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
+      if (!this.currentMap) return;
+
+      // Build chain: hop from the initial target to nearby enemies/asteroids.
+      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
+      // full entity array.  Exploding entities are still skipped since the
+      // index holds `active` entities that may mid-animation.
+      const enemies = this.entityIndex.enemies;
+      const asteroids = this.entityIndex.asteroids;
+      const chain: GameEntity[] = [firstTarget];
+      const hitSet = new Set<string>([firstTarget.id]);
+
+      const pickNearest = (prev: GameEntity): GameEntity | null => {
+          let nextTarget: GameEntity | null = null;
+          let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
+          for (let i = 0; i < enemies.length; i++) {
+              const e = enemies[i];
+              if (e.isExploding || hitSet.has(e.id)) continue;
+              const dx = e.position.x - prev.position.x;
+              const dy = e.position.y - prev.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
           }
+          for (let i = 0; i < asteroids.length; i++) {
+              const e = asteroids[i];
+              if (e.isExploding || hitSet.has(e.id)) continue;
+              const dx = e.position.x - prev.position.x;
+              const dy = e.position.y - prev.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+          }
+          return nextTarget;
+      };
 
-          // Add new trail point if far enough from last
-          const t = p.trail;
-          const lastPos = t.length > 0 ? t[t.length - 1] : null;
-          const dx = p.position.x - (lastPos?.x ?? p.position.x - 1);
-          const dy = p.position.y - (lastPos?.y ?? p.position.y - 1);
-          if (!lastPos || (dx * dx + dy * dy > MIN_DIST_SQ)) {
-              t.push({
-                  x: p.position.x,
-                  y: p.position.y,
-                  lifetime: TRAIL_LIFETIME,
-                  maxLifetime: TRAIL_LIFETIME,
-                  scale: TRAIL_SCALE,
-              });
+      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+          const next = pickNearest(chain[chain.length - 1]);
+          if (!next) break;
+          chain.push(next);
+          hitSet.add(next.id);
+      }
+
+      // Apply chain damage (skip index 0 — the first target already took projectile damage).
+      // Damage reduces by 1/(totalHops-1) per hop: e.g. 3 total → 0.5× on hop 1, 0× on hop 2.
+      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
+      const totalHops = chain.length; // includes direct hit at index 0
+      const reductionPerHop = totalHops > 1 ? 1 / (totalHops - 1) : 1;
+
+      for (let i = 1; i < chain.length; i++) {
+          const target = chain[i];
+          const dmg = Math.max(0, baseDmg * (1 - i * reductionPerHop));
+          if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
+
+          target.health -= dmg;
+          target.hitFlash = 0.15;
+          this.spawnDamageText(target.position, dmg, target);
+
+          if (target.health <= 0 && !target.isExploding) {
+              target.lastImpactDamage = dmg;
+              this.handleEntityDeath(target);
           }
       }
+
+      // Only spawn arc visual if there's at least one chain hop
+      if (chain.length < 2) return;
+
+      // Build arc points: impact → target1 → target2 (target 0 is the direct hit)
+      const arcPoints: Vector2[] = [];
+      for (const t of chain) {
+          arcPoints.push({ x: t.position.x, y: t.position.y });
+      }
+
+      // Spawn a single PARTICLE entity carrying the arc data for rendering
+      this.currentMap.entities.push({
+          id: nextId('lightning'),
+          type: EntityType.PARTICLE,
+          position: { x: impactPos.x, y: impactPos.y },
+          velocity: { x: 0, y: 0 },
+          size: { x: 1, y: 1 },
+          rotation: 0,
+          color: WEAPONS[WeaponType.LIGHTNING].color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: LIGHTNING_ARC_LIFETIME,
+          maxLifetime: LIGHTNING_ARC_LIFETIME,
+          mass: 0,
+          isLightningArc: true,
+          arcPoints,
+      });
   }
 
   // ─── Collision-based stick bonds ───────────────────────────────────────────
@@ -1725,16 +1429,14 @@ export class GameEngine {
       this.stickBonds.length = writeIdx;
 
       // ── 2. Detect new contacts via spatial grid ───────────────────────────
-      // Candidates: active asteroids + eligible drops (no glass/powerup)
+      // Candidates: active asteroids + eligible drops (no glass/powerup).
+      // Phase 4: asteroids come straight from the prebuilt index.
+      const asteroids = this.entityIndex.asteroids;
       const candidates: GameEntity[] = [];
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.ASTEROID) candidates.push(e);
-      }
+      for (let i = 0; i < asteroids.length; i++) candidates.push(asteroids[i]);
       for (let i = 0; i < this.activeDrops.length; i++) {
           const d = this.activeDrops[i];
-          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup' && d.dropType !== 'health') candidates.push(d);
+          if (d.active && d.dropType !== 'glass' && d.dropType !== 'health') candidates.push(d);
       }
       if (candidates.length < 2) return;
 
@@ -1945,7 +1647,7 @@ export class GameEngine {
       }));
 
       this.currentMap.entities.push({
-          id:            `composite_${Date.now()}_${Math.random()}`,
+          id:            nextId('composite'),
           type:          EntityType.ASTEROID,
           shardType:    'asteroid',
           position:      { x: mx, y: my },
@@ -2051,7 +1753,7 @@ export class GameEngine {
           const maxSpin = 2.0 / (newSize / 20);
 
           this.currentMap?.entities.push({
-              id:           `shard_${Date.now()}_${i}`,
+              id:           nextId('shard'),
               type:          EntityType.ASTEROID,
               shardType:     parentShardType,
               position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
@@ -2085,150 +1787,53 @@ export class GameEngine {
 
   // --- WAVE SYSTEM ---
 
+  /** Build the per-call spawn context that WaveSystem needs.  Kept as a
+   *  tiny helper so every wave entry point (init / grace tick / skip) goes
+   *  through the same factory. */
+  private waveContext(): WaveSpawnContext | null {
+    if (!this.currentMap) return null;
+    return {
+      entities: this.currentMap.entities,
+      player: this.player,
+      physics: this.physics,
+      enemyScale: this.enemyScale,
+      difficultyLevel: this.difficultyLevel,
+    };
+  }
+
+  // Thin wrappers kept for internal call-site compatibility — delegate to WaveSystem.
   private initWaveSystem() {
-    this.waveIndex = 0;
-    this.waveEnemyIds = new Set();
-    this.waveState = 'inactive';
-    this.waveGraceTimer = 0;
-    this.spawnWave(0);
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    this.waves.init(ctx);
   }
 
   private spawnWave(index: number) {
-    if (!this.currentMap) return;
-    this.waveIndex = index;
-    this.waveEnemyIds.clear();
-
-    const statScale = DIFFICULTY_STAT_SCALES[this.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
-    const waveDef = generateWaveDef(index);
-    const scaledGroups = waveDef.enemies.map(g => ({ ...g, count: Math.round(g.count * this.enemyScale) }));
-    const totalEnemies = scaledGroups.reduce((s, g) => s + g.count, 0);
-    let enemyIdx = 0;
-
-    // Flanking: divide enemies into groups arriving from evenly-spaced angles.
-    // A random base rotation ensures no two waves look the same.
-    const numFlanks = totalEnemies >= 5 ? 3 : 2;
-    const flankSpacing = (Math.PI * 2) / numFlanks;
-    const flankBaseRotation = Math.random() * Math.PI * 2;
-
-    for (const group of scaledGroups) {
-      for (let i = 0; i < group.count; i++) {
-        const flankIdx = enemyIdx % numFlanks;
-        const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
-        const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
-        let x = 0, y = 0;
-        // Try up to 8 candidate positions; pick first one clear of static tiles
-        for (let attempt = 0; attempt < 8; attempt++) {
-          const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
-          const dist = 550 + Math.random() * 200;
-          x = this.player.position.x + Math.cos(a) * dist;
-          y = this.player.position.y + Math.sin(a) * dist;
-          if (this.physics.isPositionClear(x, y, safeRadius)) break;
-        }
-        const config = ENEMY_VARIANTS[group.subtype];
-        const id = `wave_${index}_${enemyIdx}_${Date.now()}`;
-
-        const tierMap: Partial<Record<string, number>> = {
-          RAMMER_1: 1, SHOOTER_1: 1,
-          RAMMER_2: 2, SHOOTER_2: 2,
-          RAMMER_3: 3, SHOOTER_3: 3,
-        };
-        const enemyTier = tierMap[group.subtype] ?? 1;
-
-        const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
-        this.currentMap.entities.push({
-          id,
-          type: EntityType.ENEMY,
-          enemySubtype: group.subtype,
-          enemyTier,
-          position: { x, y },
-          velocity: { x: 0, y: 0 },
-          size: { x: config.size, y: config.size },
-          rotation: Math.random() * Math.PI * 2,
-          color: config.color,
-          active: true,
-          health: scaledHealth,
-          maxHealth: scaledHealth,
-          maxSpeed: config.maxSpeed * statScale.speed,
-          mass: config.mass,
-          visionRange: ENEMY_CONSTANTS.VISION_RANGE,
-          sprite: config.sprite
-        });
-
-        this.waveEnemyIds.add(id);
-        enemyIdx++;
-      }
-    }
-
-    this.waveState = 'active';
-
-    // Wave start announcement
-    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-    this.waveAnnouncements.push({
-      text: `WAVE ${index + 1}`,
-      subtext: 'GET READY',
-      color: '#ffffff',
-      lifetime: totalLife,
-      maxLifetime: totalLife,
-    });
+    const ctx = this.waveContext();
+    if (!ctx) return;
+    this.waves.spawn(index, ctx);
   }
 
 
-  /**
-   * Apply the reward of a collected/broken drop directly to the player.
-   * Called both from spawnDrops (when a drop is destroyed by a player projectile)
-   * and previously from the contact-collection loop.
-   */
+  // --- Drop / shard thin wrappers ────────────────────────────────────────
+  //
+  // Logic lives in DropSystem; these wrappers preserve the existing call
+  // sites in updateGameLogic / handleEntityDeath / collection paths.
+
   private applyDropEffect(entity: GameEntity) {
-    if (entity.dropType === 'ammo' && entity.dropWeapon !== undefined) {
-      const wType  = entity.dropWeapon;
-      const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
-      if (!this.player.ammo) this.player.ammo = {};
-      this.player.ammo[wType] = (this.player.ammo[wType] ?? 0) + amount;
-      // Trigger slot flash — accumulate amount if picked up in quick succession
-      if (!this.player.ammoPickupFlash) this.player.ammoPickupFlash = {};
-      const prev = this.player.ammoPickupFlash[wType];
-      this.player.ammoPickupFlash[wType] = {
-        timer:  0.75,
-        amount: (prev && prev.timer > 0 ? prev.amount : 0) + amount,
-      };
-    } else if (entity.dropType === 'health') {
-      const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
-      const healed = Math.min(healAmount, this.player.maxHealth - this.player.health);
-      if (healed > 0) {
-        this.player.health += healed;
-        this.pushPlayerMessage(`+${Math.round(healed)}`, '#ef4444');
-      }
-    }
+    this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
   }
 
   private spawnDrops(entity: GameEntity) {
-    const pos = entity.position;
-    const pv = entity.velocity;
-
-    if (entity.type === EntityType.STRUCTURE) {
-      this.spawnGlassShards(entity);
-
-    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
-      // Drop was destroyed by a player projectile — apply its reward immediately.
-      this.applyDropEffect(entity);
-
-    } else if (entity.type === EntityType.ASTEROID) {
-      if (entity.dropComposition && entity.dropComposition.length > 0) {
-        for (const comp of entity.dropComposition) {
-          if (comp.type === 'ammo') {
-            this.spawnAmmoDrop(pos, comp.weapon, comp.value, pv);
-          } else if (comp.type === 'health') {
-            this.spawnHealthDrop(pos, comp.value, pv);
-          }
-          // 'powerup' entries no longer spawn — powerup drops have been removed
-        }
-      } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
-        // Wave-scaled ammo drop — only some asteroids drop ammo
-        const waveAmmoType = this.getAsteroidAmmoType();
-        this.spawnAmmoDrop(pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
-      }
-
-    }
+    if (!this.currentMap) return;
+    this.drops.spawnDrops(
+      this.currentMap.entities,
+      this.activeDrops,
+      this.player,
+      entity,
+      this.waveIndex,
+      (t, c) => this.pushPlayerMessage(t, c),
+    );
   }
 
   /**
@@ -2248,863 +1853,26 @@ export class GameEngine {
     }
   }
 
-  /**
-   * Break a dead enemy into debris using the 70/15/10/5 split:
-   *   70% tile shards  — visual debris only
-   *   15% own-color ammo drop
-   *   10% next-color ammo drop
-   *    5% empty asteroid shard
-   */
   private spawnEnemyShards(enemy: GameEntity) {
     if (!this.currentMap) return;
-
-    const pos    = enemy.position;
-    const pv     = enemy.velocity;
-    const subtype = enemy.enemySubtype;
-    const ammoMap = subtype ? ENEMY_AMMO_DROP[subtype] : null;
-
-    // Plan: 6 tile shards + 1 own ammo + 1 next ammo + 1 empty asteroid (50 % chance)
-    const TOTAL_PHYSICAL = 6 + 1 + 1 + (Math.random() < 0.5 ? 1 : 0);
-
-    // Build the spawn list: 'tile' | 'asteroid' | 'own' | 'next'
-    type SlotKind = 'tile' | 'asteroid' | 'own' | 'next';
-    const slots: SlotKind[] = [];
-    for (let i = 0; i < 6; i++) slots.push('tile');
-    if (ammoMap) { slots.push('own'); slots.push('next'); }
-    if (TOTAL_PHYSICAL > 8) slots.push('asteroid');
-    // Shuffle so drops aren't always last
-    for (let i = slots.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [slots[i], slots[j]] = [slots[j], slots[i]];
-    }
-
-    const total = slots.length;
-    for (let i = 0; i < total; i++) {
-      const baseAngle = (i / total) * Math.PI * 2;
-      const angle     = baseAngle + (Math.random() - 0.5) * (Math.PI / total) * 1.5;
-      const speed     = 1.5 + Math.random() * 3.0;
-      const vx = pv.x * 0.2 + Math.cos(angle) * speed;
-      const vy = pv.y * 0.2 + Math.sin(angle) * speed;
-
-      const kind = slots[i];
-
-      if (kind === 'own' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_OWN) {
-        this.spawnAmmoDrop(pos, ammoMap.own, DROP_CONFIG.AMMO_PER_ENEMY_OWN, { x: vx * 5, y: vy * 5 });
-        continue;
-      }
-      if (kind === 'next' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_NEXT) {
-        this.spawnAmmoDrop(pos, ammoMap.next, DROP_CONFIG.AMMO_PER_ENEMY_NEXT, { x: vx * 5, y: vy * 5 });
-        continue;
-      }
-
-      // Physical shard
-      const isTile = kind === 'tile';
-      const shardType: ShardType = isTile ? 'tile' : 'asteroid';
-      const size    = 12 + Math.random() * 10;
-      const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
-      const jitterK = isTile ? 0.25 : 0.8;
-      const rMin    = isTile ? 0.60 : 0.55;
-      const rRange  = isTile ? 0.55 : 0.70;
-      const baseR   = (size / 2) * 0.8;
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPts; j++) {
-        const ba = (j / numPts) * Math.PI * 2;
-        const aj = (Math.random() - 0.5) * (Math.PI / numPts) * jitterK;
-        rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-      this.currentMap.entities.push({
-        id:           `enemy_shard_${Date.now()}_${i}_${Math.random()}`,
-        type:          EntityType.ASTEROID,
-        shardType,
-        position:     { x: pos.x, y: pos.y },
-        velocity:     { x: vx, y: vy },
-        size:         { x: size, y: size },
-        rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2 * (2.5 / (size / 20)),
-        color:         isTile ? '#b4e6fd' : COLORS.ASTEROID,
-        active:        true,
-        health:        1,
-        maxHealth:     1,
-        mass:          size,
-        polygonPoints: pts,
-      });
-    }
+    this.drops.spawnEnemyShards(this.currentMap.entities, this.activeDrops, enemy);
   }
 
-  /**
-   * Generate an irregular shard polygon for a drop.
-   * baseR controls visual size and should scale with the drop's value so
-   * larger-value drops are physically bigger.
-   */
-  private generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
-    let numPoints: number;
-    let radMin: number;
-    let radMax: number;
-    let angleJitterScale: number;
-    if (type === 'ammo') {
-      numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, jagged crystal
-      radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
-    } else if (type === 'health') {
-      numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
-      radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
-    } else {
-      numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
-      radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
-    }
-    const rawPts: { angle: number; r: number }[] = [];
-    for (let i = 0; i < numPoints; i++) {
-      const baseAngle = (i / numPoints) * Math.PI * 2;
-      const jitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 2 * angleJitterScale;
-      rawPts.push({ angle: baseAngle + jitter, r: baseR * (radMin + Math.random() * (radMax - radMin)) });
-    }
-    rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-  }
-
-  /**
-   * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel shard.
-   * Glass shards look like tile fragments (same glass rendering), drift with the
-   * flow field, and persist as permanent debris.  They are NOT added to activeDrops so
-   * they cannot be collected — they are purely environmental debris.
-   */
   private spawnGlassShards(tile: GameEntity) {
     if (!this.currentMap) return;
-
-    // Damage biases count and size distribution.
-    // damageNorm 0 → 4–6 shards, mostly large; 1 → 9–11, mostly small.
-    const damage     = tile.lastImpactDamage ?? 1;
-    const damageNorm = Math.min(1, (damage - 1) / 4);
-    const count      = Math.round(4 + damageNorm * 6) + Math.floor(Math.random() * 3);
-
-    // Tile is approximated as a square with half-side 11 → area = 11² = 121.
-    const TILE_HALF = 11;
-    const parentArea = TILE_HALF * TILE_HALF;
-    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
-
-    // Power-law area distribution — same principle as asteroids.
-    const alpha    = 0.3 + damageNorm * 1.5; // 0.3 → few large; 1.8 → many small
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-    // Radii derived from normalised areas (area = r²).
-    const radii: number[] = rawAreas
-      .map(a => Math.sqrt((a / rawSum) * parentArea))
-      .filter(r => r >= MIN_RADIUS);
-
-    if (radii.length < 2) return;
-
-    const iv = tile.lastImpactVelocity;
-    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
-    const HALF_CONE   = Math.PI * 0.6;
-    const scatter     = 12;
-
-    for (let i = 0; i < radii.length; i++) {
-      const radius = radii[i];
-
-      let angle: number;
-      let speed: number;
-      if (impactAngle !== null) {
-        angle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-        speed = impactSpeed * 0.2 + 0.3 + Math.random() * 1.2;
-      } else {
-        angle = Math.random() * Math.PI * 2;
-        speed = 0.4 + Math.random() * 1.5;
-      }
-
-      // Tile shard polygon — 4–6 vertices, low angular jitter, moderate radius
-      // variation.  More blocky/faceted than asteroid shards (which use 5–7 pts
-      // with higher jitter) to hint at their manufactured origin.
-      const numPoints = 4 + Math.floor(Math.random() * 3);
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPoints; j++) {
-        const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-      const size = radius * 4; // diameter; slightly larger so physics feel solid
-      this.currentMap.entities.push({
-        id:            `tile_shard_${Date.now()}_${i}_${Math.random()}`,
-        type:           EntityType.ASTEROID,
-        shardType:     'tile',
-        position:      {
-          x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
-          y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
-        },
-        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-        size:          { x: size, y: size },
-        rotation:       Math.random() * Math.PI * 2,
-        rotationSpeed:  (Math.random() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
-        color:          '#b4e6fd',   // blue-white tile hue
-        active:         true,
-        health:         1,
-        maxHealth:      1,
-        mass:           size,
-        polygonPoints:  pts,
-      });
-    }
-
-    // Impact sparks: tile-colored chips + bright white hot sparks
-    const tileImpactAngle = tile.lastImpactVelocity
-      ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
-      : undefined;
-    this.spawnParticles(tile.position, 6, tile.color || '#6366f1', {
-      speedMin: 2, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
-      lifetimeMin: 0.2, lifetimeMax: 0.45,
-      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.65,
-    });
-    this.spawnParticles(tile.position, 4, '#ffffff', {
-      speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
-      lifetimeMin: 0.1, lifetimeMax: 0.25,
-      spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
-    });
-  }
-
-  /**
-   * Shatter a destroyed nebula entity (tile OR shard) into
-   * SHARDS_PER_SHATTER smaller children at SHARD_LINEAR_RATIO of the
-   * parent's diameter.  With N = 3 and ratio = 0.6, total child area
-   * ≈ 1.08 × parent — a modest ~8 % inflation per shatter, kept bounded
-   * by tile regeneration (grown tiles revert to canonical hex size).
-   *
-   * Children are fan-spread in the REARWARD cone (180° ± FAN_HALF_ANGLE)
-   * at an offset of SHARD_SPAWN_OFFSET_RATIO × parentRadius.  This puts
-   * every child behind the striker's trajectory (away from both the
-   * striker and the destroyed tile centre), so the striker doesn't
-   * immediately plow into its own debris.
-   *
-   * Rotation sign follows the tangent rule: shards on the striker's
-   * visual right spin CW (positive rotationSpeed in canvas coords),
-   * shards on the left spin CCW.  Colinear shards get a random sign.
-   *
-   * Parent's colour composition is cloned into every child so shatter →
-   * merge preserves hue through many cycles (see NebulaColor.blendCompositions).
-   *
-   * If the computed child diameter would fall below MIN_SHATTER_DIAMETER,
-   * the shatter is skipped entirely — the parent is too small to break
-   * further, and the caller should leave it alive (or have already passed
-   * the check).  This keeps the shard population bounded.
-   */
-  private spawnNebulaShards(parent: GameEntity) {
-    if (!this.currentMap) return;
-
-    // Shards never spawn further child shards — they're already small
-    // polygonal debris and should simply fade when struck.  Only nebula
-    // TILES spawn the glass-style shard burst below.
-    if (parent.type === EntityType.NEBULA_SHARD) return;
-
-    // Glass-tile-style shard generation: small polygonal debris with a
-    // power-law area distribution.  The resulting physics footprint is
-    // similar in scale to glass shards, but each shard also carries an
-    // explicit `nebulaSpriteWorldSize` so the rendered nebula sprite is
-    // visibly larger than the polygon and only slightly smaller than the
-    // parent tile's own sprite — cloud fragments, not scattered dots.
-    const parentDiameter = Math.max(parent.size.x, parent.size.y);
-    const parentRadius   = parentDiameter / 2;
-    // Parent area in r² units (matches the glass-shard convention —
-    // TILE_HALF² = 121 for glass; nebulae use whatever the actual tile
-    // radius happens to be).
-    const parentArea = parentRadius * parentRadius;
-    const MIN_RADIUS = 2; // don't spawn sub-pixel shards
-
-    // 4–6 shards per shatter (matches glass shard base range).
-    const count = 4 + Math.floor(Math.random() * 3);
-
-    // Power-law area distribution normalised to the parent's area.
-    const alpha    = 1.0; // moderate skew: some large shards, some small
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-    const radii: number[] = rawAreas
-      .map(a => Math.sqrt((a / rawSum) * parentArea))
-      .filter(r => r >= MIN_RADIUS);
-
-    if (radii.length < 1) return;
-
-    const composition = parent.nebulaColorComposition;
-
-    // Nebula sprite world size for every shard in this shatter — all
-    // children draw at the same fixed world-space size (slightly smaller
-    // than the parent tile's sprite) so they read as a continuous cloud
-    // even as their underlying polygon sizes vary.
-    const parentSpriteWorldSize = parent.nebulaSpriteWorldSize
-        ?? (parentDiameter * NEBULA_CONSTANTS.TILE_SPRITE_SCALE);
-    const shardSpriteWorldSize = parentSpriteWorldSize
-        * NEBULA_CONSTANTS.SHARD_TO_TILE_SPRITE_RATIO;
-
-    // Striker direction (forward vector).  Canvas uses y-down, so "right"
-    // of the striker's travel direction (as drawn on screen) corresponds
-    // to a positive z-component of cross(forward, shard-offset) — the
-    // tangent rule the user specified.
-    const iv = parent.lastImpactVelocity;
-    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    let fx = 1, fy = 0;
-    if (iv && impactSpeed > 0.001) {
-        fx = iv.x / impactSpeed;
-        fy = iv.y / impactSpeed;
-    }
-
-    const spinK = Math.min(
-        NEBULA_CONSTANTS.MAX_SPIN,
-        1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED
-    );
-
-    // Effective birth fade-in duration — scales inversely with the
-    // striker's impact speed.  Uses the same rateScale the PhysicsSystem
-    // used for the parent's fade-out duration, so destruction and rebirth
-    // animations feel synchronized for the same collision.
-    const shardRateScale = nebulaFadeRateScale(impactSpeed);
-    const shardSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION / shardRateScale;
-
-    // REARWARD fan: children spawn behind the striker's motion direction
-    // so they're not in the striker's forward path.  Base angle = π (180°
-    // from forward), spread symmetrically by ± FAN_HALF_ANGLE.
-    const fan  = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
-    const shardCount = radii.length;
-    const step = shardCount > 1 ? (2 * fan) / (shardCount - 1) : 0;
-    // Offset uses the parent-tile radius (not the shard radius) so every
-    // child spawns well clear of the tile footprint, matching previous
-    // behaviour regardless of the smaller shard sizes.
-    const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
-
-    for (let i = 0; i < shardCount; i++) {
-        const radius = radii[i];
-        const diameter = radius * 2;
-
-        // Glass-shard polygon: 4–6 vertices, low angular jitter, moderate
-        // radius variation.  Identical generation math to spawnGlassShards
-        // so the resulting hit shapes are indistinguishable in scale/shape
-        // from the glass debris the user already likes.
-        const numPoints = 4 + Math.floor(Math.random() * 3);
-        const rawPts: { angle: number; r: number }[] = [];
-        for (let j = 0; j < numPoints; j++) {
-            const baseAngle = (j / numPoints) * Math.PI * 2;
-            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-            rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-        }
-        rawPts.sort((a, b) => a.angle - b.angle);
-        const pts: Vector2[] = rawPts.map(p => ({
-            x: Math.cos(p.angle) * p.r,
-            y: Math.sin(p.angle) * p.r,
-        }));
-        // Size stored on the entity is a slightly-larger diameter so
-        // physics feels solid, mirroring the glass-shard convention
-        // (size = radius × 4).
-        const size = radius * 4;
-
-        // Rear-cone angle: π + (−fan … +fan) relative to forward.
-        const offsetAngle = Math.PI + (shardCount > 1 ? -fan + step * i : 0);
-        const cosA = Math.cos(offsetAngle);
-        const sinA = Math.sin(offsetAngle);
-        // Rotate forward vector by offsetAngle → this shard's direction
-        const dx = fx * cosA - fy * sinA;
-        const dy = fx * sinA + fy * cosA;
-
-        // Spawn position: offset from parent centre along the rear-cone
-        // direction by ~2 × parent radius, well outside the tile footprint.
-        const spawnX = parent.position.x + dx * offsetMag;
-        const spawnY = parent.position.y + dy * offsetMag;
-
-        // Tangent-rule side: z-component of cross(forward, spawn-direction).
-        // cross > 0 → shard is on the striker's visual right (CW rotation).
-        // cross < 0 → shard is on the striker's visual left  (CCW rotation).
-        // cross ≈ 0 → on-axis (centre shard) → random spin direction.
-        const cross = fx * dy - fy * dx;
-        const spinSign = cross > 0.01 ? 1
-                        : cross < -0.01 ? -1
-                        : (Math.random() < 0.5 ? 1 : -1);
-        const rotationSpeed = spinSign * spinK;
-
-        // Velocity: "dragged along" model.  The parallel component (in
-        // the striker's direction of travel) dominates; the perpendicular
-        // component is small and biased toward the shard's tangent side
-        // so left-spawned shards drift slightly left and right-spawned
-        // shards slightly right.
-        const parallelSpeed = Math.max(
-            NEBULA_CONSTANTS.MIN_PARALLEL_SPEED,
-            impactSpeed * NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR
-        );
-        const perpSpeed = impactSpeed * NEBULA_CONSTANTS.PERP_SCATTER_FACTOR;
-        // Right tangent in canvas y-down coords = (-fy, fx).  Flip sign
-        // for left-side shards.  Centre shards (side ≈ 0) get no perp.
-        const perpSign = cross > 0.01 ? 1 : cross < -0.01 ? -1 : 0;
-        const perpX = -fy * perpSign * perpSpeed;
-        const perpY =  fx * perpSign * perpSpeed;
-        const velX = fx * parallelSpeed + perpX;
-        const velY = fy * parallelSpeed + perpY;
-
-        this.currentMap.entities.push({
-            id:             `nebula_shard_${Date.now()}_${i}_${Math.random()}`,
-            type:            EntityType.NEBULA_SHARD,
-            shardType:      'nebula',
-            position:       { x: spawnX, y: spawnY },
-            velocity:       { x: velX, y: velY },
-            size:           { x: size, y: size },
-            rotation:        Math.random() * Math.PI * 2,
-            rotationSpeed,
-            color:           composition ? blendCompositionToHex(composition) : (parent.color || NEBULA_CONSTANTS.DEFAULT_HEX),
-            active:          true,
-            health:          1,
-            maxHealth:       1,
-            mass:            size,
-            polygonPoints:   pts,
-            sprite:          parent.sprite,
-            nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-            nebulaTileArea:  parent.nebulaTileArea,
-            nebulaGridCol:   parent.nebulaGridCol,
-            nebulaGridRow:   parent.nebulaGridRow,
-            nebulaSpriteWorldSize: shardSpriteWorldSize,
-            linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
-            angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
-            // Fade-in on birth — shards slowly materialize behind the
-            // striker instead of popping in instantly.  Duration scales
-            // with striker impact speed (matching the parent tile's
-            // fade-out rate) so fast hits produce fast rebirths.
-            nebulaSpawnTimer:    shardSpawnDuration,
-            nebulaSpawnDuration: shardSpawnDuration,
-        });
-    }
-  }
-
-  /**
-   * Per-frame gravity + merge pass for nebula shards.
-   *
-   * Only NEBULA_SHARD entities participate — nebula TILES are immutable
-   * sinks that never grow or absorb.  New tiles are born by shard
-   * coalescence: when two shards merge and the combined disc area reaches
-   * canonical HEX_AREA, the merged shard transmutes into a brand-new
-   * NEBULA tile at the nearest clear grid cell (see tryTransmuteShardToTile).
-   *
-   * Each shard is pulled toward the nearest larger-or-equal neighbouring
-   * shard within GRAVITY_RANGE.  Equal-sized pairs merge too — the
-   * mergedThisFrame Set prevents duplicate processing within a single
-   * frame, and the id check in the inner loop handles the rare exact-tie
-   * case without infinite loops.
-   *
-   * Broadphase uses a cell grid over shards to avoid O(n²).
-   */
-  private updateNebulaDynamics(dt: number) {
-    if (!this.currentMap) return;
-    const ents = this.currentMap.entities;
-
-    // Collect active nebula shards ONLY.  Tiles are not targets and
-    // don't need to be spatially indexed for this pass.  Fading shards
-    // are skipped — they're in their death animation and should not
-    // iterate as sources or be valid merge targets.
-    const all: GameEntity[] = [];
-    for (let i = 0; i < ents.length; i++) {
-        const e = ents[i];
-        if (!e.active) continue;
-        if (e.nebulaFadeTimer !== undefined) continue;
-        if (e.type === EntityType.NEBULA_SHARD) {
-            all.push(e);
-        }
-    }
-    if (all.length < 2) return;
-
-    // Spatial hash over GRAVITY_RANGE cells.
-    const CELL = NEBULA_CONSTANTS.GRAVITY_RANGE;
-    const grid = new Map<number, number[]>();
-    for (let i = 0; i < all.length; i++) {
-        const e = all[i];
-        const cx = Math.floor(e.position.x / CELL);
-        const cy = Math.floor(e.position.y / CELL);
-        const key = (cx << 16) | (cy & 0xFFFF);
-        let cell = grid.get(key);
-        if (!cell) { cell = []; grid.set(key, cell); }
-        cell.push(i);
-    }
-
-    const GRAV_RANGE_SQ = CELL * CELL;
-    const GRAV_K        = NEBULA_CONSTANTS.GRAVITY_STRENGTH;
-    const GRAV_MIN      = NEBULA_CONSTANTS.GRAVITY_MIN_DIST;
-    const MERGE_K       = NEBULA_CONSTANTS.MERGE_PROXIMITY_K;
-
-    // Per-frame set of targets that have already absorbed a shard.
-    // Enforces "at most one merge per target per frame" so the three
-    // children of a single shatter distribute across multiple neighbours
-    // instead of all stacking into the same nearest tile.  Combined with
-    // area-conserving shatter this keeps cluster growth bounded.
-    const mergedThisFrame = new Set<GameEntity>();
-
-    for (let i = 0; i < all.length; i++) {
-        const shard = all[i];
-        if (!shard.active) continue;
-        if (shard.type !== EntityType.NEBULA_SHARD) continue;
-
-        const shardR = Math.max(shard.size.x, shard.size.y) / 2;
-
-        // Find nearest larger neighbour across the 3×3 cell block.
-        const acx = Math.floor(shard.position.x / CELL);
-        const acy = Math.floor(shard.position.y / CELL);
-
-        let bestTarget: GameEntity | null = null;
-        let bestDistSq = Infinity;
-
-        for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-            for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
-                if (!cell) continue;
-                for (let k = 0; k < cell.length; k++) {
-                    const j = cell[k];
-                    if (j === i) continue;
-                    const target = all[j];
-                    if (!target.active) continue;
-                    if (mergedThisFrame.has(target)) continue; // one merge/target/frame
-                    const targetR = Math.max(target.size.x, target.size.y) / 2;
-                    // Allow equal-size merges (relaxed from strictly larger).
-                    // mergedThisFrame + inactive-check combine to prevent
-                    // the race where A and B see each other as valid targets
-                    // in the same frame and double-merge.
-                    if (targetR < shardR) continue;
-
-                    const dx = target.position.x - shard.position.x;
-                    const dy = target.position.y - shard.position.y;
-                    const distSq = dx * dx + dy * dy;
-                    if (distSq > GRAV_RANGE_SQ) continue;
-                    if (distSq < bestDistSq) {
-                        bestDistSq = distSq;
-                        bestTarget = target;
-                    }
-                }
-            }
-        }
-
-        if (!bestTarget) continue;
-
-        const dx = bestTarget.position.x - shard.position.x;
-        const dy = bestTarget.position.y - shard.position.y;
-        const dist = Math.sqrt(bestDistSq);
-        if (dist < 0.0001) continue;
-
-        const targetR   = Math.max(bestTarget.size.x, bestTarget.size.y) / 2;
-        const mergeDist = (targetR + shardR) * MERGE_K;
-
-        if (dist <= mergeDist) {
-            this.mergeNebulas(bestTarget, shard);
-            mergedThisFrame.add(bestTarget);
-            // Post-merge: if the grown shard is now large enough to form
-            // a tile (disc area ≥ canonical hex area), try transmuting it.
-            this.tryTransmuteShardToTile(bestTarget);
-            continue;
-        }
-
-        // Strong linear-radial gravity: force ∝ 1 / max(dist, MIN_DIST).
-        // Combined with the damping pass, this produces a steady terminal
-        // drift toward the target rather than a runaway acceleration.
-        const effDist = Math.max(dist, GRAV_MIN);
-        const accel   = (GRAV_K * dt) / effDist;
-        const invDist = 1 / dist;
-        shard.velocity.x += (dx * invDist) * accel;
-        shard.velocity.y += (dy * invDist) * accel;
-    }
-  }
-
-  /**
-   * Absorb a smaller nebula shard into a larger-or-equal nebula shard.
-   * Only called on NEBULA_SHARD pairs (tiles are not merge targets).
-   *
-   * - larger.size grows so its disc area gains the smaller's disc area
-   * - larger's position and sprite remain unchanged
-   * - colour composition is blended weighted by each shard's area
-   * - smaller becomes inactive and emits a brief particle puff as a
-   *   "simple merge animation"
-   *
-   * Post-merge, the caller checks whether the grown shard should
-   * transmute into a fresh NEBULA tile (see tryTransmuteShardToTile).
-   */
-  private mergeNebulas(larger: GameEntity, smaller: GameEntity) {
-    const largeR = Math.max(larger.size.x, larger.size.y) / 2;
-    const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
-    const largeArea = Math.PI * largeR * largeR;
-    const smallArea = Math.PI * smallR * smallR;
-    const newArea = largeArea + smallArea;
-    const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-
-    // Grow the larger shard's size so its disc area gains the smaller's.
-    // Once a shard has absorbed another it transitions from "glass-style
-    // polygonal fragment" back to "circular cloud blob" — clearing the
-    // polygon makes the debug view draw an implicit circle from `size`,
-    // keeping the merged hit shape consistent with the grown area.
-    larger.size.x = newDiameter;
-    larger.size.y = newDiameter;
-    larger.mass   = newDiameter;
-    larger.polygonPoints = undefined;
-
-    // Blend colour compositions weighted by area; larger dominates.
-    larger.nebulaColorComposition = blendCompositions(
-        larger.nebulaColorComposition, largeArea,
-        smaller.nebulaColorComposition, smallArea
-    );
-    larger.color = blendCompositionToHex(larger.nebulaColorComposition);
-
-    // Simple merge animation: glittery glimmer burst at the absorption
-    // point, scattered within a radius matching the larger shard.
-    const tint = blendCompositionToHex(larger.nebulaColorComposition);
-    const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-    this.spawnNebulaGlimmer(smaller.position, glimmerR, tint);
-
-    // Smaller vanishes; compaction pass at end of physics removes it.
-    smaller.active = false;
-  }
-
-  /**
-   * Deterministic, neighbourhood-aware colour rule for regenerating
-   * nebula tiles.  Works in hue space over the full 360° wheel — all
-   * hues are available (blue / indigo / violet / pink / red / yellow /
-   * green).  All hue arithmetic is circular (unit-vector sums +
-   * shortest-arc distances) so averages handle wraparound correctly.
-   *
-   * Algorithm:
-   *   1. Read old hue from the tile's previous composition.
-   *   2. Gather 6 neighbour hues (active, non-fading NEBULA tiles) from
-   *      the supplied grid index, weighted by each neighbour's disc area.
-   *   3. Compute the circular area-weighted average of neighbour hues
-   *      (unit-vector sum, atan2 back to degrees).
-   *   4. Circularly lerp between old and neighbour average based on
-   *      tile isolation:
-   *        emptyCount     = 6 − activeNeighbours
-   *        oldWeight      = emptyCount / 6
-   *        neighborWeight = 1 − oldWeight
-   *      A fully surrounded tile adopts the neighbour average; an
-   *      isolated tile keeps its old hue exactly.
-   *   5. Enforce a minimum hue shift: if the rule's natural output
-   *      lands within REGEN_MIN_HUE_SHIFT° of the old hue (shortest
-   *      arc), step forward by exactly that minimum in a deterministic
-   *      direction chosen by grid parity, wrapping modulo 360.
-   *   6. Normalise to [0, 360) and return a single-stop composition.
-   *
-   * The rule is fully deterministic — identical map state yields
-   * identical regen colours, so the cloud evolves along a predictable
-   * neighbourhood walk rather than into RNG noise.
-   */
-  private computeRegeneratedNebulaComposition(
-    tile: GameEntity,
-    nebulaIndex: Map<number, GameEntity>
-  ): NebulaColorStop[] {
-    // Derive the tile's previous hue.  If the tile has no composition
-    // (shouldn't happen, but defensive), fall back to a fresh random hue.
-    const oldComp = tile.nebulaColorComposition;
-    const oldHue = clampHueToPalette(
-        oldComp && oldComp[0]
-            ? hexToHueDeg(oldComp[0].hex)
-            : hexToHueDeg(randomNebulaComposition()[0].hex)
-    );
-
-    // Collect active-neighbour hues with area weights for the
-    // circular weighted average.
-    const neighborEntries: Array<{ hue: number; weight: number }> = [];
-    if (tile.nebulaGridCol !== undefined && tile.nebulaGridRow !== undefined) {
-        const neighbors = TileGenerator.getHexNeighbors(tile.nebulaGridCol, tile.nebulaGridRow);
-        for (const n of neighbors) {
-            const key = (n.c << 16) | (n.r & 0xFFFF);
-            const nTile = nebulaIndex.get(key);
-            if (!nTile || !nTile.nebulaColorComposition || nTile === tile) continue;
-            const hex = nTile.nebulaColorComposition[0]?.hex;
-            if (!hex) continue;
-            const nHue = clampHueToPalette(hexToHueDeg(hex));
-            const r = Math.max(nTile.size.x, nTile.size.y) / 2;
-            neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
-        }
-    }
-
-    // Circular weighted average of neighbour hues.  Falls back to the
-    // old hue when there are no neighbours, or when opposing hues
-    // cancel to a near-zero sum vector (degenerate).
-    const avgNeighborHue = circularHueAverage(neighborEntries) ?? oldHue;
-
-    // Isolation-based circular lerp between old and neighbour average.
-    const NUM_NEIGHBORS = 6;
-    const emptyCount = NUM_NEIGHBORS - neighborEntries.length;
-    const oldWeight = emptyCount / NUM_NEIGHBORS;
-    const neighborWeight = 1 - oldWeight;
-    let targetHue = circularLerpHue(oldHue, oldWeight, avgNeighborHue, neighborWeight);
-
-    // Enforce minimum hue shift so every regen is visibly distinct.
-    // Uses shortest-arc distance so wraparound is handled correctly.
-    const minShift = NEBULA_CONSTANTS.REGEN_MIN_HUE_SHIFT;
-    if (circularHueDistance(targetHue, oldHue) < minShift) {
-        // Deterministic direction: parity of (col + row) picks + or −.
-        // Using grid coords instead of a counter keeps the rule stateless;
-        // adjacent tiles step in opposite directions, producing a natural
-        // wave pattern across successive regens.
-        const sign = (((tile.nebulaGridCol ?? 0) + (tile.nebulaGridRow ?? 0)) & 1) === 0 ? 1 : -1;
-        targetHue = clampHueToPalette(oldHue + sign * minShift);
-    }
-
-    return [{ hex: paletteHueToHex(targetHue), weight: 1 }];
-  }
-
-  /**
-   * If the given nebula shard has grown large enough (disc area ≥
-   * HEX_AREA), transmute it into a brand-new NEBULA tile at the nearest
-   * unoccupied grid cell.  Returns true if the transmutation succeeded.
-   *
-   * The shard's accumulated colour composition is passed to the new
-   * tile, so the palette that multiple shards mixed together carries
-   * over to the tile that finally condenses out of them.
-   *
-   * If no candidate cell is clear (the shard's own cell and all 6
-   * neighbours are occupied), the transmutation aborts and the shard
-   * stays as a shard — a later frame may find a clear cell as it drifts.
-   */
-  private tryTransmuteShardToTile(shard: GameEntity): boolean {
-    if (!this.currentMap) return false;
-    if (shard.type !== EntityType.NEBULA_SHARD) return false;
-
-    // Disc-area threshold: the shard must cover at least one full hex
-    // worth of area before condensing into a tile.
-    const shardR = Math.max(shard.size.x, shard.size.y) / 2;
-    const shardArea = Math.PI * shardR * shardR;
-    if (shardArea < HEX_AREA) return false;
-
-    // Candidate cells: the shard's current hex cell + 6 neighbours,
-    // sorted by distance from the shard's position so we snap to the
-    // nearest free slot.
-    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
-    const candidates: { c: number; r: number; distSq: number }[] = [];
-    const pushCandidate = (c: number, r: number) => {
-        const p = hexCoordToPixel(c, r);
-        const dx = p.x - shard.position.x;
-        const dy = p.y - shard.position.y;
-        candidates.push({ c, r, distSq: dx * dx + dy * dy });
-    };
-    pushCandidate(origin.c, origin.r);
-    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
-        pushCandidate(n.c, n.r);
-    }
-    candidates.sort((a, b) => a.distSq - b.distSq);
-
-    let chosen: { c: number; r: number } | null = null;
-    for (const cand of candidates) {
-        if (this.isGridCellFreeForNebula(cand.c, cand.r)) {
-            chosen = cand;
-            break;
-        }
-    }
-    if (!chosen) return false;
-
-    // Create the new tile at the chosen grid cell, carrying over the
-    // shard's colour composition as the tile's palette.
-    const composition = shard.nebulaColorComposition
-        ? cloneComposition(shard.nebulaColorComposition)
-        : undefined;
-    const tile = TileGenerator.createNebulaTileEntity(
-        chosen.c,
-        chosen.r,
-        composition ?? [{ hex: shard.color || NEBULA_CONSTANTS.DEFAULT_HEX, weight: 1 }],
-        HEX_AREA
-    );
-
-    this.currentMap.entities.push(tile);
-    this.physics.addStaticEntity(tile);
-
-    // New tile fades in slowly instead of popping — no glimmer burst.
-    // createNebulaTileEntity already sets both spawn fields, but we
-    // re-set them here for clarity.  Transmutation is a soft "condense"
-    // event (no striker impact), so the base slow fade-in is used.
-    tile.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
-    tile.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
-
-    // Shard collapses into the new tile.
-    shard.active = false;
-    return true;
-  }
-
-  /**
-   * Check whether the given grid cell (odd-r offset) has no active or
-   * regenerating nebula tile already occupying it, and is also clear of
-   * static-grid collision geometry (glass tiles etc.).
-   */
-  private isGridCellFreeForNebula(col: number, row: number): boolean {
-    if (!this.currentMap) return false;
-    const pos = hexCoordToPixel(col, row);
-
-    // Any nebula entity pinned to this grid cell — active or regenerating.
-    const ents = this.currentMap.entities;
-    for (let i = 0; i < ents.length; i++) {
-        const e = ents[i];
-        if (e.type !== EntityType.NEBULA) continue;
-        if (e.nebulaGridCol === col && e.nebulaGridRow === row) return false;
-    }
-
-    // Any other static geometry (glass tiles) overlapping this cell —
-    // check a radius slightly smaller than the hex so touching neighbours
-    // don't register as collisions.
-    if (!this.physics.isPositionClear(pos.x, pos.y, HEX_SIZE * 0.5)) return false;
-    return true;
-  }
-
-  /** Returns the ammo type asteroids should drop for the current wave. */
-  private getAsteroidAmmoType(): WeaponType {
-    const idx = Math.min(
-      Math.floor(this.waveIndex / 3),
-      ASTEROID_AMMO_PROGRESSION.length - 1
-    );
-    return ASTEROID_AMMO_PROGRESSION[idx];
+    this.drops.spawnGlassShards(this.currentMap.entities, tile);
   }
 
   private spawnAmmoDrop(pos: Vector2, weapon: WeaponType, amount: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    if (weapon === WeaponType.BLASTER) return; // Blaster is always infinite — no drops
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop = this.makeDropEntity(`drop_ammo_${weapon}_${Date.now()}_${Math.random()}`,
-      pos, parentVelocity, WEAPONS[weapon].color, amount, 'ammo');
-    drop.dropWeapon = weapon;
-    drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
-    this.currentMap.entities.push(drop);
-    this.activeDrops.push(drop);
+    this.drops.spawnAmmoDrop(this.currentMap.entities, this.activeDrops, pos, weapon, amount, parentVelocity);
   }
 
   private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    if (this.activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop: GameEntity = {
-      id:          `drop_health_${Date.now()}_${Math.random()}`,
-      type:        EntityType.INTERACTABLE,
-      position:    { x: pos.x, y: pos.y },
-      velocity:    { x: 0, y: 0 },
-      size:        { x: 48, y: 48 },
-      rotation:    0,
-      rotationSpeed: 0,
-      color:       '#ef4444',
-      active:      true,
-      health:      1,
-      maxHealth:   1,
-      mass:        Infinity, // static — never moved by physics or flow field
-      dropType:    'health',
-      dropValue:   value,
-    };
-    this.currentMap.entities.push(drop);
-    this.activeDrops.push(drop);
+    this.drops.spawnHealthDrop(this.currentMap.entities, this.activeDrops, pos, value, parentVelocity);
   }
 
-  private makeDropEntity(
-    id: string, pos: Vector2, pv: Vector2 | undefined,
-    color: string, value: number, dropType: 'ammo' | 'health'
-  ): GameEntity {
-    const scatter = 20;
-    const angle   = Math.random() * Math.PI * 2;
-    const speed   = 0.5 + Math.random() * 1.5;
-    const r       = Math.min(10, Math.max(4, 3.5 + value * 0.075));
-    return {
-      id, type: EntityType.INTERACTABLE,
-      position: { x: pos.x + (Math.random() - 0.5) * scatter * 2, y: pos.y + (Math.random() - 0.5) * scatter * 2 },
-      velocity: { x: (pv?.x ?? 0) * 0.3 + Math.cos(angle) * speed, y: (pv?.y ?? 0) * 0.3 + Math.sin(angle) * speed },
-      size: { x: r * 3, y: r * 3 },
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 2 * 2.5,
-      color, active: true, health: 1, maxHealth: 1, mass: 5,
-      dropType, dropValue: value,
-      polygonPoints: [],
-    };
-  }
-
-  // Spawn a powerup drop for a specific weapon (used when a composite asteroid releases its stored weapons).
   private loadMap(map: BaseMapLayer) {
       if (!map.initialized) {
           map.init();
@@ -3115,11 +1883,13 @@ export class GameEngine {
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
-      // Hand the map's recorded nebula cluster positions to the
-      // background layer so its puffs render at the same world
+      // Forward the map's recorded nebula cluster-center positions to
+      // the background layer so its puffs render at the same world
       // positions as the interactable tile clusters (one unified
-      // cloud, BG backdrop still parallaxes as the camera moves).
+      // cloud; backdrop still parallaxes as the camera moves).
       this.renderer.setNebulaClusterCenters(map.nebulaClusterCenters);
+      // Fresh map — drop any queued nebula regens from the previous one.
+      this.nebulas.reset();
   }
 
   private draw() {

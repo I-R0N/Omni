@@ -137,8 +137,14 @@ export class PhysicsSystem {
           // Skip movement for exploding entities
           if (entity.isExploding) continue;
 
-          entity.position.x += entity.velocity.x;
-          entity.position.y += entity.velocity.y;
+          // Position integration — normalized to 60 Hz so that changing
+          // FIXED_DT (and therefore the number of substeps per render frame)
+          // does not alter the effective travel rate of any entity.  With
+          // timeScale = dt * 60, dt = 1/60 yields ×1 (legacy behavior) and
+          // dt = 1/120 yields ×0.5 per step × 2 steps per frame = same net
+          // displacement per wall-clock second.
+          entity.position.x += entity.velocity.x * timeScale;
+          entity.position.y += entity.velocity.y * timeScale;
 
           // Apply Friction
           if (entity.type === EntityType.NEBULA_SHARD) {
@@ -210,7 +216,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
     const attractors: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
@@ -404,7 +410,7 @@ export class PhysicsSystem {
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -608,6 +614,90 @@ export class PhysicsSystem {
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
+
+          // Bouncer projectiles reflect off tiles (STRUCTURE) and tile shards
+          // (ASTEROID with shardType === 'tile') instead of being consumed.
+          // They do NOT damage tiles — a damaged tile dies in one shot (HEALTH=1),
+          // which would leave nothing to bounce off of.
+          if (proj.isBouncer) {
+              const isTile = target.type === EntityType.STRUCTURE
+                  || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
+              if (isTile && proj.velocity) {
+                  // Tiles are axis-aligned AABBs, and the projectile is thin and
+                  // rotated along its travel direction — SAT's minimum-overlap axis
+                  // is often the wrong reflection axis. Instead, infer the entry
+                  // face from the projectile's velocity direction and the tile's
+                  // dilated AABB: for each axis, compute the reverse-unwind time
+                  // to exit the corresponding entry face. The axis with the smaller
+                  // unwind time was the most-recently-crossed face → that's the
+                  // face we bounce off of.
+                  const tileHX = target.size.x / 2;
+                  const tileHY = target.size.y / 2;
+
+                  // Effective projectile half-extents along world X and Y,
+                  // accounting for the projectile's rotation. This lets us push
+                  // the projectile out just enough to clear the tile face,
+                  // avoiding big visual teleports that break the trail.
+                  const cosR = Math.abs(Math.cos(proj.rotation));
+                  const sinR = Math.abs(Math.sin(proj.rotation));
+                  const hw = proj.size.x / 2;
+                  const hh = proj.size.y / 2;
+                  const hxEff = cosR * hw + sinR * hh;
+                  const hyEff = sinR * hw + cosR * hh;
+
+                  const vx = proj.velocity.x;
+                  const vy = proj.velocity.y;
+                  const relX = proj.position.x - target.position.x;
+                  const relY = proj.position.y - target.position.y;
+
+                  // Reverse-unwind time to the entry face along each axis, using
+                  // a conservative dilated AABB (use max effective half-extent).
+                  const dHX = tileHX + hxEff;
+                  const dHY = tileHY + hyEff;
+                  let tX = Infinity;
+                  let tY = Infinity;
+                  if (vx >  0.0001) tX = (relX + dHX) / vx;  // entered through left face
+                  else if (vx < -0.0001) tX = (relX - dHX) / vx;  // entered through right face
+                  if (vy >  0.0001) tY = (relY + dHY) / vy;
+                  else if (vy < -0.0001) tY = (relY - dHY) / vy;
+
+                  // Contact point on the tile face, clamped to the tile's extent —
+                  // this is where sparks should spawn so they sit on the surface
+                  // rather than inside the tile.
+                  let contactX = 0;
+                  let contactY = 0;
+
+                  // Pick the entry axis: the one with the SMALLER reverse-unwind
+                  // time was crossed last, so that's the face we're reflecting off.
+                  // Snap the projectile position to just outside that face + ε.
+                  if (tX <= tY) {
+                      const nx = vx > 0 ? -1 : 1;
+                      contactX = target.position.x + nx * tileHX;
+                      contactY = Math.max(
+                          target.position.y - tileHY,
+                          Math.min(target.position.y + tileHY, proj.position.y)
+                      );
+                      proj.velocity.x = -vx;
+                      proj.position.x = target.position.x + nx * (tileHX + hxEff + 0.5);
+                  } else {
+                      const ny = vy > 0 ? -1 : 1;
+                      contactY = target.position.y + ny * tileHY;
+                      contactX = Math.max(
+                          target.position.x - tileHX,
+                          Math.min(target.position.x + tileHX, proj.position.x)
+                      );
+                      proj.velocity.y = -vy;
+                      proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
+                  }
+                  proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+                  // Fire the impact callback AFTER the reflection so sparks spawn
+                  // on the tile's surface and spray along the outgoing (reflected)
+                  // velocity direction — away from the tile, not into it.
+                  if (onHit) onHit({ x: contactX, y: contactY }, proj, target);
+                  return;
+              }
+          }
 
           let projDmg = proj.damage || 1;
 

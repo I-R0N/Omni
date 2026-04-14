@@ -162,9 +162,9 @@ public setMapType(type: MapType) {
   private initContent(width: number, height: number) {
     this.sceneWidth = width;
     this.sceneHeight = height;
-    this.starLayers = [];
+    // starBands and milkyWayBand are (re)initialized further down in this
+    // same method, alongside the rest of the band-generation pass.
     this.nebulaPuffs = [];
-    this.milkyWay = [];
 
     // Nebula puffs — if the map supplied a shared cluster-center list,
     // place one puff at each recorded tile-cluster position.  Each puff

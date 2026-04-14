@@ -454,7 +454,7 @@ export class RenderSystem {
           if (!entity.active || !entity.trail || entity.trail.length < 2) return;
           if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
           const mode: 'player' | 'projectile' = entity.type === EntityType.PROJECTILE ? 'projectile' : 'player';
-          this.drawTrailStrip(ctx, entity.trail, mode, entity.color);
+          this.drawTrailStrip(ctx, entity.trail, mode, entity.color, entity.isBouncer);
       });
 
       // Detached trails from prior thrust events — always rendered as player
@@ -473,7 +473,8 @@ export class RenderSystem {
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
       mode: 'player' | 'projectile',
-      entityColor?: string
+      entityColor?: string,
+      isBouncer?: boolean
   ) {
       // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
       ctx.beginPath();
@@ -538,17 +539,25 @@ export class RenderSystem {
       const head = t[t.length - 1];
       const tail = t[0];
       const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
-      const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-      if (mode === 'projectile') {
-          const [r, g, b] = hexToRgb(entityColor || '#facc15');
-          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
+      if (isBouncer) {
+          // Bouncer beam: solid pure-green line with no fade along the trail.
+          // The short lifetime already makes the beam self-limiting; we want
+          // it sharp while it's visible.
+          const [r, g, b] = hexToRgb(entityColor || '#22c55e');
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
       } else {
-          // Player: cyan engine exhaust
-          grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-          grad.addColorStop(1, `rgba(56, 189, 248, ${0.6 * headRatio})`);
+          const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+          if (mode === 'projectile') {
+              const [r, g, b] = hexToRgb(entityColor || '#facc15');
+              grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+              grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
+          } else {
+              // Player: cyan engine exhaust
+              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
+              grad.addColorStop(1, `rgba(56, 189, 248, ${0.6 * headRatio})`);
+          }
+          ctx.fillStyle = grad;
       }
-      ctx.fillStyle = grad;
       ctx.fill();
   }
 
@@ -557,6 +566,13 @@ export class RenderSystem {
       ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < particles.length; i++) {
           const p = particles[i];
+
+          // Lightning arc particles use a dedicated renderer
+          if (p.isLightningArc) {
+              this.renderLightningArc(ctx, p);
+              continue;
+          }
+
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
           ctx.globalAlpha = lifeRatio;
           ctx.fillStyle = p.color;
@@ -566,6 +582,88 @@ export class RenderSystem {
       }
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
+  }
+
+  // ── Lightning arc rendering ─────────────────────────────────────────────
+
+  private renderLightningArc(ctx: CanvasRenderingContext2D, particle: GameEntity) {
+      const points = particle.arcPoints;
+      if (!points || points.length < 2) return;
+
+      const lifeRatio = (particle.lifetime || 0) / (particle.maxLifetime || 1);
+      const alpha = lifeRatio; // fade over lifetime
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      // Draw jagged arc between each pair of chain points
+      for (let seg = 0; seg < points.length - 1; seg++) {
+          const a = points[seg];
+          const b = points[seg + 1];
+
+          // Generate zigzag midpoints perpendicular to the segment
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len < 1) continue;
+
+          // Perpendicular direction
+          const nx = -dy / len;
+          const ny = dx / len;
+
+          const segCount = 5; // number of subdivisions
+          const zigzag: Vector2[] = [{ x: a.x, y: a.y }];
+
+          for (let i = 1; i < segCount; i++) {
+              const t = i / segCount;
+              const mx = a.x + dx * t;
+              const my = a.y + dy * t;
+              // Random perpendicular offset (scales with segment length)
+              const offset = (Math.random() - 0.5) * len * 0.25;
+              zigzag.push({ x: mx + nx * offset, y: my + ny * offset });
+          }
+          zigzag.push({ x: b.x, y: b.y });
+
+          // Draw outer white glow
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(zigzag[0].x, zigzag[0].y);
+          for (let i = 1; i < zigzag.length; i++) {
+              ctx.lineTo(zigzag[i].x, zigzag[i].y);
+          }
+          ctx.stroke();
+
+          // Draw cyan electric core
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.9)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(zigzag[0].x, zigzag[0].y);
+          for (let i = 1; i < zigzag.length; i++) {
+              ctx.lineTo(zigzag[i].x, zigzag[i].y);
+          }
+          ctx.stroke();
+      }
+
+      // Small bloom at each chain node
+      for (let i = 1; i < points.length; i++) {
+          const p = points[i];
+          ctx.globalAlpha = alpha * 0.7;
+          const nodeGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
+          nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+          nodeGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.4)');
+          nodeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = nodeGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+          ctx.fill();
+      }
+
+      ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
   }
 
   private renderEntities(
@@ -989,43 +1087,99 @@ export class RenderSystem {
           } else if (entity.type === EntityType.PROJECTILE) {
              const r = entity.size.x / 2;
              if (Number.isFinite(r) && r > 0) {
-                // Pulsing animation: fast oscillation tied to position for variety
-                const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
-                const glowR = r * pulse * 3.0;
-
                 // Fade out in the last 20% of lifetime
                 const lifetimeFrac = (entity.lifetime !== undefined && entity.maxLifetime !== undefined && entity.maxLifetime > 0)
                     ? Math.min(1, entity.lifetime / (entity.maxLifetime * 0.2))
                     : 1;
 
-                const isEnemy = entity.ownerType === EntityType.ENEMY;
-                const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+                if (entity.isLightningProjectile) {
+                    // ── Lightning projectile: electric crackling effect ──
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+                    ctx.globalCompositeOperation = 'lighter';
 
-                ctx.save();
-                ctx.globalAlpha = Math.min(1, lifetimeFrac);
+                    // Outer white glow
+                    const elecR = r * 3.5;
+                    const elecGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, elecR);
+                    elecGrad.addColorStop(0,   'rgba(255, 255, 255, 1.0)');
+                    elecGrad.addColorStop(0.15, 'rgba(255, 255, 255, 0.6)');
+                    elecGrad.addColorStop(0.4,  'rgba(255, 255, 255, 0.15)');
+                    elecGrad.addColorStop(1,    'rgba(255, 255, 255, 0)');
+                    ctx.fillStyle = elecGrad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, elecR, 0, Math.PI * 2);
+                    ctx.fill();
 
-                // Single merged gradient: hot white core → weapon colour → transparent glow.
-                // One gradient object + one draw call instead of two.
-                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                if (isEnemy) {
-                    grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
-                    grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
-                    grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
-                    grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
-                    grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                    // Cyan electric tendrils around the projectile
+                    ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)';
+                    ctx.lineWidth = 1.5;
+                    const tendrilCount = 4;
+                    for (let ti = 0; ti < tendrilCount; ti++) {
+                        const tAngle = (nowSec * 20 + ti * (Math.PI * 2 / tendrilCount)) % (Math.PI * 2);
+                        const tLen = r * (1.5 + Math.sin(nowSec * 30 + ti * 7) * 1.0);
+                        const mx = Math.cos(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
+                        const my = Math.sin(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        ctx.lineTo(mx, my);
+                        ctx.lineTo(Math.cos(tAngle) * tLen, Math.sin(tAngle) * tLen);
+                        ctx.stroke();
+                    }
+
+                    // Bright white core
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.restore();
+                } else if (entity.isBouncer) {
+                    // ── Bouncer projectile: the beam body is drawn entirely by
+                    // the fast-fading trail in renderTrails. All we draw here
+                    // is a small green head dot so the beam has a visible tip
+                    // even before the trail accumulates its first couple of
+                    // points (first 1–2 frames after spawn).
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+                    ctx.fillStyle = '#22c55e';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
                 } else {
-                    grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
-                    grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
-                    grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
-                    grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
-                    grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
-                }
-                ctx.beginPath();
-                ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-                ctx.fillStyle = grad;
-                ctx.fill();
+                    // ── Standard projectile: radial gradient glow ──
+                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * 3.0;
 
-                ctx.restore();
+                    const isEnemy = entity.ownerType === EntityType.ENEMY;
+                    const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                    // Single merged gradient: hot white core → weapon colour → transparent glow.
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    if (isEnemy) {
+                        grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
+                        grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
+                        grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
+                        grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
+                        grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                    } else {
+                        grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
+                        grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                        grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                        grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
+                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                    }
+                    ctx.beginPath();
+                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+
+                    ctx.restore();
+                }
              }
           } else {
             ctx.fillStyle = entity.color;
