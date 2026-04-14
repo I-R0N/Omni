@@ -44,13 +44,6 @@ export class BackgroundManager {
   private sceneWidth: number = 0;
   private sceneHeight: number = 0;
   private initialized: boolean = false;
-  // World-space seed positions shared with the nebula tile generator.
-  // When set, `initContent` places one background-nebula puff at each
-  // position (with depth = 1.0 so puffs stay aligned with tiles even
-  // as the camera moves) instead of generating its own random list.
-  // Populated by `setNebulaClusterCenters`, which GameEngine calls
-  // after loading the map.
-  private nebulaClusterCenters: Vector2[] | null = null;
   // Reusable output for applyLensing — avoids a heap allocation per puff
   private _lensedX: number = 0;
   private _lensedY: number = 0;
@@ -105,22 +98,6 @@ public setMapType(type: MapType) {
     this.mapType = type;
   }
 
-  /**
-   * Provide a shared list of world-space nebula cluster centers that
-   * the tile generator already used as cluster seeds.  When set, the
-   * background-nebula layer places one puff at each center with
-   * depth = 1.0 so the background and tile layers stay perfectly
-   * aligned in world space (and feel like one unified cloud).
-   *
-   * Force an initContent reset so the next render rebuilds puffs from
-   * the new centers.  Passing null/empty falls back to the legacy
-   * random distribution.
-   */
-  public setNebulaClusterCenters(centers: Vector2[] | null) {
-    this.nebulaClusterCenters = centers && centers.length > 0 ? centers : null;
-    this.initialized = false;
-  }
-
   private createPuffVariants() {
     const numVariants = 5;
     const size = 128;
@@ -162,27 +139,29 @@ public setMapType(type: MapType) {
     this.starLayers = [];
     this.nebulaPuffs = [];
     this.milkyWay = [];
+    
+    const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
 
-    // Nebula puffs — if the map provided a shared cluster-center list,
-    // use those positions but KEEP the original random parallax depth
-    // (0.2–1.0) so the background layer still drifts as the camera
-    // moves.  At camera (0, 0) the BG puffs align with the world-space
-    // tile clusters; as the player moves, parallax separates them and
-    // the tile clusters appear on top of a drifting nebular backdrop.
-    // Otherwise fall back to the legacy random distribution for maps
-    // that don't have tile nebulae.
-    if (this.nebulaClusterCenters) {
-        for (const seed of this.nebulaClusterCenters) {
+    for (let i = 0; i < numClusters; i++) {
+        const cx = (Math.random() - 0.5) * width * 20;
+        const cy = (Math.random() - 0.5) * height * 20;
+        const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
+
+        for (let j = 0; j < puffsPerCluster; j++) {
             const size = 150 + Math.random() * 250; // 150–400px
-            const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0 parallax
+            const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
+            const offsetX = (Math.random() - 0.5) * 300; // ±150
+            const offsetY = (Math.random() - 0.5) * 200; // ±100
             const hue = Math.random() * 360;
+            // Keep color string for procedural fallback path
             const color = `hsla(${hue}, 100%, 60%,`;
+
             this.nebulaPuffs.push({
-                x: seed.x,
-                y: seed.y,
+                x: cx + offsetX,
+                y: cy + offsetY,
                 size: size,
                 depth: depth,
-                opacity: 0.1 + Math.random() * 0.55,
+                opacity: 0.1 + Math.random() * 0.55, // 0.10–0.65
                 color: color,
                 hue: hue,
                 rotation: Math.random() * Math.PI * 2,
@@ -190,36 +169,6 @@ public setMapType(type: MapType) {
                 aspect: 0.8 + Math.random() * 0.4,
                 textureIndex: Math.floor(Math.random() * this.puffTextures.length)
             });
-        }
-    } else {
-        const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
-        for (let i = 0; i < numClusters; i++) {
-            const cx = (Math.random() - 0.5) * width * 20;
-            const cy = (Math.random() - 0.5) * height * 20;
-            const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
-
-            for (let j = 0; j < puffsPerCluster; j++) {
-                const size = 150 + Math.random() * 250; // 150–400px
-                const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
-                const offsetX = (Math.random() - 0.5) * 300; // ±150
-                const offsetY = (Math.random() - 0.5) * 200; // ±100
-                const hue = Math.random() * 360;
-                const color = `hsla(${hue}, 100%, 60%,`;
-
-                this.nebulaPuffs.push({
-                    x: cx + offsetX,
-                    y: cy + offsetY,
-                    size: size,
-                    depth: depth,
-                    opacity: 0.1 + Math.random() * 0.55,
-                    color: color,
-                    hue: hue,
-                    rotation: Math.random() * Math.PI * 2,
-                    rotationSpeed: (Math.random() - 0.5) * 0.001,
-                    aspect: 0.8 + Math.random() * 0.4,
-                    textureIndex: Math.floor(Math.random() * this.puffTextures.length)
-                });
-            }
         }
     }
 

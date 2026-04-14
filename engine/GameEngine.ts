@@ -3053,11 +3053,6 @@ export class GameEngine {
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
-      // Feed the shared nebula cluster-center list to the background
-      // layer so its puffs render at the same world positions as the
-      // interactable tile clusters — one unified nebula cloud instead
-      // of two independently-random layers drifting past each other.
-      this.renderer.setNebulaClusterCenters(map.nebulaClusterCenters);
   }
 
   private draw() {

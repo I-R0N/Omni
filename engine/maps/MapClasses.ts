@@ -15,11 +15,6 @@ export abstract class BaseMapLayer {
   public parentId: string | null = null;
   public initialized: boolean = false;
   public enemyScale: number = 1;
-  // World-space positions that host a nebula cluster.  Both the tile
-  // generator and the background-nebula renderer read from this list so
-  // every visible background-nebula puff coincides with an interactable
-  // tile cluster (and vice-versa) — no more "two separate layers" feel.
-  public nebulaClusterCenters: Vector2[] = [];
 
   constructor(id: string, name: string, type: MapType) {
     this.id = id;
@@ -169,26 +164,30 @@ export class UniverseMap extends BaseMapLayer {
         occupied
     ));
 
-    // Nebula clusters — generated from a SHARED list of world-space seed
-    // positions that the background-nebula layer ALSO reads from.  Every
-    // visible background-nebula puff coincides with an interactable tile
-    // cluster (and vice-versa), so the two layers read as one unified
-    // cloud instead of two random ones drifting past each other.
+    // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
+    // (sparser, spread across the full map).  The generator shares the
+    // `occupied` set from the glass passes so nebula cells naturally fill
+    // the gaps glass left behind.  With high enough cluster counts some
+    // will statistically coincide with background nebula puffs in world
+    // space (the background system scatters puffs across ±~20 000), giving
+    // the cluster + background nebulae overlap the user asked for.
     //
-    // The seed generator replicates the background layer's original
-    // 50–100 × (2–5 puff) distribution, then each seed position grows
-    // one tile cluster via `generateNebulaClustersAtSeeds`.  The list is
-    // stashed on the map so GameEngine can pipe it into BackgroundManager
-    // at map-load time.
-    this.nebulaClusterCenters = TileGenerator.generateNebulaClusterCenters(
-        this.width,
-        this.height
-    );
-    this.entities.push(...TileGenerator.generateNebulaClustersAtSeeds(
-        this.nebulaClusterCenters,
+    // Inner-zone bounds widened from 8000 to 12000 so the dense-cluster
+    // treatment covers more of the playable core.
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        12000, 12000,
         22,
+        NEBULA_CONSTANTS.CLUSTER_COUNT,
         NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
         NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
+        occupied
+    ));
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        this.width, this.height,
+        22,
+        NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
+        NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
+        NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
         occupied
     ));
 

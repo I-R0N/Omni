@@ -1,5 +1,5 @@
 
-import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
+import { GameEntity, EntityType, NebulaColorStop } from '../../types';
 import { COLORS, STRUCTURE_CONSTANTS, ASSETS, NEBULA_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
@@ -142,112 +142,6 @@ export class TileGenerator {
 
       let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
       let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
-
-      const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
-      const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
-      let createdInCluster = 0;
-
-      while (openSet.length > 0 && createdInCluster < targetSize) {
-        const idx = Math.floor(Math.random() * openSet.length);
-        const current = openSet[idx];
-        openSet.splice(idx, 1);
-
-        const key = `${current.c},${current.r}`;
-        if (occupiedCoords.has(key)) continue;
-
-        occupiedCoords.add(key);
-        createdInCluster++;
-
-        this.createNebulaEntity(entities, current.c, current.r, hexSize, w, h, cloneComposition(composition), tileArea);
-
-        const neighbors = this.getNeighbors(current.c, current.r);
-        for (const n of neighbors) {
-          const nKey = `${n.c},${n.r}`;
-          if (!occupiedCoords.has(nKey)) {
-             if (Math.random() > 0.1) {
-                 openSet.push(n);
-             }
-          }
-        }
-      }
-    }
-
-    return entities;
-  }
-
-  /**
-   * Generate a list of world-space cluster-center positions matching the
-   * distribution the background-nebula layer used to produce randomly.
-   *
-   * Both systems now consume this shared list so every background-nebula
-   * puff coincides with an interactable tile cluster — a single unified
-   * nebula layer instead of two independently-random ones.
-   *
-   * Mirrors the original BackgroundManager.initContent layout:
-   *   - 50–100 parent clusters spread across the full map
-   *   - 2–5 puffs per parent with ±150 / ±100 jitter
-   * Resulting list length ≈ 160–500.
-   */
-  public static generateNebulaClusterCenters(
-    mapWidth: number,
-    mapHeight: number
-  ): Vector2[] {
-    const centers: Vector2[] = [];
-    const numParentClusters = 50 + Math.floor(Math.random() * 51); // 50–100
-    const xRange = mapWidth / 2;
-    const yRange = mapHeight / 2;
-    for (let i = 0; i < numParentClusters; i++) {
-      const cx = (Math.random() * 2 - 1) * xRange;
-      const cy = (Math.random() * 2 - 1) * yRange;
-      const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
-      for (let j = 0; j < puffsPerCluster; j++) {
-        const offsetX = (Math.random() - 0.5) * 300;
-        const offsetY = (Math.random() - 0.5) * 200;
-        centers.push({ x: cx + offsetX, y: cy + offsetY });
-      }
-    }
-    return centers;
-  }
-
-  /**
-   * Grow a nebula tile cluster at each world-space seed position.  Each
-   * seed produces ONE cluster with a random target size in
-   * [minClusterSize, maxClusterSize].  Shares the `occupiedCoords` set
-   * with earlier tile passes so nebula cells never overlap glass cells.
-   *
-   * Used in combination with `generateNebulaClusterCenters` to tie tile
-   * clusters to the same world-space list the background-nebula layer
-   * uses — eliminating the visual split between the two layers.
-   */
-  public static generateNebulaClustersAtSeeds(
-    seeds: Vector2[],
-    hexSize: number,
-    minClusterSize: number,
-    maxClusterSize: number,
-    occupiedCoords: Set<string>
-  ): GameEntity[] {
-    const entities: GameEntity[] = [];
-
-    const w = Math.sqrt(3) * hexSize;
-    const h = 2 * hexSize;
-    const vDist = 0.75 * h;
-
-    // Same regular-hex area used in generateNebulaClusters — lets shards
-    // conserve area exactly through the shatter → merge cycle.
-    const tileArea = (3 * Math.sqrt(3) / 2) * hexSize * hexSize;
-
-    for (let s = 0; s < seeds.length; s++) {
-      const seed = seeds[s];
-
-      // Each cluster gets its own random-hue palette entry so adjacent
-      // tiles read as a single continuous cloud of one colour.
-      const composition: NebulaColorStop[] = randomNebulaComposition();
-
-      // Pixel → odd-r offset grid cell (approximate — same simple
-      // rounding used by pixelToHexCoord).
-      const startRow = Math.round(seed.y / vDist);
-      const rowOffset = (startRow % 2 !== 0) ? (w / 2) : 0;
-      const startCol = Math.round((seed.x - rowOffset) / w);
 
       const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
       const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
