@@ -7,9 +7,10 @@ import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
 import { ProjectileSystem } from './systems/ProjectileSystem';
+import { WeaponSystem } from './systems/WeaponSystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -28,6 +29,7 @@ export class GameEngine {
   private particles: ParticleSystem;
   private trails: TrailSystem;
   private projectiles: ProjectileSystem;
+  private weapons: WeaponSystem;
   private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
@@ -134,6 +136,7 @@ export class GameEngine {
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();
     this.projectiles = new ProjectileSystem();
+    this.weapons = new WeaponSystem(this.projectiles);
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -266,44 +269,13 @@ export class GameEngine {
       this.prepareFrameEntities();
   }
 
-  /**
-   * Select a weapon by slot tap.
-   * - Tapping an unowned / empty slot does nothing.
-   * - Tapping the already-active non-blaster weapon toggles it off (switches to blaster).
-   * - Tapping any other owned weapon switches to it.
-   * At level 1 only one weapon is active at a time (exclusive selection).
-   */
   private selectWeapon(wType: WeaponType) {
-    const isBlaster = wType === WeaponType.BLASTER;
-    const ammo      = this.player.ammo?.[wType] ?? 0;
-    if (!isBlaster && ammo <= 0) return; // unowned / empty — ignore tap
-
-    if (!isBlaster && this.player.currentWeapon === wType) {
-      // Toggle off: deselect and fall back to blaster
-      this.player.currentWeapon = WeaponType.BLASTER;
-      this.currentWeaponIndex   = WEAPON_LIST.indexOf(WeaponType.BLASTER);
-      this.player.burstQueue    = 0;
-      return;
-    }
-
-    this.player.currentWeapon = wType;
-    this.currentWeaponIndex   = WEAPON_LIST.indexOf(wType);
-    this.player.burstQueue    = 0;
+    this.currentWeaponIndex = this.weapons.selectWeapon(this.player, wType);
   }
 
   public cycleWeapon() {
     if (this.gameState !== GameState.PLAYING) return;
-    // Only cycle through blaster (always owned) + weapons with ammo
-    const owned = WEAPON_LIST.filter(w =>
-      w === WeaponType.BLASTER ||
-      ((this.player.ammo?.[w] ?? 0) > 0)
-    );
-    if (owned.length <= 1) return;
-    const currentIdx = owned.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
-    const nextIdx = (currentIdx + 1) % owned.length;
-    this.player.currentWeapon = owned[nextIdx];
-    this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon);
-    this.player.burstQueue = 0;
+    this.currentWeaponIndex = this.weapons.cycleWeapon(this.player);
   }
 
   public setDifficulty(level: number) {
@@ -400,42 +372,7 @@ export class GameEngine {
 
   private handleEnemyShooting(dt: number) {
       if (!this.currentMap) return;
-      const weapon = ENEMY_WEAPON;
-      const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
-
-      for (let i = 0; i < this.currentMap.entities.length; i++) {
-          const enemy = this.currentMap.entities[i];
-          if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
-          if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
-
-          // Cooldown management
-          enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
-          if (enemy.weaponCooldown > 0) continue;
-
-          const dx = this.player.position.x - enemy.position.x;
-          const dy = this.player.position.y - enemy.position.y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > rangeSq) continue;
-
-          // Lazily init burst state — first trigger starts a fresh burst
-          if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-
-          // Slight inaccuracy
-          const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
-          const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
-          const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-          this.spawnProjectileFromConfig(enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
-
-          // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
-          // then wait BURST_RELOAD before starting the next burst.
-          if (enemy.burstQueue > 1) {
-              enemy.burstQueue--;
-              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
-          } else {
-              enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-              enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
-          }
-      }
+      this.weapons.updateEnemyShooting(this.currentMap.entities, this.player, dt);
   }
 
   private handleScreenShake = (amount: number) => {
@@ -995,21 +932,9 @@ export class GameEngine {
         }
     });
 
-    if (this.player.weaponCooldown && this.player.weaponCooldown > 0) {
-        this.player.weaponCooldown -= dt;
-    }
-
-    if (this.player.burstQueue && this.player.burstQueue > 0) {
-        this.player.burstTimer = (this.player.burstTimer || 0) - dt;
-        if (this.player.burstTimer <= 0) {
-            this.player.burstQueue--;
-            const config = WEAPONS[this.player.currentWeapon || WeaponType.BLASTER];
-            this.player.burstTimer = config.burstDelay || 0.1;
-            const targetX = this.player.position.x + Math.cos(this.player.rotation) * 100;
-            const targetY = this.player.position.y + Math.sin(this.player.rotation) * 100;
-            this.spawnProjectileFromConfig(this.player, {x: targetX, y: targetY}, config, EntityType.PLAYER);
-            if (config.type === WeaponType.BURST) this.handleScreenShake(3);
-        }
+    // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    if (this.currentMap) {
+        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
 
     this.updateHomingProjectiles(dt);
@@ -1274,49 +1199,27 @@ export class GameEngine {
   }
 
   private handleShooting(target: Vector2) {
-      if (this.player.weaponCooldown && this.player.weaponCooldown > 0) return;
+      if (!this.currentMap) return;
 
-      let weaponType = this.player.currentWeapon || WeaponType.BLASTER;
-
-      // If non-blaster and out of ammo, auto-fallback to blaster
-      if (weaponType !== WeaponType.BLASTER && (this.player.ammo?.[weaponType] ?? 0) <= 0) {
-          weaponType = WeaponType.BLASTER;
-          this.player.currentWeapon = WeaponType.BLASTER;
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(WeaponType.BLASTER);
-          this.player.burstQueue = 0;
-      }
-
-      const config = WEAPONS[weaponType];
-      this.player.weaponCooldown = config.cooldown;
-
-      // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
-      if (weaponType !== WeaponType.BLASTER && this.player.ammo) {
-          const before = this.player.ammo[weaponType] ?? 0;
-          this.player.ammo[weaponType] = Math.max(0, before - 1);
-          if (this.player.ammo[weaponType] === 0) {
-              // Will auto-switch on next shot; leave current active until then
-          }
-      }
-
-      if (config.type === WeaponType.SHOTGUN) {
-          this.handleScreenShake(5);
-      } else if (config.type === WeaponType.CANNON) {
-          this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-      } else if (config.type === WeaponType.BURST) {
-          this.handleScreenShake(3);
-      }
-
-      if (config.type === WeaponType.BURST && config.burstCount) {
-          this.player.burstQueue = config.burstCount - 1;
-          this.player.burstTimer = config.burstDelay;
-      }
-
+      // Convert screen-space target to world coords once; the rest of the
+      // firing flow lives in WeaponSystem.
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
       const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
       const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
 
-      this.spawnProjectileFromConfig(this.player, {x: worldX, y: worldY}, config, EntityType.PLAYER);
+      const fired = this.weapons.firePlayerWeapon(
+          this.currentMap.entities,
+          this.player,
+          { x: worldX, y: worldY },
+          this.handleScreenShake,
+      );
+
+      // Keep the HUD weapon index aligned with the player's current weapon in
+      // case WeaponSystem auto-fell back to blaster on an empty mag.
+      if (fired) {
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
+      }
   }
 
   // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
