@@ -176,7 +176,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
     const attractors: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
@@ -361,7 +361,7 @@ export class PhysicsSystem {
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void

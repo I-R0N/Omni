@@ -136,10 +136,11 @@ public setMapType(type: MapType) {
   private initContent(width: number, height: number) {
     this.sceneWidth = width;
     this.sceneHeight = height;
-    this.starLayers = [];
+    // starBands and milkyWayBand are (re)initialized further down in this
+    // same method, alongside the rest of the band-generation pass.
     this.nebulaPuffs = [];
-    this.milkyWay = [];
-    
+
+
     const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
 
     for (let i = 0; i < numClusters; i++) {

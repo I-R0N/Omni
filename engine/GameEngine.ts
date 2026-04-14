@@ -1403,7 +1403,7 @@ export class GameEngine {
       for (let i = 0; i < asteroids.length; i++) candidates.push(asteroids[i]);
       for (let i = 0; i < this.activeDrops.length; i++) {
           const d = this.activeDrops[i];
-          if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup' && d.dropType !== 'health') candidates.push(d);
+          if (d.active && d.dropType !== 'glass' && d.dropType !== 'health') candidates.push(d);
       }
       if (candidates.length < 2) return;
 

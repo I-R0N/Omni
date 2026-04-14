@@ -189,6 +189,13 @@ export class AISystem {
 
       const targetPos = this.laggedTargets.get(enemy.id) || player.position;
 
+      // Distance to the player is needed by both the state machine's
+      // rammer-retreat branch and the movement block below, so compute
+      // it once up front.
+      const dxPlayer = player.position.x - enemy.position.x;
+      const dyPlayer = player.position.y - enemy.position.y;
+      const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
+
       // --- STATE MACHINE ---
       if (enemy.aiTimer && enemy.aiTimer > 0) {
           enemy.aiTimer -= dt;
@@ -218,9 +225,6 @@ export class AISystem {
       }
 
       // --- MOVEMENT BEHAVIOR ---
-      const dxPlayer = player.position.x - enemy.position.x;
-      const dyPlayer = player.position.y - enemy.position.y;
-      const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
       const longRange = distToPlayer > AI_CONFIG.LONG_RANGE_SEEK_DIST;
 
       // At long range always seek regardless of idle state, so waves never
