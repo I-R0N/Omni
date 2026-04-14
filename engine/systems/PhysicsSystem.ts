@@ -113,8 +113,14 @@ export class PhysicsSystem {
           // Skip movement for exploding entities
           if (entity.isExploding) continue;
 
-          entity.position.x += entity.velocity.x;
-          entity.position.y += entity.velocity.y;
+          // Position integration — normalized to 60 Hz so that changing
+          // FIXED_DT (and therefore the number of substeps per render frame)
+          // does not alter the effective travel rate of any entity.  With
+          // timeScale = dt * 60, dt = 1/60 yields ×1 (legacy behavior) and
+          // dt = 1/120 yields ×0.5 per step × 2 steps per frame = same net
+          // displacement per wall-clock second.
+          entity.position.x += entity.velocity.x * timeScale;
+          entity.position.y += entity.velocity.y * timeScale;
 
           // Apply Friction
           // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
