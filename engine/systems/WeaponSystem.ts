@@ -109,14 +109,23 @@ export class WeaponSystem {
   /**
    * Tick the shooting AI for every active shooter-role enemy.  Manages
    * cooldowns, targeting, burst-fire state, and projectile spawning.
+   *
+   * Phase 4: `enemies` is the pre-filtered enemy candidate list from
+   * EntityIndex, so this pass is O(E) on active enemies instead of O(N)
+   * on the full entity array.  Spawned projectiles are appended to
+   * `entities` (the master list) so the index stays in sync next frame.
    */
-  public updateEnemyShooting(entities: GameEntity[], player: GameEntity, dt: number) {
+  public updateEnemyShooting(
+    entities: GameEntity[],
+    enemies: GameEntity[],
+    player: GameEntity,
+    dt: number,
+  ) {
     const weapon = ENEMY_WEAPON;
     const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
 
-    for (let i = 0; i < entities.length; i++) {
-      const enemy = entities[i];
-      if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
       if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
 
       // Cooldown management

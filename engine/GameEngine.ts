@@ -10,6 +10,7 @@ import { ProjectileSystem } from './systems/ProjectileSystem';
 import { WeaponSystem } from './systems/WeaponSystem';
 import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
+import { EntityIndex } from './systems/EntityIndex';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
@@ -34,6 +35,7 @@ export class GameEngine {
   private weapons: WeaponSystem;
   private drops: DropSystem;
   private waves: WaveSystem;
+  private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
   
   private isRunning: boolean = false;
@@ -151,6 +153,7 @@ export class GameEngine {
     this.weapons = new WeaponSystem(this.projectiles);
     this.drops = new DropSystem(this.particles);
     this.waves = new WaveSystem();
+    this.entityIndex = new EntityIndex();
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -381,11 +384,16 @@ export class GameEngine {
           this.frameEntities.push(ents[i]);
       }
       this.frameEntities.push(this.player);
+      // Phase 4: rebuild type-filtered candidate lists so every downstream
+      // system scan runs on the minimal relevant slice instead of the full
+      // master entity list.  Rebuilt once per sim substep; consumers must
+      // not cache these references across steps.
+      this.entityIndex.rebuild(this.currentMap.entities);
   }
 
   private handleEnemyShooting(dt: number) {
       if (!this.currentMap) return;
-      this.weapons.updateEnemyShooting(this.currentMap.entities, this.player, dt);
+      this.weapons.updateEnemyShooting(this.currentMap.entities, this.entityIndex.enemies, this.player, dt);
   }
 
   private handleScreenShake = (amount: number) => {
@@ -427,8 +435,10 @@ export class GameEngine {
           }
       });
 
-      // Single pass: collect destroyed asteroids + count all, avoiding two filter() allocations.
-      // createAsteroidShards() pushes to entities so we must collect before iterating.
+      // Asteroid census + shard generation.  EntityIndex only contains
+      // active asteroids, so we still need a master-list scan to catch
+      // asteroids that were just deactivated this step (they're no longer
+      // in the index) and to preserve the original total-count semantics.
       const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
       const newlyDestroyed: GameEntity[] = [];
       let currentAsteroidCount = 0;
@@ -452,11 +462,8 @@ export class GameEngine {
       // any hard velocity override (no teleporting).
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          const isDropShard = e.type === EntityType.INTERACTABLE && !!e.dropType && e.dropType !== 'health';
-          if ((e.type !== EntityType.ASTEROID && !isDropShard) || !e.active) continue;
+      const asteroids = this.entityIndex.asteroids;
+      const applyFlow = (e: GameEntity) => {
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
@@ -466,9 +473,14 @@ export class GameEngine {
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+      };
+      for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
+      // Drops are a subset of activeDrops that are ammo shards (not glass, not health).
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (!d.active || !d.dropType || d.dropType === 'health') continue;
+          applyFlow(d);
       }
-
-      // Gentle flow-field current on the player — adds a subtle drift bias in
 
       // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
       // causing gradual clustering as they drift through the flow field.
@@ -481,13 +493,10 @@ export class GameEngine {
       const GRAV_MIN_SQ   = 12 * 12;
 
       const gravCandidates: GameEntity[] = [this.player];
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active) continue;
-          if (e.type === EntityType.ASTEROID) { gravCandidates.push(e); continue; }
-          if (e.type === EntityType.INTERACTABLE && e.dropType && e.dropType !== 'glass') {
-              gravCandidates.push(e);
-          }
+      for (let i = 0; i < asteroids.length; i++) gravCandidates.push(asteroids[i]);
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const d = this.activeDrops[i];
+          if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
       }
 
       // Bucket candidate indices by grid cell
@@ -916,6 +925,11 @@ export class GameEngine {
         this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
 
+    // Refresh the candidate index before projectile post-processing: the
+    // physics / AI / burst pass above may have spawned new projectiles or
+    // destroyed enemies since the last rebuild in prepareFrameEntities.
+    if (this.currentMap) this.entityIndex.rebuild(this.currentMap.entities);
+
     this.updateHomingProjectiles(dt);
     this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
@@ -1210,12 +1224,17 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      this.projectiles.updateHoming(this.currentMap.entities, dt);
+      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, dt);
   }
 
   private updateLightningGravity(dt: number) {
       if (!this.currentMap) return;
-      this.projectiles.updateLightningGravity(this.currentMap.entities, dt);
+      this.projectiles.updateLightningGravity(
+          this.entityIndex.projectiles,
+          this.entityIndex.enemies,
+          this.entityIndex.asteroids,
+          dt,
+      );
   }
 
   private updateProjectileTrails(dt: number) {
@@ -1227,34 +1246,43 @@ export class GameEngine {
 
   private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
       if (!this.currentMap) return;
-      const entities = this.currentMap.entities;
 
-      // Build chain: hop from the initial target to nearby enemies/asteroids
+      // Build chain: hop from the initial target to nearby enemies/asteroids.
+      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
+      // full entity array.  Exploding entities are still skipped since the
+      // index holds `active` entities that may mid-animation.
+      const enemies = this.entityIndex.enemies;
+      const asteroids = this.entityIndex.asteroids;
       const chain: GameEntity[] = [firstTarget];
       const hitSet = new Set<string>([firstTarget.id]);
 
-      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
-          const prev = chain[chain.length - 1];
+      const pickNearest = (prev: GameEntity): GameEntity | null => {
           let nextTarget: GameEntity | null = null;
           let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
-
-          for (let i = 0; i < entities.length; i++) {
-              const e = entities[i];
-              if (!e.active || e.isExploding) continue;
-              if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
-              if (hitSet.has(e.id)) continue;
+          for (let i = 0; i < enemies.length; i++) {
+              const e = enemies[i];
+              if (e.isExploding || hitSet.has(e.id)) continue;
               const dx = e.position.x - prev.position.x;
               const dy = e.position.y - prev.position.y;
               const d2 = dx * dx + dy * dy;
-              if (d2 < nextDistSq) {
-                  nextDistSq = d2;
-                  nextTarget = e;
-              }
+              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
           }
+          for (let i = 0; i < asteroids.length; i++) {
+              const e = asteroids[i];
+              if (e.isExploding || hitSet.has(e.id)) continue;
+              const dx = e.position.x - prev.position.x;
+              const dy = e.position.y - prev.position.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+          }
+          return nextTarget;
+      };
 
-          if (!nextTarget) break;
-          chain.push(nextTarget);
-          hitSet.add(nextTarget.id);
+      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+          const next = pickNearest(chain[chain.length - 1]);
+          if (!next) break;
+          chain.push(next);
+          hitSet.add(next.id);
       }
 
       // Apply chain damage (skip index 0 — the first target already took projectile damage).
@@ -1367,13 +1395,11 @@ export class GameEngine {
       this.stickBonds.length = writeIdx;
 
       // ── 2. Detect new contacts via spatial grid ───────────────────────────
-      // Candidates: active asteroids + eligible drops (no glass/powerup)
+      // Candidates: active asteroids + eligible drops (no glass/powerup).
+      // Phase 4: asteroids come straight from the prebuilt index.
+      const asteroids = this.entityIndex.asteroids;
       const candidates: GameEntity[] = [];
-      const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.active && e.type === EntityType.ASTEROID) candidates.push(e);
-      }
+      for (let i = 0; i < asteroids.length; i++) candidates.push(asteroids[i]);
       for (let i = 0; i < this.activeDrops.length; i++) {
           const d = this.activeDrops[i];
           if (d.active && d.dropType !== 'glass' && d.dropType !== 'powerup' && d.dropType !== 'health') candidates.push(d);

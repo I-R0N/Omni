@@ -114,25 +114,29 @@ export class ProjectileSystem {
 
   /**
    * Steer every homing projectile toward the nearest enemy within range.
-   * O(L × E) nested scan — L projectiles × E enemies — but in practice both
-   * are small enough that a spatial index isn't worth the book-keeping.
+   *
+   * Phase 4: the caller supplies pre-filtered `projectiles` and `enemies`
+   * candidate lists from EntityIndex, so each pass is O(P × E) on the
+   * filtered sets instead of O(N × N) on the full entity array.  Homing
+   * projectiles still need an active + homing check because the index
+   * does not split projectiles by `.homing`.
    */
-  public updateHoming(entities: GameEntity[], dt: number) {
-    for (let i = 0; i < entities.length; i++) {
-      const p = entities[i];
-      if (!p.active || p.type !== EntityType.PROJECTILE || !p.homing) continue;
+  public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], dt: number) {
+    if (enemies.length === 0) return;
+
+    for (let i = 0; i < projectiles.length; i++) {
+      const p = projectiles[i];
+      if (!p.homing) continue;
 
       let target: GameEntity | null = null;
       let minDist = 400 * 400;
 
-      for (let j = 0; j < entities.length; j++) {
-        const e = entities[j];
-        if (e.active && e.type === EntityType.ENEMY) {
-          const d2 = (e.position.x - p.position.x) ** 2 + (e.position.y - p.position.y) ** 2;
-          if (d2 < minDist) {
-            minDist = d2;
-            target = e;
-          }
+      for (let j = 0; j < enemies.length; j++) {
+        const e = enemies[j];
+        const d2 = (e.position.x - p.position.x) ** 2 + (e.position.y - p.position.y) ** 2;
+        if (d2 < minDist) {
+          minDist = d2;
+          target = e;
         }
       }
 
@@ -159,39 +163,49 @@ export class ProjectileSystem {
 
   /**
    * Lightning projectiles experience gravity-like attraction to the nearest
-   * valid target.  Fast-path early exit when there are no lightning
-   * projectiles or no targets in the map — avoids the O(L × N) nested scan
-   * entirely for the common case.
+   * valid target.
+   *
+   * Phase 4: works off EntityIndex candidate lists.  Early-out when either
+   * the projectile list has no lightning projectiles or there are no
+   * targets (enemies / asteroids) on the map.  Each attraction query is
+   * O(P_lightning × (E + A)) on the filtered lists instead of O(N × N).
    */
-  public updateLightningGravity(entities: GameEntity[], dt: number) {
+  public updateLightningGravity(
+    projectiles: GameEntity[],
+    enemies: GameEntity[],
+    asteroids: GameEntity[],
+    dt: number,
+  ) {
     const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
 
+    // Fast-path: scan projectile list once to see if any are lightning.
     let hasLightning = false;
-    let hasTarget = false;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (!e.active) continue;
-      if (!hasLightning && e.type === EntityType.PROJECTILE && e.isLightningProjectile) {
-        hasLightning = true;
-      } else if (!hasTarget && !e.isExploding &&
-                 (e.type === EntityType.ENEMY || e.type === EntityType.ASTEROID)) {
-        hasTarget = true;
-      }
-      if (hasLightning && hasTarget) break;
+    for (let i = 0; i < projectiles.length; i++) {
+      if (projectiles[i].isLightningProjectile) { hasLightning = true; break; }
     }
-    if (!hasLightning || !hasTarget) return;
+    if (!hasLightning) return;
+    if (enemies.length === 0 && asteroids.length === 0) return;
 
-    for (let i = 0; i < entities.length; i++) {
-      const p = entities[i];
-      if (!p.active || p.type !== EntityType.PROJECTILE || !p.isLightningProjectile) continue;
+    for (let i = 0; i < projectiles.length; i++) {
+      const p = projectiles[i];
+      if (!p.isLightningProjectile) continue;
 
-      // Find nearest enemy or asteroid within gravity range
+      // Find nearest enemy or asteroid within gravity range.
+      // Sweep both filtered lists; isExploding is still checked since
+      // exploding targets remain in the index but shouldn't attract.
       let target: GameEntity | null = null;
       let minD2 = rangeSq;
-      for (let j = 0; j < entities.length; j++) {
-        const e = entities[j];
-        if (!e.active || e.isExploding) continue;
-        if (e.type !== EntityType.ENEMY && e.type !== EntityType.ASTEROID) continue;
+      for (let j = 0; j < enemies.length; j++) {
+        const e = enemies[j];
+        if (e.isExploding) continue;
+        const dx = e.position.x - p.position.x;
+        const dy = e.position.y - p.position.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < minD2) { minD2 = d2; target = e; }
+      }
+      for (let j = 0; j < asteroids.length; j++) {
+        const e = asteroids[j];
+        if (e.isExploding) continue;
         const dx = e.position.x - p.position.x;
         const dy = e.position.y - p.position.y;
         const d2 = dx * dx + dy * dy;
