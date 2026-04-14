@@ -180,6 +180,19 @@ export const PHYSICS_CONSTANTS = {
   RECOIL_FORCE: 0 // Legacy, unused now that mass is implemented
 };
 
+// ─── Fixed-timestep simulation ───────────────────────────────────────────────
+// Engine upgrade Phase 1: the simulation (physics/AI/game logic) now runs at a
+// fixed timestep independent of frame rate so gameplay is deterministic across
+// devices.  We use 1/120 s instead of the spec's example 1/60 s so that on a
+// 60 Hz display every frame reliably runs exactly 2 sim steps and on a 120 Hz
+// display every frame runs exactly 1 — the divisibility avoids the 1-vs-2
+// alternation that caused visual jitter in the prior 1/60 accumulator attempt.
+export const SIMULATION_CONSTANTS = {
+  FIXED_DT: 1 / 120,       // Deterministic simulation timestep (seconds)
+  MAX_SUBSTEPS: 5,         // Spiral-of-death clamp: max sim steps per rendered frame
+  MAX_FRAME_TIME: 0.25,    // Safety clamp on raw frame delta before accumulating (s)
+};
+
 export const LOCAL_GRAVITY_CONSTANTS = {
   RANGE: 400,          // Pixel radius where gravity takes effect
   STRENGTH: 0.00015,     // Reduced 100x again (1000x total reduction)

@@ -6,7 +6,7 @@ import { RenderSystem } from './systems/RenderSystem';
 import { AISystem } from './systems/AISystem';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, EnemyRole, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE, MAX_PROJECTILES, MAX_PARTICLES, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, PROJECTILE_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, ENEMY_WEAPON, ENEMY_BURST_CONFIG, ENEMY_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, ENEMY_VARIANTS, ENEMY_ROLE, WAVE_CONSTANTS, generateWaveDef, DROP_CONFIG, ENEMY_AMMO_DROP, ASTEROID_AMMO_PROGRESSION, STRUCTURE_CONSTANTS, AI_CONFIG, COLLISION_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, LIGHTNING_GRAVITY_STRENGTH, LIGHTNING_GRAVITY_RANGE, MAX_PROJECTILES, MAX_PARTICLES, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, GLITTER_TRAIL_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -27,6 +27,12 @@ export class GameEngine {
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
+  // Fixed-timestep accumulator (Phase 1).  Frame delta is accumulated and the
+  // simulation is stepped at SIMULATION_CONSTANTS.FIXED_DT until the
+  // accumulator is drained; any remainder carries to the next frame.  This
+  // decouples gameplay speed from display refresh rate so physics outcomes
+  // are deterministic across devices.
+  private simAccumulator: number = 0;
   
   private currentMap: BaseMapLayer | null = null;
   private player: GameEntity;
@@ -166,6 +172,7 @@ export class GameEngine {
     if (this.isRunning) return;
     this.isRunning = true;
     this.lastTime = performance.now();
+    this.simAccumulator = 0;
     this.prepareFrameEntities();
     requestAnimationFrame(this.loop);
   }
@@ -213,6 +220,7 @@ export class GameEngine {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
         this.lastTime = performance.now(); // Prevent physics jump
+        this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
   }
 
@@ -302,7 +310,7 @@ export class GameEngine {
 
   private loop = (time: number) => {
     if (!this.isRunning) return;
-    
+
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
 
@@ -334,18 +342,37 @@ export class GameEngine {
         return;
     }
 
-    // Cap dt to prevent physics explosion after tab switch / GPU stall
-    const safeFrameTime = Math.min(frameTime, 0.05);
+    // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
+    // Drain the accumulator at a fixed simulation rate regardless of the
+    // render frame rate.  Any leftover time carries to the next frame.
+    //
+    // A MAX_FRAME_TIME clamp drops excess time from tab-switch / GPU stalls
+    // so we never try to simulate several seconds worth of physics in one
+    // frame.  A MAX_SUBSTEPS clamp on the inner loop is the spiral-of-death
+    // safeguard: if the sim is genuinely slower than real time the extra
+    // time is silently discarded rather than compounding.
+    const { FIXED_DT, MAX_SUBSTEPS, MAX_FRAME_TIME } = SIMULATION_CONSTANTS;
+    this.simAccumulator += Math.min(frameTime, MAX_FRAME_TIME);
 
-    // Refresh working set for physics/AI without reallocating each call
-    this.prepareFrameEntities();
+    let steps = 0;
+    while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+        // Refresh working set for physics/AI before each sim step so
+        // entities spawned during the previous step are visible to this one.
+        this.prepareFrameEntities();
+        try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.simAccumulator -= FIXED_DT;
+        steps++;
+    }
+    // If we hit the substep cap there's still leftover time we can't afford
+    // to simulate this frame — discard it so the accumulator can't grow
+    // unboundedly and trigger a death spiral on the next frame.
+    if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
+        this.simAccumulator = 0;
+    }
 
-    // One physics step per rendered frame at the actual frame rate.
-    // This eliminates the 1-vs-2 step alternation that caused visual jitter
-    // with a fixed-timestep accumulator at 60 Hz display.
-    try { this.updatePhysics(safeFrameTime); } catch (e) { console.error('[PhysicsSystem] update error:', e); }
-    try { this.updateGameLogic(safeFrameTime); } catch (e) { console.error('[GameLogic] update error:', e); }
-    // Include entities spawned during game logic (e.g., projectiles) before rendering
+    // Refresh the frame entity list one more time so anything spawned during
+    // the final sim step is included in the render pass.
     this.prepareFrameEntities();
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
 
