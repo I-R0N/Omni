@@ -257,6 +257,9 @@ export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc pe
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
 
+// ── Homing projectile tuning ─────────────────────────────────────────────────
+export const HOMING_ACQUIRE_RANGE = 400;            // max range at which a homing projectile locks onto an enemy
+
 // Tile regeneration pop-in burst
 export const REGEN_POP_CONSTANTS = {
   DURATION: 0.2,      // seconds for scale overshoot animation

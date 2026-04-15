@@ -4,6 +4,7 @@ import {
   SPRITE_CONSTANTS,
   LIGHTNING_GRAVITY_STRENGTH,
   LIGHTNING_GRAVITY_RANGE,
+  HOMING_ACQUIRE_RANGE,
   MAX_PROJECTILES,
 } from '../../constants';
 import { nextId } from './IdAllocator';
@@ -125,12 +126,14 @@ export class ProjectileSystem {
   public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], dt: number) {
     if (enemies.length === 0) return;
 
+    const acquireRangeSq = HOMING_ACQUIRE_RANGE * HOMING_ACQUIRE_RANGE;
+
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
       if (!p.homing) continue;
 
       let target: GameEntity | null = null;
-      let minDist = 400 * 400;
+      let minDist = acquireRangeSq;
 
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
