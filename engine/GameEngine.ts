@@ -364,10 +364,12 @@ export class GameEngine {
         steps++;
     }
     // If we hit the substep cap there's still leftover time we can't afford
-    // to simulate this frame — discard it so the accumulator can't grow
-    // unboundedly and trigger a death spiral on the next frame.
+    // to simulate this frame.  Drop the full-step debt we can't catch up on
+    // but keep the fractional remainder so sub-step phase stays continuous
+    // across the clamp boundary (vs. zeroing and visibly snapping on the
+    // next frame).
     if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
-        this.simAccumulator = 0;
+        this.simAccumulator %= FIXED_DT;
     }
 
     // Refresh the frame entity list one more time so anything spawned during
