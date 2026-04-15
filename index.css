@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: #0f172a; /* Slate 900 */
+  color: #e2e8f0;
+}
+
+canvas {
+  display: block;
+}
