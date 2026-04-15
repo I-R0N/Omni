@@ -417,7 +417,7 @@ export class GameEngine {
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
       this.flowField.flushEnemyField();
 
-      this.ai.update(dt, allEntities, this.player, this.flowField);
+      this.ai.update(dt, this.entityIndex.enemies, this.player, this.flowField);
       this.handleEnemyShooting(dt);
 
       this.physics.update(
