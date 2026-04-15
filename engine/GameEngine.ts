@@ -642,12 +642,12 @@ export class GameEngine {
           }
 
           if (safe && this.currentMap) {
-               const newAst = (this.currentMap as any).createAsteroid(x, y, 
+               const newAst = this.currentMap.createAsteroid(x, y,
                   config.minSize + Math.random() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
                this.currentMap.entities.push(newAst);
-               break; 
+               break;
           }
       }
   }
