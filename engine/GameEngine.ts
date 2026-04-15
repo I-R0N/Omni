@@ -317,7 +317,7 @@ export class GameEngine {
       inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
     };
     this.onStatsUpdate({
-      fps: Math.round(1000 / ((performance.now() - time) + 1)),
+      fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
