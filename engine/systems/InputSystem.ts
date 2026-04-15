@@ -24,16 +24,14 @@ export class InputSystem {
 
   private initListeners() {
     // Keyboard
-    window.addEventListener('keydown', (e) => this.keys.add(e.code));
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
+
     // Mouse
-    window.addEventListener('mousemove', (e) => {
-      this.mousePosition = { x: e.clientX, y: e.clientY };
-    });
+    window.addEventListener('mousemove', this.handleMouseMove);
     window.addEventListener('mousedown', this.handleMouseDown);
     window.addEventListener('mouseup', this.handleMouseUp);
-    
+
     // Note: We removed 'click' listener to handle timing manually in mouseup
 
     // Touch (Passive false allows us to prevent scrolling)
@@ -42,6 +40,18 @@ export class InputSystem {
     window.addEventListener('touchend', this.handleTouchEnd);
     window.addEventListener('touchcancel', this.handleTouchEnd);
   }
+
+  private handleKeyDown = (e: KeyboardEvent) => {
+    this.keys.add(e.code);
+  };
+
+  private handleKeyUp = (e: KeyboardEvent) => {
+    this.keys.delete(e.code);
+  };
+
+  private handleMouseMove = (e: MouseEvent) => {
+    this.mousePosition = { x: e.clientX, y: e.clientY };
+  };
 
   // Helper to detect if we should ignore input (e.g. clicking UI buttons)
   private shouldIgnoreEvent(e: Event): boolean {
@@ -197,14 +207,12 @@ export class InputSystem {
   }
 
   public cleanup() {
-    window.removeEventListener('keydown', (e) => this.keys.add(e.code));
-    window.removeEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.removeEventListener('mousemove', (e) => {
-        this.mousePosition = { x: e.clientX, y: e.clientY };
-    });
+    window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('mousemove', this.handleMouseMove);
     window.removeEventListener('mousedown', this.handleMouseDown);
     window.removeEventListener('mouseup', this.handleMouseUp);
-    
+
     window.removeEventListener('touchstart', this.handleTouchStart);
     window.removeEventListener('touchmove', this.handleTouchMove);
     window.removeEventListener('touchend', this.handleTouchEnd);

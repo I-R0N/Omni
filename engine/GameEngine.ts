@@ -209,6 +209,7 @@ export class GameEngine {
 
   public stop() {
     this.isRunning = false;
+    this.input.cleanup();
   }
 
   // --- STATE MANAGEMENT ---
