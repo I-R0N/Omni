@@ -17,16 +17,6 @@ subsystems.
 2. Run the app:
    `npm run dev`
 
-## Deploying to Firebase Hosting
-
-1. Install Firebase CLI: `npm install -g firebase-tools`
-2. Log in: `firebase login`
-3. Set your project id in `.firebaserc` (replace `your-firebase-project-id`)
-4. Build the app: `npm run build` (outputs to `dist`)
-5. Deploy: `firebase deploy --only hosting`
-
-You can also test locally with `firebase serve --only hosting`. The included `firebase.json` serves the built `dist` folder with clean URLs.
-
 ## Deploying to Netlify
 
 1. Use the CLI via npx (no install needed): `npx netlify-cli login`
