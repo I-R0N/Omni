@@ -11,10 +11,21 @@ export class PhysicsSystem {
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
 
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
-  private bufferVerticesA: Vector2[] = Array.from({ length: 16 }, () => ({ x: 0, y: 0 }));
-  private bufferVerticesB: Vector2[] = Array.from({ length: 16 }, () => ({ x: 0, y: 0 }));
-  private bufferAxes: Vector2[] = Array.from({ length: 32 }, () => ({ x: 0, y: 0 }));
+  //
+  // MAX_SAT_VERTICES caps the polygon size the SAT pass can handle without
+  // silently truncating a shape mid-collision.  Current generators top out
+  // at ~12 vertices per asteroid (9-12 for initial spawns in
+  // MapClasses.ts:62, 7-10 for accretion merges in GameEngine.ts:1499), so
+  // 24 gives roughly 2× headroom for future growth.  Pre-allocated once;
+  // allocation cost is negligible (~1 KB total).
+  private static readonly MAX_SAT_VERTICES = 24;
+  private bufferVerticesA: Vector2[] = Array.from({ length: PhysicsSystem.MAX_SAT_VERTICES }, () => ({ x: 0, y: 0 }));
+  private bufferVerticesB: Vector2[] = Array.from({ length: PhysicsSystem.MAX_SAT_VERTICES }, () => ({ x: 0, y: 0 }));
+  private bufferAxes: Vector2[] = Array.from({ length: PhysicsSystem.MAX_SAT_VERTICES * 2 }, () => ({ x: 0, y: 0 }));
   private bufferMtv: Vector2 = { x: 0, y: 0 };
+  // One-shot warning guard so a new polygon source that exceeds the cap
+  // produces exactly one console entry instead of spamming every frame.
+  private warnedVertexOverflow = false;
 
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
@@ -799,6 +810,18 @@ export class PhysicsSystem {
       if (e.polygonPoints && e.polygonPoints.length > 0) {
           const cos = Math.cos(e.rotation);
           const sin = Math.sin(e.rotation);
+
+          // Warn once if an entity ever exceeds the vertex cap — the break
+          // below still protects against buffer overrun, but a truncated
+          // polygon produces silently wrong collisions, so we want to know.
+          if (e.polygonPoints.length > buffer.length && !this.warnedVertexOverflow) {
+              this.warnedVertexOverflow = true;
+              console.warn(
+                  `[PhysicsSystem] SAT vertex buffer overflow: entity type=${e.type} ` +
+                  `has ${e.polygonPoints.length} points but buffer holds ${buffer.length}. ` +
+                  `Collision shape will be silently truncated. Raise MAX_SAT_VERTICES.`
+              );
+          }
 
           for (let i = 0; i < e.polygonPoints.length; i++) {
               if (count >= buffer.length) break;
