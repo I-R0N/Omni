@@ -1064,7 +1064,6 @@ export class GameEngine {
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Derive impact direction for a slight forward cone bias
-    const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
     const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
 
     switch (target.type) {
@@ -1123,8 +1122,6 @@ export class GameEngine {
     if (proj.isLightningProjectile) {
         this.fireLightningChainFromImpact(impactPos, target);
     }
-
-    void projSpeed; // suppress lint
   };
 
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {
