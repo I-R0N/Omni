@@ -4,6 +4,7 @@ import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, Play
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
+import { HEX_AREA } from '../maps/TileGenerator';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -822,17 +823,20 @@ export class RenderSystem {
               const tinted = this.getTintedSprite(spriteSrc, tintHex);
               if (tinted) {
                   const isTile = entity.type === EntityType.NEBULA;
-                  // Shards explicitly store their target sprite world size
-                  // (set at spawn-time from the parent tile's sprite size ×
-                  // SHARD_TO_TILE_SPRITE_RATIO) so the rendered sprite is
-                  // decoupled from the small polygonal physics footprint.
-                  // Tiles and legacy shards without the field fall back to
-                  // the physics-size × scale convention.
-                  const maxDim = Math.max(entity.size.x, entity.size.y);
-                  const drawSize = entity.nebulaSpriteWorldSize
-                      ?? (maxDim * (isTile
-                          ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
-                          : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE));
+                  // Sprite size is proportional to the effective nebula
+                  // area the entity carries.  A fresh shard from a 5-way
+                  // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
+                  // half-merged shard draws ≈ 68; a full tile draws at
+                  // the reference size (96).  Using sqrt keeps visual
+                  // area (∝ sprite²) proportional to effective area, so
+                  // what the player sees matches the conserved mass
+                  // accounting used for merge → transmutation.  Legacy
+                  // entities without nebulaTileArea fall back to a full
+                  // tile sprite.
+                  const effArea = entity.nebulaTileArea ?? HEX_AREA;
+                  const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
+                  const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
+                      * Math.sqrt(areaRatio);
                   // Content-centroid correction: shift the draw so the
                   // sprite's visible-pixel centroid lands on the pivot.
                   // Without this, asymmetric source PNGs appear to orbit
@@ -920,12 +924,13 @@ export class RenderSystem {
                           const star = this.getTwinkleBitmap();
                           // Place the star within the sprite footprint —
                           // half-extent × placement-range keeps it inside.
-                          const isTile = entity.type === EntityType.NEBULA;
-                          const scale = isTile
-                              ? NEBULA_CONSTANTS.TILE_SPRITE_SCALE
-                              : NEBULA_CONSTANTS.SHARD_SPRITE_SCALE;
-                          const maxDim = Math.max(entity.size.x, entity.size.y);
-                          const drawSize = maxDim * scale;
+                          // Same area-proportional draw-size formula the
+                          // sprite render uses above, so the twinkle
+                          // scales with the shard/tile as it merges.
+                          const effArea = entity.nebulaTileArea ?? HEX_AREA;
+                          const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
+                          const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
+                              * Math.sqrt(areaRatio);
                           const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
                           const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
                           const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;

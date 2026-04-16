@@ -167,8 +167,11 @@ export class NebulaSystem {
      *   - forward-drag velocity (parallel to striker direction)
      *   - composition cloned from parent (colour carries through)
      *   - fade-in timer scaled inversely with impact speed
-     *   - explicit `nebulaSpriteWorldSize` so the cloud sprite stays
-     *     close to tile-sprite size regardless of tiny polygon radius
+     *   - effective-area split (HEX_AREA / shardCount per shard) so
+     *     the 4–6 children together carry exactly one tile of mass
+     *     back toward the next transmutation.  Visual sprite size is
+     *     derived from this field at render time — no explicit
+     *     sprite-size state is stored on the shard itself.
      */
     private spawnShards(entities: GameEntity[], parent: GameEntity): void {
         if (parent.type === EntityType.NEBULA_SHARD) return;
@@ -202,14 +205,10 @@ export class NebulaSystem {
 
         const composition = parent.nebulaColorComposition;
 
-        // Fixed shard sprite world size — all children draw at the same
-        // world-space size (slightly smaller than the parent tile's
-        // sprite) so they read as a continuous cloud even as underlying
-        // polygon radii vary.
-        const parentSpriteWorldSize = parent.nebulaSpriteWorldSize
-            ?? (parentDiameter * NEBULA_CONSTANTS.TILE_SPRITE_SCALE);
-        const shardSpriteWorldSize = parentSpriteWorldSize
-            * NEBULA_CONSTANTS.SHARD_TO_TILE_SPRITE_RATIO;
+        // Shard sprite size is derived from `nebulaTileArea` at render
+        // time (TILE_SPRITE_WORLD_SIZE × sqrt(area / HEX_AREA)), so we
+        // no longer need to carry an explicit sprite world-size on each
+        // shard — the effective area field does double duty.
 
         // Striker direction (forward vector).  Canvas is y-down so a
         // positive z-component of cross(forward, spawn-direction) means
@@ -320,7 +319,6 @@ export class NebulaSystem {
                 nebulaTileArea:  effectiveAreaPerShard,
                 nebulaGridCol:   parent.nebulaGridCol,
                 nebulaGridRow:   parent.nebulaGridRow,
-                nebulaSpriteWorldSize: shardSpriteWorldSize,
                 linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
                 angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
                 nebulaSpawnTimer:    shardSpawnDuration,

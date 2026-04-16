@@ -348,23 +348,18 @@ export const NEBULA_CONSTANTS = {
   // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
   // can SHRINK (player kills shards mid-merge) but never GROW.
   TILE_REGEN_ENABLED: false,
-  // Display-sprite scale multiplier for nebula tiles.  Draws at 2× the
-  // entity's physics size, so adjacent tiles in a cluster have sprites
-  // that visibly bleed into each other and read as a continuous cloud
-  // rather than discrete cells.
-  TILE_SPRITE_SCALE: 2.0,
-  // Legacy: kept for back-compat with any code path still referencing it.
-  // Nebula shards now set an explicit `nebulaSpriteWorldSize` at spawn
-  // time (derived from the parent tile's sprite size × ratio below), so
-  // this constant is no longer the primary driver of shard sprite size.
-  SHARD_SPRITE_SCALE: 2.0,
-  // Ratio of a nebula shard's sprite to its parent tile's sprite.
-  // Shards draw at this fraction of the parent tile's sprite world
-  // size, so the sprite is noticeably larger than the shard's small
-  // polygonal physics footprint (which mirrors glass-tile shards) but
-  // only slightly smaller than a full nebula tile — they read as
-  // soft cloud fragments, not scattered debris dots.
-  SHARD_TO_TILE_SPRITE_RATIO: 0.9,
+  // Reference sprite world size for a FULL nebula tile (effective area
+  // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
+  //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
+  // so visual size scales proportionally with the effective area the
+  // entity carries.  A fresh shard from a 5-way shatter draws at
+  //   96 × sqrt(1/5) ≈ 43 world units
+  // and grows as it merges:
+  //   half-merged → 96 × sqrt(0.5) ≈ 68
+  //   fully-merged (about to transmute) → 96
+  // Tune this one number to make nebula tiles visually bigger or smaller;
+  // shard sprites follow automatically.
+  TILE_SPRITE_WORLD_SIZE: 96,
   // Cluster generation — tuned for heavy coverage across the map so that
   // nebula clusters naturally fill empty gaps between glass-tile clusters
   // and statistically overlap with some of the procedurally placed
