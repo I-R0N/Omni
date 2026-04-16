@@ -156,29 +156,50 @@ export class UniverseMap extends BaseMapLayer {
     // and glass tiles never overlap on the shared hex grid.
     const occupied = new Set<string>();
 
-    // Landmark clusters in the inner zone — sparse enough to leave clear
-    // flow corridors between chunks for asteroids to stream through
+    // Cluster layout on the 15 000-unit toroidal map — see comment
+    // below for the zone bounds.  The outer passes stop ~1000 units
+    // short of the map edge so each axis retains a thin dead-space
+    // ring, and the inner passes sit inside that dense core.
+    //
+    //   Inner glass / tiles : ±2500   (dense core landmarks)
+    //   Outer glass / tiles : ±6500   (spread toward the edges)
+    //   Inner nebula cloud  : ±3500   (dense central cloud)
+    //   Outer nebula cloud  : ±6500   (spread toward the edges)
+    //
+    // Inner zones overlap with the outer pass' footprint on purpose —
+    // they bias density toward the playable core, which is where most
+    // fighting happens, without leaving the outskirts empty.  Clusters
+    // grow organically past their seed zone (BFS neighbour walk), so
+    // boundaries blur naturally.
+    const INNER_GLASS_ZONE  = 5000;
+    const OUTER_GLASS_ZONE  = 13000;
+    const INNER_NEBULA_ZONE = 7000;
+    const OUTER_NEBULA_ZONE = 13000;
+
+    // Dense landmark cluster core around the spawn region.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        8000, 8000,  // inner zone
+        INNER_GLASS_ZONE, INNER_GLASS_ZONE,
         22,          // hexSize
-        100,         // clusterCount  (was 70)
-        15,          // minClusterSize (was 12)
-        45,          // maxClusterSize (was 40)
+        80,          // clusterCount
+        15,          // minClusterSize
+        45,          // maxClusterSize
         occupied
     ));
 
-    // Sparse outer landmarks — well-separated chunks across deep space
+    // Sparser outer landmarks — spread across most of the map with a
+    // ~1000-unit dead ring near the wrap seam so the toroidal edges
+    // stay visually distinguishable from the cluttered interior.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        this.width, this.height,
+        OUTER_GLASS_ZONE, OUTER_GLASS_ZONE,
         22,
-        130,         // was 100
-        8,           // was 6
-        28,          // was 24
+        130,
+        8,
+        28,
         occupied
     ));
 
     // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
-    // (sparser, spread across the full map).  The generator shares the
+    // (sparser, spread across most of the map).  The generator shares the
     // `occupied` set from the glass passes so nebula cells naturally fill
     // the gaps glass left behind.
     //
@@ -187,11 +208,8 @@ export class UniverseMap extends BaseMapLayer {
     // so the background-nebula layer renders puffs at the exact same
     // positions — one unified cloud, with parallax drift of the backdrop
     // as the camera moves.
-    //
-    // Inner-zone bounds widened from 8000 to 12000 so the dense-cluster
-    // treatment covers more of the playable core.
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        12000, 12000,
+        INNER_NEBULA_ZONE, INNER_NEBULA_ZONE,
         22,
         NEBULA_CONSTANTS.CLUSTER_COUNT,
         NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
@@ -200,7 +218,7 @@ export class UniverseMap extends BaseMapLayer {
         this.nebulaClusterCenters
     ));
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        this.width, this.height,
+        OUTER_NEBULA_ZONE, OUTER_NEBULA_ZONE,
         22,
         NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
         NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,

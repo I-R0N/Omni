@@ -16,13 +16,14 @@
 import { Vector2 } from '../types';
 
 // ── Map size ──────────────────────────────────────────────────────────────
-// The universe is 20000×20000 world units — reduced from the prior
-// 30000×30000 bounding box so the wrap is actually meaningful at the
-// scales of AI vision (2500) and enemy pursuit (~4600 units).  Axis
-// sizes are stored separately so the map can become non-square later
-// without touching every call site.
-export const MAP_WIDTH  = 20000;
-export const MAP_HEIGHT = 20000;
+// The universe is 15000×15000 world units.  Sized so the wrap distance
+// is smaller than the AI pursuit range (~4600 units) on each axis — two
+// wrap crossings bring any point inside one another's range — but still
+// roomy enough that a player can sprint 25–30 s in a straight line
+// before looping back.  Axis sizes are stored separately so the map
+// can become non-square later without touching every call site.
+export const MAP_WIDTH  = 15000;
+export const MAP_HEIGHT = 15000;
 export const HALF_MAP_WIDTH  = MAP_WIDTH  / 2;
 export const HALF_MAP_HEIGHT = MAP_HEIGHT / 2;
 
