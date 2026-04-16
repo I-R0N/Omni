@@ -13,7 +13,7 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -122,6 +122,41 @@ export class GameEngine {
   // own, never have new points appended, so they visually detach from the
   // player when a new thrust event begins.
   private detachedTrails: TrailPoint[][] = [];
+
+  // ── Perf instrumentation ──────────────────────────────────────────────────
+  // Pre-allocated ring buffers for per-system timings over the last N sim
+  // substeps (or N render frames for perfRender).  All reads happen on the
+  // stats callback path at the top of each render frame, and all writes are
+  // O(1) per metric with no allocation — the `perfIdx` counters wrap on a
+  // fixed-size Float64Array so the hot path stays GC-free.
+  private static readonly PERF_WINDOW = 60;
+  // Sim-substep timings (one sample per physics tick)
+  private perfPhysics        = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfAI             = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfHoming         = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLightning      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfGravity        = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLocalGravity   = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfFlowField      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfDensity        = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfSimIdx: number = 0;   // shared write index for every sim-side buffer
+  private perfSimFilled: number = 0;
+  // Render timings (one sample per rendered frame — may be written in menu
+  // and paused states as well, so this is tracked on its own cursor)
+  private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfRenderIdx: number = 0;
+  private perfRenderFilled: number = 0;
+  // Latest count snapshot from the most recent prepareFrameEntities() pass.
+  // Stored as a mutable struct so getPerfSnapshot() can read it without
+  // rebuilding the object each frame.
+  private perfCounts = {
+      totalEntities: 0,
+      enemyCount: 0,
+      asteroidCount: 0,
+      projectileCount: 0,
+      particleCount: 0,
+      interactableCount: 0,
+  };
 
   public toggleDebug() {
     this.debugMode = !this.debugMode;
@@ -237,6 +272,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
       weaponCount: this.currentWeaponIndex + 1,
+      perf: this.buildPerfSnapshot(),
     });
   }
 
@@ -332,11 +368,13 @@ export class GameEngine {
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
+      perf: this.buildPerfSnapshot(),
     });
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
         requestAnimationFrame(this.loop);
         return;
     }
@@ -360,6 +398,10 @@ export class GameEngine {
         this.prepareFrameEntities();
         try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
         try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        // Push per-substep perf samples.  Every timed sub-phase was written
+        // to instance fields on its owning system during the two calls above;
+        // the recorder just reads and ring-buffers them in one shot.
+        this.recordSimPerf();
         this.simAccumulator -= FIXED_DT;
         steps++;
     }
@@ -376,6 +418,7 @@ export class GameEngine {
     // the final sim step is included in the render pass.
     this.prepareFrameEntities();
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+    this.recordRenderPerf();
 
     requestAnimationFrame(this.loop);
   };
@@ -393,6 +436,17 @@ export class GameEngine {
       // master entity list.  Rebuilt once per sim substep; consumers must
       // not cache these references across steps.
       this.entityIndex.rebuild(this.currentMap.entities);
+
+      // Mirror the latest entity-type counts into the perf snapshot — the
+      // index just walked the full list anyway, so this is O(0) extra work.
+      // The master list passed to rebuild() does not include the player, so
+      // add 1 to totalEntities to match the existing entityCount semantics.
+      this.perfCounts.totalEntities     = this.entityIndex.activeCount + 1;
+      this.perfCounts.enemyCount        = this.entityIndex.enemies.length;
+      this.perfCounts.asteroidCount     = this.entityIndex.asteroids.length;
+      this.perfCounts.projectileCount   = this.entityIndex.projectiles.length;
+      this.perfCounts.particleCount     = this.entityIndex.particleCount;
+      this.perfCounts.interactableCount = this.entityIndex.interactableCount;
   }
 
   private handleEnemyShooting(dt: number) {
@@ -1859,5 +1913,82 @@ export class GameEngine {
           this.waveAnnouncements,
           this.detachedTrails
       );
+  }
+
+  // ─── Perf recording ─────────────────────────────────────────────────────
+  // Called exactly once per sim substep (immediately after updatePhysics +
+  // updateGameLogic).  Reads the `lastXMs` fields populated by each system
+  // during the substep and advances the shared ring-buffer cursor.
+  private recordSimPerf() {
+      const idx = this.perfSimIdx;
+      this.perfPhysics[idx]       = this.physics.lastUpdateMs;
+      this.perfAI[idx]            = this.ai.lastUpdateMs;
+      this.perfHoming[idx]        = this.projectiles.lastHomingMs;
+      this.perfLightning[idx]     = this.projectiles.lastLightningMs;
+      this.perfGravity[idx]       = this.physics.lastGravityMs;
+      this.perfLocalGravity[idx]  = this.physics.lastLocalGravityMs;
+      this.perfFlowField[idx]     = this.flowField.lastFlushMs;
+      this.perfDensity[idx]       = this.physics.lastMaxCellDensity;
+      const next = idx + 1;
+      this.perfSimIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
+      if (this.perfSimFilled < GameEngine.PERF_WINDOW) this.perfSimFilled++;
+  }
+
+  // Called once per render frame (after draw()).  Render timing uses its
+  // own ring since it happens once per frame regardless of how many sim
+  // substeps the accumulator drained.
+  private recordRenderPerf() {
+      this.perfRender[this.perfRenderIdx] = this.renderer.lastRenderMs;
+      const next = this.perfRenderIdx + 1;
+      this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
+      if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
+  }
+
+  /**
+   * Average the first `filled` entries of a ring buffer.  `filled` tracks
+   * how many samples have been written since startup so the reported mean
+   * isn't dragged toward zero by the pre-allocated tail of the buffer
+   * during the first second of gameplay.
+   */
+  private static ringAvg(buf: Float64Array, filled: number): number {
+      if (filled <= 0) return 0;
+      let sum = 0;
+      for (let i = 0; i < filled; i++) sum += buf[i];
+      return sum / filled;
+  }
+
+  /**
+   * Peak value over the populated portion of a ring buffer.  Used for
+   * maxCellDensity so a single-frame spike remains visible in the overlay
+   * even after the surrounding substeps report normal density.
+   */
+  private static ringPeak(buf: Float64Array, filled: number): number {
+      if (filled <= 0) return 0;
+      let m = 0;
+      for (let i = 0; i < filled; i++) if (buf[i] > m) m = buf[i];
+      return m;
+  }
+
+  private buildPerfSnapshot(): PerfSnapshot {
+      const simN = this.perfSimFilled;
+      return {
+          physicsMs:      GameEngine.ringAvg(this.perfPhysics,      simN),
+          aiMs:           GameEngine.ringAvg(this.perfAI,           simN),
+          homingMs:       GameEngine.ringAvg(this.perfHoming,       simN),
+          lightningMs:    GameEngine.ringAvg(this.perfLightning,    simN),
+          gravityMs:      GameEngine.ringAvg(this.perfGravity,      simN),
+          localGravityMs: GameEngine.ringAvg(this.perfLocalGravity, simN),
+          flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
+          renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
+          // Cell density peaks on single-frame spikes — report the window
+          // max so the overlay surfaces transient clusters, not just the mean.
+          maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
+          totalEntities:     this.perfCounts.totalEntities,
+          enemyCount:        this.perfCounts.enemyCount,
+          asteroidCount:     this.perfCounts.asteroidCount,
+          projectileCount:   this.perfCounts.projectileCount,
+          particleCount:     this.perfCounts.particleCount,
+          interactableCount: this.perfCounts.interactableCount,
+      };
   }
 }

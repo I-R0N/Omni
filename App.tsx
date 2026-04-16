@@ -18,6 +18,11 @@ const App: React.FC = () => {
     difficulty: 3
   });
   const [difficulty, setDifficulty] = useState<number>(3);
+  // Dev-only perf overlay toggled with F3.  Kept in React state so the
+  // UIOverlay can render (or hide) the panel without any engine roundtrip;
+  // stats from the engine are streamed regardless, so enabling the panel
+  // never has to wait for the next frame to populate.
+  const [showPerf, setShowPerf] = useState<boolean>(false);
   // Mirror difficulty into a ref so the one-shot mount effect below can
   // read the latest value without closing over stale state.
   const difficultyRef = useRef(difficulty);
@@ -63,10 +68,23 @@ const App: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
+    // Dev perf overlay: F3 toggles a frame-level stats panel rendered by
+    // UIOverlay.  Registered here (rather than in InputSystem) so the key
+    // still works on the menu/pause screens where the sim loop is idle,
+    // and so it never participates in gameplay input handling.
+    const handlePerfToggle = (e: KeyboardEvent) => {
+      if (e.code === 'F3') {
+        e.preventDefault();
+        setShowPerf(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handlePerfToggle);
+
     // Cleanup
     return () => {
       engine.stop();
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handlePerfToggle);
     };
   }, []);
 
@@ -124,6 +142,7 @@ const App: React.FC = () => {
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
+        showPerf={showPerf}
       />
     </div>
   );
