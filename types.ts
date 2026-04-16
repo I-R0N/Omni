@@ -26,13 +26,6 @@ export interface TrailPoint extends Vector2 {
   vy?: number;
 }
 
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 export enum EntityType {
   PLAYER = 'PLAYER',
   ENEMY = 'ENEMY',

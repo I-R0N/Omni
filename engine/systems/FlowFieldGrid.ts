@@ -28,7 +28,7 @@
  */
 
 import { GameEntity, EntityType } from '../../types';
-import { sampleFlow } from './FlowField';
+import { sampleFlow, FlowVector } from './FlowField';
 
 // ─── grid constants ────────────────────────────────────────────────────────
 
@@ -60,7 +60,9 @@ const MAX_ENEMY_RANGE = 18; // cells  ≈ 4608 world units
 
 // ─── public types ─────────────────────────────────────────────────────────
 
-export interface FlowVector { x: number; y: number }
+// Re-export FlowVector (canonical definition lives in ./FlowField) so
+// consumers of FlowFieldGrid can still reference the type by this module.
+export type { FlowVector };
 
 // ─── FlowFieldGrid ────────────────────────────────────────────────────────
 
