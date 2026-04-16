@@ -471,7 +471,26 @@ export class NebulaSystem {
         larger.size.x = newDiameter;
         larger.size.y = newDiameter;
         larger.mass   = newDiameter;
-        larger.polygonPoints = undefined;
+
+        // Regenerate the polygon at the new size so merged shards keep
+        // the glass-shard-style polygon outline in debug view instead
+        // of collapsing to a circle fallback.  Uses the same 4–6 vertex
+        // power-law math as spawnShards with a radius derived from the
+        // grown disc size (newDiameter / 2 × slack factor to match the
+        // loose polygon-inside-size convention used at spawn).
+        const polyRadius = newDiameter / 2 * 0.5; // keeps shape inside bbox
+        const numPoints = 4 + Math.floor(Math.random() * 3);
+        const rawPts: { angle: number; r: number }[] = [];
+        for (let j = 0; j < numPoints; j++) {
+            const baseAngle = (j / numPoints) * Math.PI * 2;
+            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
+            rawPts.push({ angle: baseAngle + jitter, r: polyRadius * (0.6 + Math.random() * 0.55) });
+        }
+        rawPts.sort((a, b) => a.angle - b.angle);
+        larger.polygonPoints = rawPts.map(p => ({
+            x: Math.cos(p.angle) * p.r,
+            y: Math.sin(p.angle) * p.r,
+        }));
 
         // Blend colour compositions weighted by area; larger dominates.
         larger.nebulaColorComposition = blendCompositions(
@@ -484,12 +503,6 @@ export class NebulaSystem {
         // smaller shard — the subtle merge feedback.
         const tint = blendCompositionToHex(larger.nebulaColorComposition);
         const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-        // We don't have access to the entities list here — but the
-        // glimmer is cosmetic only; it doesn't need to register with
-        // the entity list directly.  Route through spawnGlimmer which
-        // accepts an entities list as caller context.  However,
-        // mergeNebulas is itself called from updateDynamics which has
-        // the entities list; refactor: accept entities as a param.
         this.spawnGlimmerAtMergePoint(smaller.position, glimmerR, tint);
 
         // Smaller vanishes; compaction pass at end of physics removes it.
