@@ -295,13 +295,6 @@ export interface GameEntity {
   nebulaSpawnTimer?: number;
   // Effective duration for this particular fade-in (see nebulaFadeDuration).
   nebulaSpawnDuration?: number;
-  // Smoky trail emission timer on NEBULA_SHARD entities.  Decremented
-  // each frame in NebulaSystem.emitTrails; when it hits 0 a single
-  // tinted particle is spawned behind the shard's velocity and the
-  // timer resets to TRAIL_EMIT_INTERVAL.  Absent on tiles (they're
-  // stationary) and on fading shards (their death animation owns the
-  // visuals).
-  nebulaTrailTimer?: number;
   // Twinkle scheduling — each nebula tile and shard hosts an occasional
   // fading-in/out star at a random in-sprite position.  The renderer
   // lazily initializes these fields on first draw, then advances the

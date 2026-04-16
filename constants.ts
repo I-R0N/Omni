@@ -410,20 +410,6 @@ export const NEBULA_CONSTANTS = {
   // wave-scaled ASTEROID_AMMO_PROGRESSION used by asteroids.
   AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
   AMMO_PER_NEBULA: 3,     // ammo units per nebula drop
-  // ── Shard smoky trail ────────────────────────────────────────────
-  // Drifting shards emit a sparse trail of large, tinted, additive
-  // particles behind their velocity vector to amplify the smoky cloud
-  // feel.  Throttled per-shard by nebulaTrailTimer so cost stays flat
-  // regardless of how fast the shard is moving.  Uses 'lighter'
-  // composite via ParticleSystem, so overlapping emissions naturally
-  // brighten into a soft glow.
-  TRAIL_EMIT_INTERVAL: 0.08,  // seconds between emissions per shard (~12.5 Hz)
-  TRAIL_MIN_SPEED_SQ: 0.02,   // (px/frame)² — below this, skip emission
-  TRAIL_LIFETIME_MIN: 0.5,
-  TRAIL_LIFETIME_MAX: 0.9,
-  TRAIL_SIZE_MIN: 2.0,
-  TRAIL_SIZE_MAX: 3.5,
-  TRAIL_OFFSET_RATIO: 0.4,    // spawn at shardRadius × this behind velocity
 };
 
 /**
