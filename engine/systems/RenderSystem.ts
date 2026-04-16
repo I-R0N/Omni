@@ -819,6 +819,20 @@ export class RenderSystem {
           const spawnMul = entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0 && spawnDuration > 0
               ? Math.max(0, 1 - entity.nebulaSpawnTimer / spawnDuration)
               : 1.0;
+          // Speed-based opacity falloff for shards — fast shards read
+          // a little translucent ("wind-torn cloud"), settled shards are
+          // fully opaque.  Uses speed² so we skip sqrt; tiles are
+          // stationary so we skip the branch entirely for them.
+          let speedMul = 1.0;
+          if (entity.type === EntityType.NEBULA_SHARD) {
+              const vx = entity.velocity.x;
+              const vy = entity.velocity.y;
+              const speedSq = vx * vx + vy * vy;
+              speedMul = Math.max(
+                  NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_MIN,
+                  1 - speedSq * NEBULA_CONSTANTS.SHARD_SPEED_OPACITY_K,
+              );
+          }
           if (spriteSrc) {
               const tinted = this.getTintedSprite(spriteSrc, tintHex);
               if (tinted) {
@@ -848,7 +862,7 @@ export class RenderSystem {
                   const dy = dOffset - centroid.dy * drawSize;
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
-                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul;
+                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
               } else {
@@ -859,7 +873,7 @@ export class RenderSystem {
                   grad.addColorStop(0, tintHex);
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   ctx.fillStyle = grad;
-                  ctx.globalAlpha = 0.45 * fadeMul * spawnMul;
+                  ctx.globalAlpha = 0.45 * fadeMul * spawnMul * speedMul;
                   ctx.beginPath();
                   ctx.arc(0, 0, r, 0, Math.PI * 2);
                   ctx.fill();

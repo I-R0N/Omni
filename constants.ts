@@ -293,6 +293,14 @@ export const NEBULA_CONSTANTS = {
   // the screen, while still giving a beat of motion post-shatter.
   LINEAR_DAMPING: 0.98,
   ANGULAR_DAMPING: 0.98,
+  // Speed-based opacity falloff for shards — fast shards read slightly
+  // translucent, settled shards are fully opaque.  Applied as
+  //   mul = max(SHARD_SPEED_OPACITY_MIN, 1 − speedSq × SHARD_SPEED_OPACITY_K)
+  // in RenderSystem.  Uses speed-squared so we skip the sqrt; the
+  // coefficient K is tuned against typical launch speeds (2–5 px/frame
+  // → speedSq 4–25) to drop opacity by ~0.25 at peak scatter.
+  SHARD_SPEED_OPACITY_K:   0.01,
+  SHARD_SPEED_OPACITY_MIN: 0.75,
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
   REST_SPEED: 0.005,
   REST_SPIN: 0.01,
