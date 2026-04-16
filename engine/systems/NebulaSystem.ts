@@ -114,8 +114,12 @@ export class NebulaSystem {
             );
         }
 
-        // Tiles queue for regeneration; shards just fade + vanish.
-        if (entity.type === EntityType.NEBULA) {
+        // Tile regeneration (when enabled) queues the shattered tile to
+        // respawn at its original grid cell.  When disabled (current
+        // default), tiles are gone permanently — the only path to new
+        // tiles is shard → tile transmutation after enough shard mass
+        // coalesces, keeping total tile population bounded.
+        if (entity.type === EntityType.NEBULA && NEBULA_CONSTANTS.TILE_REGEN_ENABLED) {
             entity.regenProgress = 0;
             this.pendingRegens.push({ entity, timer: NEBULA_CONSTANTS.REGEN_DELAY });
         }
@@ -286,6 +290,16 @@ export class NebulaSystem {
             const velX = fx * parallelSpeed + perpX;
             const velY = fy * parallelSpeed + perpY;
 
+            // Effective area carried by each shard toward the next
+            // transmutation.  Splitting HEX_AREA equally across all
+            // spawned shards gives net-zero tile balance: one shatter
+            // produces exactly 1 hex of effective mass, and when all
+            // those shards merge back together the accumulation hits
+            // HEX_AREA and transmutes into one new tile.  Independent
+            // of the shard's visual polygon radius so shards can stay
+            // glass-style small without blocking the transmutation path.
+            const effectiveAreaPerShard = HEX_AREA / shardCount;
+
             entities.push({
                 id:              nextId('nebula_shard'),
                 type:            EntityType.NEBULA_SHARD,
@@ -303,7 +317,7 @@ export class NebulaSystem {
                 polygonPoints:   pts,
                 sprite:          parent.sprite,
                 nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-                nebulaTileArea:  parent.nebulaTileArea,
+                nebulaTileArea:  effectiveAreaPerShard,
                 nebulaGridCol:   parent.nebulaGridCol,
                 nebulaGridRow:   parent.nebulaGridRow,
                 nebulaSpriteWorldSize: shardSpriteWorldSize,
@@ -311,6 +325,10 @@ export class NebulaSystem {
                 angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
                 nebulaSpawnTimer:    shardSpawnDuration,
                 nebulaSpawnDuration: shardSpawnDuration,
+                // Newly-spawned shards cannot merge for this many seconds
+                // — keeps them visible as distinct polygons for a beat
+                // before the gravity/merge pass starts coalescing them.
+                nebulaMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
             });
         }
     }
@@ -379,6 +397,13 @@ export class NebulaSystem {
             if (!shard.active) continue;
             if (shard.type !== EntityType.NEBULA_SHARD) continue;
 
+            // Merge cooldown: freshly-spawned (or recently-merged)
+            // shards skip both gravity pull AND merge checks until the
+            // cooldown expires, keeping them visible as distinct
+            // polygons for a beat before the coalescence pass touches
+            // them.
+            if ((shard.nebulaMergeCooldown ?? 0) > 0) continue;
+
             const shardR = Math.max(shard.size.x, shard.size.y) / 2;
 
             // Find nearest larger-or-equal neighbour across the 3×3 block.
@@ -398,6 +423,8 @@ export class NebulaSystem {
                         const target = all[j];
                         if (!target.active) continue;
                         if (mergedThisFrame.has(target)) continue;
+                        // Target also honours its own merge cooldown.
+                        if ((target.nebulaMergeCooldown ?? 0) > 0) continue;
                         const targetR = Math.max(target.size.x, target.size.y) / 2;
                         if (targetR < shardR) continue;
 
@@ -472,6 +499,19 @@ export class NebulaSystem {
         larger.size.y = newDiameter;
         larger.mass   = newDiameter;
 
+        // Accumulate the effective area carried by both shards onto
+        // the larger.  This is what drives transmutation in
+        // tryTransmuteShardToTile — decoupled from the physical disc
+        // area so shards can stay glass-style small while still
+        // condensing back to tiles at a 1-tile-in → 1-tile-out rate.
+        larger.nebulaTileArea = (larger.nebulaTileArea ?? 0)
+                              + (smaller.nebulaTileArea ?? 0);
+
+        // Arm a fresh merge cooldown on the grown shard so it doesn't
+        // immediately chain-merge with another neighbour the same frame.
+        // Spreads visible merge events over seconds instead of a burst.
+        larger.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
+
         // Regenerate the polygon at the new size so merged shards keep
         // the glass-shard-style polygon outline in debug view instead
         // of collapsing to a circle fallback.  Uses the same 4–6 vertex
@@ -537,11 +577,15 @@ export class NebulaSystem {
     ): boolean {
         if (shard.type !== EntityType.NEBULA_SHARD) return false;
 
-        // Disc-area threshold: the shard must cover at least one full
-        // hex worth of area before condensing into a tile.
-        const shardR = Math.max(shard.size.x, shard.size.y) / 2;
-        const shardArea = Math.PI * shardR * shardR;
-        if (shardArea < HEX_AREA) return false;
+        // Effective-area threshold.  Each shard carries a
+        // `nebulaTileArea` set at spawn (= HEX_AREA / shardCount) that
+        // accumulates through merges.  Transmutation fires when a
+        // shard's accumulated effective area reaches HEX_AREA — i.e.
+        // one full tile's worth of shatter mass has coalesced back
+        // together.  Decoupled from physical disc area so shards can
+        // stay small and glass-style without blocking the cycle.
+        const effectiveArea = shard.nebulaTileArea ?? 0;
+        if (effectiveArea < HEX_AREA) return false;
 
         // Candidate cells: the shard's current hex cell + 6 neighbours,
         // sorted by distance so we snap to the nearest free slot.

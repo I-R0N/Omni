@@ -323,12 +323,31 @@ export const NEBULA_CONSTANTS = {
   FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)
   // Gravity pull: each shard is attracted to the nearest larger nebula
   // entity within GRAVITY_RANGE.  The force curve is G / max(dist, MIN).
+  // Tuned low so shards drift toward merges over a few seconds instead
+  // of snapping together on the first substep.
   GRAVITY_RANGE: 380,
-  GRAVITY_STRENGTH: 650,
+  GRAVITY_STRENGTH: 220,
   GRAVITY_MIN_DIST: 15,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
-  // the larger nebula absorbs the smaller one.
-  MERGE_PROXIMITY_K: 0.9,
+  // the larger nebula absorbs the smaller one.  K = 0.55 means the
+  // shards must substantially OVERLAP, not merely touch, before a merge
+  // fires — keeps shards visible as distinct polygons for longer.
+  MERGE_PROXIMITY_K: 0.55,
+  // Per-shard merge cooldown — a freshly-spawned shard (from a tile
+  // shatter OR a recent merge) cannot participate in another merge for
+  // this many seconds.  Prevents the cascade where 4–6 shards spawn
+  // together and all collapse into one circle on frame 1–2.  The
+  // cooldown is ticked each substep by PhysicsSystem and consulted by
+  // NebulaSystem.updateDynamics before considering any merge pair.
+  MERGE_COOLDOWN: 1.8,
+  // Tile regeneration toggle.  When false, shattered tiles are gone
+  // forever (no respawn at their original grid cell) and the ONLY way
+  // new tiles appear is via shard → tile transmutation.  Combined with
+  // per-shard effective-area accumulation (see NebulaSystem spawn /
+  // merge / tryTransmute), this keeps total tile population bounded:
+  // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
+  // can SHRINK (player kills shards mid-merge) but never GROW.
+  TILE_REGEN_ENABLED: false,
   // Display-sprite scale multiplier for nebula tiles.  Draws at 2× the
   // entity's physics size, so adjacent tiles in a cluster have sprites
   // that visibly bleed into each other and read as a continuous cloud

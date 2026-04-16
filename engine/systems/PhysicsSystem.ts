@@ -194,6 +194,17 @@ export class PhysicsSystem {
               entity.nebulaSpawnTimer = undefined;
           }
       }
+      // Nebula shard merge cooldown — skip gravity pull + merge checks
+      // in NebulaSystem.updateDynamics while this is positive.  Only
+      // NEBULA_SHARDs carry this field in practice, but ticking it
+      // unconditionally is a single branch per entity and keeps the
+      // timer model consistent.
+      if (entity.nebulaMergeCooldown !== undefined && entity.nebulaMergeCooldown > 0) {
+          entity.nebulaMergeCooldown -= dt;
+          if (entity.nebulaMergeCooldown <= 0) {
+              entity.nebulaMergeCooldown = undefined;
+          }
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;

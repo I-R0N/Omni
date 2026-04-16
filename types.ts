@@ -271,6 +271,13 @@ export interface GameEntity {
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
   // While > 0, subsequent nebula contacts pass through without shattering.
   nebulaImpactCooldown?: number;
+  // Per-shard cooldown before the shard can participate in a merge.
+  // Set to NEBULA_CONSTANTS.MERGE_COOLDOWN at spawn (from shatter or
+  // as the larger party of a previous merge) and ticked each substep
+  // by PhysicsSystem.  NebulaSystem.updateDynamics skips any pair
+  // where either party has a positive cooldown, so fresh shards stay
+  // visible as distinct polygons for ~1.8 s before they can coalesce.
+  nebulaMergeCooldown?: number;
   // Post-shatter fade timer on NEBULA tiles and shards.  While > 0 the
   // entity stays rendered but with alpha scaled by timer / nebulaFadeDuration.
   // On reaching 0, tiles become inactive and enter the regen wait;
