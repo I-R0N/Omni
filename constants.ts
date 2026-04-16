@@ -6,9 +6,6 @@ import { ASSETS } from './assets';
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
 
-export const CANVAS_WIDTH = window.innerWidth;
-export const CANVAS_HEIGHT = window.innerHeight;
-
 export const COLORS = {
   UNIVERSE_BG: '#020617', // Slate 950
   SOLAR_BG: '#0f172a',    // Slate 900
@@ -218,10 +215,6 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
-  // Unused map types — kept for type completeness
-  [MapType.SOLAR_SYSTEM]: { maxSpeed: 140, acceleration: 0.05, friction: 0.998 },
-  [MapType.LOCAL]:        { maxSpeed: 140, acceleration: 0.05, friction: 0.998 },
-  [MapType.SUB_MAP]:      { maxSpeed: 140, acceleration: 0.05, friction: 0.998 }
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
@@ -232,10 +225,6 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     radius: 5000,
     speedMultiplier: 1.5
   },
-  // Unused map types — kept for type completeness
-  [MapType.SOLAR_SYSTEM]: { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
-  [MapType.LOCAL]:        { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 },
-  [MapType.SUB_MAP]:      { count: 0, minSize: 0, maxSize: 0, radius: 0, speedMultiplier: 0 }
 };
 
 export const STRUCTURE_CONSTANTS = {
@@ -446,6 +435,9 @@ export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops aft
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
+
+// ── Homing projectile tuning ─────────────────────────────────────────────────
+export const HOMING_ACQUIRE_RANGE = 400;            // max range at which a homing projectile locks onto an enemy
 
 // Tile regeneration pop-in burst
 export const REGEN_POP_CONSTANTS = {

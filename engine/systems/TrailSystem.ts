@@ -17,19 +17,25 @@ export class TrailSystem {
 
   /**
    * Tick a trail array: decrement each point's lifetime, apply per-point
-   * drift velocity, and splice expired entries.  Shared between the active
+   * drift velocity, and drop expired entries.  Shared between the active
    * player trail and detached trails from prior thrust events.
+   *
+   * Uses a write-index compaction pass instead of splice-in-reverse so the
+   * worst case (many simultaneous expirations, e.g. when a sustained thrust
+   * ends and the tail of the trail rolls over) is O(n) rather than O(n²).
    */
   public tickTrail(trail: TrailPoint[], dt: number) {
-    for (let i = trail.length - 1; i >= 0; i--) {
+    let writeIdx = 0;
+    for (let i = 0; i < trail.length; i++) {
       const tp = trail[i];
       tp.lifetime -= dt;
       if (tp.vx !== undefined) tp.x += tp.vx;
       if (tp.vy !== undefined) tp.y += tp.vy;
-      if (tp.lifetime <= 0) {
-        trail.splice(i, 1);
+      if (tp.lifetime > 0) {
+        trail[writeIdx++] = tp;
       }
     }
+    trail.length = writeIdx;
   }
 
   /**

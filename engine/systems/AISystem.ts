@@ -1,6 +1,6 @@
 
 
-import { GameEntity, EntityType, EnemySubtype, EnemyRole, Vector2 } from '../../types';
+import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 
@@ -16,10 +16,24 @@ export class AISystem {
   private stuckTimers: Map<string, number> = new Map();
   private lastPositions: Map<string, Vector2> = new Map();
 
-  public update(dt: number, entities: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
-    for (let i = 0; i < entities.length; i++) {
-      const enemy = entities[i];
-      if (!enemy.active || enemy.type !== EntityType.ENEMY) continue;
+  // Perf instrumentation — wall-time (ms) of the most recent update() call.
+  // Written by update() and read by GameEngine for the dev perf overlay.
+  public lastUpdateMs: number = 0;
+
+  /**
+   * Advance every enemy's AI by one sim step.
+   *
+   * `enemies` is the pre-filtered EntityIndex list — all entries are
+   * guaranteed to be `active` and of type `ENEMY`, so each inner loop can
+   * skip the type/active re-checks and run on the minimal candidate set.
+   * This in particular turns the pack-sync pass (which used to nest two
+   * full-entity scans) into an O(enemies²) walk on a handful of entries
+   * instead of O(allEntities²) with filtering.
+   */
+  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
+    const t0 = performance.now();
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
 
       // Default initialization
       if (!enemy.aiState) {
@@ -50,22 +64,24 @@ export class AISystem {
     // Pack sync: idle rammers near a chasing rammer get pulled into the charge.
     // Truncating the idle timer to PACK_SYNC_WINDOW forces near-simultaneous
     // attacks — a much harder threat to dodge than staggered individuals.
-    for (let i = 0; i < entities.length; i++) {
-      const leader = entities[i];
-      if (!leader.active || leader.type !== EntityType.ENEMY) continue;
+    //
+    // `enemies` is already type-filtered and active — we only need to check
+    // for the RAMMING role and the chase/idle states.
+    const PACK_RANGE_SQ = AI_CONFIG.PACK_SYNC_RANGE * AI_CONFIG.PACK_SYNC_RANGE;
+    for (let i = 0; i < enemies.length; i++) {
+      const leader = enemies[i];
       if (!leader.enemySubtype || ENEMY_ROLE[leader.enemySubtype] !== EnemyRole.RAMMING) continue;
       if (leader.aiState !== 'chase') continue;
 
-      for (let j = 0; j < entities.length; j++) {
+      for (let j = 0; j < enemies.length; j++) {
         if (i === j) continue;
-        const follower = entities[j];
-        if (!follower.active || follower.type !== EntityType.ENEMY) continue;
+        const follower = enemies[j];
         if (!follower.enemySubtype || ENEMY_ROLE[follower.enemySubtype] !== EnemyRole.RAMMING) continue;
         if (follower.aiState !== 'idle') continue;
 
         const pdx = leader.position.x - follower.position.x;
         const pdy = leader.position.y - follower.position.y;
-        if (pdx * pdx + pdy * pdy > AI_CONFIG.PACK_SYNC_RANGE * AI_CONFIG.PACK_SYNC_RANGE) continue;
+        if (pdx * pdx + pdy * pdy > PACK_RANGE_SQ) continue;
 
         // Snap idle timer down so this rammer joins the charge within PACK_SYNC_WINDOW
         if ((follower.aiTimer ?? 0) > AI_CONFIG.PACK_SYNC_WINDOW) {
@@ -74,11 +90,12 @@ export class AISystem {
       }
     }
 
-    // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically
+    // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically.
+    // `enemies` only contains live entities, so build the live set directly.
     if (Math.random() < 0.05) {
         const liveIds = new Set<string>();
-        for (let i = 0; i < entities.length; i++) {
-            if (entities[i].active && entities[i].type === EntityType.ENEMY) liveIds.add(entities[i].id);
+        for (let i = 0; i < enemies.length; i++) {
+            liveIds.add(enemies[i].id);
         }
         for (const id of this.laggedTargets.keys()) {
             if (!liveIds.has(id)) {
@@ -89,6 +106,8 @@ export class AISystem {
             }
         }
     }
+
+    this.lastUpdateMs = performance.now() - t0;
   }
 
   /**

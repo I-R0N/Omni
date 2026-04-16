@@ -4,6 +4,7 @@ import {
   SPRITE_CONSTANTS,
   LIGHTNING_GRAVITY_STRENGTH,
   LIGHTNING_GRAVITY_RANGE,
+  HOMING_ACQUIRE_RANGE,
   MAX_PROJECTILES,
 } from '../../constants';
 import { nextId } from './IdAllocator';
@@ -17,6 +18,13 @@ import { nextId } from './IdAllocator';
  * read from.
  */
 export class ProjectileSystem {
+  // Perf instrumentation — wall time (ms) of the most recent homing and
+  // lightning-gravity passes.  Both are O(P×E) scans that can grow once
+  // projectile/enemy counts climb in late waves, so they're tracked
+  // separately in the dev perf overlay.
+  public lastHomingMs: number = 0;
+  public lastLightningMs: number = 0;
+
   /**
    * Spawn `config.count` projectile entities from `shooter` toward `target`.
    * Returns the number spawned so callers can update recoil / muzzle state.
@@ -123,14 +131,17 @@ export class ProjectileSystem {
    * does not split projectiles by `.homing`.
    */
   public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], dt: number) {
-    if (enemies.length === 0) return;
+    const t0 = performance.now();
+    if (enemies.length === 0) { this.lastHomingMs = performance.now() - t0; return; }
+
+    const acquireRangeSq = HOMING_ACQUIRE_RANGE * HOMING_ACQUIRE_RANGE;
 
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
       if (!p.homing) continue;
 
       let target: GameEntity | null = null;
-      let minDist = 400 * 400;
+      let minDist = acquireRangeSq;
 
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
@@ -160,6 +171,8 @@ export class ProjectileSystem {
         p.velocity.y = Math.sin(p.rotation) * speed;
       }
     }
+
+    this.lastHomingMs = performance.now() - t0;
   }
 
   /**
@@ -177,6 +190,7 @@ export class ProjectileSystem {
     asteroids: GameEntity[],
     dt: number,
   ) {
+    const t0 = performance.now();
     const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
 
     // Fast-path: scan projectile list once to see if any are lightning.
@@ -184,8 +198,8 @@ export class ProjectileSystem {
     for (let i = 0; i < projectiles.length; i++) {
       if (projectiles[i].isLightningProjectile) { hasLightning = true; break; }
     }
-    if (!hasLightning) return;
-    if (enemies.length === 0 && asteroids.length === 0) return;
+    if (!hasLightning) { this.lastLightningMs = performance.now() - t0; return; }
+    if (enemies.length === 0 && asteroids.length === 0) { this.lastLightningMs = performance.now() - t0; return; }
 
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
@@ -231,5 +245,7 @@ export class ProjectileSystem {
         p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
       }
     }
+
+    this.lastLightningMs = performance.now() - t0;
   }
 }
