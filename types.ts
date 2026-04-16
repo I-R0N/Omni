@@ -255,6 +255,7 @@ export interface PerfSnapshot {
   lightningMs: number;
   gravityMs: number;      // PhysicsSystem.applyGravity (attractor fields)
   localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
+  collisionsMs: number;   // PhysicsSystem.handleEntityCollisions (broadphase + SAT)
   renderMs: number;
   flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
   // Collision broadphase — peak dynamic-grid cell density observed last step

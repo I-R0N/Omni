@@ -10,6 +10,13 @@ export class PhysicsSystem {
   private staticGrid: Map<number, GameEntity[]> = new Map();
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
 
+  // Cached list of gravitational attractors (planets/stars — entities with
+  // `gravityRange > 0`).  Populated once per map via initializeAttractors()
+  // instead of being rebuilt every sim substep by scanning the full ~22k
+  // master entity array.  Individual attractors still get an `active` check
+  // at access time so a destroyed attractor stops contributing mid-game.
+  private attractorsCache: GameEntity[] = [];
+
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Last-step wall time (ms) for the main update phases.  Written once per
   // update() call and read by GameEngine for the dev perf overlay.  Kept as
@@ -52,7 +59,7 @@ export class PhysicsSystem {
                const cx = Math.floor(e.position.x / cellSize);
                const cy = Math.floor(e.position.y / cellSize);
                const key = (cx << 16) | (cy & 0xFFFF);
-               
+
                let cell = this.staticGrid.get(key);
                if (!cell) {
                    cell = [];
@@ -63,8 +70,28 @@ export class PhysicsSystem {
       }
   }
 
+  /**
+   * Cache the list of gravitational attractors for a map.  Call once on
+   * map load (alongside initializeStaticGrid) to replace the old
+   * rebuild-every-frame scan in applyGravity.  Attractors are almost
+   * always fixed stellar geometry so a one-shot cache is sufficient; if
+   * gameplay ever spawns a new attractor at runtime, add it via a future
+   * `addAttractor()` helper or call this method again from the caller.
+   */
+  public initializeAttractors(entities: GameEntity[]) {
+      this.attractorsCache.length = 0;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (e.gravityRange && e.gravityRange > 0) {
+              this.attractorsCache.push(e);
+          }
+      }
+  }
+
   public update(
     entities: GameEntity[],
+    asteroids: GameEntity[],
+    player: GameEntity,
     mapType: MapType,
     dt: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
@@ -90,12 +117,24 @@ export class PhysicsSystem {
 
     // Apply Player-Asteroid Mutual Gravity (Scaled by time)
     const tLocal = performance.now();
-    this.applyLocalGravity(entities, timeScale);
+    this.applyLocalGravity(asteroids, player, timeScale);
     this.lastLocalGravityMs = performance.now() - tLocal;
 
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
       if (!entity.active) continue;
+
+      // OPTIMIZATION: Early bail on static geometry.
+      // Map scenes can hold ~22k tile structures, the vast majority of which
+      // are inert walls with mass=Infinity.  Walking them through the full
+      // lifetime/flash/shield pipeline below burns 5+ conditionals per tile
+      // per substep for nothing.  Bail immediately here — the only per-
+      // frame work a static entity still needs is hitFlash decay (tiles
+      // visibly flash when damaged), which is cheap to handle inline.
+      if (entity.mass === Infinity) {
+          if (entity.hitFlash && entity.hitFlash > 0) entity.hitFlash -= dt;
+          continue;
+      }
 
       // Lifetime management
       if (entity.lifetime !== undefined) {
@@ -121,12 +160,6 @@ export class PhysicsSystem {
           && entity.shield < entity.maxShield
           && (entity.shieldRechargeTimer ?? 0) <= 0) {
           entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
-      }
-
-      // OPTIMIZATION: Skip Integration for Static Geometry
-      // If mass is infinity (and not an interactable needing triggers), it never moves.
-      if (entity.mass === Infinity) {
-          continue; 
       }
 
       // ORBITAL PHYSICS
@@ -175,18 +208,26 @@ export class PhysicsSystem {
     this.lastUpdateMs = performance.now() - t0;
   }
 
-  private applyLocalGravity(entities: GameEntity[], timeScale: number) {
-      const player = entities.find(e => e.type === EntityType.PLAYER);
-      if (!player || !player.active) return;
+  /**
+   * Mutual gravity between the player and every active asteroid.
+   *
+   * Phase 2: consumes EntityIndex.asteroids (passed down from GameEngine
+   * via update()) instead of scanning the full ~22k entity master list.
+   * The measurement-driven signal for late-wave drops: this single scan
+   * used to walk every static tile just to reach a few hundred shards.
+   * Each asteroid still gets an `isExploding` skip since the index is
+   * filtered by `active` alone and can hold mid-explosion entries.
+   */
+  private applyLocalGravity(asteroids: GameEntity[], player: GameEntity, timeScale: number) {
+      if (!player.active) return;
 
       const { RANGE, STRENGTH, MIN_DIST, PLAYER_INFLUENCE } = LOCAL_GRAVITY_CONSTANTS;
       const rangeSq = RANGE * RANGE;
       const minDistSq = MIN_DIST * MIN_DIST;
 
-      // Optimization: Could limit iteration to only Asteroids in dynamic grid, but raw iteration is fast enough for now
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.type !== EntityType.ASTEROID || !e.active || e.isExploding) continue;
+      for (let i = 0; i < asteroids.length; i++) {
+          const e = asteroids[i];
+          if (e.isExploding) continue;
 
           const dx = player.position.x - e.position.x;
           const dy = player.position.y - e.position.y;
@@ -211,14 +252,11 @@ export class PhysicsSystem {
   }
 
   private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
-    const attractors: GameEntity[] = [];
-    for (let i = 0; i < entities.length; i++) {
-        const e = entities[i];
-        if (e.active && e.gravityRange && e.gravityRange > 0) {
-            attractors.push(e);
-        }
-    }
-
+    // Phase 2: use the attractors cache populated on map load instead of
+    // re-scanning the full entity array every substep.  Individual dead
+    // attractors are skipped at access time by the `active` check below so
+    // a destroyed attractor stops contributing without rebuilding the list.
+    const attractors = this.attractorsCache;
     if (attractors.length === 0) return;
 
     for (let i = 0; i < entities.length; i++) {
@@ -228,6 +266,7 @@ export class PhysicsSystem {
 
         for (let j = 0; j < attractors.length; j++) {
             const attractor = attractors[j];
+            if (!attractor.active) continue;
             if (entity === attractor) continue;
 
             const dx = attractor.position.x - entity.position.x;

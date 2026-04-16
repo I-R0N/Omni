@@ -137,6 +137,7 @@ export class GameEngine {
   private perfLightning      = new Float64Array(GameEngine.PERF_WINDOW);
   private perfGravity        = new Float64Array(GameEngine.PERF_WINDOW);
   private perfLocalGravity   = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfCollisions     = new Float64Array(GameEngine.PERF_WINDOW);
   private perfFlowField      = new Float64Array(GameEngine.PERF_WINDOW);
   private perfDensity        = new Float64Array(GameEngine.PERF_WINDOW);
   private perfSimIdx: number = 0;   // shared write index for every sim-side buffer
@@ -476,6 +477,8 @@ export class GameEngine {
 
       this.physics.update(
         allEntities,
+        this.entityIndex.asteroids,
+        this.player,
         this.currentMap.type,
         dt,
         this.spawnDamageText,
@@ -1893,6 +1896,11 @@ export class GameEngine {
       this.currentMap = map;
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
+      // Cache gravitational attractors once per map so applyGravity no
+      // longer rescans the full entity array every substep.  Attractors
+      // are effectively static geometry (stellar POIs), so a one-shot
+      // cache matches their lifecycle.
+      this.physics.initializeAttractors(map.entities);
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
@@ -1927,6 +1935,7 @@ export class GameEngine {
       this.perfLightning[idx]     = this.projectiles.lastLightningMs;
       this.perfGravity[idx]       = this.physics.lastGravityMs;
       this.perfLocalGravity[idx]  = this.physics.lastLocalGravityMs;
+      this.perfCollisions[idx]    = this.physics.lastCollisionsMs;
       this.perfFlowField[idx]     = this.flowField.lastFlushMs;
       this.perfDensity[idx]       = this.physics.lastMaxCellDensity;
       const next = idx + 1;
@@ -1978,6 +1987,7 @@ export class GameEngine {
           lightningMs:    GameEngine.ringAvg(this.perfLightning,    simN),
           gravityMs:      GameEngine.ringAvg(this.perfGravity,      simN),
           localGravityMs: GameEngine.ringAvg(this.perfLocalGravity, simN),
+          collisionsMs:   GameEngine.ringAvg(this.perfCollisions,   simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           // Cell density peaks on single-frame spikes — report the window
