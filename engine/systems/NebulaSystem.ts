@@ -147,8 +147,62 @@ export class NebulaSystem {
         try {
             this.tickRegens(entities, dt, physics);
             this.updateDynamics(entities, dt, physics);
+            this.emitTrails(entities, dt);
         } finally {
             this.currentFrameEntities = null;
+        }
+    }
+
+    /**
+     * Smoky wake for drifting shards — every TRAIL_EMIT_INTERVAL
+     * seconds each active, non-fading shard that's moving faster than
+     * TRAIL_MIN_SPEED_SQ drops a single large tinted particle at its
+     * tail.  Particles render with 'lighter' compositing and fade over
+     * their lifetime, so overlapping emissions read as a soft coloured
+     * glow rather than discrete dots.
+     *
+     * Cost is flat per shard (one branch + occasional one spawn), and
+     * the per-entity timer means fast shards don't emit more than slow
+     * ones — they just trace a longer spatial trail for the same
+     * particle budget.
+     */
+    private emitTrails(entities: GameEntity[], dt: number): void {
+        const interval = NEBULA_CONSTANTS.TRAIL_EMIT_INTERVAL;
+        const minSpeedSq = NEBULA_CONSTANTS.TRAIL_MIN_SPEED_SQ;
+        const offsetRatio = NEBULA_CONSTANTS.TRAIL_OFFSET_RATIO;
+
+        for (let i = 0; i < entities.length; i++) {
+            const e = entities[i];
+            if (e.type !== EntityType.NEBULA_SHARD) continue;
+            if (!e.active) continue;
+            if (e.nebulaFadeTimer !== undefined) continue;
+
+            e.nebulaTrailTimer = (e.nebulaTrailTimer ?? interval * Math.random()) - dt;
+            if (e.nebulaTrailTimer > 0) continue;
+            e.nebulaTrailTimer = interval;
+
+            const vx = e.velocity.x;
+            const vy = e.velocity.y;
+            const speedSq = vx * vx + vy * vy;
+            if (speedSq < minSpeedSq) continue;
+
+            const speed = Math.sqrt(speedSq);
+            const shardR = Math.max(e.size.x, e.size.y) / 2;
+            const offset = shardR * offsetRatio;
+            const tailX = e.position.x - (vx / speed) * offset;
+            const tailY = e.position.y - (vy / speed) * offset;
+
+            const tint = blendCompositionToHex(e.nebulaColorComposition)
+                || e.color
+                || NEBULA_CONSTANTS.DEFAULT_HEX;
+
+            this.particles.spawn(entities, { x: tailX, y: tailY }, 1, tint, {
+                speedMin: 0, speedMax: 0.05,
+                sizeMin: NEBULA_CONSTANTS.TRAIL_SIZE_MIN,
+                sizeMax: NEBULA_CONSTANTS.TRAIL_SIZE_MAX,
+                lifetimeMin: NEBULA_CONSTANTS.TRAIL_LIFETIME_MIN,
+                lifetimeMax: NEBULA_CONSTANTS.TRAIL_LIFETIME_MAX,
+            });
         }
     }
 
