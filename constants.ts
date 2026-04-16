@@ -326,7 +326,7 @@ export const NEBULA_CONSTANTS = {
   // Tuned low so shards drift toward merges over a few seconds instead
   // of snapping together on the first substep.
   GRAVITY_RANGE: 380,
-  GRAVITY_STRENGTH: 220,
+  GRAVITY_STRENGTH: 300,
   GRAVITY_MIN_DIST: 15,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
