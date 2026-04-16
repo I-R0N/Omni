@@ -378,7 +378,7 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
-        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.draw();
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
         return;
@@ -401,8 +401,8 @@ export class GameEngine {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
-        try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
-        try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.updatePhysics(FIXED_DT);
+        this.updateGameLogic(FIXED_DT);
         // Push per-substep perf samples.  Every timed sub-phase was written
         // to instance fields on its owning system during the two calls above;
         // the recorder just reads and ring-buffers them in one shot.
@@ -422,7 +422,7 @@ export class GameEngine {
     // Refresh the frame entity list one more time so anything spawned during
     // the final sim step is included in the render pass.
     this.prepareFrameEntities();
-    try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+    this.draw();
     this.recordRenderPerf();
 
     requestAnimationFrame(this.loop);
