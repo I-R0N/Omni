@@ -24,6 +24,17 @@ export class EntityIndex {
   /** Active projectiles (both player- and enemy-owned). */
   public projectiles: GameEntity[] = [];
 
+  // ── Count-only snapshots (no list alloc) ─────────────────────────────────
+  // Updated alongside the filtered lists above so the dev perf overlay can
+  // chart per-type accumulation without a second O(N) walk every frame.
+  // Particles and interactables are the two largest late-wave contributors
+  // outside the enemy/asteroid/projectile trio, so they're tracked here
+  // even though no downstream system needs full lists for them.
+  public particleCount: number = 0;
+  public interactableCount: number = 0;
+  /** Total active entities (all types, including types we don't list). */
+  public activeCount: number = 0;
+
   /**
    * Rebuild all filtered lists from the master entity array.  Inactive
    * entities are skipped so downstream consumers don't need to re-check
@@ -33,10 +44,14 @@ export class EntityIndex {
     this.enemies.length = 0;
     this.asteroids.length = 0;
     this.projectiles.length = 0;
+    this.particleCount = 0;
+    this.interactableCount = 0;
+    this.activeCount = 0;
 
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
+      this.activeCount++;
       switch (e.type) {
         case EntityType.ENEMY:
           this.enemies.push(e);
@@ -47,6 +62,12 @@ export class EntityIndex {
         case EntityType.PROJECTILE:
           this.projectiles.push(e);
           break;
+        case EntityType.PARTICLE:
+          this.particleCount++;
+          break;
+        case EntityType.INTERACTABLE:
+          this.interactableCount++;
+          break;
       }
     }
   }
@@ -56,5 +77,8 @@ export class EntityIndex {
     this.enemies.length = 0;
     this.asteroids.length = 0;
     this.projectiles.length = 0;
+    this.particleCount = 0;
+    this.interactableCount = 0;
+    this.activeCount = 0;
   }
 }

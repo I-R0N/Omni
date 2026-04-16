@@ -55,6 +55,11 @@ export class RenderSystem {
   private backgroundManager: BackgroundManager;
   private debugMode: boolean = false;
 
+  // Perf instrumentation — wall time (ms) of the most recent render() call.
+  // Written at the end of render() and read by GameEngine for the dev perf
+  // overlay.  render() is a single top-level pass so one timer covers it.
+  public lastRenderMs: number = 0;
+
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
@@ -66,6 +71,19 @@ export class RenderSystem {
   private _particleBuffer: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
+
+  // ── Pre-rendered static minimap layer ─────────────────────────────────
+  // Structures (~22k) don't move, so we render them to an offscreen canvas
+  // once on map load and blit the relevant viewport each frame instead of
+  // issuing ~22k individual fillRect calls.  The canvas covers the full map
+  // at a resolution matched to MINIMAP_CONSTANTS.EXPANDED_SIZE so even the
+  // expanded minimap looks sharp.  Dynamic entities (enemies, asteroids,
+  // drops) are still drawn per-frame on top of this layer.
+  private _minimapStaticCanvas: HTMLCanvasElement | null = null;
+  // World-space range captured by the static layer (half-extent from map
+  // center).  Stored so renderMinimap can compute the blit source rect
+  // without re-reading the map dimensions.
+  private _minimapStaticRange: number = 0;
 
   constructor() {
     this.backgroundManager = new BackgroundManager();
@@ -118,6 +136,43 @@ export class RenderSystem {
     this.backgroundManager.setMapType(type);
   }
 
+  /**
+   * Pre-render all STRUCTURE entities to an offscreen minimap canvas.
+   * Call once on map load.  The canvas covers the full map area at a
+   * resolution matched to the expanded minimap display size so the
+   * per-frame renderMinimap pass only needs a single drawImage blit
+   * instead of ~22k individual fillRect calls.
+   */
+  public buildMinimapStaticLayer(entities: GameEntity[], mapWidth: number, mapHeight: number) {
+      const { EXPANDED_SIZE, RANGE } = MINIMAP_CONSTANTS;
+      // Use the expanded minimap range so the pre-rendered layer covers the
+      // full overview.  The zoomed minimap simply reads a smaller source
+      // rect from the same canvas.
+      const halfMap = Math.max(mapWidth, mapHeight) / 2;
+      const range = Math.max(RANGE, halfMap);
+      this._minimapStaticRange = range;
+
+      const res = EXPANDED_SIZE;
+      const c = document.createElement('canvas');
+      c.width = res;
+      c.height = res;
+      const cx = c.getContext('2d')!;
+      const scale = (res / 2) / range;
+      const center = res / 2;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.type !== EntityType.STRUCTURE) continue;
+          cx.fillStyle = e.color;
+          // Map space: entity position is absolute.  Map center = (0,0).
+          const dotX = center + e.position.x * scale;
+          const dotY = center + e.position.y * scale;
+          cx.fillRect(dotX, dotY, 2, 2);
+      }
+
+      this._minimapStaticCanvas = c;
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,
@@ -130,7 +185,8 @@ export class RenderSystem {
     waveAnnouncements?: WaveAnnouncement[],
     detachedTrails?: TrailPoint[][]
   ) {
-    if (!this.ctx) return;
+    const t0 = performance.now();
+    if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
     const width = (ctx.canvas.width || 0) / dpr;
@@ -163,8 +219,24 @@ export class RenderSystem {
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
+
+        // ── Fast-path STRUCTURE ──────────────────────────────────────
+        // Structures (~22k per map) never participate in the attractor /
+        // indicator / minimap / trail buffers, and the minimap is now a
+        // pre-rendered static layer.  Skip all the per-entity bucket
+        // checks and just frustum-cull → visible push.  This keeps the
+        // off-screen-tile cost to ~5 ops per entity instead of ~17.
+        if (entity.type === EntityType.STRUCTURE) {
+            const isRegen = entity.regenProgress !== undefined;
+            if (!entity.active && !isRegen) continue;
+            if (entity.position.x < left || entity.position.x > right ||
+                entity.position.y < top || entity.position.y > bottom) continue;
+            this._visibleEntities.push(entity);
+            continue;
+        }
+
         // Allow inactive tiles that are regenerating to pass through for ghost rendering
-        if (!entity.active && !(entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined)) continue;
+        if (!entity.active) continue;
 
         const dx = entity.position.x - camX;
         const dy = entity.position.y - camY;
@@ -180,6 +252,8 @@ export class RenderSystem {
             }
         }
 
+        // Structures use the pre-rendered static minimap layer — skip them
+        // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
@@ -261,6 +335,8 @@ export class RenderSystem {
     if (player) {
         this.renderAmmoHUD(ctx, player, width, height);
     }
+
+    this.lastRenderMs = performance.now() - t0;
   }
 
   private renderTrails(
@@ -493,6 +569,11 @@ export class RenderSystem {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
 
+    // Cache the structure sprite once.  Prior to this, getImage() was
+    // called once per visible tile (200-400×) to look up the same image.
+    const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+    const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
+
     entities.forEach(entity => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -501,6 +582,22 @@ export class RenderSystem {
 
       // Particles are handled separately in renderParticles() — skip here
       if (entity.type === EntityType.PARTICLE) return;
+
+      // ── Fast-path STRUCTURE sprite render ───────────────────────────
+      // Structures have rotation = 0, no per-entity ctx state changes,
+      // and almost always render as a single drawImage call.  Skipping
+      // the generic save/translate/rotate/restore wrapper saves 4 canvas
+      // state ops per tile — multiplied by 200-400 visible tiles, that's
+      // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
+      // pop, regen ghost) fall back to the slow generic path.
+      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
+          && !entity.hitFlash && entity.regenPopTimer === undefined) {
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const drawSize = maxDim * 1.02;
+          const dHalf = drawSize / 2;
+          ctx.drawImage(hexSprite, entity.position.x - dHalf, entity.position.y - dHalf, drawSize, drawSize);
+          return;
+      }
 
       ctx.save();
       
@@ -1476,30 +1573,51 @@ export class RenderSystem {
       const centerY = mapY + currentSize / 2;
       const scale = (currentSize / 2) / range;
 
-      items.forEach(item => {
+      // ── Static structure layer (pre-rendered on map load) ──────────────
+      // Blit the relevant viewport from the offscreen canvas instead of
+      // issuing ~22k individual fillRect calls.  The static layer is in
+      // map-space (centred on world origin), so we offset by the camera
+      // position to align it with the minimap viewport.
+      const staticCanvas = this._minimapStaticCanvas;
+      if (staticCanvas) {
+          const staticRange = this._minimapStaticRange;
+          const sRes = staticCanvas.width;
+          const sScale = (sRes / 2) / staticRange;
+
+          // Source rect: map the minimap's world-space viewport to pixels
+          // on the static canvas.
+          const srcCenterX = sRes / 2 + camera.position.x * sScale;
+          const srcCenterY = sRes / 2 + camera.position.y * sScale;
+          const srcHalf = range * sScale;
+          const sx = srcCenterX - srcHalf;
+          const sy = srcCenterY - srcHalf;
+          const sw = srcHalf * 2;
+          const sh = srcHalf * 2;
+
+          ctx.drawImage(staticCanvas, sx, sy, sw, sh, mapX, mapY, currentSize, currentSize);
+      }
+
+      // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
+      for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           const entity = item.entity;
-          if (!entity.active) return;
+          if (!entity.active) continue;
 
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
 
-          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) return;
+          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
           ctx.fillStyle = entity.color;
 
-          if (entity.type === EntityType.STRUCTURE) {
-              // OPTIMIZATION: Use fillRect for structures (faster than arc)
-              ctx.fillRect(dotX, dotY, 2, 2);
-          } else {
-              let dotRadius = 1.5;
-              if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
-              if (entity.type === EntityType.ENEMY) dotRadius = 2;
+          let dotRadius = 1.5;
+          if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
+          if (entity.type === EntityType.ENEMY) dotRadius = 2;
 
-              ctx.beginPath();
-              ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-              ctx.fill();
-          }
-      });
+          ctx.beginPath();
+          ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+      }
 
       // When expanded, draw a rectangle showing the area covered by the small zoomed map
       if (expanded) {

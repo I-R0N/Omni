@@ -28,6 +28,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSetDifficulty,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
+  const perf = stats.perf;
+  // Two-digit ms formatter for the perf overlay.  Values under 10 ms get a
+  // decimal so sub-millisecond jitter is still visible; bigger numbers
+  // collapse to whole ms so the grid stays compact.
+  const fmtMs = (ms: number | undefined): string => {
+    if (ms === undefined) return '—';
+    if (ms < 10) return ms.toFixed(2);
+    return ms.toFixed(1);
+  };
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
@@ -48,13 +57,41 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             DBG
           </button>
 
-          {/* Debug info panel */}
+          {/* Debug info + perf instrumentation panel.  Shown only while
+              debug mode is active (DBG button).  Deliberately small and
+              semi-transparent (~35% bg opacity, 8-9 px font, tight leading)
+              so it never hides the player ship while dev stats stream. */}
           {stats.debugMode && (
-            <div className="pointer-events-none bg-slate-900/80 border border-slate-700/60 rounded-lg px-3 py-2 text-[11px] font-mono text-slate-300 space-y-0.5 shadow-lg backdrop-blur-sm">
-              <p>FPS: <span className="text-white">{stats.fps}</span></p>
-              <p>Entities: <span className="text-white">{stats.entityCount}</span></p>
-              <p>Wave: <span className="text-white">{stats.waveNumber ?? 1}</span></p>
-              <p>State: <span className="text-white">{stats.waveStatus}</span></p>
+            <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
+              <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
+              <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
+              <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
+              <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>
+              {perf ? (
+                <>
+                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Entities</div>
+                  <div className="flex justify-between"><span>total</span><span className="text-white">{perf.totalEntities}</span></div>
+                  <div className="flex justify-between"><span>enemies</span><span className="text-white">{perf.enemyCount}</span></div>
+                  <div className="flex justify-between"><span>asteroids</span><span className="text-white">{perf.asteroidCount}</span></div>
+                  <div className="flex justify-between"><span>projectiles</span><span className="text-white">{perf.projectileCount}</span></div>
+                  <div className="flex justify-between"><span>particles</span><span className="text-white">{perf.particleCount}</span></div>
+                  <div className="flex justify-between"><span>drops/POI</span><span className="text-white">{perf.interactableCount}</span></div>
+                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Broadphase</div>
+                  <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
+                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Timing (ms)</div>
+                  <div className="flex justify-between"><span>physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                  <div className="flex justify-between"><span>ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
+                  <div className="flex justify-between"><span>homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
+                  <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
+                  <div className="flex justify-between"><span>flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                  <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
+                </>
+              ) : (
+                <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>
+              )}
             </div>
           )}
         </div>

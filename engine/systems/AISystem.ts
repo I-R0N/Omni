@@ -16,6 +16,10 @@ export class AISystem {
   private stuckTimers: Map<string, number> = new Map();
   private lastPositions: Map<string, Vector2> = new Map();
 
+  // Perf instrumentation — wall-time (ms) of the most recent update() call.
+  // Written by update() and read by GameEngine for the dev perf overlay.
+  public lastUpdateMs: number = 0;
+
   /**
    * Advance every enemy's AI by one sim step.
    *
@@ -27,6 +31,7 @@ export class AISystem {
    * instead of O(allEntities²) with filtering.
    */
   public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
+    const t0 = performance.now();
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
 
@@ -101,6 +106,8 @@ export class AISystem {
             }
         }
     }
+
+    this.lastUpdateMs = performance.now() - t0;
   }
 
   /**
