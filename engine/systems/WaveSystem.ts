@@ -9,6 +9,7 @@ import {
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
+import { wrapPosition } from '../toroidal';
 
 /**
  * WaveSystem — owns wave state (current index, live enemy ids, phase,
@@ -67,12 +68,18 @@ export class WaveSystem {
         const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
         let x = 0, y = 0;
-        // Try up to 8 candidate positions; pick first one clear of static tiles
+        // Try up to 8 candidate positions; pick first one clear of static tiles.
+        // Candidate positions are wrapped into canonical world coords so spawns
+        // near a seam don't materialise at ±MAP_WIDTH off the map.
+        const pos = { x: 0, y: 0 };
         for (let attempt = 0; attempt < 8; attempt++) {
           const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
           const dist = 550 + Math.random() * 200;
-          x = player.position.x + Math.cos(a) * dist;
-          y = player.position.y + Math.sin(a) * dist;
+          pos.x = player.position.x + Math.cos(a) * dist;
+          pos.y = player.position.y + Math.sin(a) * dist;
+          wrapPosition(pos);
+          x = pos.x;
+          y = pos.y;
           if (physics.isPositionClear(x, y, safeRadius)) break;
         }
         const config = ENEMY_VARIANTS[group.subtype];

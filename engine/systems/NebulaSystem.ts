@@ -23,6 +23,7 @@ import { nextId } from './IdAllocator';
 import { ParticleSystem } from './ParticleSystem';
 import { DropSystem } from './DropSystem';
 import { PhysicsSystem } from './PhysicsSystem';
+import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
 
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
@@ -272,8 +273,10 @@ export class NebulaSystem {
             const dx = fx * cosA - fy * sinA;
             const dy = fx * sinA + fy * cosA;
 
-            const spawnX = parent.position.x + dx * offsetMag;
-            const spawnY = parent.position.y + dy * offsetMag;
+            const spawnPos = { x: parent.position.x + dx * offsetMag, y: parent.position.y + dy * offsetMag };
+            wrapPosition(spawnPos);
+            const spawnX = spawnPos.x;
+            const spawnY = spawnPos.y;
 
             // Tangent-rule side for spin direction.
             const cross = fx * dy - fy * dx;
@@ -373,16 +376,24 @@ export class NebulaSystem {
         }
         if (all.length < 2) return;
 
-        // Spatial hash over GRAVITY_RANGE cells.
+        // Spatial hash over GRAVITY_RANGE cells — cell coords wrap modulo
+        // the grid dimension so shards near a seam share a bucket with
+        // merge candidates on the other side.
         const CELL = NEBULA_CONSTANTS.GRAVITY_RANGE;
+        const COLS = Math.ceil(MAP_WIDTH  / CELL);
+        const ROWS = Math.ceil(MAP_HEIGHT / CELL);
+        const keyFor = (cx: number, cy: number) => {
+            const wx = ((cx % COLS) + COLS) % COLS;
+            const wy = ((cy % ROWS) + ROWS) % ROWS;
+            return (wx << 16) | (wy & 0xFFFF);
+        };
         const grid = new Map<number, number[]>();
         for (let i = 0; i < all.length; i++) {
             const e = all[i];
             const cx = Math.floor(e.position.x / CELL);
             const cy = Math.floor(e.position.y / CELL);
-            const key = (cx << 16) | (cy & 0xFFFF);
-            let cell = grid.get(key);
-            if (!cell) { cell = []; grid.set(key, cell); }
+            let cell = grid.get(keyFor(cx, cy));
+            if (!cell) { cell = []; grid.set(keyFor(cx, cy), cell); }
             cell.push(i);
         }
 
@@ -419,7 +430,7 @@ export class NebulaSystem {
 
             for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
                 for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                    const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                    const cell = grid.get(keyFor(ncx, ncy));
                     if (!cell) continue;
                     for (let k = 0; k < cell.length; k++) {
                         const j = cell[k];
@@ -432,8 +443,8 @@ export class NebulaSystem {
                         const targetR = Math.max(target.size.x, target.size.y) / 2;
                         if (targetR < shardR) continue;
 
-                        const dx = target.position.x - shard.position.x;
-                        const dy = target.position.y - shard.position.y;
+                        const dx = wrapDeltaX(shard.position.x, target.position.x);
+                        const dy = wrapDeltaY(shard.position.y, target.position.y);
                         const distSq = dx * dx + dy * dy;
                         if (distSq > GRAV_RANGE_SQ) continue;
                         if (distSq < bestDistSq) {
@@ -446,8 +457,8 @@ export class NebulaSystem {
 
             if (!bestTarget) continue;
 
-            const dx = bestTarget.position.x - shard.position.x;
-            const dy = bestTarget.position.y - shard.position.y;
+            const dx = wrapDeltaX(shard.position.x, bestTarget.position.x);
+            const dy = wrapDeltaY(shard.position.y, bestTarget.position.y);
             const dist = Math.sqrt(bestDistSq);
             if (dist < 0.0001) continue;
 
@@ -597,8 +608,8 @@ export class NebulaSystem {
         const candidates: { c: number; r: number; distSq: number }[] = [];
         const pushCandidate = (c: number, r: number) => {
             const p = hexCoordToPixel(c, r);
-            const dx = p.x - shard.position.x;
-            const dy = p.y - shard.position.y;
+            const dx = wrapDeltaX(shard.position.x, p.x);
+            const dy = wrapDeltaY(shard.position.y, p.y);
             candidates.push({ c, r, distSq: dx * dx + dy * dy });
         };
         pushCandidate(origin.c, origin.r);

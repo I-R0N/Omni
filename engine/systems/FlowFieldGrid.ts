@@ -29,16 +29,23 @@
 
 import { GameEntity, EntityType } from '../../types';
 import { sampleFlow } from './FlowField';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../toroidal';
 
 // ─── grid constants ────────────────────────────────────────────────────────
+//
+// Toroidal grid: the world wraps at ±HALF_MAP_{WIDTH,HEIGHT}.  Grid edges
+// line up exactly with the wrap seam, so BFS neighbour lookups can use
+// modular arithmetic on (row, col) without any special-case handling for
+// off-grid cells — every world coordinate maps to exactly one cell and
+// every cell has four in-range neighbours.
 
 const CELL_SIZE = 256;          // world units per cell
-const MAP_MIN   = -15000;       // world coordinate of grid edge
-const MAP_MAX   =  15000;
+const MAP_MIN_X = -HALF_MAP_WIDTH;
+const MAP_MIN_Y = -HALF_MAP_HEIGHT;
 
-export const FF_COLS = Math.ceil((MAP_MAX - MAP_MIN) / CELL_SIZE); // 118
-export const FF_ROWS = FF_COLS;                                     // 118
-const TOTAL = FF_COLS * FF_ROWS;                                    // 13 924
+export const FF_COLS = Math.ceil(MAP_WIDTH  / CELL_SIZE); // 20000 / 256 ≈ 79
+export const FF_ROWS = Math.ceil(MAP_HEIGHT / CELL_SIZE); // 79
+const TOTAL = FF_COLS * FF_ROWS;
 
 const INF = 0x7FFF_FFFF;
 
@@ -98,9 +105,13 @@ export class FlowFieldGrid {
   // ─── coordinate helpers ──────────────────────────────────────────────────
 
   worldToCell(wx: number, wy: number): number {
-    const col = ((wx - MAP_MIN) / CELL_SIZE) | 0;
-    const row = ((wy - MAP_MIN) / CELL_SIZE) | 0;
-    if (col < 0 || col >= FF_COLS || row < 0 || row >= FF_ROWS) return -1;
+    // World coords are expected to be wrapped into [-HALF_MAP, +HALF_MAP),
+    // but defensively modulo-reduce into the grid so any stale pre-wrap
+    // position still maps to a valid cell instead of returning -1.
+    let col = ((wx - MAP_MIN_X) / CELL_SIZE) | 0;
+    let row = ((wy - MAP_MIN_Y) / CELL_SIZE) | 0;
+    col = ((col % FF_COLS) + FF_COLS) % FF_COLS;
+    row = ((row % FF_ROWS) + FF_ROWS) % FF_ROWS;
     return row * FF_COLS + col;
   }
 
@@ -147,8 +158,8 @@ export class FlowFieldGrid {
 
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
-    const wx  = MAP_MIN + (col + 0.5) * CELL_SIZE;
-    const wy  = MAP_MIN + (row + 0.5) * CELL_SIZE;
+    const wx  = MAP_MIN_X + (col + 0.5) * CELL_SIZE;
+    const wy  = MAP_MIN_Y + (row + 0.5) * CELL_SIZE;
 
     // Base direction from the analytical vortex field
     const base = sampleFlow(wx, wy);
@@ -156,11 +167,12 @@ export class FlowFieldGrid {
     let fy = base.y;
 
     // Wall repulsion: each blocked cardinal neighbour pushes the flow
-    // away from it.  DC4[k]/DR4[k] is the world-space direction toward
-    // that neighbour, so we subtract it to deflect away.
+    // away from it.  Neighbours wrap around the torus so edge cells
+    // consider their counterparts across the seam rather than treating
+    // the edge as open space.
     for (let k = 0; k < 4; k++) {
-      const nr = row + DR4[k], nc = col + DC4[k];
-      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
       if (this.blocked[nr * FF_COLS + nc]) {
         fx -= DC4[k] * WALL_REPULSE;
         fy -= DR4[k] * WALL_REPULSE;
@@ -232,9 +244,9 @@ export class FlowFieldGrid {
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
     for (let k = 0; k < 4; k++) {
-      const nr = row + DR4[k], nc = col + DC4[k];
-      if (nr >= 0 && nr < FF_ROWS && nc >= 0 && nc < FF_COLS)
-        this._computeAsteroidCell(nr * FF_COLS + nc);
+      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
+      this._computeAsteroidCell(nr * FF_COLS + nc);
     }
 
     // Enemy field — BFS patch
@@ -278,8 +290,8 @@ export class FlowFieldGrid {
     const col =  idx % FF_COLS;
     let rx = 0, ry = 0;
     for (let k = 0; k < 4; k++) {
-      const nr = row + DR4[k], nc = col + DC4[k];
-      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
       if (this.blocked[nr * FF_COLS + nc]) {
         rx -= DC4[k]; // push away from the blocked neighbour
         ry -= DR4[k];
@@ -312,9 +324,8 @@ export class FlowFieldGrid {
       const col =  idx % FF_COLS;
 
       for (let k = 0; k < 4; k++) {
-        const nr = row + DR4[k];
-        const nc = col + DC4[k];
-        if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+        const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+        const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
         const nidx = nr * FF_COLS + nc;
         if (this.blocked[nidx] || inQ[nidx]) continue;
         dist[nidx] = d + 1;
@@ -346,8 +357,8 @@ export class FlowFieldGrid {
     // Find the best distance reachable from passable neighbours.
     let best = INF;
     for (let k = 0; k < 4; k++) {
-      const nr = row0 + DR4[k], nc = col0 + DC4[k];
-      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      const nr = (row0 + DR4[k] + FF_ROWS) % FF_ROWS;
+      const nc = (col0 + DC4[k] + FF_COLS) % FF_COLS;
       const nidx = nr * FF_COLS + nc;
       if (!this.blocked[nidx] && dist[nidx] < best) best = dist[nidx];
     }
@@ -367,8 +378,8 @@ export class FlowFieldGrid {
       const col =  idx % FF_COLS;
 
       for (let k = 0; k < 4; k++) {
-        const nr = row + DR4[k], nc = col + DC4[k];
-        if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+        const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+        const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
         const nidx = nr * FF_COLS + nc;
         if (this.blocked[nidx]) continue;
         if (dist[idx] + 1 < dist[nidx]) {
@@ -385,9 +396,9 @@ export class FlowFieldGrid {
     for (const u of updated) {
       const ur = (u / FF_COLS) | 0, uc = u % FF_COLS;
       for (let k = 0; k < 4; k++) {
-        const nr = ur + DR4[k], nc = uc + DC4[k];
-        if (nr >= 0 && nr < FF_ROWS && nc >= 0 && nc < FF_COLS)
-          refresh.add(nr * FF_COLS + nc);
+        const nr = (ur + DR4[k] + FF_ROWS) % FF_ROWS;
+        const nc = (uc + DC4[k] + FF_COLS) % FF_COLS;
+        refresh.add(nr * FF_COLS + nc);
       }
     }
     for (const u of refresh) this._gradientAt(u, dist, flowX, flowY);
@@ -425,8 +436,8 @@ export class FlowFieldGrid {
     let bx = 0, by = 0;
 
     for (let k = 0; k < 4; k++) {
-      const nr = row + DR4[k], nc = col + DC4[k];
-      if (nr < 0 || nr >= FF_ROWS || nc < 0 || nc >= FF_COLS) continue;
+      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
       const nidx = nr * FF_COLS + nc;
       if (dist[nidx] < d) { bx += DC4[k]; by += DR4[k]; }
     }

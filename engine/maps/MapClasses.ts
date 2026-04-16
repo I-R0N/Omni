@@ -4,6 +4,7 @@ import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS } from '../../constants';
 import { sampleFlow } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
+import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -132,8 +133,8 @@ export abstract class BaseMapLayer {
 export class UniverseMap extends BaseMapLayer {
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
-    this.width = 30000;
-    this.height = 30000;
+    this.width = MAP_WIDTH;
+    this.height = MAP_HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 
@@ -144,6 +145,10 @@ export class UniverseMap extends BaseMapLayer {
     // Asteroids spread around spawn
     const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    // Asteroids are spawned on a linear radial distribution and may fall
+    // just outside the canonical wrap range; normalise so every entity
+    // sits in [-HALF, HALF) before any distance math runs.
+    for (const e of this.entities) wrapPosition(e.position);
 
     // Shared occupancy set — every tile pass (glass inner, glass outer,
     // nebula inner, nebula outer) writes to this set so later passes

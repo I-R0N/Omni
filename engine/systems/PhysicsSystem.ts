@@ -2,6 +2,30 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY } from '../toroidal';
+
+// Number of spatial-hash cells along each axis of the toroidal map.  The
+// broadphase keys pack (col, row) into a single int using `(cx << 16) |
+// (cy & 0xFFFF)`, and cell indices are wrapped into [0, SPATIAL_COLS) so
+// neighbour queries near a seam land on the same bucket as the entities
+// they should collide with on the opposite side.
+const SPATIAL_COLS = Math.ceil(MAP_WIDTH  / SPATIAL_GRID_SIZE);
+const SPATIAL_ROWS = Math.ceil(MAP_HEIGHT / SPATIAL_GRID_SIZE);
+
+function wrapCellX(cx: number): number {
+    return ((cx % SPATIAL_COLS) + SPATIAL_COLS) % SPATIAL_COLS;
+}
+function wrapCellY(cy: number): number {
+    return ((cy % SPATIAL_ROWS) + SPATIAL_ROWS) % SPATIAL_ROWS;
+}
+function cellKey(x: number, y: number): number {
+    const cx = wrapCellX(Math.floor(x / SPATIAL_GRID_SIZE));
+    const cy = wrapCellY(Math.floor(y / SPATIAL_GRID_SIZE));
+    return (cx << 16) | (cy & 0xFFFF);
+}
+function cellKeyFromCell(cx: number, cy: number): number {
+    return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
+}
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -50,15 +74,12 @@ export class PhysicsSystem {
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
-      const cellSize = SPATIAL_GRID_SIZE;
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           // Only index static structures that are not interactive portals/stations
           if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE && e.active) {
-               const cx = Math.floor(e.position.x / cellSize);
-               const cy = Math.floor(e.position.y / cellSize);
-               const key = (cx << 16) | (cy & 0xFFFF);
+               const key = cellKey(e.position.x, e.position.y);
 
                let cell = this.staticGrid.get(key);
                if (!cell) {
@@ -223,7 +244,8 @@ export class PhysicsSystem {
           entity.orbitAngle += entity.orbitSpeed * dt;
           entity.position.x = entity.orbitCenter.x + Math.cos(entity.orbitAngle) * entity.orbitRadius;
           entity.position.y = entity.orbitCenter.y + Math.sin(entity.orbitAngle) * entity.orbitRadius;
-          
+          wrapPosition(entity.position);
+
           entity.velocity.x = 0;
           entity.velocity.y = 0;
       } else {
@@ -240,6 +262,10 @@ export class PhysicsSystem {
           // displacement per wall-clock second.
           entity.position.x += entity.velocity.x * timeScale;
           entity.position.y += entity.velocity.y * timeScale;
+          // Toroidal map: keep positions in [-HALF_MAP, +HALF_MAP) so the
+          // spatial hash, flow field, and all distance math always see a
+          // canonical coordinate rather than one drifting off toward ±∞.
+          wrapPosition(entity.position);
 
           // Apply Friction
           if (entity.type === EntityType.NEBULA_SHARD) {
@@ -301,8 +327,8 @@ export class PhysicsSystem {
           const e = asteroids[i];
           if (e.isExploding) continue;
 
-          const dx = player.position.x - e.position.x;
-          const dy = player.position.y - e.position.y;
+          const dx = wrapDeltaX(e.position.x, player.position.x);
+          const dy = wrapDeltaY(e.position.y, player.position.y);
           const distSq = dx*dx + dy*dy;
 
           if (distSq < rangeSq && distSq > minDistSq) {
@@ -341,8 +367,8 @@ export class PhysicsSystem {
             if (!attractor.active) continue;
             if (entity === attractor) continue;
 
-            const dx = attractor.position.x - entity.position.x;
-            const dy = attractor.position.y - entity.position.y;
+            const dx = wrapDeltaX(entity.position.x, attractor.position.x);
+            const dy = wrapDeltaY(entity.position.y, attractor.position.y);
             const distSq = dx*dx + dy*dy;
             const rangeSq = attractor.gravityRange! ** 2;
 
@@ -379,7 +405,6 @@ export class PhysicsSystem {
   ) {
     // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
     this.dynamicGrid.clear();
-    const cellSize = SPATIAL_GRID_SIZE;
 
     // 2. Populate Dynamic Grid with moving entities.  While we're walking
     // each cell push, track the peak cell population — the 3×3 neighbourhood
@@ -413,9 +438,7 @@ export class PhysicsSystem {
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
 
-        const cx = Math.floor(e.position.x / cellSize);
-        const cy = Math.floor(e.position.y / cellSize);
-        const key = (cx << 16) | (cy & 0xFFFF);
+        const key = cellKey(e.position.x, e.position.y);
 
         let cell = this.dynamicGrid.get(key);
         if (!cell) {
@@ -431,13 +454,16 @@ export class PhysicsSystem {
     for (let i = 0; i < dynamicEntities.length; i++) {
         const a = dynamicEntities[i];
 
-        const cx = Math.floor(a.position.x / cellSize);
-        const cy = Math.floor(a.position.y / cellSize);
+        const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+        const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
 
-        // Check 3x3 neighbor cells
+        // Check 3x3 neighbor cells — cell coords wrap across the seam so
+        // entities near the edge see their counterparts on the opposite
+        // side of the map.  checkAndResolveCollision handles the world-
+        // space offset required to make SAT see the right geometry.
         for (let x = -1; x <= 1; x++) {
             for (let y = -1; y <= 1; y++) {
-                const key = ((cx + x) << 16) | ((cy + y) & 0xFFFF);
+                const key = cellKeyFromCell(cx + x, cy + y);
 
                 // Retrieve candidates from BOTH grids
                 const dynamicCandidates = this.dynamicGrid.get(key);
@@ -492,11 +518,7 @@ export class PhysicsSystem {
   }
 
   private removeStaticEntity(entity: GameEntity) {
-      const cellSize = SPATIAL_GRID_SIZE;
-      const cx = Math.floor(entity.position.x / cellSize);
-      const cy = Math.floor(entity.position.y / cellSize);
-      const key = (cx << 16) | (cy & 0xFFFF);
-
+      const key = cellKey(entity.position.x, entity.position.y);
       const cell = this.staticGrid.get(key);
       if (cell) {
           const idx = cell.indexOf(entity);
@@ -507,11 +529,7 @@ export class PhysicsSystem {
   }
 
   public addStaticEntity(entity: GameEntity) {
-      const cellSize = SPATIAL_GRID_SIZE;
-      const cx = Math.floor(entity.position.x / cellSize);
-      const cy = Math.floor(entity.position.y / cellSize);
-      const key = (cx << 16) | (cy & 0xFFFF);
-
+      const key = cellKey(entity.position.x, entity.position.y);
       let cell = this.staticGrid.get(key);
       if (!cell) {
           cell = [];
@@ -525,21 +543,22 @@ export class PhysicsSystem {
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
   public isPositionClear(x: number, y: number, r: number): boolean {
-      const cellSize = SPATIAL_GRID_SIZE;
-      const cx = Math.floor(x / cellSize);
-      const cy = Math.floor(y / cellSize);
+      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
       const rSq = r * r;
 
       for (let dx = -1; dx <= 1; dx++) {
           for (let dy = -1; dy <= 1; dy++) {
-              const key = ((cx + dx) << 16) | ((cy + dy) & 0xFFFF);
+              const key = cellKeyFromCell(cx + dx, cy + dy);
               const cell = this.staticGrid.get(key);
               if (!cell) continue;
               for (let i = 0; i < cell.length; i++) {
                   const t = cell[i];
                   if (!t.active) continue;
-                  const tdx = x - t.position.x;
-                  const tdy = y - t.position.y;
+                  // Toroidal distance — a candidate tile near the seam can
+                  // still be within `r` of the test point on the short way.
+                  const tdx = wrapDeltaX(t.position.x, x);
+                  const tdy = wrapDeltaY(t.position.y, y);
                   if (tdx * tdx + tdy * tdy < rSq) return false;
               }
           }
@@ -555,21 +574,44 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
-      // 0. BROADPHASE: Fast Circle Check
+      // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
+      // across the wrap seam are still considered.  If the shorter way
+      // around the torus is < rA+rB, the two entities are genuinely close.
       let rA = Math.max(a.size.x, a.size.y) / 2;
       let rB = Math.max(b.size.x, b.size.y) / 2;
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
-      const dx = a.position.x - b.position.x;
-      const dy = a.position.y - b.position.y;
-      const distSq = dx*dx + dy*dy;
+      const wdx = wrapDeltaX(a.position.x, b.position.x);
+      const wdy = wrapDeltaY(a.position.y, b.position.y);
+      const distSq = wdx*wdx + wdy*wdy;
 
       if (distSq > (rA + rB + 10)**2) return;
+
+      // SAT works on absolute vertex positions.  If A and B sit on
+      // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
+      // a's frame for the duration of this check so vertex math stays
+      // local.  After resolution we re-wrap both positions so anything
+      // the bouncer / positional-correction path wrote to a.position or
+      // b.position in the shifted frame returns to canonical coords.
+      const offsetX = (a.position.x + wdx) - b.position.x;
+      const offsetY = (a.position.y + wdy) - b.position.y;
+      const shifted = offsetX !== 0 || offsetY !== 0;
+      if (shifted) {
+          b.position.x += offsetX;
+          b.position.y += offsetY;
+      }
 
       // 1. SAT Collision Detection (Alloc-Free)
       if (this.checkCollisionSAT(a, b)) {
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
+      }
+
+      if (shifted) {
+          // Normalize any positions the resolver may have written in b's
+          // shifted frame (bouncer reflection, SLOP correction, etc.).
+          wrapPosition(a.position);
+          wrapPosition(b.position);
       }
   }
 
