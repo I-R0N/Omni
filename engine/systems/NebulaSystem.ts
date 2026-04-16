@@ -549,8 +549,13 @@ export class NebulaSystem {
         const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
         this.spawnGlimmerAtMergePoint(smaller.position, glimmerR, tint);
 
-        // Smaller vanishes; compaction pass at end of physics removes it.
-        smaller.active = false;
+        // Smaller fades out over top of the already-grown larger shard
+        // — no fade-in on larger (it just grows in place), so the eye
+        // reads the smaller dissolving INTO the new combined shard
+        // rather than popping out with the result flashing in from
+        // alpha 0.  Compaction removes it once the fade completes.
+        smaller.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
+        smaller.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
     }
 
     // Helper used by mergeNebulas — stashes the current frame's
@@ -631,13 +636,14 @@ export class NebulaSystem {
         entities.push(tile);
         physics.addStaticEntity(tile);
 
-        // New tile fades in slowly instead of popping — no glimmer
-        // burst since transmutation is a soft "condense" event.
-        tile.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
-        tile.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
-
-        // Shard collapses into the new tile.
-        shard.active = false;
+        // New tile appears immediately at full opacity — the parent
+        // shard fades out over top of it, so the eye reads the shard
+        // dissolving INTO an already-present tile rather than a flash
+        // where both source and destination cross through zero alpha.
+        // Shard collapses into the new tile — fade it out instead of
+        // instant-deactivating so the hand-off is a smooth dissolve.
+        shard.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
+        shard.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
         return true;
     }
 
