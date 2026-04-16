@@ -152,8 +152,6 @@ export class NebulaSystem {
         }
     }
 
-    // Private method stubs — filled in by subsequent edits.
-
     /**
      * Shatter a nebula TILE into glass-style polygonal shards.  Shards
      * never re-shatter — they just fade when struck — so this early-

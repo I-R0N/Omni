@@ -173,7 +173,6 @@ export const PHYSICS_CONSTANTS = {
   ACCELERATION: 0.02, // Fallback default (Reduced from 0.04)
   MAX_SPEED: 15,
   PLAYER_MASS: 100, // Heavier player = less recoil
-  RECOIL_FORCE: 0 // Legacy, unused now that mass is implemented
 };
 
 // ─── Fixed-timestep simulation ───────────────────────────────────────────────
