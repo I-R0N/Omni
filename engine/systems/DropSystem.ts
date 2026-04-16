@@ -13,20 +13,17 @@ import { buildShardPolygon } from '../shardPolygon';
 /**
  * DropSystem — owns collectible drops and breakage debris.
  *
- * Extracted from GameEngine in Phase 3 of the engine upgrade.  Stateless
- * apart from its ParticleSystem dependency; all drop / shard entities are
- * appended to the caller-supplied `entities` array and (for collectible
- * drops) also registered in a caller-supplied `activeDrops` cache for fast
- * lookup during the collection pass.
+ * Stateless apart from its ParticleSystem dependency; all drop / shard
+ * entities are appended to the caller-supplied `entities` array and (for
+ * collectible drops) also registered in a caller-supplied `activeDrops`
+ * cache for fast lookup during the collection pass.
  *
- * Reward application (player ammo / health adjustment) lives on this system
- * too — it's the natural home for "what happens when a drop is collected"
- * and keeps the surface area of Phase 3 small.
+ * Reward application (player ammo / health adjustment) lives on this
+ * system too — the natural home for "what happens when a drop is
+ * collected".
  */
 export class DropSystem {
   constructor(private particles: ParticleSystem) {}
-
-  // --- Wave-scaled ammo dispensing ----------------------------------------
 
   /** Returns the ammo type asteroids should drop for the current wave. */
   public getAsteroidAmmoType(waveIndex: number): WeaponType {
@@ -36,8 +33,6 @@ export class DropSystem {
     );
     return ASTEROID_AMMO_PROGRESSION[idx];
   }
-
-  // --- Reward application --------------------------------------------------
 
   /**
    * Apply the reward of a collected/broken drop directly to the player.
@@ -72,8 +67,6 @@ export class DropSystem {
       }
     }
   }
-
-  // --- Drop dispatcher -----------------------------------------------------
 
   /**
    * Top-level drop/shard dispatcher invoked when an entity is destroyed.
@@ -114,8 +107,6 @@ export class DropSystem {
       }
     }
   }
-
-  // --- Enemy / glass shard breakage ---------------------------------------
 
   /**
    * Break a dead enemy into debris.  Uses a fixed slot plan (6 tile shards +
@@ -288,8 +279,6 @@ export class DropSystem {
     });
   }
 
-  // --- Collectible drop spawning ------------------------------------------
-
   /**
    * Spawn a single collectible ammo drop and register it in `activeDrops`.
    * Blaster drops are silently skipped (blaster ammo is infinite).
@@ -346,8 +335,6 @@ export class DropSystem {
     entities.push(drop);
     activeDrops.push(drop);
   }
-
-  // --- Shard / drop polygon helpers ---------------------------------------
 
   /**
    * Generate an irregular shard polygon for a drop.  baseR controls visual

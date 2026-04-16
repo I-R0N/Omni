@@ -196,7 +196,7 @@ export interface GameEntity {
   // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
   ammo?: Partial<Record<WeaponType, number>>;
 
-  // Player resources (gold kept for drop-system compat until PR 2)
+  // Player resources
   gold?: number;
 
   // Drop item fields

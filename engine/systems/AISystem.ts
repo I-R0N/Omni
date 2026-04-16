@@ -196,7 +196,8 @@ export class AISystem {
       const timers = isRammer ? AI_CONFIG.RAMMER : AI_CONFIG;
       const rotThreshold = isRammer ? AI_CONFIG.RAMMER.ROTATION_THRESHOLD : AI_CONFIG.ROTATION_THRESHOLD;
 
-      // --- TARGETING LOGIC (Delayed Aim) ---
+      // Delayed-aim targeting — enemies snap their lagged target to the
+      // player's current position only once per reaction tick.
       let reaction = this.reactionTimers.get(enemy.id) || 0;
       reaction -= dt;
 
@@ -215,7 +216,6 @@ export class AISystem {
       const dyPlayer = player.position.y - enemy.position.y;
       const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
 
-      // --- STATE MACHINE ---
       if (enemy.aiTimer && enemy.aiTimer > 0) {
           enemy.aiTimer -= dt;
       } else {
@@ -243,7 +243,6 @@ export class AISystem {
           }
       }
 
-      // --- MOVEMENT BEHAVIOR ---
       const longRange = distToPlayer > AI_CONFIG.LONG_RANGE_SEEK_DIST;
 
       // At long range always seek regardless of idle state, so waves never
@@ -295,9 +294,9 @@ export class AISystem {
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
 
-      // --- STUCK DETECTION ---
-      // If the enemy has barely moved over the check interval while chasing,
-      // it's pinned against geometry. Apply a random impulse to break free.
+      // Stuck detection: if the enemy has barely moved over the check
+      // interval while chasing, it's pinned against geometry — apply a
+      // random impulse to break free.
       let stuckTimer = (this.stuckTimers.get(enemy.id) ?? AI_CONFIG.STUCK_CHECK_INTERVAL) - dt;
       if (stuckTimer <= 0) {
           const last = this.lastPositions.get(enemy.id);
@@ -315,9 +314,7 @@ export class AISystem {
       }
       this.stuckTimers.set(enemy.id, stuckTimer);
 
-      // --- ROTATION LOGIC ---
-      // Face velocity vector when moving fast (Flight dynamics)
-      // Face player when moving slow (Drift/Hover dynamics)
+      // Face the velocity vector at flight speeds, the player at drift speeds.
       let targetAngle = enemy.rotation;
 
       if (speed > rotThreshold) {

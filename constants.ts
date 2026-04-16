@@ -19,8 +19,6 @@ export const COLORS = {
   STRUCTURE_BORDER: '#818cf8', // Indigo 400
 };
 
-// --- SYSTEM CONFIGURATIONS ---
-
 export const CAMERA_CONSTANTS = {
   DEFAULT_ZOOM: 0.65,
   TRANSITION_DURATION: 0.8,
@@ -176,12 +174,11 @@ export const PHYSICS_CONSTANTS = {
 };
 
 // ─── Fixed-timestep simulation ───────────────────────────────────────────────
-// Engine upgrade Phase 1: the simulation (physics/AI/game logic) now runs at a
-// fixed timestep independent of frame rate so gameplay is deterministic across
-// devices.  We use 1/120 s instead of the spec's example 1/60 s so that on a
-// 60 Hz display every frame reliably runs exactly 2 sim steps and on a 120 Hz
-// display every frame runs exactly 1 — the divisibility avoids the 1-vs-2
-// alternation that caused visual jitter in the prior 1/60 accumulator attempt.
+// The simulation runs at a fixed timestep independent of frame rate so
+// gameplay is deterministic across devices.  We use 1/120 s rather than
+// 1/60 s so that on a 60 Hz display every frame reliably runs exactly 2 sim
+// steps and on a 120 Hz display exactly 1 — the divisibility avoids the
+// 1-vs-2-step alternation that otherwise produced visible jitter.
 export const SIMULATION_CONSTANTS = {
   FIXED_DT: 1 / 120,       // Deterministic simulation timestep (seconds)
   MAX_SUBSTEPS: 5,         // Spiral-of-death clamp: max sim steps per rendered frame
@@ -652,7 +649,6 @@ export const ENEMY_WEAPON: WeaponConfig = {
   pierce: 0
 };
 
-// --- ASSETS ---
 export { ASSETS };
 
 export const SHIELD_CONSTANTS = {

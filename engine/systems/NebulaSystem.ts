@@ -30,10 +30,8 @@ import { buildShardPolygon } from '../shardPolygon';
  * gravity/merge dynamics, tile regeneration with rule-based colour,
  * shard→tile transmutation, and the low-frequency ammo drop roll.
  *
- * Extracted from GameEngine as part of the Phase-2/3 style system split
- * introduced by the engine-upgrade PR.  NebulaSystem owns its own
- * `pendingRegens` queue (kept separate from glass-tile regen in
- * GameEngine) and drives a single per-frame `update()` tick.
+ * Owns its own `pendingRegens` queue (kept separate from glass-tile regen
+ * in GameEngine) and drives a single per-frame `update()` tick.
  *
  * State that lives on NebulaSystem:
  *   - `pendingRegens` — inactive nebula tiles waiting to respawn.

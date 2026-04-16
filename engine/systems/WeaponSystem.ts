@@ -13,10 +13,10 @@ import { ProjectileSystem } from './ProjectileSystem';
 /**
  * WeaponSystem — owns shooting behavior for both players and enemies.
  *
- * Extracted from GameEngine in Phase 2.  The system is stateless apart from
- * its ProjectileSystem dependency; all cooldown / burst state lives on the
- * entities themselves.  Screen-shake and other side effects are surfaced via
- * optional callbacks so the subsystem stays self-contained.
+ * Stateless apart from its ProjectileSystem dependency; cooldown / burst
+ * state lives on the entities themselves.  Screen-shake and other side
+ * effects are surfaced via optional callbacks so the subsystem stays
+ * self-contained.
  */
 export class WeaponSystem {
   constructor(private projectiles: ProjectileSystem) {}
@@ -110,10 +110,10 @@ export class WeaponSystem {
    * Tick the shooting AI for every active shooter-role enemy.  Manages
    * cooldowns, targeting, burst-fire state, and projectile spawning.
    *
-   * Phase 4: `enemies` is the pre-filtered enemy candidate list from
-   * EntityIndex, so this pass is O(E) on active enemies instead of O(N)
-   * on the full entity array.  Spawned projectiles are appended to
-   * `entities` (the master list) so the index stays in sync next frame.
+   * `enemies` is the pre-filtered enemy candidate list from EntityIndex,
+   * so the pass is O(E) on active enemies.  Spawned projectiles are
+   * appended to `entities` (the master list) so the index stays in sync
+   * next frame.
    */
   public updateEnemyShooting(
     entities: GameEntity[],

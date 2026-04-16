@@ -5,11 +5,10 @@ import { nextId } from './IdAllocator';
 /**
  * ParticleSystem — spawns and manages decorative particle entities.
  *
- * Extracted from GameEngine in Phase 2 of the engine upgrade.  Owns no state
- * of its own; callers pass the current map's entity list so particles can be
- * appended alongside other world entities.  A hard cap on live particles is
- * enforced after each burst via {@link enforceCap} — purely visual entities,
- * so FIFO dropping is safe.
+ * Owns no state of its own; callers pass the current map's entity list so
+ * particles can be appended alongside other world entities.  A hard cap on
+ * live particles is enforced after each burst via {@link enforceCap} —
+ * purely visual entities, so FIFO dropping is safe.
  */
 export class ParticleSystem {
   /**

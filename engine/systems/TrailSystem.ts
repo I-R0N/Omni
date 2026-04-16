@@ -3,8 +3,7 @@ import { TRAIL_CONSTANTS } from '../../constants';
 
 /**
  * TrailSystem — ticks down all trail-point arrays and handles projectile
- * trail emission.  Extracted from GameEngine in Phase 2.  Stateless; all
- * data lives on the entities themselves.
+ * trail emission.  Stateless; all data lives on the entities themselves.
  */
 export class TrailSystem {
   private static readonly PROJECTILE_TRAIL_LIFETIME = 0.25;

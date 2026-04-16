@@ -13,9 +13,8 @@ import { nextId } from './IdAllocator';
  * ProjectileSystem — owns projectile lifecycle: spawning, homing steering,
  * lightning gravity attraction, and the hard cap on active projectiles.
  *
- * Extracted from GameEngine in Phase 2 of the engine upgrade.  Stateless;
- * callers provide the entity list the projectiles should be appended to and
- * read from.
+ * Stateless; callers provide the entity list the projectiles should be
+ * appended to and read from.
  */
 export class ProjectileSystem {
   // Perf instrumentation — wall time (ms) of the most recent homing and
@@ -124,11 +123,11 @@ export class ProjectileSystem {
   /**
    * Steer every homing projectile toward the nearest enemy within range.
    *
-   * Phase 4: the caller supplies pre-filtered `projectiles` and `enemies`
-   * candidate lists from EntityIndex, so each pass is O(P × E) on the
-   * filtered sets instead of O(N × N) on the full entity array.  Homing
-   * projectiles still need an active + homing check because the index
-   * does not split projectiles by `.homing`.
+   * Caller supplies pre-filtered `projectiles` and `enemies` candidate
+   * lists from EntityIndex, so each pass is O(P × E) on the filtered sets
+   * rather than O(N × N) on the full entity array.  Homing projectiles
+   * still need a `.homing` check since the index does not split
+   * projectiles by that flag.
    */
   public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], dt: number) {
     const t0 = performance.now();
@@ -177,12 +176,8 @@ export class ProjectileSystem {
 
   /**
    * Lightning projectiles experience gravity-like attraction to the nearest
-   * valid target.
-   *
-   * Phase 4: works off EntityIndex candidate lists.  Early-out when either
-   * the projectile list has no lightning projectiles or there are no
-   * targets (enemies / asteroids) on the map.  Each attraction query is
-   * O(P_lightning × (E + A)) on the filtered lists instead of O(N × N).
+   * valid target.  Works off EntityIndex candidate lists with an early-out
+   * when there are no lightning projectiles or no targets on the map.
    */
   public updateLightningGravity(
     projectiles: GameEntity[],

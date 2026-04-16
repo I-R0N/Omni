@@ -10,8 +10,7 @@ const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
 const SHIELD_COLLISION_MULT = SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
 
-// Converts a 6-digit hex color string to an [r, g, b] tuple.
-// Results are cached to avoid per-frame string parsing.
+// Cached so repeated lookups (one per rendered entity) skip the substring parse.
 const _rgbCache = new Map<string, [number, number, number]>();
 function hexToRgb(hex: string): [number, number, number] {
     let cached = _rgbCache.get(hex);
@@ -64,7 +63,7 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
-  // Optimization: Reusable buffer for sorting indicators to prevent array allocation
+  // Reusable sort buffer — avoids a per-frame array allocation.
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
@@ -271,7 +270,6 @@ export class RenderSystem {
       return c;
   }
 
-  // Helper to load/get images
   private getImage(src: string): HTMLImageElement {
       if (this.images.has(src)) {
           return this.images.get(src)!;
@@ -553,7 +551,7 @@ export class RenderSystem {
       entityColor?: string,
       isBouncer?: boolean
   ) {
-      // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
+      // Single polygon strip so the whole trail is one fill call.
       ctx.beginPath();
 
       // Forward pass: Right side of trail
@@ -1595,7 +1593,6 @@ export class RenderSystem {
       
       texts.forEach(t => {
           ctx.save();
-          // REMOVED INTEGER OPTIMIZATION
           ctx.translate(t.position.x, t.position.y);
           
           const lifeRatio = t.lifetime / t.maxLifetime;

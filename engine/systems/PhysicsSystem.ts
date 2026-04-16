@@ -124,17 +124,12 @@ export class PhysicsSystem {
       const entity = entities[i];
       if (!entity.active) continue;
 
-      // OPTIMIZATION: Early bail on static geometry.
-      // Map scenes can hold ~22k tile structures, the vast majority of which
-      // are inert walls with mass=Infinity.  Walking them through the full
-      // lifetime/flash/shield pipeline below burns 5+ conditionals per tile
-      // per substep for nothing.  Bail immediately here — but FIRST tick
-      // the nebula-specific timers, because NEBULA tiles also have
-      // mass=Infinity and their spawn / fade / cooldown decrements must
-      // still run every frame.  Without this, newly-created tiles with
-      // `nebulaSpawnTimer = FADE_IN_DURATION` compute `spawnMul = 0` in
-      // the renderer and draw at alpha 0 — invisible sprites even though
-      // debug outlines render fine.
+      // Early bail on static geometry.  Map scenes can hold ~22k tile
+      // structures with mass=Infinity; skipping the full lifetime/flash/
+      // shield pipeline cuts ~5 conditionals per tile per substep.  We
+      // MUST still tick the nebula-specific timers first because NEBULA
+      // tiles also carry mass=Infinity — without that, newly-spawned
+      // tiles render at alpha 0 (invisible sprite, debug outline fine).
       if (entity.mass === Infinity) {
           if (entity.hitFlash && entity.hitFlash > 0) entity.hitFlash -= dt;
           if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
@@ -283,12 +278,10 @@ export class PhysicsSystem {
   /**
    * Mutual gravity between the player and every active asteroid.
    *
-   * Phase 2: consumes EntityIndex.asteroids (passed down from GameEngine
-   * via update()) instead of scanning the full ~22k entity master list.
-   * The measurement-driven signal for late-wave drops: this single scan
-   * used to walk every static tile just to reach a few hundred shards.
-   * Each asteroid still gets an `isExploding` skip since the index is
-   * filtered by `active` alone and can hold mid-explosion entries.
+   * Consumes EntityIndex.asteroids (passed down from GameEngine via
+   * update()) rather than scanning the full ~22k entity list.  Each
+   * asteroid still gets an `isExploding` skip since the index filters
+   * by `active` alone and can hold mid-explosion entries.
    */
   private applyLocalGravity(asteroids: GameEntity[], player: GameEntity, timeScale: number) {
       if (!player.active) return;
@@ -324,16 +317,14 @@ export class PhysicsSystem {
   }
 
   private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
-    // Phase 2: use the attractors cache populated on map load instead of
-    // re-scanning the full entity array every substep.  Individual dead
-    // attractors are skipped at access time by the `active` check below so
-    // a destroyed attractor stops contributing without rebuilding the list.
+    // Use the attractors cache populated on map load.  Individual dead
+    // attractors are skipped via the `active` check below so a destroyed
+    // attractor stops contributing without rebuilding the cache.
     const attractors = this.attractorsCache;
     if (attractors.length === 0) return;
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
-        // Optimization: Skip particles and structures
         if (!entity.active || entity.isExploding || entity.mass === Infinity || entity.type === EntityType.STRUCTURE || entity.type === EntityType.PARTICLE) continue;
 
         for (let j = 0; j < attractors.length; j++) {
@@ -1050,7 +1041,6 @@ export class PhysicsSystem {
       }
   }
 
-  // --- OPTIMIZED SAT HELPERS ---
   private fillVertices(e: GameEntity, buffer: Vector2[]): number {
       let count = 0;
       // Shield expands the player's collision shape

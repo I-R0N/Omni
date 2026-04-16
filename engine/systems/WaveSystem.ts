@@ -14,12 +14,10 @@ import { nextId } from './IdAllocator';
  * WaveSystem — owns wave state (current index, live enemy ids, phase,
  * grace-period countdown) and the wave-spawn routine.
  *
- * Extracted from GameEngine in Phase 3 of the engine upgrade.  Unlike the
- * fully stateless Phase-2 systems, this one owns meaningful state because
- * multiple GameEngine methods need to read/write it (stats reporting, HUD,
- * completion detection, skip).  Keeping it encapsulated here lets the
- * engine treat waves as a black box instead of sprinkling wave fields
- * across the god-class.
+ * Unlike the stateless sibling systems, this one owns meaningful state
+ * because multiple GameEngine methods read/write it (stats reporting,
+ * HUD, completion detection, skip).  Encapsulating it here keeps the
+ * engine oblivious to wave internals.
  */
 export class WaveSystem {
   public waveIndex: number = 0;

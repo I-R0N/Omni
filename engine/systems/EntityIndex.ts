@@ -3,16 +3,15 @@ import { GameEntity, EntityType } from '../../types';
 /**
  * EntityIndex — type-filtered candidate lists rebuilt once per sim step.
  *
- * Phase 4 of the engine upgrade.  Multiple systems used to scan the master
- * entity list independently ("find all active enemies", "find all
- * projectiles", "find all asteroids for gravity"), each a full O(N) walk.
- * EntityIndex performs a single O(N) classification pass and exposes the
- * filtered slices so every downstream consumer stays O(matches) instead
- * of O(all entities).
+ * Systems would otherwise each scan the master entity list independently
+ * ("find all active enemies", "find all projectiles", "find all
+ * asteroids"), every scan a full O(N) walk.  EntityIndex performs a
+ * single O(N) classification pass and exposes filtered slices so every
+ * downstream consumer stays O(matches) instead of O(all entities).
  *
- * Callers are expected to call {@link rebuild} at the start of each sim
- * step (via GameEngine.prepareFrameEntities).  The lists mutate in place
- * on every rebuild, so consumers must NOT cache them across calls.
+ * Callers must invoke {@link rebuild} at the start of each sim step
+ * (via GameEngine.prepareFrameEntities).  The lists mutate in place on
+ * every rebuild, so consumers must NOT cache them across calls.
  */
 export class EntityIndex {
   /** Active enemies (ships, shooters, rammers). */

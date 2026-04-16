@@ -1,23 +1,12 @@
 /**
  * IdAllocator — monotonic, process-scoped unique ID generator.
  *
- * Phase 5 of the engine upgrade.  Replaces the previous
- * `${prefix}_${Date.now()}_${Math.random()}` pattern used throughout the
- * engine for entity / message / announcement IDs.
+ * A plain incrementing counter is O(1), collision-free for the session,
+ * and avoids the `Date.now()` / `Math.random()` calls per spawn that used
+ * to show up in hot allocation loops (particles, shards, projectiles).
  *
- * Rationale:
- *   - `Date.now()` is a syscall on most JS runtimes; calling it once per
- *     spawned entity burns cycles in hot loops that allocate hundreds of
- *     particles / projectiles / shards per frame.
- *   - `Math.random()` adds another call and a long fractional suffix to
- *     every ID string, which is pure overhead for unique-id purposes.
- *   - A simple monotonically incrementing counter is O(1), collision-free
- *     within a process lifetime, and produces short stable strings that
- *     are friendly to logs and debuggers.
- *
- * IDs generated here are NOT persisted, serialized, or shared across
- * clients — they only need to stay unique for the current game session,
- * so a process-local counter is sufficient.
+ * IDs are not persisted, serialized, or shared across clients — they
+ * only need to stay unique for the current game session.
  */
 
 let counter = 0;

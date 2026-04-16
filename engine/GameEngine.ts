@@ -45,7 +45,7 @@ export class GameEngine {
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
-  // Fixed-timestep accumulator (Phase 1).  Frame delta is accumulated and the
+  // Fixed-timestep accumulator.  Frame delta is accumulated and the
   // simulation is stepped at SIMULATION_CONSTANTS.FIXED_DT until the
   // accumulator is drained; any remainder carries to the next frame.  This
   // decouples gameplay speed from display refresh rate so physics outcomes
@@ -74,9 +74,8 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Wave system state lives on this.waves (WaveSystem) — these accessors
-  // preserve the old GameEngine.waveX field ergonomics for the handful of
-  // call sites that still read/write them directly.
+  // Wave state lives on this.waves (WaveSystem); these accessors let the
+  // call sites that read/write it directly stay terse.
   private get waveIndex(): number { return this.waves.waveIndex; }
   private set waveIndex(v: number) { this.waves.waveIndex = v; }
   private get waveEnemyIds(): Set<string> { return this.waves.waveEnemyIds; }
@@ -96,8 +95,7 @@ export class GameEngine {
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
 
-  // Wave announcement banners rendered on the canvas — forwarded from
-  // WaveSystem so existing call sites keep working verbatim.
+  // Wave announcement banners rendered on the canvas.
   public get waveAnnouncements(): WaveAnnouncement[] { return this.waves.announcements; }
   public set waveAnnouncements(v: WaveAnnouncement[]) { this.waves.announcements = v; }
 
@@ -252,7 +250,6 @@ export class GameEngine {
     this.input.cleanup();
   }
 
-  // --- STATE MANAGEMENT ---
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
@@ -384,7 +381,6 @@ export class GameEngine {
         return;
     }
 
-    // ── Fixed-timestep accumulator (Phase 1) ─────────────────────────────────
     // Drain the accumulator at a fixed simulation rate regardless of the
     // render frame rate.  Any leftover time carries to the next frame.
     //
@@ -436,10 +432,10 @@ export class GameEngine {
           this.frameEntities.push(ents[i]);
       }
       this.frameEntities.push(this.player);
-      // Phase 4: rebuild type-filtered candidate lists so every downstream
-      // system scan runs on the minimal relevant slice instead of the full
-      // master entity list.  Rebuilt once per sim substep; consumers must
-      // not cache these references across steps.
+      // Rebuild type-filtered candidate lists so every downstream system
+      // scans the minimal relevant slice instead of the full master entity
+      // list.  Rebuilt once per sim substep; consumers must not cache these
+      // references across steps.
       this.entityIndex.rebuild(this.currentMap.entities);
 
       // Mirror the latest entity-type counts into the perf snapshot — the
@@ -859,15 +855,14 @@ export class GameEngine {
     }
 
     const moveDir = this.input.getMovementVector();
-    this.player.inputVector = moveDir; // Debug visualization assignment
-    
+    this.player.inputVector = moveDir;
+
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
     const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
     const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
 
-    // Time-Scaled Input Acceleration
-    // Input is applied per-frame (variable dt), so we must scale acceleration by dt
-    // Normalized to 60fps (dt * 60)
+    // Scale input acceleration so the per-step impulse is equivalent at any
+    // substep rate (reference 60 Hz).
     const timeScale = dt * 60;
     this.player.velocity.x += moveDir.x * acc * timeScale;
     this.player.velocity.y += moveDir.y * acc * timeScale;
@@ -1122,7 +1117,6 @@ export class GameEngine {
 
   // ── Particle helpers ────────────────────────────────────────────────────────
 
-  // Thin wrapper kept for call-site compatibility — delegates to ParticleSystem.
   private spawnParticles(
     position: Vector2,
     count: number,
@@ -1299,8 +1293,6 @@ export class GameEngine {
       }
   }
 
-  // Thin wrappers that delegate to ProjectileSystem / TrailSystem.  Kept so
-  // existing GameEngine call sites stay unchanged during the Phase 2 split.
   private spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
       if (!this.currentMap) return;
       this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
@@ -1332,9 +1324,9 @@ export class GameEngine {
       if (!this.currentMap) return;
 
       // Build chain: hop from the initial target to nearby enemies/asteroids.
-      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
-      // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may mid-animation.
+      // Walks the pre-filtered enemy + asteroid lists; exploding entities
+      // are skipped since the index holds `active` entities that may be
+      // mid-animation.
       const enemies = this.entityIndex.enemies;
       const asteroids = this.entityIndex.asteroids;
       const chain: GameEntity[] = [firstTarget];
@@ -1480,7 +1472,6 @@ export class GameEngine {
 
       // ── 2. Detect new contacts via spatial grid ───────────────────────────
       // Candidates: active asteroids + eligible drops (no glass/powerup).
-      // Phase 4: asteroids come straight from the prebuilt index.
       const asteroids = this.entityIndex.asteroids;
       const candidates: GameEntity[] = [];
       for (let i = 0; i < asteroids.length; i++) candidates.push(asteroids[i]);
@@ -1818,8 +1809,6 @@ export class GameEngine {
       });
   }
 
-  // --- WAVE SYSTEM ---
-
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
    *  tiny helper so every wave entry point (init / grace tick / skip) goes
    *  through the same factory. */
@@ -1834,7 +1823,6 @@ export class GameEngine {
     };
   }
 
-  // Thin wrappers kept for internal call-site compatibility — delegate to WaveSystem.
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
@@ -1848,10 +1836,8 @@ export class GameEngine {
   }
 
 
-  // --- Drop / shard thin wrappers ────────────────────────────────────────
-  //
-  // Logic lives in DropSystem; these wrappers preserve the existing call
-  // sites in updateGameLogic / handleEntityDeath / collection paths.
+  // Drop / shard logic lives in DropSystem; these wrappers forward the
+  // GameEngine-local context (current map entities, activeDrops cache, etc.).
 
   private applyDropEffect(entity: GameEntity) {
     this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
