@@ -287,12 +287,12 @@ export const NEBULA_CONSTANTS = {
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
-  // damping = shards drift longer.  At 0.991, velocity halves in ~77
-  // frames (~1.28 s) — paired with the reduced launch velocities below,
-  // the total coast distance is preserved while making shards *move*
-  // more slowly (same travel distance, ~33 % longer wall-clock time).
-  LINEAR_DAMPING: 0.991,
-  ANGULAR_DAMPING: 0.991,
+  // damping = shards drift longer.  At 0.98, velocity halves in ~34
+  // frames (~0.57 s) — a noticeably quicker settle than the original
+  // 0.991 so shards come to rest instead of drifting visibly across
+  // the screen, while still giving a beat of motion post-shatter.
+  LINEAR_DAMPING: 0.98,
+  ANGULAR_DAMPING: 0.98,
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
   REST_SPEED: 0.005,
   REST_SPIN: 0.01,
