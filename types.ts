@@ -2,9 +2,6 @@
 
 export enum MapType {
   UNIVERSE = 'UNIVERSE',
-  SOLAR_SYSTEM = 'SOLAR_SYSTEM',
-  LOCAL = 'LOCAL',
-  SUB_MAP = 'SUB_MAP',
 }
 
 export enum GameState {

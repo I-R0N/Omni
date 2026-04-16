@@ -209,6 +209,7 @@ export class GameEngine {
 
   public stop() {
     this.isRunning = false;
+    this.input.cleanup();
   }
 
   // --- STATE MANAGEMENT ---
@@ -317,7 +318,7 @@ export class GameEngine {
       inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
     };
     this.onStatsUpdate({
-      fps: Math.round(1000 / ((performance.now() - time) + 1)),
+      fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
@@ -363,10 +364,12 @@ export class GameEngine {
         steps++;
     }
     // If we hit the substep cap there's still leftover time we can't afford
-    // to simulate this frame — discard it so the accumulator can't grow
-    // unboundedly and trigger a death spiral on the next frame.
+    // to simulate this frame.  Drop the full-step debt we can't catch up on
+    // but keep the fractional remainder so sub-step phase stays continuous
+    // across the clamp boundary (vs. zeroing and visibly snapping on the
+    // next frame).
     if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
-        this.simAccumulator = 0;
+        this.simAccumulator %= FIXED_DT;
     }
 
     // Refresh the frame entity list one more time so anything spawned during
@@ -414,7 +417,7 @@ export class GameEngine {
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
       this.flowField.flushEnemyField();
 
-      this.ai.update(dt, allEntities, this.player, this.flowField);
+      this.ai.update(dt, this.entityIndex.enemies, this.player, this.flowField);
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -639,12 +642,12 @@ export class GameEngine {
           }
 
           if (safe && this.currentMap) {
-               const newAst = (this.currentMap as any).createAsteroid(x, y, 
+               const newAst = this.currentMap.createAsteroid(x, y,
                   config.minSize + Math.random() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
                this.currentMap.entities.push(newAst);
-               break; 
+               break;
           }
       }
   }
@@ -969,14 +972,16 @@ export class GameEngine {
       }
     }
 
-    // Proximity collection + magnetic pull — single pass over activeDrops
+    // Proximity collection + magnetic pull — single pass over activeDrops.
+    // Ammo shards get a magnet accelerator; health hearts collect on contact
+    // only (static pickup).
     if (!this.player.isExploding) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const MAGNET_RANGE_SQ = 150 * 150;
       const MAGNET_ACCEL    = 7; // world-units/s² toward player; scales up as dist shrinks
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
-        if (!drop.active || drop.dropType === 'health') continue;
+        if (!drop.active) continue;
         const dx     = this.player.position.x - drop.position.x;
         const dy     = this.player.position.y - drop.position.y;
         const distSq = dx * dx + dy * dy;
@@ -985,23 +990,13 @@ export class GameEngine {
           drop.active = false;
           continue;
         }
+        // Health drops are static — skip the magnet pull.
+        if (drop.dropType === 'health') continue;
         if (distSq < MAGNET_RANGE_SQ) {
           const dist = Math.sqrt(distSq);
           const a    = MAGNET_ACCEL / dist; // inverse-linear: stronger when closer
           drop.velocity.x += dx * a * dt;
           drop.velocity.y += dy * a * dt;
-        }
-      }
-      // Health drop proximity check (no magnet — static heart)
-      const cr2 = collectRadSq;
-      for (let i = 0; i < this.activeDrops.length; i++) {
-        const drop = this.activeDrops[i];
-        if (!drop.active || drop.dropType !== 'health') continue;
-        const dx = this.player.position.x - drop.position.x;
-        const dy = this.player.position.y - drop.position.y;
-        if (dx * dx + dy * dy <= cr2) {
-          this.applyDropEffect(drop);
-          drop.active = false;
         }
       }
     }
@@ -1063,7 +1058,6 @@ export class GameEngine {
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Derive impact direction for a slight forward cone bias
-    const projSpeed = Math.sqrt(proj.velocity.x ** 2 + proj.velocity.y ** 2) || 1;
     const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
 
     switch (target.type) {
@@ -1122,8 +1116,6 @@ export class GameEngine {
     if (proj.isLightningProjectile) {
         this.fireLightningChainFromImpact(impactPos, target);
     }
-
-    void projSpeed; // suppress lint
   };
 
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {

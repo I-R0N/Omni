@@ -18,6 +18,10 @@ const App: React.FC = () => {
     difficulty: 3
   });
   const [difficulty, setDifficulty] = useState<number>(3);
+  // Mirror difficulty into a ref so the one-shot mount effect below can
+  // read the latest value without closing over stale state.
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -25,7 +29,7 @@ const App: React.FC = () => {
     // Initialize Engine
     const engine = new GameEngine((newStats) => {
         setStats(newStats);
-    }, difficulty);
+    }, difficultyRef.current);
 
     const handleResize = () => {
       if (canvasRef.current) {
