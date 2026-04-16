@@ -128,11 +128,31 @@ export class PhysicsSystem {
       // Map scenes can hold ~22k tile structures, the vast majority of which
       // are inert walls with mass=Infinity.  Walking them through the full
       // lifetime/flash/shield pipeline below burns 5+ conditionals per tile
-      // per substep for nothing.  Bail immediately here — the only per-
-      // frame work a static entity still needs is hitFlash decay (tiles
-      // visibly flash when damaged), which is cheap to handle inline.
+      // per substep for nothing.  Bail immediately here — but FIRST tick
+      // the nebula-specific timers, because NEBULA tiles also have
+      // mass=Infinity and their spawn / fade / cooldown decrements must
+      // still run every frame.  Without this, newly-created tiles with
+      // `nebulaSpawnTimer = FADE_IN_DURATION` compute `spawnMul = 0` in
+      // the renderer and draw at alpha 0 — invisible sprites even though
+      // debug outlines render fine.
       if (entity.mass === Infinity) {
           if (entity.hitFlash && entity.hitFlash > 0) entity.hitFlash -= dt;
+          if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
+              entity.nebulaImpactCooldown -= dt;
+          }
+          if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
+              entity.nebulaFadeTimer -= dt;
+              if (entity.nebulaFadeTimer <= 0) {
+                  entity.nebulaFadeTimer = undefined;
+                  entity.active = false;
+              }
+          }
+          if (entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0) {
+              entity.nebulaSpawnTimer -= dt;
+              if (entity.nebulaSpawnTimer <= 0) {
+                  entity.nebulaSpawnTimer = undefined;
+              }
+          }
           continue;
       }
 
@@ -154,9 +174,10 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
-      // Nebula tile fade — shattered tiles stay active+rendered while
-      // this counts down, then deactivate and enter the regen wait.
-      // Must tick before the mass=Infinity skip so static tiles get it.
+      // Nebula shard fade — shattered shards stay active+rendered while
+      // this counts down, then deactivate and get compacted out.  Tiles
+      // already had their fade ticked above inside the mass=Infinity
+      // branch, so this path only fires for dynamic (shard) entities.
       if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
           entity.nebulaFadeTimer -= dt;
           if (entity.nebulaFadeTimer <= 0) {
