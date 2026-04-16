@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -128,11 +128,31 @@ export class PhysicsSystem {
       // Map scenes can hold ~22k tile structures, the vast majority of which
       // are inert walls with mass=Infinity.  Walking them through the full
       // lifetime/flash/shield pipeline below burns 5+ conditionals per tile
-      // per substep for nothing.  Bail immediately here — the only per-
-      // frame work a static entity still needs is hitFlash decay (tiles
-      // visibly flash when damaged), which is cheap to handle inline.
+      // per substep for nothing.  Bail immediately here — but FIRST tick
+      // the nebula-specific timers, because NEBULA tiles also have
+      // mass=Infinity and their spawn / fade / cooldown decrements must
+      // still run every frame.  Without this, newly-created tiles with
+      // `nebulaSpawnTimer = FADE_IN_DURATION` compute `spawnMul = 0` in
+      // the renderer and draw at alpha 0 — invisible sprites even though
+      // debug outlines render fine.
       if (entity.mass === Infinity) {
           if (entity.hitFlash && entity.hitFlash > 0) entity.hitFlash -= dt;
+          if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
+              entity.nebulaImpactCooldown -= dt;
+          }
+          if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
+              entity.nebulaFadeTimer -= dt;
+              if (entity.nebulaFadeTimer <= 0) {
+                  entity.nebulaFadeTimer = undefined;
+                  entity.active = false;
+              }
+          }
+          if (entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0) {
+              entity.nebulaSpawnTimer -= dt;
+              if (entity.nebulaSpawnTimer <= 0) {
+                  entity.nebulaSpawnTimer = undefined;
+              }
+          }
           continue;
       }
 
@@ -148,6 +168,42 @@ export class PhysicsSystem {
       // Visuals: Tick down flash timer
       if (entity.hitFlash && entity.hitFlash > 0) {
           entity.hitFlash -= dt;
+      }
+      // Nebula shatter cooldown — strikers (PLAYER/ENEMY) that just broke
+      // a nebula can't break another until this expires.
+      if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
+          entity.nebulaImpactCooldown -= dt;
+      }
+      // Nebula shard fade — shattered shards stay active+rendered while
+      // this counts down, then deactivate and get compacted out.  Tiles
+      // already had their fade ticked above inside the mass=Infinity
+      // branch, so this path only fires for dynamic (shard) entities.
+      if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
+          entity.nebulaFadeTimer -= dt;
+          if (entity.nebulaFadeTimer <= 0) {
+              entity.nebulaFadeTimer = undefined;
+              entity.active = false;
+          }
+      }
+      // Nebula birth fade-in — newly-created tiles and shards count this
+      // down from FADE_IN_DURATION to 0; the renderer scales alpha by
+      // 1 − (timer / FADE_IN_DURATION) so they slowly materialise.
+      if (entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0) {
+          entity.nebulaSpawnTimer -= dt;
+          if (entity.nebulaSpawnTimer <= 0) {
+              entity.nebulaSpawnTimer = undefined;
+          }
+      }
+      // Nebula shard merge cooldown — skip gravity pull + merge checks
+      // in NebulaSystem.updateDynamics while this is positive.  Only
+      // NEBULA_SHARDs carry this field in practice, but ticking it
+      // unconditionally is a single branch per entity and keeps the
+      // timer model consistent.
+      if (entity.nebulaMergeCooldown !== undefined && entity.nebulaMergeCooldown > 0) {
+          entity.nebulaMergeCooldown -= dt;
+          if (entity.nebulaMergeCooldown <= 0) {
+              entity.nebulaMergeCooldown = undefined;
+          }
       }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
@@ -172,7 +228,7 @@ export class PhysicsSystem {
           entity.velocity.y = 0;
       } else {
           // STANDARD PHYSICS
-          
+
           // Skip movement for exploding entities
           if (entity.isExploding) continue;
 
@@ -186,13 +242,29 @@ export class PhysicsSystem {
           entity.position.y += entity.velocity.y * timeScale;
 
           // Apply Friction
-          // Don't apply friction to projectiles (constant speed), asteroids (drift), or drop shards (drift like asteroids)
-          if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
+          if (entity.type === EntityType.NEBULA_SHARD) {
+            // Nebula shards: custom heavy linear & angular damping (cloud drag).
+            // Uses per-entity damping factors so individual shards can vary if
+            // needed, with a sane default from NEBULA_CONSTANTS.
+            const linearD = entity.linearDamping ?? NEBULA_CONSTANTS.LINEAR_DAMPING;
+            const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
+            const lin = Math.pow(linearD, timeScale);
+            const ang = Math.pow(angularD, timeScale);
+            entity.velocity.x *= lin;
+            entity.velocity.y *= lin;
+            if (Math.abs(entity.velocity.x) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.x = 0;
+            if (Math.abs(entity.velocity.y) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.y = 0;
+            if (entity.rotationSpeed !== undefined) {
+                entity.rotationSpeed *= ang;
+                if (Math.abs(entity.rotationSpeed) < NEBULA_CONSTANTS.REST_SPIN) entity.rotationSpeed = 0;
+                entity.rotation += entity.rotationSpeed * dt;
+            }
+          } else if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
               && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             // Apply standard friction to all dynamic entities (Player, Enemies, etc)
             entity.velocity.x *= friction;
             entity.velocity.y *= friction;
-            
+
             // Snap to zero at very low speeds to prevent micro-drift calculations
             if (Math.abs(entity.velocity.x) < 0.01) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < 0.01) entity.velocity.y = 0;
@@ -330,6 +402,15 @@ export class PhysicsSystem {
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
 
+        // Fading nebulas (tiles and shards alike) are in their death
+        // animation — drop them out of broadphase so they can't be
+        // re-shattered mid-fade even after the striker's cooldown expires.
+        if (e.nebulaFadeTimer !== undefined) continue;
+
+        // Nebula shards re-enter the dynamic grid so player/enemy contact
+        // can trigger a shatter.  The nebula branch in resolveCollision is
+        // still pass-through (no impulse), so they never exchange momentum
+        // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
 
         const cx = Math.floor(e.position.x / cellSize);
@@ -568,6 +649,78 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
+
+      // ── NEBULA: pass-through with conditional shatter ──────────────────
+      // Nebula tiles AND nebula shards never apply a collision impulse.
+      // PLAYER/ENEMY contact shatters them into 3 children at 75% of the
+      // parent's linear size (handled in GameEngine.spawnNebulaShards).
+      // Projectiles and everything else pass straight through without
+      // touching the nebula.  Sub-minimum shards pass through without
+      // even shattering (the caller returns early in spawnNebulaShards).
+      const aIsNebula = a.type === EntityType.NEBULA || a.type === EntityType.NEBULA_SHARD;
+      const bIsNebula = b.type === EntityType.NEBULA || b.type === EntityType.NEBULA_SHARD;
+      if (aIsNebula || bIsNebula) {
+          // If both sides are nebula (tile/shard vs tile/shard), no shatter —
+          // those interactions belong to the gravity/merge pass in
+          // GameEngine.updateNebulaDynamics.
+          if (aIsNebula && bIsNebula) return;
+
+          const nebula = aIsNebula ? a : b;
+          const other  = aIsNebula ? b : a;
+
+          // Striker must be PLAYER or ENEMY to shatter, AND must not be
+          // in the post-shatter cooldown window.  Shards are
+          // INDESTRUCTIBLE — they pass through unchanged — so only
+          // NEBULA tiles are shatterable.  This keeps the total nebula
+          // area conserved: each tile shatter produces exactly one
+          // tile's worth of effective shard mass, which eventually
+          // coalesces back into one new tile via transmutation.
+          const shatters = nebula.type === EntityType.NEBULA
+                            && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+                            && (other.nebulaImpactCooldown ?? 0) <= 0;
+          if (shatters) {
+              // Size floor check: below MIN_SHATTER_DIAMETER the child
+              // diameter would be too small to spawn, so just pass through.
+              const parentD = Math.max(nebula.size.x, nebula.size.y);
+              const childD  = parentD * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
+              if (childD >= NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) {
+                  if (other.velocity) {
+                      nebula.lastImpactVelocity = { x: other.velocity.x, y: other.velocity.y };
+                  }
+                  nebula.lastImpactDamage = 1;
+                  nebula.health = 0;
+                  // Effective fade-out duration scales with impact speed —
+                  // a fast collision snaps through the fade, while slow
+                  // drift-through keeps the graceful 1s dissolution.
+                  // Both the duration AND the initial timer value get
+                  // the scaled value so the renderer's alpha = timer /
+                  // duration normalisation stays correct.
+                  const impactSpeed = other.velocity
+                      ? Math.sqrt(other.velocity.x * other.velocity.x + other.velocity.y * other.velocity.y)
+                      : 0;
+                  const rateScale = nebulaFadeRateScale(impactSpeed);
+                  const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
+                  nebula.nebulaFadeTimer = scaledFadeDuration;
+                  nebula.nebulaFadeDuration = scaledFadeDuration;
+                  if (nebula.type === EntityType.NEBULA) {
+                      // Tiles live in the static grid — pull them out so
+                      // the player can drift through the fading cell.
+                      this.removeStaticEntity(nebula);
+                  }
+                  // Shards live in the dynamic grid which is rebuilt
+                  // each frame; the populate loop below skips entities
+                  // with nebulaFadeTimer set, so fading shards drop out
+                  // of broadphase automatically on the next frame.
+                  //
+                  // Arm the striker's post-shatter cooldown.
+                  other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
+                  if (onDeath) onDeath(nebula);
+              }
+          }
+          // No impulse / no positional correction regardless of outcome.
+          return;
+      }
+
       // INTERACTABLE collision rules:
       // - Non-drop interactables (POIs, etc.): skip entirely.
       // - Glass shards are full physics participants — they interact with everything

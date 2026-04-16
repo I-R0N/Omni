@@ -1,8 +1,10 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
+import { blendCompositionToHex } from '../NebulaColor';
+import { HEX_AREA } from '../maps/TileGenerator';
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -66,7 +68,28 @@ export class RenderSystem {
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
+  // Pre-rendered nebula twinkle star (created once, reused for every nebula
+  // tile/shard).  Soft radial glow with a 4-point spike cross drawn additively
+  // so it reads as a tiny far-away star sparkling inside the cloud.
+  private _twinkleBitmap: HTMLCanvasElement | null = null;
+  // Tinted sprite cache: `${src}|${hex}` → pre-tinted offscreen canvas.
+  // Nebula tiles/shards re-use the background nebula PNGs with per-tile
+  // colour composition applied via source-atop, so tinting happens once per
+  // (sprite, colour) pair instead of every frame.
+  private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
+  // Normalized (range [-0.5, 0.5]) alpha-weighted centroid offset of the
+  // visible content within each sprite's bitmap bounds.  Computed once
+  // per source URL at first draw, then reused to shift drawImage so the
+  // content's visual centre lands on the rotation pivot.  Prevents
+  // sprite "orbiting" when the art isn't perfectly centred in its frame.
+  private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
   private _visibleEntities: GameEntity[] = [];
+  // Separate render bucket for nebula tiles and shards so they always
+  // render BELOW asteroids / actors / other entities regardless of their
+  // order in currentMap.entities.  Runtime-spawned nebula tiles (from
+  // shard transmutation) get pushed to the end of the entities array, so
+  // a naive single-pass loop would render them on top of asteroids.
+  private _nebulaEntities: GameEntity[] = [];
   private _trailEntities: GameEntity[] = [];
   private _particleBuffer: GameEntity[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -109,6 +132,145 @@ export class RenderSystem {
       return c;
   }
 
+  /**
+   * Return a 32×32 offscreen canvas with a soft white star: a radial-gradient
+   * glow plus a 4-point spike cross drawn additively.  Created once, reused
+   * for every nebula twinkle.  Drawn at NEBULA_CONSTANTS.TWINKLE_STAR_SIZE
+   * world-units in the render path.
+   */
+  private getTwinkleBitmap(): HTMLCanvasElement {
+      if (this._twinkleBitmap) return this._twinkleBitmap;
+      const size = 32;
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const cx = c.getContext('2d')!;
+      const mid = size / 2;
+      // Additive composite so the glow + spikes blend smoothly
+      cx.globalCompositeOperation = 'lighter';
+      // Soft radial glow
+      const glow = cx.createRadialGradient(mid, mid, 0, mid, mid, mid);
+      glow.addColorStop(0,    'rgba(255,255,255,1)');
+      glow.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+      glow.addColorStop(0.6,  'rgba(255,255,255,0.12)');
+      glow.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = glow;
+      cx.beginPath();
+      cx.arc(mid, mid, mid, 0, Math.PI * 2);
+      cx.fill();
+      // 4-point spike cross — long horizontal + vertical narrow gradients
+      const spikeH = cx.createLinearGradient(0, mid, size, mid);
+      spikeH.addColorStop(0,    'rgba(255,255,255,0)');
+      spikeH.addColorStop(0.5,  'rgba(255,255,255,0.85)');
+      spikeH.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = spikeH;
+      cx.fillRect(0, mid - 0.8, size, 1.6);
+      const spikeV = cx.createLinearGradient(mid, 0, mid, size);
+      spikeV.addColorStop(0,    'rgba(255,255,255,0)');
+      spikeV.addColorStop(0.5,  'rgba(255,255,255,0.85)');
+      spikeV.addColorStop(1,    'rgba(255,255,255,0)');
+      cx.fillStyle = spikeV;
+      cx.fillRect(mid - 0.8, 0, 1.6, size);
+      cx.globalCompositeOperation = 'source-over';
+      this._twinkleBitmap = c;
+      return c;
+  }
+
+  /**
+   * Return the normalized (range [-0.5, 0.5]) alpha-weighted centroid
+   * offset of the image's visible content from its bitmap centre.
+   * Computed once per source URL on first call, then cached.
+   *
+   * Used by the nebula draw path to shift drawImage so the cloud
+   * content's visual centre lands on the rotation pivot, eliminating
+   * the "orbit around an off-centre point" artefact you'd otherwise
+   * see when rotating PNGs whose visible pixels aren't centred.
+   *
+   * Returns (0, 0) if the image hasn't loaded yet or if getImageData
+   * is blocked (e.g. cross-origin canvas taint).  Both cases just fall
+   * back to drawing at the geometric bitmap centre — same as before.
+   */
+  private getSpriteCentroid(src: string): { dx: number, dy: number } {
+      const cached = this._spriteCentroids.get(src);
+      if (cached) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return { dx: 0, dy: 0 };
+
+      // Scan a fixed 256-square render of the source image so the
+      // centroid is independent of the natural resolution.  Matches
+      // the tinted-sprite canvas size used in getTintedSprite.
+      const size = 256;
+      const tmp = document.createElement('canvas');
+      tmp.width = size;
+      tmp.height = size;
+      const tctx = tmp.getContext('2d');
+      if (!tctx) return { dx: 0, dy: 0 };
+      tctx.drawImage(img, 0, 0, size, size);
+
+      let imageData: ImageData;
+      try {
+          imageData = tctx.getImageData(0, 0, size, size);
+      } catch {
+          // Canvas tainted — skip centroid adjustment, fall back to centre.
+          return { dx: 0, dy: 0 };
+      }
+
+      const data = imageData.data;
+      let sumX = 0, sumY = 0, sumA = 0;
+      for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+              const a = data[(y * size + x) * 4 + 3];
+              if (a > 0) {
+                  sumX += x * a;
+                  sumY += y * a;
+                  sumA += a;
+              }
+          }
+      }
+      if (sumA === 0) return { dx: 0, dy: 0 };
+
+      const offset = {
+          dx: (sumX / sumA / size) - 0.5,
+          dy: (sumY / sumA / size) - 0.5,
+      };
+      this._spriteCentroids.set(src, offset);
+      return offset;
+  }
+
+  /**
+   * Return a canvas of `src` tinted to `hex` using a source-atop pass.
+   * Result is cached forever per (src, hex) pair; cache is bounded to ~256
+   * entries to avoid unbounded growth when many nebula tiles mix hues.
+   * Returns null while the underlying image is still loading.
+   */
+  private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
+      const key = `${src}|${hex}`;
+      const cached = this._tintedSprites.get(key);
+      if (cached) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return null;
+
+      const size = 256; // power of 2 to keep upscaling crisp enough
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const cx = c.getContext('2d');
+      if (!cx) return null;
+      cx.drawImage(img, 0, 0, size, size);
+      cx.globalCompositeOperation = 'source-atop';
+      cx.fillStyle = hex;
+      cx.fillRect(0, 0, size, size);
+      cx.globalCompositeOperation = 'source-over';
+
+      if (this._tintedSprites.size >= 256) {
+          // Evict the oldest entry (Map preserves insertion order) to cap memory.
+          const firstKey = this._tintedSprites.keys().next().value;
+          if (firstKey !== undefined) this._tintedSprites.delete(firstKey);
+      }
+      this._tintedSprites.set(key, c);
+      return c;
+  }
+
   // Helper to load/get images
   private getImage(src: string): HTMLImageElement {
       if (this.images.has(src)) {
@@ -134,6 +296,16 @@ export class RenderSystem {
 
   public setMapType(type: MapType) {
     this.backgroundManager.setMapType(type);
+  }
+
+  /**
+   * Forward the map's recorded nebula cluster-center positions to the
+   * background layer so its puffs render at the same world positions
+   * as the interactable tile clusters (one unified cloud, with the
+   * backdrop still parallaxing as the camera moves).
+   */
+  public setNebulaClusterCenters(centers: Vector2[] | null) {
+    this.backgroundManager.setNebulaClusterCenters(centers);
   }
 
   /**
@@ -201,6 +373,7 @@ export class RenderSystem {
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
+    this._nebulaEntities.length = 0;
     this._trailEntities.length = 0;
     this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
@@ -255,6 +428,7 @@ export class RenderSystem {
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
+                && entity.type !== EntityType.NEBULA && entity.type !== EntityType.NEBULA_SHARD
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -267,6 +441,11 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push(entity);
+        } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+            // Nebula entities render as a dedicated bottom layer so
+            // asteroids / actors / projectiles always draw on top of
+            // them, regardless of entity array order.
+            this._nebulaEntities.push(entity);
         } else {
             this._visibleEntities.push(entity);
         }
@@ -302,7 +481,11 @@ export class RenderSystem {
     // 3. Render Trails (Behind Entities)
     this.renderTrails(ctx, this._trailEntities, detachedTrails);
 
-    // 4. Render Entities (Culling logic added)
+    // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
+    // asteroids and everything else render on top of the nebula cloud.
+    this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+
+    // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
 
     // 4b. Render Particles — single composite-op switch for the whole batch
@@ -600,7 +783,7 @@ export class RenderSystem {
       }
 
       ctx.save();
-      
+
       // Transform logic
       ctx.translate(entity.position.x, entity.position.y);
       const rotation = entity.rotation + (
@@ -611,7 +794,166 @@ export class RenderSystem {
             : 0
       );
       ctx.rotate(rotation);
-      
+
+      // --- NEBULA TILES & SHARDS ---
+      // Cloud-like rendering: tinted sprite drawn at a display-scale larger
+      // than the physics size so adjacent tiles blend seamlessly across
+      // their shared hex-grid boundaries.  Tinted sprites are cached.
+      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          const tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          const spriteSrc = entity.sprite;
+          // Fade-out multiplier — per-entity duration lets fast-collision
+          // shatters use a shorter, snappier fade than slow drift-through
+          // collisions.  Falls back to the base constant for legacy tiles
+          // without the per-entity duration field set.
+          const fadeDuration = entity.nebulaFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
+          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0 && fadeDuration > 0
+              ? Math.max(0, entity.nebulaFadeTimer / fadeDuration)
+              : 1.0;
+          // Fade-in multiplier — same per-entity duration treatment so
+          // child shards from a fast collision fade in fast, matching
+          // their parent tile's fade-out rate.  Combines multiplicatively
+          // with fadeMul so a tile shattered mid-birth smoothly crossfades
+          // from its current alpha toward zero.
+          const spawnDuration = entity.nebulaSpawnDuration ?? NEBULA_CONSTANTS.FADE_IN_DURATION;
+          const spawnMul = entity.nebulaSpawnTimer !== undefined && entity.nebulaSpawnTimer > 0 && spawnDuration > 0
+              ? Math.max(0, 1 - entity.nebulaSpawnTimer / spawnDuration)
+              : 1.0;
+          if (spriteSrc) {
+              const tinted = this.getTintedSprite(spriteSrc, tintHex);
+              if (tinted) {
+                  const isTile = entity.type === EntityType.NEBULA;
+                  // Sprite size is proportional to the effective nebula
+                  // area the entity carries.  A fresh shard from a 5-way
+                  // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
+                  // half-merged shard draws ≈ 68; a full tile draws at
+                  // the reference size (96).  Using sqrt keeps visual
+                  // area (∝ sprite²) proportional to effective area, so
+                  // what the player sees matches the conserved mass
+                  // accounting used for merge → transmutation.  Legacy
+                  // entities without nebulaTileArea fall back to a full
+                  // tile sprite.
+                  const effArea = entity.nebulaTileArea ?? HEX_AREA;
+                  const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
+                  const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
+                      * Math.sqrt(areaRatio);
+                  // Content-centroid correction: shift the draw so the
+                  // sprite's visible-pixel centroid lands on the pivot.
+                  // Without this, asymmetric source PNGs appear to orbit
+                  // around their bitmap centre when rotated.  Fallback is
+                  // (0, 0) if the centroid isn't computable yet.
+                  const centroid = this.getSpriteCentroid(spriteSrc);
+                  const dOffset = -(drawSize / 2);
+                  const dx = dOffset - centroid.dx * drawSize;
+                  const dy = dOffset - centroid.dy * drawSize;
+                  // Soft alpha — tiles slightly more opaque so the cloud
+                  // reads as solid, shards slightly less so they feel light.
+                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul;
+                  ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
+                  ctx.globalAlpha = 1.0;
+              } else {
+                  // Fallback: procedural soft circle in the tint colour
+                  // while the nebula sprite is still loading.
+                  const r = Math.max(entity.size.x, entity.size.y) * 0.9;
+                  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+                  grad.addColorStop(0, tintHex);
+                  grad.addColorStop(1, 'rgba(0,0,0,0)');
+                  ctx.fillStyle = grad;
+                  ctx.globalAlpha = 0.45 * fadeMul * spawnMul;
+                  ctx.beginPath();
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.globalAlpha = 1.0;
+              }
+          }
+
+          // --- DEBUG OVERLAY ---
+          // Nebula tiles: draw the hex outline so the invisible interactable
+          // footprint is visible during debug.
+          // Nebula shards: draw the polygon outline (same glass-shard style
+          // polygon set at spawn).  Legacy shards without polygonPoints fall
+          // back to an implicit circle defined by `size`.
+          if (this.debugMode) {
+              ctx.globalAlpha = 0.9;
+              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
+              ctx.lineWidth = 1;
+              if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                  ctx.beginPath();
+                  const p0 = entity.polygonPoints[0];
+                  ctx.moveTo(p0.x, p0.y);
+                  for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                      const p = entity.polygonPoints[pi];
+                      ctx.lineTo(p.x, p.y);
+                  }
+                  ctx.closePath();
+                  ctx.stroke();
+              } else if (entity.type === EntityType.NEBULA_SHARD) {
+                  // Legacy fallback: implicit circle defined by `size`.
+                  const r = Math.max(entity.size.x, entity.size.y) / 2;
+                  ctx.beginPath();
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.stroke();
+              }
+              ctx.globalAlpha = 1.0;
+          }
+
+          // --- TWINKLE STAR ---
+          // Each tile/shard hosts an occasional fading-in/out star at a
+          // random in-sprite position.  Scheduling is render-driven so it
+          // costs nothing in the sim loop: lazy-init on first draw, then
+          // each cycle picks a random duration delay before the next.
+          // Alpha curve sin(t·π) gives a smooth fade in → peak → fade out.
+          {
+              const now = performance.now() / 1000;
+              if (entity.nebulaTwinkleNextAt === undefined) {
+                  // First sighting — stagger the initial twinkle randomly
+                  // across the [MIN, MAX] interval so a freshly-spawned
+                  // cluster doesn't all twinkle in unison.
+                  entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
+                      + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+                  entity.nebulaTwinkleX = (Math.random() * 2 - 1);
+                  entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+              }
+              const elapsed = now - entity.nebulaTwinkleNextAt;
+              if (elapsed >= 0) {
+                  if (elapsed < NEBULA_CONSTANTS.TWINKLE_DURATION) {
+                      // Active twinkle — sin curve over the duration
+                      const t = elapsed / NEBULA_CONSTANTS.TWINKLE_DURATION;
+                      const twinkleAlpha = Math.sin(t * Math.PI) * fadeMul * spawnMul;
+                      if (twinkleAlpha > 0.01) {
+                          const star = this.getTwinkleBitmap();
+                          // Place the star within the sprite footprint —
+                          // half-extent × placement-range keeps it inside.
+                          // Same area-proportional draw-size formula the
+                          // sprite render uses above, so the twinkle
+                          // scales with the shard/tile as it merges.
+                          const effArea = entity.nebulaTileArea ?? HEX_AREA;
+                          const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
+                          const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
+                              * Math.sqrt(areaRatio);
+                          const halfExtent = (drawSize / 2) * NEBULA_CONSTANTS.TWINKLE_PLACEMENT_RANGE;
+                          const tx = (entity.nebulaTwinkleX ?? 0) * halfExtent;
+                          const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;
+                          const starSize = NEBULA_CONSTANTS.TWINKLE_STAR_SIZE;
+                          ctx.globalAlpha = twinkleAlpha;
+                          ctx.drawImage(star, tx - starSize / 2, ty - starSize / 2, starSize, starSize);
+                          ctx.globalAlpha = 1.0;
+                      }
+                  } else {
+                      // Cycle complete — schedule the next one with a fresh
+                      // random delay and reroll the in-sprite position.
+                      entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
+                          + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+                      entity.nebulaTwinkleX = (Math.random() * 2 - 1);
+                      entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+                  }
+              }
+          }
+
+          ctx.restore();
+          return;
+      }
+
       let drawn = false;
 
       // --- SPRITE RENDERING ---

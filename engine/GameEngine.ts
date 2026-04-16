@@ -10,6 +10,7 @@ import { ProjectileSystem } from './systems/ProjectileSystem';
 import { WeaponSystem } from './systems/WeaponSystem';
 import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
+import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
@@ -36,6 +37,7 @@ export class GameEngine {
   private weapons: WeaponSystem;
   private drops: DropSystem;
   private waves: WaveSystem;
+  private nebulas: NebulaSystem;
   private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
   
@@ -190,6 +192,7 @@ export class GameEngine {
     this.weapons = new WeaponSystem(this.projectiles);
     this.drops = new DropSystem(this.particles);
     this.waves = new WaveSystem();
+    this.nebulas = new NebulaSystem(this.particles, this.drops);
     this.entityIndex = new EntityIndex();
     this.flowField = new FlowFieldGrid();
 
@@ -634,6 +637,22 @@ export class GameEngine {
           this.spawnEnemyShards(entity);
       }
 
+      // Nebula tiles and shards route through NebulaSystem: polygonal
+      // shard burst + occasional ammo drop + regen queueing are all
+      // handled there.  They also skip the generic death-burst particles
+      // below (nebulae fade out gracefully via nebulaFadeTimer) AND skip
+      // the generic spawnDrops path since the ammo roll lives inside
+      // NebulaSystem.handleDeath.
+      const isNebula = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
+      if (isNebula && this.currentMap) {
+          this.nebulas.handleDeath(
+              this.currentMap.entities,
+              this.activeDrops,
+              entity,
+              this.waveIndex,
+          );
+      }
+
       // Death burst particles — size/color tuned per entity type
       if (entity.type === EntityType.ENEMY) {
           // Large colored burst matching the enemy's tier color, plus a white core flash
@@ -663,6 +682,10 @@ export class GameEngine {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+      } else if (isNebula) {
+          // Nebulae fade out gracefully via nebulaFadeTimer in the
+          // renderer — no spark burst on destruction.  Merge/transmute
+          // events emit a subtle glimmer instead (see NebulaSystem).
       } else {
           // Generic fallback (structures, misc)
           const numParticles = 4 + Math.floor(Math.random() * 3);
@@ -674,7 +697,9 @@ export class GameEngine {
           });
       }
 
-      if (!entity.suppressDrops) {
+      // Nebulae run their own drop logic inside NebulaSystem.handleDeath
+      // (above), so we skip the generic drops path for them.
+      if (!entity.suppressDrops && !isNebula) {
           this.spawnDrops(entity);
       }
   };
@@ -778,6 +803,14 @@ export class GameEngine {
 
     // Tick down wave announcements
     this.waves.tickAnnouncements(dt);
+
+    // Nebula per-frame pass: regen timer tick, shard gravity/merge
+    // dynamics, shard→tile transmutation.  Runs after glass regen so
+    // a just-regenerated nebula tile can already count as a neighbour
+    // for same-frame nebula regens.
+    if (this.currentMap) {
+        this.nebulas.update(this.currentMap.entities, dt, this.physics);
+    }
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -1904,9 +1937,16 @@ export class GameEngine {
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
+      // Forward the map's recorded nebula cluster-center positions to
+      // the background layer so its puffs render at the same world
+      // positions as the interactable tile clusters (one unified
+      // cloud; backdrop still parallaxes as the camera moves).
+      this.renderer.setNebulaClusterCenters(map.nebulaClusterCenters);
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // Fresh map — drop any queued nebula regens from the previous one.
+      this.nebulas.reset();
   }
 
   private draw() {

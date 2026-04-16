@@ -41,6 +41,12 @@ export enum EntityType {
   ASTEROID = 'ASTEROID',
   STRUCTURE = 'STRUCTURE', // Destructible walls/blocks
   PARTICLE = 'PARTICLE',
+  // Nebula tile: occupies a hex grid cell like STRUCTURE, but is pass-through
+  // (no collision impulse) and shatters into NEBULA_SHARDs on player/enemy contact.
+  NEBULA = 'NEBULA',
+  // Cloud-like debris spawned from a destroyed nebula tile.  Heavily damped
+  // translation and rotation; pass-through to all entities.
+  NEBULA_SHARD = 'NEBULA_SHARD',
 }
 
 export enum EnemySubtype {
@@ -90,7 +96,17 @@ export interface WeaponConfig {
 // ── Shard type ────────────────────────────────────────────────────────────────
 // Discriminates the visual and physical origin of an asteroid-type entity.
 // Add new variants here as the game gains new destructible material types.
-export type ShardType = 'asteroid' | 'tile';
+export type ShardType = 'asteroid' | 'tile' | 'nebula';
+
+// ── Nebula colour composition ────────────────────────────────────────────────
+// Weighted list of base-palette hexes that make up a nebula tile or shard.
+// Weights sum to 1 (within rounding).  Stored rather than pre-blended so that
+// a shatter → merge cycle is lossless and future coalescence logic can
+// recombine hues without drifting toward gray.
+export interface NebulaColorStop {
+  hex: string;
+  weight: number;
+}
 
 // ── Drop composition entry ────────────────────────────────────────────────────
 // Tracks drops stored inside a composite asteroid, including absorbed power-ups.
@@ -233,6 +249,63 @@ export interface GameEntity {
   isBouncer?: boolean;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
   homingStrength?: number;
+
+  // ── Nebula fields ────────────────────────────────────────────────────────
+  // Set on NEBULA tiles and NEBULA_SHARD shards; carries the palette-blended
+  // colour composition and the total polygon area (in world units²) that
+  // drives the coalescence merge threshold.
+  nebulaColorComposition?: NebulaColorStop[];
+  // Cached polygon area (used as merge target for shards).  Shards inherit
+  // this from their parent tile so they know the reassembly threshold.
+  nebulaTileArea?: number;
+  // Hex grid coordinate (odd-r offset) of the source tile — preserved on
+  // shards so coalescence can snap back to the same column/row layout.
+  nebulaGridCol?: number;
+  nebulaGridRow?: number;
+  // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
+  // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
+  linearDamping?: number;
+  angularDamping?: number;
+  // Per-entity cooldown for nebula shatter triggering.  Set to
+  // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
+  // shatter a nebula; ticked down each frame in PhysicsSystem.update.
+  // While > 0, subsequent nebula contacts pass through without shattering.
+  nebulaImpactCooldown?: number;
+  // Per-shard cooldown before the shard can participate in a merge.
+  // Set to NEBULA_CONSTANTS.MERGE_COOLDOWN at spawn (from shatter or
+  // as the larger party of a previous merge) and ticked each substep
+  // by PhysicsSystem.  NebulaSystem.updateDynamics skips any pair
+  // where either party has a positive cooldown, so fresh shards stay
+  // visible as distinct polygons for ~1.8 s before they can coalesce.
+  nebulaMergeCooldown?: number;
+  // Post-shatter fade timer on NEBULA tiles and shards.  While > 0 the
+  // entity stays rendered but with alpha scaled by timer / nebulaFadeDuration.
+  // On reaching 0, tiles become inactive and enter the regen wait;
+  // shards are compacted out.
+  nebulaFadeTimer?: number;
+  // Effective duration for this particular fade-out (i.e., the value
+  // nebulaFadeTimer starts at).  Stored per-entity so fast-collision
+  // shatters can use a shorter duration than the base constant while
+  // still letting the renderer compute alpha = timer / duration.
+  nebulaFadeDuration?: number;
+  // Birth fade-in timer on NEBULA tiles and shards.  While > 0 the
+  // entity renders with alpha scaled by 1 − (timer / nebulaSpawnDuration),
+  // so newly-created entities fade into existence slowly instead of
+  // appearing instantly.  Ticked in PhysicsSystem.update.
+  nebulaSpawnTimer?: number;
+  // Effective duration for this particular fade-in (see nebulaFadeDuration).
+  nebulaSpawnDuration?: number;
+  // Twinkle scheduling — each nebula tile and shard hosts an occasional
+  // fading-in/out star at a random in-sprite position.  The renderer
+  // lazily initializes these fields on first draw, then advances the
+  // schedule itself (no sim cost).  nebulaTwinkleNextAt is an absolute
+  // time (seconds since epoch) at which the next twinkle starts; the
+  // twinkle is "active" while now ∈ [nextAt, nextAt + TWINKLE_DURATION].
+  // nebulaTwinkleX/Y are normalized [-1, 1] offsets within the sprite,
+  // rerolled at the start of each twinkle cycle.
+  nebulaTwinkleNextAt?: number;
+  nebulaTwinkleX?: number;
+  nebulaTwinkleY?: number;
 }
 
 export interface CameraState {

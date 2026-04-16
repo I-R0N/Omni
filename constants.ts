@@ -235,6 +235,199 @@ export const STRUCTURE_CONSTANTS = {
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 
+// ── Nebula tile configuration ──────────────────────────────────────────────
+// Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
+// pass-through debris: players and enemies drift through them, shattering
+// them into cloud-like shards with heavy linear & angular damping.  Each
+// collision spawns SHARDS_PER_SHATTER children whose total disc area equals
+// the parent's area (scaled by SHARD_TOTAL_AREA_RATIO) — the cloud keeps
+// coverage constant on impact, and a gravity-driven merge pass re-absorbs
+// small shards back into larger neighbours to re-form tiles over time.
+export const NEBULA_CONSTANTS = {
+  // Per-shatter child count and explicit linear size ratio.
+  // child_diameter = parent_diameter × SHARD_LINEAR_RATIO.  At 0.60 with
+  // N = 3, total child area = 3 × 0.36 = 1.08 × parent — a modest 8 %
+  // growth per shatter.  Permanent area inflation is checked by tile
+  // regeneration (grown tiles revert to canonical hex size on respawn).
+  SHARDS_PER_SHATTER: 3,
+  SHARD_LINEAR_RATIO: 0.60,
+  // Minimum diameter below which a shard is no longer shatter-able.  Keeps
+  // the system bounded under repeated impacts — sub-min shards simply
+  // pass-through without fragmenting further.
+  MIN_SHATTER_DIAMETER: 10,
+  // Seconds a PLAYER/ENEMY must wait after shattering a nebula before they
+  // can shatter another.  Prevents a single fly-through from ripping an
+  // entire cluster apart simultaneously.  140 px/s × 0.2 s ≈ 28 px traversal
+  // ≈ one tile width, so roughly every other tile gets broken in a row.
+  IMPACT_COOLDOWN: 0.2,
+  // How far from the destroyed parent's centre to spawn new shards, in
+  // multiples of the parent's radius.  At 1.5 they sit ~0.75 tile-widths
+  // behind the striker — close enough that the "dragged along" visual
+  // reads well, far enough that the re-collision cooldown (IMPACT_COOLDOWN)
+  // safely clears before the player overlaps the shard again.
+  SHARD_SPAWN_OFFSET_RATIO: 1.5,
+  // Regen delay: nebula tiles reappear after this many seconds.  Much
+  // shorter than the glass-tile cadence (12 s) — nebulae are the
+  // "soft" cloud layer, they should heal quickly so clusters don't
+  // stay punched-out behind the player for long.
+  REGEN_DELAY: 3,
+  // Base (slow-collision) fade durations.  Actual per-entity durations
+  // scale inversely with impact speed via nebulaFadeRateScale() — a
+  // fast collision produces a shorter, snappier fade while a gentle
+  // drift-through keeps the slow graceful dissolution.
+  FADE_DURATION: 1.0,
+  FADE_IN_DURATION: 1.5,
+  // Impact-speed → fade-rate mapping.  impactSpeed/REFERENCE_SPEED gives
+  // the rate scale, clamped to [1, MAX_SCALE].  At rateScale = 1 the
+  // base durations above are used; higher scales divide the duration
+  // (faster fade).  REFERENCE_SPEED is in px/frame — a "moderate"
+  // collision (about half player max thrust) maps to rateScale > 1.
+  FADE_RATE_REFERENCE_SPEED: 1.0,
+  FADE_RATE_MAX_SCALE: 3.0,
+  // Per-frame damping (60Hz reference).  Applied as
+  //   velocity *= Math.pow(damping, dt * 60)
+  // so behaviour is framerate-independent.  Values closer to 1.0 = less
+  // damping = shards drift longer.  At 0.991, velocity halves in ~77
+  // frames (~1.28 s) — paired with the reduced launch velocities below,
+  // the total coast distance is preserved while making shards *move*
+  // more slowly (same travel distance, ~33 % longer wall-clock time).
+  LINEAR_DAMPING: 0.991,
+  ANGULAR_DAMPING: 0.991,
+  // Velocity below which shards snap to rest (prevents infinite micro-drift).
+  REST_SPEED: 0.005,
+  REST_SPIN: 0.01,
+  // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
+  SPIN_PER_UNIT_SPEED: 1.2,
+  MAX_SPIN: 6.0,  // rad/s cap
+  // Post-shatter shard velocity: shards are "dragged along" in the
+  // striker's direction of travel (forward-biased) rather than pushed
+  // away perpendicular to it.  Parallel component dominates; a tiny
+  // perpendicular push based on tangent side gives each shard a slight
+  // lateral drift that matches its rotation direction.
+  //
+  // At FORWARD_DRAG_FACTOR = 0.9 with LINEAR_DAMPING = 0.991, shards
+  // launch a bit slower than the striker and decay more gently, so the
+  // total coast distance is preserved while per-frame motion feels
+  // noticeably slower.  The 0.75× scaling of launch velocities is
+  // matched by a 0.75× scaling of (1 − damping), keeping
+  // ∫V₀·d^t·dt = V₀/(1−d) constant.
+  //
+  // parallel_velocity = max(MIN_PARALLEL_SPEED,
+  //                         impactSpeed × FORWARD_DRAG_FACTOR)
+  // perp_velocity     = impactSpeed × PERP_SCATTER_FACTOR
+  FORWARD_DRAG_FACTOR: 0.9,
+  PERP_SCATTER_FACTOR: 0.03,
+  MIN_PARALLEL_SPEED: 0.225,
+  // Shatter fan half-angle — 3 children are spread symmetrically around
+  // the striker's forward direction within ±FAN_HALF_ANGLE.
+  FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)
+  // Gravity pull: each shard is attracted to the nearest larger nebula
+  // entity within GRAVITY_RANGE.  The force curve is G / max(dist, MIN).
+  // Tuned low so shards drift toward merges over a few seconds instead
+  // of snapping together on the first substep.
+  GRAVITY_RANGE: 380,
+  GRAVITY_STRENGTH: 300,
+  GRAVITY_MIN_DIST: 15,
+  // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
+  // the larger nebula absorbs the smaller one.  K = 0.55 means the
+  // shards must substantially OVERLAP, not merely touch, before a merge
+  // fires — keeps shards visible as distinct polygons for longer.
+  MERGE_PROXIMITY_K: 0.55,
+  // Per-shard merge cooldown — a freshly-spawned shard (from a tile
+  // shatter OR a recent merge) cannot participate in another merge for
+  // this many seconds.  Prevents the cascade where 4–6 shards spawn
+  // together and all collapse into one circle on frame 1–2.  The
+  // cooldown is ticked each substep by PhysicsSystem and consulted by
+  // NebulaSystem.updateDynamics before considering any merge pair.
+  MERGE_COOLDOWN: 1.8,
+  // Tile regeneration toggle.  When false, shattered tiles are gone
+  // forever (no respawn at their original grid cell) and the ONLY way
+  // new tiles appear is via shard → tile transmutation.  Combined with
+  // per-shard effective-area accumulation (see NebulaSystem spawn /
+  // merge / tryTransmute), this keeps total tile population bounded:
+  // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
+  // can SHRINK (player kills shards mid-merge) but never GROW.
+  TILE_REGEN_ENABLED: false,
+  // Reference sprite world size for a FULL nebula tile (effective area
+  // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
+  //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
+  // so visual size scales proportionally with the effective area the
+  // entity carries.  A fresh shard from a 3-way shatter draws at
+  //   120 × sqrt(1/3) ≈ 69 world units
+  // and grows as it merges:
+  //   half-merged → 120 × sqrt(0.5) ≈ 85
+  //   fully-merged (about to transmute) → 120
+  // Tune this one number to make nebula tiles visually bigger or smaller;
+  // shard sprites follow automatically.
+  TILE_SPRITE_WORLD_SIZE: 120,
+  // Cluster generation — tuned for heavy coverage across the map so that
+  // nebula clusters naturally fill empty gaps between glass-tile clusters
+  // and statistically overlap with some of the procedurally placed
+  // background nebula puffs (which live in world space at ±~20 000 units).
+  // The generator shares an "occupied coords" set with the glass pass so
+  // adjacency conflicts are avoided; empty cells get priority naturally.
+  CLUSTER_COUNT: 130,
+  MIN_CLUSTER_SIZE: 14,
+  MAX_CLUSTER_SIZE: 42,
+  // Outer-zone cluster pass (sparser landmarks spread across the full map).
+  OUTER_CLUSTER_COUNT: 240,
+  OUTER_MIN_CLUSTER_SIZE: 7,
+  OUTER_MAX_CLUSTER_SIZE: 26,
+  // Base palette — nebula tiles draw from the full 360° hue wheel
+  // (blue / indigo / violet / pink / red / yellow / green all available).
+  // Regen uses circular hue math so wraparound is handled correctly.
+  // SATURATION and LIGHTNESS match the background nebula aesthetic
+  // (BackgroundManager.createPuffVariants uses 100%/60%).
+  PALETTE_SATURATION: 100,
+  PALETTE_LIGHTNESS: 62,
+  // Minimum hue delta (in degrees) a regenerated nebula tile must have
+  // from its previous hue.  If the rule-based blend produces a result
+  // closer than this to the old hue, the regen code forces a step of
+  // at least this many degrees along the palette arc so every
+  // regeneration is visibly distinct from the last.
+  REGEN_MIN_HUE_SHIFT: 40,
+  // Default composition hex used if a tile spawns with no palette selection.
+  DEFAULT_HEX: '#a78bfa',
+  // ── Twinkle (random fading-in/out star within the sprite) ────────
+  // Each tile and shard maintains its own next-twinkle schedule; the
+  // renderer draws a pre-rendered star bitmap at a random position
+  // within the sprite, alpha-curved as sin(t·π) so it smoothly fades
+  // in and out over TWINKLE_DURATION seconds, then waits a random
+  // interval in [TWINKLE_INTERVAL_MIN, TWINKLE_INTERVAL_MAX] before
+  // the next one.  Star positions reroll per cycle.
+  TWINKLE_DURATION: 1.2,
+  TWINKLE_INTERVAL_MIN: 4.0,
+  TWINKLE_INTERVAL_MAX: 9.0,
+  TWINKLE_STAR_SIZE: 10,
+  TWINKLE_PLACEMENT_RANGE: 0.35,
+  // ── Standard drops (ammo) ────────────────────────────────────────
+  // Nebula tiles and shards occasionally release a standard ammo
+  // drop on shatter — low frequency so breaking a cluster yields the
+  // occasional reward without flooding the map.  The roll is
+  // independent of shard creation: shard count/size math is
+  // untouched, the ammo drop (if any) is a bonus that spawns
+  // alongside the usual shards.  Ammo type follows the same
+  // wave-scaled ASTEROID_AMMO_PROGRESSION used by asteroids.
+  AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
+  AMMO_PER_NEBULA: 3,     // ammo units per nebula drop
+};
+
+/**
+ * Map an impact speed (px/frame) to a nebula fade rate scale in
+ * [1, NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE].  Higher scales produce
+ * faster fade-out AND fade-in durations (duration = base / scale).
+ *
+ * Shared by PhysicsSystem (when arming a tile/shard's fade-out timer)
+ * and GameEngine (when arming a newly-spawned shard's fade-in timer)
+ * so destruction and rebirth feel synchronized for the same hit.
+ */
+export function nebulaFadeRateScale(impactSpeed: number): number {
+  const raw = impactSpeed / NEBULA_CONSTANTS.FADE_RATE_REFERENCE_SPEED;
+  if (raw <= 1) return 1;
+  if (raw >= NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE) return NEBULA_CONSTANTS.FADE_RATE_MAX_SCALE;
+  return raw;
+}
+
 export const EXPLOSION_CONSTANTS = {
   DURATION: 0.6, // Seconds
   SIZE_MULTIPLIER: -1.8

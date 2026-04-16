@@ -32,6 +32,7 @@ export class ParticleSystem {
       spreadAngle?: number; // center angle (radians); undefined = full circle
       spreadCone?: number;  // half-cone in radians; undefined = Math.PI (full circle)
       baseVelocity?: Vector2;
+      positionJitter?: number; // uniform random offset radius around `position`; default 0
     }
   ) {
     const {
@@ -40,6 +41,7 @@ export class ParticleSystem {
       lifetimeMin = 0.2, lifetimeMax = 0.45,
       spreadAngle, spreadCone,
       baseVelocity,
+      positionJitter = 0,
     } = options ?? {};
 
     const halfCone = spreadCone ?? Math.PI;
@@ -52,10 +54,21 @@ export class ParticleSystem {
       const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
       const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
 
+      // Optional position scatter — useful for spawning glittery clouds
+      // over an area (e.g. nebula merge glimmer) instead of a single point.
+      let px = position.x;
+      let py = position.y;
+      if (positionJitter > 0) {
+        const jAngle = Math.random() * Math.PI * 2;
+        const jDist  = Math.sqrt(Math.random()) * positionJitter; // uniform area
+        px += Math.cos(jAngle) * jDist;
+        py += Math.sin(jAngle) * jDist;
+      }
+
       entities.push({
         id: nextId('part'),
         type: EntityType.PARTICLE,
-        position: { x: position.x, y: position.y },
+        position: { x: px, y: py },
         velocity: {
           x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
           y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
