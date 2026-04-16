@@ -704,7 +704,7 @@ export class GameEngine {
       }
   };
 
-  private handleAsteroidRespawn(config: any) {
+  private handleAsteroidRespawn(config: (typeof ASTEROID_GENERATION_CONFIG)[MapType]) {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
       for (let i=0; i<5; i++) {
