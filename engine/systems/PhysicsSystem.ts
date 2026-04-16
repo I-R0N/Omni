@@ -669,10 +669,14 @@ export class PhysicsSystem {
           const other  = aIsNebula ? b : a;
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not be
-          // in the post-shatter cooldown window.  The cooldown gives a
-          // perceivable delay between hits when flying through a cluster
-          // so the entire cluster doesn't explode in a single frame.
-          const shatters = (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+          // in the post-shatter cooldown window.  Shards are
+          // INDESTRUCTIBLE — they pass through unchanged — so only
+          // NEBULA tiles are shatterable.  This keeps the total nebula
+          // area conserved: each tile shatter produces exactly one
+          // tile's worth of effective shard mass, which eventually
+          // coalesces back into one new tile via transmutation.
+          const shatters = nebula.type === EntityType.NEBULA
+                            && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
                             && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
