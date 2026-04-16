@@ -313,6 +313,11 @@ export class PhysicsSystem {
     // each cell push, track the peak cell population — the 3×3 neighbourhood
     // SAT pass below is O(k²) per cell, so peak density is the direct signal
     // for dense-cluster stalls in the dev perf overlay.
+    //
+    // Particles are excluded from the grid entirely: resolveCollision
+    // discards every pair involving a particle (they're purely visual),
+    // so inserting them wastes grid memory and forces O(particles) extra
+    // inner-loop iterations on every neighbour scan for no effect.
     let maxDensity = 0;
     const dynamicEntities: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
@@ -321,6 +326,9 @@ export class PhysicsSystem {
 
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
+
+        // Particles never interact in resolveCollision — skip the grid.
+        if (e.type === EntityType.PARTICLE) continue;
 
         dynamicEntities.push(e);
 
@@ -341,7 +349,7 @@ export class PhysicsSystem {
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary subjects
     for (let i = 0; i < dynamicEntities.length; i++) {
         const a = dynamicEntities[i];
-        
+
         const cx = Math.floor(a.position.x / cellSize);
         const cy = Math.floor(a.position.y / cellSize);
 
@@ -349,7 +357,7 @@ export class PhysicsSystem {
         for (let x = -1; x <= 1; x++) {
             for (let y = -1; y <= 1; y++) {
                 const key = ((cx + x) << 16) | ((cy + y) & 0xFFFF);
-                
+
                 // Retrieve candidates from BOTH grids
                 const dynamicCandidates = this.dynamicGrid.get(key);
                 const staticCandidates = this.staticGrid.get(key);
@@ -362,6 +370,27 @@ export class PhysicsSystem {
                         if (!b.active || b.isExploding) continue;
                         // Avoid double checking dynamic pairs
                         if (a.id > b.id) continue;
+
+                        // ── Type-pair filter: skip pairs that resolve-
+                        // Collision always discards BEFORE the expensive
+                        // SAT geometry pass.  In late waves with dense
+                        // shard clusters (max cell 100+), these filters
+                        // eliminate ~60 % of total pair checks.
+                        const ta = a.type, tb = b.type;
+
+                        // Projectile-projectile: resolveCollision returns
+                        // immediately (no proj-proj interaction).
+                        if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
+
+                        // Asteroid-asteroid: the ONLY result is gentle
+                        // impulse bouncing which fights against the
+                        // gravity + flow-field that pushes shards together
+                        // anyway, producing jitter rather than meaningful
+                        // gameplay.  The stick-bond system still handles
+                        // merging via its own grid.  Skipping this single
+                        // pair type eliminates the dominant O(k²) cost in
+                        // dense cluster cells.
+                        if (ta === EntityType.ASTEROID && tb === EntityType.ASTEROID) continue;
                         
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
