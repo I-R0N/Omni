@@ -346,12 +346,15 @@ export class RenderSystem {
    * instead of ~22k individual fillRect calls.
    */
   public buildMinimapStaticLayer(entities: GameEntity[], mapWidth: number, mapHeight: number) {
-      const { EXPANDED_SIZE, RANGE } = MINIMAP_CONSTANTS;
-      // Use the expanded minimap range so the pre-rendered layer covers the
-      // full overview.  The zoomed minimap simply reads a smaller source
-      // rect from the same canvas.
+      const { EXPANDED_SIZE } = MINIMAP_CONSTANTS;
+      // Size the pre-render to cover exactly one wrap unit of the
+      // toroidal map.  The per-frame blit (renderMinimap) uses modulo
+      // arithmetic against this canvas size, so the canvas extent must
+      // equal the map extent — otherwise the modulo wraps at a
+      // different boundary than the game's actual wrap seam and the
+      // view snaps by the size difference whenever the camera crosses.
       const halfMap = Math.max(mapWidth, mapHeight) / 2;
-      const range = Math.max(RANGE, halfMap);
+      const range = halfMap;
       this._minimapStaticRange = range;
 
       const res = EXPANDED_SIZE;
