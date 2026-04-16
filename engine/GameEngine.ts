@@ -1904,6 +1904,9 @@ export class GameEngine {
       this.flowField.initObstacles(map.entities);
       this.flowField.buildAsteroidField();
       this.renderer.setMapType(map.type);
+      // Pre-render structure dots to an offscreen minimap canvas so the
+      // per-frame minimap pass is a single blit instead of ~22k fillRects.
+      this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
   }
 
   private draw() {

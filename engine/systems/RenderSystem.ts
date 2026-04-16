@@ -72,6 +72,19 @@ export class RenderSystem {
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
 
+  // ── Pre-rendered static minimap layer ─────────────────────────────────
+  // Structures (~22k) don't move, so we render them to an offscreen canvas
+  // once on map load and blit the relevant viewport each frame instead of
+  // issuing ~22k individual fillRect calls.  The canvas covers the full map
+  // at a resolution matched to MINIMAP_CONSTANTS.EXPANDED_SIZE so even the
+  // expanded minimap looks sharp.  Dynamic entities (enemies, asteroids,
+  // drops) are still drawn per-frame on top of this layer.
+  private _minimapStaticCanvas: HTMLCanvasElement | null = null;
+  // World-space range captured by the static layer (half-extent from map
+  // center).  Stored so renderMinimap can compute the blit source rect
+  // without re-reading the map dimensions.
+  private _minimapStaticRange: number = 0;
+
   constructor() {
     this.backgroundManager = new BackgroundManager();
     // Preload basic assets
@@ -121,6 +134,43 @@ export class RenderSystem {
 
   public setMapType(type: MapType) {
     this.backgroundManager.setMapType(type);
+  }
+
+  /**
+   * Pre-render all STRUCTURE entities to an offscreen minimap canvas.
+   * Call once on map load.  The canvas covers the full map area at a
+   * resolution matched to the expanded minimap display size so the
+   * per-frame renderMinimap pass only needs a single drawImage blit
+   * instead of ~22k individual fillRect calls.
+   */
+  public buildMinimapStaticLayer(entities: GameEntity[], mapWidth: number, mapHeight: number) {
+      const { EXPANDED_SIZE, RANGE } = MINIMAP_CONSTANTS;
+      // Use the expanded minimap range so the pre-rendered layer covers the
+      // full overview.  The zoomed minimap simply reads a smaller source
+      // rect from the same canvas.
+      const halfMap = Math.max(mapWidth, mapHeight) / 2;
+      const range = Math.max(RANGE, halfMap);
+      this._minimapStaticRange = range;
+
+      const res = EXPANDED_SIZE;
+      const c = document.createElement('canvas');
+      c.width = res;
+      c.height = res;
+      const cx = c.getContext('2d')!;
+      const scale = (res / 2) / range;
+      const center = res / 2;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.type !== EntityType.STRUCTURE) continue;
+          cx.fillStyle = e.color;
+          // Map space: entity position is absolute.  Map center = (0,0).
+          const dotX = center + e.position.x * scale;
+          const dotY = center + e.position.y * scale;
+          cx.fillRect(dotX, dotY, 2, 2);
+      }
+
+      this._minimapStaticCanvas = c;
   }
 
   public render(
@@ -186,7 +236,10 @@ export class RenderSystem {
             }
         }
 
+        // Structures use the pre-rendered static minimap layer — skip them
+        // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
+                && entity.type !== EntityType.STRUCTURE
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -1484,30 +1537,51 @@ export class RenderSystem {
       const centerY = mapY + currentSize / 2;
       const scale = (currentSize / 2) / range;
 
-      items.forEach(item => {
+      // ── Static structure layer (pre-rendered on map load) ──────────────
+      // Blit the relevant viewport from the offscreen canvas instead of
+      // issuing ~22k individual fillRect calls.  The static layer is in
+      // map-space (centred on world origin), so we offset by the camera
+      // position to align it with the minimap viewport.
+      const staticCanvas = this._minimapStaticCanvas;
+      if (staticCanvas) {
+          const staticRange = this._minimapStaticRange;
+          const sRes = staticCanvas.width;
+          const sScale = (sRes / 2) / staticRange;
+
+          // Source rect: map the minimap's world-space viewport to pixels
+          // on the static canvas.
+          const srcCenterX = sRes / 2 + camera.position.x * sScale;
+          const srcCenterY = sRes / 2 + camera.position.y * sScale;
+          const srcHalf = range * sScale;
+          const sx = srcCenterX - srcHalf;
+          const sy = srcCenterY - srcHalf;
+          const sw = srcHalf * 2;
+          const sh = srcHalf * 2;
+
+          ctx.drawImage(staticCanvas, sx, sy, sw, sh, mapX, mapY, currentSize, currentSize);
+      }
+
+      // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
+      for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           const entity = item.entity;
-          if (!entity.active) return;
+          if (!entity.active) continue;
 
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
 
-          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) return;
+          if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
           ctx.fillStyle = entity.color;
 
-          if (entity.type === EntityType.STRUCTURE) {
-              // OPTIMIZATION: Use fillRect for structures (faster than arc)
-              ctx.fillRect(dotX, dotY, 2, 2);
-          } else {
-              let dotRadius = 1.5;
-              if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
-              if (entity.type === EntityType.ENEMY) dotRadius = 2;
+          let dotRadius = 1.5;
+          if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
+          if (entity.type === EntityType.ENEMY) dotRadius = 2;
 
-              ctx.beginPath();
-              ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-              ctx.fill();
-          }
-      });
+          ctx.beginPath();
+          ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+      }
 
       // When expanded, draw a rectangle showing the area covered by the small zoomed map
       if (expanded) {
