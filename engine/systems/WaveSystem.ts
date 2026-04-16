@@ -215,7 +215,3 @@ export interface WaveSpawnContext {
   enemyScale: number;
   difficultyLevel: number;
 }
-
-// Re-export for callers that want to destructure a Vector2 from enemy spawn
-// positions without pulling from the top-level types module.
-export type { Vector2 };

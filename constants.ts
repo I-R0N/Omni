@@ -3,7 +3,6 @@
 import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole } from './types';
 import { ASSETS } from './assets';
 
-export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
 
 export const COLORS = {

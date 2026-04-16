@@ -31,12 +31,3 @@ export function nextId(prefix: string): string {
   counter += 1;
   return `${prefix}_${counter}`;
 }
-
-/**
- * Reset the counter back to zero.  Intended only for tests and for the
- * engine's own restart path — do NOT call from gameplay code mid-session,
- * as it can produce ID collisions with entities already in flight.
- */
-export function resetIdCounter() {
-  counter = 0;
-}

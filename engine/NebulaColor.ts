@@ -123,14 +123,6 @@ export function blendCompositionToHex(composition: NebulaColorStop[] | undefined
 // so the rule-based regen code averages and interpolates neighbour hues
 // via unit vectors to handle wraparound correctly (e.g., averaging 350°
 // and 10° gives 0°, not 180°).
-//
-// The old linear [210, 340] constants are kept only for backward
-// compatibility with any external callers; within this module the
-// full-wheel helpers below are the canonical API.
-export const NEBULA_PALETTE_HUE_MIN = 0;
-export const NEBULA_PALETTE_HUE_MAX = 360;
-export const NEBULA_PALETTE_HUE_RANGE = 360;
-
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 
