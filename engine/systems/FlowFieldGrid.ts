@@ -88,6 +88,13 @@ export class FlowFieldGrid {
   private playerCell  = -1;
   private enemyDirty  = true;   // true = rebuild enemy field next flush
 
+  // Perf instrumentation — wall time (ms) of the most recent
+  // flushEnemyField() invocation.  Zero when the field was clean and the
+  // flush was a no-op; populated when a full range-capped BFS rebuild ran.
+  // Read by GameEngine for the dev perf overlay so we can catch pathological
+  // rebuild thrash (e.g. player oscillating across a cell boundary).
+  public lastFlushMs: number = 0;
+
   // ─── coordinate helpers ──────────────────────────────────────────────────
 
   worldToCell(wx: number, wy: number): number {
@@ -192,13 +199,18 @@ export class FlowFieldGrid {
    * Worst-case cost: ~0.2 ms (BFS over ≤ π×18² ≈ 1000 cells).
    */
   flushEnemyField(): void {
-    if (!this.enemyDirty) return;
+    if (!this.enemyDirty) { this.lastFlushMs = 0; return; }
+    const t0 = performance.now();
     this.enemyDirty = false;
     this.eneDist.fill(INF);
-    if (this.playerCell < 0 || this.blocked[this.playerCell]) return;
+    if (this.playerCell < 0 || this.blocked[this.playerCell]) {
+      this.lastFlushMs = performance.now() - t0;
+      return;
+    }
     this.eneDist[this.playerCell] = 0;
     this._runFullBFS([this.playerCell], this.eneDist, MAX_ENEMY_RANGE);
     this._computeAllGradients(this.eneDist, this.eneFlowX, this.eneFlowY);
+    this.lastFlushMs = performance.now() - t0;
   }
 
   /**

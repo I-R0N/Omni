@@ -10,6 +10,19 @@ export class PhysicsSystem {
   private staticGrid: Map<number, GameEntity[]> = new Map();
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
 
+  // ── Perf instrumentation ──────────────────────────────────────────────────
+  // Last-step wall time (ms) for the main update phases.  Written once per
+  // update() call and read by GameEngine for the dev perf overlay.  Kept as
+  // plain instance fields so there is zero allocation in the hot path.
+  public lastUpdateMs: number = 0;       // whole update() excluding caller
+  public lastGravityMs: number = 0;      // applyGravity scan + pair loop
+  public lastLocalGravityMs: number = 0; // applyLocalGravity scan
+  public lastCollisionsMs: number = 0;   // handleEntityCollisions broadphase + SAT
+  // Peak dynamic-grid cell population seen during this step's broadphase.
+  // Tracked as the grid is populated; the 3×3 neighbourhood check is
+  // quadratic per cell, so this is the direct signal for dense-cluster stalls.
+  public lastMaxCellDensity: number = 0;
+
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
   //
   // MAX_SAT_VERTICES caps the polygon size the SAT pass can handle without
@@ -59,6 +72,8 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
+    const t0 = performance.now();
+
     // Determine Friction based on Environment (MapType) from Config
     const config = PLAYER_MOVEMENT_CONFIG[mapType];
     const baseFriction = config ? config.friction : PHYSICS_CONSTANTS.FRICTION;
@@ -69,10 +84,14 @@ export class PhysicsSystem {
     const friction = Math.pow(baseFriction, timeScale);
 
     // Apply Planetary/Stellar Gravity (Scaled by time)
+    const tGrav = performance.now();
     this.applyGravity(entities, timeScale, onDamage);
+    this.lastGravityMs = performance.now() - tGrav;
 
     // Apply Player-Asteroid Mutual Gravity (Scaled by time)
+    const tLocal = performance.now();
     this.applyLocalGravity(entities, timeScale);
+    this.lastLocalGravityMs = performance.now() - tLocal;
 
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -149,7 +168,11 @@ export class PhysicsSystem {
     }
 
     // Optimized Entity-Entity Collision (Spatial Hash Grid)
+    const tCol = performance.now();
     this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+    this.lastCollisionsMs = performance.now() - tCol;
+
+    this.lastUpdateMs = performance.now() - t0;
   }
 
   private applyLocalGravity(entities: GameEntity[], timeScale: number) {
@@ -247,28 +270,34 @@ export class PhysicsSystem {
     this.dynamicGrid.clear();
     const cellSize = SPATIAL_GRID_SIZE;
 
-    // 2. Populate Dynamic Grid with moving entities
+    // 2. Populate Dynamic Grid with moving entities.  While we're walking
+    // each cell push, track the peak cell population — the 3×3 neighbourhood
+    // SAT pass below is O(k²) per cell, so peak density is the direct signal
+    // for dense-cluster stalls in the dev perf overlay.
+    let maxDensity = 0;
     const dynamicEntities: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
-        
+
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
         dynamicEntities.push(e);
-        
+
         const cx = Math.floor(e.position.x / cellSize);
         const cy = Math.floor(e.position.y / cellSize);
         const key = (cx << 16) | (cy & 0xFFFF);
-        
+
         let cell = this.dynamicGrid.get(key);
         if (!cell) {
             cell = [];
             this.dynamicGrid.set(key, cell);
         }
         cell.push(e);
+        if (cell.length > maxDensity) maxDensity = cell.length;
     }
+    this.lastMaxCellDensity = maxDensity;
 
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary subjects
     for (let i = 0; i < dynamicEntities.length; i++) {

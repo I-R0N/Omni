@@ -55,6 +55,11 @@ export class RenderSystem {
   private backgroundManager: BackgroundManager;
   private debugMode: boolean = false;
 
+  // Perf instrumentation — wall time (ms) of the most recent render() call.
+  // Written at the end of render() and read by GameEngine for the dev perf
+  // overlay.  render() is a single top-level pass so one timer covers it.
+  public lastRenderMs: number = 0;
+
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
@@ -130,7 +135,8 @@ export class RenderSystem {
     waveAnnouncements?: WaveAnnouncement[],
     detachedTrails?: TrailPoint[][]
   ) {
-    if (!this.ctx) return;
+    const t0 = performance.now();
+    if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
     const width = (ctx.canvas.width || 0) / dpr;
@@ -261,6 +267,8 @@ export class RenderSystem {
     if (player) {
         this.renderAmmoHUD(ctx, player, width, height);
     }
+
+    this.lastRenderMs = performance.now() - t0;
   }
 
   private renderTrails(

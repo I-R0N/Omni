@@ -242,6 +242,32 @@ export interface CameraState {
   shakeOffset: Vector2;
 }
 
+// Per-frame performance sample set surfaced to the dev overlay.  All timing
+// values are running averages in milliseconds over the last ~60 sim frames;
+// counts are snapshots of the most recent sim step.  Every field is optional
+// so the stats snapshot remains usable before the first sim tick populates
+// the ring buffers (and so the main HUD can ignore it entirely).
+export interface PerfSnapshot {
+  // System update durations (ms, averaged)
+  physicsMs: number;
+  aiMs: number;
+  homingMs: number;
+  lightningMs: number;
+  gravityMs: number;      // PhysicsSystem.applyGravity (attractor fields)
+  localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
+  renderMs: number;
+  flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
+  // Collision broadphase — peak dynamic-grid cell density observed last step
+  maxCellDensity: number;
+  // Entity counts (snapshot of most recent sim step)
+  totalEntities: number;
+  enemyCount: number;
+  asteroidCount: number;    // Includes asteroid shards (shardType='asteroid'|'tile')
+  projectileCount: number;
+  particleCount: number;
+  interactableCount: number; // Drops, portals, POIs
+}
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
@@ -258,6 +284,9 @@ export interface EngineStats {
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
+  // Performance instrumentation — populated every frame, only displayed by
+  // the dev-only F3 overlay so the normal HUD stays uncluttered.
+  perf?: PerfSnapshot;
 }
 
 export interface DamageText {
