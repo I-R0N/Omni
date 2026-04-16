@@ -4,6 +4,7 @@ import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS } from '../../constants';
 import { sampleFlow } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
+import { buildShardPolygon } from '../shardPolygon';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -68,20 +69,7 @@ export abstract class BaseMapLayer {
     // polygon winding regardless of jitter direction.
     const numPoints = 9 + Math.floor(Math.random() * 4); // 9–12
     const baseR    = (size / 2) * 0.82;
-    const rawPts: { angle: number; r: number }[] = [];
-    for (let i = 0; i < numPoints; i++) {
-        const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.65;
-        rawPts.push({
-            angle: baseAngle + angleJitter,
-            r:     baseR * (0.75 + Math.random() * 0.5), // 75 %–125 % of base
-        });
-    }
-    rawPts.sort((a, b) => a.angle - b.angle);
-    const points: Vector2[] = rawPts.map(p => ({
-        x: Math.cos(p.angle) * p.r,
-        y: Math.sin(p.angle) * p.r,
-    }));
+    const points: Vector2[] = buildShardPolygon(numPoints, baseR, 0.75, 0.5, 0.65);
 
     let asteroidAssets = [ASSETS.ASTEROID_1, ASSETS.ASTEROID_2, ASSETS.ASTEROID_3, ASSETS.ASTEROID_ICE, ASSETS.ASTEROID_VOLCANIC];
 

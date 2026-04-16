@@ -23,6 +23,7 @@ import { nextId } from './IdAllocator';
 import { ParticleSystem } from './ParticleSystem';
 import { DropSystem } from './DropSystem';
 import { PhysicsSystem } from './PhysicsSystem';
+import { buildShardPolygon } from '../shardPolygon';
 
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
@@ -250,17 +251,7 @@ export class NebulaSystem {
 
             // Glass-shard polygon generation.
             const numPoints = 4 + Math.floor(Math.random() * 3);
-            const rawPts: { angle: number; r: number }[] = [];
-            for (let j = 0; j < numPoints; j++) {
-                const baseAngle = (j / numPoints) * Math.PI * 2;
-                const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-                rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-            }
-            rawPts.sort((a, b) => a.angle - b.angle);
-            const pts: Vector2[] = rawPts.map(p => ({
-                x: Math.cos(p.angle) * p.r,
-                y: Math.sin(p.angle) * p.r,
-            }));
+            const pts: Vector2[] = buildShardPolygon(numPoints, radius, 0.6, 0.55, 0.25);
             const size = radius * 4; // diameter with a bit of slack for physics feel
 
             // Rear-cone angle: π + (−fan … +fan) relative to forward.
@@ -522,17 +513,7 @@ export class NebulaSystem {
         // loose polygon-inside-size convention used at spawn).
         const polyRadius = newDiameter / 2 * 0.5; // keeps shape inside bbox
         const numPoints = 4 + Math.floor(Math.random() * 3);
-        const rawPts: { angle: number; r: number }[] = [];
-        for (let j = 0; j < numPoints; j++) {
-            const baseAngle = (j / numPoints) * Math.PI * 2;
-            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-            rawPts.push({ angle: baseAngle + jitter, r: polyRadius * (0.6 + Math.random() * 0.55) });
-        }
-        rawPts.sort((a, b) => a.angle - b.angle);
-        larger.polygonPoints = rawPts.map(p => ({
-            x: Math.cos(p.angle) * p.r,
-            y: Math.sin(p.angle) * p.r,
-        }));
+        larger.polygonPoints = buildShardPolygon(numPoints, polyRadius, 0.6, 0.55, 0.25);
 
         // Blend colour compositions weighted by area; larger dominates.
         larger.nebulaColorComposition = blendCompositions(

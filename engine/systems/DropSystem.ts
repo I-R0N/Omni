@@ -8,6 +8,7 @@ import {
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
+import { buildShardPolygon } from '../shardPolygon';
 
 /**
  * DropSystem — owns collectible drops and breakage debris.
@@ -173,14 +174,7 @@ export class DropSystem {
       const rMin    = isTile ? 0.60 : 0.55;
       const rRange  = isTile ? 0.55 : 0.70;
       const baseR   = (size / 2) * 0.8;
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPts; j++) {
-        const ba = (j / numPts) * Math.PI * 2;
-        const aj = (Math.random() - 0.5) * (Math.PI / numPts) * jitterK;
-        rawPts.push({ angle: ba + aj, r: baseR * (rMin + Math.random() * rRange) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+      const pts: Vector2[] = buildShardPolygon(numPts, baseR, rMin, rRange, jitterK);
 
       entities.push({
         id:           nextId('enemy_shard'),
@@ -254,14 +248,7 @@ export class DropSystem {
       // radius variation.  More blocky/faceted than asteroid shards (which
       // use 5–7 pts with higher jitter) to hint at their manufactured origin.
       const numPoints = 4 + Math.floor(Math.random() * 3);
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPoints; j++) {
-        const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+      const pts: Vector2[] = buildShardPolygon(numPoints, radius, 0.6, 0.55, 0.25);
 
       const size = radius * 4; // diameter; slightly larger so physics feel solid
       entities.push({

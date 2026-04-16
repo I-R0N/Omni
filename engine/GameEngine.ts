@@ -18,6 +18,7 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { buildShardPolygon } from './shardPolygon';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -1683,17 +1684,7 @@ export class GameEngine {
       // Irregular polygon (same approach as normal asteroids)
       const numPts = 9 + Math.floor(Math.random() * 4);
       const baseR  = (newSize / 2) * 0.82;
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let i = 0; i < numPts; i++) {
-          const base   = (i / numPts) * Math.PI * 2;
-          const jitter = (Math.random() - 0.5) * (Math.PI / numPts) * 0.65;
-          rawPts.push({ angle: base + jitter, r: baseR * (0.75 + Math.random() * 0.5) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const points = rawPts.map(p => ({
-          x: Math.cos(p.angle) * p.r,
-          y: Math.sin(p.angle) * p.r,
-      }));
+      const points = buildShardPolygon(numPts, baseR, 0.75, 0.5, 0.65);
 
       this.currentMap.entities.push({
           id:            nextId('composite'),
@@ -1788,14 +1779,7 @@ export class GameEngine {
           const rMin         = isTile ? 0.60 : 0.55;
           const rRange       = isTile ? 0.55 : 0.70;
           const baseR        = (newSize / 2) * 0.8;
-          const rawPts: { angle: number; r: number }[] = [];
-          for (let j = 0; j < numPoints; j++) {
-              const baseAngle   = (j / numPoints) * Math.PI * 2;
-              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitterK;
-              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (rMin + Math.random() * rRange) });
-          }
-          rawPts.sort((a, b) => a.angle - b.angle);
-          const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+          const points: Vector2[] = buildShardPolygon(numPoints, baseR, rMin, rRange, angleJitterK);
 
           const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
           const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
