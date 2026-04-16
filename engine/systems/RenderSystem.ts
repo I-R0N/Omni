@@ -219,8 +219,24 @@ export class RenderSystem {
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
+
+        // ── Fast-path STRUCTURE ──────────────────────────────────────
+        // Structures (~22k per map) never participate in the attractor /
+        // indicator / minimap / trail buffers, and the minimap is now a
+        // pre-rendered static layer.  Skip all the per-entity bucket
+        // checks and just frustum-cull → visible push.  This keeps the
+        // off-screen-tile cost to ~5 ops per entity instead of ~17.
+        if (entity.type === EntityType.STRUCTURE) {
+            const isRegen = entity.regenProgress !== undefined;
+            if (!entity.active && !isRegen) continue;
+            if (entity.position.x < left || entity.position.x > right ||
+                entity.position.y < top || entity.position.y > bottom) continue;
+            this._visibleEntities.push(entity);
+            continue;
+        }
+
         // Allow inactive tiles that are regenerating to pass through for ghost rendering
-        if (!entity.active && !(entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined)) continue;
+        if (!entity.active) continue;
 
         const dx = entity.position.x - camX;
         const dy = entity.position.y - camY;
@@ -239,7 +255,6 @@ export class RenderSystem {
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
-                && entity.type !== EntityType.STRUCTURE
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -554,6 +569,11 @@ export class RenderSystem {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
 
+    // Cache the structure sprite once.  Prior to this, getImage() was
+    // called once per visible tile (200-400×) to look up the same image.
+    const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+    const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
+
     entities.forEach(entity => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -562,6 +582,22 @@ export class RenderSystem {
 
       // Particles are handled separately in renderParticles() — skip here
       if (entity.type === EntityType.PARTICLE) return;
+
+      // ── Fast-path STRUCTURE sprite render ───────────────────────────
+      // Structures have rotation = 0, no per-entity ctx state changes,
+      // and almost always render as a single drawImage call.  Skipping
+      // the generic save/translate/rotate/restore wrapper saves 4 canvas
+      // state ops per tile — multiplied by 200-400 visible tiles, that's
+      // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
+      // pop, regen ghost) fall back to the slow generic path.
+      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
+          && !entity.hitFlash && entity.regenPopTimer === undefined) {
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const drawSize = maxDim * 1.02;
+          const dHalf = drawSize / 2;
+          ctx.drawImage(hexSprite, entity.position.x - dHalf, entity.position.y - dHalf, drawSize, drawSize);
+          return;
+      }
 
       ctx.save();
       
