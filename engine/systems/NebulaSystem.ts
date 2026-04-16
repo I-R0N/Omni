@@ -190,8 +190,14 @@ export class NebulaSystem {
         const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF;
         const MIN_RADIUS = 2; // don't spawn sub-pixel shards
 
-        // 4–6 shards per shatter (matches glass base range).
-        const count = 4 + Math.floor(Math.random() * 3);
+        // 2–3 shards per shatter — fewer, chunkier pieces than glass
+        // tiles produce.  Nebula tiles read as soft cloud blobs that
+        // come apart slowly into a couple of large fragments rather
+        // than a glittery shower of small debris.  Combined with the
+        // area-proportional sprite formula in RenderSystem, each fresh
+        // shard draws at sqrt(1/count) × TILE_SPRITE_WORLD_SIZE — so
+        // 2-shard splits are 0.71× tile size, 3-shard splits 0.58×.
+        const count = 2 + Math.floor(Math.random() * 2);
 
         // Power-law area distribution normalised to the parent's area.
         const alpha    = 1.0;

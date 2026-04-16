@@ -352,14 +352,14 @@ export const NEBULA_CONSTANTS = {
   // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
   //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
   // so visual size scales proportionally with the effective area the
-  // entity carries.  A fresh shard from a 5-way shatter draws at
-  //   96 × sqrt(1/5) ≈ 43 world units
+  // entity carries.  A fresh shard from a 3-way shatter draws at
+  //   120 × sqrt(1/3) ≈ 69 world units
   // and grows as it merges:
-  //   half-merged → 96 × sqrt(0.5) ≈ 68
-  //   fully-merged (about to transmute) → 96
+  //   half-merged → 120 × sqrt(0.5) ≈ 85
+  //   fully-merged (about to transmute) → 120
   // Tune this one number to make nebula tiles visually bigger or smaller;
   // shard sprites follow automatically.
-  TILE_SPRITE_WORLD_SIZE: 96,
+  TILE_SPRITE_WORLD_SIZE: 120,
   // Cluster generation — tuned for heavy coverage across the map so that
   // nebula clusters naturally fill empty gaps between glass-tile clusters
   // and statistically overlap with some of the procedurally placed
