@@ -334,7 +334,7 @@ export const NEBULA_CONSTANTS = {
   // Stronger pull shortens the drift-to-merge beat; paired with heavier
   // LINEAR_DAMPING below so shards don't overshoot their target.
   GRAVITY_RANGE: 380,
-  GRAVITY_STRENGTH: 500,
+  GRAVITY_STRENGTH: 380,
   GRAVITY_MIN_DIST: 15,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
