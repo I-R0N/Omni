@@ -529,6 +529,11 @@ export class GameEngine {
       // treats those shards as slow-along-flow and applies the full 9×
       // correction, so the cluster actually drifts instead of humming in
       // place.
+      //
+      // The (1 − v·flow/target) ratio is clamped to [0, 1] so an asteroid
+      // briefly travelling *against* the flow (e.g. right after bouncing
+      // off a tile) doesn't trigger runaway urgency that would pin it back
+      // into the wall — it caps at the same 9× the cluster case gets.
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
@@ -537,7 +542,8 @@ export class GameEngine {
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
           const vAlongFlow = e.velocity.x * flow.x + e.velocity.y * flow.y;
-          const urgency = 1 + 8 * Math.max(0, 1 - vAlongFlow / FLOW_TARGET_SPEED);
+          const deficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
+          const urgency = 1 + 8 * deficit;
           const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;

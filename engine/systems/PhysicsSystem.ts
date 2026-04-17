@@ -585,20 +585,30 @@ export class PhysicsSystem {
    * positional correction + elastic impulse.  Typical cost per pair is
    * ~10 multiplications and 1 sqrt.
    *
-   * Degenerate exact-overlap (distSq ≈ 0) is resolved by pushing along
-   * a deterministic axis derived from the entity ids so two stacked
-   * shards pick the same separation direction each frame and actually
-   * come apart instead of flickering.
+   * Collision radius is `size.x * 0.42`, not `size.x / 2` — the
+   * generator places polygon points at a base radius of size × 0.41 with
+   * ±25 % jitter, so the average visible extent sits near 0.42 × size.
+   * Using the full size/2 fired the resolver at visible gaps where the
+   * polygons clearly weren't touching, which read as "awkward" phantom
+   * collisions.
+   *
+   * Per-entity positional correction is capped at MAX_SEPARATION_STEP
+   * per frame so that first-frame encounters with a deeply-stacked
+   * cluster (where many pairs have overlap ≈ sumR) ease apart over a
+   * handful of frames instead of teleporting.  The elastic impulse is
+   * applied every frame regardless so separation velocity builds up
+   * quickly.
    */
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
-      const rA = a.size.x / 2;
-      const rB = b.size.x / 2;
+      const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
+      const rA = a.size.x * 0.42;
+      const rB = b.size.x * 0.42;
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 
-      let dx = wrapDeltaX(a.position.x, b.position.x);
-      let dy = wrapDeltaY(a.position.y, b.position.y);
-      let distSq = dx * dx + dy * dy;
+      const dx = wrapDeltaX(a.position.x, b.position.x);
+      const dy = wrapDeltaY(a.position.y, b.position.y);
+      const distSq = dx * dx + dy * dy;
       if (distSq > sumRSq) return;
 
       let nx: number;
@@ -627,14 +637,20 @@ export class PhysicsSystem {
       const totalInvMass = invMassA + invMassB;
       if (totalInvMass <= 0) return;
 
-      // Positional correction — push the pair apart proportional to
-      // inverse mass so a small shard bouncing off a large one moves
-      // most of the distance.
+      // Positional correction — mass-weighted push apart.  Cap the per-
+      // entity movement so a deeply-overlapping pair (e.g. the initial
+      // frame when a newly-merged cluster is dissolved) separates
+      // smoothly over several frames rather than teleporting chunks of
+      // the cluster across the screen.
       const correction = Math.max(0, overlap - SLOP) * CORRECTION_PERCENT / totalInvMass;
-      a.position.x -= nx * correction * invMassA;
-      a.position.y -= ny * correction * invMassA;
-      b.position.x += nx * correction * invMassB;
-      b.position.y += ny * correction * invMassB;
+      let pushA = correction * invMassA;
+      let pushB = correction * invMassB;
+      if (pushA > MAX_SEPARATION_STEP) pushA = MAX_SEPARATION_STEP;
+      if (pushB > MAX_SEPARATION_STEP) pushB = MAX_SEPARATION_STEP;
+      a.position.x -= nx * pushA;
+      a.position.y -= ny * pushA;
+      b.position.x += nx * pushB;
+      b.position.y += ny * pushB;
 
       // Velocity resolution — elastic bounce along the contact normal.
       const rvx = b.velocity.x - a.velocity.x;
