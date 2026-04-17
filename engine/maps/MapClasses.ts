@@ -157,24 +157,25 @@ export class UniverseMap extends BaseMapLayer {
     const occupied = new Set<string>();
 
     // Cluster layout on the 15 000-unit toroidal map — see comment
-    // below for the zone bounds.  The outer passes stop ~1000 units
+    // below for the zone bounds.  The outer passes stop ~500 units
     // short of the map edge so each axis retains a thin dead-space
     // ring, and the inner passes sit inside that dense core.
     //
     //   Inner glass / tiles : ±2500   (dense core landmarks)
-    //   Outer glass / tiles : ±6500   (spread toward the edges)
+    //   Outer glass / tiles : ±7000   (spread to near the edges)
     //   Inner nebula cloud  : ±3500   (dense central cloud)
-    //   Outer nebula cloud  : ±6500   (spread toward the edges)
+    //   Outer nebula cloud  : ±7000   (spread to near the edges)
     //
     // Inner zones overlap with the outer pass' footprint on purpose —
     // they bias density toward the playable core, which is where most
     // fighting happens, without leaving the outskirts empty.  Clusters
     // grow organically past their seed zone (BFS neighbour walk), so
-    // boundaries blur naturally.
+    // the visible dead-space ring ends up tighter than the seed bound
+    // suggests.
     const INNER_GLASS_ZONE  = 5000;
-    const OUTER_GLASS_ZONE  = 13000;
+    const OUTER_GLASS_ZONE  = 14000;
     const INNER_NEBULA_ZONE = 7000;
-    const OUTER_NEBULA_ZONE = 13000;
+    const OUTER_NEBULA_ZONE = 14000;
 
     // Dense landmark cluster core around the spawn region.
     this.entities.push(...TileGenerator.generateClusteredMesh(
