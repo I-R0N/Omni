@@ -489,16 +489,24 @@ export class PhysicsSystem {
                         // immediately (no proj-proj interaction).
                         if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
 
-                        // Asteroid-asteroid: the ONLY result is gentle
-                        // impulse bouncing which fights against the
-                        // gravity + flow-field that pushes shards together
-                        // anyway, producing jitter rather than meaningful
-                        // gameplay.  The stick-bond system still handles
-                        // merging via its own grid.  Skipping this single
-                        // pair type eliminates the dominant O(k²) cost in
-                        // dense cluster cells.
-                        if (ta === EntityType.ASTEROID && tb === EntityType.ASTEROID) continue;
-                        
+                        // Asteroid-asteroid: route through a dedicated
+                        // circle-only resolver instead of the full SAT +
+                        // resolveCollision path.  Full SAT is too expensive
+                        // for dense clusters (O(k²) pairs per cell × O(v²)
+                        // per pair), so the previous build skipped this
+                        // pair type entirely — but that let shards stack
+                        // at the same centre, where mutual gravity trapped
+                        // them and the flow field couldn't budge the pile.
+                        // The cheap resolver still physically separates
+                        // overlapping shards and applies an elastic bounce
+                        // so they can't share a position, while costing a
+                        // few mul/sqrt per pair instead of a full polygon
+                        // projection.
+                        if (ta === EntityType.ASTEROID && tb === EntityType.ASTEROID) {
+                            this.resolveAsteroidPair(a, b);
+                            continue;
+                        }
+
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
                 }
@@ -564,6 +572,84 @@ export class PhysicsSystem {
           }
       }
       return true;
+  }
+
+  /**
+   * Cheap circle-only collision resolver for asteroid-asteroid pairs.
+   *
+   * Asteroids are roughly round (irregular convex polygons with radius
+   * ≈ size.x / 2), so a full SAT pass is overkill — and prohibitively
+   * expensive in dense clusters where a single cell can hold dozens of
+   * shards giving O(k²) pair checks.  This routine uses toroidal-delta
+   * distance, a single bounding-circle overlap test, and a mass-weighted
+   * positional correction + elastic impulse.  Typical cost per pair is
+   * ~10 multiplications and 1 sqrt.
+   *
+   * Degenerate exact-overlap (distSq ≈ 0) is resolved by pushing along
+   * a deterministic axis derived from the entity ids so two stacked
+   * shards pick the same separation direction each frame and actually
+   * come apart instead of flickering.
+   */
+  private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
+      const rA = a.size.x / 2;
+      const rB = b.size.x / 2;
+      const sumR = rA + rB;
+      const sumRSq = sumR * sumR;
+
+      let dx = wrapDeltaX(a.position.x, b.position.x);
+      let dy = wrapDeltaY(a.position.y, b.position.y);
+      let distSq = dx * dx + dy * dy;
+      if (distSq > sumRSq) return;
+
+      let nx: number;
+      let ny: number;
+      let dist: number;
+      if (distSq < 0.01) {
+          // Exact overlap — the very case that was trapping shards at a
+          // shared centre.  Pick a deterministic axis from the ids so the
+          // separation direction is stable frame-to-frame and the pair
+          // consistently pushes apart instead of jittering.
+          const seed = (a.id.charCodeAt(a.id.length - 1)
+                      + b.id.charCodeAt(b.id.length - 1)) * 0.7853981633974483; // π/4
+          nx = Math.cos(seed);
+          ny = Math.sin(seed);
+          dist = 0.001;
+      } else {
+          dist = Math.sqrt(distSq);
+          nx = dx / dist;
+          ny = dy / dist;
+      }
+
+      const overlap = sumR - dist;
+      const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
+      const invMassA = 1 / a.mass;
+      const invMassB = 1 / b.mass;
+      const totalInvMass = invMassA + invMassB;
+      if (totalInvMass <= 0) return;
+
+      // Positional correction — push the pair apart proportional to
+      // inverse mass so a small shard bouncing off a large one moves
+      // most of the distance.
+      const correction = Math.max(0, overlap - SLOP) * CORRECTION_PERCENT / totalInvMass;
+      a.position.x -= nx * correction * invMassA;
+      a.position.y -= ny * correction * invMassA;
+      b.position.x += nx * correction * invMassB;
+      b.position.y += ny * correction * invMassB;
+
+      // Velocity resolution — elastic bounce along the contact normal.
+      const rvx = b.velocity.x - a.velocity.x;
+      const rvy = b.velocity.y - a.velocity.y;
+      const velAlongNormal = rvx * nx + rvy * ny;
+      if (velAlongNormal > 0) return; // already moving apart
+
+      const j = -(1 + ELASTICITY) * velAlongNormal;
+      const impulse = j / totalInvMass;
+      const ix = nx * impulse;
+      const iy = ny * impulse;
+      a.velocity.x -= ix * invMassA;
+      a.velocity.y -= iy * invMassA;
+      b.velocity.x += ix * invMassB;
+      b.velocity.y += iy * invMassB;
   }
 
   private checkAndResolveCollision(
