@@ -287,11 +287,11 @@ export const NEBULA_CONSTANTS = {
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
-  // damping = shards drift longer.  At 0.98, velocity halves in ~34
-  // frames (~0.57 s) — a noticeably quicker settle than the original
-  // 0.991 so shards come to rest instead of drifting visibly across
-  // the screen, while still giving a beat of motion post-shatter.
-  LINEAR_DAMPING: 0.98,
+  // damping = shards drift longer.  LINEAR at 0.97 → velocity halves
+  // in ~23 frames (~0.38 s), heavier than angular so shards translate
+  // less freely (counterweights the stronger GRAVITY_STRENGTH above)
+  // while keeping the softer tumble on spin.
+  LINEAR_DAMPING: 0.97,
   ANGULAR_DAMPING: 0.98,
   // Speed-based opacity falloff for shards — fast shards read slightly
   // translucent, settled shards are fully opaque.  Applied as
@@ -331,10 +331,10 @@ export const NEBULA_CONSTANTS = {
   FAN_HALF_ANGLE: Math.PI / 3,  // 60° (so ±60° → 120° full fan)
   // Gravity pull: each shard is attracted to the nearest larger nebula
   // entity within GRAVITY_RANGE.  The force curve is G / max(dist, MIN).
-  // Tuned low so shards drift toward merges over a few seconds instead
-  // of snapping together on the first substep.
+  // Stronger pull shortens the drift-to-merge beat; paired with heavier
+  // LINEAR_DAMPING below so shards don't overshoot their target.
   GRAVITY_RANGE: 380,
-  GRAVITY_STRENGTH: 300,
+  GRAVITY_STRENGTH: 500,
   GRAVITY_MIN_DIST: 15,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
