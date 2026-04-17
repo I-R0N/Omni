@@ -547,73 +547,13 @@ export class GameEngine {
           applyFlow(d);
       }
 
-      // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
-      // causing gradual clustering as they drift through the flow field.
-      // Glass shards are purely debris and excluded.
-      // Spatial grid (cell = interaction radius) reduces O(n²) pairs to O(n·k)
-      // where k is the local candidate density — typically 1–5 vs. all candidates.
-      const GRAV_G        = 2.5;
-      const GRAV_RANGE    = 120;
-      const GRAV_RANGE_SQ = GRAV_RANGE * GRAV_RANGE;
-      const GRAV_MIN_SQ   = 12 * 12;
-
-      const gravCandidates: GameEntity[] = [this.player];
-      for (let i = 0; i < asteroids.length; i++) gravCandidates.push(asteroids[i]);
-      for (let i = 0; i < this.activeDrops.length; i++) {
-          const d = this.activeDrops[i];
-          if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
-      }
-
-      // Bucket candidate indices by grid cell — cell indices wrap modulo
-      // the grid count so entities near a seam end up in the same bucket
-      // as their counterparts on the far side (pair reasoning below uses
-      // toroidal delta to compute the actual interaction force).
-      const GRAV_GRID_COLS = Math.ceil(MAP_WIDTH  / GRAV_RANGE);
-      const GRAV_GRID_ROWS = Math.ceil(MAP_HEIGHT / GRAV_RANGE);
-      const gravCellKey = (cx: number, cy: number) => {
-          const wx = ((cx % GRAV_GRID_COLS) + GRAV_GRID_COLS) % GRAV_GRID_COLS;
-          const wy = ((cy % GRAV_GRID_ROWS) + GRAV_GRID_ROWS) % GRAV_GRID_ROWS;
-          return (wx << 16) | (wy & 0xFFFF);
-      };
-      const gravGrid = new Map<number, number[]>();
-      for (let i = 0; i < gravCandidates.length; i++) {
-          const e = gravCandidates[i];
-          const cx = Math.floor(e.position.x / GRAV_RANGE);
-          const cy = Math.floor(e.position.y / GRAV_RANGE);
-          let cell = gravGrid.get(gravCellKey(cx, cy));
-          if (!cell) { cell = []; gravGrid.set(gravCellKey(cx, cy), cell); }
-          cell.push(i);
-      }
-
-      // Check only same + 8 neighbouring cells; j > i ensures each pair is processed once
-      for (let i = 0; i < gravCandidates.length; i++) {
-          const a = gravCandidates[i];
-          const acx = Math.floor(a.position.x / GRAV_RANGE);
-          const acy = Math.floor(a.position.y / GRAV_RANGE);
-          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                  const cell = gravGrid.get(gravCellKey(ncx, ncy));
-                  if (!cell) continue;
-                  for (let k = 0; k < cell.length; k++) {
-                      const j = cell[k];
-                      if (j <= i) continue;
-                      const b = gravCandidates[j];
-                      const dx = wrapDeltaX(a.position.x, b.position.x);
-                      const dy = wrapDeltaY(a.position.y, b.position.y);
-                      const distSq = dx * dx + dy * dy;
-                      if (distSq > GRAV_RANGE_SQ) continue;
-                      const effSq = Math.max(distSq, GRAV_MIN_SQ);
-                      const f    = GRAV_G / effSq;
-                      const fx   = dx * f;
-                      const fy   = dy * f;
-                      a.velocity.x += fx * dt;
-                      a.velocity.y += fy * dt;
-                      b.velocity.x -= fx * dt;
-                      b.velocity.y -= fy * dt;
-                  }
-              }
-          }
-      }
+      // Mutual asteroid / drop gravity removed: on the old vortex flow
+      // field it produced intentional clustering along streamlines, but
+      // on the new continuous unit-magnitude field it creates permanent
+      // collection hotspots wherever local density happens to be highest
+      // (positive feedback loop amplified by the stick-bond merge pass).
+      // Player-asteroid gravity still runs via PhysicsSystem.applyLocalGravity
+      // so the player keeps their magnet-style pull on nearby rocks.
 
       // Stick bonds: detect contact and merge entities after threshold
       this.handleEntitySticking(dt);
