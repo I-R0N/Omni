@@ -1976,8 +1976,12 @@ export class RenderSystem {
           ZOOM_RANGE, RANGE, VIEWPORT_COLOR, VIEWPORT_BORDER_COLOR
       } = MINIMAP_CONSTANTS;
 
-      // Small map uses a zoomed-in range; expanded map shows the full overview range
-      const range = expanded ? RANGE : ZOOM_RANGE;
+      // Small map uses a zoomed-in range; expanded map shows the full overview range.
+      // Cap to the map's half-extent so the expanded view stops at one full wrap —
+      // otherwise on a 15 k map the configured 8 k range would show the same tiles
+      // twice at the edges, which reads as a duplicated minimap.
+      const staticRange = this._minimapStaticRange || Infinity;
+      const range = Math.min(expanded ? RANGE : ZOOM_RANGE, staticRange);
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
