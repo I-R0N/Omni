@@ -521,10 +521,14 @@ export class GameEngine {
       }
 
       // Flow-field nudge: steer each asteroid toward the grid flow direction.
-      // Elastic correction rate: asteroids near the target speed get a gentle
-      // 8 %/s nudge; asteroids that have been slowed by collisions receive up
-      // to 9× stronger correction so they re-enter the stream quickly without
-      // any hard velocity override (no teleporting).
+      // Elastic correction rate keyed off the *signed* velocity component
+      // along the local flow — not the raw speed magnitude.  A cluster held
+      // together by mutual gravity has individual shards rapidly oscillating
+      // around the cluster centre of mass: raw speed is high, but the COM
+      // drift along flow is ~0.  Using `v · flow` for the urgency check
+      // treats those shards as slow-along-flow and applies the full 9×
+      // correction, so the cluster actually drifts instead of humming in
+      // place.
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
@@ -532,8 +536,8 @@ export class GameEngine {
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
-          const speed   = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
-          const urgency = 1 + 8 * Math.max(0, 1 - speed / FLOW_TARGET_SPEED);
+          const vAlongFlow = e.velocity.x * flow.x + e.velocity.y * flow.y;
+          const urgency = 1 + 8 * Math.max(0, 1 - vAlongFlow / FLOW_TARGET_SPEED);
           const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
