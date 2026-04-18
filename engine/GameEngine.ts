@@ -1618,6 +1618,14 @@ export class GameEngine {
           const rB = b.size.x / 2;
           const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
 
+          // Size cap — clusters that grow past the generator's maxSize
+          // get stuck in gaps between tile clusters, creating traffic
+          // jams.  If the area-conserving merge would exceed the cap,
+          // skip the merge: the bond is discarded by the caller
+          // (handleEntitySticking dropping it from the write list) and
+          // the pair stays as two separate rocks.
+          if (newDiam > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].maxSize) return;
+
           // Larger entity by area dominates shardType; blend glow colors
           const dominant: ShardType = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
           const glowA = a.powerupGlowColor;
