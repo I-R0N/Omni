@@ -18,6 +18,7 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from './toroidal';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -520,10 +521,24 @@ export class GameEngine {
       }
 
       // Flow-field nudge: steer each asteroid toward the grid flow direction.
-      // Elastic correction rate: asteroids near the target speed get a gentle
-      // 8 %/s nudge; asteroids that have been slowed by collisions receive up
-      // to 9× stronger correction so they re-enter the stream quickly without
-      // any hard velocity override (no teleporting).
+      // Urgency is driven by TWO deficits, and the max of them wins:
+      //
+      //   parallelDeficit: how far below target the velocity's flow-aligned
+      //   component is — ramps the correction back up to 9× when an asteroid
+      //   is stalled or bouncing backward, and sits at 1× when it's cruising
+      //   forward at target.
+      //
+      //   perpDeficit: how much velocity the asteroid has *perpendicular* to
+      //   the flow — ramps up whenever something (collisions, mutual gravity,
+      //   bond cohesion with a neighbour in a different flow cell) has
+      //   dragged it off its streamline.  Without this term, an asteroid at
+      //   the target parallel speed dropped to urgency = 1 regardless of
+      //   how much sideways drift it had accumulated, so the perpendicular
+      //   component of mutual gravity went essentially uncontested and
+      //   asteroids slowly pulled each other into dense packs that still
+      //   drifted at target speed together.  Keeping the perp-deficit hot
+      //   makes the correction actively damp sideways motion, so packs
+      //   spread back out onto the flow lines.
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
@@ -531,9 +546,13 @@ export class GameEngine {
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
-          const speed   = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
-          const urgency = 1 + 8 * Math.max(0, 1 - speed / FLOW_TARGET_SPEED);
-          const alpha   = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
+          const vAlongFlow = e.velocity.x * flow.x + e.velocity.y * flow.y;
+          const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+          const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
+          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
+          const perpDeficit     = Math.min(1, vPerp / FLOW_TARGET_SPEED);
+          const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
+          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
@@ -563,15 +582,24 @@ export class GameEngine {
           if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
       }
 
-      // Bucket candidate indices by grid cell
+      // Bucket candidate indices by grid cell — cell indices wrap modulo
+      // the grid count so entities near a seam end up in the same bucket
+      // as their counterparts on the far side (pair reasoning below uses
+      // toroidal delta to compute the actual interaction force).
+      const GRAV_GRID_COLS = Math.ceil(MAP_WIDTH  / GRAV_RANGE);
+      const GRAV_GRID_ROWS = Math.ceil(MAP_HEIGHT / GRAV_RANGE);
+      const gravCellKey = (cx: number, cy: number) => {
+          const wx = ((cx % GRAV_GRID_COLS) + GRAV_GRID_COLS) % GRAV_GRID_COLS;
+          const wy = ((cy % GRAV_GRID_ROWS) + GRAV_GRID_ROWS) % GRAV_GRID_ROWS;
+          return (wx << 16) | (wy & 0xFFFF);
+      };
       const gravGrid = new Map<number, number[]>();
       for (let i = 0; i < gravCandidates.length; i++) {
           const e = gravCandidates[i];
           const cx = Math.floor(e.position.x / GRAV_RANGE);
           const cy = Math.floor(e.position.y / GRAV_RANGE);
-          const key = (cx << 16) | (cy & 0xFFFF);
-          let cell = gravGrid.get(key);
-          if (!cell) { cell = []; gravGrid.set(key, cell); }
+          let cell = gravGrid.get(gravCellKey(cx, cy));
+          if (!cell) { cell = []; gravGrid.set(gravCellKey(cx, cy), cell); }
           cell.push(i);
       }
 
@@ -582,14 +610,14 @@ export class GameEngine {
           const acy = Math.floor(a.position.y / GRAV_RANGE);
           for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
               for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                  const cell = gravGrid.get((ncx << 16) | (ncy & 0xFFFF));
+                  const cell = gravGrid.get(gravCellKey(ncx, ncy));
                   if (!cell) continue;
                   for (let k = 0; k < cell.length; k++) {
                       const j = cell[k];
                       if (j <= i) continue;
                       const b = gravCandidates[j];
-                      const dx = b.position.x - a.position.x;
-                      const dy = b.position.y - a.position.y;
+                      const dx = wrapDeltaX(a.position.x, b.position.x);
+                      const dy = wrapDeltaY(a.position.y, b.position.y);
                       const distSq = dx * dx + dy * dy;
                       if (distSq > GRAV_RANGE_SQ) continue;
                       const effSq = Math.max(distSq, GRAV_MIN_SQ);
@@ -935,8 +963,10 @@ export class GameEngine {
 
     // Distance-gated emission — compare against the last EMISSION position
     // rather than the last trail point, since points drift after emission.
-    const emitDx = this.player.position.x - this.lastTrailEmitPos.x;
-    const emitDy = this.player.position.y - this.lastTrailEmitPos.y;
+    // Toroidal delta so a wrap-around doesn't read as a giant leap that
+    // triggers a spurious trail emission.
+    const emitDx = wrapDeltaX(this.lastTrailEmitPos.x, this.player.position.x);
+    const emitDy = wrapDeltaY(this.lastTrailEmitPos.y, this.player.position.y);
     const emitDistSq = emitDx * emitDx + emitDy * emitDy;
     const hasTrail = !!this.player.trail && this.player.trail.length > 0;
 
@@ -1072,8 +1102,8 @@ export class GameEngine {
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
         if (!drop.active) continue;
-        const dx     = this.player.position.x - drop.position.x;
-        const dy     = this.player.position.y - drop.position.y;
+        const dx     = wrapDeltaX(drop.position.x, this.player.position.x);
+        const dy     = wrapDeltaY(drop.position.y, this.player.position.y);
         const distSq = dx * dx + dy * dy;
         if (distSq <= collectRadSq) {
           this.applyDropEffect(drop);
@@ -1345,16 +1375,16 @@ export class GameEngine {
           for (let i = 0; i < enemies.length; i++) {
               const e = enemies[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = e.position.x - prev.position.x;
-              const dy = e.position.y - prev.position.y;
+              const dx = wrapDeltaX(prev.position.x, e.position.x);
+              const dy = wrapDeltaY(prev.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
               if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
           }
           for (let i = 0; i < asteroids.length; i++) {
               const e = asteroids[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = e.position.x - prev.position.x;
-              const dy = e.position.y - prev.position.y;
+              const dx = wrapDeltaX(prev.position.x, e.position.x);
+              const dy = wrapDeltaY(prev.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
               if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
           }
@@ -1426,8 +1456,8 @@ export class GameEngine {
   private handleEntitySticking(dt: number) {
       if (!this.currentMap) return;
 
-      const SAME_THRESHOLD = 1.0;   // base seconds for min-size pair (same type)
-      const DIFF_THRESHOLD = 2.0;   // base seconds for min-size pair (cross type)
+      const SAME_THRESHOLD = 10.0;  // base seconds for min-size pair (same type)
+      const DIFF_THRESHOLD = 20.0;  // base seconds for min-size pair (cross type)
       const SIZE_REF       = 20;    // reference size (min asteroid diameter)
       const SIZE_POWER     = 1.5;   // exponent — small bodies merge fast, large ones slowly
       const DIFF_CHANCE    = 0.5;   // probability that a cross-type contact forms a bond
@@ -1445,8 +1475,8 @@ export class GameEngine {
 
           if (!a.active || !b.active) continue; // discard silently
 
-          const dx = b.position.x - a.position.x;
-          const dy = b.position.y - a.position.y;
+          const dx = wrapDeltaX(a.position.x, b.position.x);
+          const dy = wrapDeltaY(a.position.y, b.position.y);
           const dist       = Math.sqrt(dx * dx + dy * dy);
           const contactDist = (a.size.x + b.size.x) * 0.5;
 
@@ -1492,12 +1522,19 @@ export class GameEngine {
       // Cell size: must cover the widest possible contact distance.
       // Max asteroid = 200, max drop ≈ 30 → max contactDist ≈ (200+200)/2 + buffer = 104 → use 110.
       const CELL = 110;
+      const STICK_COLS = Math.ceil(MAP_WIDTH  / CELL);
+      const STICK_ROWS = Math.ceil(MAP_HEIGHT / CELL);
+      const stickCellKey = (cx: number, cy: number) => {
+          const wx = ((cx % STICK_COLS) + STICK_COLS) % STICK_COLS;
+          const wy = ((cy % STICK_ROWS) + STICK_ROWS) % STICK_ROWS;
+          return (wx << 16) | (wy & 0xFFFF);
+      };
       const grid  = new Map<number, number[]>();
       for (let i = 0; i < candidates.length; i++) {
           const c  = candidates[i];
           const cx = Math.floor(c.position.x / CELL);
           const cy = Math.floor(c.position.y / CELL);
-          const key = (cx << 16) | (cy & 0xFFFF);
+          const key = stickCellKey(cx, cy);
           let cell  = grid.get(key);
           if (!cell) { cell = []; grid.set(key, cell); }
           cell.push(i);
@@ -1512,7 +1549,7 @@ export class GameEngine {
 
           for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
               for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                  const cell = grid.get((ncx << 16) | (ncy & 0xFFFF));
+                  const cell = grid.get(stickCellKey(ncx, ncy));
                   if (!cell) continue;
                   for (let k = 0; k < cell.length; k++) {
                       const j = cell[k];
@@ -1520,8 +1557,8 @@ export class GameEngine {
                       const b = candidates[j];
                       if (!b.active || bonded.has(b)) continue;
 
-                      const dx = b.position.x - a.position.x;
-                      const dy = b.position.y - a.position.y;
+                      const dx = wrapDeltaX(a.position.x, b.position.x);
+                      const dy = wrapDeltaY(a.position.y, b.position.y);
                       const distSq      = dx * dx + dy * dy;
                       const contactDist = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
                       if (distSq > contactDist * contactDist) continue;
@@ -1560,8 +1597,16 @@ export class GameEngine {
       const totalMass = a.mass + b.mass;
       const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
       const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
-      const nmx = (a.position.x * a.mass + b.position.x * b.mass) / totalMass;
-      const nmy = (a.position.y * a.mass + b.position.y * b.mass) / totalMass;
+      // Mass-weighted centroid — shift b into a's frame first so a wrap-
+      // crossing pair doesn't merge into a point on the opposite side of
+      // the map.  Final position is re-wrapped to canonical coords below.
+      const bShiftX = a.position.x + wrapDeltaX(a.position.x, b.position.x);
+      const bShiftY = a.position.y + wrapDeltaY(a.position.y, b.position.y);
+      let nmx = (a.position.x * a.mass + bShiftX * b.mass) / totalMass;
+      let nmy = (a.position.y * a.mass + bShiftY * b.mass) / totalMass;
+      // Wrap the centroid so any shift that carried it past a seam comes
+      // back into [-HALF_MAP, +HALF_MAP) before it's written to entities.
+      { const p = { x: nmx, y: nmy }; wrapPosition(p); nmx = p.x; nmy = p.y; }
 
       const aIsAst = a.type === EntityType.ASTEROID;
       const bIsAst = b.type === EntityType.ASTEROID;
@@ -1572,6 +1617,14 @@ export class GameEngine {
           const rA = a.size.x / 2;
           const rB = b.size.x / 2;
           const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+
+          // Size cap — clusters that grow past the generator's maxSize
+          // get stuck in gaps between tile clusters, creating traffic
+          // jams.  If the area-conserving merge would exceed the cap,
+          // skip the merge: the bond is discarded by the caller
+          // (handleEntitySticking dropping it from the write list) and
+          // the pair stays as two separate rocks.
+          if (newDiam > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].maxSize) return;
 
           // Larger entity by area dominates shardType; blend glow colors
           const dominant: ShardType = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
@@ -1895,8 +1948,8 @@ export class GameEngine {
     const rangeSq = AI_CONFIG.AGGRO_RANGE * AI_CONFIG.AGGRO_RANGE;
     for (const e of this.currentMap.entities) {
       if (!e.active || e.type !== EntityType.ENEMY) continue;
-      const dx = e.position.x - position.x;
-      const dy = e.position.y - position.y;
+      const dx = wrapDeltaX(position.x, e.position.x);
+      const dy = wrapDeltaY(position.y, e.position.y);
       if (dx * dx + dy * dy > rangeSq) continue;
       e.aggroTimer = AI_CONFIG.AGGRO_DURATION;
     }

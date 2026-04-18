@@ -8,6 +8,7 @@ import {
   MAX_PROJECTILES,
 } from '../../constants';
 import { nextId } from './IdAllocator';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
  * ProjectileSystem — owns projectile lifecycle: spawning, homing steering,
@@ -38,7 +39,11 @@ export class ProjectileSystem {
     config: WeaponConfig,
     ownerType: EntityType
   ) {
-    const angle = Math.atan2(target.y - shooter.position.y, target.x - shooter.position.x);
+    // Aim angle via toroidal delta so an enemy shooting a player that sits
+    // just across the seam doesn't fire in the opposite direction.
+    const aimDX = wrapDeltaX(shooter.position.x, target.x);
+    const aimDY = wrapDeltaY(shooter.position.y, target.y);
+    const angle = Math.atan2(aimDY, aimDX);
 
     // Only apply recoil to player for now
     if (ownerType === EntityType.PLAYER) {
@@ -145,7 +150,9 @@ export class ProjectileSystem {
 
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
-        const d2 = (e.position.x - p.position.x) ** 2 + (e.position.y - p.position.y) ** 2;
+        const dx = wrapDeltaX(p.position.x, e.position.x);
+        const dy = wrapDeltaY(p.position.y, e.position.y);
+        const d2 = dx * dx + dy * dy;
         if (d2 < minDist) {
           minDist = d2;
           target = e;
@@ -153,7 +160,9 @@ export class ProjectileSystem {
       }
 
       if (target) {
-        const desiredAngle = Math.atan2(target.position.y - p.position.y, target.position.x - p.position.x);
+        const tdx = wrapDeltaX(p.position.x, target.position.x);
+        const tdy = wrapDeltaY(p.position.y, target.position.y);
+        const desiredAngle = Math.atan2(tdy, tdx);
         let angleDiff = desiredAngle - p.rotation;
 
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -213,23 +222,23 @@ export class ProjectileSystem {
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
         if (e.isExploding) continue;
-        const dx = e.position.x - p.position.x;
-        const dy = e.position.y - p.position.y;
+        const dx = wrapDeltaX(p.position.x, e.position.x);
+        const dy = wrapDeltaY(p.position.y, e.position.y);
         const d2 = dx * dx + dy * dy;
         if (d2 < minD2) { minD2 = d2; target = e; }
       }
       for (let j = 0; j < asteroids.length; j++) {
         const e = asteroids[j];
         if (e.isExploding) continue;
-        const dx = e.position.x - p.position.x;
-        const dy = e.position.y - p.position.y;
+        const dx = wrapDeltaX(p.position.x, e.position.x);
+        const dy = wrapDeltaY(p.position.y, e.position.y);
         const d2 = dx * dx + dy * dy;
         if (d2 < minD2) { minD2 = d2; target = e; }
       }
 
       if (target) {
-        const dx = target.position.x - p.position.x;
-        const dy = target.position.y - p.position.y;
+        const dx = wrapDeltaX(p.position.x, target.position.x);
+        const dy = wrapDeltaY(p.position.y, target.position.y);
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 1) {
           // Gravity-like acceleration: stronger when closer

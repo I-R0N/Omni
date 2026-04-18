@@ -1,5 +1,6 @@
 import { GameEntity, EntityType, TrailPoint } from '../../types';
 import { TRAIL_CONSTANTS } from '../../constants';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
  * TrailSystem — ticks down all trail-point arrays and handles projectile
@@ -66,11 +67,13 @@ export class TrailSystem {
         p.trail = [];
       }
 
-      // Add new trail point if far enough from last
+      // Add new trail point if far enough from last.  Toroidal delta so
+      // a projectile that just wrapped across a seam doesn't read as a
+      // giant jump and emit a runaway burst of trail points.
       const t = p.trail;
       const lastPos = t.length > 0 ? t[t.length - 1] : null;
-      const dx = p.position.x - (lastPos?.x ?? p.position.x - 1);
-      const dy = p.position.y - (lastPos?.y ?? p.position.y - 1);
+      const dx = lastPos ? wrapDeltaX(lastPos.x, p.position.x) : 1;
+      const dy = lastPos ? wrapDeltaY(lastPos.y, p.position.y) : 1;
       if (!lastPos || (dx * dx + dy * dy > MIN_DIST_SQ)) {
         t.push({
           x: p.position.x,

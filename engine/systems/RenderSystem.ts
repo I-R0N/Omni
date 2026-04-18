@@ -5,6 +5,30 @@ import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRI
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../toroidal';
+
+/**
+ * Return the shift that brings a world-space point (wx, wy) into the
+ * camera's wrap zone — i.e. the copy of that point whose delta from the
+ * camera is in [-HALF_MAP, +HALF_MAP).  Render translations use the
+ * shifted coords so entities near a seam draw at the correct on-screen
+ * position instead of ~MAP_WIDTH off the edge.  Since the frustum is
+ * always < HALF_MAP on each axis, at most one shift offset can bring
+ * an entity into view, so a single-draw render is sufficient (no
+ * duplicate-draw needed).
+ */
+function shiftX(camX: number, wx: number): number {
+    const d = wx - camX;
+    if (d >  HALF_MAP_WIDTH) return wx - MAP_WIDTH;
+    if (d < -HALF_MAP_WIDTH) return wx + MAP_WIDTH;
+    return wx;
+}
+function shiftY(camY: number, wy: number): number {
+    const d = wy - camY;
+    if (d >  HALF_MAP_HEIGHT) return wy - MAP_HEIGHT;
+    if (d < -HALF_MAP_HEIGHT) return wy + MAP_HEIGHT;
+    return wy;
+}
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -83,15 +107,21 @@ export class RenderSystem {
   // content's visual centre lands on the rotation pivot.  Prevents
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
   private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
-  private _visibleEntities: GameEntity[] = [];
+  // Render buffers.  Each entry carries the entity AND its camera-local
+  // render coords (rx, ry) — computed once at cull time so the draw pass
+  // can translate to the right shifted position without recomputing.
+  // Toroidal maps require this because an entity near the wrap seam
+  // must render at position ±MAP_WIDTH / ±MAP_HEIGHT from its canonical
+  // coord to appear in the right on-screen spot.
+  private _visibleEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   // Separate render bucket for nebula tiles and shards so they always
   // render BELOW asteroids / actors / other entities regardless of their
   // order in currentMap.entities.  Runtime-spawned nebula tiles (from
   // shard transmutation) get pushed to the end of the entities array, so
   // a naive single-pass loop would render them on top of asteroids.
-  private _nebulaEntities: GameEntity[] = [];
-  private _trailEntities: GameEntity[] = [];
-  private _particleBuffer: GameEntity[] = [];
+  private _nebulaEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
 
@@ -316,12 +346,15 @@ export class RenderSystem {
    * instead of ~22k individual fillRect calls.
    */
   public buildMinimapStaticLayer(entities: GameEntity[], mapWidth: number, mapHeight: number) {
-      const { EXPANDED_SIZE, RANGE } = MINIMAP_CONSTANTS;
-      // Use the expanded minimap range so the pre-rendered layer covers the
-      // full overview.  The zoomed minimap simply reads a smaller source
-      // rect from the same canvas.
+      const { EXPANDED_SIZE } = MINIMAP_CONSTANTS;
+      // Size the pre-render to cover exactly one wrap unit of the
+      // toroidal map.  The per-frame blit (renderMinimap) uses modulo
+      // arithmetic against this canvas size, so the canvas extent must
+      // equal the map extent — otherwise the modulo wraps at a
+      // different boundary than the game's actual wrap seam and the
+      // view snaps by the size difference whenever the camera crosses.
       const halfMap = Math.max(mapWidth, mapHeight) / 2;
-      const range = Math.max(RANGE, halfMap);
+      const range = halfMap;
       this._minimapStaticRange = range;
 
       const res = EXPANDED_SIZE;
@@ -393,6 +426,12 @@ export class RenderSystem {
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
 
+        // Toroidal shift: compute the render position in the camera's
+        // local wrap zone so an entity near a seam draws at the correct
+        // on-screen spot instead of ~MAP_WIDTH off to the side.
+        const rx = shiftX(camX, entity.position.x);
+        const ry = shiftY(camY, entity.position.y);
+
         // ── Fast-path STRUCTURE ──────────────────────────────────────
         // Structures (~22k per map) never participate in the attractor /
         // indicator / minimap / trail buffers, and the minimap is now a
@@ -402,17 +441,16 @@ export class RenderSystem {
         if (entity.type === EntityType.STRUCTURE) {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
-            if (entity.position.x < left || entity.position.x > right ||
-                entity.position.y < top || entity.position.y > bottom) continue;
-            this._visibleEntities.push(entity);
+            if (rx < left || rx > right || ry < top || ry > bottom) continue;
+            this._visibleEntities.push({ entity, rx, ry });
             continue;
         }
 
         // Allow inactive tiles that are regenerating to pass through for ghost rendering
         if (!entity.active) continue;
 
-        const dx = entity.position.x - camX;
-        const dy = entity.position.y - camY;
+        const dx = rx - camX;
+        const dy = ry - camY;
 
         if (entity.type === EntityType.INTERACTABLE && entity.gravityStrength && entity.gravityStrength > 500) {
             this._attractors.push(entity);
@@ -433,25 +471,24 @@ export class RenderSystem {
             this._minimapBuffer.push({ entity, dx, dy });
         }
 
-        if (entity.position.x < left || entity.position.x > right ||
-            entity.position.y < top || entity.position.y > bottom) {
+        if (rx < left || rx > right || ry < top || ry > bottom) {
             continue;
         }
 
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
-            this._particleBuffer.push(entity);
+            this._particleBuffer.push({ entity, rx, ry });
         } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
             // Nebula entities render as a dedicated bottom layer so
             // asteroids / actors / projectiles always draw on top of
             // them, regardless of entity array order.
-            this._nebulaEntities.push(entity);
+            this._nebulaEntities.push({ entity, rx, ry });
         } else {
-            this._visibleEntities.push(entity);
+            this._visibleEntities.push({ entity, rx, ry });
         }
 
         if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
-            this._trailEntities.push(entity);
+            this._trailEntities.push({ entity, rx, ry });
         }
     }
 
@@ -479,7 +516,7 @@ export class RenderSystem {
     }
 
     // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities, detachedTrails);
+    this.renderTrails(ctx, this._trailEntities, camera, detachedTrails);
 
     // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
     // asteroids and everything else render on top of the nebula cloud.
@@ -489,11 +526,11 @@ export class RenderSystem {
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
 
     // 4b. Render Particles — single composite-op switch for the whole batch
-    this.renderParticles(ctx, this._particleBuffer);
+    this.renderParticles(ctx, this._particleBuffer, camera);
 
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
-        this.renderDamageTexts(ctx, damageTexts);
+        this.renderDamageTexts(ctx, damageTexts, camera);
     }
 
     ctx.restore();
@@ -524,14 +561,15 @@ export class RenderSystem {
 
   private renderTrails(
       ctx: CanvasRenderingContext2D,
-      entities: GameEntity[],
+      entries: { entity: GameEntity, rx: number, ry: number }[],
+      camera: CameraState,
       detachedTrails?: TrailPoint[][]
   ) {
-      entities.forEach(entity => {
+      entries.forEach(({ entity }) => {
           if (!entity.active || !entity.trail || entity.trail.length < 2) return;
           if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
           const mode: 'player' | 'projectile' = entity.type === EntityType.PROJECTILE ? 'projectile' : 'player';
-          this.drawTrailStrip(ctx, entity.trail, mode, entity.color, entity.isBouncer);
+          this.drawTrailStrip(ctx, entity.trail, mode, camera, entity.color, entity.isBouncer);
       });
 
       // Detached trails from prior thrust events — always rendered as player
@@ -540,9 +578,22 @@ export class RenderSystem {
           for (let i = 0; i < detachedTrails.length; i++) {
               const t = detachedTrails[i];
               if (t.length >= 2) {
-                  this.drawTrailStrip(ctx, t, 'player');
+                  this.drawTrailStrip(ctx, t, 'player', camera);
               }
           }
+      }
+  }
+
+  // Reusable scratch buffer for shifted trail coordinates — keeps the
+  // trail path tool allocation-free even when every projectile in the
+  // scene is rendering a 30-point trail.
+  private _trailShiftedX: Float32Array = new Float32Array(64);
+  private _trailShiftedY: Float32Array = new Float32Array(64);
+  private _ensureTrailScratch(n: number) {
+      if (this._trailShiftedX.length < n) {
+          const next = Math.max(n, this._trailShiftedX.length * 2);
+          this._trailShiftedX = new Float32Array(next);
+          this._trailShiftedY = new Float32Array(next);
       }
   }
 
@@ -550,9 +601,23 @@ export class RenderSystem {
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
       mode: 'player' | 'projectile',
+      camera: CameraState,
       entityColor?: string,
       isBouncer?: boolean
   ) {
+      // Pre-shift every trail point into the camera's wrap zone so a trail
+      // that spans a seam (emitter just wrapped) renders as one continuous
+      // strip rather than a huge discontinuity across the map.  All the
+      // normal-calc / gradient math below operates on the shifted copies.
+      this._ensureTrailScratch(t.length);
+      const sx = this._trailShiftedX;
+      const sy = this._trailShiftedY;
+      const camX = camera.position.x;
+      const camY = camera.position.y;
+      for (let i = 0; i < t.length; i++) {
+          sx[i] = shiftX(camX, t[i].x);
+          sy[i] = shiftY(camY, t[i].y);
+      }
       // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
       ctx.beginPath();
 
@@ -567,20 +632,20 @@ export class RenderSystem {
           // For first point, use next point. For last, use prev.
           let nx = 0, ny = 0;
           if (i < t.length - 1) {
-              const dx = t[i+1].x - p.x;
-              const dy = t[i+1].y - p.y;
+              const dx = sx[i+1] - sx[i];
+              const dy = sy[i+1] - sy[i];
               const len = Math.sqrt(dx*dx + dy*dy) || 1;
               nx = -dy / len;
               ny = dx / len;
           } else if (i > 0) {
-              const dx = p.x - t[i-1].x;
-              const dy = p.y - t[i-1].y;
+              const dx = sx[i] - sx[i-1];
+              const dy = sy[i] - sy[i-1];
               const len = Math.sqrt(dx*dx + dy*dy) || 1;
               nx = -dy / len;
               ny = dx / len;
           }
 
-          ctx.lineTo(p.x + nx * width, p.y + ny * width);
+          ctx.lineTo(sx[i] + nx * width, sy[i] + ny * width);
       }
 
       // Backward pass: Left side of trail
@@ -592,20 +657,20 @@ export class RenderSystem {
 
           let nx = 0, ny = 0;
           if (i < t.length - 1) {
-              const dx = t[i+1].x - p.x;
-              const dy = t[i+1].y - p.y;
+              const dx = sx[i+1] - sx[i];
+              const dy = sy[i+1] - sy[i];
               const len = Math.sqrt(dx*dx + dy*dy) || 1;
               nx = -dy / len;
               ny = dx / len;
           } else if (i > 0) {
-              const dx = p.x - t[i-1].x;
-              const dy = p.y - t[i-1].y;
+              const dx = sx[i] - sx[i-1];
+              const dy = sy[i] - sy[i-1];
               const len = Math.sqrt(dx*dx + dy*dy) || 1;
               nx = -dy / len;
               ny = dx / len;
           }
 
-          ctx.lineTo(p.x - nx * width, p.y - ny * width);
+          ctx.lineTo(sx[i] - nx * width, sy[i] - ny * width);
       }
 
       ctx.closePath();
@@ -623,7 +688,7 @@ export class RenderSystem {
           const [r, g, b] = hexToRgb(entityColor || '#22c55e');
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
       } else {
-          const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+          const grad = ctx.createLinearGradient(sx[0], sy[0], sx[t.length - 1], sy[t.length - 1]);
           if (mode === 'projectile') {
               const [r, g, b] = hexToRgb(entityColor || '#facc15');
               grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
@@ -638,15 +703,19 @@ export class RenderSystem {
       ctx.fill();
   }
 
-  private renderParticles(ctx: CanvasRenderingContext2D, particles: GameEntity[]) {
-      if (particles.length === 0) return;
+  private renderParticles(
+      ctx: CanvasRenderingContext2D,
+      entries: { entity: GameEntity, rx: number, ry: number }[],
+      camera: CameraState,
+  ) {
+      if (entries.length === 0) return;
       ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < particles.length; i++) {
-          const p = particles[i];
+      for (let i = 0; i < entries.length; i++) {
+          const { entity: p, rx, ry } = entries[i];
 
           // Lightning arc particles use a dedicated renderer
           if (p.isLightningArc) {
-              this.renderLightningArc(ctx, p);
+              this.renderLightningArc(ctx, p, camera);
               continue;
           }
 
@@ -654,7 +723,7 @@ export class RenderSystem {
           ctx.globalAlpha = lifeRatio;
           ctx.fillStyle = p.color;
           ctx.beginPath();
-          ctx.arc(p.position.x, p.position.y, p.size.x, 0, Math.PI * 2);
+          ctx.arc(rx, ry, p.size.x, 0, Math.PI * 2);
           ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
@@ -663,7 +732,7 @@ export class RenderSystem {
 
   // ── Lightning arc rendering ─────────────────────────────────────────────
 
-  private renderLightningArc(ctx: CanvasRenderingContext2D, particle: GameEntity) {
+  private renderLightningArc(ctx: CanvasRenderingContext2D, particle: GameEntity, camera: CameraState) {
       const points = particle.arcPoints;
       if (!points || points.length < 2) return;
 
@@ -673,10 +742,18 @@ export class RenderSystem {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
 
+      // Shift each chain node into the camera's wrap zone so arcs that
+      // span a seam draw as one continuous bolt rather than crossing
+      // the whole map diagonally.
+      const camX = camera.position.x;
+      const camY = camera.position.y;
+
       // Draw jagged arc between each pair of chain points
       for (let seg = 0; seg < points.length - 1; seg++) {
-          const a = points[seg];
-          const b = points[seg + 1];
+          const rawA = points[seg];
+          const rawB = points[seg + 1];
+          const a = { x: shiftX(camX, rawA.x), y: shiftY(camY, rawA.y) };
+          const b = { x: shiftX(camX, rawB.x), y: shiftY(camY, rawB.y) };
 
           // Generate zigzag midpoints perpendicular to the segment
           const dx = b.x - a.x;
@@ -726,15 +803,17 @@ export class RenderSystem {
 
       // Small bloom at each chain node
       for (let i = 1; i < points.length; i++) {
-          const p = points[i];
+          const raw = points[i];
+          const px = shiftX(camX, raw.x);
+          const py = shiftY(camY, raw.y);
           ctx.globalAlpha = alpha * 0.7;
-          const nodeGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
+          const nodeGrad = ctx.createRadialGradient(px, py, 0, px, py, 14);
           nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
           nodeGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.4)');
           nodeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
           ctx.fillStyle = nodeGrad;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+          ctx.arc(px, py, 14, 0, Math.PI * 2);
           ctx.fill();
       }
 
@@ -745,7 +824,7 @@ export class RenderSystem {
 
   private renderEntities(
       ctx: CanvasRenderingContext2D,
-      entities: GameEntity[],
+      entries: { entity: GameEntity, rx: number, ry: number }[],
       camera: CameraState,
       playerPos?: Vector2
     ) {
@@ -757,7 +836,7 @@ export class RenderSystem {
     const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
     const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
 
-    entities.forEach(entity => {
+    entries.forEach(({ entity, rx, ry }) => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
       if (!entity.active && !isRegenGhost) return;
@@ -778,14 +857,15 @@ export class RenderSystem {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
-          ctx.drawImage(hexSprite, entity.position.x - dHalf, entity.position.y - dHalf, drawSize, drawSize);
+          ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           return;
       }
 
       ctx.save();
 
-      // Transform logic
-      ctx.translate(entity.position.x, entity.position.y);
+      // Transform logic — translate to the entity's shifted render
+      // position so wrap-seam copies draw at the correct on-screen spot.
+      ctx.translate(rx, ry);
       const rotation = entity.rotation + (
         entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
@@ -1086,10 +1166,12 @@ export class RenderSystem {
                 // ── Glass tile ──────────────────────────────────────────────
                 const isFlash = entity.hitFlash && entity.hitFlash > 0;
 
-                // Proximity tint: edge shifts from cool blue-white → bright cyan
+                // Proximity tint: edge shifts from cool blue-white → bright cyan.
+                // Toroidal delta so tiles across a seam reveal the same tint
+                // treatment as tiles on the same side of the map.
                 const PROX_RANGE = 120;
-                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
-                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
+                const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
                 const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
 
                 const edgeR = Math.round(186 - prox * 83);
@@ -1318,10 +1400,10 @@ export class RenderSystem {
                     ctx.closePath();
                 };
 
-                // Proximity tint — same formula as full tile
+                // Proximity tint — same formula as full tile (toroidal)
                 const PROX_RANGE = 120;
-                const pdx = playerPos ? entity.position.x - playerPos.x : Infinity;
-                const pdy = playerPos ? entity.position.y - playerPos.y : Infinity;
+                const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
+                const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
                 const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
                 const edgeR = Math.round(186 - prox * 83);
                 const edgeG = Math.round(230 + prox * 2);
@@ -1520,9 +1602,9 @@ export class RenderSystem {
       if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
           const iv = entity.inputVector;
           const mag = Math.sqrt(iv.x*iv.x + iv.y*iv.y);
-          if (mag > 0.05) { 
+          if (mag > 0.05) {
               ctx.save();
-              ctx.translate(entity.position.x, entity.position.y);
+              ctx.translate(rx, ry);
               // No rotation here, inputVector is world-aligned
               
               const scale = 100; // 1 unit (full throttle) = 100px length
@@ -1554,27 +1636,27 @@ export class RenderSystem {
       }
 
       // Render Health Bar (World Space, No Rotation)
-      this.renderHealthBar(ctx, entity);
+      this.renderHealthBar(ctx, entity, rx, ry);
     });
   }
 
-  private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity) {
+  private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
       // Only render for Player and Enemies
       if ((entity.type !== EntityType.PLAYER && entity.type !== EntityType.ENEMY) || entity.maxHealth <= 0) return;
 
       const { PLAYER_WIDTH, PLAYER_HEIGHT, ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
 
       const isPlayer = entity.type === EntityType.PLAYER;
-      
+
       const width = isPlayer ? PLAYER_WIDTH : ENEMY_WIDTH;
       const height = isPlayer ? PLAYER_HEIGHT : ENEMY_HEIGHT;
-      
+
       // Calculate offset based on visual size approx
-      const visualRadius = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER; 
+      const visualRadius = Math.max(entity.size.x, entity.size.y) * OFFSET_MODIFIER;
       const yOffset = visualRadius + OFFSET_BASE;
 
-      const x = entity.position.x - width / 2;
-      const y = entity.position.y + yOffset;
+      const x = rx - width / 2;
+      const y = ry + yOffset;
       
       const healthPct = Math.max(0, Math.min(1, entity.health / entity.maxHealth));
 
@@ -1603,14 +1685,17 @@ export class RenderSystem {
       }
   }
 
-  private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[]) {
+  private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
-      
+
+      const camX = camera.position.x;
+      const camY = camera.position.y;
       texts.forEach(t => {
           ctx.save();
-          // REMOVED INTEGER OPTIMIZATION
-          ctx.translate(t.position.x, t.position.y);
+          // Shift into the camera's wrap zone so damage numbers that pop
+          // over an entity near a seam appear where the entity is drawn.
+          ctx.translate(shiftX(camX, t.position.x), shiftY(camY, t.position.y));
           
           const lifeRatio = t.lifetime / t.maxLifetime;
           ctx.globalAlpha = Math.max(0, lifeRatio);
@@ -1695,8 +1780,8 @@ export class RenderSystem {
               poisDrawn++;
           }
 
-          const dx = t.position.x - playerPos.x;
-          const dy = t.position.y - playerPos.y;
+          const dx = wrapDeltaX(playerPos.x, t.position.x);
+          const dy = wrapDeltaY(playerPos.y, t.position.y);
           const angle = Math.atan2(dy, dx);
 
           // Skip if the enemy is already closer than the indicator ring
@@ -1905,8 +1990,12 @@ export class RenderSystem {
           ZOOM_RANGE, RANGE, VIEWPORT_COLOR, VIEWPORT_BORDER_COLOR
       } = MINIMAP_CONSTANTS;
 
-      // Small map uses a zoomed-in range; expanded map shows the full overview range
-      const range = expanded ? RANGE : ZOOM_RANGE;
+      // Small map uses a zoomed-in range; expanded map shows the full overview range.
+      // Cap to the map's half-extent so the expanded view stops at one full wrap —
+      // otherwise on a 15 k map the configured 8 k range would show the same tiles
+      // twice at the edges, which reads as a duplicated minimap.
+      const staticRange = this._minimapStaticRange || Infinity;
+      const range = Math.min(expanded ? RANGE : ZOOM_RANGE, staticRange);
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
@@ -1932,25 +2021,49 @@ export class RenderSystem {
       // ── Static structure layer (pre-rendered on map load) ──────────────
       // Blit the relevant viewport from the offscreen canvas instead of
       // issuing ~22k individual fillRect calls.  The static layer is in
-      // map-space (centred on world origin), so we offset by the camera
-      // position to align it with the minimap viewport.
+      // map-space (centred on world origin); since the world wraps, the
+      // source rect may straddle the canvas edge and we split it into
+      // up to four drawImage calls so the minimap seamlessly shows both
+      // sides of a seam when the camera is near the edge.
       const staticCanvas = this._minimapStaticCanvas;
       if (staticCanvas) {
           const staticRange = this._minimapStaticRange;
           const sRes = staticCanvas.width;
           const sScale = (sRes / 2) / staticRange;
 
-          // Source rect: map the minimap's world-space viewport to pixels
-          // on the static canvas.
+          // Source rect in canvas pixels; wraps modulo sRes because the
+          // static layer represents a toroidal map.
           const srcCenterX = sRes / 2 + camera.position.x * sScale;
           const srcCenterY = sRes / 2 + camera.position.y * sScale;
           const srcHalf = range * sScale;
-          const sx = srcCenterX - srcHalf;
-          const sy = srcCenterY - srcHalf;
+          const sxRaw = srcCenterX - srcHalf;
+          const syRaw = srcCenterY - srcHalf;
           const sw = srcHalf * 2;
           const sh = srcHalf * 2;
-
-          ctx.drawImage(staticCanvas, sx, sy, sw, sh, mapX, mapY, currentSize, currentSize);
+          const sxMod = ((sxRaw % sRes) + sRes) % sRes;
+          const syMod = ((syRaw % sRes) + sRes) % sRes;
+          const dScaleX = currentSize / sw;
+          const dScaleY = currentSize / sh;
+          const sw1 = Math.min(sw, sRes - sxMod);
+          const sh1 = Math.min(sh, sRes - syMod);
+          const sw2 = sw - sw1;
+          const sh2 = sh - sh1;
+          // part 1 (no wrap)
+          ctx.drawImage(staticCanvas,
+              sxMod, syMod, sw1, sh1,
+              mapX, mapY, sw1 * dScaleX, sh1 * dScaleY);
+          // part 2 (x-wrap)
+          if (sw2 > 0) ctx.drawImage(staticCanvas,
+              0, syMod, sw2, sh1,
+              mapX + sw1 * dScaleX, mapY, sw2 * dScaleX, sh1 * dScaleY);
+          // part 3 (y-wrap)
+          if (sh2 > 0) ctx.drawImage(staticCanvas,
+              sxMod, 0, sw1, sh2,
+              mapX, mapY + sh1 * dScaleY, sw1 * dScaleX, sh2 * dScaleY);
+          // part 4 (both-wrap)
+          if (sw2 > 0 && sh2 > 0) ctx.drawImage(staticCanvas,
+              0, 0, sw2, sh2,
+              mapX + sw1 * dScaleX, mapY + sh1 * dScaleY, sw2 * dScaleX, sh2 * dScaleY);
       }
 
       // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────

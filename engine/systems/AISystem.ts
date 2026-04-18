@@ -3,6 +3,7 @@
 import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 export class AISystem {
   // Store persistent aim targets to simulate reaction time.
@@ -79,8 +80,8 @@ export class AISystem {
         if (!follower.enemySubtype || ENEMY_ROLE[follower.enemySubtype] !== EnemyRole.RAMMING) continue;
         if (follower.aiState !== 'idle') continue;
 
-        const pdx = leader.position.x - follower.position.x;
-        const pdy = leader.position.y - follower.position.y;
+        const pdx = wrapDeltaX(follower.position.x, leader.position.x);
+        const pdy = wrapDeltaY(follower.position.y, leader.position.y);
         if (pdx * pdx + pdy * pdy > PACK_RANGE_SQ) continue;
 
         // Snap idle timer down so this rammer joins the charge within PACK_SYNC_WINDOW
@@ -125,17 +126,19 @@ export class AISystem {
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
 
-      const dx = player.position.x - enemy.position.x;
-      const dy = player.position.y - enemy.position.y;
+      const dx = wrapDeltaX(enemy.position.x, player.position.x);
+      const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const dist = Math.sqrt(dx*dx + dy*dy);
-      
+
       const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
 
       // Aim-lead: predict where the player will be when the projectile arrives.
       // Movement still tracks the real player position for responsive seek/flee/strafe.
+      // Use toroidal delta so enemies near a seam aim at the nearest wrapped
+      // copy of the player instead of firing across the entire map.
       const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
-      const aimX = player.position.x + player.velocity.x * leadTime - enemy.position.x;
-      const aimY = player.position.y + player.velocity.y * leadTime - enemy.position.y;
+      const aimX = dx + player.velocity.x * leadTime;
+      const aimY = dy + player.velocity.y * leadTime;
       let targetAngle = Math.atan2(aimY, aimX);
       
       if (dist < PREFERRED_DIST - DEADZONE) {
@@ -210,9 +213,11 @@ export class AISystem {
 
       // Distance to the player is needed by both the state machine's
       // rammer-retreat branch and the movement block below, so compute
-      // it once up front.
-      const dxPlayer = player.position.x - enemy.position.x;
-      const dyPlayer = player.position.y - enemy.position.y;
+      // it once up front.  Wrapped delta so rammers near a seam don't
+      // see the player as being across the whole map when they're in
+      // fact 50 units away across the wrap.
+      const dxPlayer = wrapDeltaX(enemy.position.x, player.position.x);
+      const dyPlayer = wrapDeltaY(enemy.position.y, player.position.y);
       const distToPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
 
       // --- STATE MACHINE ---
@@ -253,8 +258,8 @@ export class AISystem {
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
           // optimal for routing; the lagged target is kept for rotation/aim.
-          const dx = targetPos.x - enemy.position.x;
-          const dy = targetPos.y - enemy.position.y;
+          const dx = wrapDeltaX(enemy.position.x, targetPos.x);
+          const dy = wrapDeltaY(enemy.position.y, targetPos.y);
           const d  = Math.sqrt(dx * dx + dy * dy);
 
           if (d > 0) {
@@ -298,12 +303,14 @@ export class AISystem {
       // --- STUCK DETECTION ---
       // If the enemy has barely moved over the check interval while chasing,
       // it's pinned against geometry. Apply a random impulse to break free.
+      // Toroidal delta so a wrap-around mid-interval doesn't read as a huge
+      // jump and suppress the stuck detection.
       let stuckTimer = (this.stuckTimers.get(enemy.id) ?? AI_CONFIG.STUCK_CHECK_INTERVAL) - dt;
       if (stuckTimer <= 0) {
           const last = this.lastPositions.get(enemy.id);
           if (last && (enemy.aiState === 'chase' || longRange)) {
-              const sx = enemy.position.x - last.x;
-              const sy = enemy.position.y - last.y;
+              const sx = wrapDeltaX(last.x, enemy.position.x);
+              const sy = wrapDeltaY(last.y, enemy.position.y);
               if (sx * sx + sy * sy < AI_CONFIG.STUCK_DIST_THRESHOLD * AI_CONFIG.STUCK_DIST_THRESHOLD) {
                   const nudgeAngle = Math.random() * Math.PI * 2;
                   enemy.velocity.x += Math.cos(nudgeAngle) * maxSpeed * 0.8;
@@ -323,8 +330,8 @@ export class AISystem {
       if (speed > rotThreshold) {
           targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
       } else {
-          const toTargetX = player.position.x - enemy.position.x;
-          const toTargetY = player.position.y - enemy.position.y;
+          const toTargetX = wrapDeltaX(enemy.position.x, player.position.x);
+          const toTargetY = wrapDeltaY(enemy.position.y, player.position.y);
           targetAngle = Math.atan2(toTargetY, toTargetX);
       }
 

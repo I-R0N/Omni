@@ -9,6 +9,7 @@ import {
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
+import { wrapPosition } from '../toroidal';
 
 /**
  * WaveSystem — owns wave state (current index, live enemy ids, phase,
@@ -28,13 +29,16 @@ export class WaveSystem {
   public waveGraceTimer: number = 0;
   public announcements: WaveAnnouncement[] = [];
 
-  /** Reset all wave state and spawn wave 0. */
+  /** Reset all wave state and spawn wave 0.  Skipped entirely when
+   *  enemyScale is 0 (difficulty "None") — the map loads with waves
+   *  disabled: no wave 1 banner, no grace-period cycling, no enemies. */
   public init(ctx: WaveSpawnContext) {
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
     this.waveGraceTimer = 0;
     this.announcements = [];
+    if (ctx.enemyScale <= 0) return;
     this.spawn(0, ctx);
   }
 
@@ -43,9 +47,13 @@ export class WaveSystem {
    * evenly-spaced angles around the player with per-wave rotation so no two
    * waves look the same, and each spawn position is tested against static
    * tiles via the physics system so enemies never materialize inside walls.
+   *
+   * At enemyScale = 0 (difficulty "None") this is a no-op: waves stay
+   * inactive forever so nothing cycles and the "WAVE N" banner never fires.
    */
   public spawn(index: number, ctx: WaveSpawnContext) {
     const { entities, player, physics, enemyScale, difficultyLevel } = ctx;
+    if (enemyScale <= 0) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
 
@@ -67,12 +75,18 @@ export class WaveSystem {
         const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
         const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
         let x = 0, y = 0;
-        // Try up to 8 candidate positions; pick first one clear of static tiles
+        // Try up to 8 candidate positions; pick first one clear of static tiles.
+        // Candidate positions are wrapped into canonical world coords so spawns
+        // near a seam don't materialise at ±MAP_WIDTH off the map.
+        const pos = { x: 0, y: 0 };
         for (let attempt = 0; attempt < 8; attempt++) {
           const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
           const dist = 550 + Math.random() * 200;
-          x = player.position.x + Math.cos(a) * dist;
-          y = player.position.y + Math.sin(a) * dist;
+          pos.x = player.position.x + Math.cos(a) * dist;
+          pos.y = player.position.y + Math.sin(a) * dist;
+          wrapPosition(pos);
+          x = pos.x;
+          y = pos.y;
           if (physics.isPositionClear(x, y, safeRadius)) break;
         }
         const config = ENEMY_VARIANTS[group.subtype];

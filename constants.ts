@@ -219,10 +219,17 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
+    // Doubled on 2026-04-18 to 280 — denser belt now that pressure
+    // breaking and the 50 % on-path spawn distribution keep collision
+    // costs bounded even at higher population.  Same density as the
+    // original 15k map but on the current 6k map, so cluster
+    // encounters and traffic dynamics are visibly busier.
     count: 280,
     minSize: 20,
     maxSize: 160,
-    radius: 5000,
+    // Spawn radius also halved so asteroids stay inside the wrap box
+    // rather than being pushed across a seam immediately.
+    radius: 2500,
     speedMultiplier: 1.5
   },
 };
@@ -231,7 +238,24 @@ export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
-  CRASH_VELOCITY_THRESHOLD: 4, // Speed needed to break through
+  CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // Momentum threshold (asteroid.mass × impactSpeed) above which an
+  // asteroid plows through a tile permanently.  At 200 a cruising
+  // size-100 merged cluster just barely crashes, while a 20-mass
+  // shard at drift speed doesn't.
+  ASTEROID_CRASH_MOMENTUM: 200,
+  // Pressure accumulator — sustained sub-crash-momentum impacts from
+  // "large enough" asteroids also break a tile permanently, simulating
+  // repeated-impact pressure without a full stress model.  A tile
+  // breaks the first time its accumulator reaches ASTEROID_PRESSURE_HITS
+  // within the rolling ASTEROID_PRESSURE_WINDOW.  Only asteroids with
+  // mass ≥ ASTEROID_PRESSURE_MIN_MASS contribute, so trivial drift
+  // shards don't count.  ASTEROID_PRESSURE_COOLDOWN debounces multi-
+  // substep re-hits from a single bouncing rock.
+  ASTEROID_PRESSURE_HITS: 5,
+  ASTEROID_PRESSURE_WINDOW: 2.0,
+  ASTEROID_PRESSURE_MIN_MASS: 40,
+  ASTEROID_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 
@@ -374,11 +398,11 @@ export const NEBULA_CONSTANTS = {
   // background nebula puffs (which live in world space at ±~20 000 units).
   // The generator shares an "occupied coords" set with the glass pass so
   // adjacency conflicts are avoided; empty cells get priority naturally.
-  CLUSTER_COUNT: 130,
+  CLUSTER_COUNT: 65,    // halved for 7.5k map (was 130)
   MIN_CLUSTER_SIZE: 14,
   MAX_CLUSTER_SIZE: 42,
   // Outer-zone cluster pass (sparser landmarks spread across the full map).
-  OUTER_CLUSTER_COUNT: 240,
+  OUTER_CLUSTER_COUNT: 120, // halved for 7.5k map (was 240)
   OUTER_MIN_CLUSTER_SIZE: 7,
   OUTER_MAX_CLUSTER_SIZE: 26,
   // Base palette — nebula tiles draw from the full 360° hue wheel
