@@ -27,12 +27,11 @@ export type AssetManifest = {
 // render immediately, without hanging external HTTP requests.
 const PLACEHOLDER = '/assets/placeholder.png';
 
-// List image paths here to replace the procedural nebula generation with real images.
-// Supported formats: PNG, JPEG, WebP. Use white/light-colored images on a transparent
-// or black background — the engine tints them at runtime with per-nebula colors.
-// Leave empty to keep the built-in procedural generation.
-// Example: ['/assets/nebula_1.png', '/assets/nebula_2.png']
-export const NEBULA_IMAGES: string[] = [
+// Two nebula-image sets for A/B comparison.  Set A is the original collection;
+// Set B is the newer art.  NEBULA_IMAGES is the currently-active list — flip
+// via GameEngine.toggleNebulaSet() (wired to the DBG panel).  Importers read
+// the same array reference, so in-place mutation propagates to all consumers.
+export const NEBULA_IMAGES_SET_A: readonly string[] = [
   '/assets/Nebula00.png',
   '/assets/Nebula01.png',
   '/assets/Nebula02.png',
@@ -42,6 +41,9 @@ export const NEBULA_IMAGES: string[] = [
   '/assets/Nebula06.png',
   '/assets/Nebula07.png',
   '/assets/Nebula08.png',
+];
+
+export const NEBULA_IMAGES_SET_B: readonly string[] = [
   '/assets/Nebula09.png',
   '/assets/Nebula10.png',
   '/assets/Nebula11.png',
@@ -51,6 +53,17 @@ export const NEBULA_IMAGES: string[] = [
   '/assets/Nebula15.png',
   '/assets/Nebula16.png',
 ];
+
+export type NebulaSet = 'A' | 'B';
+
+export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_SET_A];
+
+export function setActiveNebulaSet(set: NebulaSet): string[] {
+  const source = set === 'A' ? NEBULA_IMAGES_SET_A : NEBULA_IMAGES_SET_B;
+  NEBULA_IMAGES.length = 0;
+  NEBULA_IMAGES.push(...source);
+  return NEBULA_IMAGES;
+}
 
 // TODO: Replace PLACEHOLDER entries with real asset locations (CDN/object storage).
 export const ASSETS: AssetManifest = {

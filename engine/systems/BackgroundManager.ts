@@ -78,6 +78,22 @@ export class BackgroundManager {
     });
   }
 
+  /**
+   * Swap the active nebula image set at runtime.  Clears the texture list
+   * and every cached tinted puff canvas, then forces initContent to rerun
+   * on the next render so textureIndex values re-map to the new set.
+   */
+  public setNebulaImages(paths: string[]) {
+    this.puffTextures = [];
+    if (paths.length > 0) {
+      this.loadNebulaImages(paths);
+    } else {
+      this.createPuffVariants();
+    }
+    for (const puff of this.nebulaPuffs) puff.cachedCanvas = undefined;
+    this.initialized = false;
+  }
+
   private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): void {
     let outX = x;
     let outY = y;

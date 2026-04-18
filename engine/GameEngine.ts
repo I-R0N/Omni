@@ -16,7 +16,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
-import { ASSETS } from '../assets';
+import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
 /** Average two 6-digit hex colours component-wise. */
@@ -72,6 +72,10 @@ export class GameEngine {
 
   // Debug mode
   private debugMode: boolean = false;
+
+  // Which nebula image set is active (A = Nebula00-08, B = Nebula09-16).
+  // Toggled from the DBG panel to A/B compare the two art collections.
+  private nebulaSet: NebulaSet = 'A';
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -172,6 +176,19 @@ export class GameEngine {
         this.player.ammo[w] = 999;
       }
     }
+  }
+
+  /**
+   * Flip between nebula image sets A (Nebula00-08) and B (Nebula09-16).
+   * Updates the shared NEBULA_IMAGES array and reloads background textures
+   * immediately.  Tile-cluster sprites are stamped at map-gen time, so
+   * existing tiles keep their old textures — reload the map to repopulate
+   * tile sprites from the new set.
+   */
+  public toggleNebulaSet() {
+    this.nebulaSet = this.nebulaSet === 'A' ? 'B' : 'A';
+    const active = setActiveNebulaSet(this.nebulaSet);
+    this.renderer.setNebulaImages(active);
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -275,6 +292,7 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
+      nebulaSet: this.nebulaSet,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -369,6 +387,7 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
+      nebulaSet: this.nebulaSet,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

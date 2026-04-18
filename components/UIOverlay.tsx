@@ -10,6 +10,7 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onToggleDebug?: () => void;
+  onToggleNebulaSet?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -23,6 +24,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onToggleDebug,
+  onToggleNebulaSet,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -64,6 +66,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {stats.debugMode && (
             <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
               <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
+
+              {/* Nebula-set A/B toggle — compares Nebula00-08 vs Nebula09-16 */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Nebulas</span>
+                <button
+                  onClick={onToggleNebulaSet}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Swap Nebula00-08 ↔ Nebula09-16"
+                >
+                  {stats.nebulaSet === 'B' ? 'B (09-16)' : 'A (00-08)'}
+                </button>
+              </div>
+
               <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
               <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
               <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>

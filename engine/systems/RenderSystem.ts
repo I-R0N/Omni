@@ -308,6 +308,10 @@ export class RenderSystem {
     this.backgroundManager.setNebulaClusterCenters(centers);
   }
 
+  public setNebulaImages(paths: string[]) {
+    this.backgroundManager.setNebulaImages(paths);
+  }
+
   /**
    * Pre-render all STRUCTURE entities to an offscreen minimap canvas.
    * Call once on map load.  The canvas covers the full map area at a
