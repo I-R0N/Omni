@@ -22,8 +22,8 @@ import { Vector2 } from '../types';
 // match so density per cell stays comparable to the old map.  Axis
 // sizes are stored separately so the map can become non-square later
 // without touching every call site.
-export const MAP_WIDTH  = 7500;
-export const MAP_HEIGHT = 7500;
+export const MAP_WIDTH  = 6000;
+export const MAP_HEIGHT = 6000;
 export const HALF_MAP_WIDTH  = MAP_WIDTH  / 2;
 export const HALF_MAP_HEIGHT = MAP_HEIGHT / 2;
 
