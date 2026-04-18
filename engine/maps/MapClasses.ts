@@ -156,46 +156,54 @@ export class UniverseMap extends BaseMapLayer {
     // and glass tiles never overlap on the shared hex grid.
     const occupied = new Set<string>();
 
-    // Cluster layout on the 7 500-unit toroidal map — see comment
-    // below for the zone bounds.  The outer passes stop ~250 units
-    // short of the map edge so each axis retains a thin dead-space
-    // ring, and the inner passes sit inside that dense core.  Every
-    // dimension and count is half of the prior 15 k-map values to
-    // keep cluster density per unit area consistent.
+    // Cluster layout — all zone extents are computed as fractions of
+    // the active map size (MAP_WIDTH / MAP_HEIGHT) so the visible
+    // dead-space ring scales with the map.
     //
-    //   Inner glass / tiles : ±1250   (dense core landmarks)
-    //   Outer glass / tiles : ±3500   (spread to near the edges)
-    //   Inner nebula cloud  : ±1750   (dense central cloud)
-    //   Outer nebula cloud  : ±3500   (spread to near the edges)
+    //   SAFE_ZONE_FRAC  5 %   — width of the tile-free ring around
+    //                           each wrap seam.  Outer cluster passes
+    //                           seed at (1 − SAFE_ZONE_FRAC) of the
+    //                           map extent; clusters can still grow
+    //                           slightly past that via BFS neighbour
+    //                           walk, but the visible dead ring stays
+    //                           ≈5 % of the map.
+    //   INNER_GLASS_FRAC  33 % — dense core landmark cluster footprint.
+    //   INNER_NEBULA_FRAC 47 % — dense central nebula cluster footprint.
     //
     // Inner zones overlap with the outer pass' footprint on purpose —
     // they bias density toward the playable core, which is where most
-    // fighting happens, without leaving the outskirts empty.  Clusters
-    // grow organically past their seed zone (BFS neighbour walk), so
-    // the visible dead-space ring ends up tighter than the seed bound
-    // suggests.
-    const INNER_GLASS_ZONE  = 2500;
-    const OUTER_GLASS_ZONE  = 7000;
-    const INNER_NEBULA_ZONE = 3500;
-    const OUTER_NEBULA_ZONE = 7000;
+    // fighting happens, without leaving the outskirts empty.
+    const SAFE_ZONE_FRAC    = 0.05;
+    const OUTER_ZONE_FRAC   = 1 - SAFE_ZONE_FRAC;
+    const INNER_GLASS_FRAC  = 0.33;
+    const INNER_NEBULA_FRAC = 0.47;
+
+    const INNER_GLASS_W  = MAP_WIDTH  * INNER_GLASS_FRAC;
+    const INNER_GLASS_H  = MAP_HEIGHT * INNER_GLASS_FRAC;
+    const OUTER_GLASS_W  = MAP_WIDTH  * OUTER_ZONE_FRAC;
+    const OUTER_GLASS_H  = MAP_HEIGHT * OUTER_ZONE_FRAC;
+    const INNER_NEBULA_W = MAP_WIDTH  * INNER_NEBULA_FRAC;
+    const INNER_NEBULA_H = MAP_HEIGHT * INNER_NEBULA_FRAC;
+    const OUTER_NEBULA_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
+    const OUTER_NEBULA_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
 
     // Dense landmark cluster core around the spawn region.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        INNER_GLASS_ZONE, INNER_GLASS_ZONE,
+        INNER_GLASS_W, INNER_GLASS_H,
         22,          // hexSize
-        40,          // clusterCount  (was 80)
+        40,          // clusterCount
         15,          // minClusterSize
         45,          // maxClusterSize
         occupied
     ));
 
-    // Sparser outer landmarks — spread across most of the map with a
-    // ~250-unit dead ring near the wrap seam so the toroidal edges
-    // stay visually distinguishable from the cluttered interior.
+    // Sparser outer landmarks — spread across 95 % of the map with
+    // a 5 % dead ring near the wrap seam so the toroidal edges stay
+    // visually distinguishable from the cluttered interior.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        OUTER_GLASS_ZONE, OUTER_GLASS_ZONE,
+        OUTER_GLASS_W, OUTER_GLASS_H,
         22,
-        65,          // clusterCount  (was 130)
+        65,          // clusterCount
         8,
         28,
         occupied
@@ -212,7 +220,7 @@ export class UniverseMap extends BaseMapLayer {
     // positions — one unified cloud, with parallax drift of the backdrop
     // as the camera moves.
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        INNER_NEBULA_ZONE, INNER_NEBULA_ZONE,
+        INNER_NEBULA_W, INNER_NEBULA_H,
         22,
         NEBULA_CONSTANTS.CLUSTER_COUNT,
         NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
@@ -221,7 +229,7 @@ export class UniverseMap extends BaseMapLayer {
         this.nebulaClusterCenters
     ));
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        OUTER_NEBULA_ZONE, OUTER_NEBULA_ZONE,
+        OUTER_NEBULA_W, OUTER_NEBULA_H,
         22,
         NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
         NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
