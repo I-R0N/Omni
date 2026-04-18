@@ -52,6 +52,7 @@ export const NEBULA_IMAGES_SET_B: readonly string[] = [
   '/assets/Nebula14.png',
   '/assets/Nebula15.png',
   '/assets/Nebula16.png',
+  '/assets/Nebula17.png',
 ];
 
 export type NebulaSet = 'A' | 'B' | 'ALL' | 'N16';
