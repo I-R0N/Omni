@@ -54,12 +54,18 @@ export abstract class BaseMapLayer {
     // area without creating a straight line of rocks.  Perpendicular
     // jitter widens the streamline into a band.
     //
+    // Path step is sized so that pathCount × PATH_STEP ≈ MAP_WIDTH /
+    // cos(BASE_ANGLE) — at the flow's ~32° base slope that's roughly
+    // 1.2 × MAP_WIDTH of total arc length, which is just over one
+    // full wrap along the dominant direction so the streamline lays
+    // asteroids across the whole map in the flow axis.
+    //
     // A smaller scatter pass fills in a uniform background of asteroids
     // outside the main current so the field doesn't look like one
     // compressed ribbon.
-    const PATH_FRACTION   = 0.8;   // 80 % of asteroids on the main path
-    const PATH_STEP       = 40;    // world units advanced per path sample
-    const PATH_PERP_JITTER = 120;  // ± perpendicular spread around streamline
+    const PATH_FRACTION    = 0.7;   // 70 % of asteroids on the main path
+    const PATH_STEP        = 80;    // world units advanced per path sample
+    const PATH_PERP_JITTER = 120;   // ± perpendicular spread around streamline
     const pathCount    = Math.round(count * PATH_FRACTION);
     const scatterCount = count - pathCount;
 
