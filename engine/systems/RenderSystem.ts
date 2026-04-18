@@ -884,7 +884,19 @@ export class RenderSystem {
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          const tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          let tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          // Interior-darken rule: nebula tiles surrounded by more active
+          // neighbours render progressively darker so cluster edges pop
+          // and interiors recede.  Max darkening at 6 neighbours (fully
+          // enclosed) caps at 0.55× brightness; shards skip the pass.
+          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount) {
+              const t = Math.min(1, entity.nebulaNeighborCount / 6);
+              const factor = 1 - t * 0.45;
+              const [r, g, b] = hexToRgb(tintHex);
+              const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v * factor)))
+                  .toString(16).padStart(2, '0');
+              tintHex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+          }
           const spriteSrc = entity.sprite;
           // Fade-out multiplier — per-entity duration lets fast-collision
           // shatters use a shorter, snappier fade than slow drift-through
