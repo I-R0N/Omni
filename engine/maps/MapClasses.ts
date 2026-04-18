@@ -1,8 +1,8 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
-import { TileGenerator } from './TileGenerator';
-import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS } from '../../constants';
-import { sampleFlow } from '../systems/FlowField';
+import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
+import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, STRUCTURE_CONSTANTS } from '../../constants';
+import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
 
@@ -36,6 +36,18 @@ export abstract class BaseMapLayer {
   }
 
   abstract init(): void;
+
+  /**
+   * Per-map flow sampler.  Default is the global analytical meander used
+   * by the universe map; subclasses can override to give the map its
+   * own streamline geometry (e.g. concentric rings).  Must return a
+   * unit vector.  Also consumed by `FlowFieldGrid.buildAsteroidField`
+   * via `GameEngine.loadMap`, so the baked grid matches the map-specific
+   * flow visible in asteroid motion from frame 1.
+   */
+  public sampleFlow(wx: number, wy: number): FlowVector {
+    return sampleFlow(wx, wy);
+  }
 
   protected spawnAsteroids(
       count: number,
@@ -71,7 +83,7 @@ export abstract class BaseMapLayer {
 
     let px = 0, py = 0; // streamline integrator state
     for (let i = 0; i < pathCount; i++) {
-        const flow = sampleFlow(px, py);
+        const flow = this.sampleFlow(px, py);
         // Advance along the flow by one step length, then wrap.
         px += flow.x * PATH_STEP;
         py += flow.y * PATH_STEP;
@@ -146,7 +158,7 @@ export abstract class BaseMapLayer {
 
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
     // This seeds the asteroid into the vortex streamlines from spawn.
-    const flow = sampleFlow(x, y);
+    const flow = this.sampleFlow(x, y);
     const randX = (Math.random() - 0.5) * 2;
     const randY = (Math.random() - 0.5) * 2;
     const FLOW_BIAS = 0.7;
@@ -272,5 +284,106 @@ export class UniverseMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+  }
+}
+
+/**
+ * Ring map — a single ring of glass tiles around the spawn, wrapped by a
+ * concentric rotational flow field.  Every streamline is a circle about
+ * the origin, so the "featured" ring streamline naturally lives outside
+ * the tile ring (any radius R > RING_TILE_RADIUS is one).
+ */
+export class RingMap extends BaseMapLayer {
+  // Radius of the tile ring in world units.  Sized so it's clearly
+  // visible from spawn (well inside the 3000-unit half-map) and
+  // leaves a large safe zone at the centre.
+  private static readonly RING_TILE_RADIUS = 700;
+
+  constructor() {
+    super('ring_01', 'Ring World', MapType.RING);
+    this.width = MAP_WIDTH;
+    this.height = MAP_HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  /**
+   * Pure rotational flow — tangent to the circle of radius |r| at every
+   * point, CCW.  Returns a unit vector; at the exact origin (undefined
+   * tangent) we fall back to +x so the baked grid cell at the centre
+   * still has a deterministic direction.
+   */
+  public sampleFlow(wx: number, wy: number): FlowVector {
+    const r2 = wx * wx + wy * wy;
+    if (r2 < 1e-6) return { x: 1, y: 0 };
+    const inv = 1 / Math.sqrt(r2);
+    return { x: -wy * inv, y: wx * inv };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    // Asteroids follow the concentric flow from spawn (sampleFlow above
+    // is called by the base-class helper through `this.sampleFlow`).
+    const gen = ASTEROID_GENERATION_CONFIG[MapType.RING];
+    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    for (const e of this.entities) wrapPosition(e.position);
+
+    // Glass tile ring — enumerate every hex cell whose centre lies within
+    // one hex of the target radius and emit a STRUCTURE there.  Using the
+    // shared odd-r grid guarantees edges meet exactly between adjacent
+    // tiles on the ring the same way cluster tiles do elsewhere.
+    const R = RingMap.RING_TILE_RADIUS;
+    const BAND = HEX_SIZE;              // single-tile-thick ring
+    const maxCol = Math.ceil((R + HEX_SIZE) / HEX_WIDTH) + 1;
+    const maxRow = Math.ceil((R + HEX_SIZE) / HEX_V_SPACING) + 1;
+    for (let r = -maxRow; r <= maxRow; r++) {
+      for (let c = -maxCol; c <= maxCol; c++) {
+        const { x, y } = hexCoordToPixel(c, r);
+        const d = Math.sqrt(x * x + y * y);
+        if (Math.abs(d - R) > BAND) continue;
+        this.entities.push(this.createRingGlassTile(c, r, x, y));
+      }
+    }
+
+    // Clear a safe open area around spawn (same rule as UniverseMap so
+    // the player never spawns inside an asteroid).
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > 350 * 350;
+    });
+  }
+
+  /**
+   * Build a glass hex tile identical in shape/stats to the ones emitted
+   * by TileGenerator.createHexEntity — inlined here so the ring pass
+   * doesn't need to share TileGenerator's private occupancy plumbing.
+   */
+  private createRingGlassTile(c: number, r: number, cx: number, cy: number): GameEntity {
+    const w = HEX_WIDTH;
+    const h = 2 * HEX_SIZE;
+    const pts: Vector2[] = [
+      { x: 0, y: -h/2 },
+      { x: w/2, y: -h/4 },
+      { x: w/2, y: h/4 },
+      { x: 0, y: h/2 },
+      { x: -w/2, y: h/4 },
+      { x: -w/2, y: -h/4 },
+    ];
+    return {
+      id: nextId(`tile_${r}_${c}`),
+      type: EntityType.STRUCTURE,
+      position: { x: cx, y: cy },
+      velocity: { x: 0, y: 0 },
+      size: { x: w * 0.95, y: h * 0.95 },
+      rotation: 0,
+      color: Math.random() > 0.8 ? COLORS.STRUCTURE_BORDER : COLORS.STRUCTURE,
+      active: true,
+      health: STRUCTURE_CONSTANTS.HEALTH,
+      maxHealth: STRUCTURE_CONSTANTS.HEALTH,
+      mass: STRUCTURE_CONSTANTS.MASS,
+      polygonPoints: pts,
+      sprite: ASSETS.HEX_STRUCTURE,
+    };
   }
 }

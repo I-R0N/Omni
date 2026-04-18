@@ -2,6 +2,7 @@
 
 export enum MapType {
   UNIVERSE = 'UNIVERSE',
+  RING     = 'RING',
 }
 
 export enum GameState {

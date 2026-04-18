@@ -215,6 +215,11 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.RING]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
@@ -229,6 +234,13 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     maxSize: 160,
     // Spawn radius also halved so asteroids stay inside the wrap box
     // rather than being pushed across a seam immediately.
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.RING]: {
+    count: 280,
+    minSize: 20,
+    maxSize: 160,
     radius: 2500,
     speedMultiplier: 1.5
   },

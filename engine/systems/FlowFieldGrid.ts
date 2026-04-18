@@ -28,8 +28,10 @@
  */
 
 import { GameEntity, EntityType } from '../../types';
-import { sampleFlow } from './FlowField';
+import { sampleFlow, FlowVector as AnalyticalFlowVector } from './FlowField';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../toroidal';
+
+export type FlowSampler = (wx: number, wy: number) => AnalyticalFlowVector;
 
 // ─── grid constants ────────────────────────────────────────────────────────
 //
@@ -99,6 +101,14 @@ export class FlowFieldGrid {
   private playerCell  = -1;
   private enemyDirty  = true;   // true = rebuild enemy field next flush
 
+  // Active flow sampler — the map's own streamline function when provided,
+  // else the global analytical meander.  Set by buildAsteroidField() and
+  // reused by _computeAsteroidCell() (including wall-repulsion fallbacks)
+  // and sampleAsteroidFlow() (out-of-grid fallback).  Caching the sampler
+  // here keeps the map-specific flow geometry in one place instead of
+  // reaching across systems for it on every grid recompute.
+  private flowSampler: FlowSampler = sampleFlow;
+
   // Perf instrumentation — wall time (ms) of the most recent
   // flushEnemyField() invocation.  Zero when the field was clean and the
   // flush was a no-op; populated when a full range-capped BFS rebuild ran.
@@ -148,7 +158,8 @@ export class FlowFieldGrid {
    * This replaces the old BFS-to-4-corners approach which caused all
    * asteroids to funnel toward the same convergence points.
    */
-  buildAsteroidField(): void {
+  buildAsteroidField(sampler?: FlowSampler): void {
+    if (sampler) this.flowSampler = sampler;
     for (let idx = 0; idx < TOTAL; idx++) {
       this._computeAsteroidCell(idx);
     }
@@ -165,8 +176,8 @@ export class FlowFieldGrid {
     const wx  = MAP_MIN_X + (col + 0.5) * CELL_SIZE;
     const wy  = MAP_MIN_Y + (row + 0.5) * CELL_SIZE;
 
-    // Base direction from the analytical vortex field
-    const base = sampleFlow(wx, wy);
+    // Base direction from the active map flow sampler
+    const base = this.flowSampler(wx, wy);
     let fx = base.x;
     let fy = base.y;
 
@@ -262,10 +273,12 @@ export class FlowFieldGrid {
   /** O(1) — returns a unit vector in the asteroid streaming direction. */
   sampleAsteroidFlow(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
-    // Outside the grid or zero-vector cell: fall back to the raw analytical field
-    if (idx < 0) return sampleFlow(wx, wy);
+    // Outside the grid or zero-vector cell: fall back to the active map
+    // sampler (set by buildAsteroidField) rather than the global analytical
+    // meander so the fallback matches the baked grid's geometry.
+    if (idx < 0) return this.flowSampler(wx, wy);
     const fx = this.astFlowX[idx], fy = this.astFlowY[idx];
-    return (fx !== 0 || fy !== 0) ? { x: fx, y: fy } : sampleFlow(wx, wy);
+    return (fx !== 0 || fy !== 0) ? { x: fx, y: fy } : this.flowSampler(wx, wy);
   }
 
   /**

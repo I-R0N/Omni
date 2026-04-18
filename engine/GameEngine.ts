@@ -13,7 +13,7 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap, RingMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
@@ -70,6 +70,10 @@ export class GameEngine {
   private respawnTimer: number = 0;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
+  // Map the next restart / initial load should build.  Updated from the
+  // main-menu map-style buttons so the UI-selected map survives the
+  // restartGame() path (which re-instantiates the map class from scratch).
+  private selectedMapType: MapType = MapType.UNIVERSE;
 
   // Debug mode
   private debugMode: boolean = false;
@@ -230,8 +234,32 @@ export class GameEngine {
       shakeOffset: { x: 0, y: 0 }
     };
 
-    const initialMap = new UniverseMap();
-    this.loadMap(initialMap);
+    this.loadMap(this.buildMap(this.selectedMapType));
+  }
+
+  /** Factory for the per-run map class so both the constructor and
+   *  restartGame() share a single construction path. */
+  private buildMap(type: MapType): BaseMapLayer {
+    switch (type) {
+      case MapType.RING:     return new RingMap();
+      case MapType.UNIVERSE:
+      default:               return new UniverseMap();
+    }
+  }
+
+  /** Set the map style that the next restart / startGame will use.
+   *  Called from the main menu.  No-op mid-game; the next restart
+   *  (triggered by the UI) will pick up the new selection. */
+  public setMapType(type: MapType) {
+    this.selectedMapType = type;
+    if (this.gameState === GameState.MENU) {
+      this.loadMap(this.buildMap(type));
+      // Recentre the player on the newly-loaded map's spawn so the
+      // menu backdrop renders the new map at frame 0 instead of the
+      // previous map's viewport.
+      this.player.position = { ...this.currentMap!.playerSpawn };
+      this.prepareFrameEntities();
+    }
   }
 
   public initCanvas(ctx: CanvasRenderingContext2D) {
@@ -300,7 +328,7 @@ export class GameEngine {
       this.activeDrops = [];
       this.trailDecayTimer = 0;
       this.waveAnnouncements = [];
-      this.loadMap(new UniverseMap());
+      this.loadMap(this.buildMap(this.selectedMapType));
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -1988,7 +2016,7 @@ export class GameEngine {
       // cache matches their lifecycle.
       this.physics.initializeAttractors(map.entities);
       this.flowField.initObstacles(map.entities);
-      this.flowField.buildAsteroidField();
+      this.flowField.buildAsteroidField((x, y) => map.sampleFlow(x, y));
       this.renderer.setMapType(map.type);
       // Forward the map's recorded nebula cluster-center positions to
       // the background layer so its puffs render at the same world

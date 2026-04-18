@@ -13,6 +13,8 @@ interface UIOverlayProps {
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
+  mapType?: MapType;
+  onSetMapType?: (type: MapType) => void;
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -26,6 +28,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
+  mapType = MapType.UNIVERSE,
+  onSetMapType,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   const perf = stats.perf;
@@ -161,6 +165,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   }`}
                 >
                   {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-8 flex flex-col items-center gap-3">
+            <span className="text-slate-200 text-sm tracking-wide">Map</span>
+            <div className="flex gap-2">
+              {[
+                { type: MapType.UNIVERSE, label: 'Deep Space' },
+                { type: MapType.RING,     label: 'Ring World' },
+              ].map(opt => (
+                <button
+                  key={opt.type}
+                  onClick={() => onSetMapType && onSetMapType(opt.type)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                    mapType === opt.type
+                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+                  }`}
+                >
+                  {opt.label}
                 </button>
               ))}
             </div>
