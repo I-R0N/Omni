@@ -1456,8 +1456,8 @@ export class GameEngine {
   private handleEntitySticking(dt: number) {
       if (!this.currentMap) return;
 
-      const SAME_THRESHOLD = 1.0;   // base seconds for min-size pair (same type)
-      const DIFF_THRESHOLD = 2.0;   // base seconds for min-size pair (cross type)
+      const SAME_THRESHOLD = 10.0;  // base seconds for min-size pair (same type)
+      const DIFF_THRESHOLD = 20.0;  // base seconds for min-size pair (cross type)
       const SIZE_REF       = 20;    // reference size (min asteroid diameter)
       const SIZE_POWER     = 1.5;   // exponent — small bodies merge fast, large ones slowly
       const DIFF_CHANCE    = 0.5;   // probability that a cross-type contact forms a bond
