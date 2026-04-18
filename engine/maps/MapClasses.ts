@@ -156,84 +156,61 @@ export class UniverseMap extends BaseMapLayer {
     // and glass tiles never overlap on the shared hex grid.
     const occupied = new Set<string>();
 
-    // Cluster layout — all zone extents are computed as fractions of
-    // the active map size (MAP_WIDTH / MAP_HEIGHT) so the visible
-    // dead-space ring scales with the map.
+    // Cluster layout — seed zone is computed as a fraction of the
+    // active map size (MAP_WIDTH / MAP_HEIGHT) so the visible dead
+    // space around the wrap seam scales with the map.
     //
     //   SAFE_ZONE_FRAC  5 %   — width of the tile-free ring around
-    //                           each wrap seam.  Outer cluster passes
-    //                           seed at (1 − SAFE_ZONE_FRAC) of the
-    //                           map extent; clusters can still grow
+    //                           each wrap seam.  Cluster passes seed
+    //                           at (1 − SAFE_ZONE_FRAC) of the map
+    //                           extent; clusters can still grow
     //                           slightly past that via BFS neighbour
     //                           walk, but the visible dead ring stays
     //                           ≈5 % of the map.
-    //   INNER_GLASS_FRAC  33 % — dense core landmark cluster footprint.
-    //   INNER_NEBULA_FRAC 47 % — dense central nebula cluster footprint.
     //
-    // Inner zones overlap with the outer pass' footprint on purpose —
-    // they bias density toward the playable core, which is where most
-    // fighting happens, without leaving the outskirts empty.
-    const SAFE_ZONE_FRAC    = 0.05;
-    const OUTER_ZONE_FRAC   = 1 - SAFE_ZONE_FRAC;
-    const INNER_GLASS_FRAC  = 0.33;
-    const INNER_NEBULA_FRAC = 0.47;
+    // Inner/outer zone split was removed: on smaller maps it visibly
+    // concentrated clusters in the centre.  All cluster passes now
+    // target the full 95 %-of-map footprint, so cluster density is
+    // roughly uniform across the playable area with a consistent
+    // dead ring at every edge regardless of map size.
+    //
+    // Cluster counts scale linearly with the map axis (not area), so
+    // the average cluster-to-cluster spacing stays at a fixed
+    // percentage of map size as the map grows or shrinks.  Spacing on
+    // a random uniform distribution is ∝ N / √count, so count ∝ N
+    // gives spacing ∝ N (constant as a fraction of N).
+    const SAFE_ZONE_FRAC  = 0.05;
+    const OUTER_ZONE_FRAC = 1 - SAFE_ZONE_FRAC;
+    const CLUSTER_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
+    const GLASS_CLUSTERS_PER_AXIS  = 0.014; // ≈ 84 clusters on a 6000 map
+    const NEBULA_CLUSTERS_PER_AXIS = 0.025; // ≈ 150 clusters on a 6000 map
+    const GLASS_COUNT  = Math.round(MAP_WIDTH * GLASS_CLUSTERS_PER_AXIS);
+    const NEBULA_COUNT = Math.round(MAP_WIDTH * NEBULA_CLUSTERS_PER_AXIS);
 
-    const INNER_GLASS_W  = MAP_WIDTH  * INNER_GLASS_FRAC;
-    const INNER_GLASS_H  = MAP_HEIGHT * INNER_GLASS_FRAC;
-    const OUTER_GLASS_W  = MAP_WIDTH  * OUTER_ZONE_FRAC;
-    const OUTER_GLASS_H  = MAP_HEIGHT * OUTER_ZONE_FRAC;
-    const INNER_NEBULA_W = MAP_WIDTH  * INNER_NEBULA_FRAC;
-    const INNER_NEBULA_H = MAP_HEIGHT * INNER_NEBULA_FRAC;
-    const OUTER_NEBULA_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
-    const OUTER_NEBULA_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
-
-    // Dense landmark cluster core around the spawn region.
+    // Glass landmark clusters — uniform distribution across the 95 %
+    // zone.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        INNER_GLASS_W, INNER_GLASS_H,
+        CLUSTER_W, CLUSTER_H,
         22,          // hexSize
-        40,          // clusterCount
-        15,          // minClusterSize
-        45,          // maxClusterSize
+        GLASS_COUNT, // scales with map axis
+        10,          // minClusterSize
+        34,          // maxClusterSize
         occupied
     ));
 
-    // Sparser outer landmarks — spread across 95 % of the map with
-    // a 5 % dead ring near the wrap seam so the toroidal edges stay
-    // visually distinguishable from the cluttered interior.
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        OUTER_GLASS_W, OUTER_GLASS_H,
-        22,
-        65,          // clusterCount
-        8,
-        28,
-        occupied
-    ));
-
-    // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
-    // (sparser, spread across most of the map).  The generator shares the
-    // `occupied` set from the glass passes so nebula cells naturally fill
-    // the gaps glass left behind.
-    //
-    // Both passes record their world-space cluster start positions into
-    // `nebulaClusterCenters`, which GameEngine pipes into BackgroundManager
-    // so the background-nebula layer renders puffs at the exact same
-    // positions — one unified cloud, with parallax drift of the backdrop
-    // as the camera moves.
+    // Nebula cloud clusters — same 95 %-zone uniform distribution.
+    // Records each cluster's world-space start position into
+    // `nebulaClusterCenters`, which GameEngine pipes into
+    // BackgroundManager so the background-nebula layer renders puffs
+    // at the same positions — one unified cloud, with parallax drift
+    // of the backdrop as the camera moves.
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        INNER_NEBULA_W, INNER_NEBULA_H,
+        CLUSTER_W, CLUSTER_H,
         22,
-        NEBULA_CONSTANTS.CLUSTER_COUNT,
-        NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
-        NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
-        occupied,
-        this.nebulaClusterCenters
-    ));
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        OUTER_NEBULA_W, OUTER_NEBULA_H,
-        22,
-        NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
-        NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
-        NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
+        NEBULA_COUNT,
+        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
+        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
         occupied,
         this.nebulaClusterCenters
     ));
