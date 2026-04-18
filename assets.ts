@@ -27,22 +27,52 @@ export type AssetManifest = {
 // render immediately, without hanging external HTTP requests.
 const PLACEHOLDER = '/assets/placeholder.png';
 
-// List image paths here to replace the procedural nebula generation with real images.
-// Supported formats: PNG, JPEG, WebP. Use white/light-colored images on a transparent
-// or black background — the engine tints them at runtime with per-nebula colors.
-// Leave empty to keep the built-in procedural generation.
-// Example: ['/assets/nebula_1.png', '/assets/nebula_2.png']
-export const NEBULA_IMAGES: string[] = [
-  '/assets/Nebula00.png',
-  '/assets/Nebula01.png',
-  '/assets/Nebula02.png',
-  '/assets/Nebula03.png',
-  '/assets/Nebula04.png',
-  '/assets/Nebula05.png',
-  '/assets/Nebula06.png',
-  '/assets/Nebula07.png',
-  '/assets/Nebula08.png',
-];
+// Nebula images are auto-discovered at build time by vite.config.ts's
+// nebula-manifest plugin, which scans public/assets/ for every file matching
+// Nebula##.png.  Dropping a new file into that folder picks it up on the
+// next dev reload / build — no code changes required.
+import NEBULA_MANIFEST from 'virtual:nebula-manifest';
+
+// All discovered nebula image URLs, sorted by filename.
+export const NEBULA_IMAGES_ALL: readonly string[] = NEBULA_MANIFEST;
+
+// Historical baseline: the original nine nebula images (00-08).  Kept as a
+// named subset so the DBG panel can A/B compare "old art" vs "everything".
+// Rendered from the discovered manifest so a missing file stops rendering,
+// but never includes any of the newer art by accident.
+const SET_A_BASENAMES = new Set([
+  'Nebula00.png', 'Nebula01.png', 'Nebula02.png',
+  'Nebula03.png', 'Nebula04.png', 'Nebula05.png',
+  'Nebula06.png', 'Nebula07.png', 'Nebula08.png',
+]);
+const basenameOf = (url: string) => url.slice(url.lastIndexOf('/') + 1);
+
+export const NEBULA_IMAGES_SET_A: readonly string[] =
+  NEBULA_IMAGES_ALL.filter(url => SET_A_BASENAMES.has(basenameOf(url)));
+
+// Everything discovered that isn't in set A — grows automatically as new
+// Nebula##.png files are added past index 08.
+export const NEBULA_IMAGES_SET_B: readonly string[] =
+  NEBULA_IMAGES_ALL.filter(url => !SET_A_BASENAMES.has(basenameOf(url)));
+
+export type NebulaSet = 'A' | 'B' | 'ALL' | 'N16';
+
+// NEBULA_IMAGES is the currently-active list — swapped via
+// setActiveNebulaSet() (wired to the DBG panel).  Consumers read the same
+// array reference, so in-place mutation propagates to all of them.
+export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_ALL];
+
+export function setActiveNebulaSet(set: NebulaSet): string[] {
+  const n16 = NEBULA_IMAGES_ALL.filter(url => basenameOf(url) === 'Nebula16.png');
+  const source =
+      set === 'A'   ? NEBULA_IMAGES_SET_A
+    : set === 'B'   ? NEBULA_IMAGES_SET_B
+    : set === 'N16' ? n16
+    : NEBULA_IMAGES_ALL;
+  NEBULA_IMAGES.length = 0;
+  NEBULA_IMAGES.push(...source);
+  return NEBULA_IMAGES;
+}
 
 // TODO: Replace PLACEHOLDER entries with real asset locations (CDN/object storage).
 export const ASSETS: AssetManifest = {
