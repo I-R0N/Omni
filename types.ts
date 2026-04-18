@@ -1,8 +1,9 @@
 
 
 export enum MapType {
-  UNIVERSE = 'UNIVERSE',
-  RING     = 'RING',
+  UNIVERSE    = 'UNIVERSE',
+  RING        = 'RING',
+  SEVEN_RINGS = 'SEVEN_RINGS',
 }
 
 export enum GameState {
