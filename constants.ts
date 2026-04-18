@@ -219,10 +219,15 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    count: 280,
+    // Halved for the 7.5k map on 2026-04-18 — fewer asteroids but the
+    // same density per unit area, so collision-broadphase pressure in
+    // any given cell stays the same as on the prior 15k map.
+    count: 140,
     minSize: 20,
     maxSize: 160,
-    radius: 5000,
+    // Spawn radius also halved so asteroids stay inside the wrap box
+    // rather than being pushed across a seam immediately.
+    radius: 2500,
     speedMultiplier: 1.5
   },
 };
@@ -371,11 +376,11 @@ export const NEBULA_CONSTANTS = {
   // background nebula puffs (which live in world space at ±~20 000 units).
   // The generator shares an "occupied coords" set with the glass pass so
   // adjacency conflicts are avoided; empty cells get priority naturally.
-  CLUSTER_COUNT: 130,
+  CLUSTER_COUNT: 65,    // halved for 7.5k map (was 130)
   MIN_CLUSTER_SIZE: 14,
   MAX_CLUSTER_SIZE: 42,
   // Outer-zone cluster pass (sparser landmarks spread across the full map).
-  OUTER_CLUSTER_COUNT: 240,
+  OUTER_CLUSTER_COUNT: 120, // halved for 7.5k map (was 240)
   OUTER_MIN_CLUSTER_SIZE: 7,
   OUTER_MAX_CLUSTER_SIZE: 26,
   // Base palette — nebula tiles draw from the full 360° hue wheel

@@ -16,14 +16,14 @@
 import { Vector2 } from '../types';
 
 // ── Map size ──────────────────────────────────────────────────────────────
-// The universe is 15000×15000 world units.  Sized so the wrap distance
-// is smaller than the AI pursuit range (~4600 units) on each axis — two
-// wrap crossings bring any point inside one another's range — but still
-// roomy enough that a player can sprint 25–30 s in a straight line
-// before looping back.  Axis sizes are stored separately so the map
-// can become non-square later without touching every call site.
-export const MAP_WIDTH  = 15000;
-export const MAP_HEIGHT = 15000;
+// The universe is 7500×7500 world units.  Halved from the prior 15k on
+// 2026-04-18 to relieve collision/broadphase cost in dense-cluster
+// situations — entity counts (tiles, asteroids, nebulae) are halved to
+// match so density per cell stays comparable to the old map.  Axis
+// sizes are stored separately so the map can become non-square later
+// without touching every call site.
+export const MAP_WIDTH  = 7500;
+export const MAP_HEIGHT = 7500;
 export const HALF_MAP_WIDTH  = MAP_WIDTH  / 2;
 export const HALF_MAP_HEIGHT = MAP_HEIGHT / 2;
 

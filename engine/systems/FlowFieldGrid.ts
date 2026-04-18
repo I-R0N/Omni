@@ -62,8 +62,12 @@ const DC4 = [ 0,  0, -1,  1] as const;
 const WALL_REPULSE = 1.2;
 
 // Enemy pursuit BFS is capped at this many cells from the player so each
-// rebuild stays cheap (~800 cells vs. 14 k for the whole map).
-const MAX_ENEMY_RANGE = 18; // cells  ≈ 4608 world units
+// rebuild stays cheap AND the range stays under half the grid axis,
+// which is required on the toroidal map: a BFS that propagates past
+// halfGrid would start landing on the far side of the wrap and the
+// pursuit field would overlap itself.  At MAP_WIDTH=7500 / CELL_SIZE=256,
+// FF_COLS=30 → half=15 → range must be ≤14.
+const MAX_ENEMY_RANGE = 14; // cells ≈ 3584 world units
 
 // ─── public types ─────────────────────────────────────────────────────────
 

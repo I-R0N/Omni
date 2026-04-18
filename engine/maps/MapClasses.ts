@@ -156,15 +156,17 @@ export class UniverseMap extends BaseMapLayer {
     // and glass tiles never overlap on the shared hex grid.
     const occupied = new Set<string>();
 
-    // Cluster layout on the 15 000-unit toroidal map — see comment
-    // below for the zone bounds.  The outer passes stop ~500 units
+    // Cluster layout on the 7 500-unit toroidal map — see comment
+    // below for the zone bounds.  The outer passes stop ~250 units
     // short of the map edge so each axis retains a thin dead-space
-    // ring, and the inner passes sit inside that dense core.
+    // ring, and the inner passes sit inside that dense core.  Every
+    // dimension and count is half of the prior 15 k-map values to
+    // keep cluster density per unit area consistent.
     //
-    //   Inner glass / tiles : ±2500   (dense core landmarks)
-    //   Outer glass / tiles : ±7000   (spread to near the edges)
-    //   Inner nebula cloud  : ±3500   (dense central cloud)
-    //   Outer nebula cloud  : ±7000   (spread to near the edges)
+    //   Inner glass / tiles : ±1250   (dense core landmarks)
+    //   Outer glass / tiles : ±3500   (spread to near the edges)
+    //   Inner nebula cloud  : ±1750   (dense central cloud)
+    //   Outer nebula cloud  : ±3500   (spread to near the edges)
     //
     // Inner zones overlap with the outer pass' footprint on purpose —
     // they bias density toward the playable core, which is where most
@@ -172,28 +174,28 @@ export class UniverseMap extends BaseMapLayer {
     // grow organically past their seed zone (BFS neighbour walk), so
     // the visible dead-space ring ends up tighter than the seed bound
     // suggests.
-    const INNER_GLASS_ZONE  = 5000;
-    const OUTER_GLASS_ZONE  = 14000;
-    const INNER_NEBULA_ZONE = 7000;
-    const OUTER_NEBULA_ZONE = 14000;
+    const INNER_GLASS_ZONE  = 2500;
+    const OUTER_GLASS_ZONE  = 7000;
+    const INNER_NEBULA_ZONE = 3500;
+    const OUTER_NEBULA_ZONE = 7000;
 
     // Dense landmark cluster core around the spawn region.
     this.entities.push(...TileGenerator.generateClusteredMesh(
         INNER_GLASS_ZONE, INNER_GLASS_ZONE,
         22,          // hexSize
-        80,          // clusterCount
+        40,          // clusterCount  (was 80)
         15,          // minClusterSize
         45,          // maxClusterSize
         occupied
     ));
 
     // Sparser outer landmarks — spread across most of the map with a
-    // ~1000-unit dead ring near the wrap seam so the toroidal edges
+    // ~250-unit dead ring near the wrap seam so the toroidal edges
     // stay visually distinguishable from the cluttered interior.
     this.entities.push(...TileGenerator.generateClusteredMesh(
         OUTER_GLASS_ZONE, OUTER_GLASS_ZONE,
         22,
-        130,
+        65,          // clusterCount  (was 130)
         8,
         28,
         occupied
