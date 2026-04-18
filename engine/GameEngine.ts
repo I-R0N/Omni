@@ -180,15 +180,22 @@ export class GameEngine {
 
   /**
    * Flip between nebula image sets A (Nebula00-08) and B (Nebula09-16).
-   * Updates the shared NEBULA_IMAGES array and reloads background textures
-   * immediately.  Tile-cluster sprites are stamped at map-gen time, so
-   * existing tiles keep their old textures — reload the map to repopulate
-   * tile sprites from the new set.
+   * Updates the shared NEBULA_IMAGES array, reloads background textures,
+   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
+   * tile-cluster art swaps instantly without requiring a map reload.
    */
   public toggleNebulaSet() {
     this.nebulaSet = this.nebulaSet === 'A' ? 'B' : 'A';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
+
+    if (active.length > 0 && this.currentMap) {
+      for (const e of this.currentMap.entities) {
+        if (e.type === EntityType.NEBULA || e.type === EntityType.NEBULA_SHARD) {
+          e.sprite = active[Math.floor(Math.random() * active.length)];
+        }
+      }
+    }
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
