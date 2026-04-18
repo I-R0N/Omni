@@ -242,6 +242,18 @@ export const STRUCTURE_CONSTANTS = {
   // size-100 merged cluster just barely crashes, while a 20-mass
   // shard at drift speed doesn't.
   ASTEROID_CRASH_MOMENTUM: 200,
+  // Pressure accumulator — sustained sub-crash-momentum impacts from
+  // "large enough" asteroids also break a tile permanently, simulating
+  // repeated-impact pressure without a full stress model.  A tile
+  // breaks the first time its accumulator reaches ASTEROID_PRESSURE_HITS
+  // within the rolling ASTEROID_PRESSURE_WINDOW.  Only asteroids with
+  // mass ≥ ASTEROID_PRESSURE_MIN_MASS contribute, so trivial drift
+  // shards don't count.  ASTEROID_PRESSURE_COOLDOWN debounces multi-
+  // substep re-hits from a single bouncing rock.
+  ASTEROID_PRESSURE_HITS: 5,
+  ASTEROID_PRESSURE_WINDOW: 2.0,
+  ASTEROID_PRESSURE_MIN_MASS: 40,
+  ASTEROID_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 

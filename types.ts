@@ -221,6 +221,18 @@ export interface GameEntity {
   // Tile regen pop-in scale overshoot timer (counts down from REGEN_POP_DURATION)
   regenPopTimer?: number;
 
+  // ── Tile asteroid-pressure accumulator ───────────────────────────────────
+  // Set on STRUCTURE tiles to track repeated sub-crash-threshold asteroid
+  // impacts.  When `asteroidHitCount` reaches STRUCTURE_CONSTANTS
+  // .ASTEROID_PRESSURE_HITS within the decaying `asteroidHitTimer` window,
+  // the tile breaks permanently the same way a single above-threshold
+  // momentum crash would.  `asteroidHitCooldown` debounces multi-substep
+  // re-hits from a single bouncing rock so one glancing bounce counts as
+  // one pressure event, not several.
+  asteroidHitCount?: number;
+  asteroidHitTimer?: number;
+  asteroidHitCooldown?: number;
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.

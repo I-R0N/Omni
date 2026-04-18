@@ -174,6 +174,21 @@ export class PhysicsSystem {
                   entity.nebulaSpawnTimer = undefined;
               }
           }
+          // Asteroid-pressure accumulator decay.  The rolling window
+          // expires into a full reset (both count and cooldown cleared)
+          // so a tile only breaks under *sustained* pressure within
+          // ASTEROID_PRESSURE_WINDOW, not from hits spread over a minute.
+          if (entity.asteroidHitCooldown !== undefined && entity.asteroidHitCooldown > 0) {
+              entity.asteroidHitCooldown -= dt;
+              if (entity.asteroidHitCooldown <= 0) entity.asteroidHitCooldown = undefined;
+          }
+          if (entity.asteroidHitTimer !== undefined && entity.asteroidHitTimer > 0) {
+              entity.asteroidHitTimer -= dt;
+              if (entity.asteroidHitTimer <= 0) {
+                  entity.asteroidHitTimer = undefined;
+                  entity.asteroidHitCount = undefined;
+              }
+          }
           continue;
       }
 
@@ -1212,7 +1227,33 @@ export class PhysicsSystem {
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               return;
           }
-          // Below threshold: fall through to the standard elastic bounce.
+
+          // Below the single-hit crash threshold: accumulate a pressure
+          // hit if the asteroid is "large enough".  A short cooldown
+          // debounces multi-substep re-hits from one bounce event so a
+          // single glancing collision counts as one pressure event
+          // rather than two or three.  Once the accumulator reaches
+          // ASTEROID_PRESSURE_HITS within the ASTEROID_PRESSURE_WINDOW,
+          // the tile breaks the same way a single above-threshold crash
+          // would — no shards, no regen, no flow-field patch.
+          if (asteroid.mass >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_MIN_MASS
+              && !(structure.asteroidHitCooldown ?? 0)) {
+              structure.asteroidHitCount = (structure.asteroidHitCount ?? 0) + 1;
+              structure.asteroidHitTimer = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_WINDOW;
+              structure.asteroidHitCooldown = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_COOLDOWN;
+              if (structure.asteroidHitCount >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_HITS) {
+                  structure.health = 0;
+                  structure.active = false;
+                  if (structure.mass === Infinity) {
+                      this.removeStaticEntity(structure);
+                  }
+                  asteroid.velocity.x *= 0.85;
+                  asteroid.velocity.y *= 0.85;
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  return;
+              }
+          }
+          // Still below pressure threshold: fall through to elastic bounce.
       }
 
       // Asteroid vs Player — speed-gated environmental damage (bypasses shield)
