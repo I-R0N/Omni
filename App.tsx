@@ -18,6 +18,7 @@ const App: React.FC = () => {
     difficulty: 3
   });
   const [difficulty, setDifficulty] = useState<number>(3);
+  const [mapType, setMapType] = useState<MapType>(MapType.UNIVERSE);
   // Mirror difficulty into a ref so the one-shot mount effect below can
   // read the latest value without closing over stale state.
   const difficultyRef = useRef(difficulty);
@@ -103,6 +104,11 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleDebug();
   };
 
+  const handleSetMapType = (type: MapType) => {
+      setMapType(type);
+      if (engineRef.current) engineRef.current.setMapType(type);
+  };
+
   const handleToggleNebulaSet = () => {
       if (engineRef.current) engineRef.current.toggleNebulaSet();
   };
@@ -129,6 +135,8 @@ const App: React.FC = () => {
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
+        mapType={mapType}
+        onSetMapType={handleSetMapType}
       />
     </div>
   );
