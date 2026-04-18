@@ -63,8 +63,8 @@ export abstract class BaseMapLayer {
     // A smaller scatter pass fills in a uniform background of asteroids
     // outside the main current so the field doesn't look like one
     // compressed ribbon.
-    const PATH_FRACTION    = 0.7;   // 70 % of asteroids on the main path
-    const PATH_STEP        = 80;    // world units advanced per path sample
+    const PATH_FRACTION    = 0.5;   // 50 % of asteroids on the main path
+    const PATH_STEP        = 160;   // world units advanced per path sample
     const PATH_PERP_JITTER = 120;   // ± perpendicular spread around streamline
     const pathCount    = Math.round(count * PATH_FRACTION);
     const scatterCount = count - pathCount;
