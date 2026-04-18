@@ -42,6 +42,14 @@ export const NEBULA_IMAGES: string[] = [
   '/assets/Nebula06.png',
   '/assets/Nebula07.png',
   '/assets/Nebula08.png',
+  '/assets/Nebula09.png',
+  '/assets/Nebula10.png',
+  '/assets/Nebula11.png',
+  '/assets/Nebula12.png',
+  '/assets/Nebula13.png',
+  '/assets/Nebula14.png',
+  '/assets/Nebula15.png',
+  '/assets/Nebula16.png',
 ];
 
 // TODO: Replace PLACEHOLDER entries with real asset locations (CDN/object storage).
