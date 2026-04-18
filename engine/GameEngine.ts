@@ -179,13 +179,18 @@ export class GameEngine {
   }
 
   /**
-   * Flip between nebula image sets A (Nebula00-08) and B (Nebula09-16).
-   * Updates the shared NEBULA_IMAGES array, reloads background textures,
-   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
-   * tile-cluster art swaps instantly without requiring a map reload.
+   * Cycle through nebula image sets: A (00-08) → B (09-16) → ALL (00-16)
+   * → N16 (Nebula16 only) → A.  Updates the shared NEBULA_IMAGES array,
+   * reloads background textures, and re-rolls the sprite on every live
+   * NEBULA / NEBULA_SHARD entity so tile-cluster art swaps instantly
+   * without requiring a map reload.
    */
   public toggleNebulaSet() {
-    this.nebulaSet = this.nebulaSet === 'A' ? 'B' : 'A';
+    this.nebulaSet =
+        this.nebulaSet === 'A'   ? 'B'
+      : this.nebulaSet === 'B'   ? 'ALL'
+      : this.nebulaSet === 'ALL' ? 'N16'
+      : 'A';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
 

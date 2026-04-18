@@ -355,7 +355,7 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
-  nebulaSet?: 'A' | 'B';
+  nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

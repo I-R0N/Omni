@@ -54,12 +54,16 @@ export const NEBULA_IMAGES_SET_B: readonly string[] = [
   '/assets/Nebula16.png',
 ];
 
-export type NebulaSet = 'A' | 'B';
+export type NebulaSet = 'A' | 'B' | 'ALL' | 'N16';
 
 export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_SET_A];
 
 export function setActiveNebulaSet(set: NebulaSet): string[] {
-  const source = set === 'A' ? NEBULA_IMAGES_SET_A : NEBULA_IMAGES_SET_B;
+  const source =
+      set === 'A'   ? NEBULA_IMAGES_SET_A
+    : set === 'B'   ? NEBULA_IMAGES_SET_B
+    : set === 'N16' ? ['/assets/Nebula16.png']
+    : [...NEBULA_IMAGES_SET_A, ...NEBULA_IMAGES_SET_B];
   NEBULA_IMAGES.length = 0;
   NEBULA_IMAGES.push(...source);
   return NEBULA_IMAGES;
