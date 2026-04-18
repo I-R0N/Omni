@@ -118,18 +118,16 @@ export function blendCompositionToHex(composition: NebulaColorStop[] | undefined
 }
 
 // ── HSL palette generation ───────────────────────────────────────────────
-// Nebula tiles cover the FULL 360° hue wheel — blue, indigo, violet, pink,
-// red, yellow, green — all available.  The palette is treated circularly,
-// so the rule-based regen code averages and interpolates neighbour hues
-// via unit vectors to handle wraparound correctly (e.g., averaging 350°
-// and 10° gives 0°, not 180°).
-//
-// The old linear [210, 340] constants are kept only for backward
-// compatibility with any external callers; within this module the
-// full-wheel helpers below are the canonical API.
-export const NEBULA_PALETTE_HUE_MIN = 0;
-export const NEBULA_PALETTE_HUE_MAX = 360;
-export const NEBULA_PALETTE_HUE_RANGE = 360;
+// Nebula tiles draw from a constrained hue arc — cyan through blue,
+// purple, pink, and into red — skipping the orange/yellow/green band.
+// The arc spans 210° starting at NEBULA_PALETTE_HUE_MIN (cyan, 165°) and
+// wrapping past 360° into the reds, ending at NEBULA_PALETTE_HUE_MIN +
+// NEBULA_PALETTE_HUE_RANGE (= 375° ≡ 15°).  Averages/interpolations still
+// use unit-vector math so wraparound (e.g. 350° + 10° → 0°) works
+// correctly on the allowed arc.
+export const NEBULA_PALETTE_HUE_MIN = 165;
+export const NEBULA_PALETTE_HUE_MAX = 375; // wraps: the 15° past 360°
+export const NEBULA_PALETTE_HUE_RANGE = 210;
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -229,15 +227,16 @@ export function circularLerpHue(
     return clampHueToPalette(Math.atan2(y, x) * RAD_TO_DEG);
 }
 
-// Pick a random hue uniformly from the full 360° wheel.
+// Pick a random hue uniformly from the allowed 210° arc (cyan → blue →
+// purple → pink → red), skipping the orange/yellow/green band.
 export function randomPaletteHueDeg(): number {
-    return Math.random() * 360;
+    return (NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE) % 360;
 }
 
 /**
- * Pick a fresh random-hue palette entry.  Full 360° wheel — blue,
- * indigo, violet, pink, red, yellow, green all available.  Returns
- * a single-stop composition suitable for a newly generated nebula tile.
+ * Pick a fresh random-hue palette entry from the cyan-through-red arc
+ * (orange, yellow, and green are excluded).  Returns a single-stop
+ * composition suitable for a newly generated nebula tile.
  */
 export function randomNebulaComposition(): NebulaColorStop[] {
     const hue = randomPaletteHueDeg();

@@ -64,6 +64,17 @@ export class NebulaSystem {
      */
     private nebulaGridIndex: Map<number, GameEntity> | null = null;
 
+    /**
+     * Set to true whenever the active nebula-tile population changes
+     * (destruction, regen revival, shard→tile transmutation, map reset).
+     * Drives a lazy recompute of every tile's `nebulaNeighborCount` at
+     * the top of the next update() so the interior-darken render rule
+     * stays current without threading delta updates through every call
+     * site.  Starts true so the first frame after map load initialises
+     * counts from scratch.
+     */
+    private neighborCountsDirty: boolean = true;
+
     constructor(
         private particles: ParticleSystem,
         private drops: DropSystem,
@@ -76,6 +87,7 @@ export class NebulaSystem {
     public reset() {
         this.pendingRegens = [];
         this.nebulaGridIndex = null;
+        this.neighborCountsDirty = true;
     }
 
     /**
@@ -99,6 +111,10 @@ export class NebulaSystem {
         // Both tiles and shards run through spawnShards (it early-returns
         // for shards — shards don't re-shatter, they just fade).
         this.spawnShards(entities, entity);
+
+        // A destroyed tile removes itself from its neighbours' counts;
+        // flag for recompute on the next frame.
+        if (entity.type === EntityType.NEBULA) this.neighborCountsDirty = true;
 
         // Low-frequency ammo drop — the ONLY standard drop nebulae produce.
         // Roll is independent of the shard math so shard count/size is
@@ -140,6 +156,18 @@ export class NebulaSystem {
         // if any regen finishes this frame and needs neighbour lookups.
         this.nebulaGridIndex = null;
 
+        // Refresh every tile's neighbour count if something changed since
+        // last frame (destroy / regen / transmute / reset).  Cheap — O(N)
+        // over the active tiles, no recompute when nothing moved.  Only
+        // clears the dirty flag once tiles actually exist, so a pre-map
+        // update() doesn't starve the first real tile population of a
+        // count pass.
+        if (this.neighborCountsDirty) {
+            if (this.recomputeNeighborCounts(entities) > 0) {
+                this.neighborCountsDirty = false;
+            }
+        }
+
         // Stash the entities list so helper methods (glimmer, transmute)
         // can spawn new particles/entities without threading the list
         // through every private call site.
@@ -151,6 +179,36 @@ export class NebulaSystem {
         } finally {
             this.currentFrameEntities = null;
         }
+    }
+
+    /**
+     * Count active nebula-tile neighbours (in the 6 hex cells around
+     * each tile) and stash the count on each tile's
+     * `nebulaNeighborCount` field.  0 = isolated, 6 = fully interior.
+     * Used by the renderer to darken interior tiles vs. cluster edges.
+     */
+    private recomputeNeighborCounts(entities: GameEntity[]): number {
+        const index = this.buildNebulaGridIndex(entities);
+        this.nebulaGridIndex = index;
+        let tilesProcessed = 0;
+        for (let i = 0; i < entities.length; i++) {
+            const e = entities[i];
+            if (e.type !== EntityType.NEBULA) continue;
+            if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
+            tilesProcessed++;
+            if (!e.active) {
+                e.nebulaNeighborCount = 0;
+                continue;
+            }
+            let count = 0;
+            const neighbors = TileGenerator.getHexNeighbors(e.nebulaGridCol, e.nebulaGridRow);
+            for (const n of neighbors) {
+                const key = (n.c << 16) | (n.r & 0xFFFF);
+                if (index.has(key)) count++;
+            }
+            e.nebulaNeighborCount = count;
+        }
+        return tilesProcessed;
     }
 
     // Private method stubs — filled in by subsequent edits.
@@ -647,6 +705,9 @@ export class NebulaSystem {
         entities.push(tile);
         physics.addStaticEntity(tile);
 
+        // A newly-transmuted tile adds itself to its neighbours' counts.
+        this.neighborCountsDirty = true;
+
         // New tile appears immediately at full opacity — the parent
         // shard fades out over top of it, so the eye reads the shard
         // dissolving INTO an already-present tile rather than a flash
@@ -810,6 +871,8 @@ export class NebulaSystem {
                 // Re-add to the static grid so collisions start hitting again.
                 physics.addStaticEntity(regen.entity);
                 this.pendingRegens.splice(i, 1);
+                // A revived tile changes its neighbours' counts.
+                this.neighborCountsDirty = true;
 
                 // The just-regenerated tile should now count as a
                 // neighbour for any later regens in this same frame.

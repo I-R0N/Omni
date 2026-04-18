@@ -276,6 +276,12 @@ export interface GameEntity {
   // shards so coalescence can snap back to the same column/row layout.
   nebulaGridCol?: number;
   nebulaGridRow?: number;
+  // Number of active nebula-tile neighbours in the 6 hex cells around this
+  // tile (0 = isolated, 6 = fully interior).  Drives the interior-darken
+  // render rule: edge tiles stay bright, interior tiles get progressively
+  // darker.  NebulaSystem recomputes this lazily whenever tiles are
+  // destroyed, regenerated, or transmuted from shards.
+  nebulaNeighborCount?: number;
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
@@ -369,6 +375,7 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
+  nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

@@ -2,6 +2,7 @@
 import { MapType, Vector2, GameEntity } from '../../types';
 import { COLORS, SHOOTING_STAR_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
+import { randomPaletteHueDeg } from '../NebulaColor';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 interface StarBand {
@@ -77,6 +78,22 @@ export class BackgroundManager {
       // The image may still be loading; drawImage handles in-progress loads gracefully.
       this.puffTextures.push(img);
     });
+  }
+
+  /**
+   * Swap the active nebula image set at runtime.  Clears the texture list
+   * and every cached tinted puff canvas, then forces initContent to rerun
+   * on the next render so textureIndex values re-map to the new set.
+   */
+  public setNebulaImages(paths: string[]) {
+    this.puffTextures = [];
+    if (paths.length > 0) {
+      this.loadNebulaImages(paths);
+    } else {
+      this.createPuffVariants();
+    }
+    for (const puff of this.nebulaPuffs) puff.cachedCanvas = undefined;
+    this.initialized = false;
   }
 
   private applyLensing(x: number, y: number, cameraPos: Vector2, attractors: GameEntity[], halfW: number, halfH: number): void {
@@ -181,7 +198,7 @@ public setMapType(type: MapType) {
         for (const seed of this.nebulaClusterCenters) {
             const size = 150 + Math.random() * 250; // 150–400px
             const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0 parallax
-            const hue = Math.random() * 360;
+            const hue = randomPaletteHueDeg();
             const color = `hsla(${hue}, 100%, 60%,`;
             this.nebulaPuffs.push({
                 x: seed.x,
@@ -210,7 +227,7 @@ public setMapType(type: MapType) {
                 const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
                 const offsetX = (Math.random() - 0.5) * 300; // ±150
                 const offsetY = (Math.random() - 0.5) * 200; // ±100
-                const hue = Math.random() * 360;
+                const hue = randomPaletteHueDeg();
                 // Keep color string for procedural fallback path
                 const color = `hsla(${hue}, 100%, 60%,`;
 

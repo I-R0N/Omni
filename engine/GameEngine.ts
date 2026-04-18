@@ -16,7 +16,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
-import { ASSETS } from '../assets';
+import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from './toroidal';
 
@@ -77,6 +77,12 @@ export class GameEngine {
 
   // Debug mode
   private debugMode: boolean = false;
+
+  // Which nebula image set is active.  Defaults to ALL so every discovered
+  // nebula image renders out of the box; the DBG panel cycles through A
+  // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
+  // comparison.
+  private nebulaSet: NebulaSet = 'ALL';
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -175,6 +181,31 @@ export class GameEngine {
       for (const w of WEAPON_LIST) {
         if (w === WeaponType.BLASTER) continue; // blaster is always infinite
         this.player.ammo[w] = 999;
+      }
+    }
+  }
+
+  /**
+   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
+   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
+   * Updates the shared NEBULA_IMAGES array, reloads background textures,
+   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
+   * tile-cluster art swaps instantly without requiring a map reload.
+   */
+  public toggleNebulaSet() {
+    this.nebulaSet =
+        this.nebulaSet === 'ALL' ? 'A'
+      : this.nebulaSet === 'A'   ? 'B'
+      : this.nebulaSet === 'B'   ? 'N16'
+      : 'ALL';
+    const active = setActiveNebulaSet(this.nebulaSet);
+    this.renderer.setNebulaImages(active);
+
+    if (active.length > 0 && this.currentMap) {
+      for (const e of this.currentMap.entities) {
+        if (e.type === EntityType.NEBULA || e.type === EntityType.NEBULA_SHARD) {
+          e.sprite = active[Math.floor(Math.random() * active.length)];
+        }
       }
     }
   }
@@ -305,6 +336,7 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
+      nebulaSet: this.nebulaSet,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -399,6 +431,7 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
+      nebulaSet: this.nebulaSet,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

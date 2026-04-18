@@ -109,6 +109,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.setMapType(type);
   };
 
+  const handleToggleNebulaSet = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaSet();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -127,6 +131,7 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
+        onToggleNebulaSet={handleToggleNebulaSet}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
