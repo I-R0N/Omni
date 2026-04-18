@@ -9,6 +9,7 @@ import {
   COLLISION_CONFIG,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
  * WeaponSystem — owns shooting behavior for both players and enemies.
@@ -132,8 +133,8 @@ export class WeaponSystem {
       enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
       if (enemy.weaponCooldown > 0) continue;
 
-      const dx = player.position.x - enemy.position.x;
-      const dy = player.position.y - enemy.position.y;
+      const dx = wrapDeltaX(enemy.position.x, player.position.x);
+      const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const distSq = dx * dx + dy * dy;
       if (distSq > rangeSq) continue;
 

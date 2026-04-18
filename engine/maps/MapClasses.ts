@@ -4,6 +4,7 @@ import { TileGenerator } from './TileGenerator';
 import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS } from '../../constants';
 import { sampleFlow } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
+import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
 
 export abstract class BaseMapLayer {
   public id: string;
@@ -44,7 +45,58 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
   ) {
-    for (let i = 0; i < count; i++) {
+    // Spawn the majority of asteroids along a representative streamline
+    // of the flow field so the belt reads as "following the current"
+    // from the first frame rather than drifting into the stream over a
+    // few seconds.  The flow field is ergodic on the torus (irrational
+    // base slope), so integrating a single streamline from the origin
+    // winds across the map and naturally covers most of the playable
+    // area without creating a straight line of rocks.  Perpendicular
+    // jitter widens the streamline into a band.
+    //
+    // Path step is sized so that pathCount × PATH_STEP ≈ MAP_WIDTH /
+    // cos(BASE_ANGLE) — at the flow's ~32° base slope that's roughly
+    // 1.2 × MAP_WIDTH of total arc length, which is just over one
+    // full wrap along the dominant direction so the streamline lays
+    // asteroids across the whole map in the flow axis.
+    //
+    // A smaller scatter pass fills in a uniform background of asteroids
+    // outside the main current so the field doesn't look like one
+    // compressed ribbon.
+    const PATH_FRACTION    = 0.5;   // 50 % of asteroids on the main path
+    const PATH_STEP        = 160;   // world units advanced per path sample
+    const PATH_PERP_JITTER = 120;   // ± perpendicular spread around streamline
+    const pathCount    = Math.round(count * PATH_FRACTION);
+    const scatterCount = count - pathCount;
+
+    let px = 0, py = 0; // streamline integrator state
+    for (let i = 0; i < pathCount; i++) {
+        const flow = sampleFlow(px, py);
+        // Advance along the flow by one step length, then wrap.
+        px += flow.x * PATH_STEP;
+        py += flow.y * PATH_STEP;
+        const stepPos = { x: px, y: py };
+        wrapPosition(stepPos);
+        px = stepPos.x;
+        py = stepPos.y;
+
+        // Lay the asteroid perpendicular to the flow by a random offset
+        // so the streamline reads as a broad current rather than a line
+        // of rocks in single file.
+        const perpX = -flow.y;
+        const perpY =  flow.x;
+        const j = (Math.random() - 0.5) * 2 * PATH_PERP_JITTER;
+        const pos = { x: px + perpX * j, y: py + perpY * j };
+        wrapPosition(pos);
+
+        const size = minSize + Math.random() * (maxSize - minSize);
+        this.entities.push(this.createAsteroid(pos.x, pos.y, size, speedMultiplier, allowedSprites));
+    }
+
+    // Scatter the remainder across the original radial distribution so
+    // the non-current regions of the map still have some asteroids to
+    // bump into.
+    for (let i = 0; i < scatterCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = 500 + Math.random() * (radius - 500);
         const x = Math.cos(angle) * dist;
@@ -132,8 +184,8 @@ export abstract class BaseMapLayer {
 export class UniverseMap extends BaseMapLayer {
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
-    this.width = 30000;
-    this.height = 30000;
+    this.width = MAP_WIDTH;
+    this.height = MAP_HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 
@@ -144,6 +196,10 @@ export class UniverseMap extends BaseMapLayer {
     // Asteroids spread around spawn
     const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    // Asteroids are spawned on a linear radial distribution and may fall
+    // just outside the canonical wrap range; normalise so every entity
+    // sits in [-HALF, HALF) before any distance math runs.
+    for (const e of this.entities) wrapPosition(e.position);
 
     // Shared occupancy set — every tile pass (glass inner, glass outer,
     // nebula inner, nebula outer) writes to this set so later passes
@@ -151,55 +207,62 @@ export class UniverseMap extends BaseMapLayer {
     // and glass tiles never overlap on the shared hex grid.
     const occupied = new Set<string>();
 
-    // Landmark clusters in the inner zone — sparse enough to leave clear
-    // flow corridors between chunks for asteroids to stream through
+    // Cluster layout — seed zone is computed as a fraction of the
+    // active map size (MAP_WIDTH / MAP_HEIGHT) so the visible dead
+    // space around the wrap seam scales with the map.
+    //
+    //   SAFE_ZONE_FRAC  5 %   — width of the tile-free ring around
+    //                           each wrap seam.  Cluster passes seed
+    //                           at (1 − SAFE_ZONE_FRAC) of the map
+    //                           extent; clusters can still grow
+    //                           slightly past that via BFS neighbour
+    //                           walk, but the visible dead ring stays
+    //                           ≈5 % of the map.
+    //
+    // Inner/outer zone split was removed: on smaller maps it visibly
+    // concentrated clusters in the centre.  All cluster passes now
+    // target the full 95 %-of-map footprint, so cluster density is
+    // roughly uniform across the playable area with a consistent
+    // dead ring at every edge regardless of map size.
+    //
+    // Cluster counts are fixed regardless of map size so the expected
+    // cluster-to-cluster spacing stays at a constant percentage of
+    // map size.  For a random uniform distribution on an N×N zone
+    // with C clusters, expected spacing ≈ N/√C, so spacing/N = 1/√C —
+    // independent of N.  With C_glass + C_nebula = 234, expected
+    // spacing ≈ 6.5 % of map size on every map, meaning a smaller
+    // map has clusters that are physically closer together but
+    // visually spaced identically relative to the viewport.
+    const SAFE_ZONE_FRAC  = 0.05;
+    const OUTER_ZONE_FRAC = 1 - SAFE_ZONE_FRAC;
+    const CLUSTER_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
+    const GLASS_COUNT  = 84;   // → ~10.9 % spacing from glass alone
+    const NEBULA_COUNT = 150;  // → ~6.5 % spacing combined (glass + nebula)
+
+    // Glass landmark clusters — uniform distribution across the 95 %
+    // zone.
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        8000, 8000,  // inner zone
+        CLUSTER_W, CLUSTER_H,
         22,          // hexSize
-        100,         // clusterCount  (was 70)
-        15,          // minClusterSize (was 12)
-        45,          // maxClusterSize (was 40)
+        GLASS_COUNT, // scales with map axis
+        10,          // minClusterSize
+        34,          // maxClusterSize
         occupied
     ));
 
-    // Sparse outer landmarks — well-separated chunks across deep space
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        this.width, this.height,
-        22,
-        130,         // was 100
-        8,           // was 6
-        28,          // was 24
-        occupied
-    ));
-
-    // Nebula cloud clusters — inner zone (dense, larger clusters) + outer
-    // (sparser, spread across the full map).  The generator shares the
-    // `occupied` set from the glass passes so nebula cells naturally fill
-    // the gaps glass left behind.
-    //
-    // Both passes record their world-space cluster start positions into
-    // `nebulaClusterCenters`, which GameEngine pipes into BackgroundManager
-    // so the background-nebula layer renders puffs at the exact same
-    // positions — one unified cloud, with parallax drift of the backdrop
-    // as the camera moves.
-    //
-    // Inner-zone bounds widened from 8000 to 12000 so the dense-cluster
-    // treatment covers more of the playable core.
+    // Nebula cloud clusters — same 95 %-zone uniform distribution.
+    // Records each cluster's world-space start position into
+    // `nebulaClusterCenters`, which GameEngine pipes into
+    // BackgroundManager so the background-nebula layer renders puffs
+    // at the same positions — one unified cloud, with parallax drift
+    // of the backdrop as the camera moves.
     this.entities.push(...TileGenerator.generateNebulaClusters(
-        12000, 12000,
+        CLUSTER_W, CLUSTER_H,
         22,
-        NEBULA_CONSTANTS.CLUSTER_COUNT,
-        NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
-        NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
-        occupied,
-        this.nebulaClusterCenters
-    ));
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        this.width, this.height,
-        22,
-        NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
-        NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
-        NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
+        NEBULA_COUNT,
+        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
+        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
         occupied,
         this.nebulaClusterCenters
     ));

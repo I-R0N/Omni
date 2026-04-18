@@ -2,6 +2,7 @@
 import { MapType, Vector2, GameEntity } from '../../types';
 import { COLORS, SHOOTING_STAR_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 interface StarBand {
   canvas: HTMLCanvasElement;
@@ -99,8 +100,8 @@ export class BackgroundManager {
     let outY = y;
     for (let i = 0; i < attractors.length; i++) {
         const attr = attractors[i];
-        const ax = (attr.position.x - cameraPos.x) + halfW;
-        const ay = (attr.position.y - cameraPos.y) + halfH;
+        const ax = wrapDeltaX(cameraPos.x, attr.position.x) + halfW;
+        const ay = wrapDeltaY(cameraPos.y, attr.position.y) + halfH;
         const adx = outX - ax;
         const ady = outY - ay;
         const distSq = adx*adx + ady*ady;
@@ -324,8 +325,13 @@ public setMapType(type: MapType) {
     }
 
     if (!this.lastCameraPos) this.lastCameraPos = { ...cameraPos };
-    const dx = cameraPos.x - this.lastCameraPos.x;
-    const dy = cameraPos.y - this.lastCameraPos.y;
+    // Wrapped delta so a camera that just crossed a seam produces a
+    // small parallax nudge rather than a full-map scroll of the star
+    // bands.  Absolute `lastCameraPos` is still refreshed from the raw
+    // cameraPos (not the wrapped delta) so subsequent deltas stay
+    // consistent as the player keeps moving.
+    const dx = wrapDeltaX(this.lastCameraPos.x, cameraPos.x);
+    const dy = wrapDeltaY(this.lastCameraPos.y, cameraPos.y);
     this.lastCameraPos = { ...cameraPos };
 
     ctx.save();
@@ -346,8 +352,11 @@ public setMapType(type: MapType) {
     // x/y are world-space coordinates. Project to screen via parallax depth so
     // nebulae are distributed across the world and discovered as the camera moves.
     this.nebulaPuffs.forEach(puff => {
-        let drawX = (puff.x - cameraPos.x) * puff.depth + halfW;
-        let drawY = (puff.y - cameraPos.y) * puff.depth + halfH;
+        // Toroidal delta so a puff on the far side of the seam still reads
+        // as "close" to the camera and draws at the correct parallax-offset
+        // screen spot instead of ~MAP_WIDTH off to the side.
+        let drawX = wrapDeltaX(cameraPos.x, puff.x) * puff.depth + halfW;
+        let drawY = wrapDeltaY(cameraPos.y, puff.y) * puff.depth + halfH;
 
         // Frustum cull before doing any work
         const margin = puff.size;
