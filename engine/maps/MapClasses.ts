@@ -174,19 +174,20 @@ export class UniverseMap extends BaseMapLayer {
     // roughly uniform across the playable area with a consistent
     // dead ring at every edge regardless of map size.
     //
-    // Cluster counts scale linearly with the map axis (not area), so
-    // the average cluster-to-cluster spacing stays at a fixed
-    // percentage of map size as the map grows or shrinks.  Spacing on
-    // a random uniform distribution is ∝ N / √count, so count ∝ N
-    // gives spacing ∝ N (constant as a fraction of N).
+    // Cluster counts are fixed regardless of map size so the expected
+    // cluster-to-cluster spacing stays at a constant percentage of
+    // map size.  For a random uniform distribution on an N×N zone
+    // with C clusters, expected spacing ≈ N/√C, so spacing/N = 1/√C —
+    // independent of N.  With C_glass + C_nebula = 234, expected
+    // spacing ≈ 6.5 % of map size on every map, meaning a smaller
+    // map has clusters that are physically closer together but
+    // visually spaced identically relative to the viewport.
     const SAFE_ZONE_FRAC  = 0.05;
     const OUTER_ZONE_FRAC = 1 - SAFE_ZONE_FRAC;
     const CLUSTER_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
     const CLUSTER_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
-    const GLASS_CLUSTERS_PER_AXIS  = 0.014; // ≈ 84 clusters on a 6000 map
-    const NEBULA_CLUSTERS_PER_AXIS = 0.025; // ≈ 150 clusters on a 6000 map
-    const GLASS_COUNT  = Math.round(MAP_WIDTH * GLASS_CLUSTERS_PER_AXIS);
-    const NEBULA_COUNT = Math.round(MAP_WIDTH * NEBULA_CLUSTERS_PER_AXIS);
+    const GLASS_COUNT  = 84;   // → ~10.9 % spacing from glass alone
+    const NEBULA_COUNT = 150;  // → ~6.5 % spacing combined (glass + nebula)
 
     // Glass landmark clusters — uniform distribution across the 95 %
     // zone.
