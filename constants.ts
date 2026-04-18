@@ -231,7 +231,12 @@ export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
-  CRASH_VELOCITY_THRESHOLD: 4, // Speed needed to break through
+  CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // Momentum threshold (asteroid.mass × impactSpeed) above which an
+  // asteroid plows through a tile permanently.  At 200 a cruising
+  // size-100 merged cluster just barely crashes, while a 20-mass
+  // shard at drift speed doesn't.
+  ASTEROID_CRASH_MOMENTUM: 200,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
 

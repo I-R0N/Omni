@@ -1144,7 +1144,12 @@ export class PhysicsSystem {
           }
       }
 
-      // Structure Crashing Logic
+      // Structure crashing — player path.
+      // Player punches through tiles on hard impact: the tile breaks apart
+      // into glass shards (via onDeath → spawnDrops → spawnGlassShards)
+      // and then regenerates on the normal 12 s timer (via onDeath → the
+      // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
+      // The player loses half its velocity to the tile break.
       if ((a.type === EntityType.PLAYER && b.type === EntityType.STRUCTURE) || (b.type === EntityType.PLAYER && a.type === EntityType.STRUCTURE)) {
           const player = a.type === EntityType.PLAYER ? a : b;
           const structure = a.type === EntityType.STRUCTURE ? a : b;
@@ -1159,12 +1164,55 @@ export class PhysicsSystem {
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              if (onDeath) onDeath(structure);
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
               player.health -= envDmg;
               player.hitFlash = 0.1;
           }
+      }
+
+      // Structure crashing — asteroid path.
+      // Big accreted clusters plow straight through tile geometry rather
+      // than bouncing, letting them clear traffic jams at cluster edges.
+      // The threshold is momentum (mass × impactSpeed) so a heavy rock
+      // at drift speed and a small shard at high speed can both crash,
+      // while cruising shards stay harmlessly bouncing.
+      //
+      // This path deliberately does NOT call onDeath — unlike the player
+      // crash above, asteroids destroy tiles permanently (no shard debris,
+      // no regeneration queue, no flow-field BFS patch).  Omitting
+      // onDeath avoids:
+      //   - spawning 4–11 glass-shard asteroids per crashed tile
+      //     (runaway entity count when a cluster plows a row of tiles),
+      //   - `flowField.onTileDestroyed` and its patch BFS, which on a
+      //     toroidal map propagates through every unblocked cell of the
+      //     pursuit field within range and dominates the frame.
+      // Enemies continue treating the destroyed cell as blocked until
+      // the next natural full field rebuild (when the player changes
+      // grid cells); that's a ~1 s staleness in the worst case, which
+      // is cheaper than patching on every crash.
+      if ((a.type === EntityType.ASTEROID && b.type === EntityType.STRUCTURE)
+          || (b.type === EntityType.ASTEROID && a.type === EntityType.STRUCTURE)) {
+          const asteroid = a.type === EntityType.ASTEROID ? a : b;
+          const structure = a.type === EntityType.STRUCTURE ? a : b;
+          const impactSpeed = Math.abs(velAlongNormal);
+          const momentum = asteroid.mass * impactSpeed;
+
+          if (momentum > STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM) {
+              structure.health = 0;
+              structure.active = false;
+              if (structure.mass === Infinity) {
+                  this.removeStaticEntity(structure);
+              }
+              // Rough momentum transfer to the tile fragments.
+              asteroid.velocity.x *= 0.85;
+              asteroid.velocity.y *= 0.85;
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              return;
+          }
+          // Below threshold: fall through to the standard elastic bounce.
       }
 
       // Asteroid vs Player — speed-gated environmental damage (bypasses shield)
