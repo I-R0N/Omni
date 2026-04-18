@@ -219,10 +219,12 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    // Halved for the 7.5k map on 2026-04-18 — fewer asteroids but the
-    // same density per unit area, so collision-broadphase pressure in
-    // any given cell stays the same as on the prior 15k map.
-    count: 140,
+    // Doubled on 2026-04-18 to 280 — denser belt now that pressure
+    // breaking and the 50 % on-path spawn distribution keep collision
+    // costs bounded even at higher population.  Same density as the
+    // original 15k map but on the current 6k map, so cluster
+    // encounters and traffic dynamics are visibly busier.
+    count: 280,
     minSize: 20,
     maxSize: 160,
     // Spawn radius also halved so asteroids stay inside the wrap box
