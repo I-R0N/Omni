@@ -45,7 +45,52 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
   ) {
-    for (let i = 0; i < count; i++) {
+    // Spawn the majority of asteroids along a representative streamline
+    // of the flow field so the belt reads as "following the current"
+    // from the first frame rather than drifting into the stream over a
+    // few seconds.  The flow field is ergodic on the torus (irrational
+    // base slope), so integrating a single streamline from the origin
+    // winds across the map and naturally covers most of the playable
+    // area without creating a straight line of rocks.  Perpendicular
+    // jitter widens the streamline into a band.
+    //
+    // A smaller scatter pass fills in a uniform background of asteroids
+    // outside the main current so the field doesn't look like one
+    // compressed ribbon.
+    const PATH_FRACTION   = 0.8;   // 80 % of asteroids on the main path
+    const PATH_STEP       = 40;    // world units advanced per path sample
+    const PATH_PERP_JITTER = 120;  // ± perpendicular spread around streamline
+    const pathCount    = Math.round(count * PATH_FRACTION);
+    const scatterCount = count - pathCount;
+
+    let px = 0, py = 0; // streamline integrator state
+    for (let i = 0; i < pathCount; i++) {
+        const flow = sampleFlow(px, py);
+        // Advance along the flow by one step length, then wrap.
+        px += flow.x * PATH_STEP;
+        py += flow.y * PATH_STEP;
+        const stepPos = { x: px, y: py };
+        wrapPosition(stepPos);
+        px = stepPos.x;
+        py = stepPos.y;
+
+        // Lay the asteroid perpendicular to the flow by a random offset
+        // so the streamline reads as a broad current rather than a line
+        // of rocks in single file.
+        const perpX = -flow.y;
+        const perpY =  flow.x;
+        const j = (Math.random() - 0.5) * 2 * PATH_PERP_JITTER;
+        const pos = { x: px + perpX * j, y: py + perpY * j };
+        wrapPosition(pos);
+
+        const size = minSize + Math.random() * (maxSize - minSize);
+        this.entities.push(this.createAsteroid(pos.x, pos.y, size, speedMultiplier, allowedSprites));
+    }
+
+    // Scatter the remainder across the original radial distribution so
+    // the non-current regions of the map still have some asteroids to
+    // bump into.
+    for (let i = 0; i < scatterCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = 500 + Math.random() * (radius - 500);
         const x = Math.cos(angle) * dist;
