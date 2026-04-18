@@ -73,15 +73,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   onClick={onToggleNebulaSet}
                   className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle A (00-08) → B (09-17) → ALL (00-17) → N16 (16 only)"
+                  title="Cycle ALL → A (baseline 00-08) → B (new art) → N16 (16 only)"
                 >
-                  {stats.nebulaSet === 'B'
-                    ? 'B (09-17)'
-                    : stats.nebulaSet === 'ALL'
-                    ? 'ALL (00-17)'
+                  {stats.nebulaSet === 'A'
+                    ? 'A (baseline)'
+                    : stats.nebulaSet === 'B'
+                    ? 'B (new art)'
                     : stats.nebulaSet === 'N16'
-                    ? 'N16 (16 only)'
-                    : 'A (00-08)'}
+                    ? 'N16 only'
+                    : 'ALL'}
                 </button>
               </div>
 

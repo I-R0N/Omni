@@ -74,9 +74,11 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Which nebula image set is active (A = Nebula00-08, B = Nebula09-16).
-  // Toggled from the DBG panel to A/B compare the two art collections.
-  private nebulaSet: NebulaSet = 'A';
+  // Which nebula image set is active.  Defaults to ALL so every discovered
+  // nebula image renders out of the box; the DBG panel cycles through A
+  // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
+  // comparison.
+  private nebulaSet: NebulaSet = 'ALL';
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -180,18 +182,18 @@ export class GameEngine {
   }
 
   /**
-   * Cycle through nebula image sets: A (00-08) → B (09-16) → ALL (00-16)
-   * → N16 (Nebula16 only) → A.  Updates the shared NEBULA_IMAGES array,
-   * reloads background textures, and re-rolls the sprite on every live
-   * NEBULA / NEBULA_SHARD entity so tile-cluster art swaps instantly
-   * without requiring a map reload.
+   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
+   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
+   * Updates the shared NEBULA_IMAGES array, reloads background textures,
+   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
+   * tile-cluster art swaps instantly without requiring a map reload.
    */
   public toggleNebulaSet() {
     this.nebulaSet =
-        this.nebulaSet === 'A'   ? 'B'
-      : this.nebulaSet === 'B'   ? 'ALL'
-      : this.nebulaSet === 'ALL' ? 'N16'
-      : 'A';
+        this.nebulaSet === 'ALL' ? 'A'
+      : this.nebulaSet === 'A'   ? 'B'
+      : this.nebulaSet === 'B'   ? 'N16'
+      : 'ALL';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
 
