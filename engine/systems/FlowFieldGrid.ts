@@ -29,7 +29,7 @@
 
 import { GameEntity, EntityType } from '../../types';
 import { sampleFlow, FlowVector as AnalyticalFlowVector } from './FlowField';
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, onMapDimensionsChanged } from '../toroidal';
 
 export type FlowSampler = (wx: number, wy: number) => AnalyticalFlowVector;
 
@@ -42,12 +42,23 @@ export type FlowSampler = (wx: number, wy: number) => AnalyticalFlowVector;
 // every cell has four in-range neighbours.
 
 const CELL_SIZE = 256;          // world units per cell
-const MAP_MIN_X = -HALF_MAP_WIDTH;
-const MAP_MIN_Y = -HALF_MAP_HEIGHT;
+// Min corner + cell counts are `let` so setMapDimensions() updates them
+// on map load.  Instances reallocate their typed arrays in
+// `_ensureCapacity()` when the cell count grows past their current size.
+let MAP_MIN_X = -HALF_MAP_WIDTH;
+let MAP_MIN_Y = -HALF_MAP_HEIGHT;
 
-export const FF_COLS = Math.ceil(MAP_WIDTH  / CELL_SIZE); // 20000 / 256 ≈ 79
-export const FF_ROWS = Math.ceil(MAP_HEIGHT / CELL_SIZE); // 79
-const TOTAL = FF_COLS * FF_ROWS;
+export let FF_COLS = Math.ceil(MAP_WIDTH  / CELL_SIZE);
+export let FF_ROWS = Math.ceil(MAP_HEIGHT / CELL_SIZE);
+let TOTAL = FF_COLS * FF_ROWS;
+
+onMapDimensionsChanged((w, h) => {
+    MAP_MIN_X = -w / 2;
+    MAP_MIN_Y = -h / 2;
+    FF_COLS = Math.ceil(w / CELL_SIZE);
+    FF_ROWS = Math.ceil(h / CELL_SIZE);
+    TOTAL   = FF_COLS * FF_ROWS;
+});
 
 const INF = 0x7FFF_FFFF;
 
@@ -79,24 +90,29 @@ export interface FlowVector { x: number; y: number }
 
 export class FlowFieldGrid {
 
-  // Shared obstacle bitmap (1 = blocked by a tile)
-  private readonly blocked   = new Uint8Array(TOTAL);
+  // All grid-sized buffers are reassignable so per-map dimension changes
+  // can grow them in `_ensureCapacity()` before the next initObstacles()
+  // populates the new map.  The patch queue is map-independent.
+  private blocked   = new Uint8Array(TOTAL);
 
   // ── asteroid streaming field (vortex-based, no BFS distance needed) ──
-  private readonly astFlowX  = new Float32Array(TOTAL);
-  private readonly astFlowY  = new Float32Array(TOTAL);
+  private astFlowX  = new Float32Array(TOTAL);
+  private astFlowY  = new Float32Array(TOTAL);
 
   // ── enemy pursuit field ──
-  private readonly eneDist   = new Int32Array(TOTAL).fill(INF);
-  private readonly eneFlowX  = new Float32Array(TOTAL);
-  private readonly eneFlowY  = new Float32Array(TOTAL);
+  private eneDist   = new Int32Array(TOTAL).fill(INF);
+  private eneFlowX  = new Float32Array(TOTAL);
+  private eneFlowY  = new Float32Array(TOTAL);
 
   // Pre-allocated queues — zero runtime allocation in the hot path.
   // fullQ / inFullQ  : full-map BFS (asteroid init + enemy rebuild)
   // patchQ           : small incremental patch queue
-  private readonly fullQ    = new Int32Array(TOTAL + 4);
-  private readonly inFullQ  = new Uint8Array(TOTAL);
-  private readonly patchQ   = new Int32Array(8192);
+  private fullQ    = new Int32Array(TOTAL + 4);
+  private inFullQ  = new Uint8Array(TOTAL);
+  private readonly patchQ = new Int32Array(8192);
+
+  // Current allocation sizes so _ensureCapacity() knows when to reallocate.
+  private _allocTotal = TOTAL;
 
   private playerCell  = -1;
   private enemyDirty  = true;   // true = rebuild enemy field next flush
@@ -132,10 +148,31 @@ export class FlowFieldGrid {
   // ─── initialisation ──────────────────────────────────────────────────────
 
   /**
+   * Reallocate the grid-sized typed-array fields if the current map's
+   * cell count exceeds the previously-allocated capacity.  Called at the
+   * top of initObstacles() so every map load sees arrays sized for the
+   * active dimensions.  Pure no-op when the new map fits in the existing
+   * allocation (common after the first map load).
+   */
+  private _ensureCapacity(): void {
+    if (TOTAL <= this._allocTotal) return;
+    this.blocked  = new Uint8Array(TOTAL);
+    this.astFlowX = new Float32Array(TOTAL);
+    this.astFlowY = new Float32Array(TOTAL);
+    this.eneDist  = new Int32Array(TOTAL);
+    this.eneFlowX = new Float32Array(TOTAL);
+    this.eneFlowY = new Float32Array(TOTAL);
+    this.fullQ    = new Int32Array(TOTAL + 4);
+    this.inFullQ  = new Uint8Array(TOTAL);
+    this._allocTotal = TOTAL;
+  }
+
+  /**
    * Populate the obstacle bitmap from the map's tile entities.
    * Call once right after map.init() and before buildAsteroidField().
    */
   initObstacles(entities: GameEntity[]): void {
+    this._ensureCapacity();
     this.blocked.fill(0);
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];

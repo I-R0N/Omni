@@ -194,10 +194,16 @@ export abstract class BaseMapLayer {
  * Tile clusters act as visual landmarks. The player never leaves this map.
  */
 export class UniverseMap extends BaseMapLayer {
+  // Deep Space is the smallest of the three maps — half the axis size of
+  // Ring / Seven Rings so cluster traffic is dense and travel times are
+  // short.  Other maps override this with their own constants.
+  public static readonly WIDTH  = 3000;
+  public static readonly HEIGHT = 3000;
+
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
-    this.width = MAP_WIDTH;
-    this.height = MAP_HEIGHT;
+    this.width  = UniverseMap.WIDTH;
+    this.height = UniverseMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 
@@ -316,14 +322,16 @@ export class UniverseMap extends BaseMapLayer {
  */
 export class RingMap extends BaseMapLayer {
   // Radius of the tile ring in world units.  Sized so it's clearly
-  // visible from spawn (well inside the 3000-unit half-map) and
-  // leaves a large safe zone at the centre.
-  private static readonly RING_TILE_RADIUS = 350;
+  // visible from spawn (well inside the half-map) and leaves a large
+  // safe zone at the centre.
+  private static readonly RING_TILE_RADIUS = 700;
+  public  static readonly WIDTH  = 6000;
+  public  static readonly HEIGHT = 6000;
 
   constructor() {
     super('ring_01', 'Ring World', MapType.RING);
-    this.width = MAP_WIDTH;
-    this.height = MAP_HEIGHT;
+    this.width  = RingMap.WIDTH;
+    this.height = RingMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 
@@ -368,13 +376,15 @@ export class RingMap extends BaseMapLayer {
  */
 export class SevenRingsMap extends BaseMapLayer {
   private static readonly RING_COUNT = 7;
-  private static readonly INNER_RADIUS = 200;
-  private static readonly OUTER_RADIUS = 1100;
+  private static readonly INNER_RADIUS = 400;
+  private static readonly OUTER_RADIUS = 2200;
+  public  static readonly WIDTH  = 6000;
+  public  static readonly HEIGHT = 6000;
 
   constructor() {
     super('seven_rings_01', 'Seven Rings', MapType.SEVEN_RINGS);
-    this.width = MAP_WIDTH;
-    this.height = MAP_HEIGHT;
+    this.width  = SevenRingsMap.WIDTH;
+    this.height = SevenRingsMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 

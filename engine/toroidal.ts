@@ -16,16 +16,47 @@
 import { Vector2 } from '../types';
 
 // ── Map size ──────────────────────────────────────────────────────────────
-// The universe is 7500×7500 world units.  Halved from the prior 15k on
-// 2026-04-18 to relieve collision/broadphase cost in dense-cluster
-// situations — entity counts (tiles, asteroids, nebulae) are halved to
-// match so density per cell stays comparable to the old map.  Axis
-// sizes are stored separately so the map can become non-square later
-// without touching every call site.
-export const MAP_WIDTH  = 3000;
-export const MAP_HEIGHT = 3000;
-export const HALF_MAP_WIDTH  = MAP_WIDTH  / 2;
-export const HALF_MAP_HEIGHT = MAP_HEIGHT / 2;
+// Per-map dimensions.  Each BaseMapLayer carries its own `width`/`height`,
+// and GameEngine.loadMap calls `setMapDimensions(w, h)` before any system
+// init so the wrap-box math and all downstream precomputed tables (spatial
+// grid, flow field, etc.) agree on the currently-active map.
+//
+// These bindings are `let` so ES-module live-binding rules propagate the
+// update to every consumer that imports them directly.  Modules that
+// _derive_ values from these (e.g. SPATIAL_COLS in PhysicsSystem) register
+// a listener via `onMapDimensionsChanged` so their caches rebuild too.
+//
+// Default values are used for the initial map before loadMap runs.
+export let MAP_WIDTH  = 3000;
+export let MAP_HEIGHT = 3000;
+export let HALF_MAP_WIDTH  = MAP_WIDTH  / 2;
+export let HALF_MAP_HEIGHT = MAP_HEIGHT / 2;
+
+type DimensionListener = (w: number, h: number) => void;
+const _dimensionListeners: DimensionListener[] = [];
+
+/**
+ * Register a callback that fires every time the active map's dimensions
+ * change.  Modules that precompute values from MAP_WIDTH/MAP_HEIGHT at
+ * import time register here so their caches stay in sync.
+ */
+export function onMapDimensionsChanged(cb: DimensionListener): void {
+    _dimensionListeners.push(cb);
+}
+
+/**
+ * Update the toroidal wrap-box dimensions and notify all listeners.
+ * Called from GameEngine.loadMap before any downstream system rebuilds
+ * its static state for the new map.
+ */
+export function setMapDimensions(w: number, h: number): void {
+    if (w === MAP_WIDTH && h === MAP_HEIGHT) return;
+    MAP_WIDTH  = w;
+    MAP_HEIGHT = h;
+    HALF_MAP_WIDTH  = w / 2;
+    HALF_MAP_HEIGHT = h / 2;
+    for (const cb of _dimensionListeners) cb(w, h);
+}
 
 /**
  * Wrap a scalar world coordinate into [-HALF_MAP, +HALF_MAP).  Uses a

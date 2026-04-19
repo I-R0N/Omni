@@ -252,14 +252,16 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     count: 280,
     minSize: 20,
     maxSize: 160,
-    radius: 1250,
+    // 6000×6000 map — half is 3000, so a 2500 spawn ring leaves a
+    // ~500-unit buffer inside the wrap seam.
+    radius: 2500,
     speedMultiplier: 1.5
   },
   [MapType.SEVEN_RINGS]: {
     count: 280,
     minSize: 20,
     maxSize: 160,
-    radius: 1250,
+    radius: 2500,
     speedMultiplier: 1.5
   },
 };

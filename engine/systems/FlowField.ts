@@ -28,7 +28,7 @@
  * vector once on map load for the hot sim path.
  */
 
-import { MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, onMapDimensionsChanged } from '../toroidal';
 
 export interface FlowVector {
   x: number;
@@ -48,8 +48,12 @@ const BASE_ANGLE = Math.atan2(PHI_MINUS_ONE, 1); // ≈ 31.7°
 const AMP_X = 0.8;
 const AMP_Y = 0.8;
 
-const TWO_PI_OVER_W = (2 * Math.PI) / MAP_WIDTH;
-const TWO_PI_OVER_H = (2 * Math.PI) / MAP_HEIGHT;
+let TWO_PI_OVER_W = (2 * Math.PI) / MAP_WIDTH;
+let TWO_PI_OVER_H = (2 * Math.PI) / MAP_HEIGHT;
+onMapDimensionsChanged((w, h) => {
+    TWO_PI_OVER_W = (2 * Math.PI) / w;
+    TWO_PI_OVER_H = (2 * Math.PI) / h;
+});
 
 /**
  * Sample the flow field at world position (wx, wy).  Returns a unit

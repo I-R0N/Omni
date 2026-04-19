@@ -2,15 +2,22 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
 // (cy & 0xFFFF)`, and cell indices are wrapped into [0, SPATIAL_COLS) so
 // neighbour queries near a seam land on the same bucket as the entities
 // they should collide with on the opposite side.
-const SPATIAL_COLS = Math.ceil(MAP_WIDTH  / SPATIAL_GRID_SIZE);
-const SPATIAL_ROWS = Math.ceil(MAP_HEIGHT / SPATIAL_GRID_SIZE);
+//
+// `let` + dimension listener so per-map size changes rebuild the cell
+// count used by wrapCellX/Y before the next broadphase pass.
+let SPATIAL_COLS = Math.ceil(MAP_WIDTH  / SPATIAL_GRID_SIZE);
+let SPATIAL_ROWS = Math.ceil(MAP_HEIGHT / SPATIAL_GRID_SIZE);
+onMapDimensionsChanged((w, h) => {
+    SPATIAL_COLS = Math.ceil(w / SPATIAL_GRID_SIZE);
+    SPATIAL_ROWS = Math.ceil(h / SPATIAL_GRID_SIZE);
+});
 
 function wrapCellX(cx: number): number {
     return ((cx % SPATIAL_COLS) + SPATIAL_COLS) % SPATIAL_COLS;
