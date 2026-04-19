@@ -441,8 +441,8 @@ export class SevenRingsMap extends BaseMapLayer {
  * having to fly around a full-size map to find each element.
  */
 export class PocketMap extends BaseMapLayer {
-  public static readonly WIDTH  = 1000;
-  public static readonly HEIGHT = 1000;
+  public static readonly WIDTH  = 2000;
+  public static readonly HEIGHT = 2000;
 
   // Cluster counts — kept very small so the 1 000-unit axis doesn't
   // saturate.  Split across tile variants matches Deep Space's 60/22/
