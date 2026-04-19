@@ -4,6 +4,11 @@ export enum MapType {
   UNIVERSE    = 'UNIVERSE',
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
+  // 1 000 × 1 000 sandbox containing every element (asteroids, glass /
+  // reinforced / heavy / indestructible tiles, nebula clusters).  Useful
+  // for quickly validating interactions between systems without having
+  // to fly across a full-size map to find them.
+  POCKET      = 'POCKET',
 }
 
 export enum GameState {

@@ -194,11 +194,12 @@ export abstract class BaseMapLayer {
  * Tile clusters act as visual landmarks. The player never leaves this map.
  */
 export class UniverseMap extends BaseMapLayer {
-  // Deep Space is the largest of the three maps — 12 000 world units per
-  // axis gives room for many landmark clusters before the player meets
-  // the wrap seam.  Other maps override this with their own constants.
-  public static readonly WIDTH  = 12000;
-  public static readonly HEIGHT = 12000;
+  // Deep Space is the largest of the three main maps — 8 000 world units
+  // per axis gives room for many landmark clusters before the player
+  // meets the wrap seam.  Other maps override this with their own
+  // constants.
+  public static readonly WIDTH  = 8000;
+  public static readonly HEIGHT = 8000;
 
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
@@ -428,6 +429,85 @@ export class SevenRingsMap extends BaseMapLayer {
     this.entities = this.entities.filter(e => {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > safeClearSq;
+    });
+  }
+}
+
+/**
+ * Pocket sandbox — 1 000 × 1 000 wrap box that spawns every element type
+ * (asteroids + all four STRUCTURE variants + nebula clusters) in a
+ * single tiny playfield.  Intended for iterating on cross-system
+ * interactions (collision, regen, pathing, nebula shatter) without
+ * having to fly around a full-size map to find each element.
+ */
+export class PocketMap extends BaseMapLayer {
+  public static readonly WIDTH  = 1000;
+  public static readonly HEIGHT = 1000;
+
+  // Cluster counts — kept very small so the 1 000-unit axis doesn't
+  // saturate.  Split across tile variants matches Deep Space's 60/22/
+  // 12/6 % ratio rounded to whole clusters.
+  private static readonly GLASS_CLUSTERS          = 3;
+  private static readonly REINFORCED_CLUSTERS     = 2;
+  private static readonly HEAVY_CLUSTERS          = 1;
+  private static readonly INDESTRUCTIBLE_CLUSTERS = 1;
+  private static readonly NEBULA_CLUSTERS         = 4;
+
+  constructor() {
+    super('pocket_01', 'Pocket', MapType.POCKET);
+    this.width  = PocketMap.WIDTH;
+    this.height = PocketMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    // Asteroids on the shared analytical meander — same sampler as
+    // Deep Space, so motion reads consistently between maps.
+    const gen = ASTEROID_GENERATION_CONFIG[MapType.POCKET];
+    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    for (const e of this.entities) wrapPosition(e.position);
+
+    // 90 %-of-map cluster zone keeps every spawn well inside the seam.
+    const CLUSTER_W = PocketMap.WIDTH  * 0.9;
+    const CLUSTER_H = PocketMap.HEIGHT * 0.9;
+    const occupied = new Set<string>();
+
+    // Tile variants — every flavour, in small (2–6 tile) clusters so the
+    // tiny map stays navigable.
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        PocketMap.GLASS_CLUSTERS, 2, 6, occupied, 'glass'
+    ));
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        PocketMap.REINFORCED_CLUSTERS, 2, 5, occupied, 'reinforced'
+    ));
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        PocketMap.HEAVY_CLUSTERS, 2, 4, occupied, 'heavy'
+    ));
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        PocketMap.INDESTRUCTIBLE_CLUSTERS, 2, 3, occupied, 'indestructible'
+    ));
+
+    // Nebula clusters — same shared occupancy so tiles and nebulae
+    // never overlap.
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        PocketMap.NEBULA_CLUSTERS, 2, 5,
+        occupied,
+        this.nebulaClusterCenters,
+    ));
+
+    // Keep a small safe bubble around spawn so the player doesn't
+    // materialise inside a tile.
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > 120 * 120;
     });
   }
 }

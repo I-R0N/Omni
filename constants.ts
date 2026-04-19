@@ -231,19 +231,23 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.POCKET]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    // Deep Space population.  Entity count kept at 140 for now even
-    // though the map axis grew 3000 → 12000 (16× area), so density
-    // will feel sparse until counts are tuned up separately.
+    // Deep Space population.  Entity count kept at 140 for now; tune up
+    // separately if the 8 000 × 8 000 playfield feels sparse.
     count: 140,
     minSize: 20,
     maxSize: 160,
-    // Spawn radius scaled with the new 12k axis — HALF = 6000, keep a
-    // 1000u buffer inside the seam so asteroids don't wrap on frame 1.
-    radius: 5000,
+    // Spawn radius sized for the 8 000 axis — HALF = 4000, keep a
+    // ~1000u buffer inside the seam so asteroids don't wrap on frame 1.
+    radius: 3000,
     speedMultiplier: 1.5
   },
   [MapType.RING]: {
@@ -260,6 +264,16 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     minSize: 20,
     maxSize: 160,
     radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.POCKET]: {
+    // 1 000 × 1 000 sandbox — HALF = 500, so a 400u spawn radius leaves
+    // a 100u buffer inside the seam.  Asteroid count is kept small so
+    // the map doesn't saturate the tiny playfield.
+    count: 18,
+    minSize: 20,
+    maxSize: 80,
+    radius: 400,
     speedMultiplier: 1.5
   },
 };
