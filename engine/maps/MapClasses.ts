@@ -318,7 +318,7 @@ export class RingMap extends BaseMapLayer {
   // Radius of the tile ring in world units.  Sized so it's clearly
   // visible from spawn (well inside the 3000-unit half-map) and
   // leaves a large safe zone at the centre.
-  private static readonly RING_TILE_RADIUS = 700;
+  private static readonly RING_TILE_RADIUS = 350;
 
   constructor() {
     super('ring_01', 'Ring World', MapType.RING);
@@ -368,8 +368,8 @@ export class RingMap extends BaseMapLayer {
  */
 export class SevenRingsMap extends BaseMapLayer {
   private static readonly RING_COUNT = 7;
-  private static readonly INNER_RADIUS = 400;
-  private static readonly OUTER_RADIUS = 2200;
+  private static readonly INNER_RADIUS = 200;
+  private static readonly OUTER_RADIUS = 1100;
 
   constructor() {
     super('seven_rings_01', 'Seven Rings', MapType.SEVEN_RINGS);

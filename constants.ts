@@ -243,23 +243,24 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     count: 280,
     minSize: 20,
     maxSize: 160,
-    // Spawn radius also halved so asteroids stay inside the wrap box
-    // rather than being pushed across a seam immediately.
-    radius: 2500,
+    // Spawn radius scales with the toroidal half-map so asteroids never
+    // spawn outside the wrap box.  At MAP_WIDTH = 3000, HALF = 1500 —
+    // keep a ~250u margin inside the seam.
+    radius: 1250,
     speedMultiplier: 1.5
   },
   [MapType.RING]: {
     count: 280,
     minSize: 20,
     maxSize: 160,
-    radius: 2500,
+    radius: 1250,
     speedMultiplier: 1.5
   },
   [MapType.SEVEN_RINGS]: {
     count: 280,
     minSize: 20,
     maxSize: 160,
-    radius: 2500,
+    radius: 1250,
     speedMultiplier: 1.5
   },
 };
