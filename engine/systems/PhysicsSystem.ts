@@ -1013,7 +1013,14 @@ export class PhysicsSystem {
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
           if (projDmg > 0) {
-              target.health -= projDmg;
+              // Indestructible tiles eat the projectile without losing
+              // health — flash only, health stays pinned.  Everything
+              // else takes the full projectile damage.
+              const isIndestructibleTile = target.type === EntityType.STRUCTURE
+                  && target.structureVariant === 'indestructible';
+              if (!isIndestructibleTile) {
+                  target.health -= projDmg;
+              }
               target.hitFlash = 0.1;
           }
 
@@ -1165,21 +1172,40 @@ export class PhysicsSystem {
       // and then regenerates on the normal 12 s timer (via onDeath → the
       // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
       // The player loses half its velocity to the tile break.
+      //
+      // Tiered tiles (reinforced/heavy) with maxHealth > 1 consume one
+      // health tier per above-threshold crash rather than shattering in
+      // one hit — the tile only onDeath's when health hits 0.
+      //
+      // Indestructible tiles short-circuit every destruction path: the
+      // crash still flashes + sheds player velocity, but health stays
+      // pinned and no onDeath fires.
       if ((a.type === EntityType.PLAYER && b.type === EntityType.STRUCTURE) || (b.type === EntityType.PLAYER && a.type === EntityType.STRUCTURE)) {
           const player = a.type === EntityType.PLAYER ? a : b;
           const structure = a.type === EntityType.STRUCTURE ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
+          const isIndestructible = structure.structureVariant === 'indestructible';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              structure.health = 0;
-              structure.active = false;
-              if (structure.mass === Infinity) {
-                  this.removeStaticEntity(structure);
-              }
               player.velocity.x *= 0.5;
               player.velocity.y *= 0.5;
+              structure.hitFlash = 0.1;
+              if (isIndestructible) {
+                  // Permanent wall — signal the hit for SFX/shake but don't
+                  // touch health or queue destruction.
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  return;
+              }
+              structure.health -= 1;
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
-              if (onDeath) onDeath(structure);
+              if (structure.health <= 0) {
+                  structure.health = 0;
+                  structure.active = false;
+                  if (structure.mass === Infinity) {
+                      this.removeStaticEntity(structure);
+                  }
+                  if (onDeath) onDeath(structure);
+              }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
@@ -1214,18 +1240,29 @@ export class PhysicsSystem {
           const structure = a.type === EntityType.STRUCTURE ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
           const momentum = asteroid.mass * impactSpeed;
+          const isIndestructible = structure.structureVariant === 'indestructible';
 
           if (momentum > STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM) {
-              structure.health = 0;
-              structure.active = false;
-              if (structure.mass === Infinity) {
-                  this.removeStaticEntity(structure);
-              }
               // Rough momentum transfer to the tile fragments.
               asteroid.velocity.x *= 0.85;
               asteroid.velocity.y *= 0.85;
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
-              return;
+              structure.hitFlash = 0.1;
+              if (isIndestructible) {
+                  // Asteroid bounces off a permanent wall — no damage.
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  // Fall through to elastic bounce below.
+              } else {
+                  structure.health -= 1;
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (structure.health <= 0) {
+                      structure.health = 0;
+                      structure.active = false;
+                      if (structure.mass === Infinity) {
+                          this.removeStaticEntity(structure);
+                      }
+                  }
+                  return;
+              }
           }
 
           // Below the single-hit crash threshold: accumulate a pressure
@@ -1234,22 +1271,29 @@ export class PhysicsSystem {
           // single glancing collision counts as one pressure event
           // rather than two or three.  Once the accumulator reaches
           // ASTEROID_PRESSURE_HITS within the ASTEROID_PRESSURE_WINDOW,
-          // the tile breaks the same way a single above-threshold crash
-          // would — no shards, no regen, no flow-field patch.
-          if (asteroid.mass >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_MIN_MASS
+          // the tile takes a damage tier the same way a single above-
+          // threshold crash would (glass dies in one; tiered tiles step
+          // down one tier per trigger).  Indestructible tiles accumulate
+          // nothing — they're inert under pressure.
+          if (!isIndestructible
+              && asteroid.mass >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_MIN_MASS
               && !(structure.asteroidHitCooldown ?? 0)) {
               structure.asteroidHitCount = (structure.asteroidHitCount ?? 0) + 1;
               structure.asteroidHitTimer = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_WINDOW;
               structure.asteroidHitCooldown = STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_COOLDOWN;
               if (structure.asteroidHitCount >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_HITS) {
-                  structure.health = 0;
-                  structure.active = false;
-                  if (structure.mass === Infinity) {
-                      this.removeStaticEntity(structure);
-                  }
+                  structure.asteroidHitCount = 0;
+                  structure.health -= 1;
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (structure.health <= 0) {
+                      structure.health = 0;
+                      structure.active = false;
+                      if (structure.mass === Infinity) {
+                          this.removeStaticEntity(structure);
+                      }
+                  }
                   return;
               }
           }

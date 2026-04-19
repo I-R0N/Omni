@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, STRUCTURE_VARIANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -23,6 +23,31 @@ function shiftX(camX: number, wx: number): number {
     if (d < -HALF_MAP_WIDTH) return wx + MAP_WIDTH;
     return wx;
 }
+/**
+ * Pick the sprite URL for a STRUCTURE tile based on its current damage
+ * tier.  Tiles with `structureVariant` set pull their tier list from
+ * STRUCTURE_VARIANTS; legacy tiles (no variant) fall back to whatever
+ * `entity.sprite` was stamped at spawn.
+ *
+ *   hpFrac = health / maxHealth
+ *   tier   = floor((1 − hpFrac) × sprites.length), clamped to last index
+ *
+ * At full health tier = 0 (intact sprite).  As health drops the index
+ * walks toward the last ("critical") sprite.  For single-sprite variants
+ * (glass, indestructible) the list has length 1 so the same sprite wins
+ * at every health value.
+ */
+function pickStructureSprite(entity: GameEntity): string {
+    const variant = entity.structureVariant;
+    if (!variant) return entity.sprite ?? ASSETS.HEX_STRUCTURE;
+    const sprites = STRUCTURE_VARIANTS[variant].sprites;
+    const n = sprites.length;
+    const maxH = entity.maxHealth || 1;
+    const hp = Math.max(0, Math.min(maxH, entity.health));
+    const tier = Math.min(n - 1, Math.max(0, Math.floor((1 - hp / maxH) * n)));
+    return sprites[tier];
+}
+
 function shiftY(camY: number, wy: number): number {
     const d = wy - camY;
     if (d >  HALF_MAP_HEIGHT) return wy - MAP_HEIGHT;
@@ -835,11 +860,6 @@ export class RenderSystem {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
 
-    // Cache the structure sprite once.  Prior to this, getImage() was
-    // called once per visible tile (200-400×) to look up the same image.
-    const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
-    const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
-
     entries.forEach(({ entity, rx, ry }) => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -856,13 +876,24 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
+      //
+      // Sprite selection honours structureVariant damage tiers so a
+      // reinforced tile at 1/3 HP draws its "critical" sprite without
+      // leaving the fast path.  getImage() is Map-cached so the per-
+      // tile lookup costs only a Map.get.
+      if (entity.type === EntityType.STRUCTURE && entity.active
           && !entity.hitFlash && entity.regenPopTimer === undefined) {
-          const maxDim = Math.max(entity.size.x, entity.size.y);
-          const drawSize = maxDim * 1.02;
-          const dHalf = drawSize / 2;
-          ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
-          return;
+          const src = pickStructureSprite(entity);
+          const img = this.getImage(src);
+          if (img.complete && img.naturalWidth > 0) {
+              const maxDim = Math.max(entity.size.x, entity.size.y);
+              const drawSize = maxDim * 1.02;
+              const dHalf = drawSize / 2;
+              ctx.drawImage(img, rx - dHalf, ry - dHalf, drawSize, drawSize);
+              return;
+          }
+          // Image not ready — fall through to the polygon-fallback path
+          // which renders a hex outline while the sprite loads.
       }
 
       ctx.save();
@@ -1067,19 +1098,24 @@ export class RenderSystem {
       let drawn = false;
 
       // --- SPRITE RENDERING ---
-      if (entity.sprite) {
-          const img = this.getImage(entity.sprite);
-          
+      // STRUCTURE tiles swap between damage-tier sprites; everything
+      // else uses the entity's static sprite field.
+      const spriteSrc = entity.type === EntityType.STRUCTURE
+          ? pickStructureSprite(entity)
+          : entity.sprite;
+      if (spriteSrc) {
+          const img = this.getImage(spriteSrc);
+
           if (img.complete && img.naturalWidth > 0) {
               try {
                   const maxDim = Math.max(entity.size.x, entity.size.y);
-                  
+
                   let drawScale = 1.5;
                   if (entity.type === EntityType.STRUCTURE) {
-                      drawScale = 1.02; 
+                      drawScale = 1.02;
                   }
-                  
-                  const drawSize = maxDim * drawScale; 
+
+                  const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
@@ -1179,27 +1215,49 @@ export class RenderSystem {
                     // (close the else below by jumping past it)
                 } else {
 
-                // ── Glass tile ──────────────────────────────────────────────
+                // ── Glass / variant tile ────────────────────────────────────
+                // Uses the variant's base/border RGB as the fill + stroke
+                // seed, so reinforced/heavy/indestructible tiles read as
+                // distinct colours even while the sprite layer is still
+                // placeholder art.  The proximity-cyan brightening stays
+                // the same as classic glass.
                 const isFlash = entity.hitFlash && entity.hitFlash > 0;
+                const variantCfg = entity.structureVariant
+                    ? STRUCTURE_VARIANTS[entity.structureVariant]
+                    : undefined;
+                const [baseR, baseG, baseB] = variantCfg
+                    ? hexToRgb(variantCfg.color)
+                    : [186, 230, 253];
+                // Indestructible tiles skip the damage-tier fill fade (they
+                // never lose HP) and get a heavier edge stroke so they read
+                // as permanent walls rather than breakable tiles.
+                const isIndestructible = entity.structureVariant === 'indestructible';
+                // Damage tint — for tiered tiles, shift fill toward red as
+                // health drops so partially-broken tiles read as stressed.
+                let tintedR = baseR, tintedG = baseG, tintedB = baseB;
+                if (!isIndestructible && entity.maxHealth > 1) {
+                    const dmg = 1 - Math.max(0, entity.health) / entity.maxHealth;
+                    tintedR = Math.round(baseR + (255 - baseR) * dmg * 0.5);
+                    tintedG = Math.round(baseG * (1 - dmg * 0.35));
+                    tintedB = Math.round(baseB * (1 - dmg * 0.35));
+                }
 
-                // Proximity tint: edge shifts from cool blue-white → bright cyan.
-                // Toroidal delta so tiles across a seam reveal the same tint
-                // treatment as tiles on the same side of the map.
+                // Proximity tint: edge shifts from cool variant tone → bright cyan.
                 const PROX_RANGE = 120;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
                 const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
 
-                const edgeR = Math.round(186 - prox * 83);
-                const edgeG = Math.round(230 + prox * 2);
-                const edgeB = Math.round(253 - prox * 4);
+                const edgeR = Math.round(tintedR + prox * (103 - tintedR));
+                const edgeG = Math.round(tintedG + prox * (232 - tintedG));
+                const edgeB = Math.round(tintedB + prox * (249 - tintedB));
                 const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
-                // Layer 1 — translucent base fill
+                // Layer 1 — translucent base fill (variant tinted)
                 buildPath();
-                ctx.globalAlpha = isFlash ? 0.55 : 0.13;
-                ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
+                ctx.globalAlpha = isFlash ? 0.55 : (isIndestructible ? 0.22 : 0.13);
+                ctx.fillStyle = isFlash ? '#ffffff' : `rgba(${tintedR},${tintedG},${tintedB},1)`;
                 ctx.fill();
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
@@ -1212,7 +1270,7 @@ export class RenderSystem {
                 // Layer 3 — edge stroke (proximity-tinted)
                 ctx.globalAlpha = 1.0;
                 ctx.strokeStyle = edgeColor;
-                ctx.lineWidth = isFlash ? 2.5 : 1.5;
+                ctx.lineWidth = isFlash ? 2.5 : (isIndestructible ? 2.5 : 1.5);
                 ctx.stroke();
 
                 // Layer 4 — small specular dot (upper-left of hex)

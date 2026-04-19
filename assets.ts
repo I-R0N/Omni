@@ -19,6 +19,19 @@ export type AssetManifest = {
   PLANET_ICE: string;
   PORTAL: string;
   HEX_STRUCTURE: string;
+  // Reinforced tile (3 HP) damage-state sprites: 0 = intact, 1 = damaged,
+  // 2 = critical.  Displayed based on the tile's health / maxHealth ratio.
+  HEX_STRUCTURE_REINFORCED_0: string;
+  HEX_STRUCTURE_REINFORCED_1: string;
+  HEX_STRUCTURE_REINFORCED_2: string;
+  // Heavy tile (5 HP) damage-state sprites: tiers 0-4.
+  HEX_STRUCTURE_HEAVY_0: string;
+  HEX_STRUCTURE_HEAVY_1: string;
+  HEX_STRUCTURE_HEAVY_2: string;
+  HEX_STRUCTURE_HEAVY_3: string;
+  HEX_STRUCTURE_HEAVY_4: string;
+  // Indestructible tile — never breaks; single sprite only.
+  HEX_STRUCTURE_INDESTRUCTIBLE: string;
   NEBULA_PUFF: string;
 };
 
@@ -99,4 +112,13 @@ export const ASSETS: AssetManifest = {
   PLANET_ICE:     PLACEHOLDER,
   PORTAL:         PLACEHOLDER,
   HEX_STRUCTURE:  PLACEHOLDER,
+  HEX_STRUCTURE_REINFORCED_0:   PLACEHOLDER,
+  HEX_STRUCTURE_REINFORCED_1:   PLACEHOLDER,
+  HEX_STRUCTURE_REINFORCED_2:   PLACEHOLDER,
+  HEX_STRUCTURE_HEAVY_0:        PLACEHOLDER,
+  HEX_STRUCTURE_HEAVY_1:        PLACEHOLDER,
+  HEX_STRUCTURE_HEAVY_2:        PLACEHOLDER,
+  HEX_STRUCTURE_HEAVY_3:        PLACEHOLDER,
+  HEX_STRUCTURE_HEAVY_4:        PLACEHOLDER,
+  HEX_STRUCTURE_INDESTRUCTIBLE: PLACEHOLDER,
 };

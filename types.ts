@@ -235,6 +235,14 @@ export interface GameEntity {
   asteroidHitTimer?: number;
   asteroidHitCooldown?: number;
 
+  // ── Tile variant ─────────────────────────────────────────────────────────
+  // Set on STRUCTURE tiles. Identifies which STRUCTURE_VARIANTS entry drives
+  // health, sprite selection, and destructibility.  Unset = glass (legacy).
+  // 'indestructible' tiles ignore all damage paths and never queue for
+  // regen; tiered variants ('reinforced', 'heavy') pick a damage-state
+  // sprite from their variant's `sprites` list based on health/maxHealth.
+  structureVariant?: 'glass' | 'reinforced' | 'heavy' | 'indestructible';
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.

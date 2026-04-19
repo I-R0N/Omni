@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, STRUCTURE_CONSTANTS } from '../../constants';
+import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, StructureVariant } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -253,14 +253,35 @@ export class UniverseMap extends BaseMapLayer {
     const NEBULA_COUNT = 150;  // → ~6.5 % spacing combined (glass + nebula)
 
     // Glass landmark clusters — uniform distribution across the 95 %
-    // zone.
+    // zone.  Most clusters are stock glass (single-hit) to preserve the
+    // original destructible feel; a smaller share rolls as reinforced or
+    // heavy tiles, plus a few rare indestructible landmarks that never
+    // break or regenerate.  Cluster counts roughly split:
+    //   glass       ~60 %
+    //   reinforced  ~22 %
+    //   heavy       ~12 %
+    //   indestructible ~6 %
+    const GLASS_CLUSTERS          = Math.round(GLASS_COUNT * 0.60);
+    const REINFORCED_CLUSTERS     = Math.round(GLASS_COUNT * 0.22);
+    const HEAVY_CLUSTERS          = Math.round(GLASS_COUNT * 0.12);
+    const INDESTRUCTIBLE_CLUSTERS = GLASS_COUNT - GLASS_CLUSTERS - REINFORCED_CLUSTERS - HEAVY_CLUSTERS;
     this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H,
-        22,          // hexSize
-        GLASS_COUNT, // scales with map axis
-        10,          // minClusterSize
-        34,          // maxClusterSize
-        occupied
+        CLUSTER_W, CLUSTER_H, 22,
+        GLASS_CLUSTERS, 10, 34, occupied, 'glass'
+    ));
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, 22,
+        REINFORCED_CLUSTERS, 8, 22, occupied, 'reinforced'
+    ));
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, 22,
+        HEAVY_CLUSTERS, 6, 14, occupied, 'heavy'
+    ));
+    // Indestructible landmarks are small (3-8 tiles) so they read as
+    // permanent obstacles rather than large impassable walls.
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, 22,
+        INDESTRUCTIBLE_CLUSTERS, 3, 8, occupied, 'indestructible'
     ));
 
     // Nebula cloud clusters — same 95 %-zone uniform distribution.
@@ -371,11 +392,23 @@ export class SevenRingsMap extends BaseMapLayer {
 
     // Evenly-spaced radii from inner to outer.  Division by (COUNT - 1)
     // places the first and last rings exactly at the declared bounds.
+    // Each ring rolls a variant based on index so the player can visually
+    // read difficulty: inner = glass, mid = reinforced, outer reinforced
+    // is punctuated by heavy rings, and the outermost is indestructible.
+    const RING_VARIANTS: StructureVariant[] = [
+        'glass',        // ring 0 — soft inner
+        'glass',        // ring 1
+        'reinforced',   // ring 2
+        'reinforced',   // ring 3
+        'heavy',        // ring 4
+        'heavy',        // ring 5
+        'indestructible', // ring 6 — outer wall
+    ];
     const step = (SevenRingsMap.OUTER_RADIUS - SevenRingsMap.INNER_RADIUS) /
                  (SevenRingsMap.RING_COUNT - 1);
     for (let i = 0; i < SevenRingsMap.RING_COUNT; i++) {
       const r = SevenRingsMap.INNER_RADIUS + step * i;
-      emitGlassTileRing(this.entities, r, HEX_SIZE);
+      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass');
     }
 
     // Keep a spawn bubble clear — use a radius slightly smaller than the
@@ -402,31 +435,22 @@ function concentricRingFlow(wx: number, wy: number): FlowVector {
 }
 
 /**
- * Append a single-tile-thick ring of glass STRUCTUREs to `entities`.
+ * Append a single-tile-thick ring of STRUCTURE tiles to `entities`.
  * Iterates every odd-r grid cell within a bounding box of the target
  * radius and emits one where the cell centre is within `band` world
  * units of that radius.  Using the shared grid guarantees edges meet
- * exactly between adjacent ring tiles.
+ * exactly between adjacent ring tiles.  The optional `variant` argument
+ * controls which STRUCTURE_VARIANT the ring tiles spawn as (defaults to
+ * glass to preserve legacy ring behaviour).
  */
-function emitGlassTileRing(entities: GameEntity[], radius: number, band: number): void {
+function emitGlassTileRing(
+    entities: GameEntity[],
+    radius: number,
+    band: number,
+    variant: StructureVariant = 'glass'
+): void {
   const maxCol = Math.ceil((radius + HEX_SIZE) / HEX_WIDTH) + 1;
   const maxRow = Math.ceil((radius + HEX_SIZE) / HEX_V_SPACING) + 1;
-  for (let r = -maxRow; r <= maxRow; r++) {
-    for (let c = -maxCol; c <= maxCol; c++) {
-      const { x, y } = hexCoordToPixel(c, r);
-      const d = Math.sqrt(x * x + y * y);
-      if (Math.abs(d - radius) > band) continue;
-      entities.push(createGlassHexTile(c, r, x, y));
-    }
-  }
-}
-
-/**
- * Build a glass hex tile identical in shape/stats to the ones emitted
- * by TileGenerator.createHexEntity — inlined here so the ring passes
- * don't need to share TileGenerator's private occupancy plumbing.
- */
-function createGlassHexTile(c: number, r: number, cx: number, cy: number): GameEntity {
   const w = HEX_WIDTH;
   const h = 2 * HEX_SIZE;
   const pts: Vector2[] = [
@@ -437,19 +461,12 @@ function createGlassHexTile(c: number, r: number, cx: number, cy: number): GameE
     { x: -w/2, y: h/4 },
     { x: -w/2, y: -h/4 },
   ];
-  return {
-    id: nextId(`tile_${r}_${c}`),
-    type: EntityType.STRUCTURE,
-    position: { x: cx, y: cy },
-    velocity: { x: 0, y: 0 },
-    size: { x: w * 0.95, y: h * 0.95 },
-    rotation: 0,
-    color: Math.random() > 0.8 ? COLORS.STRUCTURE_BORDER : COLORS.STRUCTURE,
-    active: true,
-    health: STRUCTURE_CONSTANTS.HEALTH,
-    maxHealth: STRUCTURE_CONSTANTS.HEALTH,
-    mass: STRUCTURE_CONSTANTS.MASS,
-    polygonPoints: pts,
-    sprite: ASSETS.HEX_STRUCTURE,
-  };
+  for (let r = -maxRow; r <= maxRow; r++) {
+    for (let c = -maxCol; c <= maxCol; c++) {
+      const { x, y } = hexCoordToPixel(c, r);
+      const d = Math.sqrt(x * x + y * y);
+      if (Math.abs(d - radius) > band) continue;
+      entities.push(TileGenerator.buildStructureTile(c, r, x, y, w, h, pts, variant));
+    }
+  }
 }

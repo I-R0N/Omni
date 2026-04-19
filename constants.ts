@@ -18,6 +18,12 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400
+  STRUCTURE_REINFORCED: '#8b5cf6',        // Violet 500
+  STRUCTURE_REINFORCED_BORDER: '#a78bfa', // Violet 400
+  STRUCTURE_HEAVY: '#f59e0b',             // Amber 500
+  STRUCTURE_HEAVY_BORDER: '#fbbf24',      // Amber 400
+  STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
+  STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
 };
 
 // --- SYSTEM CONFIGURATIONS ---
@@ -282,6 +288,65 @@ export const STRUCTURE_CONSTANTS = {
   ASTEROID_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
+
+// ── Tile variants ───────────────────────────────────────────────────────────
+// Every STRUCTURE tile belongs to one variant. The variant drives how much
+// damage the tile can soak, which sprite shows at each damage tier, and
+// whether the tile can be destroyed at all. `sprites` is indexed by damage
+// tier: index 0 = intact, last index = on-the-brink. Selection happens at
+// render time from floor((1 - health/maxHealth) * sprites.length), clamped.
+//
+// Glass (default) is single-hit to match the original behaviour. Reinforced
+// and heavy add intermediate states. Indestructible tiles never take damage
+// and never regenerate — they're permanent walls.
+export const STRUCTURE_VARIANTS = {
+  glass: {
+    health: 1,
+    mass: Infinity,
+    indestructible: false,
+    sprites: [ASSETS.HEX_STRUCTURE],
+    color: COLORS.STRUCTURE,
+    borderColor: COLORS.STRUCTURE_BORDER,
+  },
+  reinforced: {
+    health: 3,
+    mass: Infinity,
+    indestructible: false,
+    sprites: [
+      ASSETS.HEX_STRUCTURE_REINFORCED_0,
+      ASSETS.HEX_STRUCTURE_REINFORCED_1,
+      ASSETS.HEX_STRUCTURE_REINFORCED_2,
+    ],
+    color: COLORS.STRUCTURE_REINFORCED,
+    borderColor: COLORS.STRUCTURE_REINFORCED_BORDER,
+  },
+  heavy: {
+    health: 5,
+    mass: Infinity,
+    indestructible: false,
+    sprites: [
+      ASSETS.HEX_STRUCTURE_HEAVY_0,
+      ASSETS.HEX_STRUCTURE_HEAVY_1,
+      ASSETS.HEX_STRUCTURE_HEAVY_2,
+      ASSETS.HEX_STRUCTURE_HEAVY_3,
+      ASSETS.HEX_STRUCTURE_HEAVY_4,
+    ],
+    color: COLORS.STRUCTURE_HEAVY,
+    borderColor: COLORS.STRUCTURE_HEAVY_BORDER,
+  },
+  indestructible: {
+    // Sentinel health — tile is never destroyed, but keep a finite positive
+    // value so any stray damage arithmetic doesn't flip it negative.
+    health: 9999,
+    mass: Infinity,
+    indestructible: true,
+    sprites: [ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE],
+    color: COLORS.STRUCTURE_INDESTRUCTIBLE,
+    borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
+  },
+} as const;
+
+export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are

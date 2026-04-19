@@ -1,6 +1,6 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { COLORS, STRUCTURE_CONSTANTS, ASSETS, NEBULA_CONSTANTS } from '../../constants';
+import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS } from '../../constants';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
 import { nextId } from '../systems/IdAllocator';
@@ -54,7 +54,8 @@ export class TileGenerator {
     clusterCount: number,
     minClusterSize: number,
     maxClusterSize: number,
-    occupiedCoords?: Set<string>
+    occupiedCoords?: Set<string>,
+    variant: StructureVariant = 'glass'
   ): GameEntity[] {
     const entities: GameEntity[] = [];
     const usedCoords = occupiedCoords ?? new Set<string>();
@@ -88,7 +89,7 @@ export class TileGenerator {
         usedCoords.add(key);
         createdInCluster++;
 
-        this.createHexEntity(entities, current.c, current.r, hexSize, w, h);
+        this.createHexEntity(entities, current.c, current.r, hexSize, w, h, variant);
 
         const neighbors = this.getNeighbors(current.c, current.r);
         for (const n of neighbors) {
@@ -198,7 +199,8 @@ export class TileGenerator {
       r: number,
       size: number,
       w: number,
-      h: number
+      h: number,
+      variant: StructureVariant = 'glass'
     ) {
     // Odd-r offset coordinate to pixel conversion
     // x = size * sqrt(3) * (col + 0.5 * (row & 1))
@@ -217,21 +219,43 @@ export class TileGenerator {
         { x: -w/2, y: -h/4 }
     ];
 
-    entities.push({
+    entities.push(TileGenerator.buildStructureTile(c, r, cx, cy, w, h, pts, variant));
+  }
+
+  /**
+   * Build a STRUCTURE tile populated per variant config — shared by the
+   * cluster generator and by MapClasses' ring emitter so both paths agree
+   * on the health/sprite/colour wiring per variant.
+   */
+  public static buildStructureTile(
+      c: number,
+      r: number,
+      cx: number,
+      cy: number,
+      w: number,
+      h: number,
+      pts: Vector2[],
+      variant: StructureVariant
+  ): GameEntity {
+    const cfg = STRUCTURE_VARIANTS[variant];
+    return {
         id: nextId(`tile_${r}_${c}`),
         type: EntityType.STRUCTURE,
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 }, // Slight gap
         rotation: 0,
-        color: Math.random() > 0.8 ? COLORS.STRUCTURE_BORDER : COLORS.STRUCTURE,
+        color: Math.random() > 0.8 ? cfg.borderColor : cfg.color,
         active: true,
-        health: STRUCTURE_CONSTANTS.HEALTH,
-        maxHealth: STRUCTURE_CONSTANTS.HEALTH,
-        mass: STRUCTURE_CONSTANTS.MASS,
+        health: cfg.health,
+        maxHealth: cfg.health,
+        mass: cfg.mass,
         polygonPoints: pts,
-        sprite: ASSETS.HEX_STRUCTURE
-    });
+        // Intact sprite (tier 0); RenderSystem picks a lower-tier sprite
+        // per frame once the tile takes damage.
+        sprite: cfg.sprites[0],
+        structureVariant: variant,
+    };
   }
 
   private static createNebulaEntity(

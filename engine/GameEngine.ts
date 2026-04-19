@@ -716,6 +716,16 @@ export class GameEngine {
       }
 
       if (entity.type === EntityType.STRUCTURE) {
+          // Indestructible tiles should never reach onDeath in the first
+          // place (all damage paths short-circuit before zeroing health),
+          // but guard defensively: if somehow invoked we just restore
+          // health rather than patching the flow field and queuing a
+          // pointless regen.
+          if (entity.structureVariant === 'indestructible') {
+              entity.health = entity.maxHealth;
+              entity.active = true;
+              return;
+          }
           this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
           // Queue for regeneration; entity stays in the map entities list as
           // an inactive ghost so we can render an outline during regen.
