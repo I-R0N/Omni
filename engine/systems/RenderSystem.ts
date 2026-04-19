@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, STRUCTURE_VARIANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -23,20 +23,6 @@ function shiftX(camX: number, wx: number): number {
     if (d < -HALF_MAP_WIDTH) return wx + MAP_WIDTH;
     return wx;
 }
-/**
- * Per-variant precomputed render data so the polygon fallback can branch
- * on a single property lookup instead of parsing colour strings and
- * allocating tuples per tile per frame.  Built once at module load
- * (after hexToRgb and _rgbCache so the TDZ doesn't bite us).
- */
-type VariantRender = {
-    baseR: number;
-    baseG: number;
-    baseB: number;
-    intactFill: string;       // 'rgba(R,G,B,1)' — reused when health === maxHealth
-    isIndestructible: boolean;
-};
-
 function shiftY(camY: number, wy: number): number {
     const d = wy - camY;
     if (d >  HALF_MAP_HEIGHT) return wy - MAP_HEIGHT;
@@ -64,22 +50,6 @@ function hexToRgb(hex: string): [number, number, number] {
     }
     return cached;
 }
-
-const VARIANT_RENDER_CACHE: Record<string, VariantRender> = (() => {
-    const out: Record<string, VariantRender> = {};
-    for (const key of Object.keys(STRUCTURE_VARIANTS) as Array<keyof typeof STRUCTURE_VARIANTS>) {
-        const cfg = STRUCTURE_VARIANTS[key];
-        const [r, g, b] = hexToRgb(cfg.color);
-        out[key] = {
-            baseR: r,
-            baseG: g,
-            baseB: b,
-            intactFill: `rgba(${r},${g},${b},1)`,
-            isIndestructible: cfg.indestructible,
-        };
-    }
-    return out;
-})();
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
@@ -865,11 +835,8 @@ export class RenderSystem {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
 
-    // Cache the default structure sprite once per frame.  Tiles with a
-    // variant carry their current-tier sprite on `entity.sprite` (mutated
-    // in PhysicsSystem when health changes), so per-frame tier math is
-    // avoided in the hot loop.  Legacy tiles without a variant fall back
-    // to the shared HEX_STRUCTURE image.
+    // Cache the structure sprite once.  Prior to this, getImage() was
+    // called once per visible tile (200-400×) to look up the same image.
     const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
     const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
 
@@ -889,28 +856,13 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      //
-      // entity.sprite already reflects the current damage tier (updated
-      // by PhysicsSystem when health changes), so we just look up the
-      // cached image by URL — or reuse the hexSprite fast read when the
-      // tile uses the default sprite.
-      if (entity.type === EntityType.STRUCTURE && entity.active
+      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined) {
-          let img = hexSprite;
-          let ready = hexReady;
-          if (entity.sprite && entity.sprite !== ASSETS.HEX_STRUCTURE) {
-              img = this.getImage(entity.sprite);
-              ready = img.complete && img.naturalWidth > 0;
-          }
-          if (ready) {
-              const maxDim = Math.max(entity.size.x, entity.size.y);
-              const drawSize = maxDim * 1.02;
-              const dHalf = drawSize / 2;
-              ctx.drawImage(img, rx - dHalf, ry - dHalf, drawSize, drawSize);
-              return;
-          }
-          // Image not ready — fall through to the polygon-fallback path
-          // which renders a hex outline while the sprite loads.
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const drawSize = maxDim * 1.02;
+          const dHalf = drawSize / 2;
+          ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
+          return;
       }
 
       ctx.save();
@@ -1115,9 +1067,6 @@ export class RenderSystem {
       let drawn = false;
 
       // --- SPRITE RENDERING ---
-      // entity.sprite already reflects the current damage tier for
-      // STRUCTURE tiles (mutated in PhysicsSystem when health changes),
-      // so no per-frame tier computation is needed here.
       if (entity.sprite) {
           const img = this.getImage(entity.sprite);
 
@@ -1230,65 +1179,27 @@ export class RenderSystem {
                     // (close the else below by jumping past it)
                 } else {
 
-                // ── Glass / variant tile ────────────────────────────────────
+                // ── Glass tile ──────────────────────────────────────────────
                 const isFlash = entity.hitFlash && entity.hitFlash > 0;
-                const variant = entity.structureVariant;
-                const isGlassPath = !variant || variant === 'glass';
 
                 // Proximity tint: edge shifts from cool blue-white → bright cyan.
+                // Toroidal delta so tiles across a seam reveal the same tint
+                // treatment as tiles on the same side of the map.
                 const PROX_RANGE = 120;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
                 const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
 
-                let edgeR: number, edgeG: number, edgeB: number;
-                let baseFillStyle: string;
-                let fillAlpha: number;
-                let strokeWidthBase: number;
-
-                if (isGlassPath) {
-                    // Original glass path — constant fill string, no allocation.
-                    edgeR = Math.round(186 - prox * 83);
-                    edgeG = Math.round(230 + prox * 2);
-                    edgeB = Math.round(253 - prox * 4);
-                    baseFillStyle = 'rgba(186,230,253,1)';
-                    fillAlpha = 0.13;
-                    strokeWidthBase = 1.5;
-                } else {
-                    const vr = VARIANT_RENDER_CACHE[variant];
-                    const dmg = vr.isIndestructible || entity.maxHealth <= 1
-                        ? 0
-                        : 1 - Math.max(0, entity.health) / entity.maxHealth;
-                    if (dmg === 0) {
-                        // Undamaged variant tile — reuse precomputed fill string
-                        // so we don't pay template-literal allocation per tile.
-                        edgeR = Math.round(vr.baseR + prox * (103 - vr.baseR));
-                        edgeG = Math.round(vr.baseG + prox * (232 - vr.baseG));
-                        edgeB = Math.round(vr.baseB + prox * (249 - vr.baseB));
-                        baseFillStyle = vr.intactFill;
-                    } else {
-                        // Damage-tinted — shift fill toward bright red-orange
-                        // as health drops.  Still only happens for non-glass
-                        // tiles that have actually taken damage.
-                        const tr = Math.round(vr.baseR + (255 - vr.baseR) * dmg * 0.5);
-                        const tg = Math.round(vr.baseG * (1 - dmg * 0.35));
-                        const tb = Math.round(vr.baseB * (1 - dmg * 0.35));
-                        edgeR = Math.round(tr + prox * (103 - tr));
-                        edgeG = Math.round(tg + prox * (232 - tg));
-                        edgeB = Math.round(tb + prox * (249 - tb));
-                        baseFillStyle = `rgba(${tr},${tg},${tb},1)`;
-                    }
-                    fillAlpha = vr.isIndestructible ? 0.22 : 0.13;
-                    strokeWidthBase = vr.isIndestructible ? 2.5 : 1.5;
-                }
-
+                const edgeR = Math.round(186 - prox * 83);
+                const edgeG = Math.round(230 + prox * 2);
+                const edgeB = Math.round(253 - prox * 4);
                 const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
                 // Layer 1 — translucent base fill
                 buildPath();
-                ctx.globalAlpha = isFlash ? 0.55 : fillAlpha;
-                ctx.fillStyle = isFlash ? '#ffffff' : baseFillStyle;
+                ctx.globalAlpha = isFlash ? 0.55 : 0.13;
+                ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
                 ctx.fill();
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
@@ -1301,7 +1212,7 @@ export class RenderSystem {
                 // Layer 3 — edge stroke (proximity-tinted)
                 ctx.globalAlpha = 1.0;
                 ctx.strokeStyle = edgeColor;
-                ctx.lineWidth = isFlash ? 2.5 : strokeWidthBase;
+                ctx.lineWidth = isFlash ? 2.5 : 1.5;
                 ctx.stroke();
 
                 // Layer 4 — small specular dot (upper-left of hex)
@@ -1310,6 +1221,12 @@ export class RenderSystem {
                     ctx.globalAlpha = 0.28 + prox * 0.18;
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
+
+                // Damage cracks for multi-HP variants (reinforced / heavy).
+                // renderCracks early-returns at ≥95 % health, so undamaged
+                // tiles pay only one property read — same pattern asteroids
+                // use for their damage visualisation.
+                this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 

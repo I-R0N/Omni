@@ -251,9 +251,7 @@ export class TileGenerator {
         maxHealth: cfg.health,
         mass: cfg.mass,
         polygonPoints: pts,
-        // Intact sprite (tier 0); RenderSystem picks a lower-tier sprite
-        // per frame once the tile takes damage.
-        sprite: cfg.sprites[0],
+        sprite: cfg.sprite,
         structureVariant: variant,
     };
   }

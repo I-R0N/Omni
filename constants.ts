@@ -291,20 +291,20 @@ export const STRUCTURE_CONSTANTS = {
 
 // ── Tile variants ───────────────────────────────────────────────────────────
 // Every STRUCTURE tile belongs to one variant. The variant drives how much
-// damage the tile can soak, which sprite shows at each damage tier, and
-// whether the tile can be destroyed at all. `sprites` is indexed by damage
-// tier: index 0 = intact, last index = on-the-brink. Selection happens at
-// render time from floor((1 - health/maxHealth) * sprites.length), clamped.
+// damage the tile can soak, its sprite, and whether it can be destroyed at
+// all.  Damage-state visualisation is procedural (see renderCracks in
+// RenderSystem) — same approach asteroids use — so variants only need one
+// sprite each, not a per-tier atlas.
 //
-// Glass (default) is single-hit to match the original behaviour. Reinforced
-// and heavy add intermediate states. Indestructible tiles never take damage
-// and never regenerate — they're permanent walls.
+// Glass (default) is single-hit to match the original behaviour.
+// Reinforced and heavy add intermediate HP.  Indestructible tiles never
+// take damage and never regenerate — they're permanent walls.
 export const STRUCTURE_VARIANTS = {
   glass: {
     health: 1,
     mass: Infinity,
     indestructible: false,
-    sprites: [ASSETS.HEX_STRUCTURE],
+    sprite: ASSETS.HEX_STRUCTURE,
     color: COLORS.STRUCTURE,
     borderColor: COLORS.STRUCTURE_BORDER,
   },
@@ -312,11 +312,7 @@ export const STRUCTURE_VARIANTS = {
     health: 3,
     mass: Infinity,
     indestructible: false,
-    sprites: [
-      ASSETS.HEX_STRUCTURE_REINFORCED_0,
-      ASSETS.HEX_STRUCTURE_REINFORCED_1,
-      ASSETS.HEX_STRUCTURE_REINFORCED_2,
-    ],
+    sprite: ASSETS.HEX_STRUCTURE_REINFORCED,
     color: COLORS.STRUCTURE_REINFORCED,
     borderColor: COLORS.STRUCTURE_REINFORCED_BORDER,
   },
@@ -324,13 +320,7 @@ export const STRUCTURE_VARIANTS = {
     health: 5,
     mass: Infinity,
     indestructible: false,
-    sprites: [
-      ASSETS.HEX_STRUCTURE_HEAVY_0,
-      ASSETS.HEX_STRUCTURE_HEAVY_1,
-      ASSETS.HEX_STRUCTURE_HEAVY_2,
-      ASSETS.HEX_STRUCTURE_HEAVY_3,
-      ASSETS.HEX_STRUCTURE_HEAVY_4,
-    ],
+    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
     color: COLORS.STRUCTURE_HEAVY,
     borderColor: COLORS.STRUCTURE_HEAVY_BORDER,
   },
@@ -340,36 +330,13 @@ export const STRUCTURE_VARIANTS = {
     health: 9999,
     mass: Infinity,
     indestructible: true,
-    sprites: [ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE],
+    sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
     borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
   },
 } as const;
 
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
-
-/**
- * Pick a STRUCTURE tile's sprite URL from its variant's tier list based on
- * current health.  Called only when health changes (damage / regen) so the
- * render loop can read `entity.sprite` directly without per-frame tier math.
- *
- *   tier = floor((1 − health/maxHealth) × sprites.length)  (clamped)
- *
- * tier 0 is the intact sprite; the last tier is on-the-brink.  Single-sprite
- * variants (glass, indestructible) always return their lone sprite.
- */
-export function structureSpriteForHealth(
-    variant: StructureVariant,
-    health: number,
-    maxHealth: number,
-): string {
-    const sprites = STRUCTURE_VARIANTS[variant].sprites;
-    const n = sprites.length;
-    const maxH = maxHealth || 1;
-    const hp = Math.max(0, Math.min(maxH, health));
-    const tier = Math.min(n - 1, Math.max(0, Math.floor((1 - hp / maxH) * n)));
-    return sprites[tier];
-}
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are

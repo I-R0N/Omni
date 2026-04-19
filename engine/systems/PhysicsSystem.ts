@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, structureSpriteForHealth } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -17,20 +17,6 @@ function wrapCellX(cx: number): number {
 }
 function wrapCellY(cy: number): number {
     return ((cy % SPATIAL_ROWS) + SPATIAL_ROWS) % SPATIAL_ROWS;
-}
-
-/**
- * Refresh `entity.sprite` to match the current health tier of a tile.
- * Called from every STRUCTURE damage path so the renderer can read
- * entity.sprite directly without recomputing the tier each frame.
- * No-op for tiles without a variant (legacy glass) and for variants
- * with a single sprite (glass, indestructible) — `entity.sprite` is
- * already correct and the lookup would just rewrite the same string.
- */
-function refreshTileSprite(entity: GameEntity): void {
-    const variant = entity.structureVariant;
-    if (!variant) return;
-    entity.sprite = structureSpriteForHealth(variant, entity.health, entity.maxHealth);
 }
 function cellKey(x: number, y: number): number {
     const cx = wrapCellX(Math.floor(x / SPATIAL_GRID_SIZE));
@@ -1034,9 +1020,6 @@ export class PhysicsSystem {
                   && target.structureVariant === 'indestructible';
               if (!isIndestructibleTile) {
                   target.health -= projDmg;
-                  if (target.type === EntityType.STRUCTURE) {
-                      refreshTileSprite(target);
-                  }
               }
               target.hitFlash = 0.1;
           }
@@ -1214,7 +1197,6 @@ export class PhysicsSystem {
                   return;
               }
               structure.health -= 1;
-              refreshTileSprite(structure);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               if (structure.health <= 0) {
                   structure.health = 0;
@@ -1271,7 +1253,6 @@ export class PhysicsSystem {
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
-                  refreshTileSprite(structure);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
                   if (structure.health <= 0) {
                       structure.health = 0;
@@ -1303,7 +1284,6 @@ export class PhysicsSystem {
               if (structure.asteroidHitCount >= STRUCTURE_CONSTANTS.ASTEROID_PRESSURE_HITS) {
                   structure.asteroidHitCount = 0;
                   structure.health -= 1;
-                  refreshTileSprite(structure);
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
