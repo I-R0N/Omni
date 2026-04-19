@@ -348,6 +348,29 @@ export const STRUCTURE_VARIANTS = {
 
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 
+/**
+ * Pick a STRUCTURE tile's sprite URL from its variant's tier list based on
+ * current health.  Called only when health changes (damage / regen) so the
+ * render loop can read `entity.sprite` directly without per-frame tier math.
+ *
+ *   tier = floor((1 − health/maxHealth) × sprites.length)  (clamped)
+ *
+ * tier 0 is the intact sprite; the last tier is on-the-brink.  Single-sprite
+ * variants (glass, indestructible) always return their lone sprite.
+ */
+export function structureSpriteForHealth(
+    variant: StructureVariant,
+    health: number,
+    maxHealth: number,
+): string {
+    const sprites = STRUCTURE_VARIANTS[variant].sprites;
+    const n = sprites.length;
+    const maxH = maxHealth || 1;
+    const hp = Math.max(0, Math.min(maxH, health));
+    const tier = Math.min(n - 1, Math.max(0, Math.floor((1 - hp / maxH) * n)));
+    return sprites[tier];
+}
+
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
 // pass-through debris: players and enemies drift through them, shattering
