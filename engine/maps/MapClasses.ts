@@ -249,8 +249,8 @@ export class UniverseMap extends BaseMapLayer {
     const OUTER_ZONE_FRAC = 1 - SAFE_ZONE_FRAC;
     const CLUSTER_W = MAP_WIDTH  * OUTER_ZONE_FRAC;
     const CLUSTER_H = MAP_HEIGHT * OUTER_ZONE_FRAC;
-    const GLASS_COUNT  = 84;   // → ~10.9 % spacing from glass alone
-    const NEBULA_COUNT = 150;  // → ~6.5 % spacing combined (glass + nebula)
+    const GLASS_COUNT  = 42;   // Halved on 2026-04-19 (see commit note)
+    const NEBULA_COUNT = 75;   // Halved on 2026-04-19 (see commit note)
 
     // Glass landmark clusters — uniform distribution across the 95 %
     // zone.  Most clusters are stock glass (single-hit) to preserve the

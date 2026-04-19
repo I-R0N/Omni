@@ -235,12 +235,11 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    // Doubled on 2026-04-18 to 280 — denser belt now that pressure
-    // breaking and the 50 % on-path spawn distribution keep collision
-    // costs bounded even at higher population.  Same density as the
-    // original 15k map but on the current 6k map, so cluster
-    // encounters and traffic dynamics are visibly busier.
-    count: 280,
+    // Halved on 2026-04-19 (280 → 140) alongside the 50 % map-axis
+    // reduction so Deep Space entity density stays roughly comparable
+    // to the original 6k map.  Tweak further if the playfield still
+    // feels busy.
+    count: 140,
     minSize: 20,
     maxSize: 160,
     // Spawn radius scales with the toroidal half-map so asteroids never
