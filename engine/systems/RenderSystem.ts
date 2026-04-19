@@ -26,7 +26,8 @@ function shiftX(camX: number, wx: number): number {
 /**
  * Per-variant precomputed render data so the polygon fallback can branch
  * on a single property lookup instead of parsing colour strings and
- * allocating tuples per tile per frame.  Built once at module load.
+ * allocating tuples per tile per frame.  Built once at module load
+ * (after hexToRgb and _rgbCache so the TDZ doesn't bite us).
  */
 type VariantRender = {
     baseR: number;
@@ -35,21 +36,6 @@ type VariantRender = {
     intactFill: string;       // 'rgba(R,G,B,1)' — reused when health === maxHealth
     isIndestructible: boolean;
 };
-const VARIANT_RENDER_CACHE: Record<string, VariantRender> = (() => {
-    const out: Record<string, VariantRender> = {};
-    for (const key of Object.keys(STRUCTURE_VARIANTS) as Array<keyof typeof STRUCTURE_VARIANTS>) {
-        const cfg = STRUCTURE_VARIANTS[key];
-        const [r, g, b] = hexToRgb(cfg.color);
-        out[key] = {
-            baseR: r,
-            baseG: g,
-            baseB: b,
-            intactFill: `rgba(${r},${g},${b},1)`,
-            isIndestructible: cfg.indestructible,
-        };
-    }
-    return out;
-})();
 
 function shiftY(camY: number, wy: number): number {
     const d = wy - camY;
@@ -78,6 +64,22 @@ function hexToRgb(hex: string): [number, number, number] {
     }
     return cached;
 }
+
+const VARIANT_RENDER_CACHE: Record<string, VariantRender> = (() => {
+    const out: Record<string, VariantRender> = {};
+    for (const key of Object.keys(STRUCTURE_VARIANTS) as Array<keyof typeof STRUCTURE_VARIANTS>) {
+        const cfg = STRUCTURE_VARIANTS[key];
+        const [r, g, b] = hexToRgb(cfg.color);
+        out[key] = {
+            baseR: r,
+            baseG: g,
+            baseB: b,
+            intactFill: `rgba(${r},${g},${b},1)`,
+            isIndestructible: cfg.indestructible,
+        };
+    }
+    return out;
+})();
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
