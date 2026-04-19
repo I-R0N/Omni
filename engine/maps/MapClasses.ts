@@ -444,14 +444,15 @@ export class PocketMap extends BaseMapLayer {
   public static readonly WIDTH  = 2000;
   public static readonly HEIGHT = 2000;
 
-  // Cluster counts — kept very small so the 1 000-unit axis doesn't
-  // saturate.  Split across tile variants matches Deep Space's 60/22/
-  // 12/6 % ratio rounded to whole clusters.
-  private static readonly GLASS_CLUSTERS          = 3;
-  private static readonly REINFORCED_CLUSTERS     = 2;
-  private static readonly HEAVY_CLUSTERS          = 1;
-  private static readonly INDESTRUCTIBLE_CLUSTERS = 1;
-  private static readonly NEBULA_CLUSTERS         = 4;
+  // Cluster counts — the sandbox is a showcase so population leans
+  // heavy on tiles / nebulae and light on asteroids.  Background nebula
+  // puffs match `NEBULA_CLUSTERS` 1:1 via nebulaClusterCenters, so
+  // bumping this also densifies the backdrop.
+  private static readonly GLASS_CLUSTERS          = 8;
+  private static readonly REINFORCED_CLUSTERS     = 5;
+  private static readonly HEAVY_CLUSTERS          = 3;
+  private static readonly INDESTRUCTIBLE_CLUSTERS = 2;
+  private static readonly NEBULA_CLUSTERS         = 12;
 
   constructor() {
     super('pocket_01', 'Pocket', MapType.POCKET);

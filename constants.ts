@@ -269,8 +269,8 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
   [MapType.POCKET]: {
     // 2 000 × 2 000 sandbox — HALF = 1000, so an 800u spawn radius
     // leaves a 200u buffer inside the seam.  Asteroid count is kept
-    // low so the sandbox reads as a showcase rather than a brawl.
-    count: 6,
+    // deliberately low so tiles and nebulae dominate the showcase.
+    count: 2,
     minSize: 20,
     maxSize: 80,
     radius: 800,
