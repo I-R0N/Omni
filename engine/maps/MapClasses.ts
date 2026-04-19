@@ -194,11 +194,11 @@ export abstract class BaseMapLayer {
  * Tile clusters act as visual landmarks. The player never leaves this map.
  */
 export class UniverseMap extends BaseMapLayer {
-  // Deep Space is the smallest of the three maps — half the axis size of
-  // Ring / Seven Rings so cluster traffic is dense and travel times are
-  // short.  Other maps override this with their own constants.
-  public static readonly WIDTH  = 3000;
-  public static readonly HEIGHT = 3000;
+  // Deep Space is the largest of the three maps — 12 000 world units per
+  // axis gives room for many landmark clusters before the player meets
+  // the wrap seam.  Other maps override this with their own constants.
+  public static readonly WIDTH  = 12000;
+  public static readonly HEIGHT = 12000;
 
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);

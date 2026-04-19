@@ -235,17 +235,15 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    // Halved on 2026-04-19 (280 → 140) alongside the 50 % map-axis
-    // reduction so Deep Space entity density stays roughly comparable
-    // to the original 6k map.  Tweak further if the playfield still
-    // feels busy.
+    // Deep Space population.  Entity count kept at 140 for now even
+    // though the map axis grew 3000 → 12000 (16× area), so density
+    // will feel sparse until counts are tuned up separately.
     count: 140,
     minSize: 20,
     maxSize: 160,
-    // Spawn radius scales with the toroidal half-map so asteroids never
-    // spawn outside the wrap box.  At MAP_WIDTH = 3000, HALF = 1500 —
-    // keep a ~250u margin inside the seam.
-    radius: 1250,
+    // Spawn radius scaled with the new 12k axis — HALF = 6000, keep a
+    // 1000u buffer inside the seam so asteroids don't wrap on frame 1.
+    radius: 5000,
     speedMultiplier: 1.5
   },
   [MapType.RING]: {
