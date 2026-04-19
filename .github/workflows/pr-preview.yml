@@ -21,32 +21,49 @@ jobs:
       PREVIEW_URL: https://raw.githack.com/i-r0n/omni-standalone/main/previews/pr-${{ github.event.pull_request.number }}/index.html
 
     steps:
-      - name: Checkout PR head
+      - name: Check if event SHA is still the PR head
+        id: guard
         if: github.event.action != 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          CURRENT_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          if [ "$EVENT_SHA" != "$CURRENT_SHA" ]; then
+            echo "::notice::Event commit ${EVENT_SHA} is stale (current PR head is ${CURRENT_SHA}). Skipping preview build to avoid overwriting with older content."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout PR head
+        if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Node
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         run: npm ci
 
       - name: Build
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         run: npm run build
 
       - name: Inline into single HTML
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         run: node scripts/inline-build.mjs
 
       - name: Publish or remove preview
+        if: github.event.action == 'closed' || steps.guard.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ secrets.OMNI_STANDALONE_TOKEN }}
           ACTION: ${{ github.event.action }}
@@ -88,6 +105,7 @@ jobs:
           fi
 
       - name: Upsert preview comment on PR
+        if: github.event.action == 'closed' || steps.guard.outputs.stale != 'true'
         uses: actions/github-script@v7
         env:
           PREVIEW_URL: ${{ env.PREVIEW_URL }}
