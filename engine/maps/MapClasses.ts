@@ -476,30 +476,30 @@ export class PocketMap extends BaseMapLayer {
     const CLUSTER_H = PocketMap.HEIGHT * 0.9;
     const occupied = new Set<string>();
 
-    // Tile variants — every flavour, in small (2–6 tile) clusters so the
-    // tiny map stays navigable.
+    // Tile variants — every flavour, in mid-sized clusters so each
+    // variant reads as a distinct landmark rather than a stray hex.
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.GLASS_CLUSTERS, 2, 6, occupied, 'glass'
+        PocketMap.GLASS_CLUSTERS, 6, 14, occupied, 'glass'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.REINFORCED_CLUSTERS, 2, 5, occupied, 'reinforced'
+        PocketMap.REINFORCED_CLUSTERS, 5, 10, occupied, 'reinforced'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.HEAVY_CLUSTERS, 2, 4, occupied, 'heavy'
+        PocketMap.HEAVY_CLUSTERS, 4, 8, occupied, 'heavy'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.INDESTRUCTIBLE_CLUSTERS, 2, 3, occupied, 'indestructible'
+        PocketMap.INDESTRUCTIBLE_CLUSTERS, 3, 5, occupied, 'indestructible'
     ));
 
     // Nebula clusters — same shared occupancy so tiles and nebulae
     // never overlap.
     this.entities.push(...TileGenerator.generateNebulaClusters(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.NEBULA_CLUSTERS, 2, 5,
+        PocketMap.NEBULA_CLUSTERS, 6, 12,
         occupied,
         this.nebulaClusterCenters,
     ));
