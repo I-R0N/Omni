@@ -567,7 +567,12 @@ export class GameEngine {
       // active asteroids, so we still need a master-list scan to catch
       // asteroids that were just deactivated this step (they're no longer
       // in the index) and to preserve the original total-count semantics.
-      const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+      //
+      // Pulls count/minSize/maxSize from the CURRENT map's config so the
+      // respawn loop honours per-map population targets — previously
+      // this was hardcoded to MapType.UNIVERSE which filled small maps
+      // (e.g. Pocket, count = 2) with Deep Space's 140 asteroids.
+      const config = ASTEROID_GENERATION_CONFIG[this.currentMap.type];
       const newlyDestroyed: GameEntity[] = [];
       let currentAsteroidCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
@@ -577,7 +582,7 @@ export class GameEngine {
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
-          if (ast.size.x > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize) this.createAsteroidShards(ast);
+          if (ast.size.x > config.minSize) this.createAsteroidShards(ast);
       }
       if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
@@ -1697,7 +1702,7 @@ export class GameEngine {
           // skip the merge: the bond is discarded by the caller
           // (handleEntitySticking dropping it from the write list) and
           // the pair stays as two separate rocks.
-          if (newDiam > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].maxSize) return;
+          if (newDiam > ASTEROID_GENERATION_CONFIG[this.currentMap?.type ?? MapType.UNIVERSE].maxSize) return;
 
           // Larger entity by area dominates shardType; blend glow colors
           const dominant: ShardType = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
@@ -1852,8 +1857,8 @@ export class GameEngine {
   }
 
   private createAsteroidShards(parent: GameEntity) {
-      // Minimum shard size = smallest spawnable asteroid.
-      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
+      // Minimum shard size = smallest spawnable asteroid for the current map.
+      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[this.currentMap?.type ?? MapType.UNIVERSE].minSize;
 
       // Parent area (area ∝ size²).
       const parentArea = parent.size.x * parent.size.x;
