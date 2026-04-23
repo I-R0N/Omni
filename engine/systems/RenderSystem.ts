@@ -884,7 +884,17 @@ export class RenderSystem {
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          let tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          // Per-entity blended-hex cache: populated lazily on first render
+          // and invalidated by NebulaSystem when composition mutates
+          // (merge / regen).  Skips blendCompositionToHex's per-call
+          // composition-key string allocation on every frame.
+          let tintHex: string;
+          if (entity.nebulaBlendedHex !== undefined) {
+              tintHex = entity.nebulaBlendedHex;
+          } else {
+              tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+              entity.nebulaBlendedHex = tintHex;
+          }
           // Interior-darken rule: nebula tiles surrounded by more active
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully

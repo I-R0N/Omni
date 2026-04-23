@@ -282,6 +282,12 @@ export interface GameEntity {
   // colour composition and the total polygon area (in world units²) that
   // drives the coalescence merge threshold.
   nebulaColorComposition?: NebulaColorStop[];
+  // Render-time cache of blendCompositionToHex(nebulaColorComposition).
+  // Populated lazily by RenderSystem on first draw and invalidated by
+  // NebulaSystem whenever the composition mutates (merge, regen).
+  // Avoids the per-shard per-frame composition-key string rebuild that
+  // blendCompositionToHex's own cache keys on.
+  nebulaBlendedHex?: string;
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;
