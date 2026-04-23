@@ -106,8 +106,10 @@ export class ParticleSystem {
     const perpX = -fy;
     const perpY = fx;
 
-    // Line extent slightly exceeds the sprite on each end (±0.65 × size).
+    // Line extent slightly exceeds the sprite on each end (±0.65 × size),
+    // and spreads across the sprite's full width perpendicular to velocity.
     const axisExtent = emitter.size.x * 0.65;
+    const perpExtent = emitter.size.x * 0.5;
     const cx = emitter.position.x;
     const cy = emitter.position.y;
 
@@ -118,8 +120,10 @@ export class ParticleSystem {
       // spaced from the upstream end to the downstream end of the segment.
       const u = Math.random() * 2 - 1;
       const along = u * axisExtent;
-      // Sub-pixel perpendicular jitter to give the line a little thickness.
-      const jitter = (Math.random() - 0.5) * 1.5;
+      // Triangular perpendicular spread (peaked at centreline) so sparkles
+      // cover the sprite's width without smearing beyond the hull.
+      const pu = Math.random() - Math.random();
+      const jitter = pu * perpExtent;
 
       const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
       const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
