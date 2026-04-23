@@ -233,20 +233,24 @@ export class NebulaSystem {
      *     sprite-size state is stored on the shard itself.
      */
     private spawnShards(entities: GameEntity[], parent: GameEntity): void {
-        if (parent.type === EntityType.NEBULA_SHARD) return;
+        // In floating-shard mode, NEBULA_SHARD parents break into smaller
+        // children.  In legacy tile mode, shard parents early-return —
+        // only NEBULA tiles shatter into shards.
+        const parentIsShard = parent.type === EntityType.NEBULA_SHARD;
+        if (parentIsShard && !NEBULA_CONSTANTS.FLOATING_SHARDS_ENABLED) return;
 
         const parentDiameter = Math.max(parent.size.x, parent.size.y);
         const parentRadius   = parentDiameter / 2;
         // Parent area budget for the shard power-law distribution.  We
         // intentionally use the glass-shard convention (TILE_HALF² = 121
-        // for TILE_HALF = 11) regardless of the actual nebula tile size
-        // so the resulting shards are the SAME scale as glass shards —
-        // small enough to avoid mass re-merging on spawn and small
-        // enough that the debug polygon outline reads as a polygon and
-        // not a large circle.  Using the nebula tile's actual radius²
-        // produced ~9-unit radii and rapid merges that wiped polygons.
+        // for TILE_HALF = 11) scaled by the parent's effective area
+        // ratio, so a shard break produces children whose polygons are
+        // proportionally smaller than tile-shatter children.  For a
+        // tile parent the ratio is 1, matching the legacy behavior.
         const GLASS_TILE_HALF = 11;
-        const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF;
+        const parentEffectiveArea = parent.nebulaTileArea ?? HEX_AREA;
+        const areaScale = Math.max(0.05, parentEffectiveArea / HEX_AREA);
+        const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF * areaScale;
         const MIN_RADIUS = 2; // don't spawn sub-pixel shards
 
         // 2–3 shards per shatter — fewer, chunkier pieces than glass
@@ -357,14 +361,12 @@ export class NebulaSystem {
             const velY = fy * parallelSpeed + perpY;
 
             // Effective area carried by each shard toward the next
-            // transmutation.  Splitting HEX_AREA equally across all
-            // spawned shards gives net-zero tile balance: one shatter
-            // produces exactly 1 hex of effective mass, and when all
-            // those shards merge back together the accumulation hits
-            // HEX_AREA and transmutes into one new tile.  Independent
-            // of the shard's visual polygon radius so shards can stay
-            // glass-style small without blocking the transmutation path.
-            const effectiveAreaPerShard = HEX_AREA / shardCount;
+            // transmutation / merge.  For a tile parent this splits
+            // HEX_AREA equally across all children (1-tile-in → 1-tile-
+            // worth-of-mass-out).  For a shard parent (break path) this
+            // splits the parent's existing effective area, conserving
+            // mass across the break.
+            const effectiveAreaPerShard = parentEffectiveArea / shardCount;
 
             entities.push({
                 id:              nextId('nebula_shard'),
@@ -528,8 +530,12 @@ export class NebulaSystem {
                 mergedThisFrame.add(bestTarget);
                 // Post-merge: if the grown shard is now large enough to
                 // form a tile (disc area ≥ canonical hex area), try
-                // transmuting it to a brand-new NEBULA tile.
-                this.tryTransmuteShardToTile(entities, bestTarget, physics);
+                // transmuting it to a brand-new NEBULA tile.  Disabled
+                // in floating-shard mode — the cloud stays as shards and
+                // never condenses back into a tile.
+                if (!NEBULA_CONSTANTS.FLOATING_SHARDS_ENABLED) {
+                    this.tryTransmuteShardToTile(entities, bestTarget, physics);
+                }
                 continue;
             }
 

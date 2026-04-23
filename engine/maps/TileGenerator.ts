@@ -343,6 +343,128 @@ export class TileGenerator {
   }
 
   /**
+   * Generate loose, free-floating nebula shards instead of tiles.
+   *
+   * Shards spawn in clusters of random positions (no hex grid alignment)
+   * so the distribution visually mirrors the tile-cluster layout while
+   * producing many more fragments.  Each shard carries the same random
+   * per-cluster composition and is a dynamic entity (mass scales with
+   * radius) — the gravity/merge pass picks them up immediately.
+   *
+   * Each shard's `nebulaTileArea` is drawn from a mild power-law so the
+   * starting population includes both small and chunky fragments.
+   * Shards do NOT align to the hex grid and do NOT go through the
+   * static collision grid.
+   *
+   * Records the world-space centre of every cluster into the optional
+   * `recordedCenters` slot so the background-nebula puff layer can
+   * render in-sync with the interactable shard clusters.
+   */
+  public static generateFloatingNebulaShards(
+    mapWidth: number,
+    mapHeight: number,
+    clusterCount: number,
+    shardsPerCluster: number,
+    clusterRadius: number,
+    recordedCenters?: Vector2[],
+  ): GameEntity[] {
+    const entities: GameEntity[] = [];
+
+    for (let i = 0; i < clusterCount; i++) {
+      const composition = randomNebulaComposition();
+      const cx = (Math.random() - 0.5) * mapWidth;
+      const cy = (Math.random() - 0.5) * mapHeight;
+
+      if (recordedCenters) recordedCenters.push({ x: cx, y: cy });
+
+      for (let j = 0; j < shardsPerCluster; j++) {
+        // Uniform sample over a disc of radius `clusterRadius`.
+        const r = Math.sqrt(Math.random()) * clusterRadius;
+        const t = Math.random() * Math.PI * 2;
+        const sx = cx + Math.cos(t) * r;
+        const sy = cy + Math.sin(t) * r;
+
+        // Effective tile area per shard — power-law so a minority of
+        // shards start chunky and most start small.  Divided by a
+        // starting-population factor so the initial mass budget sits
+        // at roughly one tile's worth per ~3 shards (matches the
+        // classic 3-way tile shatter ratio).
+        const raw = Math.pow(Math.random(), 2); // 0..1, biased low
+        const area = (0.4 + raw * 1.6) * (HEX_AREA / 3);
+
+        entities.push(TileGenerator.createNebulaShardEntity({ x: sx, y: sy }, area, cloneComposition(composition)));
+      }
+    }
+
+    return entities;
+  }
+
+  /**
+   * Factory for a single free-floating nebula shard — the dynamic
+   * counterpart to `createNebulaTileEntity`.  Carries the full merge /
+   * break / fade state that NebulaSystem expects.  Shared by the
+   * floating-shard map seeder and by `NebulaSystem.spawnShards` when
+   * breaking an existing shard into smaller children.
+   */
+  public static createNebulaShardEntity(
+      position: Vector2,
+      effectiveArea: number,
+      composition: NebulaColorStop[],
+      velocity: Vector2 = { x: 0, y: 0 },
+      rotationSpeed: number = 0,
+  ): GameEntity {
+    // Polygon radius: derived from a fraction of the effective area so
+    // visual size tracks mass.  Matches the convention used elsewhere
+    // for nebula shards (glass-tile sized at HEX_AREA scale).
+    const GLASS_TILE_HALF = 11;
+    const areaBudget = GLASS_TILE_HALF * GLASS_TILE_HALF * (effectiveArea / HEX_AREA);
+    const radius = Math.max(2, Math.sqrt(areaBudget));
+
+    const numPoints = 4 + Math.floor(Math.random() * 3);
+    const rawPts: { angle: number; r: number }[] = [];
+    for (let j = 0; j < numPoints; j++) {
+        const baseAngle = (j / numPoints) * Math.PI * 2;
+        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
+        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
+    }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    const pts: Vector2[] = rawPts.map(p => ({
+        x: Math.cos(p.angle) * p.r,
+        y: Math.sin(p.angle) * p.r,
+    }));
+
+    const size = radius * 4;
+    const sprite = NEBULA_IMAGES.length > 0
+        ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+        : ASSETS.NEBULA_PUFF;
+
+    return {
+        id:              nextId('nebula_shard'),
+        type:            EntityType.NEBULA_SHARD,
+        shardType:      'nebula',
+        position:       { x: position.x, y: position.y },
+        velocity:       { x: velocity.x, y: velocity.y },
+        size:           { x: size, y: size },
+        rotation:        Math.random() * Math.PI * 2,
+        rotationSpeed,
+        color:           composition[0].hex,
+        active:          true,
+        health:          1,
+        maxHealth:       1,
+        mass:            size,
+        polygonPoints:   pts,
+        sprite,
+        nebulaColorComposition: composition,
+        nebulaTileArea:  effectiveArea,
+        linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
+        angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
+        // Freshly-seeded shards start at full opacity — no birth fade —
+        // and are eligible for merging immediately.  Seeded shards have
+        // zero launch velocity so the merge cooldown isn't needed.
+    };
+  }
+
+  /**
    * Public wrapper for the internal odd-r offset neighbour lookup.
    * Used by the shard transmutation code to check adjacent grid cells
    * when the shard's own cell is already occupied.

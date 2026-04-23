@@ -297,15 +297,28 @@ export class UniverseMap extends BaseMapLayer {
     // BackgroundManager so the background-nebula layer renders puffs
     // at the same positions — one unified cloud, with parallax drift
     // of the backdrop as the camera moves.
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        CLUSTER_W, CLUSTER_H,
-        22,
-        NEBULA_COUNT,
-        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
-        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
-        occupied,
-        this.nebulaClusterCenters
-    ));
+    if (NEBULA_CONSTANTS.FLOATING_SHARDS_ENABLED) {
+        // Floating-shard seeding: many more fragments, no tiles, no
+        // hex grid.  Shards interact with each other and with
+        // player/enemy entities only (flow field skips them).
+        this.entities.push(...TileGenerator.generateFloatingNebulaShards(
+            CLUSTER_W, CLUSTER_H,
+            NEBULA_CONSTANTS.FLOATING_SHARD_CLUSTER_COUNT,
+            NEBULA_CONSTANTS.FLOATING_SHARDS_PER_CLUSTER,
+            NEBULA_CONSTANTS.FLOATING_SHARD_CLUSTER_RADIUS,
+            this.nebulaClusterCenters,
+        ));
+    } else {
+        this.entities.push(...TileGenerator.generateNebulaClusters(
+            CLUSTER_W, CLUSTER_H,
+            22,
+            NEBULA_COUNT,
+            Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
+            Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
+            occupied,
+            this.nebulaClusterCenters
+        ));
+    }
 
     // Clear a safe open area around spawn
     this.entities = this.entities.filter(e => {
@@ -496,13 +509,24 @@ export class PocketMap extends BaseMapLayer {
     ));
 
     // Nebula clusters — same shared occupancy so tiles and nebulae
-    // never overlap.
-    this.entities.push(...TileGenerator.generateNebulaClusters(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.NEBULA_CLUSTERS, 6, 12,
-        occupied,
-        this.nebulaClusterCenters,
-    ));
+    // never overlap.  In floating-shard mode, shards don't use the
+    // hex grid so the occupancy set is irrelevant for this pass.
+    if (NEBULA_CONSTANTS.FLOATING_SHARDS_ENABLED) {
+        this.entities.push(...TileGenerator.generateFloatingNebulaShards(
+            CLUSTER_W, CLUSTER_H,
+            PocketMap.NEBULA_CLUSTERS,
+            NEBULA_CONSTANTS.FLOATING_SHARDS_PER_CLUSTER,
+            NEBULA_CONSTANTS.FLOATING_SHARD_CLUSTER_RADIUS,
+            this.nebulaClusterCenters,
+        ));
+    } else {
+        this.entities.push(...TileGenerator.generateNebulaClusters(
+            CLUSTER_W, CLUSTER_H, HEX_SIZE,
+            PocketMap.NEBULA_CLUSTERS, 6, 12,
+            occupied,
+            this.nebulaClusterCenters,
+        ));
+    }
 
     // Keep a small safe bubble around spawn so the player doesn't
     // materialise inside a tile.

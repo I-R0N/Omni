@@ -475,6 +475,19 @@ export const NEBULA_CONSTANTS = {
   // 1 tile shatter produces ≤1 new tile via transmutation.  Clusters
   // can SHRINK (player kills shards mid-merge) but never GROW.
   TILE_REGEN_ENABLED: false,
+  // ── Floating-shard test mode ─────────────────────────────────────
+  // When true, maps skip generating nebula TILES entirely and instead
+  // seed many more free-floating NEBULA_SHARD entities across the map.
+  // Shards still merge into bigger shards via the gravity/merge pass,
+  // but the shard→tile transmutation path is disabled so the cloud
+  // never condenses back into tiles.  Shards CAN break into smaller
+  // shards on player/enemy contact (above MIN_SHARD_BREAK_DIAMETER).
+  // Shards never touch the flow field.
+  FLOATING_SHARDS_ENABLED: true,
+  // Minimum shard diameter eligible for break-into-smaller-shards.  Below
+  // this the shard just fades on contact instead of splitting further
+  // (keeps the system bounded under repeated impacts).
+  MIN_SHARD_BREAK_DIAMETER: 16,
   // Reference sprite world size for a FULL nebula tile (effective area
   // = HEX_AREA).  Every nebula sprite — tile or shard — is drawn at
   //     drawSize = TILE_SPRITE_WORLD_SIZE × sqrt(nebulaTileArea / HEX_AREA)
@@ -500,6 +513,15 @@ export const NEBULA_CONSTANTS = {
   OUTER_CLUSTER_COUNT: 120, // halved for 7.5k map (was 240)
   OUTER_MIN_CLUSTER_SIZE: 7,
   OUTER_MAX_CLUSTER_SIZE: 26,
+  // Floating-shard cluster tuning (only consulted when
+  // FLOATING_SHARDS_ENABLED is true).  Each cluster seeds
+  // `FLOATING_SHARDS_PER_CLUSTER` shards uniformly over a disc of
+  // radius `FLOATING_SHARD_CLUSTER_RADIUS` world units.  Defaults
+  // produce ~3.75k shards on a UniverseMap (75 × 50) — roughly 2×
+  // the previous tile-cluster density.
+  FLOATING_SHARD_CLUSTER_COUNT: 75,
+  FLOATING_SHARDS_PER_CLUSTER: 50,
+  FLOATING_SHARD_CLUSTER_RADIUS: 220,
   // Base palette — nebula tiles draw from the full 360° hue wheel
   // (blue / indigo / violet / pink / red / yellow / green all available).
   // Regen uses circular hue math so wraparound is handled correctly.

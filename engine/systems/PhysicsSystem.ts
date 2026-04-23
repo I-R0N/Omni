@@ -835,19 +835,23 @@ export class PhysicsSystem {
           const other  = aIsNebula ? b : a;
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not be
-          // in the post-shatter cooldown window.  Shards are
-          // INDESTRUCTIBLE — they pass through unchanged — so only
-          // NEBULA tiles are shatterable.  This keeps the total nebula
-          // area conserved: each tile shatter produces exactly one
-          // tile's worth of effective shard mass, which eventually
-          // coalesces back into one new tile via transmutation.
-          const shatters = nebula.type === EntityType.NEBULA
-                            && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
-                            && (other.nebulaImpactCooldown ?? 0) <= 0;
+          // in the post-shatter cooldown window.
+          //
+          // In legacy tile mode only NEBULA tiles shatter — shards are
+          // indestructible pass-through.  In floating-shard mode,
+          // NEBULA_SHARDs above MIN_SHARD_BREAK_DIAMETER also break into
+          // smaller shards on player/enemy contact; shards below that
+          // threshold still pass through unchanged.
+          const strikerEligible = (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+                                  && (other.nebulaImpactCooldown ?? 0) <= 0;
+          const parentD = Math.max(nebula.size.x, nebula.size.y);
+          const shardCanBreak = NEBULA_CONSTANTS.FLOATING_SHARDS_ENABLED
+                                && nebula.type === EntityType.NEBULA_SHARD
+                                && parentD >= NEBULA_CONSTANTS.MIN_SHARD_BREAK_DIAMETER;
+          const shatters = strikerEligible && (nebula.type === EntityType.NEBULA || shardCanBreak);
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
-              const parentD = Math.max(nebula.size.x, nebula.size.y);
               const childD  = parentD * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
               if (childD >= NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) {
                   if (other.velocity) {
