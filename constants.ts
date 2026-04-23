@@ -216,7 +216,7 @@ export const PLAYER_TRAIL_CONSTANTS = {
   EMIT_INTERVAL: 0.09,   // Seconds between emissions at full throttle (~11/sec)
   START_RADIUS: 3,       // Ring radius at birth
   END_RADIUS: 32,        // Ring radius at death
-  PEAK_ALPHA: 1.0,       // Alpha at birth, linearly fades to 0
+  PEAK_ALPHA: 0.75,      // Alpha at birth, linearly fades to 0
   LINE_WIDTH: 2.0,       // Stroke width in world units
   COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
 };
