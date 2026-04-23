@@ -293,8 +293,8 @@ public setMapType(type: MapType) {
         bandCanvas.width = width; bandCanvas.height = height;
         const bandCtx = bandCanvas.getContext('2d')!;
         // Per-band brightness cap: furthest band (b=0) dimmest at 10%,
-        // closest band (b=NUM_BANDS-1) brightest at 60%, linear between.
-        const bandBrightness = 0.10 + tMid * 0.50;
+        // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
+        const bandBrightness = 0.10 + tMid * 0.85;
         for (let i = 0; i < STARS_PER_BAND; i++) {
             const t = (b + Math.random()) / NUM_BANDS;
             // Power-law size distribution: many tiny stars, fewer large ones.
