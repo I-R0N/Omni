@@ -1008,12 +1008,14 @@ export class RenderSystem {
           }
 
           // --- TWINKLE STAR ---
-          // Each tile/shard hosts an occasional fading-in/out star at a
-          // random in-sprite position.  Scheduling is render-driven so it
-          // costs nothing in the sim loop: lazy-init on first draw, then
-          // each cycle picks a random duration delay before the next.
-          // Alpha curve sin(t·π) gives a smooth fade in → peak → fade out.
-          {
+          // Stationary nebula TILES get an occasional fading-in/out star at a
+          // random in-sprite position — adds ambience to the backdrop.
+          // Skipped for NEBULA_SHARDs: shards are transient, drifting, and
+          // often in merge cooldown, so the twinkle is almost imperceptible
+          // on them while still costing a performance.now() + drawImage per
+          // shard per frame.  Cutting it for shards eliminates that work
+          // without a visible change.
+          if (entity.type === EntityType.NEBULA) {
               const now = performance.now() / 1000;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
