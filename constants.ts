@@ -208,6 +208,19 @@ export const TRAIL_CONSTANTS = {
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
 };
 
+// Player thrust trail — small rings emitted from the player position that
+// expand outward and fade as they age.  Replaces the older polygon-strip
+// exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
+export const PLAYER_TRAIL_CONSTANTS = {
+  LIFETIME: 0.7,         // Seconds for each ring to expand and fade out
+  EMIT_DISTANCE_SQ: 36,  // Emit a new ring every ~6 px of player motion
+  START_RADIUS: 3,       // Ring radius at birth
+  END_RADIUS: 18,        // Ring radius at death
+  PEAK_ALPHA: 0.55,      // Alpha at birth, linearly fades to 0
+  LINE_WIDTH: 1.5,       // Stroke width in world units
+  COLOR: '56, 189, 248', // RGB triplet (cyan, matches engine exhaust color)
+};
+
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
   MAX_TIMER: 700,

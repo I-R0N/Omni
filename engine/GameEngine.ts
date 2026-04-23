@@ -15,7 +15,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -113,28 +113,12 @@ export class GameEngine {
 
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
-  // Counts down after thrust stops; trail keeps emitting with shrinking lifetimes during this window
+  // Counts down after thrust stops; trail keeps emitting briefly during this window
   private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 1.0; // seconds
-  // Last unit-length thrust direction — stored so coasting trail emissions still
-  // know which way "backward" is (moveDir is zero while coasting)
-  private lastThrustDir: Vector2 = { x: 0, y: 0 };
-  // Last world position a trail point was emitted from (used for distance-gated
-  // emission; trail point positions themselves drift and can't be used directly)
+  private static readonly TRAIL_DECAY_DURATION = 0.4; // seconds
+  // Last world position a trail circle was emitted from (used for distance-gated
+  // emission)
   private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };
-  // Per-frame drift speed of thrust-trail points along the -thrust direction
-  private static readonly THRUST_TRAIL_DRIFT = 1.2;
-  // Per-frame lerp factor for easing lastThrustDir toward the current input
-  // direction — keeps the trail smooth through rapid input direction changes
-  private static readonly THRUST_DIR_SMOOTH = 0.2;
-  // Tracks whether thrust was active last frame; used to detect the start of
-  // a fresh thrust event so we can reset the trail (otherwise a new bright
-  // head stitched onto a decayed chain visually re-lights the old trail).
-  private wasThrusting: boolean = false;
-  // Trails from previous thrust events — continue to drift and fade on their
-  // own, never have new points appended, so they visually detach from the
-  // player when a new thrust event begins.
-  private detachedTrails: TrailPoint[][] = [];
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -374,10 +358,7 @@ export class GameEngine {
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
-      this.detachedTrails = [];
-      this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: 0, y: 0 };
-      this.wasThrusting = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -987,90 +968,31 @@ export class GameEngine {
     if (this.player.trail) {
         this.tickTrail(this.player.trail, dt);
     }
-    // Tick detached trails (ones from prior thrust events) and drop empty arrays
-    for (let i = this.detachedTrails.length - 1; i >= 0; i--) {
-        this.tickTrail(this.detachedTrails[i], dt);
-        if (this.detachedTrails[i].length === 0) {
-            this.detachedTrails.splice(i, 1);
-        }
-    }
 
-    const thrusting = throttle > 0;
-    // Start of a fresh thrust event — detach the old active trail so it
-    // continues to drift and fade on its own, then start a new empty trail
-    // for the new thrust event.  This prevents the spatial gradient fill
-    // from re-lighting faded old points when a new bright head is appended.
-    if (thrusting && !this.wasThrusting) {
-        if (this.player.trail && this.player.trail.length > 0) {
-            this.detachedTrails.push(this.player.trail);
-        }
-        this.player.trail = [];
-        // Snap the thrust direction to the new input so the first emitted
-        // point of the fresh trail uses the actual direction, not whatever
-        // was cached from the previous thrust event.
-        this.lastThrustDir.x = moveDir.x / throttle;
-        this.lastThrustDir.y = moveDir.y / throttle;
-        this.lastTrailEmitPos.x = this.player.position.x;
-        this.lastTrailEmitPos.y = this.player.position.y;
-    }
-    this.wasThrusting = thrusting;
-    if (thrusting) {
+    if (throttle > 0) {
         this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
-        // Target (normalized) thrust direction from current input
-        const tx = moveDir.x / throttle;
-        const ty = moveDir.y / throttle;
-        // Smoothly ease the stored direction toward the target so rapid input
-        // changes produce curves rather than sharp corners in the trail.  A
-        // framerate-compensated lerp keeps the feel consistent across dt.
-        const alpha = 1 - Math.pow(1 - GameEngine.THRUST_DIR_SMOOTH, dt * 60);
-        this.lastThrustDir.x += (tx - this.lastThrustDir.x) * alpha;
-        this.lastThrustDir.y += (ty - this.lastThrustDir.y) * alpha;
-        // Re-normalize
-        const dl = Math.sqrt(this.lastThrustDir.x * this.lastThrustDir.x + this.lastThrustDir.y * this.lastThrustDir.y);
-        if (dl > 0.0001) {
-            this.lastThrustDir.x /= dl;
-            this.lastThrustDir.y /= dl;
-        } else {
-            // Fallback if interpolation collapsed to zero (e.g. 180° reversal)
-            this.lastThrustDir.x = tx;
-            this.lastThrustDir.y = ty;
-        }
     } else {
         this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
     }
 
-    // Distance-gated emission — compare against the last EMISSION position
-    // rather than the last trail point, since points drift after emission.
+    // Distance-gated emission of expanding rings from the player position.
     // Toroidal delta so a wrap-around doesn't read as a giant leap that
-    // triggers a spurious trail emission.
+    // triggers a spurious emission.
     const emitDx = wrapDeltaX(this.lastTrailEmitPos.x, this.player.position.x);
     const emitDy = wrapDeltaY(this.lastTrailEmitPos.y, this.player.position.y);
     const emitDistSq = emitDx * emitDx + emitDy * emitDy;
     const hasTrail = !!this.player.trail && this.player.trail.length > 0;
 
     if (this.trailDecayTimer > 0 &&
-            (!hasTrail || emitDistSq > TRAIL_CONSTANTS.MIN_DISTANCE_SQ)) {
-        // t: 1.0 while thrusting, tapers to 0 over the decay window.
-        // Lifetime shrinks so points vanish sooner; scale shrinks so they start narrower.
-        const t = this.trailDecayTimer / GameEngine.TRAIL_DECAY_DURATION;
-        const pointLifetime = TRAIL_CONSTANTS.LIFETIME * t;
-        // Offset emission to the ship's rear relative to thrust direction so
-        // the trail visibly comes out the back, not the center of the sprite.
-        const halfSize = this.player.size.x / 2;
-        const tdx = this.lastThrustDir.x;
-        const tdy = this.lastThrustDir.y;
-        const drift = GameEngine.THRUST_TRAIL_DRIFT;
+            (!hasTrail || emitDistSq > PLAYER_TRAIL_CONSTANTS.EMIT_DISTANCE_SQ)) {
+        const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
         this.player.trail = this.player.trail || [];
         this.player.trail.push({
-            x: this.player.position.x - tdx * halfSize,
-            y: this.player.position.y - tdy * halfSize,
+            x: this.player.position.x,
+            y: this.player.position.y,
             lifetime: pointLifetime,
             maxLifetime: pointLifetime,
-            scale: t,
-            // Per-frame backward drift so consecutive points form a strip
-            // aligned with the thrust axis regardless of player motion.
-            vx: -tdx * drift,
-            vy: -tdy * drift,
+            scale: 1,
         });
         this.lastTrailEmitPos.x = this.player.position.x;
         this.lastTrailEmitPos.y = this.player.position.y;
@@ -1369,11 +1291,8 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
-      this.detachedTrails = [];
       this.trailDecayTimer = 0;
-      this.lastThrustDir = { x: 0, y: 0 };
       this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
-      this.wasThrusting = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
@@ -2099,8 +2018,7 @@ export class GameEngine {
           this.player.position,
           this.playerMessages,
           this.player,
-          this.waveAnnouncements,
-          this.detachedTrails
+          this.waveAnnouncements
       );
   }
 

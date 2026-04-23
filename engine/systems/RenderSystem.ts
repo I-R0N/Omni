@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -391,8 +391,7 @@ export class RenderSystem {
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
     player?: GameEntity,
-    waveAnnouncements?: WaveAnnouncement[],
-    detachedTrails?: TrailPoint[][]
+    waveAnnouncements?: WaveAnnouncement[]
   ) {
     const t0 = performance.now();
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
@@ -491,7 +490,9 @@ export class RenderSystem {
             this._visibleEntities.push({ entity, rx, ry });
         }
 
-        if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
+        // Player trail = independent expanding rings (one is enough to draw);
+        // projectile trail = polygon strip (needs at least two points).
+        if (entity.trail && entity.trail.length > 0 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
             this._trailEntities.push({ entity, rx, ry });
         }
     }
@@ -520,7 +521,7 @@ export class RenderSystem {
     }
 
     // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities, camera, detachedTrails);
+    this.renderTrails(ctx, this._trailEntities, camera);
 
     // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
     // asteroids and everything else render on top of the nebula cloud.
@@ -567,24 +568,45 @@ export class RenderSystem {
       ctx: CanvasRenderingContext2D,
       entries: { entity: GameEntity, rx: number, ry: number }[],
       camera: CameraState,
-      detachedTrails?: TrailPoint[][]
   ) {
       entries.forEach(({ entity }) => {
-          if (!entity.active || !entity.trail || entity.trail.length < 2) return;
-          if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
-          const mode: 'player' | 'projectile' = entity.type === EntityType.PROJECTILE ? 'projectile' : 'player';
-          this.drawTrailStrip(ctx, entity.trail, mode, camera, entity.color, entity.isBouncer);
-      });
-
-      // Detached trails from prior thrust events — always rendered as player
-      // exhaust since only the player creates them.
-      if (detachedTrails) {
-          for (let i = 0; i < detachedTrails.length; i++) {
-              const t = detachedTrails[i];
-              if (t.length >= 2) {
-                  this.drawTrailStrip(ctx, t, 'player', camera);
-              }
+          if (!entity.active || !entity.trail || entity.trail.length < 1) return;
+          if (entity.type === EntityType.PLAYER) {
+              this.drawPlayerTrailRings(ctx, entity.trail, camera);
+          } else if (entity.type === EntityType.PROJECTILE && entity.trail.length >= 2) {
+              this.drawTrailStrip(ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
           }
+      });
+  }
+
+  // Player trail: each TrailPoint renders as a stroked ring that grows from
+  // START_RADIUS to END_RADIUS over its lifetime while alpha fades to zero.
+  // Reads as a series of expanding pulses emitted from the player rather than
+  // a connected exhaust plume.
+  private drawPlayerTrailRings(
+      ctx: CanvasRenderingContext2D,
+      t: TrailPoint[],
+      camera: CameraState,
+  ) {
+      const camX = camera.position.x;
+      const camY = camera.position.y;
+      const startR = PLAYER_TRAIL_CONSTANTS.START_RADIUS;
+      const endR   = PLAYER_TRAIL_CONSTANTS.END_RADIUS;
+      const peak   = PLAYER_TRAIL_CONSTANTS.PEAK_ALPHA;
+      const color  = PLAYER_TRAIL_CONSTANTS.COLOR;
+
+      ctx.lineWidth = PLAYER_TRAIL_CONSTANTS.LINE_WIDTH;
+      for (let i = 0; i < t.length; i++) {
+          const p = t[i];
+          if (p.maxLifetime <= 0 || p.lifetime <= 0) continue;
+          const ratio = p.lifetime / p.maxLifetime; // 1 at birth → 0 at death
+          const age = 1 - ratio;
+          const radius = startR + (endR - startR) * age;
+          const alpha = peak * ratio;
+          ctx.strokeStyle = `rgba(${color}, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(shiftX(camX, p.x), shiftY(camY, p.y), radius, 0, Math.PI * 2);
+          ctx.stroke();
       }
   }
 
@@ -604,7 +626,7 @@ export class RenderSystem {
   private drawTrailStrip(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
-      mode: 'player' | 'projectile',
+      mode: 'projectile',
       camera: CameraState,
       entityColor?: string,
       isBouncer?: boolean
@@ -679,11 +701,9 @@ export class RenderSystem {
 
       ctx.closePath();
 
-      // Create gradient for fade effect — alpha max scales with the head
-      // point's own lifetime so detached, fading trails dim uniformly as
-      // their newest point ages out.
+      // Gradient fade — alpha max scales with the head point's own lifetime
+      // so the trail dims uniformly as its newest point ages out.
       const head = t[t.length - 1];
-      const tail = t[0];
       const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
       if (isBouncer) {
           // Bouncer beam: solid pure-green line with no fade along the trail.
@@ -693,15 +713,9 @@ export class RenderSystem {
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
       } else {
           const grad = ctx.createLinearGradient(sx[0], sy[0], sx[t.length - 1], sy[t.length - 1]);
-          if (mode === 'projectile') {
-              const [r, g, b] = hexToRgb(entityColor || '#facc15');
-              grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-              grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
-          } else {
-              // Player: cyan engine exhaust
-              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-              grad.addColorStop(1, `rgba(56, 189, 248, ${0.6 * headRatio})`);
-          }
+          const [r, g, b] = hexToRgb(entityColor || '#facc15');
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
           ctx.fillStyle = grad;
       }
       ctx.fill();
