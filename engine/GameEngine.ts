@@ -989,8 +989,8 @@ export class GameEngine {
         this.trailEmitAccumulator = 0;
     }
 
-    // Glitter trail — emits independently of thrust, based purely on motion
-    this.spawnGlitterTrail();
+    // Glitter trail disabled while tuning the thrust-ring trail.
+    // this.spawnGlitterTrail();
 
     const mousePos = this.input.getMousePosition();
     const cx = window.innerWidth / 2;
