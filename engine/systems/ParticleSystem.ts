@@ -89,11 +89,11 @@ export class ParticleSystem {
   }
 
   /**
-   * Glitter trail emission — spawns additive sparkles trailing behind a
-   * moving entity along its velocity vector.  Density is triangularly
-   * distributed across the emitter's width (denser center, sparser edges).
-   * Particles have zero velocity so they stay put while the emitter moves
-   * forward, naturally forming a trail.
+   * Glitter trail emission — spawns additive sparkles in a short segment
+   * aligned with the emitter's velocity vector, starting slightly upstream
+   * (ahead of the sprite) and ending slightly downstream (behind it).
+   * Particles have zero velocity, so while the emitter moves forward the
+   * sparkles appear to flow past it in the direction of travel.
    */
   public spawnGlitterTrail(entities: GameEntity[], emitter: GameEntity) {
     const v = emitter.velocity;
@@ -106,19 +106,20 @@ export class ParticleSystem {
     const perpX = -fy;
     const perpY = fx;
 
-    const halfWidth = emitter.size.x / 2;
-    // Spawn at the emitter's centre so particles overlay the sprite rather
-    // than trailing off the rear.  Rendered after entities in RenderSystem,
-    // so they composite on top of the ship.
-    const tailX = emitter.position.x;
-    const tailY = emitter.position.y;
+    // Line extent slightly exceeds the sprite on each end (±0.65 × size).
+    const axisExtent = emitter.size.x * 0.65;
+    const cx = emitter.position.x;
+    const cy = emitter.position.y;
 
     const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
 
     for (let i = 0; i < COUNT_PER_FRAME; i++) {
-      // Triangular distribution in [-1, 1] peaked at 0 — dense center, sparse edges
-      const u = Math.random() - Math.random();
-      const lateral = u * halfWidth;
+      // Uniform along-axis distribution in [-1, 1] so sparkles are evenly
+      // spaced from the upstream end to the downstream end of the segment.
+      const u = Math.random() * 2 - 1;
+      const along = u * axisExtent;
+      // Sub-pixel perpendicular jitter to give the line a little thickness.
+      const jitter = (Math.random() - 0.5) * 1.5;
 
       const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
       const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
@@ -128,8 +129,8 @@ export class ParticleSystem {
         id: nextId('glit'),
         type: EntityType.PARTICLE,
         position: {
-          x: tailX + perpX * lateral,
-          y: tailY + perpY * lateral,
+          x: cx + fx * along + perpX * jitter,
+          y: cy + fy * along + perpY * jitter,
         },
         velocity: { x: 0, y: 0 },
         size: { x: size, y: size },
