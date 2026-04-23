@@ -115,7 +115,7 @@ export class GameEngine {
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
   // Counts down after thrust stops; trail keeps emitting briefly during this window
   private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 0.4; // seconds
+  private static readonly TRAIL_DECAY_DURATION = 1.0; // seconds
   // Last world position a trail circle was emitted from (used for distance-gated
   // emission)
   private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };

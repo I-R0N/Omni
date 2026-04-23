@@ -212,11 +212,11 @@ export const TRAIL_CONSTANTS = {
 // expand outward and fade as they age.  Replaces the older polygon-strip
 // exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
 export const PLAYER_TRAIL_CONSTANTS = {
-  LIFETIME: 0.7,         // Seconds for each ring to expand and fade out
-  EMIT_DISTANCE_SQ: 36,  // Emit a new ring every ~6 px of player motion
+  LIFETIME: 1.6,         // Seconds for each ring to expand and fade out
+  EMIT_DISTANCE_SQ: 400, // Emit a new ring every ~20 px of player motion
   START_RADIUS: 3,       // Ring radius at birth
-  END_RADIUS: 18,        // Ring radius at death
-  PEAK_ALPHA: 0.55,      // Alpha at birth, linearly fades to 0
+  END_RADIUS: 22,        // Ring radius at death
+  PEAK_ALPHA: 0.6,       // Alpha at birth, linearly fades to 0
   LINE_WIDTH: 1.5,       // Stroke width in world units
   COLOR: '56, 189, 248', // RGB triplet (cyan, matches engine exhaust color)
 };
