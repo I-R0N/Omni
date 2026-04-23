@@ -989,8 +989,8 @@ export class GameEngine {
         this.trailEmitAccumulator = 0;
     }
 
-    // Glitter trail disabled while tuning the thrust-ring trail.
-    // this.spawnGlitterTrail();
+    // Glitter trail — motion-driven sparkles overlaid on the player sprite
+    this.spawnGlitterTrail();
 
     const mousePos = this.input.getMousePosition();
     const cx = window.innerWidth / 2;

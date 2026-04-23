@@ -96,8 +96,6 @@ export class ParticleSystem {
    * forward, naturally forming a trail.
    */
   public spawnGlitterTrail(entities: GameEntity[], emitter: GameEntity) {
-    // Temporarily disabled while tuning the thrust-ring trail.
-    return;
     const v = emitter.velocity;
     const speedSq = v.x * v.x + v.y * v.y;
     if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
@@ -109,9 +107,11 @@ export class ParticleSystem {
     const perpY = fx;
 
     const halfWidth = emitter.size.x / 2;
-    // Spawn at the emitter's tail so particles appear behind, not on top of, the sprite
-    const tailX = emitter.position.x - fx * halfWidth;
-    const tailY = emitter.position.y - fy * halfWidth;
+    // Spawn at the emitter's centre so particles overlay the sprite rather
+    // than trailing off the rear.  Rendered after entities in RenderSystem,
+    // so they composite on top of the ship.
+    const tailX = emitter.position.x;
+    const tailY = emitter.position.y;
 
     const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
 
