@@ -96,6 +96,8 @@ export class ParticleSystem {
    * forward, naturally forming a trail.
    */
   public spawnGlitterTrail(entities: GameEntity[], emitter: GameEntity) {
+    // Temporarily disabled while tuning the thrust-ring trail.
+    return;
     const v = emitter.velocity;
     const speedSq = v.x * v.x + v.y * v.y;
     if (speedSq < GLITTER_TRAIL_CONSTANTS.MIN_SPEED_SQ) return;
