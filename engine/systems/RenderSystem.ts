@@ -884,7 +884,17 @@ export class RenderSystem {
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
-          let tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+          // Per-entity blended-hex cache: populated lazily on first render
+          // and invalidated by NebulaSystem when composition mutates
+          // (merge / regen).  Skips blendCompositionToHex's per-call
+          // composition-key string allocation on every frame.
+          let tintHex: string;
+          if (entity.nebulaBlendedHex !== undefined) {
+              tintHex = entity.nebulaBlendedHex;
+          } else {
+              tintHex = blendCompositionToHex(entity.nebulaColorComposition) || entity.color;
+              entity.nebulaBlendedHex = tintHex;
+          }
           // Interior-darken rule: nebula tiles surrounded by more active
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully
@@ -930,7 +940,23 @@ export class RenderSystem {
               );
           }
           if (spriteSrc) {
-              const tinted = this.getTintedSprite(spriteSrc, tintHex);
+              // Fast path for shards: reuse the cached composite cache key
+              // so we do a single Map.get against the shared _tintedSprites
+              // store without rebuilding "${src}|${hex}" per frame.  Falls
+              // through to getTintedSprite on cache miss (first draw, or
+              // if the LRU evicted the canvas) which populates the store
+              // and returns the same canvas.  Tiles keep the default path
+              // since their tintHex varies with neighbour-count darkening.
+              let tinted: HTMLCanvasElement | null = null;
+              if (entity.type === EntityType.NEBULA_SHARD) {
+                  if (entity.nebulaTintedKey === undefined) {
+                      entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
+                  }
+                  tinted = this._tintedSprites.get(entity.nebulaTintedKey) ?? null;
+                  if (!tinted) tinted = this.getTintedSprite(spriteSrc, tintHex);
+              } else {
+                  tinted = this.getTintedSprite(spriteSrc, tintHex);
+              }
               if (tinted) {
                   const isTile = entity.type === EntityType.NEBULA;
                   // Sprite size is proportional to the effective nebula
@@ -1008,12 +1034,14 @@ export class RenderSystem {
           }
 
           // --- TWINKLE STAR ---
-          // Each tile/shard hosts an occasional fading-in/out star at a
-          // random in-sprite position.  Scheduling is render-driven so it
-          // costs nothing in the sim loop: lazy-init on first draw, then
-          // each cycle picks a random duration delay before the next.
-          // Alpha curve sin(t·π) gives a smooth fade in → peak → fade out.
-          {
+          // Stationary nebula TILES get an occasional fading-in/out star at a
+          // random in-sprite position — adds ambience to the backdrop.
+          // Skipped for NEBULA_SHARDs: shards are transient, drifting, and
+          // often in merge cooldown, so the twinkle is almost imperceptible
+          // on them while still costing a performance.now() + drawImage per
+          // shard per frame.  Cutting it for shards eliminates that work
+          // without a visible change.
+          if (entity.type === EntityType.NEBULA) {
               const now = performance.now() / 1000;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
@@ -1069,17 +1097,17 @@ export class RenderSystem {
       // --- SPRITE RENDERING ---
       if (entity.sprite) {
           const img = this.getImage(entity.sprite);
-          
+
           if (img.complete && img.naturalWidth > 0) {
               try {
                   const maxDim = Math.max(entity.size.x, entity.size.y);
-                  
+
                   let drawScale = 1.5;
                   if (entity.type === EntityType.STRUCTURE) {
-                      drawScale = 1.02; 
+                      drawScale = 1.02;
                   }
-                  
-                  const drawSize = maxDim * drawScale; 
+
+                  const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
@@ -1221,6 +1249,12 @@ export class RenderSystem {
                     ctx.globalAlpha = 0.28 + prox * 0.18;
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
+
+                // Damage cracks for multi-HP variants (reinforced / heavy).
+                // renderCracks early-returns at ≥95 % health, so undamaged
+                // tiles pay only one property read — same pattern asteroids
+                // use for their damage visualisation.
+                this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 

@@ -611,6 +611,14 @@ export class NebulaSystem {
             smaller.nebulaColorComposition, smallArea,
         );
         larger.color = blendCompositionToHex(larger.nebulaColorComposition);
+        // Composition just changed — refresh the render-time cache so the
+        // next frame's draw doesn't pull a stale tint.  Reusing
+        // larger.color avoids a redundant blendCompositionToHex call.
+        larger.nebulaBlendedHex = larger.color;
+        // tinted-sprite key encodes `${src}|${hex}` — drop it so the next
+        // render rebuilds it against the new blended hex and re-links to
+        // the freshly-rendered tinted canvas.
+        larger.nebulaTintedKey = undefined;
 
         // Glittery glimmer burst scattered within a radius matching the
         // smaller shard — the subtle merge feedback.
@@ -863,6 +871,10 @@ export class NebulaSystem {
                 }
                 regen.entity.nebulaColorComposition = this.computeRegeneratedComposition(regen.entity);
                 regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
+                // Composition changed on regen — drop the render cache so
+                // the regenerated tile picks up the new neighbourhood-blend
+                // colour on its next draw.
+                regen.entity.nebulaBlendedHex = undefined;
 
                 // Fade in slowly instead of popping — no glimmer burst.
                 regen.entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;

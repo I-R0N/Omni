@@ -4,6 +4,11 @@ export enum MapType {
   UNIVERSE    = 'UNIVERSE',
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
+  // 1 000 × 1 000 sandbox containing every element (asteroids, glass /
+  // reinforced / heavy / indestructible tiles, nebula clusters).  Useful
+  // for quickly validating interactions between systems without having
+  // to fly across a full-size map to find them.
+  POCKET      = 'POCKET',
 }
 
 export enum GameState {
@@ -235,6 +240,14 @@ export interface GameEntity {
   asteroidHitTimer?: number;
   asteroidHitCooldown?: number;
 
+  // ── Tile variant ─────────────────────────────────────────────────────────
+  // Set on STRUCTURE tiles. Identifies which STRUCTURE_VARIANTS entry drives
+  // health, sprite selection, and destructibility.  Unset = glass (legacy).
+  // 'indestructible' tiles ignore all damage paths and never queue for
+  // regen; tiered variants ('reinforced', 'heavy') pick a damage-state
+  // sprite from their variant's `sprites` list based on health/maxHealth.
+  structureVariant?: 'glass' | 'reinforced' | 'heavy' | 'indestructible';
+
   // ── Shard identity ───────────────────────────────────────────────────────
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.
@@ -269,6 +282,20 @@ export interface GameEntity {
   // colour composition and the total polygon area (in world units²) that
   // drives the coalescence merge threshold.
   nebulaColorComposition?: NebulaColorStop[];
+  // Render-time cache of blendCompositionToHex(nebulaColorComposition).
+  // Populated lazily by RenderSystem on first draw and invalidated by
+  // NebulaSystem whenever the composition mutates (merge, regen).
+  // Avoids the per-shard per-frame composition-key string rebuild that
+  // blendCompositionToHex's own cache keys on.
+  nebulaBlendedHex?: string;
+  // Render-time cache of the composite `${sprite}|${hex}` key used to
+  // look up the tinted-sprite canvas in RenderSystem._tintedSprites.
+  // Skips the per-frame key-string rebuild that getTintedSprite's
+  // default path pays.  Populated lazily on NEBULA_SHARD draws and
+  // invalidated when composition changes (NebulaSystem.mergeNebulas).
+  // Only used for shards — tiles fall through the darken branch which
+  // produces a neighbour-count-dependent key.
+  nebulaTintedKey?: string;
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;

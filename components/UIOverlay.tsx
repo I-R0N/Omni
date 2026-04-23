@@ -197,6 +197,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 { type: MapType.UNIVERSE,    label: 'Deep Space' },
                 { type: MapType.RING,        label: 'Ring World' },
                 { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
+                { type: MapType.POCKET,      label: 'Pocket' },
               ].map(opt => (
                 <button
                   key={opt.type}

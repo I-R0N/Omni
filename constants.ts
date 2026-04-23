@@ -18,6 +18,12 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400
+  STRUCTURE_REINFORCED: '#8b5cf6',        // Violet 500
+  STRUCTURE_REINFORCED_BORDER: '#a78bfa', // Violet 400
+  STRUCTURE_HEAVY: '#f59e0b',             // Amber 500
+  STRUCTURE_HEAVY_BORDER: '#fbbf24',      // Amber 400
+  STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
+  STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
 };
 
 // --- SYSTEM CONFIGURATIONS ---
@@ -225,27 +231,31 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.POCKET]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
   [MapType.UNIVERSE]: {
-    // Doubled on 2026-04-18 to 280 — denser belt now that pressure
-    // breaking and the 50 % on-path spawn distribution keep collision
-    // costs bounded even at higher population.  Same density as the
-    // original 15k map but on the current 6k map, so cluster
-    // encounters and traffic dynamics are visibly busier.
-    count: 280,
+    // Deep Space population.  Entity count kept at 140 for now; tune up
+    // separately if the 8 000 × 8 000 playfield feels sparse.
+    count: 140,
     minSize: 20,
     maxSize: 160,
-    // Spawn radius also halved so asteroids stay inside the wrap box
-    // rather than being pushed across a seam immediately.
-    radius: 2500,
+    // Spawn radius sized for the 8 000 axis — HALF = 4000, keep a
+    // ~1000u buffer inside the seam so asteroids don't wrap on frame 1.
+    radius: 3000,
     speedMultiplier: 1.5
   },
   [MapType.RING]: {
     count: 280,
     minSize: 20,
     maxSize: 160,
+    // 6000×6000 map — half is 3000, so a 2500 spawn ring leaves a
+    // ~500-unit buffer inside the wrap seam.
     radius: 2500,
     speedMultiplier: 1.5
   },
@@ -254,6 +264,18 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     minSize: 20,
     maxSize: 160,
     radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.POCKET]: {
+    // 2 000 × 2 000 sandbox — HALF = 1000, so an 800u spawn radius
+    // leaves a 200u buffer inside the seam.  Count dropped to 1 so
+    // tiles and nebulae dominate the showcase; respawn in GameEngine
+    // now honours this per-map value (was effectively 140 before the
+    // fix because the respawn path hardcoded MapType.UNIVERSE).
+    count: 1,
+    minSize: 20,
+    maxSize: 80,
+    radius: 800,
     speedMultiplier: 1.5
   },
 };
@@ -282,6 +304,55 @@ export const STRUCTURE_CONSTANTS = {
   ASTEROID_PRESSURE_COOLDOWN: 0.1,
   TILE_REGEN_DELAY: 12, // Seconds before a destroyed tile reappears
 };
+
+// ── Tile variants ───────────────────────────────────────────────────────────
+// Every STRUCTURE tile belongs to one variant. The variant drives how much
+// damage the tile can soak, its sprite, and whether it can be destroyed at
+// all.  Damage-state visualisation is procedural (see renderCracks in
+// RenderSystem) — same approach asteroids use — so variants only need one
+// sprite each, not a per-tier atlas.
+//
+// Glass (default) is single-hit to match the original behaviour.
+// Reinforced and heavy add intermediate HP.  Indestructible tiles never
+// take damage and never regenerate — they're permanent walls.
+export const STRUCTURE_VARIANTS = {
+  glass: {
+    health: 1,
+    mass: Infinity,
+    indestructible: false,
+    sprite: ASSETS.HEX_STRUCTURE,
+    color: COLORS.STRUCTURE,
+    borderColor: COLORS.STRUCTURE_BORDER,
+  },
+  reinforced: {
+    health: 3,
+    mass: Infinity,
+    indestructible: false,
+    sprite: ASSETS.HEX_STRUCTURE_REINFORCED,
+    color: COLORS.STRUCTURE_REINFORCED,
+    borderColor: COLORS.STRUCTURE_REINFORCED_BORDER,
+  },
+  heavy: {
+    health: 5,
+    mass: Infinity,
+    indestructible: false,
+    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
+    color: COLORS.STRUCTURE_HEAVY,
+    borderColor: COLORS.STRUCTURE_HEAVY_BORDER,
+  },
+  indestructible: {
+    // Sentinel health — tile is never destroyed, but keep a finite positive
+    // value so any stray damage arithmetic doesn't flip it negative.
+    health: 9999,
+    mass: Infinity,
+    indestructible: true,
+    sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
+    color: COLORS.STRUCTURE_INDESTRUCTIBLE,
+    borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
+  },
+} as const;
+
+export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are

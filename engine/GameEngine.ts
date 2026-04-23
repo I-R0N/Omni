@@ -13,12 +13,12 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from './toroidal';
+import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -274,6 +274,7 @@ export class GameEngine {
     switch (type) {
       case MapType.RING:        return new RingMap();
       case MapType.SEVEN_RINGS: return new SevenRingsMap();
+      case MapType.POCKET:      return new PocketMap();
       case MapType.UNIVERSE:
       default:                  return new UniverseMap();
     }
@@ -566,7 +567,12 @@ export class GameEngine {
       // active asteroids, so we still need a master-list scan to catch
       // asteroids that were just deactivated this step (they're no longer
       // in the index) and to preserve the original total-count semantics.
-      const config = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+      //
+      // Pulls count/minSize/maxSize from the CURRENT map's config so the
+      // respawn loop honours per-map population targets — previously
+      // this was hardcoded to MapType.UNIVERSE which filled small maps
+      // (e.g. Pocket, count = 2) with Deep Space's 140 asteroids.
+      const config = ASTEROID_GENERATION_CONFIG[this.currentMap.type];
       const newlyDestroyed: GameEntity[] = [];
       let currentAsteroidCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
@@ -576,7 +582,7 @@ export class GameEngine {
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
-          if (ast.size.x > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize) this.createAsteroidShards(ast);
+          if (ast.size.x > config.minSize) this.createAsteroidShards(ast);
       }
       if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
@@ -716,6 +722,16 @@ export class GameEngine {
       }
 
       if (entity.type === EntityType.STRUCTURE) {
+          // Indestructible tiles should never reach onDeath in the first
+          // place (all damage paths short-circuit before zeroing health),
+          // but guard defensively: if somehow invoked we just restore
+          // health rather than patching the flow field and queuing a
+          // pointless regen.
+          if (entity.structureVariant === 'indestructible') {
+              entity.health = entity.maxHealth;
+              entity.active = true;
+              return;
+          }
           this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
           // Queue for regeneration; entity stays in the map entities list as
           // an inactive ghost so we can render an outline during regen.
@@ -1686,7 +1702,7 @@ export class GameEngine {
           // skip the merge: the bond is discarded by the caller
           // (handleEntitySticking dropping it from the write list) and
           // the pair stays as two separate rocks.
-          if (newDiam > ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].maxSize) return;
+          if (newDiam > ASTEROID_GENERATION_CONFIG[this.currentMap?.type ?? MapType.UNIVERSE].maxSize) return;
 
           // Larger entity by area dominates shardType; blend glow colors
           const dominant: ShardType = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
@@ -1841,8 +1857,8 @@ export class GameEngine {
   }
 
   private createAsteroidShards(parent: GameEntity) {
-      // Minimum shard size = smallest spawnable asteroid.
-      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE].minSize;
+      // Minimum shard size = smallest spawnable asteroid for the current map.
+      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[this.currentMap?.type ?? MapType.UNIVERSE].minSize;
 
       // Parent area (area ∝ size²).
       const parentArea = parent.size.x * parent.size.x;
@@ -2038,6 +2054,13 @@ export class GameEngine {
   }
 
   private loadMap(map: BaseMapLayer) {
+      // Push the new map's dimensions into the shared toroidal module
+      // BEFORE the map initialises or any system rebuilds its static
+      // state — initializeStaticGrid, initObstacles, buildAsteroidField
+      // all read dimension-derived constants that must reflect the
+      // active map.  Listeners registered by PhysicsSystem, FlowField,
+      // and FlowFieldGrid update their caches synchronously here.
+      setMapDimensions(map.width, map.height);
       if (!map.initialized) {
           map.init();
       }
