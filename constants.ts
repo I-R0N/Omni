@@ -212,13 +212,13 @@ export const TRAIL_CONSTANTS = {
 // expand outward and fade as they age.  Replaces the older polygon-strip
 // exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
 export const PLAYER_TRAIL_CONSTANTS = {
-  LIFETIME: 1.6,         // Seconds for each ring to expand and fade out
+  LIFETIME: 3.0,         // Seconds for each ring to expand and fade out
   EMIT_INTERVAL: 0.09,   // Seconds between emissions at full throttle (~11/sec)
   START_RADIUS: 3,       // Ring radius at birth
-  END_RADIUS: 22,        // Ring radius at death
-  PEAK_ALPHA: 0.6,       // Alpha at birth, linearly fades to 0
-  LINE_WIDTH: 1.5,       // Stroke width in world units
-  COLOR: '56, 189, 248', // RGB triplet (cyan, matches engine exhaust color)
+  END_RADIUS: 32,        // Ring radius at death
+  PEAK_ALPHA: 1.0,       // Alpha at birth, linearly fades to 0
+  LINE_WIDTH: 2.0,       // Stroke width in world units
+  COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
 };
 
 export const SHOOTING_STAR_CONSTANTS = {
