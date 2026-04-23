@@ -213,7 +213,7 @@ export const TRAIL_CONSTANTS = {
 // exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
 export const PLAYER_TRAIL_CONSTANTS = {
   LIFETIME: 1.6,         // Seconds for each ring to expand and fade out
-  EMIT_DISTANCE_SQ: 400, // Emit a new ring every ~20 px of player motion
+  EMIT_INTERVAL: 0.09,   // Seconds between emissions at full throttle (~11/sec)
   START_RADIUS: 3,       // Ring radius at birth
   END_RADIUS: 22,        // Ring radius at death
   PEAK_ALPHA: 0.6,       // Alpha at birth, linearly fades to 0

@@ -113,12 +113,10 @@ export class GameEngine {
 
   // Collision-based stick bonds — entities bond on contact and merge after threshold
   private stickBonds: Array<{ a: GameEntity; b: GameEntity; timer: number; threshold: number }> = [];
-  // Counts down after thrust stops; trail keeps emitting briefly during this window
-  private trailDecayTimer: number = 0;
-  private static readonly TRAIL_DECAY_DURATION = 1.0; // seconds
-  // Last world position a trail circle was emitted from (used for distance-gated
-  // emission)
-  private lastTrailEmitPos: Vector2 = { x: 0, y: 0 };
+  // Accumulates throttle * dt; a ring emits each time it crosses the
+  // EMIT_INTERVAL threshold.  Ties emission rate to applied thrust
+  // (acceleration input), not to raw velocity — coasting produces no rings.
+  private trailEmitAccumulator: number = 0;
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -344,7 +342,7 @@ export class GameEngine {
   public restartGame() {
       this.pendingRegens = [];
       this.activeDrops = [];
-      this.trailDecayTimer = 0;
+      this.trailEmitAccumulator = 0;
       this.waveAnnouncements = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -358,7 +356,7 @@ export class GameEngine {
       this.player.ammo = {};
       this.player.gold = 0;
       this.player.trail = [];
-      this.lastTrailEmitPos = { x: 0, y: 0 };
+      this.trailEmitAccumulator = 0;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -969,33 +967,26 @@ export class GameEngine {
         this.tickTrail(this.player.trail, dt);
     }
 
+    // Thrust-gated emission — accumulator ticks proportional to throttle, so
+    // rings only appear when the player is actively accelerating.  Coasting
+    // at full speed with no input produces no rings, which ties the visual
+    // to acceleration rather than velocity.
     if (throttle > 0) {
-        this.trailDecayTimer = GameEngine.TRAIL_DECAY_DURATION;
+        this.trailEmitAccumulator += dt * throttle;
+        while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
+            this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
+            const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
+            this.player.trail = this.player.trail || [];
+            this.player.trail.push({
+                x: this.player.position.x,
+                y: this.player.position.y,
+                lifetime: pointLifetime,
+                maxLifetime: pointLifetime,
+                scale: 1,
+            });
+        }
     } else {
-        this.trailDecayTimer = Math.max(0, this.trailDecayTimer - dt);
-    }
-
-    // Distance-gated emission of expanding rings from the player position.
-    // Toroidal delta so a wrap-around doesn't read as a giant leap that
-    // triggers a spurious emission.
-    const emitDx = wrapDeltaX(this.lastTrailEmitPos.x, this.player.position.x);
-    const emitDy = wrapDeltaY(this.lastTrailEmitPos.y, this.player.position.y);
-    const emitDistSq = emitDx * emitDx + emitDy * emitDy;
-    const hasTrail = !!this.player.trail && this.player.trail.length > 0;
-
-    if (this.trailDecayTimer > 0 &&
-            (!hasTrail || emitDistSq > PLAYER_TRAIL_CONSTANTS.EMIT_DISTANCE_SQ)) {
-        const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
-        this.player.trail = this.player.trail || [];
-        this.player.trail.push({
-            x: this.player.position.x,
-            y: this.player.position.y,
-            lifetime: pointLifetime,
-            maxLifetime: pointLifetime,
-            scale: 1,
-        });
-        this.lastTrailEmitPos.x = this.player.position.x;
-        this.lastTrailEmitPos.y = this.player.position.y;
+        this.trailEmitAccumulator = 0;
     }
 
     // Glitter trail — emits independently of thrust, based purely on motion
@@ -1291,8 +1282,7 @@ export class GameEngine {
       this.player.velocity = { x: 0, y: 0 };
       this.player.rotation = 0;
       this.player.trail = [];
-      this.trailDecayTimer = 0;
-      this.lastTrailEmitPos = { x: this.player.position.x, y: this.player.position.y };
+      this.trailEmitAccumulator = 0;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
