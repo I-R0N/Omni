@@ -614,8 +614,8 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
 export const GLITTER_TRAIL_CONSTANTS = {
   COUNT_PER_FRAME: 1,     // particles spawned per frame while moving
   MIN_SPEED_SQ: 0.04,     // below this (per-frame speed²), stop emitting
-  LIFETIME_MIN: 0.25,
-  LIFETIME_MAX: 0.55,
+  LIFETIME_MIN: 0.08,
+  LIFETIME_MAX: 0.18,
   SIZE_MIN: 0.4,
   SIZE_MAX: 1.2,
   // Bright multi-hue palette — white + saturated rainbow sparks
