@@ -615,6 +615,10 @@ export class NebulaSystem {
         // next frame's draw doesn't pull a stale tint.  Reusing
         // larger.color avoids a redundant blendCompositionToHex call.
         larger.nebulaBlendedHex = larger.color;
+        // tinted-sprite key encodes `${src}|${hex}` — drop it so the next
+        // render rebuilds it against the new blended hex and re-links to
+        // the freshly-rendered tinted canvas.
+        larger.nebulaTintedKey = undefined;
 
         // Glittery glimmer burst scattered within a radius matching the
         // smaller shard — the subtle merge feedback.

@@ -288,6 +288,14 @@ export interface GameEntity {
   // Avoids the per-shard per-frame composition-key string rebuild that
   // blendCompositionToHex's own cache keys on.
   nebulaBlendedHex?: string;
+  // Render-time cache of the composite `${sprite}|${hex}` key used to
+  // look up the tinted-sprite canvas in RenderSystem._tintedSprites.
+  // Skips the per-frame key-string rebuild that getTintedSprite's
+  // default path pays.  Populated lazily on NEBULA_SHARD draws and
+  // invalidated when composition changes (NebulaSystem.mergeNebulas).
+  // Only used for shards — tiles fall through the darken branch which
+  // produces a neighbour-count-dependent key.
+  nebulaTintedKey?: string;
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;

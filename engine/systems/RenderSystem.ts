@@ -940,7 +940,23 @@ export class RenderSystem {
               );
           }
           if (spriteSrc) {
-              const tinted = this.getTintedSprite(spriteSrc, tintHex);
+              // Fast path for shards: reuse the cached composite cache key
+              // so we do a single Map.get against the shared _tintedSprites
+              // store without rebuilding "${src}|${hex}" per frame.  Falls
+              // through to getTintedSprite on cache miss (first draw, or
+              // if the LRU evicted the canvas) which populates the store
+              // and returns the same canvas.  Tiles keep the default path
+              // since their tintHex varies with neighbour-count darkening.
+              let tinted: HTMLCanvasElement | null = null;
+              if (entity.type === EntityType.NEBULA_SHARD) {
+                  if (entity.nebulaTintedKey === undefined) {
+                      entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
+                  }
+                  tinted = this._tintedSprites.get(entity.nebulaTintedKey) ?? null;
+                  if (!tinted) tinted = this.getTintedSprite(spriteSrc, tintHex);
+              } else {
+                  tinted = this.getTintedSprite(spriteSrc, tintHex);
+              }
               if (tinted) {
                   const isTile = entity.type === EntityType.NEBULA;
                   // Sprite size is proportional to the effective nebula
