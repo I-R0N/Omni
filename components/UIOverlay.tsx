@@ -192,7 +192,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
           <div className="mb-8 flex flex-col items-center gap-3">
             <span className="text-slate-200 text-sm tracking-wide">Map</span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-2 max-w-xl">
               {[
                 { type: MapType.UNIVERSE,             label: 'Deep Space' },
                 { type: MapType.RING,                 label: 'Ring World' },
