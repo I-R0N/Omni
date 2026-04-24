@@ -292,6 +292,9 @@ public setMapType(type: MapType) {
         const bandCanvas = document.createElement('canvas');
         bandCanvas.width = width; bandCanvas.height = height;
         const bandCtx = bandCanvas.getContext('2d')!;
+        // Per-band brightness cap: furthest band (b=0) dimmest at 25%,
+        // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
+        const bandBrightness = 0.25 + tMid * 0.70;
         for (let i = 0; i < STARS_PER_BAND; i++) {
             const t = (b + Math.random()) / NUM_BANDS;
             // Power-law size distribution: many tiny stars, fewer large ones.
@@ -299,8 +302,10 @@ public setMapType(type: MapType) {
             // has dense background haze but visible coloured foreground stars.
             const sizeBase = 0.3 + Math.pow(Math.random(), 3) * 0.6;
             const size = sizeBase * (0.5 + t * 0.8);
-            // Opacity: full 0.2–1.0 range; larger stars weighted brighter.
-            const opacity = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            // Within-band variation scaled against the band's brightness cap,
+            // so parallax depth maps directly to perceived brightness.
+            const variation = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            const opacity = bandBrightness * variation;
             bandCtx.globalAlpha = opacity;
             bandCtx.fillStyle = starColor();
             const x = Math.random() * width;
