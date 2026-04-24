@@ -615,12 +615,22 @@ abstract class SingleVariantTileFieldMap extends BaseMapLayer {
   }
 }
 
+// Shared cluster sizing for the variant-tile field maps.  100 clusters
+// × 12 tiles = 1 200 entities, matching the asteroid-field count so
+// the debug render-time HUD compares like-for-like across maps.  The
+// (min, max) pair must satisfy max = min + 1 because
+// `generateClusteredMesh` computes target size as
+// `floor(min + random() * (max - min))` — random() ∈ [0, 1) collapses
+// to a constant when the span is exactly 1.
+const SINGLE_ELEMENT_CLUSTER_COUNT = 100;
+const SINGLE_ELEMENT_CLUSTER_SIZE  = 12;
+
 /** Glass-only field — single-hit destructible tiles spread across the map. */
 export class GlassFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'glass';
-  protected readonly clusterCount   = 90;
-  protected readonly minClusterSize = 8;
-  protected readonly maxClusterSize = 20;
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
     super('glass_field_01', 'Glass Field', MapType.GLASS_FIELD);
@@ -637,9 +647,9 @@ export class GlassFieldMap extends SingleVariantTileFieldMap {
  */
 export class HardTileFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'heavy';
-  protected readonly clusterCount   = 90;
-  protected readonly minClusterSize = 6;
-  protected readonly maxClusterSize = 14;
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
     super('hard_tile_field_01', 'Hard Tile Field', MapType.HARD_TILE_FIELD);
@@ -652,14 +662,15 @@ export class HardTileFieldMap extends SingleVariantTileFieldMap {
 /**
  * Indestructible field — permanent wall clusters spread across the
  * map.  Never take damage, never regenerate; a maze of fixed obstacles.
- * Clusters are intentionally kept small so players can weave between
- * them rather than getting boxed in.
+ * Cluster sizing matches the other tile fields so the entity count
+ * (and therefore the debug render-time stat) is comparable across
+ * single-element maps.
  */
 export class IndestructibleFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'indestructible';
-  protected readonly clusterCount   = 120;
-  protected readonly minClusterSize = 3;
-  protected readonly maxClusterSize = 8;
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
     super('indestructible_field_01', 'Indestructible Field', MapType.INDESTRUCTIBLE_FIELD);
@@ -679,7 +690,11 @@ export class NebulaFieldMap extends BaseMapLayer {
   public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
   public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
 
-  private static readonly CLUSTER_COUNT = 110;
+  // Match the variant-tile field cluster shape so the nebula map ends
+  // with ≈1 200 entities, on par with the other single-element maps.
+  // Overrides the legacy NEBULA_CONSTANTS-derived sizing used elsewhere
+  // (UniverseMap), which would emit ~2× more tiles here.
+  private static readonly CLUSTER_COUNT = SINGLE_ELEMENT_CLUSTER_COUNT;
 
   constructor() {
     super('nebula_field_01', 'Nebula Field', MapType.NEBULA_FIELD);
@@ -699,8 +714,8 @@ export class NebulaFieldMap extends BaseMapLayer {
     this.entities.push(...TileGenerator.generateNebulaClusters(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
         NebulaFieldMap.CLUSTER_COUNT,
-        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
-        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
+        SINGLE_ELEMENT_CLUSTER_SIZE,
+        SINGLE_ELEMENT_CLUSTER_SIZE + 1,
         occupied,
         this.nebulaClusterCenters
     ));

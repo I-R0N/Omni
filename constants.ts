@@ -307,9 +307,10 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
   },
   [MapType.ASTEROID_FIELD]: {
     // 6 000 × 6 000 single-element showcase — dense belt riding a
-    // concentric rotational flow.  Count scaled up over RING (280)
-    // because this is the only element on the map.
-    count: 400,
+    // concentric rotational flow.  Count matches the tile-only
+    // showcases (~1 200 entities each) so render-time / perf
+    // comparisons across the single-element maps are apples-to-apples.
+    count: 1200,
     minSize: 20,
     maxSize: 160,
     radius: 2500,
