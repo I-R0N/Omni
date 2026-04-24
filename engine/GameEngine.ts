@@ -13,7 +13,7 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
@@ -272,11 +272,16 @@ export class GameEngine {
    *  restartGame() share a single construction path. */
   private buildMap(type: MapType): BaseMapLayer {
     switch (type) {
-      case MapType.RING:        return new RingMap();
-      case MapType.SEVEN_RINGS: return new SevenRingsMap();
-      case MapType.POCKET:      return new PocketMap();
+      case MapType.RING:                 return new RingMap();
+      case MapType.SEVEN_RINGS:          return new SevenRingsMap();
+      case MapType.POCKET:               return new PocketMap();
+      case MapType.ASTEROID_FIELD:       return new AsteroidFieldMap();
+      case MapType.GLASS_FIELD:          return new GlassFieldMap();
+      case MapType.HARD_TILE_FIELD:      return new HardTileFieldMap();
+      case MapType.INDESTRUCTIBLE_FIELD: return new IndestructibleFieldMap();
+      case MapType.NEBULA_FIELD:         return new NebulaFieldMap();
       case MapType.UNIVERSE:
-      default:                  return new UniverseMap();
+      default:                           return new UniverseMap();
     }
   }
 

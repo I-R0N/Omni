@@ -236,6 +236,33 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  // Single-element 6k showcase maps — keep movement identical to the
+  // other full-size maps so the element under test is the only variable.
+  [MapType.ASTEROID_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.GLASS_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.HARD_TILE_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.INDESTRUCTIBLE_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.NEBULA_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
@@ -276,6 +303,49 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     minSize: 20,
     maxSize: 80,
     radius: 800,
+    speedMultiplier: 1.5
+  },
+  [MapType.ASTEROID_FIELD]: {
+    // 6 000 × 6 000 single-element showcase — dense belt riding a
+    // concentric rotational flow.  Count scaled up over RING (280)
+    // because this is the only element on the map.
+    count: 400,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
+  // Tile/nebula-only showcases never spawn asteroids; set count=0 so
+  // the shared respawn path (keyed by current map type) doesn't
+  // pollute these maps with drifting rocks.  minSize/maxSize stay at
+  // non-zero values because damage-scaling arithmetic clamps against
+  // them even when no asteroids exist.
+  [MapType.GLASS_FIELD]: {
+    count: 0,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.HARD_TILE_FIELD]: {
+    count: 0,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.INDESTRUCTIBLE_FIELD]: {
+    count: 0,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
+  [MapType.NEBULA_FIELD]: {
+    count: 0,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
     speedMultiplier: 1.5
   },
 };

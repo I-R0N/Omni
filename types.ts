@@ -9,6 +9,15 @@ export enum MapType {
   // for quickly validating interactions between systems without having
   // to fly across a full-size map to find them.
   POCKET      = 'POCKET',
+  // Single-element 6 000 × 6 000 showcase maps.  Each one populates the
+  // playfield with exactly one entity type so systems (flow fields,
+  // collision, regen, pathing, nebula shatter) can be stressed in
+  // isolation without cross-element interference.
+  ASTEROID_FIELD       = 'ASTEROID_FIELD',
+  GLASS_FIELD          = 'GLASS_FIELD',
+  HARD_TILE_FIELD      = 'HARD_TILE_FIELD',
+  INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
+  NEBULA_FIELD         = 'NEBULA_FIELD',
 }
 
 export enum GameState {

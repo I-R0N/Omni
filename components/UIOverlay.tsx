@@ -194,10 +194,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <span className="text-slate-200 text-sm tracking-wide">Map</span>
             <div className="flex gap-2">
               {[
-                { type: MapType.UNIVERSE,    label: 'Deep Space' },
-                { type: MapType.RING,        label: 'Ring World' },
-                { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
-                { type: MapType.POCKET,      label: 'Pocket' },
+                { type: MapType.UNIVERSE,             label: 'Deep Space' },
+                { type: MapType.RING,                 label: 'Ring World' },
+                { type: MapType.SEVEN_RINGS,          label: 'Seven Rings' },
+                { type: MapType.POCKET,               label: 'Pocket' },
+                { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
+                { type: MapType.GLASS_FIELD,          label: 'Glass Field' },
+                { type: MapType.HARD_TILE_FIELD,      label: 'Hard Tiles' },
+                { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
+                { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
               ].map(opt => (
                 <button
                   key={opt.type}
