@@ -208,6 +208,19 @@ export const TRAIL_CONSTANTS = {
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
 };
 
+// Player thrust trail — small rings emitted from the player position that
+// expand outward and fade as they age.  Replaces the older polygon-strip
+// exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
+export const PLAYER_TRAIL_CONSTANTS = {
+  LIFETIME: 3.0,         // Seconds for each ring to expand and fade out
+  EMIT_INTERVAL: 0.09,   // Seconds between emissions at full throttle (~11/sec)
+  START_RADIUS: 3,       // Ring radius at birth
+  END_RADIUS: 32,        // Ring radius at death
+  PEAK_ALPHA: 0.75,      // Alpha at birth, linearly fades to 0
+  LINE_WIDTH: 2.0,       // Stroke width in world units
+  COLOR: '125, 211, 252',// RGB triplet (brighter cyan)
+};
+
 export const SHOOTING_STAR_CONSTANTS = {
   MIN_TIMER: 300,
   MAX_TIMER: 700,
@@ -670,14 +683,23 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
 // Glitter trail — bright points trailing behind the player along travel path.
 // Separate from the thrust trail; emits whenever the player is in motion.
 export const GLITTER_TRAIL_CONSTANTS = {
-  COUNT_PER_FRAME: 3,     // particles spawned per frame while moving
+  COUNT_PER_FRAME: 1,     // particles spawned per frame while moving
   MIN_SPEED_SQ: 0.04,     // below this (per-frame speed²), stop emitting
-  LIFETIME_MIN: 0.25,
-  LIFETIME_MAX: 0.55,
+  LIFETIME_MIN: 0.08,
+  LIFETIME_MAX: 0.18,
   SIZE_MIN: 0.4,
   SIZE_MAX: 1.2,
-  // Palette of bright, cool-white hues for the sparkle
-  COLORS: ['#ffffff', '#e0f2fe', '#bae6fd'] as string[],
+  // Bright multi-hue palette — white + saturated rainbow sparks
+  COLORS: [
+    '#ffffff', // white
+    '#f9a8d4', // pink
+    '#c084fc', // purple
+    '#7dd3fc', // cyan
+    '#86efac', // green
+    '#fde047', // yellow
+    '#fb923c', // orange
+    '#f87171', // red
+  ] as string[],
 };
 
 export const PROJECTILE_CONSTANTS = {

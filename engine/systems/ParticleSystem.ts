@@ -89,11 +89,11 @@ export class ParticleSystem {
   }
 
   /**
-   * Glitter trail emission — spawns additive sparkles trailing behind a
-   * moving entity along its velocity vector.  Density is triangularly
-   * distributed across the emitter's width (denser center, sparser edges).
-   * Particles have zero velocity so they stay put while the emitter moves
-   * forward, naturally forming a trail.
+   * Glitter trail emission — spawns additive sparkles in a short segment
+   * aligned with the emitter's velocity vector, starting slightly upstream
+   * (ahead of the sprite) and ending slightly downstream (behind it).
+   * Particles have zero velocity, so while the emitter moves forward the
+   * sparkles appear to flow past it in the direction of travel.
    */
   public spawnGlitterTrail(entities: GameEntity[], emitter: GameEntity) {
     const v = emitter.velocity;
@@ -106,17 +106,24 @@ export class ParticleSystem {
     const perpX = -fy;
     const perpY = fx;
 
-    const halfWidth = emitter.size.x / 2;
-    // Spawn at the emitter's tail so particles appear behind, not on top of, the sprite
-    const tailX = emitter.position.x - fx * halfWidth;
-    const tailY = emitter.position.y - fy * halfWidth;
+    // Line extent slightly exceeds the sprite on each end (±0.65 × size),
+    // and spreads across the sprite's full width perpendicular to velocity.
+    const axisExtent = emitter.size.x * 0.65;
+    const perpExtent = emitter.size.x * 0.5;
+    const cx = emitter.position.x;
+    const cy = emitter.position.y;
 
     const { COUNT_PER_FRAME, LIFETIME_MIN, LIFETIME_MAX, SIZE_MIN, SIZE_MAX, COLORS: GCOLORS } = GLITTER_TRAIL_CONSTANTS;
 
     for (let i = 0; i < COUNT_PER_FRAME; i++) {
-      // Triangular distribution in [-1, 1] peaked at 0 — dense center, sparse edges
-      const u = Math.random() - Math.random();
-      const lateral = u * halfWidth;
+      // Uniform along-axis distribution in [-1, 1] so sparkles are evenly
+      // spaced from the upstream end to the downstream end of the segment.
+      const u = Math.random() * 2 - 1;
+      const along = u * axisExtent;
+      // Triangular perpendicular spread (peaked at centreline) so sparkles
+      // cover the sprite's width without smearing beyond the hull.
+      const pu = Math.random() - Math.random();
+      const jitter = pu * perpExtent;
 
       const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
       const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
@@ -126,8 +133,8 @@ export class ParticleSystem {
         id: nextId('glit'),
         type: EntityType.PARTICLE,
         position: {
-          x: tailX + perpX * lateral,
-          y: tailY + perpY * lateral,
+          x: cx + fx * along + perpX * jitter,
+          y: cy + fy * along + perpY * jitter,
         },
         velocity: { x: 0, y: 0 },
         size: { x: size, y: size },

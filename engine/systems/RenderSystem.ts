@@ -1,7 +1,7 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS } from '../../constants';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -80,6 +80,8 @@ export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
   private debugMode: boolean = false;
+  // Player trail shape — selectable from the debug panel.
+  private trailShape: TrailShape = TrailShape.CIRCLE;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -103,6 +105,7 @@ export class RenderSystem {
   public lastNebulaSlowCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
+  public setTrailShape(s: TrailShape) { this.trailShape = s; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -417,8 +420,7 @@ export class RenderSystem {
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
     player?: GameEntity,
-    waveAnnouncements?: WaveAnnouncement[],
-    detachedTrails?: TrailPoint[][]
+    waveAnnouncements?: WaveAnnouncement[]
   ) {
     const t0 = performance.now();
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
@@ -517,7 +519,9 @@ export class RenderSystem {
             this._visibleEntities.push({ entity, rx, ry });
         }
 
-        if (entity.trail && entity.trail.length > 1 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
+        // Player trail = independent expanding rings (one is enough to draw);
+        // projectile trail = polygon strip (needs at least two points).
+        if (entity.trail && entity.trail.length > 0 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
             this._trailEntities.push({ entity, rx, ry });
         }
     }
@@ -554,7 +558,7 @@ export class RenderSystem {
     }
 
     // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities, camera, detachedTrails);
+    this.renderTrails(ctx, this._trailEntities, camera);
 
     // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
     // asteroids and everything else render on top of the nebula cloud.
@@ -605,24 +609,168 @@ export class RenderSystem {
       ctx: CanvasRenderingContext2D,
       entries: { entity: GameEntity, rx: number, ry: number }[],
       camera: CameraState,
-      detachedTrails?: TrailPoint[][]
   ) {
       entries.forEach(({ entity }) => {
-          if (!entity.active || !entity.trail || entity.trail.length < 2) return;
-          if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE) return;
-          const mode: 'player' | 'projectile' = entity.type === EntityType.PROJECTILE ? 'projectile' : 'player';
-          this.drawTrailStrip(ctx, entity.trail, mode, camera, entity.color, entity.isBouncer);
+          if (!entity.active || !entity.trail || entity.trail.length < 1) return;
+          if (entity.type === EntityType.PLAYER) {
+              if (this.trailShape === TrailShape.NONE) return;
+              this.drawPlayerTrail(ctx, entity.trail, camera);
+          } else if (entity.type === EntityType.PROJECTILE && entity.trail.length >= 2) {
+              this.drawTrailStrip(ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
+          }
       });
+  }
 
-      // Detached trails from prior thrust events — always rendered as player
-      // exhaust since only the player creates them.
-      if (detachedTrails) {
-          for (let i = 0; i < detachedTrails.length; i++) {
-              const t = detachedTrails[i];
-              if (t.length >= 2) {
-                  this.drawTrailStrip(ctx, t, 'player', camera);
+  // Player trail: each TrailPoint renders as a stroked shape that grows from
+  // START_RADIUS to END_RADIUS over its lifetime while alpha fades to zero.
+  // Shape is selected from the debug panel (CIRCLE / SQUARE / TRIANGLE / LINE
+  // / PATH); NONE is filtered out earlier so we never enter this method for it.
+  private drawPlayerTrail(
+      ctx: CanvasRenderingContext2D,
+      t: TrailPoint[],
+      camera: CameraState,
+  ) {
+      const camX = camera.position.x;
+      const camY = camera.position.y;
+      const startR = PLAYER_TRAIL_CONSTANTS.START_RADIUS;
+      const endR   = PLAYER_TRAIL_CONSTANTS.END_RADIUS;
+      const peak   = PLAYER_TRAIL_CONSTANTS.PEAK_ALPHA;
+      const color  = PLAYER_TRAIL_CONSTANTS.COLOR;
+      const shape  = this.trailShape;
+
+      ctx.lineWidth = PLAYER_TRAIL_CONSTANTS.LINE_WIDTH;
+
+      // PATH: single polyline through every emitted point — a continuous
+      // breadcrumb of the player's recent path rather than per-point shapes.
+      if (shape === TrailShape.PATH) {
+          this.drawPlayerTrailPath(ctx, t, camX, camY, color, peak);
+          return;
+      }
+      for (let i = 0; i < t.length; i++) {
+          const p = t[i];
+          if (p.maxLifetime <= 0 || p.lifetime <= 0) continue;
+          const ratio = p.lifetime / p.maxLifetime; // 1 at birth → 0 at death
+          const age = 1 - ratio;
+          const radius = startR + (endR - startR) * age;
+          const alpha = peak * ratio;
+          const sx = shiftX(camX, p.x);
+          const sy = shiftY(camY, p.y);
+          ctx.strokeStyle = `rgba(${color}, ${alpha})`;
+
+          switch (shape) {
+              case TrailShape.CIRCLE: {
+                  ctx.beginPath();
+                  ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+                  ctx.stroke();
+                  break;
+              }
+              case TrailShape.SQUARE: {
+                  // Axis-aligned square inscribed in the same radius envelope
+                  const d = radius * 2;
+                  ctx.strokeRect(sx - radius, sy - radius, d, d);
+                  break;
+              }
+              case TrailShape.TRIANGLE: {
+                  // Equilateral triangle pointing along the emit-time velocity
+                  // vector so it visually streams in the direction of travel.
+                  const ang = p.angle ?? 0;
+                  const cos = Math.cos(ang);
+                  const sin = Math.sin(ang);
+                  // Tip in front, two base corners behind ±120°
+                  const tipX = sx + cos * radius;
+                  const tipY = sy + sin * radius;
+                  const back = -radius * 0.5;
+                  const side = radius * 0.866; // sin(60°)
+                  const blX = sx + cos * back - sin * side;
+                  const blY = sy + sin * back + cos * side;
+                  const brX = sx + cos * back + sin * side;
+                  const brY = sy + sin * back - cos * side;
+                  ctx.beginPath();
+                  ctx.moveTo(tipX, tipY);
+                  ctx.lineTo(blX, blY);
+                  ctx.lineTo(brX, brY);
+                  ctx.closePath();
+                  ctx.stroke();
+                  break;
+              }
+              case TrailShape.LINE: {
+                  // Straight line perpendicular to travel direction, growing
+                  // outward from the centre — reads as a wake bar dropped
+                  // behind the ship.
+                  const ang = (p.angle ?? 0) + Math.PI / 2;
+                  const cos = Math.cos(ang);
+                  const sin = Math.sin(ang);
+                  ctx.beginPath();
+                  ctx.moveTo(sx - cos * radius, sy - sin * radius);
+                  ctx.lineTo(sx + cos * radius, sy + sin * radius);
+                  ctx.stroke();
+                  break;
+              }
+              case TrailShape.DOTS: {
+                  // Filled dot at fixed START_RADIUS — does not expand;
+                  // only alpha fades over lifetime.
+                  ctx.fillStyle = `rgba(${color}, ${alpha})`;
+                  ctx.beginPath();
+                  ctx.arc(sx, sy, startR, 0, Math.PI * 2);
+                  ctx.fill();
+                  break;
               }
           }
+      }
+  }
+
+  // Continuous polyline through every active trail point.  Each segment is
+  // stroked individually with alpha driven by the *older* endpoint's own
+  // lifetime ratio so the tail segment fades to zero just before its
+  // source point is culled (otherwise the path would lose whole segments
+  // at full opacity every EMIT_INTERVAL and read as choppy).  The ratio
+  // is squared so the fade is visible mid-trail during continuous thrust,
+  // not just near the disappearing tail.  Segments are skipped when:
+  //   • the newer point is flagged chainStart (thrust restart — old chain
+  //     should keep fading on its own, no bridge to the new chain),
+  //   • consecutive shifted points exceed CHAIN_GAP_PX (defense-in-depth
+  //     against any thrust-restart edge case the chainStart flag misses
+  //     — at top speed continuous emissions are <14 u apart, so 50 u is
+  //     well clear of normal thrust spacing), or
+  //   • consecutive shifted points straddle a wrap seam.
+  private drawPlayerTrailPath(
+      ctx: CanvasRenderingContext2D,
+      t: TrailPoint[],
+      camX: number,
+      camY: number,
+      color: string,
+      peak: number,
+  ) {
+      if (t.length < 2) return;
+
+      const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
+      const CHAIN_GAP_SQ = 50 * 50;
+      let prevX = shiftX(camX, t[0].x);
+      let prevY = shiftY(camY, t[0].y);
+      for (let i = 1; i < t.length; i++) {
+          const cx = shiftX(camX, t[i].x);
+          const cy = shiftY(camY, t[i].y);
+          const dx = cx - prevX;
+          const dy = cy - prevY;
+          const distSq = dx * dx + dy * dy;
+          const seamSpan = distSq > SEAM_BREAK_SQ;
+          const gapSpan  = distSq > CHAIN_GAP_SQ;
+          if (!seamSpan && !gapSpan && !t[i].chainStart) {
+              const p0 = t[i - 1];
+              const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
+              if (r0 > 0) {
+                  // Squared ratio biases more of the fade toward the head
+                  // half of the trail so the gradient reads even while
+                  // new points are constantly being emitted.
+                  ctx.strokeStyle = `rgba(${color}, ${peak * r0 * r0})`;
+                  ctx.beginPath();
+                  ctx.moveTo(prevX, prevY);
+                  ctx.lineTo(cx, cy);
+                  ctx.stroke();
+              }
+          }
+          prevX = cx;
+          prevY = cy;
       }
   }
 
@@ -642,7 +790,7 @@ export class RenderSystem {
   private drawTrailStrip(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
-      mode: 'player' | 'projectile',
+      mode: 'projectile',
       camera: CameraState,
       entityColor?: string,
       isBouncer?: boolean
@@ -717,11 +865,9 @@ export class RenderSystem {
 
       ctx.closePath();
 
-      // Create gradient for fade effect — alpha max scales with the head
-      // point's own lifetime so detached, fading trails dim uniformly as
-      // their newest point ages out.
+      // Gradient fade — alpha max scales with the head point's own lifetime
+      // so the trail dims uniformly as its newest point ages out.
       const head = t[t.length - 1];
-      const tail = t[0];
       const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
       if (isBouncer) {
           // Bouncer beam: solid pure-green line with no fade along the trail.
@@ -731,15 +877,9 @@ export class RenderSystem {
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
       } else {
           const grad = ctx.createLinearGradient(sx[0], sy[0], sx[t.length - 1], sy[t.length - 1]);
-          if (mode === 'projectile') {
-              const [r, g, b] = hexToRgb(entityColor || '#facc15');
-              grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-              grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
-          } else {
-              // Player: cyan engine exhaust
-              grad.addColorStop(0, `rgba(56, 189, 248, 0)`);
-              grad.addColorStop(1, `rgba(56, 189, 248, ${0.6 * headRatio})`);
-          }
+          const [r, g, b] = hexToRgb(entityColor || '#facc15');
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.75 * headRatio})`);
           ctx.fillStyle = grad;
       }
       ctx.fill();

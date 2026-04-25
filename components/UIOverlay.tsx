@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { EngineStats, MapType, GameState } from '../types';
+import { EngineStats, MapType, GameState, TrailShape } from '../types';
 
 interface UIOverlayProps {
   stats: EngineStats;
@@ -11,6 +11,7 @@ interface UIOverlayProps {
   onRestart?: () => void;
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
+  onCycleTrailShape?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -27,6 +28,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onRestart,
   onToggleDebug,
   onToggleNebulaSet,
+  onCycleTrailShape,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -86,6 +88,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : stats.nebulaSet === 'N16'
                     ? 'N16 only'
                     : 'ALL'}
+                </button>
+              </div>
+
+              {/* Player trail shape selector */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Trail</span>
+                <button
+                  onClick={onCycleTrailShape}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → PATH → DOTS → NONE"
+                >
+                  {stats.trailShape === TrailShape.SQUARE
+                    ? 'Square'
+                    : stats.trailShape === TrailShape.TRIANGLE
+                    ? 'Triangle'
+                    : stats.trailShape === TrailShape.LINE
+                    ? 'Line'
+                    : stats.trailShape === TrailShape.PATH
+                    ? 'Path'
+                    : stats.trailShape === TrailShape.DOTS
+                    ? 'Dots'
+                    : stats.trailShape === TrailShape.NONE
+                    ? 'None'
+                    : 'Circle'}
                 </button>
               </div>
 
