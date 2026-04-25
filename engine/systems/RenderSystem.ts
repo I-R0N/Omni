@@ -288,6 +288,16 @@ export class RenderSystem {
    * Result is cached forever per (src, hex) pair; cache is bounded to ~256
    * entries to avoid unbounded growth when many nebula tiles mix hues.
    * Returns null while the underlying image is still loading.
+   *
+   * Canvas size is sized to roughly match the largest world draw size
+   * the result will be blitted at (≈120 world units for a full nebula
+   * tile via NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE).  128² is a 4×
+   * reduction over the previous 256² in fillrate, memory, and GC
+   * pressure — the source-atop tint pass is the main allocation
+   * hot-spot when approaching unseen clusters, since each
+   * (cluster-color × neighbour-count) combination demands its own
+   * canvas.  Quality cost is minimal because the blit downscales
+   * either way.
    */
   private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
       const key = `${src}|${hex}`;
@@ -296,7 +306,7 @@ export class RenderSystem {
       const img = this.getImage(src);
       if (!img.complete || img.naturalWidth === 0) return null;
 
-      const size = 256; // power of 2 to keep upscaling crisp enough
+      const size = 128; // power of 2; matches typical world draw size
       const c = document.createElement('canvas');
       c.width = size;
       c.height = size;
