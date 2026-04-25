@@ -712,11 +712,14 @@ export class RenderSystem {
 
   // Continuous polyline through every active trail point.  Each segment is
   // stroked individually with alpha driven by the *older* endpoint's own
-  // lifetime ratio, so the tail segment fades to zero just before its
-  // source point is culled — otherwise the path would lose whole segments
-  // at full opacity every EMIT_INTERVAL and read as choppy.  Wrap seams
-  // break the path so a wrapping ship doesn't draw a diagonal across the
-  // entire map.
+  // lifetime ratio so the tail segment fades to zero just before its
+  // source point is culled (otherwise the path would lose whole segments
+  // at full opacity every EMIT_INTERVAL and read as choppy).  The ratio
+  // is squared so the fade is visible mid-trail during continuous thrust,
+  // not just near the disappearing tail.  Segments are skipped when:
+  //   • the newer point is flagged chainStart (thrust restart — old chain
+  //     should keep fading on its own, no bridge to the new chain), or
+  //   • consecutive shifted points straddle a wrap seam.
   private drawPlayerTrailPath(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
@@ -735,13 +738,15 @@ export class RenderSystem {
           const cy = shiftY(camY, t[i].y);
           const dx = cx - prevX;
           const dy = cy - prevY;
-          // Skip seam-spanning segments — adjacent shifted points should
-          // be at most a few pixels apart in screen space.
-          if (dx * dx + dy * dy <= SEAM_BREAK_SQ) {
+          const seamSpan = dx * dx + dy * dy > SEAM_BREAK_SQ;
+          if (!seamSpan && !t[i].chainStart) {
               const p0 = t[i - 1];
               const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
               if (r0 > 0) {
-                  ctx.strokeStyle = `rgba(${color}, ${peak * r0})`;
+                  // Squared ratio biases more of the fade toward the head
+                  // half of the trail so the gradient reads even while
+                  // new points are constantly being emitted.
+                  ctx.strokeStyle = `rgba(${color}, ${peak * r0 * r0})`;
                   ctx.beginPath();
                   ctx.moveTo(prevX, prevY);
                   ctx.lineTo(cx, cy);

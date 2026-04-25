@@ -43,6 +43,10 @@ export interface TrailPoint extends Vector2 {
   // Emit-time orientation (radians) — captured for shape-aware player-trail
   // rendering (e.g. LINE / TRIANGLE need a fixed direction per point).
   angle?: number;
+  // Marks the first point emitted in a fresh thrust event.  PATH rendering
+  // breaks the polyline at chain starts so a stop-and-restart doesn't draw
+  // a long segment connecting the old tail to the new head.
+  chainStart?: boolean;
 }
 
 // Player trail shape — selectable from the debug panel.  CIRCLE is the

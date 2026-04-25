@@ -120,6 +120,10 @@ export class GameEngine {
   // EMIT_INTERVAL threshold.  Ties emission rate to applied thrust
   // (acceleration input), not to raw velocity — coasting produces no rings.
   private trailEmitAccumulator: number = 0;
+  // Thrust state from the previous emission update.  Used to flag the
+  // first emission of each thrust event so the PATH renderer can break
+  // the polyline at the gap rather than connecting old tail to new head.
+  private wasThrustingLastFrame: boolean = false;
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -366,6 +370,7 @@ export class GameEngine {
       this.pendingRegens = [];
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
+      this.wasThrustingLastFrame = false;
       this.waveAnnouncements = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -380,6 +385,7 @@ export class GameEngine {
       this.player.gold = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
+      this.wasThrustingLastFrame = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -997,6 +1003,9 @@ export class GameEngine {
     // to acceleration rather than velocity.
     if (throttle > 0) {
         this.trailEmitAccumulator += dt * throttle;
+        // First emission after a thrust gap starts a fresh chain so the
+        // PATH renderer doesn't bridge old tail → new head.
+        let pendingChainStart = !this.wasThrustingLastFrame;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
@@ -1013,10 +1022,14 @@ export class GameEngine {
                 maxLifetime: pointLifetime,
                 scale: 1,
                 angle,
+                chainStart: pendingChainStart || undefined,
             });
+            pendingChainStart = false;
         }
+        this.wasThrustingLastFrame = true;
     } else {
         this.trailEmitAccumulator = 0;
+        this.wasThrustingLastFrame = false;
     }
 
     // Glitter trail — motion-driven sparkles overlaid on the player sprite
@@ -1313,6 +1326,7 @@ export class GameEngine {
       this.player.rotation = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
+      this.wasThrustingLastFrame = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
