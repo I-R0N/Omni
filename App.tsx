@@ -113,6 +113,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleNebulaSet();
   };
 
+  const handleCycleTrailShape = () => {
+      if (engineRef.current) engineRef.current.cycleTrailShape();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -132,6 +136,7 @@ const App: React.FC = () => {
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
         onToggleNebulaSet={handleToggleNebulaSet}
+        onCycleTrailShape={handleCycleTrailShape}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

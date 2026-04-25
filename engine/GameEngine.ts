@@ -14,7 +14,7 @@ import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -83,6 +83,9 @@ export class GameEngine {
   // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
   // comparison.
   private nebulaSet: NebulaSet = 'ALL';
+  // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
+  // production look; the rest are dev variants exposed via the DBG panel.
+  private trailShape: TrailShape = TrailShape.CIRCLE;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -190,6 +193,19 @@ export class GameEngine {
         }
       }
     }
+  }
+
+  /**
+   * Cycle through player-trail shapes: CIRCLE → SQUARE → TRIANGLE → LINE
+   * → NONE → CIRCLE.  Forwards the new shape to the renderer; existing
+   * trail points keep their stored emit-time angle, so a shape change is
+   * an instant visual swap with no respawn needed.
+   */
+  public cycleTrailShape() {
+    const order = [TrailShape.CIRCLE, TrailShape.SQUARE, TrailShape.TRIANGLE, TrailShape.LINE, TrailShape.NONE];
+    const i = order.indexOf(this.trailShape);
+    this.trailShape = order[(i + 1) % order.length];
+    this.renderer.setTrailShape(this.trailShape);
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -320,6 +336,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      trailShape: this.trailShape,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -412,6 +429,7 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      trailShape: this.trailShape,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -977,12 +995,18 @@ export class GameEngine {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
             this.player.trail = this.player.trail || [];
+            // Capture velocity direction at emit so shape-aware variants
+            // (LINE / TRIANGLE) orient consistently with the ship's heading.
+            const vx = this.player.velocity.x;
+            const vy = this.player.velocity.y;
+            const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
             this.player.trail.push({
                 x: this.player.position.x,
                 y: this.player.position.y,
                 lifetime: pointLifetime,
                 maxLifetime: pointLifetime,
                 scale: 1,
+                angle,
             });
         }
     } else {

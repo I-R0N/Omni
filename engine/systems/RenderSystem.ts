@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -80,6 +80,8 @@ export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
   private debugMode: boolean = false;
+  // Player trail shape — selectable from the debug panel.
+  private trailShape: TrailShape = TrailShape.CIRCLE;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -87,6 +89,7 @@ export class RenderSystem {
   public lastRenderMs: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
+  public setTrailShape(s: TrailShape) { this.trailShape = s; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -572,18 +575,19 @@ export class RenderSystem {
       entries.forEach(({ entity }) => {
           if (!entity.active || !entity.trail || entity.trail.length < 1) return;
           if (entity.type === EntityType.PLAYER) {
-              this.drawPlayerTrailRings(ctx, entity.trail, camera);
+              if (this.trailShape === TrailShape.NONE) return;
+              this.drawPlayerTrail(ctx, entity.trail, camera);
           } else if (entity.type === EntityType.PROJECTILE && entity.trail.length >= 2) {
               this.drawTrailStrip(ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
           }
       });
   }
 
-  // Player trail: each TrailPoint renders as a stroked ring that grows from
+  // Player trail: each TrailPoint renders as a stroked shape that grows from
   // START_RADIUS to END_RADIUS over its lifetime while alpha fades to zero.
-  // Reads as a series of expanding pulses emitted from the player rather than
-  // a connected exhaust plume.
-  private drawPlayerTrailRings(
+  // Shape is selected from the debug panel (CIRCLE / SQUARE / TRIANGLE / LINE);
+  // NONE is filtered out earlier so we never enter this method for it.
+  private drawPlayerTrail(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
       camera: CameraState,
@@ -594,6 +598,7 @@ export class RenderSystem {
       const endR   = PLAYER_TRAIL_CONSTANTS.END_RADIUS;
       const peak   = PLAYER_TRAIL_CONSTANTS.PEAK_ALPHA;
       const color  = PLAYER_TRAIL_CONSTANTS.COLOR;
+      const shape  = this.trailShape;
 
       ctx.lineWidth = PLAYER_TRAIL_CONSTANTS.LINE_WIDTH;
       for (let i = 0; i < t.length; i++) {
@@ -603,10 +608,60 @@ export class RenderSystem {
           const age = 1 - ratio;
           const radius = startR + (endR - startR) * age;
           const alpha = peak * ratio;
+          const sx = shiftX(camX, p.x);
+          const sy = shiftY(camY, p.y);
           ctx.strokeStyle = `rgba(${color}, ${alpha})`;
-          ctx.beginPath();
-          ctx.arc(shiftX(camX, p.x), shiftY(camY, p.y), radius, 0, Math.PI * 2);
-          ctx.stroke();
+
+          switch (shape) {
+              case TrailShape.CIRCLE: {
+                  ctx.beginPath();
+                  ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+                  ctx.stroke();
+                  break;
+              }
+              case TrailShape.SQUARE: {
+                  // Axis-aligned square inscribed in the same radius envelope
+                  const d = radius * 2;
+                  ctx.strokeRect(sx - radius, sy - radius, d, d);
+                  break;
+              }
+              case TrailShape.TRIANGLE: {
+                  // Equilateral triangle pointing along the emit-time velocity
+                  // vector so it visually streams in the direction of travel.
+                  const ang = p.angle ?? 0;
+                  const cos = Math.cos(ang);
+                  const sin = Math.sin(ang);
+                  // Tip in front, two base corners behind ±120°
+                  const tipX = sx + cos * radius;
+                  const tipY = sy + sin * radius;
+                  const back = -radius * 0.5;
+                  const side = radius * 0.866; // sin(60°)
+                  const blX = sx + cos * back - sin * side;
+                  const blY = sy + sin * back + cos * side;
+                  const brX = sx + cos * back + sin * side;
+                  const brY = sy + sin * back - cos * side;
+                  ctx.beginPath();
+                  ctx.moveTo(tipX, tipY);
+                  ctx.lineTo(blX, blY);
+                  ctx.lineTo(brX, brY);
+                  ctx.closePath();
+                  ctx.stroke();
+                  break;
+              }
+              case TrailShape.LINE: {
+                  // Straight line perpendicular to travel direction, growing
+                  // outward from the centre — reads as a wake bar dropped
+                  // behind the ship.
+                  const ang = (p.angle ?? 0) + Math.PI / 2;
+                  const cos = Math.cos(ang);
+                  const sin = Math.sin(ang);
+                  ctx.beginPath();
+                  ctx.moveTo(sx - cos * radius, sy - sin * radius);
+                  ctx.lineTo(sx + cos * radius, sy + sin * radius);
+                  ctx.stroke();
+                  break;
+              }
+          }
       }
   }
 
