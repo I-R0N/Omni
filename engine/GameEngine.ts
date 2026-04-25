@@ -1059,16 +1059,13 @@ export class GameEngine {
             // and gives each point a per-tick drift in the -input
             // direction so it gradually extends away over the point's
             // lifetime — engine-exhaust style, anchored at the ship at
-            // birth.  Drift speed of 5× maxSpeed gives the trail a
-            // visible reach in -input direction even when ship velocity
-            // and input direction align (where the two modes would
-            // otherwise look identical at full throttle).
+            // birth.
             let driftVx: number | undefined;
             let driftVy: number | undefined;
             if (this.trailEmitMode === TrailEmitMode.THRUST) {
                 const dirX = moveDir.x / throttle;
                 const dirY = moveDir.y / throttle;
-                const driftSpeed = maxSpeed * 5;
+                const driftSpeed = maxSpeed * 0.5;
                 driftVx = -dirX * driftSpeed;
                 driftVy = -dirY * driftSpeed;
             }
