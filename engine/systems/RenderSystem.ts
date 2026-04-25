@@ -95,6 +95,12 @@ export class RenderSystem {
   // pass is actually iterating per frame — context for interpreting
   // lastNebulaMs.  Updated once per render() call.
   public lastNebulaVisible: number = 0;
+  // Per-frame split of how many nebula entities took the fast path vs.
+  // the slow path.  Reset at the start of render() and incremented in
+  // renderEntities below.  fast + slow == lastNebulaVisible (modulo
+  // entities that early-return for inactivity).
+  public lastNebulaFastCount: number = 0;
+  public lastNebulaSlowCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
@@ -509,6 +515,10 @@ export class RenderSystem {
     // Snapshot the visible-nebula count after the cull bucket is built
     // so the dev overlay can report it alongside the nebula sub-timer.
     this.lastNebulaVisible = this._nebulaEntities.length;
+    // Reset the per-frame fast/slow split — incremented inside
+    // renderEntities below as each nebula entity is dispatched.
+    this.lastNebulaFastCount = 0;
+    this.lastNebulaSlowCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -913,6 +923,7 @@ export class RenderSystem {
               entity.nebulaCachedSize ?? 0,
           );
           ctx.globalAlpha = 1.0;
+          this.lastNebulaFastCount++;
           return;
       }
 
@@ -935,6 +946,7 @@ export class RenderSystem {
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          this.lastNebulaSlowCount++;
           // Per-entity blended-hex cache: populated lazily on first render
           // and invalidated by NebulaSystem when composition mutates
           // (merge / regen).  Skips blendCompositionToHex's per-call

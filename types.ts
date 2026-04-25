@@ -413,6 +413,13 @@ export interface PerfSnapshot {
   // window is ~18 % of a 6 k map, so a 1 200-tile NebulaFieldMap
   // surfaces ~210 tiles per frame.
   nebulaVisible: number;
+  // Per-frame split of nebula entities that took the fast path (cached
+  // sprite, single drawImage) vs. the slow path (full ctx.save +
+  // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
+  // debug overlay so we can tell at a glance whether the fast path
+  // is matching for steady-state tiles.
+  nebulaFast: number;
+  nebulaSlow: number;
   flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
   // Collision broadphase — peak dynamic-grid cell density observed last step
   maxCellDensity: number;

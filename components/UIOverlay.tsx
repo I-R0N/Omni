@@ -115,6 +115,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>

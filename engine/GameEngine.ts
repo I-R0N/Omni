@@ -2181,6 +2181,8 @@ export class GameEngine {
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
           nebulaVisible:  this.renderer.lastNebulaVisible,
+          nebulaFast:     this.renderer.lastNebulaFastCount,
+          nebulaSlow:     this.renderer.lastNebulaSlowCount,
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
