@@ -97,7 +97,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   onClick={onCycleTrailShape}
                   className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → NONE"
+                  title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → PATH → NONE"
                 >
                   {stats.trailShape === TrailShape.SQUARE
                     ? 'Square'
@@ -105,6 +105,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     ? 'Triangle'
                     : stats.trailShape === TrailShape.LINE
                     ? 'Line'
+                    : stats.trailShape === TrailShape.PATH
+                    ? 'Path'
                     : stats.trailShape === TrailShape.NONE
                     ? 'None'
                     : 'Circle'}

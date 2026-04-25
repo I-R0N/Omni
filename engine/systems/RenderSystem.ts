@@ -623,8 +623,8 @@ export class RenderSystem {
 
   // Player trail: each TrailPoint renders as a stroked shape that grows from
   // START_RADIUS to END_RADIUS over its lifetime while alpha fades to zero.
-  // Shape is selected from the debug panel (CIRCLE / SQUARE / TRIANGLE / LINE);
-  // NONE is filtered out earlier so we never enter this method for it.
+  // Shape is selected from the debug panel (CIRCLE / SQUARE / TRIANGLE / LINE
+  // / PATH); NONE is filtered out earlier so we never enter this method for it.
   private drawPlayerTrail(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
@@ -639,6 +639,13 @@ export class RenderSystem {
       const shape  = this.trailShape;
 
       ctx.lineWidth = PLAYER_TRAIL_CONSTANTS.LINE_WIDTH;
+
+      // PATH: single polyline through every emitted point — a continuous
+      // breadcrumb of the player's recent path rather than per-point shapes.
+      if (shape === TrailShape.PATH) {
+          this.drawPlayerTrailPath(ctx, t, camX, camY, color, peak);
+          return;
+      }
       for (let i = 0; i < t.length; i++) {
           const p = t[i];
           if (p.maxLifetime <= 0 || p.lifetime <= 0) continue;
@@ -701,6 +708,47 @@ export class RenderSystem {
               }
           }
       }
+  }
+
+  // Continuous polyline through every active trail point.  Pre-shifts each
+  // point into the camera's wrap zone and breaks the path whenever
+  // consecutive shifted points are far enough apart that they almost
+  // certainly straddle a wrap seam — otherwise a wrapping ship would draw
+  // a long diagonal segment across the entire map.
+  private drawPlayerTrailPath(
+      ctx: CanvasRenderingContext2D,
+      t: TrailPoint[],
+      camX: number,
+      camY: number,
+      color: string,
+      peak: number,
+  ) {
+      if (t.length < 2) return;
+      // Alpha follows the head's age so the whole stroke fades together as
+      // the trail decays after the player stops emitting.
+      const head = t[t.length - 1];
+      const headRatio = Math.max(0, Math.min(1, head.lifetime / Math.max(head.maxLifetime, 1e-6)));
+      ctx.strokeStyle = `rgba(${color}, ${peak * headRatio})`;
+
+      const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
+      ctx.beginPath();
+      let prevX = shiftX(camX, t[0].x);
+      let prevY = shiftY(camY, t[0].y);
+      ctx.moveTo(prevX, prevY);
+      for (let i = 1; i < t.length; i++) {
+          const cx = shiftX(camX, t[i].x);
+          const cy = shiftY(camY, t[i].y);
+          const dx = cx - prevX;
+          const dy = cy - prevY;
+          if (dx * dx + dy * dy > SEAM_BREAK_SQ) {
+              ctx.moveTo(cx, cy);
+          } else {
+              ctx.lineTo(cx, cy);
+          }
+          prevX = cx;
+          prevY = cy;
+      }
+      ctx.stroke();
   }
 
   // Reusable scratch buffer for shifted trail coordinates — keeps the
