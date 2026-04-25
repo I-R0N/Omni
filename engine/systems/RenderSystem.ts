@@ -1140,6 +1140,14 @@ export class RenderSystem {
         camA * rx + camC * ry + camE,
         camB * rx + camD * ry + camF,
       );
+      // Reset globalAlpha — without the old ctx.save/restore, sub-paths
+      // that exit at a non-1.0 alpha (STRUCTURE specular, INTERACTABLE
+      // heart highlight, drop-shard fill) would otherwise fade the next
+      // entity's drawImage / fill.  Other state (fillStyle, strokeStyle,
+      // lineWidth, font) is set per branch before use, so doesn't need
+      // resetting here.  Composite-op / filter / shadow / line-dash are
+      // already paired with inner save/restore at their use sites.
+      ctx.globalAlpha = 1.0;
 
       // --- NEBULA TILES & SHARDS ---
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
