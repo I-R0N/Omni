@@ -1051,31 +1051,32 @@ export class GameEngine {
             const vx = this.player.velocity.x;
             const vy = this.player.velocity.y;
             const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
-            // Emit-position offset — controls which way the trail extends
-            // from the ship.  VELOCITY mode (default) places points at
-            // player.position so the trail naturally extends opposite to
-            // velocity as the ship moves through space.  THRUST mode
-            // offsets each emit by (-inputDir * step) — a per-emit (NOT
-            // cumulative) offset so the trail extends opposite to thrust,
-            // anchored relative to the ship's current position rather
-            // than drifting away over time.
-            let emitOffsetX = 0;
-            let emitOffsetY = 0;
+            // Trail-extension direction — VELOCITY mode (default) emits at
+            // player.position with no per-point velocity, so the trail
+            // naturally extends opposite to velocity as the ship moves
+            // through space.  THRUST mode emits AT player.position too
+            // (no initial offset, so the newest point sits on the ship)
+            // and gives each point a per-tick drift in the -input
+            // direction so it gradually extends away over the point's
+            // lifetime — engine-exhaust style, anchored at the ship at
+            // birth.  Drift speed of 5× maxSpeed gives the trail a
+            // visible reach in -input direction even when ship velocity
+            // and input direction align (where the two modes would
+            // otherwise look identical at full throttle).
+            let driftVx: number | undefined;
+            let driftVy: number | undefined;
             if (this.trailEmitMode === TrailEmitMode.THRUST) {
-                // throttle == |moveDir|, so moveDir/throttle is the unit
-                // input vector.  Step magnitude is 5× (maxSpeed *
-                // EMIT_INTERVAL) — the velocity-mode point spacing scaled
-                // up so the THRUST trail reads ~5× longer behind the ship
-                // than the per-step spacing would otherwise produce.
                 const dirX = moveDir.x / throttle;
                 const dirY = moveDir.y / throttle;
-                const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL * 5;
-                emitOffsetX = -dirX * step;
-                emitOffsetY = -dirY * step;
+                const driftSpeed = maxSpeed * 5;
+                driftVx = -dirX * driftSpeed;
+                driftVy = -dirY * driftSpeed;
             }
             this.player.trail.push({
-                x: this.player.position.x + emitOffsetX,
-                y: this.player.position.y + emitOffsetY,
+                x: this.player.position.x,
+                y: this.player.position.y,
+                vx: driftVx,
+                vy: driftVy,
                 lifetime: pointLifetime,
                 maxLifetime: pointLifetime,
                 scale: 1,
