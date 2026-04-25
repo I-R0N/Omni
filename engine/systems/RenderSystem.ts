@@ -106,6 +106,19 @@ export class RenderSystem {
   public getSuppressBackgroundPuffs(): boolean {
       return this.backgroundManager.getSuppressNebulaPuffs();
   }
+  // Skip the foreground nebula tile / shard sprite blit while keeping the
+  // surrounding ctx.save / translate / rotate / restore wrapper.  Isolates
+  // GPU fillrate (drawImage at TILE_SPRITE_WORLD_SIZE with globalAlpha<1)
+  // from canvas-state overhead.
+  private suppressNebulaSprite: boolean = false;
+  public setSuppressNebulaSprite(v: boolean) { this.suppressNebulaSprite = v; }
+  public getSuppressNebulaSprite(): boolean { return this.suppressNebulaSprite; }
+  // Skip the per-frame neighbour-count darken-hex rebuild and use the
+  // cached blendedHex directly.  Isolates per-tile string allocation +
+  // Map-key churn from the rest of the nebula draw path.
+  private suppressNebulaDarken: boolean = false;
+  public setSuppressNebulaDarken(v: boolean) { this.suppressNebulaDarken = v; }
+  public getSuppressNebulaDarken(): boolean { return this.suppressNebulaDarken; }
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
@@ -924,7 +937,9 @@ export class RenderSystem {
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully
           // enclosed) caps at 0.55× brightness; shards skip the pass.
-          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount) {
+          // Dev ablation: skip the per-frame string allocation + Map-key
+          // churn so the cost can be measured against the nebula sub-timer.
+          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount && !this.suppressNebulaDarken) {
               const t = Math.min(1, entity.nebulaNeighborCount / 6);
               const factor = 1 - t * 0.45;
               const [r, g, b] = hexToRgb(tintHex);
@@ -1010,7 +1025,13 @@ export class RenderSystem {
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
-                  ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
+                  // Dev ablation: skip just the foreground tile/shard sprite
+                  // blit so GPU fillrate (drawImage at TILE_SPRITE_WORLD_SIZE
+                  // with alpha < 1) can be measured separately from the
+                  // surrounding ctx.save/translate/rotate/restore overhead.
+                  if (!this.suppressNebulaSprite) {
+                      ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
+                  }
                   ctx.globalAlpha = 1.0;
               } else {
                   // Fallback: procedural soft circle in the tint colour

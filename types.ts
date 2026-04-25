@@ -422,6 +422,8 @@ export interface EngineStats {
   // are currently active when comparing render times across maps.
   suppressNebulaTwinkle?: boolean;
   suppressBackgroundPuffs?: boolean;
+  suppressNebulaSprite?: boolean;
+  suppressNebulaDarken?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

@@ -121,6 +121,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleSuppressBackgroundPuffs();
   };
 
+  const handleToggleSuppressNebulaSprite = () => {
+      if (engineRef.current) engineRef.current.toggleSuppressNebulaSprite();
+  };
+
+  const handleToggleSuppressNebulaDarken = () => {
+      if (engineRef.current) engineRef.current.toggleSuppressNebulaDarken();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -142,6 +150,8 @@ const App: React.FC = () => {
         onToggleNebulaSet={handleToggleNebulaSet}
         onToggleSuppressNebulaTwinkle={handleToggleSuppressNebulaTwinkle}
         onToggleSuppressBackgroundPuffs={handleToggleSuppressBackgroundPuffs}
+        onToggleSuppressNebulaSprite={handleToggleSuppressNebulaSprite}
+        onToggleSuppressNebulaDarken={handleToggleSuppressNebulaDarken}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
