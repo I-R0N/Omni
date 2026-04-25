@@ -89,8 +89,9 @@ export class GameEngine {
   // Player-trail direction mode — VELOCITY (default) extends the trail
   // opposite to velocity (current production look — points emitted at
   // player.position naturally trail behind via the ship's path through
-  // space).  THRUST extends the trail in the +input direction by adding
-  // a cumulative per-emit offset.  Toggled from the DBG panel.
+  // space).  THRUST extends the trail opposite to the input/thrust
+  // direction by accumulating a per-emit offset in -input.  Toggled
+  // from the DBG panel.
   private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
@@ -137,11 +138,11 @@ export class GameEngine {
   // chainStart flag is never lost to substep timing.
   private chainBreakPending: boolean = false;
   // Cumulative emit-position offset used by THRUST mode to extend the trail
-  // in the +input direction from the ship.  Each emit advances it by
-  // (inputDir * step); resets at thrust start (chainBreakPending) and when
-  // thrust ends so a fresh thrust event begins anchored at the ship.
-  // Stays at zero in VELOCITY mode (default), where the trail extends
-  // opposite to velocity naturally via the ship's path through space.
+  // opposite to the input/thrust direction from the ship.  Each emit
+  // advances it by (-inputDir * step); resets at thrust start
+  // (chainBreakPending) and when thrust ends so a fresh thrust event begins
+  // anchored at the ship.  Stays at zero in VELOCITY mode (default), where
+  // the trail extends opposite to velocity naturally via the ship's path.
   private trailEmitOffset: Vector2 = { x: 0, y: 0 };
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
@@ -237,9 +238,9 @@ export class GameEngine {
    * Both modes emit only while throttle > 0.  VELOCITY (default) places
    * trail points at player.position so the trail extends opposite to
    * velocity as the ship moves; THRUST accumulates an offset in the
-   * +input direction each emit so the trail extends in the direction of
-   * thrust regardless of velocity.  Resets the per-thrust-event offset
-   * so the new mode starts cleanly at the ship.
+   * -input direction each emit so the trail extends opposite to thrust
+   * regardless of velocity.  Resets the per-thrust-event offset so the
+   * new mode starts cleanly at the ship.
    */
   public cycleTrailEmitMode() {
     this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
@@ -1067,27 +1068,29 @@ export class GameEngine {
             // from the ship.  VELOCITY mode (default) places points at
             // player.position so the trail naturally extends opposite to
             // velocity as the ship moves through space.  THRUST mode
-            // accumulates an offset in the +input direction each emit so
-            // the trail spatially extends in the direction of thrust,
-            // independent of whatever direction the ship is actually
-            // translating.  Reset on chainStart so a fresh thrust event
-            // begins anchored at the ship rather than continuing from the
-            // last event's accumulated offset.
+            // accumulates an offset in the -input direction each emit so
+            // the trail spatially extends opposite to thrust, independent
+            // of whatever direction the ship is actually translating.
+            // Reset on chainStart so a fresh thrust event begins anchored
+            // at the ship rather than continuing from the last event's
+            // accumulated offset.
             if (this.chainBreakPending) {
                 this.trailEmitOffset.x = 0;
                 this.trailEmitOffset.y = 0;
             }
             if (this.trailEmitMode === TrailEmitMode.THRUST) {
                 // throttle == |moveDir|, so moveDir/throttle is the unit
-                // input vector.  Step magnitude scales with maxSpeed *
-                // EMIT_INTERVAL so spacing matches what the velocity-mode
-                // trail produces at full throttle (~12 u between rings on
-                // UNIVERSE), keeping the two modes visually comparable.
+                // input vector.  Offset accumulates in the -input direction
+                // so the trail extends opposite to thrust — i.e., out the
+                // back of the engine, the same way velocity mode extends
+                // opposite to translation.  Step magnitude scales with
+                // maxSpeed * EMIT_INTERVAL so spacing matches what the
+                // velocity-mode trail produces at full throttle.
                 const dirX = moveDir.x / throttle;
                 const dirY = moveDir.y / throttle;
                 const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
-                this.trailEmitOffset.x += dirX * step;
-                this.trailEmitOffset.y += dirY * step;
+                this.trailEmitOffset.x -= dirX * step;
+                this.trailEmitOffset.y -= dirY * step;
             }
             this.player.trail.push({
                 x: this.player.position.x + this.trailEmitOffset.x,
