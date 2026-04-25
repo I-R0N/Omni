@@ -90,6 +90,11 @@ export class RenderSystem {
   // nebula entities, which is the primary suspect for the high render
   // cost on the NebulaFieldMap.
   public lastNebulaMs: number = 0;
+  // Visible-nebula-entity count after the per-frame frustum cull.  Read
+  // by the dev overlay so the user can see how many tiles the nebula
+  // pass is actually iterating per frame — context for interpreting
+  // lastNebulaMs.  Updated once per render() call.
+  public lastNebulaVisible: number = 0;
 
   // ── Render-path ablation toggles ───────────────────────────────────
   // Both default off (production behaviour preserved) and are flipped
@@ -538,6 +543,10 @@ export class RenderSystem {
             this._trailEntities.push({ entity, rx, ry });
         }
     }
+
+    // Snapshot the visible-nebula count after the cull bucket is built
+    // so the dev overlay can report it alongside the nebula sub-timer.
+    this.lastNebulaVisible = this._nebulaEntities.length;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);

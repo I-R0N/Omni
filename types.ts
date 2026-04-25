@@ -391,6 +391,12 @@ export interface PerfSnapshot {
   // pass can be A/B'd against the twinkle / background-puff ablation
   // toggles.
   nebulaMs: number;
+  // Visible-nebula-entity count post frustum cull (latest frame, not
+  // averaged).  Lets the user weigh nebulaMs against how many tiles the
+  // pass is actually iterating — at default zoom 0.65 the visible
+  // window is ~18 % of a 6 k map, so a 1 200-tile NebulaFieldMap
+  // surfaces ~210 tiles per frame.
+  nebulaVisible: number;
   flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
   // Collision broadphase — peak dynamic-grid cell density observed last step
   maxCellDensity: number;
