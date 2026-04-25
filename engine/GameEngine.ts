@@ -1063,12 +1063,13 @@ export class GameEngine {
             let emitOffsetY = 0;
             if (this.trailEmitMode === TrailEmitMode.THRUST) {
                 // throttle == |moveDir|, so moveDir/throttle is the unit
-                // input vector.  Step magnitude scales with maxSpeed *
-                // EMIT_INTERVAL so spacing matches what the velocity-mode
-                // trail produces at full throttle.
+                // input vector.  Step magnitude is 5× (maxSpeed *
+                // EMIT_INTERVAL) — the velocity-mode point spacing scaled
+                // up so the THRUST trail reads ~5× longer behind the ship
+                // than the per-step spacing would otherwise produce.
                 const dirX = moveDir.x / throttle;
                 const dirY = moveDir.y / throttle;
-                const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
+                const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL * 5;
                 emitOffsetX = -dirX * step;
                 emitOffsetY = -dirY * step;
             }
