@@ -727,7 +727,11 @@ export class RenderSystem {
   // is squared so the fade is visible mid-trail during continuous thrust,
   // not just near the disappearing tail.  Segments are skipped when:
   //   • the newer point is flagged chainStart (thrust restart — old chain
-  //     should keep fading on its own, no bridge to the new chain), or
+  //     should keep fading on its own, no bridge to the new chain),
+  //   • consecutive shifted points exceed CHAIN_GAP_PX (defense-in-depth
+  //     against any thrust-restart edge case the chainStart flag misses
+  //     — at top speed continuous emissions are <14 u apart, so 50 u is
+  //     well clear of normal thrust spacing), or
   //   • consecutive shifted points straddle a wrap seam.
   private drawPlayerTrailPath(
       ctx: CanvasRenderingContext2D,
@@ -740,6 +744,7 @@ export class RenderSystem {
       if (t.length < 2) return;
 
       const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
+      const CHAIN_GAP_SQ = 50 * 50;
       let prevX = shiftX(camX, t[0].x);
       let prevY = shiftY(camY, t[0].y);
       for (let i = 1; i < t.length; i++) {
@@ -747,8 +752,10 @@ export class RenderSystem {
           const cy = shiftY(camY, t[i].y);
           const dx = cx - prevX;
           const dy = cy - prevY;
-          const seamSpan = dx * dx + dy * dy > SEAM_BREAK_SQ;
-          if (!seamSpan && !t[i].chainStart) {
+          const distSq = dx * dx + dy * dy;
+          const seamSpan = distSq > SEAM_BREAK_SQ;
+          const gapSpan  = distSq > CHAIN_GAP_SQ;
+          if (!seamSpan && !gapSpan && !t[i].chainStart) {
               const p0 = t[i - 1];
               const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
               if (r0 > 0) {

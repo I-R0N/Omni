@@ -1032,7 +1032,7 @@ export class GameEngine {
                 maxLifetime: pointLifetime,
                 scale: 1,
                 angle,
-                chainStart: this.chainBreakPending || undefined,
+                chainStart: this.chainBreakPending ? true : undefined,
             });
             this.chainBreakPending = false;
         }
