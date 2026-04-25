@@ -862,6 +862,12 @@ export class RenderSystem {
     ) {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
+    // performance.now() ticks since page load — used for the nebula
+    // twinkle scheduler (and the matching fast-path predicate).  Hoist
+    // it to per-frame so the slow path doesn't pay the syscall cost
+    // per tile, and keep both the fast-path check and the twinkle
+    // bookkeeping reading the *same* clock so the comparison is valid.
+    const perfNowSec = performance.now() / 1000;
 
     // Cache the structure sprite once.  Prior to this, getImage() was
     // called once per visible tile (200-400×) to look up the same image.
@@ -917,7 +923,7 @@ export class RenderSystem {
           && entity.regenPopTimer === undefined
           && entity.nebulaCachedTinted !== undefined
           && entity.nebulaTwinkleNextAt !== undefined
-          && nowSec < entity.nebulaTwinkleNextAt) {
+          && perfNowSec < entity.nebulaTwinkleNextAt) {
           ctx.globalAlpha = 0.55;
           ctx.drawImage(
               entity.nebulaCachedTinted,
@@ -1122,7 +1128,7 @@ export class RenderSystem {
           // without a visible change.
           //
           if (entity.type === EntityType.NEBULA) {
-              const now = performance.now() / 1000;
+              const now = perfNowSec;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
                   // across the [MIN, MAX] interval so a freshly-spawned
