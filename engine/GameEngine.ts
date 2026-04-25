@@ -86,10 +86,12 @@ export class GameEngine {
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
-  // Player-trail emission gate — THRUST (default) emits while the player
-  // is accelerating, VELOCITY emits while the player is translating.
-  // Toggled from the DBG panel for visual A/B comparison.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
+  // Player-trail direction mode — VELOCITY (default) extends the trail
+  // opposite to velocity (current production look — points emitted at
+  // player.position naturally trail behind via the ship's path through
+  // space).  THRUST extends the trail in the +input direction by adding
+  // a cumulative per-emit offset.  Toggled from the DBG panel.
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -134,6 +136,13 @@ export class GameEngine {
   // "thrust pressed" and "accumulator first reaches EMIT_INTERVAL", so the
   // chainStart flag is never lost to substep timing.
   private chainBreakPending: boolean = false;
+  // Cumulative emit-position offset used by THRUST mode to extend the trail
+  // in the +input direction from the ship.  Each emit advances it by
+  // (inputDir * step); resets at thrust start (chainBreakPending) and when
+  // thrust ends so a fresh thrust event begins anchored at the ship.
+  // Stays at zero in VELOCITY mode (default), where the trail extends
+  // opposite to velocity naturally via the ship's path through space.
+  private trailEmitOffset: Vector2 = { x: 0, y: 0 };
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -224,18 +233,20 @@ export class GameEngine {
   }
 
   /**
-   * Toggle player-trail emission gate between THRUST and VELOCITY.
-   * THRUST emits while the player is accelerating; VELOCITY emits while
-   * the player is translating.  Resets the emission accumulator and the
-   * "was-emitting" latch so the new mode starts cleanly without
-   * inheriting accumulator state from the previous mode.
+   * Toggle the player-trail direction mode between THRUST and VELOCITY.
+   * Both modes emit only while throttle > 0.  VELOCITY (default) places
+   * trail points at player.position so the trail extends opposite to
+   * velocity as the ship moves; THRUST accumulates an offset in the
+   * +input direction each emit so the trail extends in the direction of
+   * thrust regardless of velocity.  Resets the per-thrust-event offset
+   * so the new mode starts cleanly at the ship.
    */
   public cycleTrailEmitMode() {
     this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
       ? TrailEmitMode.VELOCITY
       : TrailEmitMode.THRUST;
-    this.trailEmitAccumulator = 0;
-    this.wasThrustingLastFrame = false;
+    this.trailEmitOffset.x = 0;
+    this.trailEmitOffset.y = 0;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -398,6 +409,8 @@ export class GameEngine {
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
+      this.trailEmitOffset.x = 0;
+      this.trailEmitOffset.y = 0;
       this.waveAnnouncements = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -414,6 +427,8 @@ export class GameEngine {
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
+      this.trailEmitOffset.x = 0;
+      this.trailEmitOffset.y = 0;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -1026,26 +1041,19 @@ export class GameEngine {
         this.tickTrail(this.player.trail, dt);
     }
 
-    // Emission gate — THRUST (default) ties the trail to input so coasting
-    // at full speed produces no rings; VELOCITY ties it to translation so
-    // the trail reads off motion regardless of whether thrust is applied.
-    // The accumulator ticks proportional to whichever quantity is active,
-    // so emission density scales with how hard the player is pushing
-    // (THRUST) or how fast they're moving (VELOCITY).
-    let emitWeight: number;
-    if (this.trailEmitMode === TrailEmitMode.VELOCITY) {
-        emitWeight = maxSpeed > 0 ? Math.min(1, currentSpeed / maxSpeed) : 0;
-    } else {
-        emitWeight = throttle;
-    }
-    const emitting = emitWeight > 0.01;
-    if (emitting) {
-        // Latch a chain break the first frame emission resumes.  Stays set
+    // Thrust-gated emission — accumulator ticks proportional to throttle, so
+    // rings only appear when the player is actively accelerating.  Coasting
+    // at full speed with no input produces no rings, which ties the visual
+    // emission gate to acceleration rather than velocity.  The trail-emit
+    // mode toggle below changes the *direction* the trail extends from the
+    // ship — emission gate stays on throttle in both modes.
+    if (throttle > 0) {
+        // Latch a chain break the first frame thrust resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
         // it — so the very first new point always gets chainStart, no
         // matter how long it takes the accumulator to reach EMIT_INTERVAL.
         if (!this.wasThrustingLastFrame) this.chainBreakPending = true;
-        this.trailEmitAccumulator += dt * emitWeight;
+        this.trailEmitAccumulator += dt * throttle;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
@@ -1055,9 +1063,35 @@ export class GameEngine {
             const vx = this.player.velocity.x;
             const vy = this.player.velocity.y;
             const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
+            // Emit-position offset — controls which way the trail extends
+            // from the ship.  VELOCITY mode (default) places points at
+            // player.position so the trail naturally extends opposite to
+            // velocity as the ship moves through space.  THRUST mode
+            // accumulates an offset in the +input direction each emit so
+            // the trail spatially extends in the direction of thrust,
+            // independent of whatever direction the ship is actually
+            // translating.  Reset on chainStart so a fresh thrust event
+            // begins anchored at the ship rather than continuing from the
+            // last event's accumulated offset.
+            if (this.chainBreakPending) {
+                this.trailEmitOffset.x = 0;
+                this.trailEmitOffset.y = 0;
+            }
+            if (this.trailEmitMode === TrailEmitMode.THRUST) {
+                // throttle == |moveDir|, so moveDir/throttle is the unit
+                // input vector.  Step magnitude scales with maxSpeed *
+                // EMIT_INTERVAL so spacing matches what the velocity-mode
+                // trail produces at full throttle (~12 u between rings on
+                // UNIVERSE), keeping the two modes visually comparable.
+                const dirX = moveDir.x / throttle;
+                const dirY = moveDir.y / throttle;
+                const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
+                this.trailEmitOffset.x += dirX * step;
+                this.trailEmitOffset.y += dirY * step;
+            }
             this.player.trail.push({
-                x: this.player.position.x,
-                y: this.player.position.y,
+                x: this.player.position.x + this.trailEmitOffset.x,
+                y: this.player.position.y + this.trailEmitOffset.y,
                 lifetime: pointLifetime,
                 maxLifetime: pointLifetime,
                 scale: 1,
@@ -1070,6 +1104,8 @@ export class GameEngine {
     } else {
         this.trailEmitAccumulator = 0;
         this.wasThrustingLastFrame = false;
+        this.trailEmitOffset.x = 0;
+        this.trailEmitOffset.y = 0;
     }
 
     // Glitter trail — motion-driven sparkles overlaid on the player sprite
@@ -1367,6 +1403,8 @@ export class GameEngine {
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
+      this.trailEmitOffset.x = 0;
+      this.trailEmitOffset.y = 0;
       this.chainBreakPending = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;

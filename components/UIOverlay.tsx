@@ -117,15 +117,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Trail emission gate — THRUST (input/accel) vs VELOCITY (translation) */}
+              {/* Trail direction — VELOCITY (extends opposite to velocity) vs THRUST (extends in input direction) */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Emit</span>
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Dir</span>
                 <button
                   onClick={onCycleTrailEmitMode}
                   className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Toggle trail emission gate: THRUST (input/accel) vs VELOCITY (translation)"
+                  title="Toggle trail direction: VELOCITY (trail extends opposite to velocity) vs THRUST (trail extends in input/thrust direction)"
                 >
-                  {stats.trailEmitMode === TrailEmitMode.VELOCITY ? 'Velocity' : 'Thrust'}
+                  {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
                 </button>
               </div>
 
