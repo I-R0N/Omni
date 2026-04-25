@@ -710,11 +710,13 @@ export class RenderSystem {
       }
   }
 
-  // Continuous polyline through every active trail point.  Pre-shifts each
-  // point into the camera's wrap zone and breaks the path whenever
-  // consecutive shifted points are far enough apart that they almost
-  // certainly straddle a wrap seam — otherwise a wrapping ship would draw
-  // a long diagonal segment across the entire map.
+  // Continuous polyline through every active trail point.  Each segment is
+  // stroked individually with alpha driven by the *older* endpoint's own
+  // lifetime ratio, so the tail segment fades to zero just before its
+  // source point is culled — otherwise the path would lose whole segments
+  // at full opacity every EMIT_INTERVAL and read as choppy.  Wrap seams
+  // break the path so a wrapping ship doesn't draw a diagonal across the
+  // entire map.
   private drawPlayerTrailPath(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
@@ -724,31 +726,31 @@ export class RenderSystem {
       peak: number,
   ) {
       if (t.length < 2) return;
-      // Alpha follows the head's age so the whole stroke fades together as
-      // the trail decays after the player stops emitting.
-      const head = t[t.length - 1];
-      const headRatio = Math.max(0, Math.min(1, head.lifetime / Math.max(head.maxLifetime, 1e-6)));
-      ctx.strokeStyle = `rgba(${color}, ${peak * headRatio})`;
 
       const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
-      ctx.beginPath();
       let prevX = shiftX(camX, t[0].x);
       let prevY = shiftY(camY, t[0].y);
-      ctx.moveTo(prevX, prevY);
       for (let i = 1; i < t.length; i++) {
           const cx = shiftX(camX, t[i].x);
           const cy = shiftY(camY, t[i].y);
           const dx = cx - prevX;
           const dy = cy - prevY;
-          if (dx * dx + dy * dy > SEAM_BREAK_SQ) {
-              ctx.moveTo(cx, cy);
-          } else {
-              ctx.lineTo(cx, cy);
+          // Skip seam-spanning segments — adjacent shifted points should
+          // be at most a few pixels apart in screen space.
+          if (dx * dx + dy * dy <= SEAM_BREAK_SQ) {
+              const p0 = t[i - 1];
+              const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
+              if (r0 > 0) {
+                  ctx.strokeStyle = `rgba(${color}, ${peak * r0})`;
+                  ctx.beginPath();
+                  ctx.moveTo(prevX, prevY);
+                  ctx.lineTo(cx, cy);
+                  ctx.stroke();
+              }
           }
           prevX = cx;
           prevY = cy;
       }
-      ctx.stroke();
   }
 
   // Reusable scratch buffer for shifted trail coordinates — keeps the
