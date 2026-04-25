@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { EngineStats, MapType, GameState, TrailShape } from '../types';
+import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
 
 interface UIOverlayProps {
   stats: EngineStats;
@@ -12,6 +12,7 @@ interface UIOverlayProps {
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
+  onCycleTrailEmitMode?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -29,6 +30,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleDebug,
   onToggleNebulaSet,
   onCycleTrailShape,
+  onCycleTrailEmitMode,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -112,6 +114,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : stats.trailShape === TrailShape.NONE
                     ? 'None'
                     : 'Circle'}
+                </button>
+              </div>
+
+              {/* Trail emission gate — THRUST (input/accel) vs VELOCITY (translation) */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Emit</span>
+                <button
+                  onClick={onCycleTrailEmitMode}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle trail emission gate: THRUST (input/accel) vs VELOCITY (translation)"
+                >
+                  {stats.trailEmitMode === TrailEmitMode.VELOCITY ? 'Velocity' : 'Thrust'}
                 </button>
               </div>
 

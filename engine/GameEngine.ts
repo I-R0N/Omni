@@ -14,7 +14,7 @@ import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -86,6 +86,10 @@ export class GameEngine {
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
+  // Player-trail emission gate — THRUST (default) emits while the player
+  // is accelerating, VELOCITY emits while the player is translating.
+  // Toggled from the DBG panel for visual A/B comparison.
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -217,6 +221,21 @@ export class GameEngine {
     const i = order.indexOf(this.trailShape);
     this.trailShape = order[(i + 1) % order.length];
     this.renderer.setTrailShape(this.trailShape);
+  }
+
+  /**
+   * Toggle player-trail emission gate between THRUST and VELOCITY.
+   * THRUST emits while the player is accelerating; VELOCITY emits while
+   * the player is translating.  Resets the emission accumulator and the
+   * "was-emitting" latch so the new mode starts cleanly without
+   * inheriting accumulator state from the previous mode.
+   */
+  public cycleTrailEmitMode() {
+    this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
+      ? TrailEmitMode.VELOCITY
+      : TrailEmitMode.THRUST;
+    this.trailEmitAccumulator = 0;
+    this.wasThrustingLastFrame = false;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -353,6 +372,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
+      trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -450,6 +470,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
+      trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -1005,17 +1026,26 @@ export class GameEngine {
         this.tickTrail(this.player.trail, dt);
     }
 
-    // Thrust-gated emission — accumulator ticks proportional to throttle, so
-    // rings only appear when the player is actively accelerating.  Coasting
-    // at full speed with no input produces no rings, which ties the visual
-    // to acceleration rather than velocity.
-    if (throttle > 0) {
-        // Latch a chain break the first frame thrust resumes.  Stays set
+    // Emission gate — THRUST (default) ties the trail to input so coasting
+    // at full speed produces no rings; VELOCITY ties it to translation so
+    // the trail reads off motion regardless of whether thrust is applied.
+    // The accumulator ticks proportional to whichever quantity is active,
+    // so emission density scales with how hard the player is pushing
+    // (THRUST) or how fast they're moving (VELOCITY).
+    let emitWeight: number;
+    if (this.trailEmitMode === TrailEmitMode.VELOCITY) {
+        emitWeight = maxSpeed > 0 ? Math.min(1, currentSpeed / maxSpeed) : 0;
+    } else {
+        emitWeight = throttle;
+    }
+    const emitting = emitWeight > 0.01;
+    if (emitting) {
+        // Latch a chain break the first frame emission resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
         // it — so the very first new point always gets chainStart, no
         // matter how long it takes the accumulator to reach EMIT_INTERVAL.
         if (!this.wasThrustingLastFrame) this.chainBreakPending = true;
-        this.trailEmitAccumulator += dt * throttle;
+        this.trailEmitAccumulator += dt * emitWeight;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
