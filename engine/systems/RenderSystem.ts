@@ -943,6 +943,27 @@ export class RenderSystem {
               entity.nebulaCachedSize ?? 0,
           );
           ctx.globalAlpha = 1.0;
+          // Debug overlay parity with the slow path — without this the
+          // polygon outline only appears for tiles currently in their
+          // twinkle window (which forces them to the slow path), which
+          // looks like random flickering across the cluster.  Drawn in
+          // world space (no ctx.translate in the fast path) by adding
+          // (rx, ry) to each polygon point.
+          if (this.debugMode && entity.polygonPoints && entity.polygonPoints.length > 0) {
+              ctx.globalAlpha = 0.9;
+              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              const p0 = entity.polygonPoints[0];
+              ctx.moveTo(rx + p0.x, ry + p0.y);
+              for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                  const p = entity.polygonPoints[pi];
+                  ctx.lineTo(rx + p.x, ry + p.y);
+              }
+              ctx.closePath();
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+          }
           this.lastNebulaFastCount++;
           return;
       }
