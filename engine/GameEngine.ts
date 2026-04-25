@@ -120,10 +120,16 @@ export class GameEngine {
   // EMIT_INTERVAL threshold.  Ties emission rate to applied thrust
   // (acceleration input), not to raw velocity — coasting produces no rings.
   private trailEmitAccumulator: number = 0;
-  // Thrust state from the previous emission update.  Used to flag the
-  // first emission of each thrust event so the PATH renderer can break
-  // the polyline at the gap rather than connecting old tail to new head.
+  // Thrust state from the previous emission update.  Used to detect the
+  // start of a fresh thrust event so the next emitted point can carry a
+  // chainStart flag and the PATH renderer can break the polyline at the
+  // gap rather than connecting old tail to new head.
   private wasThrustingLastFrame: boolean = false;
+  // Sticky flag set when a fresh thrust event begins, cleared only when an
+  // emission actually consumes it.  Survives the substeps / frames between
+  // "thrust pressed" and "accumulator first reaches EMIT_INTERVAL", so the
+  // chainStart flag is never lost to substep timing.
+  private chainBreakPending: boolean = false;
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -371,6 +377,7 @@ export class GameEngine {
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
+      this.chainBreakPending = false;
       this.waveAnnouncements = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -386,6 +393,7 @@ export class GameEngine {
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
+      this.chainBreakPending = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -1002,10 +1010,12 @@ export class GameEngine {
     // at full speed with no input produces no rings, which ties the visual
     // to acceleration rather than velocity.
     if (throttle > 0) {
+        // Latch a chain break the first frame thrust resumes.  Stays set
+        // through subsequent substeps / frames until an emission consumes
+        // it — so the very first new point always gets chainStart, no
+        // matter how long it takes the accumulator to reach EMIT_INTERVAL.
+        if (!this.wasThrustingLastFrame) this.chainBreakPending = true;
         this.trailEmitAccumulator += dt * throttle;
-        // First emission after a thrust gap starts a fresh chain so the
-        // PATH renderer doesn't bridge old tail → new head.
-        let pendingChainStart = !this.wasThrustingLastFrame;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
@@ -1022,9 +1032,9 @@ export class GameEngine {
                 maxLifetime: pointLifetime,
                 scale: 1,
                 angle,
-                chainStart: pendingChainStart || undefined,
+                chainStart: this.chainBreakPending || undefined,
             });
-            pendingChainStart = false;
+            this.chainBreakPending = false;
         }
         this.wasThrustingLastFrame = true;
     } else {
@@ -1327,6 +1337,7 @@ export class GameEngine {
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
+      this.chainBreakPending = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
       this.player.burstTimer = 0;
