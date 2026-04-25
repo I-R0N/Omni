@@ -137,13 +137,6 @@ export class GameEngine {
   // "thrust pressed" and "accumulator first reaches EMIT_INTERVAL", so the
   // chainStart flag is never lost to substep timing.
   private chainBreakPending: boolean = false;
-  // Cumulative emit-position offset used by THRUST mode to extend the trail
-  // opposite to the input/thrust direction from the ship.  Each emit
-  // advances it by (-inputDir * step); resets at thrust start
-  // (chainBreakPending) and when thrust ends so a fresh thrust event begins
-  // anchored at the ship.  Stays at zero in VELOCITY mode (default), where
-  // the trail extends opposite to velocity naturally via the ship's path.
-  private trailEmitOffset: Vector2 = { x: 0, y: 0 };
 
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Pre-allocated ring buffers for per-system timings over the last N sim
@@ -246,8 +239,6 @@ export class GameEngine {
     this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
       ? TrailEmitMode.VELOCITY
       : TrailEmitMode.THRUST;
-    this.trailEmitOffset.x = 0;
-    this.trailEmitOffset.y = 0;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -410,8 +401,6 @@ export class GameEngine {
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
-      this.trailEmitOffset.x = 0;
-      this.trailEmitOffset.y = 0;
       this.waveAnnouncements = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -428,8 +417,6 @@ export class GameEngine {
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
-      this.trailEmitOffset.x = 0;
-      this.trailEmitOffset.y = 0;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
@@ -1068,33 +1055,26 @@ export class GameEngine {
             // from the ship.  VELOCITY mode (default) places points at
             // player.position so the trail naturally extends opposite to
             // velocity as the ship moves through space.  THRUST mode
-            // accumulates an offset in the -input direction each emit so
-            // the trail spatially extends opposite to thrust, independent
-            // of whatever direction the ship is actually translating.
-            // Reset on chainStart so a fresh thrust event begins anchored
-            // at the ship rather than continuing from the last event's
-            // accumulated offset.
-            if (this.chainBreakPending) {
-                this.trailEmitOffset.x = 0;
-                this.trailEmitOffset.y = 0;
-            }
+            // offsets each emit by (-inputDir * step) — a per-emit (NOT
+            // cumulative) offset so the trail extends opposite to thrust,
+            // anchored relative to the ship's current position rather
+            // than drifting away over time.
+            let emitOffsetX = 0;
+            let emitOffsetY = 0;
             if (this.trailEmitMode === TrailEmitMode.THRUST) {
                 // throttle == |moveDir|, so moveDir/throttle is the unit
-                // input vector.  Offset accumulates in the -input direction
-                // so the trail extends opposite to thrust — i.e., out the
-                // back of the engine, the same way velocity mode extends
-                // opposite to translation.  Step magnitude scales with
-                // maxSpeed * EMIT_INTERVAL so spacing matches what the
-                // velocity-mode trail produces at full throttle.
+                // input vector.  Step magnitude scales with maxSpeed *
+                // EMIT_INTERVAL so spacing matches what the velocity-mode
+                // trail produces at full throttle.
                 const dirX = moveDir.x / throttle;
                 const dirY = moveDir.y / throttle;
                 const step = maxSpeed * PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
-                this.trailEmitOffset.x -= dirX * step;
-                this.trailEmitOffset.y -= dirY * step;
+                emitOffsetX = -dirX * step;
+                emitOffsetY = -dirY * step;
             }
             this.player.trail.push({
-                x: this.player.position.x + this.trailEmitOffset.x,
-                y: this.player.position.y + this.trailEmitOffset.y,
+                x: this.player.position.x + emitOffsetX,
+                y: this.player.position.y + emitOffsetY,
                 lifetime: pointLifetime,
                 maxLifetime: pointLifetime,
                 scale: 1,
@@ -1107,8 +1087,6 @@ export class GameEngine {
     } else {
         this.trailEmitAccumulator = 0;
         this.wasThrustingLastFrame = false;
-        this.trailEmitOffset.x = 0;
-        this.trailEmitOffset.y = 0;
     }
 
     // Glitter trail — motion-driven sparkles overlaid on the player sprite
@@ -1406,8 +1384,6 @@ export class GameEngine {
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
-      this.trailEmitOffset.x = 0;
-      this.trailEmitOffset.y = 0;
       this.chainBreakPending = false;
       this.player.weaponCooldown = 0;
       this.player.burstQueue = 0;
