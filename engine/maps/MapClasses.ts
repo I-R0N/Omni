@@ -515,14 +515,217 @@ export class PocketMap extends BaseMapLayer {
 
 /**
  * Concentric rotational flow — tangent to the circle of radius |r| at
- * every point, CCW.  Shared by RingMap and SevenRingsMap so both maps
- * read as the same weather system with different tile layouts on top.
+ * every point, CCW.  Shared by RingMap, SevenRingsMap, and
+ * AsteroidFieldMap so every "ring weather" map reads as the same
+ * vortex with different contents on top.
  */
 function concentricRingFlow(wx: number, wy: number): FlowVector {
   const r2 = wx * wx + wy * wy;
   if (r2 < 1e-6) return { x: 1, y: 0 };
   const inv = 1 / Math.sqrt(r2);
   return { x: -wy * inv, y: wx * inv };
+}
+
+/**
+ * Single-element showcase maps — 6 000 × 6 000 playfields that each
+ * spawn exactly one entity type.  Used to stress one system at a time
+ * (flow field, tile regen, nebula shatter) without cross-element
+ * interference.
+ *
+ * Each map keeps the same 350-unit spawn bubble clear so the player
+ * never materialises inside a tile/asteroid regardless of which element
+ * is selected.
+ */
+const SINGLE_ELEMENT_MAP_SIZE   = 6000;
+const SINGLE_ELEMENT_SPAWN_CLEAR = 350;
+// Cluster zone shrinks by the same 5 % safe-fraction used on the
+// UniverseMap so clusters never crowd the wrap seam.
+const SINGLE_ELEMENT_CLUSTER_FRAC = 0.95;
+
+/**
+ * Asteroid-only field — asteroids spread across the 6k map, riding a
+ * concentric rotational flow so the belt reads as one giant vortex.
+ * No tiles, no nebulae.
+ */
+export class AsteroidFieldMap extends BaseMapLayer {
+  public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
+  public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
+
+  constructor() {
+    super('asteroid_field_01', 'Asteroid Field', MapType.ASTEROID_FIELD);
+    this.width  = AsteroidFieldMap.WIDTH;
+    this.height = AsteroidFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  public sampleFlow(wx: number, wy: number): FlowVector {
+    return concentricRingFlow(wx, wy);
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const gen = ASTEROID_GENERATION_CONFIG[MapType.ASTEROID_FIELD];
+    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    for (const e of this.entities) wrapPosition(e.position);
+
+    const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > clearSq;
+    });
+  }
+}
+
+/**
+ * Base for the single-variant tile-field maps.  Subclasses supply the
+ * STRUCTURE variant and cluster-size range; the shared init emits
+ * clusters over ~95 % of the 6k map with a clear spawn bubble.  No
+ * asteroids, no nebulae.
+ */
+abstract class SingleVariantTileFieldMap extends BaseMapLayer {
+  public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
+  public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
+
+  protected abstract readonly variant: StructureVariant;
+  protected abstract readonly clusterCount: number;
+  protected abstract readonly minClusterSize: number;
+  protected abstract readonly maxClusterSize: number;
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const CLUSTER_W = MAP_WIDTH  * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const occupied = new Set<string>();
+
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        this.clusterCount, this.minClusterSize, this.maxClusterSize,
+        occupied, this.variant
+    ));
+
+    const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > clearSq;
+    });
+  }
+}
+
+// Shared cluster sizing for the variant-tile field maps.  100 clusters
+// × 12 tiles = 1 200 entities, matching the asteroid-field count so
+// the debug render-time HUD compares like-for-like across maps.  The
+// (min, max) pair must satisfy max = min + 1 because
+// `generateClusteredMesh` computes target size as
+// `floor(min + random() * (max - min))` — random() ∈ [0, 1) collapses
+// to a constant when the span is exactly 1.
+const SINGLE_ELEMENT_CLUSTER_COUNT = 100;
+const SINGLE_ELEMENT_CLUSTER_SIZE  = 12;
+
+/** Glass-only field — single-hit destructible tiles spread across the map. */
+export class GlassFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'glass';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('glass_field_01', 'Glass Field', MapType.GLASS_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Hard-damageable field — 5-HP heavy tiles spread across the map.  The
+ * hardest destructible variant; every cluster requires sustained fire
+ * (or a high-momentum asteroid crash) to break.
+ */
+export class HardTileFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'heavy';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('hard_tile_field_01', 'Hard Tile Field', MapType.HARD_TILE_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Indestructible field — permanent wall clusters spread across the
+ * map.  Never take damage, never regenerate; a maze of fixed obstacles.
+ * Cluster sizing matches the other tile fields so the entity count
+ * (and therefore the debug render-time stat) is comparable across
+ * single-element maps.
+ */
+export class IndestructibleFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'indestructible';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('indestructible_field_01', 'Indestructible Field', MapType.INDESTRUCTIBLE_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Nebula-only field — pass-through nebula clusters spread across the
+ * 6k map.  Each cluster center is recorded into `nebulaClusterCenters`
+ * so the background layer renders puffs at the same positions as the
+ * interactable tiles.
+ */
+export class NebulaFieldMap extends BaseMapLayer {
+  public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
+  public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
+
+  // Match the variant-tile field cluster shape so the nebula map ends
+  // with ≈1 200 entities, on par with the other single-element maps.
+  // Overrides the legacy NEBULA_CONSTANTS-derived sizing used elsewhere
+  // (UniverseMap), which would emit ~2× more tiles here.
+  private static readonly CLUSTER_COUNT = SINGLE_ELEMENT_CLUSTER_COUNT;
+
+  constructor() {
+    super('nebula_field_01', 'Nebula Field', MapType.NEBULA_FIELD);
+    this.width  = NebulaFieldMap.WIDTH;
+    this.height = NebulaFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const CLUSTER_W = MAP_WIDTH  * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const occupied = new Set<string>();
+
+    this.entities.push(...TileGenerator.generateNebulaClusters(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        NebulaFieldMap.CLUSTER_COUNT,
+        SINGLE_ELEMENT_CLUSTER_SIZE,
+        SINGLE_ELEMENT_CLUSTER_SIZE + 1,
+        occupied,
+        this.nebulaClusterCenters
+    ));
+
+    const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > clearSq;
+    });
+  }
 }
 
 /**

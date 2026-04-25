@@ -9,6 +9,15 @@ export enum MapType {
   // for quickly validating interactions between systems without having
   // to fly across a full-size map to find them.
   POCKET      = 'POCKET',
+  // Single-element 6 000 × 6 000 showcase maps.  Each one populates the
+  // playfield with exactly one entity type so systems (flow fields,
+  // collision, regen, pathing, nebula shatter) can be stressed in
+  // isolation without cross-element interference.
+  ASTEROID_FIELD       = 'ASTEROID_FIELD',
+  GLASS_FIELD          = 'GLASS_FIELD',
+  HARD_TILE_FIELD      = 'HARD_TILE_FIELD',
+  INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
+  NEBULA_FIELD         = 'NEBULA_FIELD',
 }
 
 export enum GameState {
@@ -309,6 +318,22 @@ export interface GameEntity {
   // darker.  NebulaSystem recomputes this lazily whenever tiles are
   // destroyed, regenerated, or transmuted from shards.
   nebulaNeighborCount?: number;
+  // ── Render fast-path cache (NEBULA tiles only) ──────────────────────────
+  // Snapshot of the four inputs to the per-frame nebula draw call:
+  //   * `nebulaCachedTinted`  — the pre-tinted offscreen sprite canvas
+  //   * `nebulaCachedDx/Dy`   — centroid-corrected sprite-local offsets
+  //   * `nebulaCachedSize`    — drawSize (proportional to tileArea)
+  // Populated lazily by RenderSystem at the end of the slow path, then
+  // read by the fast path in subsequent frames so a steady-state tile
+  // collapses to `globalAlpha = 0.55; drawImage(...); globalAlpha = 1`.
+  // Invalidated by NebulaSystem at every site that mutates the inputs:
+  // composition (merge / regen), neighbour count (neighbour destroyed or
+  // regenerated), or tile area (merge).  Mirrors the same per-entity
+  // caching pattern `nebulaBlendedHex` already uses.
+  nebulaCachedTinted?: HTMLCanvasElement;
+  nebulaCachedDx?: number;
+  nebulaCachedDy?: number;
+  nebulaCachedSize?: number;
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
@@ -377,6 +402,24 @@ export interface PerfSnapshot {
   localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
   collisionsMs: number;   // PhysicsSystem.handleEntityCollisions (broadphase + SAT)
   renderMs: number;
+  // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
+  // debug overlay alongside renderMs so the contribution of the nebula
+  // pass can be A/B'd against the twinkle / background-puff ablation
+  // toggles.
+  nebulaMs: number;
+  // Visible-nebula-entity count post frustum cull (latest frame, not
+  // averaged).  Lets the user weigh nebulaMs against how many tiles the
+  // pass is actually iterating — at default zoom 0.65 the visible
+  // window is ~18 % of a 6 k map, so a 1 200-tile NebulaFieldMap
+  // surfaces ~210 tiles per frame.
+  nebulaVisible: number;
+  // Per-frame split of nebula entities that took the fast path (cached
+  // sprite, single drawImage) vs. the slow path (full ctx.save +
+  // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
+  // debug overlay so we can tell at a glance whether the fast path
+  // is matching for steady-state tiles.
+  nebulaFast: number;
+  nebulaSlow: number;
   flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
   // Collision broadphase — peak dynamic-grid cell density observed last step
   maxCellDensity: number;

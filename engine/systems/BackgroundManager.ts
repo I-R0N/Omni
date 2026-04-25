@@ -184,16 +184,17 @@ public setMapType(type: MapType) {
     // same method, alongside the rest of the band-generation pass.
     this.nebulaPuffs = [];
 
-    // Nebula puffs — if the map supplied a shared cluster-center list,
-    // place one puff at each recorded tile-cluster position.  Each puff
-    // still gets a RANDOM parallax depth (0.2–1.0) so the backdrop
-    // drifts as the camera moves.  At camera (0, 0) every BG puff
-    // aligns with an interactable tile cluster; as the camera moves,
-    // parallax separates them and the tile clusters appear on top of
-    // a drifting nebular backdrop.
+    // Nebula puffs — one background puff per recorded tile-cluster
+    // position.  Each puff gets a RANDOM parallax depth (0.2–1.0) so
+    // the backdrop drifts as the camera moves: at camera (0, 0) every
+    // BG puff aligns with an interactable tile cluster; as the camera
+    // moves, parallax separates them and the tile clusters appear on
+    // top of a drifting nebular backdrop.
     //
-    // Otherwise (legacy maps with no recorded centers), fall back to
-    // the original canvas-size-based random distribution.
+    // Maps without nebula tiles supply no cluster centers, so the
+    // background stays empty of nebulae — BG puffs exist only where
+    // interactable nebula tiles do, keeping the single-element
+    // showcase maps visually honest.
     if (this.nebulaClusterCenters) {
         for (const seed of this.nebulaClusterCenters) {
             const size = 150 + Math.random() * 250; // 150–400px
@@ -213,38 +214,6 @@ public setMapType(type: MapType) {
                 aspect: 0.8 + Math.random() * 0.4,
                 textureIndex: Math.floor(Math.random() * this.puffTextures.length)
             });
-        }
-    } else {
-        const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
-
-        for (let i = 0; i < numClusters; i++) {
-            const cx = (Math.random() - 0.5) * width * 20;
-            const cy = (Math.random() - 0.5) * height * 20;
-            const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
-
-            for (let j = 0; j < puffsPerCluster; j++) {
-                const size = 150 + Math.random() * 250; // 150–400px
-                const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
-                const offsetX = (Math.random() - 0.5) * 300; // ±150
-                const offsetY = (Math.random() - 0.5) * 200; // ±100
-                const hue = randomPaletteHueDeg();
-                // Keep color string for procedural fallback path
-                const color = `hsla(${hue}, 100%, 60%,`;
-
-                this.nebulaPuffs.push({
-                    x: cx + offsetX,
-                    y: cy + offsetY,
-                    size: size,
-                    depth: depth,
-                    opacity: 0.1 + Math.random() * 0.55, // 0.10–0.65
-                    color: color,
-                    hue: hue,
-                    rotation: Math.random() * Math.PI * 2,
-                    rotationSpeed: (Math.random() - 0.5) * 0.001,
-                    aspect: 0.8 + Math.random() * 0.4,
-                    textureIndex: Math.floor(Math.random() * this.puffTextures.length)
-                });
-            }
         }
     }
 
