@@ -57,6 +57,7 @@ export enum TrailShape {
   TRIANGLE = 'TRIANGLE',
   LINE     = 'LINE',
   PATH     = 'PATH',
+  DOTS     = 'DOTS',
   NONE     = 'NONE',
 }
 

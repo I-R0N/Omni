@@ -706,6 +706,15 @@ export class RenderSystem {
                   ctx.stroke();
                   break;
               }
+              case TrailShape.DOTS: {
+                  // Filled dot at fixed START_RADIUS — does not expand;
+                  // only alpha fades over lifetime.
+                  ctx.fillStyle = `rgba(${color}, ${alpha})`;
+                  ctx.beginPath();
+                  ctx.arc(sx, sy, startR, 0, Math.PI * 2);
+                  ctx.fill();
+                  break;
+              }
           }
       }
   }

@@ -207,7 +207,7 @@ export class GameEngine {
    * an instant visual swap with no respawn needed.
    */
   public cycleTrailShape() {
-    const order = [TrailShape.CIRCLE, TrailShape.SQUARE, TrailShape.TRIANGLE, TrailShape.LINE, TrailShape.PATH, TrailShape.NONE];
+    const order = [TrailShape.CIRCLE, TrailShape.SQUARE, TrailShape.TRIANGLE, TrailShape.LINE, TrailShape.PATH, TrailShape.DOTS, TrailShape.NONE];
     const i = order.indexOf(this.trailShape);
     this.trailShape = order[(i + 1) % order.length];
     this.renderer.setTrailShape(this.trailShape);
