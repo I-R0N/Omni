@@ -184,16 +184,17 @@ public setMapType(type: MapType) {
     // same method, alongside the rest of the band-generation pass.
     this.nebulaPuffs = [];
 
-    // Nebula puffs — if the map supplied a shared cluster-center list,
-    // place one puff at each recorded tile-cluster position.  Each puff
-    // still gets a RANDOM parallax depth (0.2–1.0) so the backdrop
-    // drifts as the camera moves.  At camera (0, 0) every BG puff
-    // aligns with an interactable tile cluster; as the camera moves,
-    // parallax separates them and the tile clusters appear on top of
-    // a drifting nebular backdrop.
+    // Nebula puffs — one background puff per recorded tile-cluster
+    // position.  Each puff gets a RANDOM parallax depth (0.2–1.0) so
+    // the backdrop drifts as the camera moves: at camera (0, 0) every
+    // BG puff aligns with an interactable tile cluster; as the camera
+    // moves, parallax separates them and the tile clusters appear on
+    // top of a drifting nebular backdrop.
     //
-    // Otherwise (legacy maps with no recorded centers), fall back to
-    // the original canvas-size-based random distribution.
+    // Maps without nebula tiles supply no cluster centers, so the
+    // background stays empty of nebulae — BG puffs exist only where
+    // interactable nebula tiles do, keeping the single-element
+    // showcase maps visually honest.
     if (this.nebulaClusterCenters) {
         for (const seed of this.nebulaClusterCenters) {
             const size = 150 + Math.random() * 250; // 150–400px
@@ -213,38 +214,6 @@ public setMapType(type: MapType) {
                 aspect: 0.8 + Math.random() * 0.4,
                 textureIndex: Math.floor(Math.random() * this.puffTextures.length)
             });
-        }
-    } else {
-        const numClusters = 50 + Math.floor(Math.random() * 51); // 50–100
-
-        for (let i = 0; i < numClusters; i++) {
-            const cx = (Math.random() - 0.5) * width * 20;
-            const cy = (Math.random() - 0.5) * height * 20;
-            const puffsPerCluster = 2 + Math.floor(Math.random() * 4); // 2–5
-
-            for (let j = 0; j < puffsPerCluster; j++) {
-                const size = 150 + Math.random() * 250; // 150–400px
-                const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0, no dampening
-                const offsetX = (Math.random() - 0.5) * 300; // ±150
-                const offsetY = (Math.random() - 0.5) * 200; // ±100
-                const hue = randomPaletteHueDeg();
-                // Keep color string for procedural fallback path
-                const color = `hsla(${hue}, 100%, 60%,`;
-
-                this.nebulaPuffs.push({
-                    x: cx + offsetX,
-                    y: cy + offsetY,
-                    size: size,
-                    depth: depth,
-                    opacity: 0.1 + Math.random() * 0.55, // 0.10–0.65
-                    color: color,
-                    hue: hue,
-                    rotation: Math.random() * Math.PI * 2,
-                    rotationSpeed: (Math.random() - 0.5) * 0.001,
-                    aspect: 0.8 + Math.random() * 0.4,
-                    textureIndex: Math.floor(Math.random() * this.puffTextures.length)
-                });
-            }
         }
     }
 
@@ -292,6 +261,9 @@ public setMapType(type: MapType) {
         const bandCanvas = document.createElement('canvas');
         bandCanvas.width = width; bandCanvas.height = height;
         const bandCtx = bandCanvas.getContext('2d')!;
+        // Per-band brightness cap: furthest band (b=0) dimmest at 25%,
+        // closest band (b=NUM_BANDS-1) brightest at 95%, linear between.
+        const bandBrightness = 0.25 + tMid * 0.70;
         for (let i = 0; i < STARS_PER_BAND; i++) {
             const t = (b + Math.random()) / NUM_BANDS;
             // Power-law size distribution: many tiny stars, fewer large ones.
@@ -299,8 +271,10 @@ public setMapType(type: MapType) {
             // has dense background haze but visible coloured foreground stars.
             const sizeBase = 0.3 + Math.pow(Math.random(), 3) * 0.6;
             const size = sizeBase * (0.5 + t * 0.8);
-            // Opacity: full 0.2–1.0 range; larger stars weighted brighter.
-            const opacity = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            // Within-band variation scaled against the band's brightness cap,
+            // so parallax depth maps directly to perceived brightness.
+            const variation = Math.min(1.0, 0.2 + Math.random() * 0.7 + size * 0.04);
+            const opacity = bandBrightness * variation;
             bandCtx.globalAlpha = opacity;
             bandCtx.fillStyle = starColor();
             const x = Math.random() * width;

@@ -13,7 +13,7 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
@@ -143,6 +143,7 @@ export class GameEngine {
   // Render timings (one sample per rendered frame — may be written in menu
   // and paused states as well, so this is tracked on its own cursor)
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -270,11 +271,16 @@ export class GameEngine {
    *  restartGame() share a single construction path. */
   private buildMap(type: MapType): BaseMapLayer {
     switch (type) {
-      case MapType.RING:        return new RingMap();
-      case MapType.SEVEN_RINGS: return new SevenRingsMap();
-      case MapType.POCKET:      return new PocketMap();
+      case MapType.RING:                 return new RingMap();
+      case MapType.SEVEN_RINGS:          return new SevenRingsMap();
+      case MapType.POCKET:               return new PocketMap();
+      case MapType.ASTEROID_FIELD:       return new AsteroidFieldMap();
+      case MapType.GLASS_FIELD:          return new GlassFieldMap();
+      case MapType.HARD_TILE_FIELD:      return new HardTileFieldMap();
+      case MapType.INDESTRUCTIBLE_FIELD: return new IndestructibleFieldMap();
+      case MapType.NEBULA_FIELD:         return new NebulaFieldMap();
       case MapType.UNIVERSE:
-      default:                  return new UniverseMap();
+      default:                           return new UniverseMap();
     }
   }
 
@@ -2061,10 +2067,12 @@ export class GameEngine {
   // substeps the accumulator drained.
   private recordRenderPerf() {
       this.perfRender[this.perfRenderIdx] = this.renderer.lastRenderMs;
+      this.perfNebula[this.perfRenderIdx] = this.renderer.lastNebulaMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
   }
+
 
   /**
    * Average the first `filled` entries of a ring buffer.  `filled` tracks
@@ -2103,6 +2111,10 @@ export class GameEngine {
           collisionsMs:   GameEngine.ringAvg(this.perfCollisions,   simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
+          nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
+          nebulaVisible:  this.renderer.lastNebulaVisible,
+          nebulaFast:     this.renderer.lastNebulaFastCount,
+          nebulaSlow:     this.renderer.lastNebulaSlowCount,
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),
