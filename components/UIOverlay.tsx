@@ -11,6 +11,8 @@ interface UIOverlayProps {
   onRestart?: () => void;
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
+  onToggleSuppressNebulaTwinkle?: () => void;
+  onToggleSuppressBackgroundPuffs?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -27,6 +29,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onRestart,
   onToggleDebug,
   onToggleNebulaSet,
+  onToggleSuppressNebulaTwinkle,
+  onToggleSuppressBackgroundPuffs,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -89,6 +93,38 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
+              {/* Render-time ablation toggles — flip wholesale features
+                  off so the perf overlay can show their delta against
+                  renderMs / nebulaMs. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Twinkle</span>
+                <button
+                  onClick={onToggleSuppressNebulaTwinkle}
+                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
+                    stats.suppressNebulaTwinkle
+                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
+                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
+                  }`}
+                  title="Skip the per-tile nebula twinkle scheduler + drawImage"
+                >
+                  {stats.suppressNebulaTwinkle ? 'OFF' : 'ON'}
+                </button>
+              </div>
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">BG puffs</span>
+                <button
+                  onClick={onToggleSuppressBackgroundPuffs}
+                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
+                    stats.suppressBackgroundPuffs
+                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
+                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
+                  }`}
+                  title="Skip the BackgroundManager nebula-puff render pass"
+                >
+                  {stats.suppressBackgroundPuffs ? 'OFF' : 'ON'}
+                </button>
+              </div>
+
               <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
               <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
               <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>
@@ -113,6 +149,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
                   <div className="flex justify-between"><span>flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
                   <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>

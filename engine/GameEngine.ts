@@ -158,6 +158,7 @@ export class GameEngine {
   // Render timings (one sample per rendered frame — may be written in menu
   // and paused states as well, so this is tracked on its own cursor)
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -343,6 +344,8 @@ export class GameEngine {
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      suppressNebulaTwinkle: this.renderer.getSuppressNebulaTwinkle(),
+      suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -438,6 +441,8 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      suppressNebulaTwinkle: this.renderer.getSuppressNebulaTwinkle(),
+      suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -2134,9 +2139,22 @@ export class GameEngine {
   // substeps the accumulator drained.
   private recordRenderPerf() {
       this.perfRender[this.perfRenderIdx] = this.renderer.lastRenderMs;
+      this.perfNebula[this.perfRenderIdx] = this.renderer.lastNebulaMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
+  }
+
+  // ── Dev ablation toggles (debug-only perf experiments) ──────────────
+  // These flip the corresponding suppression flag inside RenderSystem /
+  // BackgroundManager so the user can A/B compare render time on the
+  // same map without restarting.  No production behaviour changes when
+  // the toggles are off (default).
+  public toggleSuppressNebulaTwinkle() {
+      this.renderer.setSuppressNebulaTwinkle(!this.renderer.getSuppressNebulaTwinkle());
+  }
+  public toggleSuppressBackgroundPuffs() {
+      this.renderer.setSuppressBackgroundPuffs(!this.renderer.getSuppressBackgroundPuffs());
   }
 
   /**
@@ -2176,6 +2194,7 @@ export class GameEngine {
           collisionsMs:   GameEngine.ringAvg(this.perfCollisions,   simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
+          nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),

@@ -386,6 +386,11 @@ export interface PerfSnapshot {
   localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
   collisionsMs: number;   // PhysicsSystem.handleEntityCollisions (broadphase + SAT)
   renderMs: number;
+  // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
+  // debug overlay alongside renderMs so the contribution of the nebula
+  // pass can be A/B'd against the twinkle / background-puff ablation
+  // toggles.
+  nebulaMs: number;
   flowFieldMs: number;    // FlowFieldGrid.flushEnemyField
   // Collision broadphase — peak dynamic-grid cell density observed last step
   maxCellDensity: number;
@@ -412,6 +417,11 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
+  // Dev ablation toggle states.  Only meaningful when debugMode is true;
+  // surfaced in the debug overlay so the user can see which ablations
+  // are currently active when comparing render times across maps.
+  suppressNebulaTwinkle?: boolean;
+  suppressBackgroundPuffs?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

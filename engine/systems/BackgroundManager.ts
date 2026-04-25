@@ -126,6 +126,15 @@ public setMapType(type: MapType) {
     this.mapType = type;
   }
 
+  // Dev ablation toggle — when true, the background-nebula puff render
+  // pass is skipped wholesale.  Lets the perf overlay isolate how much
+  // of the NebulaFieldMap's render-time budget the backdrop layer is
+  // costing, separate from the foreground tile pass.  Default off; flag
+  // is only flipped from the debug panel.
+  private suppressNebulaPuffs: boolean = false;
+  public setSuppressNebulaPuffs(v: boolean) { this.suppressNebulaPuffs = v; }
+  public getSuppressNebulaPuffs(): boolean { return this.suppressNebulaPuffs; }
+
   /**
    * Provide a shared list of world-space nebula cluster start positions
    * that the tile generator recorded while building the tile clusters.
@@ -321,7 +330,9 @@ public setMapType(type: MapType) {
     // RENDER NEBULAE
     // x/y are world-space coordinates. Project to screen via parallax depth so
     // nebulae are distributed across the world and discovered as the camera moves.
-    this.nebulaPuffs.forEach(puff => {
+    // Dev ablation: skip the entire pass when the suppress toggle is on so
+    // the perf overlay can show render-time with vs without backdrop puffs.
+    if (!this.suppressNebulaPuffs) this.nebulaPuffs.forEach(puff => {
         // Toroidal delta so a puff on the far side of the seam still reads
         // as "close" to the camera and draws at the correct parallax-offset
         // screen spot instead of ~MAP_WIDTH off to the side.

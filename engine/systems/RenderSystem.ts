@@ -85,6 +85,27 @@ export class RenderSystem {
   // Written at the end of render() and read by GameEngine for the dev perf
   // overlay.  render() is a single top-level pass so one timer covers it.
   public lastRenderMs: number = 0;
+  // Sub-timer for the dedicated nebula-tile / shard pass.  Lets the dev
+  // overlay show what fraction of the total render budget is spent on
+  // nebula entities, which is the primary suspect for the high render
+  // cost on the NebulaFieldMap.
+  public lastNebulaMs: number = 0;
+
+  // ── Render-path ablation toggles ───────────────────────────────────
+  // Both default off (production behaviour preserved) and are flipped
+  // from the debug panel so the dev can A/B compare render-time on the
+  // same map without a rebuild.  Each one is a perf experiment, not a
+  // permanent feature — see the corresponding gates inside render() /
+  // BackgroundManager for the actual early-return.
+  private suppressNebulaTwinkle: boolean = false;
+  public setSuppressNebulaTwinkle(v: boolean) { this.suppressNebulaTwinkle = v; }
+  public getSuppressNebulaTwinkle(): boolean { return this.suppressNebulaTwinkle; }
+  public setSuppressBackgroundPuffs(v: boolean) {
+      this.backgroundManager.setSuppressNebulaPuffs(v);
+  }
+  public getSuppressBackgroundPuffs(): boolean {
+      return this.backgroundManager.getSuppressNebulaPuffs();
+  }
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
@@ -524,7 +545,11 @@ export class RenderSystem {
 
     // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
     // asteroids and everything else render on top of the nebula cloud.
+    // Wrapped in its own performance.now() bracket so the dev overlay
+    // can show nebula-pass cost separately from the total render time.
+    const tNebula0 = performance.now();
     this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+    this.lastNebulaMs = performance.now() - tNebula0;
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -1041,7 +1066,11 @@ export class RenderSystem {
           // on them while still costing a performance.now() + drawImage per
           // shard per frame.  Cutting it for shards eliminates that work
           // without a visible change.
-          if (entity.type === EntityType.NEBULA) {
+          //
+          // Also skipped when the dev "kill twinkle" ablation toggle is on
+          // (debug panel) so the contribution of the twinkle scheduler can
+          // be measured against the renderMs / nebulaMs sub-timer.
+          if (entity.type === EntityType.NEBULA && !this.suppressNebulaTwinkle) {
               const now = performance.now() / 1000;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
