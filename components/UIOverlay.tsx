@@ -113,6 +113,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
                   <div className="flex justify-between"><span>flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
                   <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>
@@ -192,12 +195,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
           <div className="mb-8 flex flex-col items-center gap-3">
             <span className="text-slate-200 text-sm tracking-wide">Map</span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-2 max-w-xl">
               {[
-                { type: MapType.UNIVERSE,    label: 'Deep Space' },
-                { type: MapType.RING,        label: 'Ring World' },
-                { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
-                { type: MapType.POCKET,      label: 'Pocket' },
+                { type: MapType.UNIVERSE,             label: 'Deep Space' },
+                { type: MapType.RING,                 label: 'Ring World' },
+                { type: MapType.SEVEN_RINGS,          label: 'Seven Rings' },
+                { type: MapType.POCKET,               label: 'Pocket' },
+                { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
+                { type: MapType.GLASS_FIELD,          label: 'Glass Field' },
+                { type: MapType.HARD_TILE_FIELD,      label: 'Hard Tiles' },
+                { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
+                { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
               ].map(opt => (
                 <button
                   key={opt.type}

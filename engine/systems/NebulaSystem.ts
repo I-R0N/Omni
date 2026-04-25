@@ -197,7 +197,10 @@ export class NebulaSystem {
             if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
             tilesProcessed++;
             if (!e.active) {
-                e.nebulaNeighborCount = 0;
+                if (e.nebulaNeighborCount !== 0) {
+                    e.nebulaNeighborCount = 0;
+                    e.nebulaCachedTinted = undefined;
+                }
                 continue;
             }
             let count = 0;
@@ -206,7 +209,13 @@ export class NebulaSystem {
                 const key = (n.c << 16) | (n.r & 0xFFFF);
                 if (index.has(key)) count++;
             }
-            e.nebulaNeighborCount = count;
+            // Neighbour count drives the interior-darken render rule, so
+            // any change invalidates the fast-path tinted canvas (built
+            // against the old darkened hex).
+            if (e.nebulaNeighborCount !== count) {
+                e.nebulaNeighborCount = count;
+                e.nebulaCachedTinted = undefined;
+            }
         }
         return tilesProcessed;
     }
@@ -619,6 +628,10 @@ export class NebulaSystem {
         // render rebuilds it against the new blended hex and re-links to
         // the freshly-rendered tinted canvas.
         larger.nebulaTintedKey = undefined;
+        // Drop the nebula fast-path cache too — both tint and (for any
+        // tile whose area changed via merge) drawSize are now stale.
+        // Slow path will repopulate on the next draw.
+        larger.nebulaCachedTinted = undefined;
 
         // Glittery glimmer burst scattered within a radius matching the
         // smaller shard — the subtle merge feedback.
@@ -873,8 +886,11 @@ export class NebulaSystem {
                 regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
                 // Composition changed on regen — drop the render cache so
                 // the regenerated tile picks up the new neighbourhood-blend
-                // colour on its next draw.
+                // colour on its next draw.  Same invalidation also clears
+                // the fast-path cache (tinted canvas / dx / dy / size) so
+                // the slow path repopulates on the regen tile's next draw.
                 regen.entity.nebulaBlendedHex = undefined;
+                regen.entity.nebulaCachedTinted = undefined;
 
                 // Fade in slowly instead of popping — no glimmer burst.
                 regen.entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;

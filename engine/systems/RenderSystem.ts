@@ -85,6 +85,22 @@ export class RenderSystem {
   // Written at the end of render() and read by GameEngine for the dev perf
   // overlay.  render() is a single top-level pass so one timer covers it.
   public lastRenderMs: number = 0;
+  // Sub-timer for the dedicated nebula-tile / shard pass.  Lets the dev
+  // overlay show what fraction of the total render budget is spent on
+  // nebula entities, which is the primary suspect for the high render
+  // cost on the NebulaFieldMap.
+  public lastNebulaMs: number = 0;
+  // Visible-nebula-entity count after the per-frame frustum cull.  Read
+  // by the dev overlay so the user can see how many tiles the nebula
+  // pass is actually iterating per frame — context for interpreting
+  // lastNebulaMs.  Updated once per render() call.
+  public lastNebulaVisible: number = 0;
+  // Per-frame split of how many nebula entities took the fast path vs.
+  // the slow path.  Reset at the start of render() and incremented in
+  // renderEntities below.  fast + slow == lastNebulaVisible (modulo
+  // entities that early-return for inactivity).
+  public lastNebulaFastCount: number = 0;
+  public lastNebulaSlowCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
@@ -272,6 +288,16 @@ export class RenderSystem {
    * Result is cached forever per (src, hex) pair; cache is bounded to ~256
    * entries to avoid unbounded growth when many nebula tiles mix hues.
    * Returns null while the underlying image is still loading.
+   *
+   * Canvas size is sized to roughly match the largest world draw size
+   * the result will be blitted at (≈120 world units for a full nebula
+   * tile via NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE).  128² is a 4×
+   * reduction over the previous 256² in fillrate, memory, and GC
+   * pressure — the source-atop tint pass is the main allocation
+   * hot-spot when approaching unseen clusters, since each
+   * (cluster-color × neighbour-count) combination demands its own
+   * canvas.  Quality cost is minimal because the blit downscales
+   * either way.
    */
   private getTintedSprite(src: string, hex: string): HTMLCanvasElement | null {
       const key = `${src}|${hex}`;
@@ -280,7 +306,7 @@ export class RenderSystem {
       const img = this.getImage(src);
       if (!img.complete || img.naturalWidth === 0) return null;
 
-      const size = 256; // power of 2 to keep upscaling crisp enough
+      const size = 128; // power of 2; matches typical world draw size
       const c = document.createElement('canvas');
       c.width = size;
       c.height = size;
@@ -496,6 +522,14 @@ export class RenderSystem {
         }
     }
 
+    // Snapshot the visible-nebula count after the cull bucket is built
+    // so the dev overlay can report it alongside the nebula sub-timer.
+    this.lastNebulaVisible = this._nebulaEntities.length;
+    // Reset the per-frame fast/slow split — incremented inside
+    // renderEntities below as each nebula entity is dispatched.
+    this.lastNebulaFastCount = 0;
+    this.lastNebulaSlowCount = 0;
+
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
 
@@ -524,7 +558,11 @@ export class RenderSystem {
 
     // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
     // asteroids and everything else render on top of the nebula cloud.
+    // Wrapped in its own performance.now() bracket so the dev overlay
+    // can show nebula-pass cost separately from the total render time.
+    const tNebula0 = performance.now();
     this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+    this.lastNebulaMs = performance.now() - tNebula0;
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -834,6 +872,12 @@ export class RenderSystem {
     ) {
     // Computed once per frame and reused by all entity rendering below.
     const nowSec = Date.now() / 1000;
+    // performance.now() ticks since page load — used for the nebula
+    // twinkle scheduler (and the matching fast-path predicate).  Hoist
+    // it to per-frame so the slow path doesn't pay the syscall cost
+    // per tile, and keep both the fast-path check and the twinkle
+    // bookkeeping reading the *same* clock so the comparison is valid.
+    const perfNowSec = performance.now() / 1000;
 
     // Cache the structure sprite once.  Prior to this, getImage() was
     // called once per visible tile (200-400×) to look up the same image.
@@ -865,6 +909,65 @@ export class RenderSystem {
           return;
       }
 
+      // ── Fast-path NEBULA tile render ───────────────────────────────
+      // Mirrors the STRUCTURE fast path.  Steady-state nebula tiles (no
+      // hit flash, no fade in / fade out, not in a twinkle window, cache
+      // populated by an earlier slow-path draw) collapse to a single
+      // drawImage + two globalAlpha writes — cutting per-tile cost from
+      // ~30-100 µs to ~5 µs.  Tiles drop into the slow path automatically
+      // when twinkle activates (nebulaTwinkleNextAt has elapsed) or when
+      // NebulaSystem invalidates the cache (nebulaCachedTinted=undefined).
+      // Shards are excluded because they still need ctx.rotate +
+      // speed-based opacity.
+      //
+      // Debug mode is NOT a fast-path blocker: the slow-path's cyan
+      // polygon overlay only matters for shards (which take the slow
+      // path anyway), and the HUD requires debug mode to be on for the
+      // user to see perf numbers — so blocking the fast path on
+      // debugMode would mean it never runs while we're measuring.
+      if (entity.type === EntityType.NEBULA
+          && entity.active
+          && !entity.hitFlash
+          && entity.nebulaFadeTimer === undefined
+          && entity.nebulaSpawnTimer === undefined
+          && entity.regenPopTimer === undefined
+          && entity.nebulaCachedTinted !== undefined
+          && entity.nebulaTwinkleNextAt !== undefined
+          && perfNowSec < entity.nebulaTwinkleNextAt) {
+          ctx.globalAlpha = 0.55;
+          ctx.drawImage(
+              entity.nebulaCachedTinted,
+              rx + (entity.nebulaCachedDx ?? 0),
+              ry + (entity.nebulaCachedDy ?? 0),
+              entity.nebulaCachedSize ?? 0,
+              entity.nebulaCachedSize ?? 0,
+          );
+          ctx.globalAlpha = 1.0;
+          // Debug overlay parity with the slow path — without this the
+          // polygon outline only appears for tiles currently in their
+          // twinkle window (which forces them to the slow path), which
+          // looks like random flickering across the cluster.  Drawn in
+          // world space (no ctx.translate in the fast path) by adding
+          // (rx, ry) to each polygon point.
+          if (this.debugMode && entity.polygonPoints && entity.polygonPoints.length > 0) {
+              ctx.globalAlpha = 0.9;
+              ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              const p0 = entity.polygonPoints[0];
+              ctx.moveTo(rx + p0.x, ry + p0.y);
+              for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
+                  const p = entity.polygonPoints[pi];
+                  ctx.lineTo(rx + p.x, ry + p.y);
+              }
+              ctx.closePath();
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+          }
+          this.lastNebulaFastCount++;
+          return;
+      }
+
       ctx.save();
 
       // Transform logic — translate to the entity's shifted render
@@ -884,6 +987,7 @@ export class RenderSystem {
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
       if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+          this.lastNebulaSlowCount++;
           // Per-entity blended-hex cache: populated lazily on first render
           // and invalidated by NebulaSystem when composition mutates
           // (merge / regen).  Skips blendCompositionToHex's per-call
@@ -987,6 +1091,18 @@ export class RenderSystem {
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
+                  // Populate the nebula fast-path cache while we have
+                  // every input on hand.  See the fast-path block above
+                  // renderEntities()'s slow body — once these four
+                  // fields are non-undefined, subsequent frames bypass
+                  // this whole slow path until NebulaSystem invalidates
+                  // them (composition / neighbour-count / area changes).
+                  if (entity.type === EntityType.NEBULA) {
+                      entity.nebulaCachedTinted = tinted;
+                      entity.nebulaCachedDx = dx;
+                      entity.nebulaCachedDy = dy;
+                      entity.nebulaCachedSize = drawSize;
+                  }
               } else {
                   // Fallback: procedural soft circle in the tint colour
                   // while the nebula sprite is still loading.
@@ -1041,8 +1157,9 @@ export class RenderSystem {
           // on them while still costing a performance.now() + drawImage per
           // shard per frame.  Cutting it for shards eliminates that work
           // without a visible change.
+          //
           if (entity.type === EntityType.NEBULA) {
-              const now = performance.now() / 1000;
+              const now = perfNowSec;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
                   // across the [MIN, MAX] interval so a freshly-spawned
