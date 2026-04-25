@@ -902,11 +902,15 @@ export class RenderSystem {
       // when twinkle activates (nebulaTwinkleNextAt has elapsed) or when
       // NebulaSystem invalidates the cache (nebulaCachedTinted=undefined).
       // Shards are excluded because they still need ctx.rotate +
-      // speed-based opacity.  debugMode also forces the slow path so
-      // the polygon outlines render.
+      // speed-based opacity.
+      //
+      // Debug mode is NOT a fast-path blocker: the slow-path's cyan
+      // polygon overlay only matters for shards (which take the slow
+      // path anyway), and the HUD requires debug mode to be on for the
+      // user to see perf numbers — so blocking the fast path on
+      // debugMode would mean it never runs while we're measuring.
       if (entity.type === EntityType.NEBULA
           && entity.active
-          && !this.debugMode
           && !entity.hitFlash
           && entity.nebulaFadeTimer === undefined
           && entity.nebulaSpawnTimer === undefined
