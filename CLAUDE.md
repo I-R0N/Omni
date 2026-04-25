@@ -56,8 +56,13 @@ engine/
                           listener registry
   NebulaColor.ts          Palette-aware hex blending for nebula compositions
   maps/
-    MapClasses.ts         BaseMapLayer + UniverseMap / RingMap /
-                          SevenRingsMap / PocketMap subclasses
+    MapClasses.ts         BaseMapLayer + full-game maps (UniverseMap,
+                          RingMap, SevenRingsMap, PocketMap) and the
+                          single-element 6k showcase maps
+                          (AsteroidFieldMap, GlassFieldMap,
+                          HardTileFieldMap, IndestructibleFieldMap,
+                          NebulaFieldMap) sharing the abstract
+                          SingleVariantTileFieldMap base
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
     InputSystem.ts        Keyboard/mouse state
@@ -177,7 +182,11 @@ Notable existing field categories on `GameEntity`:
   `nebulaTileArea`, `nebulaGridCol/Row`, `nebulaNeighborCount`,
   `nebulaImpactCooldown`, `nebulaMergeCooldown`,
   `nebulaFadeTimer`/`Duration`, `nebulaSpawnTimer`/`Duration`,
-  `nebulaTwinkleNextAt/X/Y`
+  `nebulaTwinkleNextAt/X/Y`. **Render fast-path cache** (NEBULA tiles
+  only): `nebulaCachedTinted`, `nebulaCachedDx`, `nebulaCachedDy`,
+  `nebulaCachedSize` — populated by RenderSystem after a slow-path
+  draw and invalidated by NebulaSystem at every site that mutates the
+  inputs (composition, neighbour count, tile area).
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ammo`, `enemyTier` (set on
   spawn but currently unused by drop scaling), `suppressDrops`
@@ -238,6 +247,41 @@ and `DIFFICULTY_STAT_SCALES`.
 - `setActiveNebulaSet(...)` mutates the shared `NEBULA_IMAGES` array in
   place. Every consumer reads the same array reference; the DBG panel
   cycles `ALL → A → B → N16`.
+
+---
+
+## 6a. Maps
+
+Two families of maps live in `engine/maps/MapClasses.ts`, all subclasses
+of `BaseMapLayer`:
+
+- **Full-game maps** — `UniverseMap` (`UNIVERSE`), `RingMap` (`RING`),
+  `SevenRingsMap` (`SEVEN_RINGS`), `PocketMap` (`POCKET`). These mix
+  asteroids, structures (multiple variants), and nebulae and are the
+  ones a normal play session uses.
+- **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
+  (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`), `HardTileFieldMap`
+  (`HARD_TILE_FIELD`, uses the `'heavy'` STRUCTURE variant — note the
+  naming mismatch), `IndestructibleFieldMap` (`INDESTRUCTIBLE_FIELD`),
+  `NebulaFieldMap` (`NEBULA_FIELD`). Each populates the playfield with
+  exactly one entity type so a single system (flow field, regen, nebula
+  shatter, etc.) can be stress-tested in isolation. The four tile-only
+  showcases share an abstract `SingleVariantTileFieldMap` base; entity
+  counts are tuned to ≈1 200 per map so the debug HUD's render-time
+  numbers compare apples-to-apples across showcases.
+- Background-nebula puffs (`BackgroundManager.setMapType`) now key off
+  the map's `nebulaClusterCenters` list; maps without nebula tiles
+  render no BG nebulae (no canvas-size-random fallback). Keep new maps
+  honest by populating that list when, and only when, you spawn nebula
+  tiles.
+- Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` and
+  `ASTEROID_GENERATION_CONFIG` in `constants.ts` — both are
+  `Record<MapType, …>`, so adding a new MapType requires entries in both.
+
+Engine plumbing for adding a map: register the `MapType` value in
+`types.ts`, add the subclass in `MapClasses.ts`, switch on it in
+`GameEngine.buildMap()`, add per-map config in `constants.ts`, and add
+the menu button in `UIOverlay.tsx`.
 
 ---
 
