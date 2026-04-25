@@ -212,7 +212,7 @@ export const TRAIL_CONSTANTS = {
 // expand outward and fade as they age.  Replaces the older polygon-strip
 // exhaust plume.  Each emission is independent (no detached-trail bookkeeping).
 export const PLAYER_TRAIL_CONSTANTS = {
-  LIFETIME: 3.0,         // Seconds for each ring to expand and fade out
+  LIFETIME: 9.0,         // Seconds for each ring to expand and fade out
   EMIT_INTERVAL: 0.09,   // Seconds between emissions at full throttle (~11/sec)
   START_RADIUS: 3,       // Ring radius at birth
   END_RADIUS: 32,        // Ring radius at death
