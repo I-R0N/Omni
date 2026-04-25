@@ -318,6 +318,22 @@ export interface GameEntity {
   // darker.  NebulaSystem recomputes this lazily whenever tiles are
   // destroyed, regenerated, or transmuted from shards.
   nebulaNeighborCount?: number;
+  // ── Render fast-path cache (NEBULA tiles only) ──────────────────────────
+  // Snapshot of the four inputs to the per-frame nebula draw call:
+  //   * `nebulaCachedTinted`  — the pre-tinted offscreen sprite canvas
+  //   * `nebulaCachedDx/Dy`   — centroid-corrected sprite-local offsets
+  //   * `nebulaCachedSize`    — drawSize (proportional to tileArea)
+  // Populated lazily by RenderSystem at the end of the slow path, then
+  // read by the fast path in subsequent frames so a steady-state tile
+  // collapses to `globalAlpha = 0.55; drawImage(...); globalAlpha = 1`.
+  // Invalidated by NebulaSystem at every site that mutates the inputs:
+  // composition (merge / regen), neighbour count (neighbour destroyed or
+  // regenerated), or tile area (merge).  Mirrors the same per-entity
+  // caching pattern `nebulaBlendedHex` already uses.
+  nebulaCachedTinted?: HTMLCanvasElement;
+  nebulaCachedDx?: number;
+  nebulaCachedDy?: number;
+  nebulaCachedSize?: number;
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
@@ -423,14 +439,6 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
-  // Dev ablation toggle states.  Only meaningful when debugMode is true;
-  // surfaced in the debug overlay so the user can see which ablations
-  // are currently active when comparing render times across maps.
-  suppressNebulaTwinkle?: boolean;
-  suppressBackgroundPuffs?: boolean;
-  suppressNebulaSprite?: boolean;
-  suppressNebulaDarken?: boolean;
-  suppressNebulaWrapper?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

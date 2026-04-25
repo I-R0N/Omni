@@ -113,26 +113,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleNebulaSet();
   };
 
-  const handleToggleSuppressNebulaTwinkle = () => {
-      if (engineRef.current) engineRef.current.toggleSuppressNebulaTwinkle();
-  };
-
-  const handleToggleSuppressBackgroundPuffs = () => {
-      if (engineRef.current) engineRef.current.toggleSuppressBackgroundPuffs();
-  };
-
-  const handleToggleSuppressNebulaSprite = () => {
-      if (engineRef.current) engineRef.current.toggleSuppressNebulaSprite();
-  };
-
-  const handleToggleSuppressNebulaDarken = () => {
-      if (engineRef.current) engineRef.current.toggleSuppressNebulaDarken();
-  };
-
-  const handleToggleSuppressNebulaWrapper = () => {
-      if (engineRef.current) engineRef.current.toggleSuppressNebulaWrapper();
-  };
-
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -152,11 +132,6 @@ const App: React.FC = () => {
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
         onToggleNebulaSet={handleToggleNebulaSet}
-        onToggleSuppressNebulaTwinkle={handleToggleSuppressNebulaTwinkle}
-        onToggleSuppressBackgroundPuffs={handleToggleSuppressBackgroundPuffs}
-        onToggleSuppressNebulaSprite={handleToggleSuppressNebulaSprite}
-        onToggleSuppressNebulaDarken={handleToggleSuppressNebulaDarken}
-        onToggleSuppressNebulaWrapper={handleToggleSuppressNebulaWrapper}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

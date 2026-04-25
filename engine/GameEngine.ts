@@ -344,11 +344,6 @@ export class GameEngine {
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
-      suppressNebulaTwinkle: this.renderer.getSuppressNebulaTwinkle(),
-      suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
-      suppressNebulaSprite: this.renderer.getSuppressNebulaSprite(),
-      suppressNebulaDarken: this.renderer.getSuppressNebulaDarken(),
-      suppressNebulaWrapper: this.renderer.getSuppressNebulaWrapper(),
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -444,11 +439,6 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
-      suppressNebulaTwinkle: this.renderer.getSuppressNebulaTwinkle(),
-      suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
-      suppressNebulaSprite: this.renderer.getSuppressNebulaSprite(),
-      suppressNebulaDarken: this.renderer.getSuppressNebulaDarken(),
-      suppressNebulaWrapper: this.renderer.getSuppressNebulaWrapper(),
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -2151,26 +2141,6 @@ export class GameEngine {
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
   }
 
-  // ── Dev ablation toggles (debug-only perf experiments) ──────────────
-  // These flip the corresponding suppression flag inside RenderSystem /
-  // BackgroundManager so the user can A/B compare render time on the
-  // same map without restarting.  No production behaviour changes when
-  // the toggles are off (default).
-  public toggleSuppressNebulaTwinkle() {
-      this.renderer.setSuppressNebulaTwinkle(!this.renderer.getSuppressNebulaTwinkle());
-  }
-  public toggleSuppressBackgroundPuffs() {
-      this.renderer.setSuppressBackgroundPuffs(!this.renderer.getSuppressBackgroundPuffs());
-  }
-  public toggleSuppressNebulaSprite() {
-      this.renderer.setSuppressNebulaSprite(!this.renderer.getSuppressNebulaSprite());
-  }
-  public toggleSuppressNebulaDarken() {
-      this.renderer.setSuppressNebulaDarken(!this.renderer.getSuppressNebulaDarken());
-  }
-  public toggleSuppressNebulaWrapper() {
-      this.renderer.setSuppressNebulaWrapper(!this.renderer.getSuppressNebulaWrapper());
-  }
 
   /**
    * Average the first `filled` entries of a ring buffer.  `filled` tracks

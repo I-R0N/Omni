@@ -96,44 +96,6 @@ export class RenderSystem {
   // lastNebulaMs.  Updated once per render() call.
   public lastNebulaVisible: number = 0;
 
-  // ── Render-path ablation toggles ───────────────────────────────────
-  // Both default off (production behaviour preserved) and are flipped
-  // from the debug panel so the dev can A/B compare render-time on the
-  // same map without a rebuild.  Each one is a perf experiment, not a
-  // permanent feature — see the corresponding gates inside render() /
-  // BackgroundManager for the actual early-return.
-  private suppressNebulaTwinkle: boolean = false;
-  public setSuppressNebulaTwinkle(v: boolean) { this.suppressNebulaTwinkle = v; }
-  public getSuppressNebulaTwinkle(): boolean { return this.suppressNebulaTwinkle; }
-  public setSuppressBackgroundPuffs(v: boolean) {
-      this.backgroundManager.setSuppressNebulaPuffs(v);
-  }
-  public getSuppressBackgroundPuffs(): boolean {
-      return this.backgroundManager.getSuppressNebulaPuffs();
-  }
-  // Skip the foreground nebula tile / shard sprite blit while keeping the
-  // surrounding ctx.save / translate / rotate / restore wrapper.  Isolates
-  // GPU fillrate (drawImage at TILE_SPRITE_WORLD_SIZE with globalAlpha<1)
-  // from canvas-state overhead.
-  private suppressNebulaSprite: boolean = false;
-  public setSuppressNebulaSprite(v: boolean) { this.suppressNebulaSprite = v; }
-  public getSuppressNebulaSprite(): boolean { return this.suppressNebulaSprite; }
-  // Skip the per-frame neighbour-count darken-hex rebuild and use the
-  // cached blendedHex directly.  Isolates per-tile string allocation +
-  // Map-key churn from the rest of the nebula draw path.
-  private suppressNebulaDarken: boolean = false;
-  public setSuppressNebulaDarken(v: boolean) { this.suppressNebulaDarken = v; }
-  public getSuppressNebulaDarken(): boolean { return this.suppressNebulaDarken; }
-  // Skip the outer ctx.save / translate / rotate / restore wrapper for
-  // nebula entities.  Everything inside the nebula branch instead uses
-  // world-space coordinates directly (baseX = rx, baseY = ry).  Tests
-  // whether the 4 canvas-state ops per tile are the dominant cost once
-  // all other ablations are active.  NEBULA_SHARDs won't rotate with
-  // this on, but the measurement cost is a cosmetic-only regression.
-  private suppressNebulaWrapper: boolean = false;
-  public setSuppressNebulaWrapper(v: boolean) { this.suppressNebulaWrapper = v; }
-  public getSuppressNebulaWrapper(): boolean { return this.suppressNebulaWrapper; }
-
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
@@ -921,32 +883,52 @@ export class RenderSystem {
           return;
       }
 
-      // Dev ablation: for nebula entities, allow skipping the outer
-      // save/translate/rotate wrapper entirely.  When skipped, every
-      // coordinate inside the nebula branch is biased by (baseX, baseY)
-      // = (rx, ry) so draw calls land at the same world position without
-      // the canvas matrix mutation.  All other entity types always take
-      // the wrapped path below.
-      const isNebulaEntity = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
-      const skipWrap = isNebulaEntity && this.suppressNebulaWrapper;
-      const baseX = skipWrap ? rx : 0;
-      const baseY = skipWrap ? ry : 0;
-
-      if (!skipWrap) {
-          ctx.save();
-
-          // Transform logic — translate to the entity's shifted render
-          // position so wrap-seam copies draw at the correct on-screen spot.
-          ctx.translate(rx, ry);
-          const rotation = entity.rotation + (
-            entity.type === EntityType.PLAYER
-              ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
-              : entity.type === EntityType.ENEMY
-                ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
-                : 0
+      // ── Fast-path NEBULA tile render ───────────────────────────────
+      // Mirrors the STRUCTURE fast path.  Steady-state nebula tiles (no
+      // hit flash, no fade in / fade out, not in a twinkle window, cache
+      // populated by an earlier slow-path draw) collapse to a single
+      // drawImage + two globalAlpha writes — cutting per-tile cost from
+      // ~30-100 µs to ~5 µs.  Tiles drop into the slow path automatically
+      // when twinkle activates (nebulaTwinkleNextAt has elapsed) or when
+      // NebulaSystem invalidates the cache (nebulaCachedTinted=undefined).
+      // Shards are excluded because they still need ctx.rotate +
+      // speed-based opacity.  debugMode also forces the slow path so
+      // the polygon outlines render.
+      if (entity.type === EntityType.NEBULA
+          && entity.active
+          && !this.debugMode
+          && !entity.hitFlash
+          && entity.nebulaFadeTimer === undefined
+          && entity.nebulaSpawnTimer === undefined
+          && entity.regenPopTimer === undefined
+          && entity.nebulaCachedTinted !== undefined
+          && entity.nebulaTwinkleNextAt !== undefined
+          && nowSec < entity.nebulaTwinkleNextAt) {
+          ctx.globalAlpha = 0.55;
+          ctx.drawImage(
+              entity.nebulaCachedTinted,
+              rx + (entity.nebulaCachedDx ?? 0),
+              ry + (entity.nebulaCachedDy ?? 0),
+              entity.nebulaCachedSize ?? 0,
+              entity.nebulaCachedSize ?? 0,
           );
-          ctx.rotate(rotation);
+          ctx.globalAlpha = 1.0;
+          return;
       }
+
+      ctx.save();
+
+      // Transform logic — translate to the entity's shifted render
+      // position so wrap-seam copies draw at the correct on-screen spot.
+      ctx.translate(rx, ry);
+      const rotation = entity.rotation + (
+        entity.type === EntityType.PLAYER
+          ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
+          : entity.type === EntityType.ENEMY
+            ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
+            : 0
+      );
+      ctx.rotate(rotation);
 
       // --- NEBULA TILES & SHARDS ---
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
@@ -968,9 +950,7 @@ export class RenderSystem {
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully
           // enclosed) caps at 0.55× brightness; shards skip the pass.
-          // Dev ablation: skip the per-frame string allocation + Map-key
-          // churn so the cost can be measured against the nebula sub-timer.
-          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount && !this.suppressNebulaDarken) {
+          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount) {
               const t = Math.min(1, entity.nebulaNeighborCount / 6);
               const factor = 1 - t * 0.45;
               const [r, g, b] = hexToRgb(tintHex);
@@ -1056,25 +1036,31 @@ export class RenderSystem {
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
-                  // Dev ablation: skip just the foreground tile/shard sprite
-                  // blit so GPU fillrate (drawImage at TILE_SPRITE_WORLD_SIZE
-                  // with alpha < 1) can be measured separately from the
-                  // surrounding ctx.save/translate/rotate/restore overhead.
-                  if (!this.suppressNebulaSprite) {
-                      ctx.drawImage(tinted, baseX + dx, baseY + dy, drawSize, drawSize);
-                  }
+                  ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
+                  // Populate the nebula fast-path cache while we have
+                  // every input on hand.  See the fast-path block above
+                  // renderEntities()'s slow body — once these four
+                  // fields are non-undefined, subsequent frames bypass
+                  // this whole slow path until NebulaSystem invalidates
+                  // them (composition / neighbour-count / area changes).
+                  if (entity.type === EntityType.NEBULA) {
+                      entity.nebulaCachedTinted = tinted;
+                      entity.nebulaCachedDx = dx;
+                      entity.nebulaCachedDy = dy;
+                      entity.nebulaCachedSize = drawSize;
+                  }
               } else {
                   // Fallback: procedural soft circle in the tint colour
                   // while the nebula sprite is still loading.
                   const r = Math.max(entity.size.x, entity.size.y) * 0.9;
-                  const grad = ctx.createRadialGradient(baseX, baseY, 0, baseX, baseY, r);
+                  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
                   grad.addColorStop(0, tintHex);
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   ctx.fillStyle = grad;
                   ctx.globalAlpha = 0.45 * fadeMul * spawnMul * speedMul;
                   ctx.beginPath();
-                  ctx.arc(baseX, baseY, r, 0, Math.PI * 2);
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
                   ctx.fill();
                   ctx.globalAlpha = 1.0;
               }
@@ -1093,10 +1079,10 @@ export class RenderSystem {
               if (entity.polygonPoints && entity.polygonPoints.length > 0) {
                   ctx.beginPath();
                   const p0 = entity.polygonPoints[0];
-                  ctx.moveTo(baseX + p0.x, baseY + p0.y);
+                  ctx.moveTo(p0.x, p0.y);
                   for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
                       const p = entity.polygonPoints[pi];
-                      ctx.lineTo(baseX + p.x, baseY + p.y);
+                      ctx.lineTo(p.x, p.y);
                   }
                   ctx.closePath();
                   ctx.stroke();
@@ -1104,7 +1090,7 @@ export class RenderSystem {
                   // Legacy fallback: implicit circle defined by `size`.
                   const r = Math.max(entity.size.x, entity.size.y) / 2;
                   ctx.beginPath();
-                  ctx.arc(baseX, baseY, r, 0, Math.PI * 2);
+                  ctx.arc(0, 0, r, 0, Math.PI * 2);
                   ctx.stroke();
               }
               ctx.globalAlpha = 1.0;
@@ -1119,10 +1105,7 @@ export class RenderSystem {
           // shard per frame.  Cutting it for shards eliminates that work
           // without a visible change.
           //
-          // Also skipped when the dev "kill twinkle" ablation toggle is on
-          // (debug panel) so the contribution of the twinkle scheduler can
-          // be measured against the renderMs / nebulaMs sub-timer.
-          if (entity.type === EntityType.NEBULA && !this.suppressNebulaTwinkle) {
+          if (entity.type === EntityType.NEBULA) {
               const now = performance.now() / 1000;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
@@ -1155,7 +1138,7 @@ export class RenderSystem {
                           const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;
                           const starSize = NEBULA_CONSTANTS.TWINKLE_STAR_SIZE;
                           ctx.globalAlpha = twinkleAlpha;
-                          ctx.drawImage(star, baseX + tx - starSize / 2, baseY + ty - starSize / 2, starSize, starSize);
+                          ctx.drawImage(star, tx - starSize / 2, ty - starSize / 2, starSize, starSize);
                           ctx.globalAlpha = 1.0;
                       }
                   } else {
@@ -1169,7 +1152,7 @@ export class RenderSystem {
               }
           }
 
-          if (!skipWrap) ctx.restore();
+          ctx.restore();
           return;
       }
 

@@ -11,11 +11,6 @@ interface UIOverlayProps {
   onRestart?: () => void;
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
-  onToggleSuppressNebulaTwinkle?: () => void;
-  onToggleSuppressBackgroundPuffs?: () => void;
-  onToggleSuppressNebulaSprite?: () => void;
-  onToggleSuppressNebulaDarken?: () => void;
-  onToggleSuppressNebulaWrapper?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -32,11 +27,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onRestart,
   onToggleDebug,
   onToggleNebulaSet,
-  onToggleSuppressNebulaTwinkle,
-  onToggleSuppressBackgroundPuffs,
-  onToggleSuppressNebulaSprite,
-  onToggleSuppressNebulaDarken,
-  onToggleSuppressNebulaWrapper,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -96,80 +86,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : stats.nebulaSet === 'N16'
                     ? 'N16 only'
                     : 'ALL'}
-                </button>
-              </div>
-
-              {/* Render-time ablation toggles — flip wholesale features
-                  off so the perf overlay can show their delta against
-                  renderMs / nebulaMs. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Twinkle</span>
-                <button
-                  onClick={onToggleSuppressNebulaTwinkle}
-                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
-                    stats.suppressNebulaTwinkle
-                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
-                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
-                  }`}
-                  title="Skip the per-tile nebula twinkle scheduler + drawImage"
-                >
-                  {stats.suppressNebulaTwinkle ? 'OFF' : 'ON'}
-                </button>
-              </div>
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">BG puffs</span>
-                <button
-                  onClick={onToggleSuppressBackgroundPuffs}
-                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
-                    stats.suppressBackgroundPuffs
-                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
-                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
-                  }`}
-                  title="Skip the BackgroundManager nebula-puff render pass"
-                >
-                  {stats.suppressBackgroundPuffs ? 'OFF' : 'ON'}
-                </button>
-              </div>
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Tile spr</span>
-                <button
-                  onClick={onToggleSuppressNebulaSprite}
-                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
-                    stats.suppressNebulaSprite
-                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
-                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
-                  }`}
-                  title="Skip just the foreground nebula tile/shard sprite drawImage (fillrate test)"
-                >
-                  {stats.suppressNebulaSprite ? 'OFF' : 'ON'}
-                </button>
-              </div>
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Darken</span>
-                <button
-                  onClick={onToggleSuppressNebulaDarken}
-                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
-                    stats.suppressNebulaDarken
-                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
-                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
-                  }`}
-                  title="Skip per-frame neighbour-count darken hex rebuild (string-allocation test)"
-                >
-                  {stats.suppressNebulaDarken ? 'OFF' : 'ON'}
-                </button>
-              </div>
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Wrapper</span>
-                <button
-                  onClick={onToggleSuppressNebulaWrapper}
-                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
-                    stats.suppressNebulaWrapper
-                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
-                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
-                  }`}
-                  title="Skip ctx.save/translate/rotate/restore for nebula entities (canvas-state-ops test)"
-                >
-                  {stats.suppressNebulaWrapper ? 'OFF' : 'ON'}
                 </button>
               </div>
 
