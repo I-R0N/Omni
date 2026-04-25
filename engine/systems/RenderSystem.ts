@@ -1024,6 +1024,16 @@ export class RenderSystem {
     const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
     const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
 
+    // Cache the active camera matrix once per pass so the slow-path body
+    // can replace ctx.save / translate / rotate / restore (4 canvas-state
+    // ops) with a single absolute setTransform call (~2-3× cheaper per
+    // entity).  Matches the pattern in BackgroundManager.ts:370-374 for
+    // nebula puffs.  The camera transform is set up by render() before
+    // renderEntities() runs and is restored by render()'s ctx.restore()
+    // afterwards, so we only need to reset to it between iterations.
+    const cam = ctx.getTransform();
+    const camA = cam.a, camB = cam.b, camC = cam.c, camD = cam.d, camE = cam.e, camF = cam.f;
+
     entries.forEach(({ entity, rx, ry }) => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -1108,11 +1118,11 @@ export class RenderSystem {
           return;
       }
 
-      ctx.save();
-
-      // Transform logic — translate to the entity's shifted render
-      // position so wrap-seam copies draw at the correct on-screen spot.
-      ctx.translate(rx, ry);
+      // Transform logic — compose camera × translate(rx, ry) × rotate
+      // into one absolute matrix and write it via setTransform.  Replaces
+      // ctx.save / translate / rotate / restore (4 canvas-state ops) with
+      // a single matrix write — ~2-3× cheaper per slow-path entity.
+      // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
       const rotation = entity.rotation + (
         entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
@@ -1120,7 +1130,16 @@ export class RenderSystem {
             ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
             : 0
       );
-      ctx.rotate(rotation);
+      const cosR = Math.cos(rotation);
+      const sinR = Math.sin(rotation);
+      ctx.setTransform(
+        camA * cosR + camC * sinR,
+        camB * cosR + camD * sinR,
+        -camA * sinR + camC * cosR,
+        -camB * sinR + camD * cosR,
+        camA * rx + camC * ry + camE,
+        camB * rx + camD * ry + camF,
+      );
 
       // --- NEBULA TILES & SHARDS ---
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
@@ -1345,7 +1364,11 @@ export class RenderSystem {
               }
           }
 
-          ctx.restore();
+          // Reset to the cached camera matrix so subsequent slow-path
+          // entities (and post-loop draws like renderHealthBar) start from
+          // camera space — mirrors what ctx.restore() did when paired
+          // with the now-removed ctx.save() at the top of the slow path.
+          ctx.setTransform(camA, camB, camC, camD, camE, camF);
           return;
       }
 
@@ -1903,7 +1926,11 @@ export class RenderSystem {
           ctx.rotate(rot);
       }
 
-      ctx.restore();
+      // Reset to the cached camera matrix so the debug-accel block, the
+      // health bar, and the next iteration all start from camera space —
+      // mirrors what ctx.restore() did when paired with the now-removed
+      // ctx.save() at the top of the slow path.
+      ctx.setTransform(camA, camB, camC, camD, camE, camF);
 
       // Render Debug Acceleration Vector (debug mode only)
       if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
