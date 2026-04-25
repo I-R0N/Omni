@@ -1044,7 +1044,13 @@ export class GameEngine {
         this.trailEmitAccumulator += dt * throttle;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
-            const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
+            // THRUST mode gets a 3× longer lifetime so the drift-extended
+            // trail has time to reach its full reach behind the ship
+            // before the head of the trail fades out; VELOCITY keeps the
+            // production lifetime since its trail doesn't drift.
+            const pointLifetime = this.trailEmitMode === TrailEmitMode.THRUST
+                ? PLAYER_TRAIL_CONSTANTS.LIFETIME * 3
+                : PLAYER_TRAIL_CONSTANTS.LIFETIME;
             this.player.trail = this.player.trail || [];
             // Capture velocity direction at emit so shape-aware variants
             // (LINE / TRIANGLE) orient consistently with the ship's heading.
