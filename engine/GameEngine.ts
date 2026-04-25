@@ -348,6 +348,7 @@ export class GameEngine {
       suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
       suppressNebulaSprite: this.renderer.getSuppressNebulaSprite(),
       suppressNebulaDarken: this.renderer.getSuppressNebulaDarken(),
+      suppressNebulaWrapper: this.renderer.getSuppressNebulaWrapper(),
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -447,6 +448,7 @@ export class GameEngine {
       suppressBackgroundPuffs: this.renderer.getSuppressBackgroundPuffs(),
       suppressNebulaSprite: this.renderer.getSuppressNebulaSprite(),
       suppressNebulaDarken: this.renderer.getSuppressNebulaDarken(),
+      suppressNebulaWrapper: this.renderer.getSuppressNebulaWrapper(),
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -2165,6 +2167,9 @@ export class GameEngine {
   }
   public toggleSuppressNebulaDarken() {
       this.renderer.setSuppressNebulaDarken(!this.renderer.getSuppressNebulaDarken());
+  }
+  public toggleSuppressNebulaWrapper() {
+      this.renderer.setSuppressNebulaWrapper(!this.renderer.getSuppressNebulaWrapper());
   }
 
   /**

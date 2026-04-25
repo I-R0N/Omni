@@ -119,6 +119,15 @@ export class RenderSystem {
   private suppressNebulaDarken: boolean = false;
   public setSuppressNebulaDarken(v: boolean) { this.suppressNebulaDarken = v; }
   public getSuppressNebulaDarken(): boolean { return this.suppressNebulaDarken; }
+  // Skip the outer ctx.save / translate / rotate / restore wrapper for
+  // nebula entities.  Everything inside the nebula branch instead uses
+  // world-space coordinates directly (baseX = rx, baseY = ry).  Tests
+  // whether the 4 canvas-state ops per tile are the dominant cost once
+  // all other ablations are active.  NEBULA_SHARDs won't rotate with
+  // this on, but the measurement cost is a cosmetic-only regression.
+  private suppressNebulaWrapper: boolean = false;
+  public setSuppressNebulaWrapper(v: boolean) { this.suppressNebulaWrapper = v; }
+  public getSuppressNebulaWrapper(): boolean { return this.suppressNebulaWrapper; }
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   private images: Map<string, HTMLImageElement> = new Map();
@@ -903,19 +912,32 @@ export class RenderSystem {
           return;
       }
 
-      ctx.save();
+      // Dev ablation: for nebula entities, allow skipping the outer
+      // save/translate/rotate wrapper entirely.  When skipped, every
+      // coordinate inside the nebula branch is biased by (baseX, baseY)
+      // = (rx, ry) so draw calls land at the same world position without
+      // the canvas matrix mutation.  All other entity types always take
+      // the wrapped path below.
+      const isNebulaEntity = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
+      const skipWrap = isNebulaEntity && this.suppressNebulaWrapper;
+      const baseX = skipWrap ? rx : 0;
+      const baseY = skipWrap ? ry : 0;
 
-      // Transform logic — translate to the entity's shifted render
-      // position so wrap-seam copies draw at the correct on-screen spot.
-      ctx.translate(rx, ry);
-      const rotation = entity.rotation + (
-        entity.type === EntityType.PLAYER
-          ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
-          : entity.type === EntityType.ENEMY
-            ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
-            : 0
-      );
-      ctx.rotate(rotation);
+      if (!skipWrap) {
+          ctx.save();
+
+          // Transform logic — translate to the entity's shifted render
+          // position so wrap-seam copies draw at the correct on-screen spot.
+          ctx.translate(rx, ry);
+          const rotation = entity.rotation + (
+            entity.type === EntityType.PLAYER
+              ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
+              : entity.type === EntityType.ENEMY
+                ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
+                : 0
+          );
+          ctx.rotate(rotation);
+      }
 
       // --- NEBULA TILES & SHARDS ---
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
@@ -1030,20 +1052,20 @@ export class RenderSystem {
                   // with alpha < 1) can be measured separately from the
                   // surrounding ctx.save/translate/rotate/restore overhead.
                   if (!this.suppressNebulaSprite) {
-                      ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
+                      ctx.drawImage(tinted, baseX + dx, baseY + dy, drawSize, drawSize);
                   }
                   ctx.globalAlpha = 1.0;
               } else {
                   // Fallback: procedural soft circle in the tint colour
                   // while the nebula sprite is still loading.
                   const r = Math.max(entity.size.x, entity.size.y) * 0.9;
-                  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+                  const grad = ctx.createRadialGradient(baseX, baseY, 0, baseX, baseY, r);
                   grad.addColorStop(0, tintHex);
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   ctx.fillStyle = grad;
                   ctx.globalAlpha = 0.45 * fadeMul * spawnMul * speedMul;
                   ctx.beginPath();
-                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.arc(baseX, baseY, r, 0, Math.PI * 2);
                   ctx.fill();
                   ctx.globalAlpha = 1.0;
               }
@@ -1062,10 +1084,10 @@ export class RenderSystem {
               if (entity.polygonPoints && entity.polygonPoints.length > 0) {
                   ctx.beginPath();
                   const p0 = entity.polygonPoints[0];
-                  ctx.moveTo(p0.x, p0.y);
+                  ctx.moveTo(baseX + p0.x, baseY + p0.y);
                   for (let pi = 1; pi < entity.polygonPoints.length; pi++) {
                       const p = entity.polygonPoints[pi];
-                      ctx.lineTo(p.x, p.y);
+                      ctx.lineTo(baseX + p.x, baseY + p.y);
                   }
                   ctx.closePath();
                   ctx.stroke();
@@ -1073,7 +1095,7 @@ export class RenderSystem {
                   // Legacy fallback: implicit circle defined by `size`.
                   const r = Math.max(entity.size.x, entity.size.y) / 2;
                   ctx.beginPath();
-                  ctx.arc(0, 0, r, 0, Math.PI * 2);
+                  ctx.arc(baseX, baseY, r, 0, Math.PI * 2);
                   ctx.stroke();
               }
               ctx.globalAlpha = 1.0;
@@ -1124,7 +1146,7 @@ export class RenderSystem {
                           const ty = (entity.nebulaTwinkleY ?? 0) * halfExtent;
                           const starSize = NEBULA_CONSTANTS.TWINKLE_STAR_SIZE;
                           ctx.globalAlpha = twinkleAlpha;
-                          ctx.drawImage(star, tx - starSize / 2, ty - starSize / 2, starSize, starSize);
+                          ctx.drawImage(star, baseX + tx - starSize / 2, baseY + ty - starSize / 2, starSize, starSize);
                           ctx.globalAlpha = 1.0;
                       }
                   } else {
@@ -1138,7 +1160,7 @@ export class RenderSystem {
               }
           }
 
-          ctx.restore();
+          if (!skipWrap) ctx.restore();
           return;
       }
 

@@ -129,6 +129,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleSuppressNebulaDarken();
   };
 
+  const handleToggleSuppressNebulaWrapper = () => {
+      if (engineRef.current) engineRef.current.toggleSuppressNebulaWrapper();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -152,6 +156,7 @@ const App: React.FC = () => {
         onToggleSuppressBackgroundPuffs={handleToggleSuppressBackgroundPuffs}
         onToggleSuppressNebulaSprite={handleToggleSuppressNebulaSprite}
         onToggleSuppressNebulaDarken={handleToggleSuppressNebulaDarken}
+        onToggleSuppressNebulaWrapper={handleToggleSuppressNebulaWrapper}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

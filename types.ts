@@ -424,6 +424,7 @@ export interface EngineStats {
   suppressBackgroundPuffs?: boolean;
   suppressNebulaSprite?: boolean;
   suppressNebulaDarken?: boolean;
+  suppressNebulaWrapper?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

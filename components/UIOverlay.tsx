@@ -15,6 +15,7 @@ interface UIOverlayProps {
   onToggleSuppressBackgroundPuffs?: () => void;
   onToggleSuppressNebulaSprite?: () => void;
   onToggleSuppressNebulaDarken?: () => void;
+  onToggleSuppressNebulaWrapper?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -35,6 +36,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSuppressBackgroundPuffs,
   onToggleSuppressNebulaSprite,
   onToggleSuppressNebulaDarken,
+  onToggleSuppressNebulaWrapper,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -154,6 +156,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   title="Skip per-frame neighbour-count darken hex rebuild (string-allocation test)"
                 >
                   {stats.suppressNebulaDarken ? 'OFF' : 'ON'}
+                </button>
+              </div>
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Wrapper</span>
+                <button
+                  onClick={onToggleSuppressNebulaWrapper}
+                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
+                    stats.suppressNebulaWrapper
+                      ? 'bg-red-500/30 border-red-400/70 text-red-200'
+                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
+                  }`}
+                  title="Skip ctx.save/translate/rotate/restore for nebula entities (canvas-state-ops test)"
+                >
+                  {stats.suppressNebulaWrapper ? 'OFF' : 'ON'}
                 </button>
               </div>
 
