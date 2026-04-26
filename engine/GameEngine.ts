@@ -1029,19 +1029,20 @@ export class GameEngine {
         this.tickTrail(this.player.trail, dt);
     }
 
-    // Thrust-gated emission — accumulator ticks proportional to throttle, so
-    // rings only appear when the player is actively accelerating.  Coasting
-    // at full speed with no input produces no rings, which ties the visual
-    // emission gate to acceleration rather than velocity.  The trail-emit
-    // mode toggle below changes the *direction* the trail extends from the
-    // ship — emission gate stays on throttle in both modes.
+    // Thrust-gated emission — emit at a fixed rate (one tick every
+    // EMIT_INTERVAL of real time) whenever throttle > 0.  Coasting at
+    // full speed with no input still produces no rings, but the rate is
+    // no longer scaled by throttle magnitude — so half-throttle gives
+    // the same per-second emission count as full throttle, keeping
+    // consecutive points (and PATH-shape segments) close together at
+    // low throttle instead of stretching out into long choppy strokes.
     if (throttle > 0) {
         // Latch a chain break the first frame thrust resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
         // it — so the very first new point always gets chainStart, no
         // matter how long it takes the accumulator to reach EMIT_INTERVAL.
         if (!this.wasThrustingLastFrame) this.chainBreakPending = true;
-        this.trailEmitAccumulator += dt * throttle;
+        this.trailEmitAccumulator += dt;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
             // THRUST mode gets a 3× longer lifetime so the drift-extended
