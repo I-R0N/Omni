@@ -30,8 +30,8 @@ export class TrailSystem {
     for (let i = 0; i < trail.length; i++) {
       const tp = trail[i];
       tp.lifetime -= dt;
-      if (tp.vx !== undefined) tp.x += tp.vx;
-      if (tp.vy !== undefined) tp.y += tp.vy;
+      if (tp.vx !== undefined) tp.x += tp.vx * dt;
+      if (tp.vy !== undefined) tp.y += tp.vy * dt;
       if (tp.lifetime > 0) {
         trail[writeIdx++] = tp;
       }

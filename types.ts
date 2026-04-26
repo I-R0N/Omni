@@ -40,6 +40,34 @@ export interface TrailPoint extends Vector2 {
   // than following the player's motion path.
   vx?: number;
   vy?: number;
+  // Emit-time orientation (radians) — captured for shape-aware player-trail
+  // rendering (e.g. LINE / TRIANGLE need a fixed direction per point).
+  angle?: number;
+  // Marks the first point emitted in a fresh thrust event.  PATH rendering
+  // breaks the polyline at chain starts so a stop-and-restart doesn't draw
+  // a long segment connecting the old tail to the new head.
+  chainStart?: boolean;
+}
+
+// Player trail shape — selectable from the debug panel.  CIRCLE is the
+// production look; the rest are dev-only variants for visual A/B.
+export enum TrailShape {
+  CIRCLE   = 'CIRCLE',
+  SQUARE   = 'SQUARE',
+  TRIANGLE = 'TRIANGLE',
+  LINE     = 'LINE',
+  PATH     = 'PATH',
+  DOTS     = 'DOTS',
+  NONE     = 'NONE',
+}
+
+// Player trail emission gate — debug-only toggle.  THRUST (default) ties
+// emission to input/acceleration so coasting at full speed produces no
+// trail; VELOCITY ties it to translation so the trail reads off the
+// ship's motion regardless of whether thrust is applied.
+export enum TrailEmitMode {
+  THRUST   = 'THRUST',
+  VELOCITY = 'VELOCITY',
 }
 
 export interface Rect {
@@ -446,6 +474,8 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
+  trailShape?: TrailShape;
+  trailEmitMode?: TrailEmitMode;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
