@@ -61,6 +61,15 @@ export enum TrailShape {
   NONE     = 'NONE',
 }
 
+// Player trail emission gate — debug-only toggle.  THRUST (default) ties
+// emission to input/acceleration so coasting at full speed produces no
+// trail; VELOCITY ties it to translation so the trail reads off the
+// ship's motion regardless of whether thrust is applied.
+export enum TrailEmitMode {
+  THRUST   = 'THRUST',
+  VELOCITY = 'VELOCITY',
+}
+
 export interface Rect {
   x: number;
   y: number;
@@ -466,6 +475,7 @@ export interface EngineStats {
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
+  trailEmitMode?: TrailEmitMode;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

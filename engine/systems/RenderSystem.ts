@@ -727,12 +727,14 @@ export class RenderSystem {
   // is squared so the fade is visible mid-trail during continuous thrust,
   // not just near the disappearing tail.  Segments are skipped when:
   //   • the newer point is flagged chainStart (thrust restart — old chain
-  //     should keep fading on its own, no bridge to the new chain),
-  //   • consecutive shifted points exceed CHAIN_GAP_PX (defense-in-depth
-  //     against any thrust-restart edge case the chainStart flag misses
-  //     — at top speed continuous emissions are <14 u apart, so 50 u is
-  //     well clear of normal thrust spacing), or
+  //     should keep fading on its own, no bridge to the new chain), or
   //   • consecutive shifted points straddle a wrap seam.
+  // (Earlier revisions added a 50-u distance defense-in-depth threshold,
+  // but THRUST mode drifts each point in -input direction over its
+  // lifetime, which legitimately produces consecutive-point gaps larger
+  // than 50 u at low throttle — the threshold then incorrectly killed
+  // every PATH segment.  chainStart is reliably latched until consumed,
+  // so the distance fallback is no longer pulling its weight.)
   private drawPlayerTrailPath(
       ctx: CanvasRenderingContext2D,
       t: TrailPoint[],
@@ -744,7 +746,6 @@ export class RenderSystem {
       if (t.length < 2) return;
 
       const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
-      const CHAIN_GAP_SQ = 50 * 50;
       let prevX = shiftX(camX, t[0].x);
       let prevY = shiftY(camY, t[0].y);
       for (let i = 1; i < t.length; i++) {
@@ -752,10 +753,8 @@ export class RenderSystem {
           const cy = shiftY(camY, t[i].y);
           const dx = cx - prevX;
           const dy = cy - prevY;
-          const distSq = dx * dx + dy * dy;
-          const seamSpan = distSq > SEAM_BREAK_SQ;
-          const gapSpan  = distSq > CHAIN_GAP_SQ;
-          if (!seamSpan && !gapSpan && !t[i].chainStart) {
+          const seamSpan = dx * dx + dy * dy > SEAM_BREAK_SQ;
+          if (!seamSpan && !t[i].chainStart) {
               const p0 = t[i - 1];
               const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
               if (r0 > 0) {
@@ -1024,6 +1023,16 @@ export class RenderSystem {
     const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
     const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
 
+    // Cache the active camera matrix once per pass so the slow-path body
+    // can replace ctx.save / translate / rotate / restore (4 canvas-state
+    // ops) with a single absolute setTransform call (~2-3× cheaper per
+    // entity).  Matches the pattern in BackgroundManager.ts:370-374 for
+    // nebula puffs.  The camera transform is set up by render() before
+    // renderEntities() runs and is restored by render()'s ctx.restore()
+    // afterwards, so we only need to reset to it between iterations.
+    const cam = ctx.getTransform();
+    const camA = cam.a, camB = cam.b, camC = cam.c, camD = cam.d, camE = cam.e, camF = cam.f;
+
     entries.forEach(({ entity, rx, ry }) => {
       // Allow inactive STRUCTURE tiles that are regenerating through for ghost outline rendering
       const isRegenGhost = !entity.active && entity.type === EntityType.STRUCTURE && entity.regenProgress !== undefined;
@@ -1108,11 +1117,11 @@ export class RenderSystem {
           return;
       }
 
-      ctx.save();
-
-      // Transform logic — translate to the entity's shifted render
-      // position so wrap-seam copies draw at the correct on-screen spot.
-      ctx.translate(rx, ry);
+      // Transform logic — compose camera × translate(rx, ry) × rotate
+      // into one absolute matrix and write it via setTransform.  Replaces
+      // ctx.save / translate / rotate / restore (4 canvas-state ops) with
+      // a single matrix write — ~2-3× cheaper per slow-path entity.
+      // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
       const rotation = entity.rotation + (
         entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
@@ -1120,7 +1129,24 @@ export class RenderSystem {
             ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
             : 0
       );
-      ctx.rotate(rotation);
+      const cosR = Math.cos(rotation);
+      const sinR = Math.sin(rotation);
+      ctx.setTransform(
+        camA * cosR + camC * sinR,
+        camB * cosR + camD * sinR,
+        -camA * sinR + camC * cosR,
+        -camB * sinR + camD * cosR,
+        camA * rx + camC * ry + camE,
+        camB * rx + camD * ry + camF,
+      );
+      // Reset globalAlpha — without the old ctx.save/restore, sub-paths
+      // that exit at a non-1.0 alpha (STRUCTURE specular, INTERACTABLE
+      // heart highlight, drop-shard fill) would otherwise fade the next
+      // entity's drawImage / fill.  Other state (fillStyle, strokeStyle,
+      // lineWidth, font) is set per branch before use, so doesn't need
+      // resetting here.  Composite-op / filter / shadow / line-dash are
+      // already paired with inner save/restore at their use sites.
+      ctx.globalAlpha = 1.0;
 
       // --- NEBULA TILES & SHARDS ---
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
@@ -1345,7 +1371,11 @@ export class RenderSystem {
               }
           }
 
-          ctx.restore();
+          // Reset to the cached camera matrix so subsequent slow-path
+          // entities (and post-loop draws like renderHealthBar) start from
+          // camera space — mirrors what ctx.restore() did when paired
+          // with the now-removed ctx.save() at the top of the slow path.
+          ctx.setTransform(camA, camB, camC, camD, camE, camF);
           return;
       }
 
@@ -1903,7 +1933,11 @@ export class RenderSystem {
           ctx.rotate(rot);
       }
 
-      ctx.restore();
+      // Reset to the cached camera matrix so the debug-accel block, the
+      // health bar, and the next iteration all start from camera space —
+      // mirrors what ctx.restore() did when paired with the now-removed
+      // ctx.save() at the top of the slow path.
+      ctx.setTransform(camA, camB, camC, camD, camE, camF);
 
       // Render Debug Acceleration Vector (debug mode only)
       if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {

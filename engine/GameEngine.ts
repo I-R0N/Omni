@@ -14,7 +14,7 @@ import { NebulaSystem } from './systems/NebulaSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, ShardType, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, ASTEROID_GENERATION_CONFIG, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -86,6 +86,13 @@ export class GameEngine {
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
+  // Player-trail direction mode — VELOCITY (default) extends the trail
+  // opposite to velocity (current production look — points emitted at
+  // player.position naturally trail behind via the ship's path through
+  // space).  THRUST extends the trail opposite to the input/thrust
+  // direction by accumulating a per-emit offset in -input.  Toggled
+  // from the DBG panel.
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -217,6 +224,21 @@ export class GameEngine {
     const i = order.indexOf(this.trailShape);
     this.trailShape = order[(i + 1) % order.length];
     this.renderer.setTrailShape(this.trailShape);
+  }
+
+  /**
+   * Toggle the player-trail direction mode between THRUST and VELOCITY.
+   * Both modes emit only while throttle > 0.  VELOCITY (default) places
+   * trail points at player.position so the trail extends opposite to
+   * velocity as the ship moves; THRUST accumulates an offset in the
+   * -input direction each emit so the trail extends opposite to thrust
+   * regardless of velocity.  Resets the per-thrust-event offset so the
+   * new mode starts cleanly at the ship.
+   */
+  public cycleTrailEmitMode() {
+    this.trailEmitMode = this.trailEmitMode === TrailEmitMode.THRUST
+      ? TrailEmitMode.VELOCITY
+      : TrailEmitMode.THRUST;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -353,6 +375,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
+      trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -450,6 +473,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
+      trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -1005,29 +1029,58 @@ export class GameEngine {
         this.tickTrail(this.player.trail, dt);
     }
 
-    // Thrust-gated emission — accumulator ticks proportional to throttle, so
-    // rings only appear when the player is actively accelerating.  Coasting
-    // at full speed with no input produces no rings, which ties the visual
-    // to acceleration rather than velocity.
+    // Thrust-gated emission — emit at a fixed rate (one tick every
+    // EMIT_INTERVAL of real time) whenever throttle > 0.  Coasting at
+    // full speed with no input still produces no rings, but the rate is
+    // no longer scaled by throttle magnitude — so half-throttle gives
+    // the same per-second emission count as full throttle, keeping
+    // consecutive points (and PATH-shape segments) close together at
+    // low throttle instead of stretching out into long choppy strokes.
     if (throttle > 0) {
         // Latch a chain break the first frame thrust resumes.  Stays set
         // through subsequent substeps / frames until an emission consumes
         // it — so the very first new point always gets chainStart, no
         // matter how long it takes the accumulator to reach EMIT_INTERVAL.
         if (!this.wasThrustingLastFrame) this.chainBreakPending = true;
-        this.trailEmitAccumulator += dt * throttle;
+        this.trailEmitAccumulator += dt;
         while (this.trailEmitAccumulator >= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL) {
             this.trailEmitAccumulator -= PLAYER_TRAIL_CONSTANTS.EMIT_INTERVAL;
-            const pointLifetime = PLAYER_TRAIL_CONSTANTS.LIFETIME;
+            // THRUST mode gets a 3× longer lifetime so the drift-extended
+            // trail has time to reach its full reach behind the ship
+            // before the head of the trail fades out; VELOCITY keeps the
+            // production lifetime since its trail doesn't drift.
+            const pointLifetime = this.trailEmitMode === TrailEmitMode.THRUST
+                ? PLAYER_TRAIL_CONSTANTS.LIFETIME * 3
+                : PLAYER_TRAIL_CONSTANTS.LIFETIME;
             this.player.trail = this.player.trail || [];
             // Capture velocity direction at emit so shape-aware variants
             // (LINE / TRIANGLE) orient consistently with the ship's heading.
             const vx = this.player.velocity.x;
             const vy = this.player.velocity.y;
             const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
+            // Trail-extension direction — VELOCITY mode (default) emits at
+            // player.position with no per-point velocity, so the trail
+            // naturally extends opposite to velocity as the ship moves
+            // through space.  THRUST mode emits AT player.position too
+            // (no initial offset, so the newest point sits on the ship)
+            // and gives each point a per-tick drift in the -input
+            // direction so it gradually extends away over the point's
+            // lifetime — engine-exhaust style, anchored at the ship at
+            // birth.
+            let driftVx: number | undefined;
+            let driftVy: number | undefined;
+            if (this.trailEmitMode === TrailEmitMode.THRUST) {
+                const dirX = moveDir.x / throttle;
+                const dirY = moveDir.y / throttle;
+                const driftSpeed = maxSpeed * 0.5;
+                driftVx = -dirX * driftSpeed;
+                driftVy = -dirY * driftSpeed;
+            }
             this.player.trail.push({
                 x: this.player.position.x,
                 y: this.player.position.y,
+                vx: driftVx,
+                vy: driftVy,
                 lifetime: pointLifetime,
                 maxLifetime: pointLifetime,
                 scale: 1,
