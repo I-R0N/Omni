@@ -80,12 +80,13 @@ export type ShardVariantId =
   | 'nebula-tile'     // hex-grid nebula tile
   | 'nebula-shard';   // free-floating nebula debris
 
-/** What carrier EntityType this variant rides on.  See decision §6.B. */
+/** What carrier EntityType this variant rides on.  See decisions §6.B / §6.C. */
 export type ShardCarrier =
-  | EntityType.STRUCTURE      // glass / reinforced / heavy / indestructible
-  | EntityType.ASTEROID       // asteroid, tile-shard
-  | EntityType.NEBULA         // nebula-tile
-  | EntityType.NEBULA_SHARD;  // nebula-shard
+  | EntityType.STRUCTURE   // glass / reinforced / heavy / indestructible
+  | EntityType.ASTEROID    // asteroid, tile-shard, nebula-shard (post-unify)
+  | EntityType.NEBULA;     // nebula-tile (static, hex-pinned)
+// EntityType.NEBULA_SHARD is removed in Stage 6 — nebula shards live on
+// EntityType.ASTEROID with very low mass (see §6.C).
 
 /** Selector for "which other variants do I interact with". */
 export type VariantSelector =
@@ -459,12 +460,20 @@ tile-shard: {
 ```ts
 'nebula-shard': {
   id: 'nebula-shard',
-  carrier: EntityType.NEBULA_SHARD,
+  // Per §6.C: unifies onto the asteroid carrier — same EntityType as
+  // 'asteroid' and 'tile-shard'.  Pass-through-collision semantics are
+  // replaced by very low mass so colliding strikers receive negligible
+  // impulse.  EntityType.NEBULA_SHARD is removed in Stage 6.
+  carrier: EntityType.ASTEROID,
   spawn: {
     sizeMin: 8, sizeMax: 44,                    // diameter = radius*4 from spawnShards
     polyVerticesMin: 4, polyVerticesMax: 6,
     angleJitter: 0.25, radiusMin: 0.6, radiusRange: 0.55,
-    sizeToMass: d => d,
+    // Near-zero mass: striker impulse drops by ~3 orders of magnitude
+    // vs. today's `mass = size` (~8–44).  Combined with the existing
+    // linearDamping/angularDamping fields on the entity, the shard still
+    // reads as "cloud being shoved aside" without slowing the striker.
+    sizeToMass: () => 0.01,
   },
   regen: { kind: 'merge-only' },                // tiles regrow only via transmutation
   merge: {
@@ -535,9 +544,12 @@ code changes after stage 5.
 What ShardSystem does with this config (no per-variant code path):
 
 1. **Pull pass**: each `nebula-shard` scans its 3×3 spatial-hash
-   neighbourhood for entities matching `attractedTo`. The broadphase
-   key set widens to include asteroid-carrier entities — see §6.D for
-   why this stays cheap on maps with no nebulae or no asteroids.
+   neighbourhood for entities matching `attractedTo`. Per §6.C the
+   spatial hash already contains every `EntityType.ASTEROID` entity
+   (asteroid + tile-shard + nebula-shard share the carrier), so the
+   puller's scan is a single variant-id filter against the existing
+   bucket — no second carrier set, no widened broadphase walk. See
+   §6.D for the per-map cost characterisation.
 2. **Bond pass**: the same 3×3 scan returns proximity-merge candidates
    (using `bondTimeSeconds === 0` semantics — overlap immediately
    resolves; no contact-timer). The `resolveMerge` walk finds rule
@@ -657,29 +669,105 @@ reflect check. Every benefit would be cosmetic. The two-axis model
 is exactly the discrimination the new `SHARD_VARIANTS` table makes
 explicit.
 
-### C. Whether nebula tiles themselves become "shards" of a variant
+### C. Whether nebula tiles & shards unify onto the asteroid carrier
 
-**Recommendation: yes, conceptually — `nebula-tile` is a
-SHARD_VARIANTS entry with carrier `EntityType.NEBULA` — but no, the
-EntityType stays distinct because it carries pass-through-collision
-semantics nothing else does.**
+**Decision (per user direction): nebula SHARDS unify onto
+`EntityType.ASTEROID`, sharing the carrier with `asteroid` and
+`tile-shard`. Pass-through-collision semantics are replaced by
+**very low mass** so player / enemy strikers receive negligible
+impulse on contact. Nebula TILES stay on `EntityType.NEBULA` —
+they are static, hex-grid-pinned, and the render fast-path cache
+keys off the NEBULA EntityType.**
 
-The variant table is the unification point; the EntityType is the
-physics-carrier. Nebula tiles are pass-through (PhysicsSystem skips
-impulse for `EntityType.NEBULA / NEBULA_SHARD`), and STRUCTURE tiles
-are not. Forcing those onto the same EntityType would either lose
-nebula's pass-through (regression) or push a per-variant branch
-into PhysicsSystem (regression of intent). Keep EntityType as the
-collision-class axis; let SHARD_VARIANTS be the behavioural axis.
+Why nebula shards unify:
+
+- **Single moving-shard carrier.** Every entity ShardSystem moves,
+  pulls, or bonds is now `EntityType.ASTEROID`. The `shardCandidates`
+  EntityIndex filter (§6.D) narrows to a single EntityType. The
+  broadphase cell-walk no longer needs to consider two carriers.
+- **Bouncer special-case shrinks.** `PhysicsSystem:932` keeps its
+  check shape but the variant filter widens cleanly:
+  `target.type === STRUCTURE || (target.type === ASTEROID &&
+   shardVariantOf(target) === 'tile-shard')`. Nebula-shards live
+  on ASTEROID but **don't** match `tile-shard`, so bouncers still
+  pass through them — exactly today's behaviour.
+- **Death dispatch collapses.** Today there are two branches in
+  `handleEntityDeath`: ASTEROID (shatter into more shards / dust
+  puff) and NEBULA_SHARD (route to NebulaSystem). After the
+  unification, both are ASTEROID; the dispatch reads
+  `SHARD_VARIANTS[shardVariantOf(entity)]` and the variant config
+  drives shatter (`kind: 'none'` for nebula-shards — no re-shatter,
+  matches today) and onShatterParticles (none — fade via
+  `nebulaFadeTimer`).
+
+How "barely, if at all, slow down" is expressed:
+
+- The variant's `spawn.sizeToMass` returns a near-zero constant
+  (recommended `() => 0.01`). Today a nebula shard has
+  `mass = size` (~8–44). With the new mass, the impulse on a
+  striker (player mass typically dozens) is reduced by ~3 orders
+  of magnitude. The shard itself still takes the equal-and-
+  opposite kick, which combined with `linearDamping = 0.97` and
+  `angularDamping = 0.98` (already on the entity, ticked by
+  PhysicsSystem) gives the existing "cloud being shoved aside"
+  feel.
+- `mass: 0.01` is finite (not `Infinity`, not zero) so the standard
+  collision-resolution path treats the shard as a normal mobile
+  body — no per-variant branch in PhysicsSystem. The lone exception
+  preserved is **damage routing**: nebula shards still take
+  weapon damage and shatter via the variant table; their HP and
+  shatter response are unchanged.
+
+Costs we accept:
+
+- Nebula shards now participate in PhysicsSystem broadphase + SAT
+  narrowphase (today they are skipped). Population is bounded
+  (typically 2–3 per shatter, with merge cooldown limiting peak
+  count) so the cost is small. The §9 perf table captures
+  `physicsMs` on NebulaFieldMap before and after to verify the
+  added cost is in the noise.
+- Per-substep `nebulaImpactCooldown` decrement on PLAYER / ENEMY
+  strikers stays in PhysicsSystem; the cooldown is no longer
+  load-bearing for "did I shatter the tile yet" gating because
+  shatter triggers on damage rather than on contact-impulse, but
+  the existing cooldown-on-strike path stays as a debounce against
+  the same striker re-shattering during one bounce.
+
+Why nebula tiles **don't** also unify:
+
+- Tiles are static-grid residents (hex-pinned, mass = Infinity,
+  render fast-path keyed on `EntityType.NEBULA`). Moving them onto
+  ASTEROID buys nothing — the ShardSystem variant table already
+  unifies their behaviour, and the render fast-path's
+  EntityType-based cache check would need a more complex predicate.
+  Concrete cost > concrete benefit. **Open to revisit later** if
+  the fast-path cache is migrated to a variant-based predicate.
+
+Cascading changes from this decision:
+
+- `EntityType.NEBULA_SHARD` becomes a dead enum value. Removed in
+  Stage 6 alongside the rest of the dead-code sweep.
+- `ShardCarrier` type in §2 simplifies — nebula-shards no longer
+  need their own carrier slot (see updated schema below).
+- `EntityIndex.shardCandidates` filter (§6.D) narrows to "active
+  entities with `EntityType.ASTEROID`".
+- The variant config's `nebula-shard.carrier` becomes
+  `EntityType.ASTEROID` and adds a mass override (see updated §4
+  config below).
+- PhysicsSystem skip-collision branch for `EntityType.NEBULA_SHARD`
+  is **deleted** in Stage 5 (when nebula shards first carry
+  `EntityType.ASTEROID`); they go through standard impulse with
+  near-zero mass.
 
 ### D. Broadphase for cross-variant gravity pull
 
 **Recommendation: ShardSystem owns a single per-frame spatial hash
-over `EntityIndex.shardCandidates` — a new prebuilt list that
-filters the master entity list to the union of "active and has a
-carrier in {ASTEROID, NEBULA_SHARD}" (i.e. movable shard-carriers).
-STRUCTURE / NEBULA tiles are never pull/bond candidates so they're
-not indexed.**
+over `EntityIndex.shardCandidates` — a new prebuilt list filtered
+to "active entities with `EntityType.ASTEROID`" (post-§6.C
+unification, that is the single carrier for every movable shard
+variant — `asteroid`, `tile-shard`, and `nebula-shard`). STRUCTURE
+and NEBULA tiles are static and never pull/bond candidates, so
+they're not indexed.**
 
 The hash is built once per simulation step, with cell size =
 `max(SHARD_VARIANTS[v].merge.pullRange ?? bondContactDist for v)`
@@ -762,22 +850,36 @@ Per-file move plan (Phase 2 staging is in §9 — this section is just
 
 ### `engine/systems/PhysicsSystem.ts`
 
-- Bouncer reflect at `:932` keeps its check, rephrased to use the
-  variant id: `target.type === STRUCTURE || (target.type === ASTEROID
-  && shardVariantOf(target) === 'tile-shard')` — no behavioural
-  change.
-- `applyLocalGravity`-style code stays where it is. The new shard
-  pull pass lives inside ShardSystem and is driven by ShardSystem's
-  own broadphase.
-- `addStaticEntity` — still called by ShardSystem on regen completion
-  (today both GameEngine and NebulaSystem call it; the refactor
-  centralises the call site).
-- Per-substep tick of `nebulaImpactCooldown`, `nebulaMergeCooldown`,
-  `nebulaFadeTimer`, `nebulaSpawnTimer`, `linearDamping`,
-  `angularDamping` — stays in PhysicsSystem (these are velocity-
-  integration-adjacent ticks, per CLAUDE.md §4 "Per-entity damping is
-  ticked by PhysicsSystem"). ShardSystem **reads** the cooldowns to
-  gate pull/bond eligibility; it doesn't decrement them.
+- **Pass-through-collision branch for `EntityType.NEBULA_SHARD`
+  is removed.** Per §6.C, nebula shards now live on
+  `EntityType.ASTEROID` with near-zero mass; standard impulse
+  resolution gives the desired "barely slow down" feel without a
+  per-EntityType branch. Lands in Stage 5 (the same stage that
+  re-stamps fresh `nebula-shard` spawns onto `EntityType.ASTEROID`).
+- **Bouncer reflect at `:932`** keeps its check, rephrased to use
+  the variant id: `target.type === STRUCTURE || (target.type ===
+  ASTEROID && shardVariantOf(target) === 'tile-shard')`. Nebula
+  shards live on ASTEROID but have variant `'nebula-shard'`, so
+  bouncers continue to pass through them — no behavioural change.
+- **`applyLocalGravity`-style code stays where it is.** The new
+  shard pull pass lives inside ShardSystem and is driven by
+  ShardSystem's own broadphase.
+- **Dynamic-grid insertion**: nebula shards now register in the
+  same per-frame dynamic grid as asteroids (today they were
+  skipped). Population is bounded — typically 2–3 per shatter,
+  with `nebulaMergeCooldown` capping peak shard count — so the
+  added broadphase + narrowphase cost is small. §9 perf table
+  captures NebulaFieldMap `physicsMs` before / after.
+- **`addStaticEntity`** — still called by ShardSystem on regen
+  completion (today both GameEngine and NebulaSystem call it; the
+  refactor centralises the call site).
+- **Per-substep ticks** of `nebulaImpactCooldown`,
+  `nebulaMergeCooldown`, `nebulaFadeTimer`, `nebulaSpawnTimer`,
+  `linearDamping`, `angularDamping` — stay in PhysicsSystem
+  (velocity-integration-adjacent ticks, per CLAUDE.md §4
+  "Per-entity damping is ticked by PhysicsSystem"). ShardSystem
+  **reads** the cooldowns to gate pull/bond eligibility; it
+  doesn't decrement them.
 
 ### `engine/systems/NebulaSystem.ts` — code that **moves out**
 
@@ -843,6 +945,11 @@ behaviour the variant table can't generically express:
   `ShardType` alias for one PR for grep-friendliness is fine; it
   goes away in stage 6.
 - One new optional field: `attachedHostId?: string`.
+- **`EntityType.NEBULA_SHARD` enum value is removed in Stage 6.**
+  After §6.C, no entity in any system carries it — `nebula-shard`
+  variants spawn with `type: EntityType.ASTEROID`. Removal is
+  mechanical (one enum entry + a handful of dead branches in
+  `NebulaSystem.handleDeath` / death dispatch / `prepareFrameEntities`).
 - Dead optional fields removed in stage 6 (after all code paths
   migrate): none expected — every field is still used by render,
   physics, or persisted state. We do **not** widen `GameEntity`.
@@ -962,18 +1069,25 @@ branch before stage 1) and committed in the stage-1 commit body.
   ±5%** on `physicsMs / renderMs / nebulaMs`. `nebulaFast/Slow`
   ratio must match exactly (cache invalidation hasn't changed).
   `Ents` exactly matches.
-- **Stage 5 (cross-variant attach)**:
-  - On AsteroidFieldMap, NebulaFieldMap, GlassFieldMap: must still
-    match baseline ±5%. There is nothing on those maps for the new
-    interaction to fire on, so the only cost is one extra
-    `selects(...)` evaluation per pair plus passenger-list
-    iteration over an empty list.
+- **Stage 5 (cross-variant attach + nebula-shard EntityType
+  unification)**:
+  - On AsteroidFieldMap, GlassFieldMap: must still match baseline
+    ±5%. No nebula shards present on these maps; the unification
+    has no effect and the new attach interaction has nothing to
+    fire on.
+  - On NebulaFieldMap: `physicsMs` is allowed to rise by ≤10%
+    steady-state and ≤15% during an active shatter pass — nebula
+    shards now register in the dynamic grid (per §6.C). All other
+    fields within ±5%. `nebulaFast/Slow` ratio must match exactly
+    (the unification doesn't change the render fast-path; the
+    cache is keyed on `EntityType.NEBULA` for tiles, which is
+    unchanged).
   - On UniverseMap: `physicsMs` is allowed to rise by ≤10% during
     the active pass when many nebula shards are bonding to
-    asteroids; steady-state must still be within ±5%.
-    `nebulaFast/Slow` ratio must not regress (passengers ride
-    composition-keyed cached canvases — moving the host doesn't
-    invalidate).
+    asteroids and entering the dynamic grid; steady-state must
+    still be within ±5%. `nebulaFast/Slow` ratio must not
+    regress (passengers ride composition-keyed cached canvases —
+    moving the host doesn't invalidate).
 - **Stage 6 (delete dead code)**: identical to stage 5 numbers; this
   stage is purely subtractive.
 
@@ -1066,7 +1180,33 @@ becomes an empty wrapper (deleted in stage 6).
 End state: stick bonds between asteroids and nebula merge both
 fire from one code path. No visible change.
 
-### Stage 5 — heterogeneous merge (the only behavioural change)
+### Stage 5 — heterogeneous merge + nebula-shard EntityType unification
+
+This is the only stage that introduces new behaviour, and the stage
+that lands the §6.C unification. It bundles two changes that share a
+test surface:
+
+**5a. Nebula-shard EntityType migration** (per §6.C):
+
+- Fresh `nebula-shard` spawns now use `type: EntityType.ASTEROID`
+  with `shardVariant: 'nebula-shard'` and `mass: 0.01`.
+- Delete the `EntityType.NEBULA_SHARD` skip branch in
+  PhysicsSystem (collision impulse / dynamic-grid insertion / SAT
+  narrowphase). Nebula shards now go through the standard mobile-
+  body collision path; near-zero mass keeps striker impulse
+  negligible.
+- `handleEntityDeath` no longer routes `EntityType.NEBULA_SHARD` —
+  the now-ASTEROID nebula-shard hits the asteroid branch and gets
+  its variant-driven shatter (`kind: 'none'`) and visual fade. The
+  ammo-drop roll moves to the variant table or stays inside
+  `NebulaSystem.handleDeath`-but-keyed-on-variant — whichever is
+  smaller; recommended: variant-driven `spawnsAmmoDrop?: boolean`
+  hook so the dispatch shape matches every other variant.
+- Bouncer reflect check (`PhysicsSystem:932`) updated to read
+  `shardVariantOf(target) === 'tile-shard'` so nebula shards
+  continue to pass through bouncers.
+
+**5b. Heterogeneous attach behaviour**:
 
 - Edit `nebula-shard.merge.attractedTo` and `.bondsWith` to include
   `'asteroid'` and `'tile-shard'`; add the two `attach` rules.
@@ -1089,9 +1229,12 @@ fire from one code path. No visible change.
   `attachedHostId`, restores it to dynamic-grid eligibility, and
   routes through its variant shatter (no-op for `nebula-shard`).
 
-End state: nebula glow rides asteroids. AsteroidFieldMap and
-NebulaFieldMap unchanged because there's nothing for the
-interaction to fire on.
+End state: nebula glow rides asteroids. NebulaFieldMap shows a
+small `physicsMs` rise from nebula shards entering the dynamic
+grid (target: ≤5% steady-state, ≤10% during active shatter passes
+— per §9). AsteroidFieldMap and GlassFieldMap unchanged because
+there's nothing for the new interaction or new colliders to fire
+on.
 
 ### Stage 6 — delete dead code & spec drift
 
@@ -1101,9 +1244,16 @@ interaction to fire on.
 - Delete `pendingRegens`, `tickRegens`, `spawnShards`,
   `updateDynamics`, `mergeNebulas` from NebulaSystem.
 - Rename `shardType → shardVariant` everywhere; update bouncer
-  reflect check (`PhysicsSystem:932`) to use `shardVariantOf(target)
-  === 'tile-shard'`.
-- Update `CLAUDE.md` §4 and §8 per §8 above.
+  reflect check (`PhysicsSystem:932`) — already done in Stage 5,
+  this is the cleanup of any remaining `shardType` references.
+- **Remove `EntityType.NEBULA_SHARD`** from the enum in `types.ts`
+  and any remaining branches that key on it (none expected at
+  this point, since Stage 5 already migrated the live spawns —
+  this is the formal removal of the now-unreferenced enum value).
+- Update `CLAUDE.md` §4 (rename `shardType` → `shardVariant`; drop
+  the `EntityType.NEBULA_SHARD` mention from the entity-type
+  list) and §8 (replace the "shardType discrimination" gotcha with
+  a pointer to `SHARD_VARIANTS`).
 - Sweep for dead optional fields on `GameEntity` (none expected).
 
 End state: net line reduction in `GameEngine.ts` and
