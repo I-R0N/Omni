@@ -11,6 +11,7 @@ import { WeaponSystem } from './systems/WeaponSystem';
 import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
+import { ShardSystem } from './systems/ShardSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
@@ -39,6 +40,10 @@ export class GameEngine {
   private drops: DropSystem;
   private waves: WaveSystem;
   private nebulas: NebulaSystem;
+  // Stage 1 of shard-system overhaul — additive skeleton, no-op
+  // update / onDeath.  Existing GameEngine + NebulaSystem code paths
+  // still drive regen / shatter / merge.  See docs/SHARD_SYSTEM.md.
+  private shards: ShardSystem;
   private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
   
@@ -260,6 +265,7 @@ export class GameEngine {
     this.drops = new DropSystem(this.particles);
     this.waves = new WaveSystem();
     this.nebulas = new NebulaSystem(this.particles, this.drops);
+    this.shards = new ShardSystem(this.particles);
     this.entityIndex = new EntityIndex();
     this.flowField = new FlowFieldGrid();
 

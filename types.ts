@@ -1,5 +1,13 @@
 
 
+// ShardVariantId is defined in engine/systems/ShardSystem.types.ts
+// (the schema lives next to the system implementation).  Imported
+// type-only here so the GameEntity field can be strongly typed
+// without creating a runtime cycle — types.ts is widely imported
+// across the engine, and the type-only import is erased at compile
+// time.
+import type { ShardVariantId } from './engine/systems/ShardSystem.types';
+
 export enum MapType {
   UNIVERSE    = 'UNIVERSE',
   RING        = 'RING',
@@ -289,6 +297,15 @@ export interface GameEntity {
   // Set on EntityType.ASTEROID entities that originate from a destructible
   // material.  Drives visual style and bonding affinity in the stick system.
   shardType?: ShardType;
+
+  // ── Unified shard-variant identity (Stage 1 of shard-system overhaul) ────
+  // Single source of truth for which SHARD_VARIANTS entry an entity belongs
+  // to.  Stage 1 leaves this undefined on every entity — readers should
+  // fall back to the legacy `shardType` / `structureVariant` fields via
+  // `shardVariantOf()` (engine/systems/ShardSystem.ts).  Stage 5 stamps
+  // this directly at every spawn site; Stage 6 deletes the legacy fields.
+  // See docs/SHARD_SYSTEM.md for the full migration plan.
+  shardVariant?: ShardVariantId;
 
   // Blended hex color of all absorbed power-up weapons; drives glow tinting
   // in the renderer.  Computed/blended in GameEngine when a power-up is

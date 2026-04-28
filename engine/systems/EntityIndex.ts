@@ -24,6 +24,19 @@ export class EntityIndex {
   /** Active projectiles (both player- and enemy-owned). */
   public projectiles: GameEntity[] = [];
 
+  /**
+   * Active mobile shard candidates — the broadphase input set used by
+   * ShardSystem's gravity-pull and stick-bond passes (see
+   * docs/SHARD_SYSTEM.md §6.D).  Stage 1 uses the same filter as
+   * `asteroids` so this list is byte-identical to the existing one;
+   * the predicate flips to `type === STRUCTURE && mass !== Infinity`
+   * in Stage 5 once the EntityType collapse lands.  Maintained as a
+   * separate list so callers that want all asteroid-class entities
+   * (weapon homing, etc.) keep the narrow filter while ShardSystem
+   * has its own input.
+   */
+  public shardCandidates: GameEntity[] = [];
+
   // ── Count-only snapshots (no list alloc) ─────────────────────────────────
   // Updated alongside the filtered lists above so the dev perf overlay can
   // chart per-type accumulation without a second O(N) walk every frame.
@@ -44,6 +57,7 @@ export class EntityIndex {
     this.enemies.length = 0;
     this.asteroids.length = 0;
     this.projectiles.length = 0;
+    this.shardCandidates.length = 0;
     this.particleCount = 0;
     this.interactableCount = 0;
     this.activeCount = 0;
@@ -58,6 +72,9 @@ export class EntityIndex {
           break;
         case EntityType.ASTEROID:
           this.asteroids.push(e);
+          // Stage 1: shardCandidates matches asteroids byte-for-byte.
+          // Stage 5 flips this to `type === STRUCTURE && mass !== Infinity`.
+          this.shardCandidates.push(e);
           break;
         case EntityType.PROJECTILE:
           this.projectiles.push(e);
@@ -77,6 +94,7 @@ export class EntityIndex {
     this.enemies.length = 0;
     this.asteroids.length = 0;
     this.projectiles.length = 0;
+    this.shardCandidates.length = 0;
     this.particleCount = 0;
     this.interactableCount = 0;
     this.activeCount = 0;
