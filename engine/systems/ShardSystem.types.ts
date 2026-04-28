@@ -169,6 +169,21 @@ export interface ShardShatterPolicy {
   fadeInSeconds?: number;
   /** Optional merge cooldown stamped on each child. */
   postShatterMergeCooldown?: number;
+  /** Shatter geometry strategy.  Two flavours today:
+   *
+   *    'asteroid' — children scattered in a cone around the impact
+   *                 direction, count and area driven by impact damage,
+   *                 each child sized via power-law over the parent's
+   *                 area budget.  Used by rock/glass/tile-family.
+   *    'nebula'   — children spawned in a rear-cone fan behind the
+   *                 striker, tangent-rule spin, parallel/perp velocity
+   *                 model, fixed count regardless of damage, child
+   *                 area = GLASS_TILE_HALF² (constant) so shards are
+   *                 visually small regardless of parent tile size.
+   *
+   *  Only meaningful when `kind === 'powerlaw'`.  Variants with
+   *  `kind === 'none'` ignore this field. */
+  style?: 'asteroid' | 'nebula';
 }
 
 // ── Variant definition ──────────────────────────────────────────────

@@ -1152,8 +1152,11 @@ const TILE_REGEN_POP_BURST = {
 
 // Spawn shape used by tile variants whose shatter spawns mobile
 // glass-shards (today's "tile-shard" debris from STRUCTURE death).
+// sizeMin matches ASTEROID_GENERATION_CONFIG[*].minSize (universally
+// 20 across maps) so the asteroid-style shatter's MIN_SIZE gate
+// matches today's behaviour byte-for-byte.
 const GLASS_SHARD_SPAWN_SHAPE = {
-  sizeMin: 12, sizeMax: 200,
+  sizeMin: 20, sizeMax: 200,
   polyVerticesMin: 4, polyVerticesMax: 6,    // blocky
   angleJitter: 0.25, radiusMin: 0.60, radiusRange: 0.55,
   sizeToMass: (d: number) => d,
@@ -1186,6 +1189,7 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
     // canonical path; the policy below mirrors today's glass-shard
     // population.
     kind: 'powerlaw',
+    style: 'asteroid',
     countMin: 4, countMax: 6,
     alphaMin: 1.0, alphaMax: 1.0,
     childVariant: 'glass-shard',
@@ -1197,7 +1201,7 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
 };
 
 const SHARD_SPAWN_SHAPE_ROCK = {
-  sizeMin: 12, sizeMax: 200,
+  sizeMin: 20, sizeMax: 200,                  // matches ASTEROID_GENERATION_CONFIG.minSize
   polyVerticesMin: 5, polyVerticesMax: 7,    // jagged
   angleJitter: 0.8, radiusMin: 0.55, radiusRange: 0.70,
   sizeToMass: (d: number) => d,
@@ -1233,6 +1237,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
+      style: 'asteroid',
       countMin: 0, countMax: 0,
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'glass-shard',
@@ -1247,6 +1252,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Rock-tiles shatter into rock-shards (not glass-shards).
     shatter: {
       kind: 'powerlaw',
+      style: 'asteroid',
       countMin: 2, countMax: 5,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
@@ -1272,6 +1278,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'powerlaw',
+      style: 'nebula',
       countMin: 2, countMax: 3,                 // count = 2 + floor(rand*2)
       alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'nebula-shard',
@@ -1306,6 +1313,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'powerlaw',
+      style: 'asteroid',
       countMin: 2, countMax: 5,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
@@ -1333,6 +1341,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     shatter: {
       kind: 'powerlaw',
+      style: 'asteroid',
       countMin: 2, countMax: 5,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'glass-shard',

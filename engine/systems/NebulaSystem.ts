@@ -106,9 +106,11 @@ export class NebulaSystem {
         entity: GameEntity,
         waveIndex: number,
     ): void {
-        // Both tiles and shards run through spawnShards (it early-returns
-        // for shards — shards don't re-shatter, they just fade).
-        this.spawnShards(entities, entity);
+        // Stage 3: shatter is owned by ShardSystem and is invoked
+        // directly from GameEngine.handleEntityDeath via
+        // `this.shards.shatter(entity, entities)`.  This system
+        // only handles the nebula-specific bookkeeping +
+        // ammo-drop roll.
 
         // A destroyed tile removes itself from its neighbours' counts;
         // flag for recompute on the next frame.
@@ -222,192 +224,9 @@ export class NebulaSystem {
         return tilesProcessed;
     }
 
-    // Private method stubs — filled in by subsequent edits.
+    // spawnShards moved to ShardSystem.shatter (Stage 3 of shard-system
+    // overhaul).  See engine/systems/ShardSystem.ts.
 
-    /**
-     * Shatter a nebula TILE into glass-style polygonal shards.  Shards
-     * never re-shatter — they just fade when struck — so this early-
-     * returns for NEBULA_SHARD parents.
-     *
-     * Generation math mirrors DropSystem.spawnGlassShards: power-law
-     * area distribution, 4–6 vertex polygons, `size = radius * 4` so
-     * physics feels solid.  Nebula-specific behaviour preserved:
-     *   - rear-cone fan positioning (shards drift behind the striker)
-     *   - tangent-rule spin (left-side CCW, right-side CW)
-     *   - forward-drag velocity (parallel to striker direction)
-     *   - composition cloned from parent (colour carries through)
-     *   - fade-in timer scaled inversely with impact speed
-     *   - effective-area split (HEX_AREA / shardCount per shard) so
-     *     the 4–6 children together carry exactly one tile of mass
-     *     back toward the next transmutation.  Visual sprite size is
-     *     derived from this field at render time — no explicit
-     *     sprite-size state is stored on the shard itself.
-     */
-    private spawnShards(entities: GameEntity[], parent: GameEntity): void {
-        if (parent.type === EntityType.NEBULA_SHARD) return;
-
-        const parentDiameter = Math.max(parent.size.x, parent.size.y);
-        const parentRadius   = parentDiameter / 2;
-        // Parent area budget for the shard power-law distribution.  We
-        // intentionally use the glass-shard convention (TILE_HALF² = 121
-        // for TILE_HALF = 11) regardless of the actual nebula tile size
-        // so the resulting shards are the SAME scale as glass shards —
-        // small enough to avoid mass re-merging on spawn and small
-        // enough that the debug polygon outline reads as a polygon and
-        // not a large circle.  Using the nebula tile's actual radius²
-        // produced ~9-unit radii and rapid merges that wiped polygons.
-        const GLASS_TILE_HALF = 11;
-        const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF;
-        const MIN_RADIUS = 2; // don't spawn sub-pixel shards
-
-        // 2–3 shards per shatter — fewer, chunkier pieces than glass
-        // tiles produce.  Nebula tiles read as soft cloud blobs that
-        // come apart slowly into a couple of large fragments rather
-        // than a glittery shower of small debris.  Combined with the
-        // area-proportional sprite formula in RenderSystem, each fresh
-        // shard draws at sqrt(1/count) × TILE_SPRITE_WORLD_SIZE — so
-        // 2-shard splits are 0.71× tile size, 3-shard splits 0.58×.
-        const count = 2 + Math.floor(Math.random() * 2);
-
-        // Power-law area distribution normalised to the parent's area.
-        const alpha    = 1.0;
-        const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-        const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-        const radii: number[] = rawAreas
-            .map(a => Math.sqrt((a / rawSum) * parentArea))
-            .filter(r => r >= MIN_RADIUS);
-
-        if (radii.length < 1) return;
-
-        const composition = parent.nebulaColorComposition;
-
-        // Shard sprite size is derived from `nebulaTileArea` at render
-        // time (TILE_SPRITE_WORLD_SIZE × sqrt(area / HEX_AREA)), so we
-        // no longer need to carry an explicit sprite world-size on each
-        // shard — the effective area field does double duty.
-
-        // Striker direction (forward vector).  Canvas is y-down so a
-        // positive z-component of cross(forward, spawn-direction) means
-        // the shard is on the striker's visual right.
-        const iv = parent.lastImpactVelocity;
-        const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-        let fx = 1, fy = 0;
-        if (iv && impactSpeed > 0.001) {
-            fx = iv.x / impactSpeed;
-            fy = iv.y / impactSpeed;
-        }
-
-        const spinK = Math.min(
-            NEBULA_CONSTANTS.MAX_SPIN,
-            1 + impactSpeed * NEBULA_CONSTANTS.SPIN_PER_UNIT_SPEED,
-        );
-
-        // Effective birth fade-in duration — matches the rateScale
-        // PhysicsSystem used for the parent's fade-out, so destruction
-        // and rebirth animations feel synchronised for the same hit.
-        const shardRateScale = nebulaFadeRateScale(impactSpeed);
-        const shardSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION / shardRateScale;
-
-        // REARWARD fan: children spawn behind the striker, spread
-        // symmetrically across 2 × FAN_HALF_ANGLE.
-        const fan  = NEBULA_CONSTANTS.FAN_HALF_ANGLE;
-        const shardCount = radii.length;
-        const step = shardCount > 1 ? (2 * fan) / (shardCount - 1) : 0;
-        // Use parent-tile radius for the spawn offset (not shard radius)
-        // so every child spawns well clear of the tile footprint.
-        const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
-
-        for (let i = 0; i < shardCount; i++) {
-            const radius = radii[i];
-
-            // Glass-shard polygon generation.
-            const numPoints = 4 + Math.floor(Math.random() * 3);
-            const rawPts: { angle: number; r: number }[] = [];
-            for (let j = 0; j < numPoints; j++) {
-                const baseAngle = (j / numPoints) * Math.PI * 2;
-                const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-                rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-            }
-            rawPts.sort((a, b) => a.angle - b.angle);
-            const pts: Vector2[] = rawPts.map(p => ({
-                x: Math.cos(p.angle) * p.r,
-                y: Math.sin(p.angle) * p.r,
-            }));
-            const size = radius * 4; // diameter with a bit of slack for physics feel
-
-            // Rear-cone angle: π + (−fan … +fan) relative to forward.
-            const offsetAngle = Math.PI + (shardCount > 1 ? -fan + step * i : 0);
-            const cosA = Math.cos(offsetAngle);
-            const sinA = Math.sin(offsetAngle);
-            const dx = fx * cosA - fy * sinA;
-            const dy = fx * sinA + fy * cosA;
-
-            const spawnPos = { x: parent.position.x + dx * offsetMag, y: parent.position.y + dy * offsetMag };
-            wrapPosition(spawnPos);
-            const spawnX = spawnPos.x;
-            const spawnY = spawnPos.y;
-
-            // Tangent-rule side for spin direction.
-            const cross = fx * dy - fy * dx;
-            const spinSign = cross > 0.01 ? 1
-                            : cross < -0.01 ? -1
-                            : (Math.random() < 0.5 ? 1 : -1);
-            const rotationSpeed = spinSign * spinK;
-
-            // "Dragged along" velocity model: parallel component dominates,
-            // perpendicular component biased to the shard's tangent side.
-            const parallelSpeed = Math.max(
-                NEBULA_CONSTANTS.MIN_PARALLEL_SPEED,
-                impactSpeed * NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR,
-            );
-            const perpSpeed = impactSpeed * NEBULA_CONSTANTS.PERP_SCATTER_FACTOR;
-            const perpSign = cross > 0.01 ? 1 : cross < -0.01 ? -1 : 0;
-            const perpX = -fy * perpSign * perpSpeed;
-            const perpY =  fx * perpSign * perpSpeed;
-            const velX = fx * parallelSpeed + perpX;
-            const velY = fy * parallelSpeed + perpY;
-
-            // Effective area carried by each shard toward the next
-            // transmutation.  Splitting HEX_AREA equally across all
-            // spawned shards gives net-zero tile balance: one shatter
-            // produces exactly 1 hex of effective mass, and when all
-            // those shards merge back together the accumulation hits
-            // HEX_AREA and transmutes into one new tile.  Independent
-            // of the shard's visual polygon radius so shards can stay
-            // glass-style small without blocking the transmutation path.
-            const effectiveAreaPerShard = HEX_AREA / shardCount;
-
-            entities.push({
-                id:              nextId('nebula_shard'),
-                type:            EntityType.NEBULA_SHARD,
-                shardType:      'nebula',
-                position:       { x: spawnX, y: spawnY },
-                velocity:       { x: velX, y: velY },
-                size:           { x: size, y: size },
-                rotation:        Math.random() * Math.PI * 2,
-                rotationSpeed,
-                color:           composition ? blendCompositionToHex(composition) : (parent.color || NEBULA_CONSTANTS.DEFAULT_HEX),
-                active:          true,
-                health:          1,
-                maxHealth:       1,
-                mass:            size,
-                polygonPoints:   pts,
-                sprite:          parent.sprite,
-                nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-                nebulaTileArea:  effectiveAreaPerShard,
-                nebulaGridCol:   parent.nebulaGridCol,
-                nebulaGridRow:   parent.nebulaGridRow,
-                linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
-                angularDamping:  NEBULA_CONSTANTS.ANGULAR_DAMPING,
-                nebulaSpawnTimer:    shardSpawnDuration,
-                nebulaSpawnDuration: shardSpawnDuration,
-                // Newly-spawned shards cannot merge for this many seconds
-                // — keeps them visible as distinct polygons for a beat
-                // before the gravity/merge pass starts coalescing them.
-                nebulaMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
-            });
-        }
-    }
     /**
      * Per-frame gravity + merge pass for NEBULA_SHARDs.
      *

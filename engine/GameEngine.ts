@@ -634,7 +634,10 @@ export class GameEngine {
           if (!e.active) newlyDestroyed.push(e);
       }
       for (const ast of newlyDestroyed) {
-          if (ast.size.x > config.minSize) this.createAsteroidShards(ast);
+          // Asteroid-style shatter is variant-driven via ShardSystem
+          // (Stage 3): the variant config gates count / size / scatter
+          // and the size-floor check now lives inside shatter() too.
+          if (this.currentMap) this.shards.shatter(ast, this.currentMap.entities);
       }
       if (currentAsteroidCount < config.count) {
           this.handleAsteroidRespawn(config);
@@ -797,17 +800,18 @@ export class GameEngine {
           this.spawnEnemyShards(entity);
       }
 
-      // Nebula tiles and shards route through NebulaSystem for the
-      // polygonal shard burst + occasional ammo drop.  Regen queueing
-      // moved out to ShardSystem in Stage 2 and is invoked alongside
-      // (the variant config decides whether the queue accepts the
-      // entity — nebula-tile is gated on NEBULA_CONSTANTS.TILE_REGEN_ENABLED,
-      // nebula-shard never queues).  Nebulae also skip the generic
-      // death-burst particles below (they fade via nebulaFadeTimer)
-      // AND skip the generic spawnDrops path since the ammo roll lives
-      // inside NebulaSystem.handleDeath.
+      // Nebula tiles and shards route through ShardSystem (shatter +
+      // regen, Stages 2–3) and NebulaSystem (ammo drop + neighbour-
+      // dirty bookkeeping).  Nebulae skip the generic death-burst
+      // particles below (they fade via nebulaFadeTimer) AND skip the
+      // generic spawnDrops path since the ammo roll lives inside
+      // NebulaSystem.handleDeath.
       const isNebula = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
       if (isNebula && this.currentMap) {
+          // Variant-driven shatter: nebula-tile spawns 2–3 nebula-shards
+          // via the rear-cone fan; nebula-shard variant has shatter.kind
+          // === 'none' so this is a no-op for shards.
+          this.shards.shatter(entity, this.currentMap.entities);
           this.nebulas.handleDeath(
               this.currentMap.entities,
               this.activeDrops,
@@ -1875,114 +1879,8 @@ export class GameEngine {
       });
   }
 
-  private createAsteroidShards(parent: GameEntity) {
-      // Minimum shard size = smallest spawnable asteroid for the current map.
-      const MIN_SIZE = ASTEROID_GENERATION_CONFIG[this.currentMap?.type ?? MapType.UNIVERSE].minSize;
-
-      // Parent area (area ∝ size²).
-      const parentArea = parent.size.x * parent.size.x;
-
-      // If parent is too small to yield two valid fragments, stop.
-      if (parentArea < MIN_SIZE * MIN_SIZE * 2) return;
-
-      // Damage scales both count and size distribution.
-      // damageNorm 0 → 2 pieces, mostly large; 1 → 5 pieces, mostly small.
-      const damage     = parent.lastImpactDamage ?? 1;
-      const damageNorm = Math.min(1, (damage - 1) / 4);
-      const count      = 2 + Math.round(damageNorm * 3); // 2–5
-
-      // Power-law area distribution: alpha low → few large; alpha high → many small.
-      const alpha = 0.4 + damageNorm * 1.6; // 0.4–2.0
-      const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-      const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-
-      // Normalise so total area equals parent area, then convert to sizes.
-      const sizes: number[] = rawAreas
-          .map(a => Math.sqrt((a / rawSum) * parentArea))
-          .filter(s => s >= MIN_SIZE);
-
-      if (sizes.length < 2) return; // not enough valid fragments
-
-      // Resolve impact direction.
-      const iv = parent.lastImpactVelocity;
-      const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
-      const HALF_CONE   = Math.PI * 0.55;
-
-      const parentRadius = parent.size.x / 2;
-
-      // Inherit shard type and color from parent so tile shards stay tiles, etc.
-      const parentShardType = parent.shardType ?? 'asteroid';
-      const isTile          = parentShardType === 'tile';
-
-      for (let i = 0; i < sizes.length; i++) {
-          const newSize = sizes[i];
-          const hp      = newSize > 30 ? 2 : 1;
-
-          let scatterAngle: number;
-          let scatterSpeed: number;
-          if (impactAngle !== null) {
-              scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-              scatterSpeed = impactSpeed * 0.35 + 0.4 + Math.random() * 1.2;
-          } else {
-              scatterAngle = Math.random() * Math.PI * 2;
-              scatterSpeed = 1 + Math.random() * 2;
-          }
-
-          const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
-          const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
-
-          // Polygon style mirrors the parent type: blocky for tile, jagged for asteroid
-          const numPoints   = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
-          const angleJitterK = isTile ? 0.25 : 0.8;
-          const rMin         = isTile ? 0.60 : 0.55;
-          const rRange       = isTile ? 0.55 : 0.70;
-          const baseR        = (newSize / 2) * 0.8;
-          const rawPts: { angle: number; r: number }[] = [];
-          for (let j = 0; j < numPoints; j++) {
-              const baseAngle   = (j / numPoints) * Math.PI * 2;
-              const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitterK;
-              rawPts.push({ angle: baseAngle + angleJitter, r: baseR * (rMin + Math.random() * rRange) });
-          }
-          rawPts.sort((a, b) => a.angle - b.angle);
-          const points: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
-          const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
-          const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
-          const maxSpin = 2.0 / (newSize / 20);
-
-          this.currentMap?.entities.push({
-              id:           nextId('shard'),
-              type:          EntityType.ASTEROID,
-              shardType:     parentShardType,
-              position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
-              velocity:     { x: vx, y: vy },
-              size:         { x: newSize, y: newSize },
-              rotation:      Math.random() * Math.PI * 2,
-              rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-              color:         isTile ? parent.color : COLORS.ASTEROID,
-              active:        true,
-              health:        hp,
-              maxHealth:     hp,
-              polygonPoints: points,
-              mass:          newSize,
-              sprite:        parent.sprite,
-          });
-      }
-
-      // Dust/debris burst at the break point
-      const dustColor  = isTile ? parent.color : '#94a3b8';
-      const dustCount  = 5 + Math.floor(parent.size.x / 20);
-      const dustSpeed  = impactSpeed * 0.4 + 2;
-      this.spawnParticles(parent.position, dustCount, dustColor, {
-          speedMin: 1, speedMax: dustSpeed,
-          sizeMin: 1, sizeMax: 2.5,
-          lifetimeMin: 0.25, lifetimeMax: 0.55,
-          spreadAngle: impactAngle ?? undefined,
-          spreadCone: Math.PI,
-          baseVelocity: parent.velocity,
-      });
-  }
+  // createAsteroidShards moved to ShardSystem.shatter in Stage 3 of
+  // the shard-system overhaul.  See engine/systems/ShardSystem.ts.
 
   // --- WAVE SYSTEM ---
 
