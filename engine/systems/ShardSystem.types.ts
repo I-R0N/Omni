@@ -234,3 +234,26 @@ export interface PerMapVariantSpawn {
   tileCluster?: TileClusterConfig;
 }
 
+// ── Variant-specific completion hook ────────────────────────────────
+// Stage 2: the nebula-tile regen path needs neighbourhood-aware
+// composition rewrite + cache invalidation + neighbour-counts dirty
+// bookkeeping at completion.  ShardSystem invokes this hook only
+// when the regen variant's `rewriteColor === 'neighborhood-blend'`,
+// keeping non-nebula regens free of any nebula-specific work.
+//
+// NebulaSystem implements this; ShardSystem accepts it via
+// constructor (optional — null-adapter is treated as a no-op so
+// non-nebula regens still work).  Other future hooks can extend
+// this interface without changing ShardSystem call sites.
+
+export interface ShardRegenAdapter {
+  /**
+   * Called after ShardSystem revives an entity, when the variant's
+   * regen.rewriteColor === 'neighborhood-blend'.  The implementation
+   * is responsible for whatever variant-specific completion work is
+   * needed (composition rewrite, cache invalidation, grid-index
+   * update, neighbour-counts-dirty flagging).
+   */
+  onNeighborhoodBlendRegen(entity: import('../../types').GameEntity, entities: import('../../types').GameEntity[]): void;
+}
+

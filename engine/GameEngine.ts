@@ -115,8 +115,10 @@ export class GameEngine {
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
 
-  // Tile regeneration — destroyed tiles waiting to respawn
-  private pendingRegens: { entity: GameEntity; timer: number }[] = [];
+  // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
+  // overhaul).  GameEngine.handleEntityDeath calls
+  // `this.shards.queueRegen(entity)` for every shard-family death;
+  // ShardSystem.update() drains the queue per fixed-step dt.
 
   // Fast drop lookup — avoids scanning all ~22k map entities every frame
   private activeDrops: GameEntity[] = [];
@@ -266,6 +268,9 @@ export class GameEngine {
     this.waves = new WaveSystem();
     this.nebulas = new NebulaSystem(this.particles, this.drops);
     this.shards = new ShardSystem(this.particles);
+    // Wire the variant-specific completion hook for the
+    // neighbourhood-blend regen path (today: nebula-tile only).
+    this.shards.setRegenAdapter(this.nebulas);
     this.entityIndex = new EntityIndex();
     this.flowField = new FlowFieldGrid();
 
@@ -402,7 +407,7 @@ export class GameEngine {
   }
 
   public restartGame() {
-      this.pendingRegens = [];
+      this.shards.reset();
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -780,22 +785,27 @@ export class GameEngine {
               return;
           }
           this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
-          // Queue for regeneration; entity stays in the map entities list as
-          // an inactive ghost so we can render an outline during regen.
-          entity.regenProgress = 0;
-          this.pendingRegens.push({ entity, timer: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY });
+          // Queue for regeneration; entity stays in the map entities list
+          // as an inactive ghost so the renderer draws an outline during
+          // the wait.  ShardSystem reads SHARD_VARIANTS[variant].regen
+          // for the per-variant delay, pop-burst, and any neighbourhood
+          // -blend hook (Stage 2).
+          this.shards.queueRegen(entity);
       }
 
       if (entity.type === EntityType.ENEMY) {
           this.spawnEnemyShards(entity);
       }
 
-      // Nebula tiles and shards route through NebulaSystem: polygonal
-      // shard burst + occasional ammo drop + regen queueing are all
-      // handled there.  They also skip the generic death-burst particles
-      // below (nebulae fade out gracefully via nebulaFadeTimer) AND skip
-      // the generic spawnDrops path since the ammo roll lives inside
-      // NebulaSystem.handleDeath.
+      // Nebula tiles and shards route through NebulaSystem for the
+      // polygonal shard burst + occasional ammo drop.  Regen queueing
+      // moved out to ShardSystem in Stage 2 and is invoked alongside
+      // (the variant config decides whether the queue accepts the
+      // entity — nebula-tile is gated on NEBULA_CONSTANTS.TILE_REGEN_ENABLED,
+      // nebula-shard never queues).  Nebulae also skip the generic
+      // death-burst particles below (they fade via nebulaFadeTimer)
+      // AND skip the generic spawnDrops path since the ammo roll lives
+      // inside NebulaSystem.handleDeath.
       const isNebula = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
       if (isNebula && this.currentMap) {
           this.nebulas.handleDeath(
@@ -804,6 +814,9 @@ export class GameEngine {
               entity,
               this.waveIndex,
           );
+          // Variant-driven regen — no-op for nebula-shard, no-op for
+          // nebula-tile when TILE_REGEN_ENABLED is false (current default).
+          this.shards.queueRegen(entity);
       }
 
       // Death burst particles — size/color tuned per entity type
@@ -914,30 +927,13 @@ export class GameEngine {
         this.minimapDebounce -= dt;
     }
 
-    // Tile regeneration tick
-    for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
-        const regen = this.pendingRegens[i];
-        regen.timer -= dt;
-        regen.entity.regenProgress = 1 - (regen.timer / STRUCTURE_CONSTANTS.TILE_REGEN_DELAY);
-
-        if (regen.timer <= 0) {
-            // Restore tile to full health and re-add to physics static grid
-            regen.entity.health = regen.entity.maxHealth;
-            regen.entity.active = true;
-            regen.entity.regenProgress = undefined;
-            regen.entity.regenPopTimer = REGEN_POP_CONSTANTS.DURATION;
-            this.physics.addStaticEntity(regen.entity);
-            this.pendingRegens.splice(i, 1);
-
-            // Pop-in particle burst: tile-colored chips scattering outward
-            this.spawnParticles(regen.entity.position, REGEN_POP_CONSTANTS.CHIP_COUNT, regen.entity.color || '#6366f1', {
-                speedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
-                speedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
-                lifetimeMin: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                lifetimeMax: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
-                sizeMin: 1, sizeMax: 2,
-            });
-        }
+    // Tile regeneration tick — drains the unified ShardSystem regen
+    // queue (replaces the previous separate STRUCTURE-tile loop here
+    // and the nebula-tile loop in NebulaSystem.tickRegens).  The
+    // variant config drives delay, pop-burst particles, and the
+    // optional neighbourhood-blend hook for nebula tiles.
+    if (this.currentMap) {
+        this.shards.update(this.currentMap.entities, dt, this.physics);
     }
 
     // Tick down regenPopTimer on tiles

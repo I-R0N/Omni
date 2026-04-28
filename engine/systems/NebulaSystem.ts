@@ -31,12 +31,15 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../
  * shard→tile transmutation, and the low-frequency ammo drop roll.
  *
  * Extracted from GameEngine as part of the Phase-2/3 style system split
- * introduced by the engine-upgrade PR.  NebulaSystem owns its own
- * `pendingRegens` queue (kept separate from glass-tile regen in
- * GameEngine) and drives a single per-frame `update()` tick.
+ * introduced by the engine-upgrade PR.  Stage 2 of the shard-system
+ * overhaul moved the regen queue out into ShardSystem (the unified
+ * queue handles both STRUCTURE and NEBULA tiles); NebulaSystem now
+ * exposes `onNeighborhoodBlendRegen` as the variant-completion hook
+ * ShardSystem invokes for nebula-tile regens.
  *
- * State that lives on NebulaSystem:
- *   - `pendingRegens` — inactive nebula tiles waiting to respawn.
+ * State that stays on NebulaSystem:
+ *   - `nebulaGridIndex` (lazy per-frame index over active tiles)
+ *   - `neighborCountsDirty` flag for the interior-darken render rule
  *
  * State that stays on the entity itself (ticked by PhysicsSystem):
  *   - `nebulaFadeTimer`, `nebulaSpawnTimer`, `nebulaImpactCooldown`,
@@ -50,17 +53,11 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../
  */
 export class NebulaSystem {
     /**
-     * Pending nebula tile regenerations.  Kept separate from
-     * GameEngine.pendingRegens (which handles glass structures) so the
-     * two regen cadences don't have to share a loop.
-     */
-    public pendingRegens: { entity: GameEntity; timer: number }[] = [];
-
-    /**
      * Lazily-built per-frame nebula grid index used by the regen colour
      * rule.  Cleared at the top of each `update()` and rebuilt on demand
-     * inside `tickRegens` so we pay the O(n) scan cost at most once per
-     * frame.  Not meaningful outside an `update()` call.
+     * inside `onNeighborhoodBlendRegen` (Stage 2 adapter hook) so we pay
+     * the O(n) scan cost at most once per frame.  Not meaningful outside
+     * an `update()` call or the regen-completion path.
      */
     private nebulaGridIndex: Map<number, GameEntity> | null = null;
 
@@ -82,10 +79,11 @@ export class NebulaSystem {
 
     /**
      * Hard reset — called on game restart so a fresh run doesn't inherit
-     * queued regens from the previous session's map.
+     * stale state from the previous session's map.  (Stage 2: the regen
+     * queue is now owned by ShardSystem; this only resets nebula-local
+     * state — neighbour-counts dirty flag and grid index.)
      */
     public reset() {
-        this.pendingRegens = [];
         this.nebulaGridIndex = null;
         this.neighborCountsDirty = true;
     }
@@ -131,15 +129,15 @@ export class NebulaSystem {
             );
         }
 
-        // Tile regeneration (when enabled) queues the shattered tile to
-        // respawn at its original grid cell.  When disabled (current
-        // default), tiles are gone permanently — the only path to new
-        // tiles is shard → tile transmutation after enough shard mass
-        // coalesces, keeping total tile population bounded.
-        if (entity.type === EntityType.NEBULA && NEBULA_CONSTANTS.TILE_REGEN_ENABLED) {
-            entity.regenProgress = 0;
-            this.pendingRegens.push({ entity, timer: NEBULA_CONSTANTS.REGEN_DELAY });
-        }
+        // Tile-regen queueing is now owned by ShardSystem (Stage 2).
+        // GameEngine.handleEntityDeath calls `this.shards.queueRegen(entity)`
+        // unconditionally for shard-family deaths; the variant config
+        // (SHARD_VARIANTS['nebula-tile'].regen) decides whether the
+        // queue actually accepts the entity.  When NEBULA_CONSTANTS
+        // .TILE_REGEN_ENABLED is false the variant's regen.kind
+        // collapses to 'none' and queueRegen is a no-op — matches
+        // today's "tiles are gone permanently; new tiles only appear
+        // via shard→tile transmutation" semantics.
     }
 
     /**
@@ -152,8 +150,10 @@ export class NebulaSystem {
         dt: number,
         physics: PhysicsSystem,
     ): void {
-        // Reset the lazy grid index — it'll be rebuilt inside tickRegens
-        // if any regen finishes this frame and needs neighbour lookups.
+        // Reset the lazy grid index — it'll be rebuilt by
+        // onNeighborhoodBlendRegen (the ShardSystem regen-completion
+        // hook) if any nebula regen finishes this frame and needs
+        // neighbour lookups.
         this.nebulaGridIndex = null;
 
         // Refresh every tile's neighbour count if something changed since
@@ -174,7 +174,9 @@ export class NebulaSystem {
         this.currentFrameEntities = entities;
 
         try {
-            this.tickRegens(entities, dt, physics);
+            // Stage 2: regen ticking is owned by ShardSystem.  This
+            // system only runs the dynamics pass (gravity-pull + merge);
+            // ShardSystem.update() drains the unified regen queue.
             this.updateDynamics(entities, dt, physics);
         } finally {
             this.currentFrameEntities = null;
@@ -845,72 +847,54 @@ export class NebulaSystem {
         return [{ hex: paletteHueToHex(targetHue), weight: 1 }];
     }
     /**
-     * Advance pending nebula-tile regen timers.  When a timer expires:
-     *   - Revive the tile (active=true, health=max, regenProgress=undef)
+     * ShardRegenAdapter hook (Stage 2).  Called by ShardSystem when a
+     * regen completes for a variant whose `regen.rewriteColor === 'neighborhood-blend'`
+     * (today: nebula-tile only).  ShardSystem already revived the
+     * entity (active=true, health=max, regenProgress=undef) and will
+     * call physics.addStaticEntity afterwards; this hook only handles
+     * the nebula-specific completion work:
      *   - Compute a rule-based colour (neighbourhood-aware, forced shift)
+     *   - Drop the render fast-path cache so the new colour shows
      *   - Reset the fade-in timer so the tile slowly materialises
-     *   - Re-add to the physics static grid so collisions start hitting
      *   - Update the grid index so this tile counts as a neighbour for
      *     any later regens in the same frame (cluster-wide shatter)
+     *   - Flag neighbour-counts dirty for the next update() pass
      */
-    private tickRegens(
-        entities: GameEntity[],
-        dt: number,
-        physics: PhysicsSystem,
-    ): void {
-        if (this.pendingRegens.length === 0) return;
+    public onNeighborhoodBlendRegen(entity: GameEntity, entities: GameEntity[]): void {
+        // Tiles never grow (only shards do), so size is already
+        // canonical.  Rule-based colour regeneration reads the
+        // regenerating tile's 6 hex neighbours and blends their
+        // compositions with the old tile's composition based on
+        // isolation level — interior tiles smooth toward the
+        // cluster average, edge tiles drift less, isolated tiles
+        // keep their old hue exactly.
+        if (!this.nebulaGridIndex) {
+            this.nebulaGridIndex = this.buildNebulaGridIndex(entities);
+        }
+        entity.nebulaColorComposition = this.computeRegeneratedComposition(entity);
+        entity.color = entity.nebulaColorComposition[0].hex;
+        // Composition changed on regen — drop the render cache so
+        // the regenerated tile picks up the new neighbourhood-blend
+        // colour on its next draw.  Same invalidation also clears
+        // the fast-path cache (tinted canvas / dx / dy / size) so
+        // the slow path repopulates on the regen tile's next draw.
+        entity.nebulaBlendedHex = undefined;
+        entity.nebulaCachedTinted = undefined;
 
-        const delay = NEBULA_CONSTANTS.REGEN_DELAY;
+        // Fade in slowly instead of popping — no glimmer burst.
+        entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
+        entity.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
 
-        for (let i = this.pendingRegens.length - 1; i >= 0; i--) {
-            const regen = this.pendingRegens[i];
-            regen.timer -= dt;
-            regen.entity.regenProgress = 1 - (regen.timer / delay);
+        // A revived tile changes its neighbours' counts.
+        this.neighborCountsDirty = true;
 
-            if (regen.timer <= 0) {
-                regen.entity.health = regen.entity.maxHealth;
-                regen.entity.active = true;
-                regen.entity.regenProgress = undefined;
-
-                // Tiles never grow (only shards do), so size is already
-                // canonical.  Rule-based colour regeneration reads the
-                // regenerating tile's 6 hex neighbours and blends their
-                // compositions with the old tile's composition based on
-                // isolation level — interior tiles smooth toward the
-                // cluster average, edge tiles drift less, isolated
-                // tiles keep their old hue exactly.
-                if (!this.nebulaGridIndex) {
-                    this.nebulaGridIndex = this.buildNebulaGridIndex(entities);
-                }
-                regen.entity.nebulaColorComposition = this.computeRegeneratedComposition(regen.entity);
-                regen.entity.color = regen.entity.nebulaColorComposition[0].hex;
-                // Composition changed on regen — drop the render cache so
-                // the regenerated tile picks up the new neighbourhood-blend
-                // colour on its next draw.  Same invalidation also clears
-                // the fast-path cache (tinted canvas / dx / dy / size) so
-                // the slow path repopulates on the regen tile's next draw.
-                regen.entity.nebulaBlendedHex = undefined;
-                regen.entity.nebulaCachedTinted = undefined;
-
-                // Fade in slowly instead of popping — no glimmer burst.
-                regen.entity.nebulaSpawnTimer    = NEBULA_CONSTANTS.FADE_IN_DURATION;
-                regen.entity.nebulaSpawnDuration = NEBULA_CONSTANTS.FADE_IN_DURATION;
-
-                // Re-add to the static grid so collisions start hitting again.
-                physics.addStaticEntity(regen.entity);
-                this.pendingRegens.splice(i, 1);
-                // A revived tile changes its neighbours' counts.
-                this.neighborCountsDirty = true;
-
-                // The just-regenerated tile should now count as a
-                // neighbour for any later regens in this same frame.
-                if (regen.entity.nebulaGridCol !== undefined
-                    && regen.entity.nebulaGridRow !== undefined) {
-                    const key = (regen.entity.nebulaGridCol << 16)
-                              | (regen.entity.nebulaGridRow & 0xFFFF);
-                    this.nebulaGridIndex.set(key, regen.entity);
-                }
-            }
+        // The just-regenerated tile should now count as a neighbour
+        // for any later regens in this same frame.
+        if (entity.nebulaGridCol !== undefined
+            && entity.nebulaGridRow !== undefined) {
+            const key = (entity.nebulaGridCol << 16)
+                      | (entity.nebulaGridRow & 0xFFFF);
+            this.nebulaGridIndex.set(key, entity);
         }
     }
     /**
