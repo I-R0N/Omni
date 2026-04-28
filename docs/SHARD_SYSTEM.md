@@ -102,12 +102,16 @@ export type VariantSelector =
   | { include: ShardVariantId[] }
   | { exclude: ShardVariantId[] };
 
-/** Outcome of a successful merge between A (puller / passenger) and B (host). */
+/** Outcome of a successful merge between two stick-bonded entities. */
 export type MergeOutcome =
   | 'compose'   // both same variant: one larger entity of this variant
-  | 'attach'    // A becomes a passenger riding host B
-  | 'absorb';   // A is consumed, B is unchanged but logs a side-effect
-                //   (currently used by ammo/health drop → asteroid)
+  | 'absorb';   // smaller entity → inactive; larger entity logs a small
+                // visual side-effect (e.g. nebula-shard absorbed into a
+                // glass-shard sets the glass-shard's powerupGlowColor to
+                // the closest weapon-palette colour, blended with any
+                // existing glow).  Two flat entities merging via the
+                // standard stick-bond mechanism — no parenting, no
+                // passenger model, no per-frame position writebacks.
 
 /** Per-pair override; the resolver (see §3) walks this table. */
 export interface MergeRule {
@@ -115,6 +119,16 @@ export interface MergeRule {
   outcome: MergeOutcome;
   /** Threshold scaler; applied on top of base bondTimeSeconds. */
   thresholdScale?: number;
+  /** Optional gate: rule only fires once partner has grown to at least
+   *  this fraction of its variant's spawn.sizeMax.  Default 0 — no gate.
+   *  Used by nebula-shard's absorb rule against glass-shard: the absorb
+   *  only fires when the glass-shard has accreted to maximum size, so
+   *  nebula-shards can stick-bond and float along with smaller glass
+   *  fragments indefinitely (cohesion preserved) while absorption stays
+   *  a relatively unique event.  Below the gate the bond persists but
+   *  the merge does not trigger; the moment the partner reaches the
+   *  size threshold (or the bond breaks), the merge fires. */
+  requirePartnerSizeFraction?: number;
 }
 
 export interface ShardSpawnShape {
@@ -195,12 +209,6 @@ export interface ShardShatterPolicy {
   postShatterMergeCooldown?: number;
 }
 
-export interface ShardPassengerVisual {
-  kind: 'none' | 'nebula-tint';
-  /** Render layer offset relative to host; positive = above. */
-  zOffset: number;
-}
-
 export interface ShardVariantDef {
   id: ShardVariantId;
   carrier: ShardCarrier;        // always EntityType.STRUCTURE post-unification
@@ -208,9 +216,6 @@ export interface ShardVariantDef {
   regen: ShardRegenPolicy;
   merge: ShardMergePolicy;
   shatter: ShardShatterPolicy;
-  /** Drawn on top of a host when this variant is the passenger
-   *  (mergeOutcome 'attach' with this variant on the small side). */
-  passengerVisual: ShardPassengerVisual;
   /** Hooks delegated to existing systems; the variant config does not
    *  re-implement drops or particles. */
   onShatterParticles?: 'inherit' | 'none' | { color: string; count: number };
@@ -263,18 +268,20 @@ puller's `merge.rules`, in order. This keeps cross-variant interaction
 asteroid" only edits the `ice` variant, never `asteroid`.
 
 ```ts
-// Pseudocode that ShardSystem calls on every candidate pair
+// Pseudocode that ShardSystem calls on every candidate pair at bond
+// formation (to record the threshold) and at threshold completion
+// (to evaluate `requirePartnerSizeFraction` against current sizes).
 function resolveMerge(a: GameEntity, b: GameEntity): {
-  host: GameEntity;        // surviving entity
-  passenger: GameEntity;   // consumed / attached entity
-  outcome: MergeOutcome;
+  host: GameEntity;        // surviving entity (larger)
+  consumed: GameEntity;    // entity that goes inactive on merge
+  outcome: MergeOutcome;   // 'compose' or 'absorb'
   threshold: number;       // bond seconds for this pair
+  rule: MergeRule;         // kept around so the gate can be re-checked
 } | null {
   const va = SHARD_VARIANTS[shardVariantOf(a)];
   const vb = SHARD_VARIANTS[shardVariantOf(b)];
 
-  // The "puller" is the one who cares about the other.
-  // Symmetric same-variant case: pick larger entity as host.
+  // Either side may want the bond; selectors are evaluated on both.
   const aWantsB = selects(va.merge.bondsWith, vb.id);
   const bWantsA = selects(vb.merge.bondsWith, va.id);
   if (!aWantsB && !bWantsA) return null;
@@ -288,12 +295,10 @@ function resolveMerge(a: GameEntity, b: GameEntity): {
     ?? pullerDef.merge.rules?.find(r => r.partner === 'self' && shardVariantOf(target) === pullerDef.id)
     ?? { partner: 'self' as const, outcome: pullerDef.merge.defaultOutcome };
 
-  // Same-variant 'compose' picks larger entity as host.
-  // Cross-variant 'attach' makes the puller (small) the passenger
-  // and the target (host) keeps identity.
-  const [host, passenger] = rule.outcome === 'compose'
-    ? (a.size.x >= b.size.x ? [a, b] : [b, a])
-    : [target, puller];
+  // Larger entity is always the host.  For 'compose' the host's size
+  // grows; for 'absorb' the host is unchanged except for a small
+  // visual side-effect (see §5).
+  const [host, consumed] = a.size.x >= b.size.x ? [a, b] : [b, a];
 
   const baseTime = pullerDef.merge.bondTimeSeconds ?? 10;
   const sizeRef  = pullerDef.merge.bondTimeSizeRef ?? 20;
@@ -302,8 +307,19 @@ function resolveMerge(a: GameEntity, b: GameEntity): {
   const baseScaled = baseTime * Math.pow(Math.max(1, avgSize / sizeRef), power);
   const threshold  = baseScaled * (rule.thresholdScale ?? 1);
 
-  return { host, passenger, outcome: rule.outcome, threshold };
+  return { host, consumed, outcome: rule.outcome, threshold, rule };
 }
+
+// At bond-completion (timer >= threshold), gate the merge:
+function shouldMergeFire(bond: Bond): boolean {
+  const gate = bond.rule.requirePartnerSizeFraction ?? 0;
+  if (gate <= 0) return true;
+  const partnerVariant = SHARD_VARIANTS[shardVariantOf(bond.host)];
+  const partnerMax = partnerVariant.spawn.sizeMax;
+  return bond.host.size.x >= partnerMax * gate;
+}
+// If the gate is unmet, the bond persists with cohesion active but
+// the merge does not fire.  The next substep re-checks the gate.
 ```
 
 `shardVariantOf(entity)` reads the post-Stage-5 `shardVariant` field
@@ -311,11 +327,9 @@ on `GameEntity` (see §7 `types.ts`). Stage 1 establishes the field
 as a getter aliased over today's `shardType` and `structureVariant`
 fields so reads return the post-rename ids without forcing a single
 big sweep; Stage 5 stamps the field directly on every shard-family
-spawn site; Stage 6 deletes the legacy fields.
-
-The only new optional field on `GameEntity` is
-`attachedHostId?: string` for passengers (see §6.A); `shardVariant`
-replaces existing fields rather than widening the type.
+spawn site; Stage 6 deletes the legacy fields. `shardVariant`
+replaces existing fields rather than widening the type — no new
+optional fields on `GameEntity` for the merge architecture.
 
 `selects(VariantSelector, id)` evaluates `'none' | 'self' | 'all' |
 {include: [...]} | {exclude: [...]}` against an id with no allocation.
@@ -374,7 +388,6 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
     forwardDrag: 0.0, perpScatter: 0.0,
     scatterHalfCone: Math.PI,
   },
-  passengerVisual: { kind: 'none', zOffset: 0 },
   passThrough: false,
   spawnsDropsOnDeath: true,                     // delegates to GameEngine.spawnDrops
 },
@@ -423,7 +436,6 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
     forwardDrag: 0.35, perpScatter: 0.0,
     scatterHalfCone: Math.PI * 0.55,
   },
-  passengerVisual: { kind: 'none', zOffset: 0 },
   passThrough: false,
   spawnsDropsOnDeath: true,
 },
@@ -465,7 +477,6 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
     forwardDrag: 0.35, perpScatter: 0.0,
     scatterHalfCone: Math.PI * 0.55,
   },
-  passengerVisual: { kind: 'none', zOffset: 0 },
   passThrough: false,
   onShatterParticles: { color: '#94a3b8', count: 5 }, // dust puff
   spawnsDropsOnDeath: true,
@@ -503,7 +514,6 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
     forwardDrag: 0.35, perpScatter: 0.0,
     scatterHalfCone: Math.PI * 0.55,
   },
-  passengerVisual: { kind: 'none', zOffset: 0 },
   passThrough: false,
   onShatterParticles: 'inherit',                // tile-color puff
   spawnsDropsOnDeath: true,
@@ -546,7 +556,6 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
     fadeInSeconds: NEBULA_CONSTANTS.FADE_IN_DURATION,
     postShatterMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
   },
-  passengerVisual: { kind: 'none', zOffset: 0 },
   // Striker passes through nebula tiles without bouncing.  Mass = ∞
   // alone would make the tile a solid wall (immovable = full reflect);
   // mass = 0.01 would let strikers shove tiles off the hex grid (and
@@ -563,7 +572,15 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
 },
 ```
 
-### nebula-shard (today's behaviour, no cross-variant interaction yet)
+### nebula-shard
+
+Today's bespoke gravity-toward-other-nebula-shards model is
+**dropped**. Nebula shards drift like every other mobile shard
+(flow-field-driven free-body translation + the standard stick-bond
+contact-merge mechanism) and clump with glass-shards via cohesion
+inside the same stick-bond. After a long contact threshold against
+the largest glass-shard in a bonded group, the nebula-shard absorbs
+into it — described in §5.
 
 ```ts
 'nebula-shard': {
@@ -581,19 +598,31 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
   },
   regen: { kind: 'merge-only' },                // tiles regrow only via transmutation
   merge: {
-    // Same-variant gravity pull only — today's behaviour.
-    attractedTo: 'self',
-    pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,    // 380
-    pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH, // 380
-    pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST, // 15
-    bondsWith: 'self',
-    bondTimeSeconds: 0,                         // proximity-merge, not contact-timer
-    rules: [{ partner: 'self', outcome: 'compose' }],
+    // No gravity-pull.  Drift is driven by flow-field seeding +
+    // free-body integration + cohesion from active stick-bonds —
+    // identical to how glass-shards float together today.
+    attractedTo: 'none',
+    // Stick-bonds form on contact with self (homogeneous coalesce →
+    // bigger nebula-shard → eventually transmute back to a tile via
+    // the existing nebulaTileArea threshold) and with glass-shards
+    // (cohesion lets the nebula float along with the cluster; absorb
+    // fires only when the partner has grown to its variant max size,
+    // making absorption a relatively unique event).
+    bondsWith: { include: ['nebula-shard', 'glass-shard'] },
+    bondTimeSeconds: 1.8,                       // matches today's MERGE_COOLDOWN scale for self
+    bondTimeSizeRef: 20,
+    bondTimeSizePower: 1.5,
+    rules: [
+      { partner: 'self',        outcome: 'compose' },
+      { partner: 'glass-shard', outcome: 'absorb',
+        thresholdScale: 5.0,                    // ~5× longer than self-compose
+        requirePartnerSizeFraction: 1.0,        // partner must be at sizeMax
+      },
+    ],
     defaultOutcome: 'compose',
     postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN, // 1.8
   },
   shatter: { kind: 'none' },                    // shards never re-shatter
-  passengerVisual: { kind: 'nebula-tint', zOffset: +1 }, // unused at this stage
   // Mass alone (0.01) handles "striker barely affected" for shards;
   // pass-through is only needed for tiles (see nebula-tile).
   passThrough: false,
@@ -610,156 +639,156 @@ where it is — DropSystem's scope is unchanged per task brief).
 
 ---
 
-## 5. Worked example — the "nebula glow rides an asteroid" config
+## 5. Worked example — nebula shards drift, clump, and absorb
 
-This is the only behavioural change in the whole overhaul, and the
-test that the architecture is data-driven. **The diff is a single
-config edit on `nebula-shard`.** No other variant changes; no engine
-code changes after stage 5.
+The only behavioural change in the whole overhaul. **The diff is the
+nebula-shard variant config in §4** — drop the bespoke gravity-pull,
+opt into the standard stick-bond mechanism with a glass-shard absorb
+rule. No engine code beyond the shared `'absorb'` outcome handler
+(implemented once in ShardSystem, used by every future cross-variant
+absorption).
+
+The story, frame-by-frame:
+
+1. **A nebula-tile shatters** (player drifts through it). Per the
+   variant's `shatter` policy, it produces 2–3 nebula-shards with
+   the existing rear-cone fan velocity profile and a 1.8 s spawn
+   cooldown.
+2. **Drift**: the shards integrate normally under PhysicsSystem.
+   `linearDamping = 0.97` and `angularDamping = 0.98` give the same
+   "cloud floating" feel. There is no nebula-specific gravity any
+   more — the shards drift along the same flow-field-seeded paths
+   every other mobile shard rides.
+3. **Contact with a glass-shard cluster**: a nebula-shard touches
+   a glass-shard. ShardSystem's stick-bond formation pass evaluates
+   `selects(nebulaShardDef.bondsWith, 'glass-shard')` → match. A
+   bond is recorded with the resolved threshold (5× the base
+   compose time, scaled for size).
+4. **Cohesion active**: the standard stick-bond per-substep velocity
+   blend pulls both entities toward shared momentum. To the eye:
+   the nebula-shard floats along with the glass cluster instead of
+   drifting past it. This works for every glass-shard size — the
+   bond doesn't care whether the partner is at max yet.
+5. **Glass-shards keep merging**: per their own `compose` rules,
+   touching glass-shards merge into bigger glass-shards (existing
+   asteroid-stick-bond accretion). The cluster's biggest piece
+   grows. The nebula-shard's bond-target may itself merge into a
+   bigger glass-shard mid-bond — ShardSystem re-evaluates
+   resolveMerge against the new entity each frame, so the bond
+   simply re-targets.
+6. **Threshold reached, partner not at max yet**: the bond timer
+   crosses its threshold but `requirePartnerSizeFraction = 1.0`
+   gates it. `shouldMergeFire` returns false. The bond persists,
+   timer caps at threshold; cohesion stays active. Next frame
+   re-checks.
+7. **Partner reaches max size** (via continued accretion) and the
+   bond is still active. `shouldMergeFire` returns true. The
+   `'absorb'` outcome fires:
+   - The nebula-shard goes inactive (no shatter, no drop, no
+     fade). ShardSystem's compaction sweep removes it next frame.
+   - The host glass-shard's `powerupGlowColor` is set to the
+     nearest weapon-palette colour to the absorbed nebula's
+     blended hex. If a glow was already present, the two are
+     blended via the existing `blendHexColors` helper.
+   - A small glimmer particle burst plays at the absorption
+     point (reuse `NebulaSystem.spawnGlimmer` for visual
+     continuity).
+8. **Same-variant case unchanged**: two nebula-shards in stick-bond
+   contact hit `{ partner: 'self', outcome: 'compose' }` — they
+   coalesce into a bigger nebula-shard, accumulating
+   `nebulaTileArea`. Once the accumulator reaches `HEX_AREA`,
+   `tryTransmuteShardToTile` fires and the merged shard becomes a
+   new nebula-tile. Today's transmutation behaviour is preserved
+   bit-for-bit; the only difference is what brings two shards into
+   contact (flow-field drift instead of bespoke gravity pull).
+
+The "closest power-up colour" math, kept simple per direction:
 
 ```ts
-'nebula-shard': {
-  ...previous,
-  merge: {
-    // BEFORE: attractedTo: 'self'
-    // AFTER: attracted to every asteroid-class shard too.
-    attractedTo: { include: ['nebula-shard', 'asteroid', 'tile-shard'] },
-    pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
-    pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
-    pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
+// Pre-tabulate per weapon at module init — no per-frame allocation.
+const POWERUP_PALETTE: Array<{ rgb: [number, number, number]; hex: string }> =
+  WEAPON_LIST.map(w => ({ rgb: hexToRgb(WEAPONS[w].color), hex: WEAPONS[w].color }));
 
-    // BEFORE: bondsWith: 'self'
-    // AFTER: bonds with the same set, but the outcome differs per partner.
-    bondsWith: { include: ['nebula-shard', 'asteroid', 'tile-shard'] },
-    bondTimeSeconds: 0,                         // still proximity-merge
-
-    rules: [
-      { partner: 'self',        outcome: 'compose' },  // unchanged
-      { partner: 'asteroid',    outcome: 'attach' },   // new — host asteroid
-      { partner: 'tile-shard',  outcome: 'attach' },   // new — host tile shard
-    ],
-    defaultOutcome: 'compose',
-    postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
-  },
-  passengerVisual: {
-    kind: 'nebula-tint',
-    zOffset: +1,
-  },
-},
+function closestPowerupHex(targetHex: string): string {
+  const [tr, tg, tb] = hexToRgb(targetHex);
+  let best = POWERUP_PALETTE[0].hex;
+  let bestDist = Infinity;
+  for (let i = 0; i < POWERUP_PALETTE.length; i++) {
+    const [r, g, b] = POWERUP_PALETTE[i].rgb;
+    const d = (r - tr) * (r - tr) + (g - tg) * (g - tg) + (b - tb) * (b - tb);
+    if (d < bestDist) { bestDist = d; best = POWERUP_PALETTE[i].hex; }
+  }
+  return best;
+}
 ```
 
-What ShardSystem does with this config (no per-variant code path):
+Plain Euclidean distance in RGB space against the pre-tabulated
+weapon palette — no per-frame allocation, no perceptual-luminance
+weighting, no edge cases. If a future variant wants a different
+mapping it overrides the absorb side-effect via a per-variant hook.
 
-1. **Pull pass**: each `nebula-shard` scans its 3×3 spatial-hash
-   neighbourhood for entities matching `attractedTo`. Per §6.C the
-   spatial hash already contains every `EntityType.ASTEROID` entity
-   (asteroid + tile-shard + nebula-shard share the carrier), so the
-   puller's scan is a single variant-id filter against the existing
-   bucket — no second carrier set, no widened broadphase walk. See
-   §6.D for the per-map cost characterisation.
-2. **Bond pass**: the same 3×3 scan returns proximity-merge candidates
-   (using `bondTimeSeconds === 0` semantics — overlap immediately
-   resolves; no contact-timer). The `resolveMerge` walk finds rule
-   `{ partner: 'asteroid', outcome: 'attach' }`.
-3. **Attach** (the new outcome): `host = asteroid`, `passenger =
-   nebula-shard`. ShardSystem sets `passenger.attachedHostId =
-   host.id`, deactivates the passenger's physics participation
-   (excluded from PhysicsSystem dynamic-grid insertion via the
-   existing `active` field path — see §6.A) but **keeps it in the
-   entities list** for rendering and host-death cleanup. The host
-   gains an entry in a `passengersByHost: Map<id, GameEntity[]>`
-   maintained by ShardSystem (one Map per frame, populated from the
-   EntityIndex pass — no new field on the host entity).
-4. **Render**: `RenderSystem` already iterates the entity list. After
-   drawing a host (asteroid), it checks `passengersByHost.get(host.id)`
-   and dispatches each passenger's `passengerVisual.kind` —
-   `'nebula-tint'` reuses the existing tinted-sprite + composition
-   path (`getTintedSprite` + nebula colour blend), drawn at the
-   host's screen position with its own size, **but the cached tinted
-   canvas (`nebulaCachedTinted`) is keyed on composition only and
-   stays valid frame-to-frame as the host moves.**
-5. **Host death**: in `handleEntityDeath`, ShardSystem looks up
-   `passengersByHost.get(deadEntity.id)`, marks each passenger
-   inactive and routes through `nebula-shard`'s shatter policy
-   (`kind: 'none'`) → they fade out via the existing
-   `nebulaFadeTimer` path, so the eye reads "the glow puffs apart
-   when the rock breaks".
-6. **Same-variant case unchanged**: two `nebula-shard`s still hit
-   the `partner: 'self', outcome: 'compose'` rule — today's
-   coalesce + transmute behaviour is preserved bit-for-bit.
-7. **Asteroid + asteroid** stays homogeneous compose: the asteroid
-   variant's `bondsWith` doesn't include nebula-shard, so the new
-   pull/bond is unilateral.
-
-Adding "ice attracted to asteroid shards" later is the same shape
-applied to a new `'ice'` entry — one schema entry, no engine code.
+Adding "ice attracted to glass" later is the same shape applied to
+a new `'ice'` variant — one schema entry, no engine code.
 
 ---
 
 ## 6. Open decisions — recommendations
 
-### A. How attached passengers ride the host
+### A. How nebula-shards "ride along" with glass-shards
 
-**Recommendation: Option (b), but stricter — the passenger stays a
-flat `GameEntity` with `attachedHostId?: string`, gets pulled out of
-the dynamic physics grid for the duration of the bond, has its
-position overwritten from the host each substep via a single
-ShardSystem pass, and renders normally as part of the entity list.
-ShardSystem maintains `passengersByHost: Map<string, GameEntity[]>`
-rebuilt once per frame from EntityIndex; no new field on the host.**
+**Decision (per user direction): there is no parenting / passenger
+mechanism. Nebula-shards drift on the same flow-field paths as every
+other mobile shard, and clump with glass-shards through the standard
+stick-bond cohesion mechanism (the velocity-blend pass that already
+pulls bonded entities toward shared momentum). After the bond's
+absorb threshold elapses against a max-size glass-shard, the
+nebula-shard merges into it via the `'absorb'` outcome (smaller
+entity → inactive; host gets a small visual glow update). Both
+entities remain flat `GameEntity` structs at all times.**
 
-Rejected:
-- *Option (a)* — moving passengers onto a `host.passengers` array
-  would force every system that walks `currentMap.entities`
-  (PhysicsSystem, RenderSystem, EntityIndex, NebulaSystem,
-  GameEngine death/drop scans) to recurse into a nested array. That
-  is exactly the "OOP entity tree" the codebase deliberately
-  avoids. It also breaks the spatial-grid model.
-- *Option (c)* — making the passenger a render-only sprite on the
-  host loses identity: drop composition, ammo carriage, future
-  passengers-of-passengers all become special cases. And it forces
-  damage to a "host" to choose between also damaging the rider or
-  not, with no clean answer.
+This replaces an earlier "passenger riding host" model that was
+considered before the user clarified intent. That model would have
+introduced an `attachedHostId?: string` field, a per-frame
+`passengersByHost: Map<string, GameEntity[]>` lookup table, a
+per-substep position-writeback pass, a `passengerVisual` schema
+field, and a render-time host→passenger draw dispatch. **All of
+that is dropped** — the existing stick-bond mechanism (cohesion +
+threshold-fired merge) already produces the desired "float along
+with the cluster, eventually merge with the largest piece"
+behaviour without any of the parent/child machinery.
 
-Why (b) wins:
-- **Zero new fields on the host.** Host-side state lives in the
-  per-frame `passengersByHost` Map maintained by ShardSystem.
-- **Passenger keeps its identity.** Death routing, render paths,
-  composition all flow through the same code as a free-floating
-  shard.
-- **One new optional field on `GameEntity`** (`attachedHostId`),
-  matching the task brief's "one new field at most" constraint.
-- **Damage routing is unambiguous**: passengers are pass-through
-  (already true for nebula shards — `EntityType.NEBULA_SHARD`
-  doesn't impart impulse). Damage to the host doesn't flow to the
-  passenger; the passenger still takes damage from its own
-  collisions but, while attached, those collisions are routed at
-  the host's position so they're effectively impossible against
-  anything but a colliding-into-host striker.
-- **Host destruction**: ShardSystem subscribes to the same
-  `handleEntityDeath` dispatch the engine already has, looks up
-  `passengersByHost.get(deadId)`, and detaches each passenger
-  (clear `attachedHostId`, restamp dynamic-grid eligibility). The
-  detached passenger then routes through the variant's shatter
-  policy — for `nebula-shard` that's `kind: 'none'`, which simply
-  drops them back into a free fade.
-- **Render fast-path stays valid.** The cached
-  `nebulaCachedTinted` is composition-keyed, not position-keyed.
-  As the host moves frame-to-frame, only the draw position
-  changes; the cached canvas is reused. Composition mutations
-  (further passenger-on-passenger merges) hit the existing
-  invalidation site.
-- **Per-substep cost is one writeback**: `passenger.position.x =
-  host.position.x; passenger.position.y = host.position.y` after
-  PhysicsSystem integrates the host. Done in one tight loop over
-  the `passengersByHost` map values.
+Why this is cleaner:
 
-Tradeoff acknowledged: passengers stay in the master entity list
-and the per-frame compaction sweep, so for very large passenger
-populations there's a constant per-entity walk cost. This is the
-same cost a free-floating shard incurs today, so net new cost is
-zero on existing maps. If we ever ship "1000 nebulae glommed onto
-1000 asteroids" we revisit.
+- **Zero new fields on `GameEntity`**. The merge architecture
+  reuses `shardVariant` (replacing `shardType` /
+  `structureVariant`); no `attachedHostId`, no host-side
+  passenger reference. The earlier amendment's "one new optional
+  field" budget is now unused.
+- **Damage routing is whatever it already is.** Both entities
+  participate in collisions / weapons fire as themselves; there
+  is no "host vs passenger" question to answer.
+- **Host destruction is automatic.** When a glass-shard
+  shatters or is otherwise removed, any nebula-shard bonded to
+  it sees the partner go inactive on the next frame, the bond
+  is dropped, and the nebula-shard resumes free drift. No
+  detach pass.
+- **Render fast-path is untouched.** Nebula-shards render at
+  their own positions like any other shard. The
+  `nebulaCachedTinted` cache stays nebula-tile-only.
+- **Per-substep cost shrinks.** No position writeback pass over
+  passenger entries. The new cost is one extra
+  `requirePartnerSizeFraction` evaluation when a stick-bond
+  reaches threshold — single multiply + compare per qualifying
+  bond, executed at most once per bond-completion event.
+
+Tradeoff: the absorb side-effect (set host's `powerupGlowColor`
+to the closest weapon-palette colour to the nebula's blended
+hex) is a one-time small visual change. There's no continuous
+glow that "rides" the host pre-absorb — the cohesion phase is
+just two shapes drifting together. If a more theatrical pre-
+absorb visual is wanted later, it adds as a separate variant
+hook (`onBondActive?: (host, partner) => void`) without
+changing the merge architecture.
 
 ### B. Tile shards' EntityType
 
@@ -1206,16 +1235,15 @@ behaviour the variant table can't generically express:
   Dx / Dy / Size`) and only nebula-tile variants ever populate
   them. Future opt-ins via `renderCache` would generalise the
   populate site.
-- New: after drawing each shard-carrier host (any
-  `EntityType.STRUCTURE` mobile entity that has passengers), call
-  `shardSystem.drawPassengers(host, ctx)` which iterates
-  `passengersByHost.get(host.id)` and dispatches each passenger's
-  `passengerVisual.kind`. For `'nebula-tint'` the path reuses the
-  existing tinted-sprite + composition draw — no new pixel
-  pipeline.
-- Counter `lastNebulaFastCount` / `lastNebulaSlowCount` — increment
-  on passenger draws too so the DBG `·neb fast/slow` numbers stay
-  comparable.
+- **No new render hooks.** The earlier amendment proposed a
+  passenger-on-host draw dispatch; per §6.A revision it's been
+  dropped. Nebula-shards render at their own positions like any
+  other shard. The `'absorb'` outcome's visual side-effect is a
+  one-time mutation of the host's `powerupGlowColor` (read by the
+  existing glow-render path) plus a `spawnGlimmer` particle burst
+  at the absorption point — no new render branches.
+- Counter `lastNebulaFastCount` / `lastNebulaSlowCount` — unchanged
+  semantics. Cache stays nebula-tile-only.
 
 ### `engine/systems/EntityIndex.ts`
 
@@ -1243,8 +1271,10 @@ behaviour the variant table can't generically express:
   `shardVariant` — every `structureVariant: 'glass'` becomes
   `shardVariant: 'glass-tile'`, etc. Single source of truth for
   variant identity. Stage 6 deletes `structureVariant`.
-- One new optional field: `attachedHostId?: string` (passenger
-  reference per §6.A).
+- **Zero new fields on `GameEntity`** for the merge architecture.
+  The earlier `attachedHostId` field is dropped along with the
+  passenger model (§6.A revision). `shardVariant` replaces
+  existing fields rather than widening the type.
 - **`EntityType.ASTEROID`, `EntityType.NEBULA`,
   `EntityType.NEBULA_SHARD` enum values are all removed in Stage
   6.** After Stage 5, no entity in any system carries them —
@@ -1278,8 +1308,7 @@ behaviour the variant table can't generically express:
 
 - DBG overlay unchanged in shape. The same `nebulaMs /
   nebulaVisible / nebulaFast / nebulaSlow` numbers continue to
-  surface; the passenger-render contribution shows up inside
-  `nebulaMs`.
+  surface with the same semantics.
 - Optional add (Stage 5 or later): a "expected entity budget"
   summary derived from `MAP_POPULATION[currentMap]` — surfaces
   next to the live `Ents` count so it's obvious when the map is
@@ -1369,11 +1398,11 @@ for ~5 seconds, then read the overlay.
 | `physicsMs` | `physics` | Combined cost of integration + collisions + the new shard pull/bond pass (cross-cuts everything we touch) |
 | `aiMs`     | `ai`      | Sentinel — must not change |
 | `flowFieldMs` | `flow` | Sentinel — must not change (flow grid only changes on tile destroy) |
-| `renderMs` | `render`  | Total render; includes nebula passenger draws after stage 5 |
-| `nebulaMs` | `·neb`    | Nebula render sub-timer; should not regress (passenger pass is included here) |
+| `renderMs` | `render`  | Total render; should be stable across all stages (no new render hooks per §6.A revision) |
+| `nebulaMs` | `·neb`    | Nebula render sub-timer; should not regress |
 | `nebulaVisible` | `·vis-neb` | Drives nebulaMs's per-tile cost characterisation |
-| `nebulaFast / nebulaSlow` | `·neb fast/slow` | Fast-path hit ratio — must not regress, especially after stage 5 (the cache is composition-keyed; passenger movement should not invalidate) |
-| `totalEntities` | `Ents` | Sanity — passenger entities stay live, so this should be stable across stages 1–4 and may rise modestly after stage 5 |
+| `nebulaFast / nebulaSlow` | `·neb fast/slow` | Fast-path hit ratio — must not regress (gating predicate flips from EntityType to variant id; same hit pattern) |
+| `totalEntities` | `Ents` | Sanity — should be stable across stages 1–4. Stage 5 may show a modest *decrease* on UniverseMap as nebula-shards absorb into max-size glass-shards (compaction removes them) |
 | `asteroidCount` | `asteroids` | Sanity for stick-bond / shatter migrations |
 
 ### Maps to capture on (in order)
@@ -1452,11 +1481,11 @@ branch before stage 1) and committed in the stage-1 commit body.
     path gate from EntityType to variant id; same cost, same
     cache hit pattern).
   - On UniverseMap: `physicsMs` allowed to rise by ≤10% during
-    the active pass (nebula shards bonding to rock-shards and
-    entering the dynamic grid); steady-state within ±5%.
-    `nebulaFast/Slow` ratio must not regress (passengers ride
-    composition-keyed cached canvases — moving the host doesn't
-    invalidate).
+    the active pass (nebula shards entering the dynamic grid +
+    new stick-bond candidates against glass-shards); steady-state
+    within ±5%. `nebulaFast / Slow` ratio must not regress (the
+    cache is nebula-tile-only; nebula-shards have no per-entity
+    tint cache and don't affect the ratio).
   - On RockFieldMap: fresh baseline established at Stage 5.
     Tuned to ≈1200 tiles, target similar `physicsMs` profile to
     GlassFieldMap (both are static-tile-only showcases).
@@ -1488,10 +1517,9 @@ build` green and includes a DBG-numbers table in the commit body.
 
 - Add `engine/systems/ShardSystem.ts` and `ShardSystem.types.ts`,
   exporting an instance wired into `GameEngine` constructor. The
-  skeleton has `update(dt, entities)`, `onDeath(entity)`,
-  `drawPassengers(host, ctx)` — all of them no-ops returning
-  defaults that mean "the existing engine code should still
-  handle this".
+  skeleton has `update(dt, entities)` and `onDeath(entity)` —
+  both no-ops returning defaults that mean "the existing engine
+  code should still handle this".
 - Add `SHARD_VARIANTS` to `constants.ts` with the per-variant
   configs from §4 — purely data, not yet read. Variant ids use
   the post-rename names (rock-shard / glass-shard / glass-tile /
@@ -1504,11 +1532,13 @@ build` green and includes a DBG-numbers table in the commit body.
   staged: today filters `type === ASTEROID`; flips to `type ===
   STRUCTURE && mass !== Infinity` in Stage 5). For Stage 1 it
   uses today's predicate so the additive change is truly no-op.
-- Add `attachedHostId?: string` to `GameEntity` in `types.ts`.
 - Add a `shardVariant` field to `GameEntity` aliased over the
-  existing `shardType` (a getter / runtime lookup that returns
-  the renamed id from the legacy field). Lets later stages read
-  the variant id without forcing a single big sweep.
+  existing `shardType` / `structureVariant` (a getter / runtime
+  lookup that returns the renamed id from the legacy fields).
+  Lets later stages read the variant id without forcing a single
+  big sweep. **Zero genuinely-new fields** on `GameEntity` per
+  the §6.A revision — the merge architecture reuses existing
+  state.
 
 End state: zero behavioural change. Build green. Numbers identical.
 
@@ -1622,38 +1652,46 @@ It bundles three changes that share a test surface:
   `ASTEROID_GENERATION_CONFIG` / `NEBULA_CONSTANTS` cluster
   fields. Old constants stay in place as orphans until Stage 6.
 
-**5c. Heterogeneous attach behaviour**:
+**5c. Cross-variant absorb behaviour**:
 
-- Edit `nebula-shard.merge.attractedTo` and `.bondsWith` to include
-  `'rock-shard'` and `'glass-shard'`; add the two `attach` rules.
-- Implement `mergeOutcome: 'attach'` in `ShardSystem.merge`:
-  pulls `passenger.attachedHostId = host.id`, takes the passenger
-  out of the dynamic-grid candidate set on the next
-  `prepareFrameEntities`, and registers it in
-  `passengersByHost` for the frame.
-- Implement `ShardSystem.applyPassengerPositions(dt)` called once
-  per substep after PhysicsSystem integrates: writes
-  `passenger.position = host.position` for every entry in
-  `passengersByHost`. (Passenger velocity is irrelevant while
-  attached; cleared on detach.)
-- Implement `RenderSystem.drawPassengers(host)` hook for the
-  `'nebula-tint'` passenger visual, reusing the existing tinted-
-  sprite path. **Do not invalidate `nebulaCachedTinted`** on host
-  movement — the cache is composition-keyed, position-independent.
-- Implement host-death detach: `ShardSystem.onDeath(host)` walks
-  `passengersByHost.get(host.id)`, clears each passenger's
-  `attachedHostId`, restores it to dynamic-grid eligibility, and
-  routes through its variant shatter (no-op for `nebula-shard`).
+- Edit the `nebula-shard` variant config per §4: drop the
+  bespoke gravity-pull, set `attractedTo: 'none'`, set
+  `bondsWith: { include: ['nebula-shard', 'glass-shard'] }`, add
+  the two rules — `{ partner: 'self', outcome: 'compose' }` and
+  `{ partner: 'glass-shard', outcome: 'absorb', thresholdScale:
+   5.0, requirePartnerSizeFraction: 1.0 }`.
+- Implement the `'absorb'` outcome in `ShardSystem.merge`:
+  - `consumed.active = false` (compaction sweep removes it).
+  - `host.powerupGlowColor = closestPowerupHex(consumed.color
+     ?? blendCompositionToHex(consumed.nebulaColorComposition))`,
+    blended with any existing host glow via `blendHexColors`.
+  - `spawnGlimmer` particle burst at the absorption point
+    (reuse `NebulaSystem.spawnGlimmer`).
+  - Done. No parenting, no per-frame writeback, no render hook.
+- Implement `closestPowerupHex(targetHex)`: pre-tabulate
+  `WEAPON_LIST.map(w => ({ rgb: hexToRgb(WEAPONS[w].color), hex:
+   WEAPONS[w].color }))` at module init; per-call walk the small
+  array with squared-Euclidean RGB distance and return the
+  closest hex. ~10 lines total, zero per-call allocations.
+- Implement the `requirePartnerSizeFraction` gate in the bond-
+  completion path: at threshold, evaluate
+  `host.size.x >= SHARD_VARIANTS[shardVariantOf(host)].spawn.sizeMax * gate`.
+  If false, the bond persists (cohesion stays active, timer
+  caps at threshold) and the next frame re-checks. If true,
+  fire the merge.
+- Confirm no glass-shard variant changes are needed: glass-shards
+  themselves don't `bondsWith` nebula-shards, so the absorb is
+  unilateral — driven entirely by the nebula-shard rule.
 
-End state: nebula glow rides rock shards / glass shards on
-UniverseMap; rock-tile clusters appear on maps that opt in via
-`MAP_POPULATION`; nebula and rock and glass shards all live on
-one EntityType with mass-based dispatch. NebulaFieldMap shows a
-small `physicsMs` rise from nebula shards entering the dynamic
-grid (target: ≤10% steady-state, ≤15% active — per §9).
-AsteroidFieldMap (now an instance with `MAP_POPULATION` populating
-rock-shards directly, no rock-tile clusters) is unchanged.
-RockFieldMap is a new map; baselined fresh.
+End state: nebula shards drift along flow paths with glass
+clusters, eventually absorbing into the largest piece via a
+small visual glow update on the host. Rock-tile clusters appear
+on maps that opt in via `MAP_POPULATION`. All shard-family
+entities live on one EntityType with mass-based dispatch.
+NebulaFieldMap shows a small `physicsMs` rise from nebula shards
+entering the dynamic grid (target: ≤10% steady-state, ≤15%
+active — per §9). AsteroidFieldMap unchanged. RockFieldMap is
+a new map; baselined fresh.
 
 ### Stage 6 — delete dead code & spec drift
 
