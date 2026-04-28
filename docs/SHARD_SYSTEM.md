@@ -574,13 +574,14 @@ picker; the ShardSystem entry covers regen + merge + shatter only.
 
 ### nebula-shard
 
-Today's bespoke gravity-toward-other-nebula-shards model is
-**dropped**. Nebula shards drift like every other mobile shard
-(flow-field-driven free-body translation + the standard stick-bond
-contact-merge mechanism) and clump with glass-shards via cohesion
-inside the same stick-bond. After a long contact threshold against
-the largest glass-shard in a bonded group, the nebula-shard absorbs
-into it — described in §5.
+Nebula shards drift like every other mobile shard (flow-field-driven
+free-body translation + the standard stick-bond cohesion mechanism)
+and are gravity-pulled toward nearby mobile shards of any variant.
+The gravity brings them in from a distance; on contact, stick-bond
+cohesion takes over; eventually the bond fires either same-variant
+compose (with another nebula-shard, leading to the existing tile
+transmutation) or, against a max-size glass-shard, the new
+`'absorb'` outcome — described in §5.
 
 ```ts
 'nebula-shard': {
@@ -598,10 +599,18 @@ into it — described in §5.
   },
   regen: { kind: 'merge-only' },                // tiles regrow only via transmutation
   merge: {
-    // No gravity-pull.  Drift is driven by flow-field seeding +
-    // free-body integration + cohesion from active stick-bonds —
-    // identical to how glass-shards float together today.
-    attractedTo: 'none',
+    // Unilateral gravity pull from nebula-shards toward all mobile
+    // shard variants (self + cross-variant).  Range / strength /
+    // min-distance match today's nebula self-gravity tuning so the
+    // existing "cloud drifts toward neighbours" feel is preserved.
+    // Other variants don't have attractedTo set, so this remains a
+    // one-way pull — rock-shards and glass-shards drift normally,
+    // and only the nebula-shard receives the velocity update.
+    attractedTo: { include: ['nebula-shard', 'rock-shard', 'glass-shard'] },
+    pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,    // 380
+    pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH, // 380
+    pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST, // 15
+
     // Stick-bonds form on contact with self (homogeneous coalesce →
     // bigger nebula-shard → eventually transmute back to a tile via
     // the existing nebulaTileArea threshold) and with glass-shards
@@ -639,14 +648,14 @@ where it is — DropSystem's scope is unchanged per task brief).
 
 ---
 
-## 5. Worked example — nebula shards drift, clump, and absorb
+## 5. Worked example — nebula shards drift, pull, clump, and absorb
 
 The only behavioural change in the whole overhaul. **The diff is the
-nebula-shard variant config in §4** — drop the bespoke gravity-pull,
-opt into the standard stick-bond mechanism with a glass-shard absorb
-rule. No engine code beyond the shared `'absorb'` outcome handler
-(implemented once in ShardSystem, used by every future cross-variant
-absorption).
+nebula-shard variant config in §4** — widen `attractedTo` to include
+all mobile shard variants, opt into the standard stick-bond mechanism
+with a glass-shard absorb rule. No engine code beyond the shared
+`'absorb'` outcome handler (implemented once in ShardSystem, used by
+every future cross-variant absorption).
 
 The story, frame-by-frame:
 
@@ -654,13 +663,20 @@ The story, frame-by-frame:
    variant's `shatter` policy, it produces 2–3 nebula-shards with
    the existing rear-cone fan velocity profile and a 1.8 s spawn
    cooldown.
-2. **Drift**: the shards integrate normally under PhysicsSystem.
-   `linearDamping = 0.97` and `angularDamping = 0.98` give the same
-   "cloud floating" feel. There is no nebula-specific gravity any
-   more — the shards drift along the same flow-field-seeded paths
-   every other mobile shard rides.
-3. **Contact with a glass-shard cluster**: a nebula-shard touches
-   a glass-shard. ShardSystem's stick-bond formation pass evaluates
+2. **Drift + gravity pull**: the shards integrate normally under
+   PhysicsSystem (`linearDamping = 0.97`, `angularDamping = 0.98`
+   give the same "cloud floating" feel). On top of free-body drift,
+   ShardSystem's per-frame pull pass scans each nebula-shard's 3×3
+   spatial-hash neighbourhood for entities matching its
+   `attractedTo` selector — `nebula-shard | rock-shard | glass-shard`.
+   The nearest qualifying neighbour applies a force on the
+   nebula-shard (range 380 / strength 380 / min-dist 15, today's
+   nebula-self-gravity tuning preserved). Pull is unilateral —
+   only the nebula-shard's velocity updates; the target's physics
+   is unchanged.
+3. **Contact with a glass-shard cluster**: gravity pull eventually
+   brings a nebula-shard into touch range of a glass-shard.
+   ShardSystem's stick-bond formation pass evaluates
    `selects(nebulaShardDef.bondsWith, 'glass-shard')` → match. A
    bond is recorded with the resolved threshold (5× the base
    compose time, scaled for size).
@@ -693,14 +709,16 @@ The story, frame-by-frame:
    - A small glimmer particle burst plays at the absorption
      point (reuse `NebulaSystem.spawnGlimmer` for visual
      continuity).
-8. **Same-variant case unchanged**: two nebula-shards in stick-bond
-   contact hit `{ partner: 'self', outcome: 'compose' }` — they
-   coalesce into a bigger nebula-shard, accumulating
-   `nebulaTileArea`. Once the accumulator reaches `HEX_AREA`,
-   `tryTransmuteShardToTile` fires and the merged shard becomes a
-   new nebula-tile. Today's transmutation behaviour is preserved
-   bit-for-bit; the only difference is what brings two shards into
-   contact (flow-field drift instead of bespoke gravity pull).
+8. **Same-variant case**: two nebula-shards drawn together by the
+   pull pass eventually touch and stick-bond. The
+   `{ partner: 'self', outcome: 'compose' }` rule fires at the
+   short self-compose threshold — they coalesce into a bigger
+   nebula-shard, accumulating `nebulaTileArea`. Once the
+   accumulator reaches `HEX_AREA`, `tryTransmuteShardToTile`
+   fires and the merged shard becomes a new nebula-tile. Today's
+   transmutation behaviour is preserved bit-for-bit; the merge
+   path is now driven by gravity-pull → contact → stick-bond
+   instead of today's gravity-pull → proximity-merge.
 
 The "closest power-up colour" math, kept simple per direction:
 
@@ -1654,12 +1672,27 @@ It bundles three changes that share a test surface:
 
 **5c. Cross-variant absorb behaviour**:
 
-- Edit the `nebula-shard` variant config per §4: drop the
-  bespoke gravity-pull, set `attractedTo: 'none'`, set
-  `bondsWith: { include: ['nebula-shard', 'glass-shard'] }`, add
-  the two rules — `{ partner: 'self', outcome: 'compose' }` and
-  `{ partner: 'glass-shard', outcome: 'absorb', thresholdScale:
-   5.0, requirePartnerSizeFraction: 1.0 }`.
+- Edit the `nebula-shard` variant config per §4: widen
+  `attractedTo` to `{ include: ['nebula-shard', 'rock-shard',
+   'glass-shard'] }` (gravity pull from nebula-shards toward
+  every mobile shard variant; pull tuning at today's nebula-
+  self-gravity values — range 380, strength 380, min-dist 15).
+  Set `bondsWith: { include: ['nebula-shard', 'glass-shard'] }`
+  and add the two rules — `{ partner: 'self', outcome:
+  'compose' }` and `{ partner: 'glass-shard', outcome:
+  'absorb', thresholdScale: 5.0, requirePartnerSizeFraction:
+   1.0 }`.
+- Pull pass implementation lives in `ShardSystem.merge`'s
+  cell-walk per §6.D: for each mobile shard, evaluate
+  `selects(va.merge.attractedTo, vb.id)` against neighbours in
+  the 3×3 spatial-hash neighbourhood; on match, apply the
+  variant's `pullStrength / max(dist, pullMinDist)` force to
+  the puller only. Today's NebulaSystem.updateDynamics
+  gravity loop is the template; the only change is the per-
+  pair selector check (one indirect lookup) and the wider
+  candidate set (any mobile shard, not just other nebula-
+  shards). No new allocation; existing pre-allocated
+  `Map<number, number[]>` cell buckets (§6.D) are reused.
 - Implement the `'absorb'` outcome in `ShardSystem.merge`:
   - `consumed.active = false` (compaction sweep removes it).
   - `host.powerupGlowColor = closestPowerupHex(consumed.color
