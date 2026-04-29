@@ -1358,28 +1358,22 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation
     merge: {
-      // Unilateral gravity pull from nebula-shards toward all mobile
-      // shard variants (self + cross-variant).  Pull tuning at today's
-      // nebula-self-gravity values.
-      attractedTo: { include: ['nebula-shard', 'rock-shard', 'glass-shard'] },
+      // Stage 4 (homogeneous merge migration): same-variant pull and
+      // bond only — preserves today's "no visible change" target.
+      // Stage 5 widens attractedTo / bondsWith to include rock-shard
+      // and glass-shard plus the absorb rule.
+      attractedTo: 'self',
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      // Stick-bonds with self → compose (existing coalesce + transmute);
-      // with glass-shard → absorb after long contact, gated on partner
-      // reaching its sizeMax (rare, "unique event").
-      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
-      bondTimeSeconds: NEBULA_CONSTANTS.MERGE_COOLDOWN,
-      bondTimeSizeRef: 20,
-      bondTimeSizePower: 1.5,
+      // Stick-bonds with self only.  bondTimeSeconds: 0 = merge
+      // instantly on contact, matching today's nebula proximity-merge
+      // (the gravity pull brings shards together; the bond fires the
+      // moment they touch).
+      bondsWith: 'self',
+      bondTimeSeconds: 0,
       rules: [
-        { partner: 'self',        outcome: 'compose' },
-        {
-          partner: 'glass-shard',
-          outcome: 'absorb',
-          thresholdScale: 5.0,                  // ~5× longer than self-compose
-          requirePartnerSizeFraction: 1.0,      // partner must be at sizeMax
-        },
+        { partner: 'self', outcome: 'compose' },
       ],
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,

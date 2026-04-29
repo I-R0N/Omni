@@ -143,45 +143,31 @@ export class NebulaSystem {
     }
 
     /**
-     * Per-frame update — called from GameEngine.updateGameLogic at the
-     * simulation dt.  Runs regen ticks first so newly-revived tiles
-     * count as valid merge targets for the same-frame dynamics pass.
+     * Per-frame update — called from GameEngine.updateGameLogic.
+     * Stage 4: this system no longer owns regen (Stage 2) or shard
+     * gravity-merge (Stage 4) — both are in ShardSystem.update.  The
+     * remaining responsibility is the lazy nebula-grid index + the
+     * interior-darken neighbour-count refresh that drives the
+     * render rule.  Kept here because both depend on the active-
+     * tile population (visual-only, not gameplay).
      */
     public update(
         entities: GameEntity[],
-        dt: number,
-        physics: PhysicsSystem,
+        _dt: number,
+        _physics: PhysicsSystem,
     ): void {
-        // Reset the lazy grid index — it'll be rebuilt by
-        // onNeighborhoodBlendRegen (the ShardSystem regen-completion
-        // hook) if any nebula regen finishes this frame and needs
-        // neighbour lookups.
+        // Reset the lazy grid index — onNeighborhoodBlendRegen
+        // (Stage 2 regen-completion hook) and onComposeNebulaShard
+        // (Stage 4 merge-completion hook) rebuild it on demand.
         this.nebulaGridIndex = null;
 
-        // Refresh every tile's neighbour count if something changed since
-        // last frame (destroy / regen / transmute / reset).  Cheap — O(N)
-        // over the active tiles, no recompute when nothing moved.  Only
-        // clears the dirty flag once tiles actually exist, so a pre-map
-        // update() doesn't starve the first real tile population of a
-        // count pass.
+        // Refresh every tile's neighbour count if something changed
+        // since last frame.  Cheap — O(N) over active tiles, no
+        // recompute when nothing moved.
         if (this.neighborCountsDirty) {
             if (this.recomputeNeighborCounts(entities) > 0) {
                 this.neighborCountsDirty = false;
             }
-        }
-
-        // Stash the entities list so helper methods (glimmer, transmute)
-        // can spawn new particles/entities without threading the list
-        // through every private call site.
-        this.currentFrameEntities = entities;
-
-        try {
-            // Stage 2: regen ticking is owned by ShardSystem.  This
-            // system only runs the dynamics pass (gravity-pull + merge);
-            // ShardSystem.update() drains the unified regen queue.
-            this.updateDynamics(entities, dt, physics);
-        } finally {
-            this.currentFrameEntities = null;
         }
     }
 
@@ -227,256 +213,7 @@ export class NebulaSystem {
     // spawnShards moved to ShardSystem.shatter (Stage 3 of shard-system
     // overhaul).  See engine/systems/ShardSystem.ts.
 
-    /**
-     * Per-frame gravity + merge pass for NEBULA_SHARDs.
-     *
-     * Only NEBULA_SHARD entities participate — nebula TILES are immutable
-     * sinks that never grow or absorb.  New tiles are born by shard
-     * coalescence: when two shards merge and the combined disc area
-     * reaches canonical HEX_AREA, the merged shard transmutes into a
-     * brand-new NEBULA tile at the nearest clear grid cell.
-     *
-     * Each shard is pulled toward the nearest larger-or-equal
-     * neighbouring shard within GRAVITY_RANGE.  Equal-size pairs merge
-     * too — the `mergedThisFrame` set prevents duplicate processing
-     * within a single frame, and the id check in the inner loop handles
-     * the rare exact-tie case without infinite loops.
-     *
-     * Broadphase uses a cell grid over shards to avoid O(n²).
-     */
-    private updateDynamics(
-        entities: GameEntity[],
-        dt: number,
-        physics: PhysicsSystem,
-    ): void {
-        // Collect active nebula shards ONLY.  Tiles aren't merge targets
-        // and don't need to be spatially indexed for this pass.  Fading
-        // shards are skipped — they're in their death animation and
-        // shouldn't iterate as sources or be valid merge targets.
-        const all: GameEntity[] = [];
-        for (let i = 0; i < entities.length; i++) {
-            const e = entities[i];
-            if (!e.active) continue;
-            if (e.nebulaFadeTimer !== undefined) continue;
-            if (e.type === EntityType.NEBULA_SHARD) {
-                all.push(e);
-            }
-        }
-        if (all.length < 2) return;
 
-        // Spatial hash over GRAVITY_RANGE cells — cell coords wrap modulo
-        // the grid dimension so shards near a seam share a bucket with
-        // merge candidates on the other side.
-        const CELL = NEBULA_CONSTANTS.GRAVITY_RANGE;
-        const COLS = Math.ceil(MAP_WIDTH  / CELL);
-        const ROWS = Math.ceil(MAP_HEIGHT / CELL);
-        const keyFor = (cx: number, cy: number) => {
-            const wx = ((cx % COLS) + COLS) % COLS;
-            const wy = ((cy % ROWS) + ROWS) % ROWS;
-            return (wx << 16) | (wy & 0xFFFF);
-        };
-        const grid = new Map<number, number[]>();
-        for (let i = 0; i < all.length; i++) {
-            const e = all[i];
-            const cx = Math.floor(e.position.x / CELL);
-            const cy = Math.floor(e.position.y / CELL);
-            let cell = grid.get(keyFor(cx, cy));
-            if (!cell) { cell = []; grid.set(keyFor(cx, cy), cell); }
-            cell.push(i);
-        }
-
-        const GRAV_RANGE_SQ = CELL * CELL;
-        const GRAV_K        = NEBULA_CONSTANTS.GRAVITY_STRENGTH;
-        const GRAV_MIN      = NEBULA_CONSTANTS.GRAVITY_MIN_DIST;
-        const MERGE_K       = NEBULA_CONSTANTS.MERGE_PROXIMITY_K;
-
-        // Per-frame set: "at most one merge per target per frame" keeps
-        // the three children of a single shatter from all stacking into
-        // the same nearest tile.
-        const mergedThisFrame = new Set<GameEntity>();
-
-        for (let i = 0; i < all.length; i++) {
-            const shard = all[i];
-            if (!shard.active) continue;
-            if (shard.type !== EntityType.NEBULA_SHARD) continue;
-
-            // Merge cooldown: freshly-spawned (or recently-merged)
-            // shards skip both gravity pull AND merge checks until the
-            // cooldown expires, keeping them visible as distinct
-            // polygons for a beat before the coalescence pass touches
-            // them.
-            if ((shard.nebulaMergeCooldown ?? 0) > 0) continue;
-
-            const shardR = Math.max(shard.size.x, shard.size.y) / 2;
-
-            // Find nearest larger-or-equal neighbour across the 3×3 block.
-            const acx = Math.floor(shard.position.x / CELL);
-            const acy = Math.floor(shard.position.y / CELL);
-
-            let bestTarget: GameEntity | null = null;
-            let bestDistSq = Infinity;
-
-            for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-                for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                    const cell = grid.get(keyFor(ncx, ncy));
-                    if (!cell) continue;
-                    for (let k = 0; k < cell.length; k++) {
-                        const j = cell[k];
-                        if (j === i) continue;
-                        const target = all[j];
-                        if (!target.active) continue;
-                        if (mergedThisFrame.has(target)) continue;
-                        // Target also honours its own merge cooldown.
-                        if ((target.nebulaMergeCooldown ?? 0) > 0) continue;
-                        const targetR = Math.max(target.size.x, target.size.y) / 2;
-                        if (targetR < shardR) continue;
-
-                        const dx = wrapDeltaX(shard.position.x, target.position.x);
-                        const dy = wrapDeltaY(shard.position.y, target.position.y);
-                        const distSq = dx * dx + dy * dy;
-                        if (distSq > GRAV_RANGE_SQ) continue;
-                        if (distSq < bestDistSq) {
-                            bestDistSq = distSq;
-                            bestTarget = target;
-                        }
-                    }
-                }
-            }
-
-            if (!bestTarget) continue;
-
-            const dx = wrapDeltaX(shard.position.x, bestTarget.position.x);
-            const dy = wrapDeltaY(shard.position.y, bestTarget.position.y);
-            const dist = Math.sqrt(bestDistSq);
-            if (dist < 0.0001) continue;
-
-            const targetR   = Math.max(bestTarget.size.x, bestTarget.size.y) / 2;
-            const mergeDist = (targetR + shardR) * MERGE_K;
-
-            if (dist <= mergeDist) {
-                this.mergeNebulas(bestTarget, shard);
-                mergedThisFrame.add(bestTarget);
-                // Post-merge: if the grown shard is now large enough to
-                // form a tile (disc area ≥ canonical hex area), try
-                // transmuting it to a brand-new NEBULA tile.
-                this.tryTransmuteShardToTile(entities, bestTarget, physics);
-                continue;
-            }
-
-            // Strong linear-radial gravity: force ∝ 1 / max(dist, MIN_DIST).
-            // Combined with the damping pass this produces a steady
-            // terminal drift toward the target rather than runaway
-            // acceleration.
-            const effDist = Math.max(dist, GRAV_MIN);
-            const accel   = (GRAV_K * dt) / effDist;
-            const invDist = 1 / dist;
-            shard.velocity.x += (dx * invDist) * accel;
-            shard.velocity.y += (dy * invDist) * accel;
-        }
-    }
-    /**
-     * Absorb a smaller nebula shard into a larger-or-equal nebula shard.
-     * Only called on NEBULA_SHARD pairs — tiles are not merge targets.
-     *
-     *  - larger.size grows so its disc area gains the smaller's area
-     *  - colour composition is blended weighted by each shard's area
-     *  - polygonPoints is cleared: once a shard has absorbed another
-     *    it transitions from "glass-style polygonal fragment" back to
-     *    "circular cloud blob", so the debug view draws an implicit
-     *    circle from `size` matching the grown hit shape
-     *  - smaller becomes inactive; a glimmer burst plays at the
-     *    absorption point as the merge animation
-     *
-     * Post-merge, updateDynamics checks whether the grown shard should
-     * transmute into a fresh NEBULA tile via tryTransmuteShardToTile.
-     */
-    private mergeNebulas(larger: GameEntity, smaller: GameEntity): void {
-        const largeR = Math.max(larger.size.x, larger.size.y) / 2;
-        const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
-        const largeArea = Math.PI * largeR * largeR;
-        const smallArea = Math.PI * smallR * smallR;
-        const newArea = largeArea + smallArea;
-        const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-
-        larger.size.x = newDiameter;
-        larger.size.y = newDiameter;
-        larger.mass   = newDiameter;
-
-        // Accumulate the effective area carried by both shards onto
-        // the larger.  This is what drives transmutation in
-        // tryTransmuteShardToTile — decoupled from the physical disc
-        // area so shards can stay glass-style small while still
-        // condensing back to tiles at a 1-tile-in → 1-tile-out rate.
-        larger.nebulaTileArea = (larger.nebulaTileArea ?? 0)
-                              + (smaller.nebulaTileArea ?? 0);
-
-        // Arm a fresh merge cooldown on the grown shard so it doesn't
-        // immediately chain-merge with another neighbour the same frame.
-        // Spreads visible merge events over seconds instead of a burst.
-        larger.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
-
-        // Regenerate the polygon at the new size so merged shards keep
-        // the glass-shard-style polygon outline in debug view instead
-        // of collapsing to a circle fallback.  Uses the same 4–6 vertex
-        // power-law math as spawnShards with a radius derived from the
-        // grown disc size (newDiameter / 2 × slack factor to match the
-        // loose polygon-inside-size convention used at spawn).
-        const polyRadius = newDiameter / 2 * 0.5; // keeps shape inside bbox
-        const numPoints = 4 + Math.floor(Math.random() * 3);
-        const rawPts: { angle: number; r: number }[] = [];
-        for (let j = 0; j < numPoints; j++) {
-            const baseAngle = (j / numPoints) * Math.PI * 2;
-            const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-            rawPts.push({ angle: baseAngle + jitter, r: polyRadius * (0.6 + Math.random() * 0.55) });
-        }
-        rawPts.sort((a, b) => a.angle - b.angle);
-        larger.polygonPoints = rawPts.map(p => ({
-            x: Math.cos(p.angle) * p.r,
-            y: Math.sin(p.angle) * p.r,
-        }));
-
-        // Blend colour compositions weighted by area; larger dominates.
-        larger.nebulaColorComposition = blendCompositions(
-            larger.nebulaColorComposition, largeArea,
-            smaller.nebulaColorComposition, smallArea,
-        );
-        larger.color = blendCompositionToHex(larger.nebulaColorComposition);
-        // Composition just changed — refresh the render-time cache so the
-        // next frame's draw doesn't pull a stale tint.  Reusing
-        // larger.color avoids a redundant blendCompositionToHex call.
-        larger.nebulaBlendedHex = larger.color;
-        // tinted-sprite key encodes `${src}|${hex}` — drop it so the next
-        // render rebuilds it against the new blended hex and re-links to
-        // the freshly-rendered tinted canvas.
-        larger.nebulaTintedKey = undefined;
-        // Drop the nebula fast-path cache too — both tint and (for any
-        // tile whose area changed via merge) drawSize are now stale.
-        // Slow path will repopulate on the next draw.
-        larger.nebulaCachedTinted = undefined;
-
-        // Glittery glimmer burst scattered within a radius matching the
-        // smaller shard — the subtle merge feedback.
-        const tint = blendCompositionToHex(larger.nebulaColorComposition);
-        const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-        this.spawnGlimmerAtMergePoint(smaller.position, glimmerR, tint);
-
-        // Smaller fades out over top of the already-grown larger shard
-        // — no fade-in on larger (it just grows in place), so the eye
-        // reads the smaller dissolving INTO the new combined shard
-        // rather than popping out with the result flashing in from
-        // alpha 0.  Compaction removes it once the fade completes.
-        smaller.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-        smaller.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
-    }
-
-    // Helper used by mergeNebulas — stashes the current frame's
-    // entities list so spawnGlimmer can hand it to ParticleSystem
-    // without threading the list through every private method.
-    private currentFrameEntities: GameEntity[] | null = null;
-    private spawnGlimmerAtMergePoint(position: Vector2, radius: number, tint: string): void {
-        if (!this.currentFrameEntities) return;
-        this.spawnGlimmer(this.currentFrameEntities, position, radius, tint);
-    }
     /**
      * If the given nebula shard has grown large enough (disc area ≥
      * HEX_AREA), transmute it into a brand-new NEBULA tile at the nearest
@@ -679,6 +416,21 @@ export class NebulaSystem {
      *     any later regens in the same frame (cluster-wide shatter)
      *   - Flag neighbour-counts dirty for the next update() pass
      */
+    /**
+     * ShardAdapter hook (Stage 4).  Called after a nebula-shard
+     * self-compose merge fires inside ShardSystem.composeEntities.
+     * Delegates straight to the existing transmutation logic; the
+     * compose math itself (area accumulate, composition blend,
+     * polygon regen, fade smaller) lives in ShardSystem.
+     */
+    public onComposeNebulaShard(
+        host: GameEntity,
+        entities: GameEntity[],
+        physics: PhysicsSystem,
+    ): void {
+        this.tryTransmuteShardToTile(entities, host, physics);
+    }
+
     public onNeighborhoodBlendRegen(entity: GameEntity, entities: GameEntity[]): void {
         // Tiles never grow (only shards do), so size is already
         // canonical.  Rule-based colour regeneration reads the

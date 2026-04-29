@@ -249,26 +249,47 @@ export interface PerMapVariantSpawn {
   tileCluster?: TileClusterConfig;
 }
 
-// ── Variant-specific completion hook ────────────────────────────────
-// Stage 2: the nebula-tile regen path needs neighbourhood-aware
-// composition rewrite + cache invalidation + neighbour-counts dirty
-// bookkeeping at completion.  ShardSystem invokes this hook only
-// when the regen variant's `rewriteColor === 'neighborhood-blend'`,
-// keeping non-nebula regens free of any nebula-specific work.
+// ── Variant-specific completion hooks ──────────────────────────────
+// Stage 2: nebula-tile regen needs neighbourhood-aware composition
+// rewrite + cache invalidation + grid-index update.
+// Stage 4: nebula-shard 'compose' merges need a transmutation check
+// (when accumulated effective area ≥ HEX_AREA, replace the merged
+// shard with a new nebula-tile at the nearest free hex cell).
+//
+// ShardSystem invokes these hooks only for the relevant variants /
+// outcomes; non-nebula entities never call into the adapter.
 //
 // NebulaSystem implements this; ShardSystem accepts it via
 // constructor (optional — null-adapter is treated as a no-op so
-// non-nebula regens still work).  Other future hooks can extend
-// this interface without changing ShardSystem call sites.
+// non-nebula regens / merges still work).
 
-export interface ShardRegenAdapter {
+export interface ShardAdapter {
   /**
-   * Called after ShardSystem revives an entity, when the variant's
-   * regen.rewriteColor === 'neighborhood-blend'.  The implementation
-   * is responsible for whatever variant-specific completion work is
-   * needed (composition rewrite, cache invalidation, grid-index
-   * update, neighbour-counts-dirty flagging).
+   * Regen-completion hook.  Called when the variant's
+   * regen.rewriteColor === 'neighborhood-blend' (today: nebula-tile).
    */
   onNeighborhoodBlendRegen(entity: import('../../types').GameEntity, entities: import('../../types').GameEntity[]): void;
+
+  /**
+   * Compose-completion hook for nebula-shard self-compose.  After
+   * two nebula-shards merge, the host's accumulated nebulaTileArea
+   * may have crossed HEX_AREA — at which point a new nebula-tile
+   * is spawned at the nearest free hex cell and the host shard
+   * dissolves.  The implementation lives in NebulaSystem
+   * (`tryTransmuteShardToTile`) since it depends on hex coords +
+   * nebula tile creation + the static grid; ShardSystem just
+   * invokes it via this hook for variants whose merge.rules
+   * compose-outcome targets the nebula-shard variant.  PhysicsSystem
+   * is passed through because the implementation queries the
+   * static grid for cell occupancy and adds the new tile to it.
+   */
+  onComposeNebulaShard(
+    host: import('../../types').GameEntity,
+    entities: import('../../types').GameEntity[],
+    physics: import('./PhysicsSystem').PhysicsSystem,
+  ): void;
 }
+
+// Backwards-compat alias for the Stage 2 type name.  Removed in Stage 6.
+export type ShardRegenAdapter = ShardAdapter;
 
