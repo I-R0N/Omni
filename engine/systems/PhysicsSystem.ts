@@ -641,6 +641,16 @@ export class PhysicsSystem {
    * quickly.
    */
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
+      // Stage 5 fix: respect per-variant passThrough on the dynamic-
+      // grid fast-path.  Without this, nebula-shards (passThrough=
+      // true, mass=0.01) get an elastic bounce here that gives them a
+      // huge velocity kick (invMassA = 100), and the bond-cohesion
+      // pass smears that energy onto the glass partner.  The full
+      // resolveCollision path already honours passThrough; the fast-
+      // path needs the same gate.
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
       const rA = a.size.x * 0.42;
       const rB = b.size.x * 0.42;

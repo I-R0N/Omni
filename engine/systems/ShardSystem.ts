@@ -853,10 +853,19 @@ export class ShardSystem {
       let bestPullTarget: GameEntity | null = null;
       let bestPullDistSq = Infinity;
       const aR = Math.max(a.size.x, a.size.y) / 2;
-      const wantsPull = aVariant && aVariant.merge.attractedTo !== 'none';
 
       // ── Bond formation pass ────────────────────────────────────
       const aBondedAlready = bonded.has(a) || bondedThisFrame.has(a);
+
+      // Pull pass is suppressed once the puller is already in a
+      // stick-bond (this frame or a prior frame).  Without this
+      // gate, gravity keeps adding velocity each frame on top of
+      // the bond's cohesion blend — a nebula-shard cohering with a
+      // glass-shard would get a steady-state velocity kick that
+      // both sides eventually share via cohesion, accelerating the
+      // pair indefinitely.  Asteroid stick-bonds today have no
+      // gravity at all, so this matches their behaviour.
+      const wantsPull = aVariant && aVariant.merge.attractedTo !== 'none' && !aBondedAlready;
 
       for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
         for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
