@@ -498,7 +498,7 @@ export class RenderSystem {
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
-                && entity.type !== EntityType.NEBULA && entity.type !== EntityType.NEBULA_SHARD
+                && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -510,7 +510,7 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push({ entity, rx, ry });
-        } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+        } else if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
             // Nebula entities render as a dedicated bottom layer so
             // asteroids / actors / projectiles always draw on top of
             // them, regardless of entity array order.
@@ -1074,7 +1074,12 @@ export class RenderSystem {
       // path anyway), and the HUD requires debug mode to be on for the
       // user to see perf numbers — so blocking the fast path on
       // debugMode would mean it never runs while we're measuring.
-      if (entity.type === EntityType.NEBULA
+      // Stage 5: fast-path gate flips from EntityType-keyed to
+      // variant-id-keyed.  Same cost (one string compare), same
+      // shape, same cache invalidation sites.  Only the nebula-tile
+      // variant populates the per-entity tinted-canvas cache —
+      // future variants can opt in via SHARD_VARIANTS[v].renderCache.
+      if (entity.shardVariant === 'nebula-tile'
           && entity.active
           && !entity.hitFlash
           && entity.nebulaFadeTimer === undefined
@@ -1152,7 +1157,7 @@ export class RenderSystem {
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
-      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+      if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
           this.lastNebulaSlowCount++;
           // Per-entity blended-hex cache: populated lazily on first render
           // and invalidated by NebulaSystem when composition mutates
@@ -1169,7 +1174,7 @@ export class RenderSystem {
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully
           // enclosed) caps at 0.55× brightness; shards skip the pass.
-          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount) {
+          if (entity.shardVariant === 'nebula-tile' && entity.nebulaNeighborCount) {
               const t = Math.min(1, entity.nebulaNeighborCount / 6);
               const factor = 1 - t * 0.45;
               const [r, g, b] = hexToRgb(tintHex);
@@ -1200,7 +1205,7 @@ export class RenderSystem {
           // fully opaque.  Uses speed² so we skip sqrt; tiles are
           // stationary so we skip the branch entirely for them.
           let speedMul = 1.0;
-          if (entity.type === EntityType.NEBULA_SHARD) {
+          if (entity.shardVariant === 'nebula-shard') {
               const vx = entity.velocity.x;
               const vy = entity.velocity.y;
               const speedSq = vx * vx + vy * vy;
@@ -1218,7 +1223,7 @@ export class RenderSystem {
               // and returns the same canvas.  Tiles keep the default path
               // since their tintHex varies with neighbour-count darkening.
               let tinted: HTMLCanvasElement | null = null;
-              if (entity.type === EntityType.NEBULA_SHARD) {
+              if (entity.shardVariant === 'nebula-shard') {
                   if (entity.nebulaTintedKey === undefined) {
                       entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
                   }
@@ -1228,7 +1233,7 @@ export class RenderSystem {
                   tinted = this.getTintedSprite(spriteSrc, tintHex);
               }
               if (tinted) {
-                  const isTile = entity.type === EntityType.NEBULA;
+                  const isTile = entity.shardVariant === 'nebula-tile';
                   // Sprite size is proportional to the effective nebula
                   // area the entity carries.  A fresh shard from a 5-way
                   // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
@@ -1263,7 +1268,7 @@ export class RenderSystem {
                   // fields are non-undefined, subsequent frames bypass
                   // this whole slow path until NebulaSystem invalidates
                   // them (composition / neighbour-count / area changes).
-                  if (entity.type === EntityType.NEBULA) {
+                  if (entity.shardVariant === 'nebula-tile') {
                       entity.nebulaCachedTinted = tinted;
                       entity.nebulaCachedDx = dx;
                       entity.nebulaCachedDy = dy;
@@ -1305,7 +1310,7 @@ export class RenderSystem {
                   }
                   ctx.closePath();
                   ctx.stroke();
-              } else if (entity.type === EntityType.NEBULA_SHARD) {
+              } else if (entity.shardVariant === 'nebula-shard') {
                   // Legacy fallback: implicit circle defined by `size`.
                   const r = Math.max(entity.size.x, entity.size.y) / 2;
                   ctx.beginPath();
@@ -1324,7 +1329,7 @@ export class RenderSystem {
           // shard per frame.  Cutting it for shards eliminates that work
           // without a visible change.
           //
-          if (entity.type === EntityType.NEBULA) {
+          if (entity.shardVariant === 'nebula-tile') {
               const now = perfNowSec;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly

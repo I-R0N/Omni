@@ -172,7 +172,11 @@ export abstract class BaseMapLayer {
 
     return {
         id: nextId('ast'),
-        type: EntityType.ASTEROID,
+        // Stage 5: free-floating asteroids unify onto the
+        // shard-family carrier as the rock-shard variant.
+        type: EntityType.STRUCTURE,
+        shardVariant: 'rock-shard',
+        shardType: 'asteroid',
         position: { x, y },
         velocity: { x: vx, y: vy },
         size: { x: size, y: size },

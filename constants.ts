@@ -1358,28 +1358,54 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation
     merge: {
-      // Stage 4 (homogeneous merge migration): same-variant pull and
-      // bond only — preserves today's "no visible change" target.
-      // Stage 5 widens attractedTo / bondsWith to include rock-shard
-      // and glass-shard plus the absorb rule.
-      attractedTo: 'self',
+      // Stage 5b: cross-variant gravity pull from nebula-shards
+      // toward all mobile shard variants (self + rock-shard +
+      // glass-shard).  Pull is unilateral — only nebula-shards have
+      // attractedTo set; rock and glass shards are dragged toward
+      // nebulae but don't pull each other or pull toward nebulae.
+      attractedTo: { include: ['nebula-shard', 'rock-shard', 'glass-shard'] },
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      // Stick-bonds with self only.  bondTimeSeconds: 0 = merge
-      // instantly on contact, matching today's nebula proximity-merge
-      // (the gravity pull brings shards together; the bond fires the
-      // moment they touch).
-      bondsWith: 'self',
+      // Stick-bonds with self → compose (existing coalesce / transmute);
+      // with glass-shard → absorb after long contact, gated on partner
+      // reaching its variant sizeMax (rare, "unique event").
+      // bondTimeSeconds: 0 fires self-compose instantly on contact
+      // (matches today's nebula proximity-merge); glass-shard absorb
+      // uses thresholdScale to scale to ~5× the self-compose time.
+      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
       bondTimeSeconds: 0,
+      bondTimeSizeRef: 20,
+      bondTimeSizePower: 1.5,
       rules: [
         { partner: 'self', outcome: 'compose' },
+        {
+          partner: 'glass-shard',
+          outcome: 'absorb',
+          // bondTimeSeconds=0 + thresholdScale would still be 0.  We
+          // use NEBULA_CONSTANTS.MERGE_COOLDOWN × 5 as the absorb
+          // threshold base by setting thresholdScale to a value the
+          // resolver multiplies AGAINST a stand-in baseTime — handled
+          // inside ShardSystem (see tickBonds gate).  In practice the
+          // partner-size gate dominates: bonds persist (cohesion) and
+          // never fire the absorb until the glass-shard reaches
+          // sizeMax, which is a rare event regardless of timer.
+          thresholdScale: 5.0,
+          requirePartnerSizeFraction: 1.0,
+        },
       ],
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },
     shatter: { kind: 'none', countMin: 0, countMax: 0, alphaMin: 1, alphaMax: 1, childVariant: 'nebula-shard', forwardDrag: 0, perpScatter: 0, scatterHalfCone: 0 },
-    passThrough: false,                         // mass alone covers shards
+    // passThrough = true so shard-vs-shard and shard-vs-striker
+    // contacts skip collision impulse entirely.  Mass = 0.01 alone
+    // would let strikers pass with negligible impulse, but
+    // shard-vs-shard pairs (both low-mass) would bounce apart
+    // elastically — breaking the gravity-pull-then-merge cycle.
+    // The flag is the cleanest fix and matches today's "shards are
+    // INDESTRUCTIBLE — they pass through unchanged" behaviour.
+    passThrough: true,
     spawnsDropsOnDeath: false,
   },
 };

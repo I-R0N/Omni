@@ -19,6 +19,7 @@ import {
   COLORS,
   NEBULA_CONSTANTS,
   WEAPONS,
+  WEAPON_LIST,
   ASTEROID_GENERATION_CONFIG,
   nebulaFadeRateScale,
 } from '../../constants';
@@ -40,6 +41,7 @@ import {
   ShardVariantDef,
   VariantSelector,
   MergeRule,
+  MergeOutcome,
   ShardAdapter,
 } from './ShardSystem.types';
 
@@ -94,14 +96,20 @@ interface RegenEntry {
 
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
- * `timer` accumulates contact dt; when it reaches `threshold` the
- * resolved outcome fires (compose today, absorb in Stage 5).
+ * `timer` accumulates contact dt; when it reaches `threshold` AND
+ * the rule's gate (requirePartnerSizeFraction) is met, the resolved
+ * outcome fires.
  */
 interface BondEntry {
   a: GameEntity;
   b: GameEntity;
   timer: number;
   threshold: number;
+  outcome: MergeOutcome;
+  /** Optional gate for cross-variant absorbs (today: glass-shard
+   *  must reach sizeMax * gate before absorb fires).  When unmet,
+   *  the bond persists but the merge doesn't trigger. */
+  requirePartnerSizeFraction?: number;
 }
 
 export class ShardSystem {
@@ -426,12 +434,16 @@ export class ShardSystem {
       const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
       const maxSpin = 2.0 / (newSize / 20);
 
-      // Map child variant id back to today's EntityType / shardType
-      // pair so existing physics + render code paths continue to work
-      // before Stage 5's full EntityType collapse.
+      // Stage 5: shard-family entities live on a single EntityType
+      // (STRUCTURE), with shardVariant declaring the variant id.
+      // PhysicsSystem dispatches by mass (∞ → static grid, finite →
+      // dynamic) and per-variant passThrough flag.
       entities.push({
         id:           nextId('shard'),
-        type:          EntityType.ASTEROID,
+        type:          EntityType.STRUCTURE,
+        shardVariant:  childVariant.id,
+        // Legacy field — kept stamped for systems that haven't fully
+        // migrated to shardVariant yet (deleted in Stage 6).
         shardType:     isTile ? 'tile' : 'asteroid',
         position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
         velocity:     { x: vx, y: vy },
@@ -586,7 +598,12 @@ export class ShardSystem {
 
       entities.push({
         id:              nextId('nebula_shard'),
-        type:            EntityType.NEBULA_SHARD,
+        // Stage 5: unified carrier with mass-based dispatch.  Mass
+        // resolves via childSpawn.sizeToMass() which the nebula-shard
+        // variant overrides to () => 0.01 — striker impulse is
+        // negligible without needing a per-EntityType skip.
+        type:            EntityType.STRUCTURE,
+        shardVariant:   childVariant.id,
         shardType:      'nebula',
         position:       { x: spawnPos.x, y: spawnPos.y },
         velocity:       { x: velX, y: velY },
@@ -696,8 +713,28 @@ export class ShardSystem {
       bond.timer += dt;
 
       if (bond.timer >= bond.threshold) {
-        this.composeEntities(a, b, entities, physics);
-        continue; // bond resolved — drop
+        // Stage 5b: requirePartnerSizeFraction gate.  If unmet, the
+        // bond persists with cohesion active but the merge doesn't
+        // fire — useful for "rare-event" cross-variant outcomes
+        // (e.g. nebula absorbed only into max-size glass-shards).
+        const gate = bond.requirePartnerSizeFraction;
+        let gateMet = true;
+        if (gate !== undefined && gate > 0) {
+          // Evaluate the gate against the LARGER side (the absorb host).
+          const host = a.size.x >= b.size.x ? a : b;
+          const hostVariant = shardVariantOf(host);
+          if (hostVariant !== null) {
+            const sizeMax = SHARD_VARIANTS[hostVariant].spawn.sizeMax;
+            gateMet = host.size.x >= sizeMax * gate;
+          }
+        }
+        if (gateMet) {
+          this.composeEntities(a, b, entities, physics, bond.outcome);
+          continue; // bond resolved — drop
+        }
+        // Gate unmet — cap the timer at threshold and keep the bond
+        // alive.  Cohesion stays active; next frame re-checks gate.
+        bond.timer = bond.threshold;
       }
 
       this.bonds[writeIdx++] = bond;
@@ -740,21 +777,23 @@ export class ShardSystem {
       bonded.add(this.bonds[i].b);
     }
 
-    // Candidate set: active asteroids/nebula-shards + eligible drops.
-    // Drops with dropType 'glass' or 'health' are excluded (today's
-    // stick-bond rules — glass shards never bond, health drops aren't
-    // collectible-mergeable).
+    // Candidate set: every mobile shard-family entity + eligible drops.
+    // Stage 5: shards live on EntityType.STRUCTURE with finite mass
+    // (mass=Infinity tiles are in the static grid — never candidates).
+    // The legacy ASTEROID branch is kept as defence for any spawn
+    // site that hasn't migrated yet.  Fading nebula-shards are
+    // skipped (they're in their death animation).
     const candidates: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
-      if (e.type === EntityType.ASTEROID) {
-        candidates.push(e);
-      } else if (e.type === EntityType.NEBULA_SHARD) {
-        // Skip fading shards — they're in their death animation.
-        if (e.nebulaFadeTimer !== undefined) continue;
-        candidates.push(e);
-      }
+      const isMobileShard =
+        (e.type === EntityType.STRUCTURE && e.mass !== Infinity)
+        || e.type === EntityType.ASTEROID
+        || e.type === EntityType.NEBULA_SHARD; // legacy
+      if (!isMobileShard) continue;
+      if (e.nebulaFadeTimer !== undefined) continue;
+      candidates.push(e);
     }
     for (let i = 0; i < this.activeDrops.length; i++) {
       const d = this.activeDrops[i];
@@ -887,7 +926,7 @@ export class ShardSystem {
               const sizeRatio = Math.max(1, avgSize / SIZE_REF);
               const baseTime  = sameType ? 10.0 : 20.0;
               const threshold = baseTime * Math.pow(sizeRatio, SIZE_POWER);
-              this.bonds.push({ a, b, timer: 0, threshold });
+              this.bonds.push({ a, b, timer: 0, threshold, outcome: 'compose' });
               bondedThisFrame.add(a);
               bondedThisFrame.add(b);
               continue;
@@ -902,12 +941,20 @@ export class ShardSystem {
             if (partnerId === null) continue;
             const rule = this.resolveRule(pullerVariant, partnerId);
 
-            // Stage 4: only 'compose' outcomes fire.  Stage 5 adds 'absorb'.
-            if (rule.outcome !== 'compose') continue;
+            // Both 'compose' and 'absorb' outcomes are supported in
+            // Stage 5b.  Other outcomes (none yet) skip the bond.
+            if (rule.outcome !== 'compose' && rule.outcome !== 'absorb') continue;
 
             // Threshold: pullerVariant.merge.bondTimeSeconds, scaled
-            // by size and the rule's thresholdScale.
-            const baseTime  = pullerVariant.merge.bondTimeSeconds ?? 10;
+            // by size and the rule's thresholdScale.  For absorb
+            // rules with bondTimeSeconds=0 (nebula → glass-shard) we
+            // bump the base to MERGE_COOLDOWN so thresholdScale is
+            // meaningful; the size-fraction gate is the dominant
+            // gate anyway.
+            let baseTime  = pullerVariant.merge.bondTimeSeconds ?? 10;
+            if (rule.outcome === 'absorb' && baseTime <= 0) {
+              baseTime = pullerVariant.merge.postMergeCooldown ?? 1.0;
+            }
             const sizeRef   = pullerVariant.merge.bondTimeSizeRef   ?? 20;
             const sizePower = pullerVariant.merge.bondTimeSizePower ?? 1.5;
             const avgSize   = (a.size.x + b.size.x) * 0.5;
@@ -915,15 +962,20 @@ export class ShardSystem {
             const baseScaled = baseTime * Math.pow(sizeRatio, sizePower);
             const threshold  = baseScaled * (rule.thresholdScale ?? 1);
 
-            this.bonds.push({ a, b, timer: 0, threshold });
+            this.bonds.push({
+              a, b, timer: 0, threshold,
+              outcome: rule.outcome,
+              requirePartnerSizeFraction: rule.requirePartnerSizeFraction,
+            });
             bondedThisFrame.add(a);
             bondedThisFrame.add(b);
 
             // bondTimeSeconds === 0 (nebula's instant-merge case) →
             // fire compose immediately so today's same-frame nebula
-            // merge timing is preserved.
-            if (threshold <= 0) {
-              this.composeEntities(a, b, entities, _physics);
+            // merge timing is preserved.  Absorb rules don't take
+            // this path (their effective baseTime is bumped above).
+            if (threshold <= 0 && rule.outcome === 'compose') {
+              this.composeEntities(a, b, entities, _physics, 'compose');
               // Drop the just-pushed bond (it's already resolved).
               this.bonds.pop();
             }
@@ -968,13 +1020,36 @@ export class ShardSystem {
    *  merges (today's behaviour).  Nebula-shard merges use the
    *  existing glimmer burst inside composeNebulaShards.
    */
-  private composeEntities(a: GameEntity, b: GameEntity, entities: GameEntity[], physics: PhysicsSystem): void {
+  private composeEntities(
+    a: GameEntity,
+    b: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+    outcome: MergeOutcome = 'compose',
+  ): void {
     if (!a.active || !b.active) return;
 
-    const aIsAst = a.type === EntityType.ASTEROID;
-    const bIsAst = b.type === EntityType.ASTEROID;
-    const aIsNebShard = a.type === EntityType.NEBULA_SHARD;
-    const bIsNebShard = b.type === EntityType.NEBULA_SHARD;
+    // Stage 5b: 'absorb' — smaller fades, larger gains a glow tint
+    // mapped to the closest weapon-palette colour.  Used by nebula-
+    // shard absorbed into a max-size glass-shard.
+    if (outcome === 'absorb') {
+      this.applyAbsorb(a, b, entities);
+      return;
+    }
+
+    // Stage 5: shard-family entities are now all EntityType.STRUCTURE.
+    // Distinguish by variant id rather than the legacy EntityTypes.
+    const aVariant = shardVariantOf(a);
+    const bVariant = shardVariantOf(b);
+    const aIsNebShard = aVariant === 'nebula-shard';
+    const bIsNebShard = bVariant === 'nebula-shard';
+    // Mobile-shard family: rock-shard or glass-shard ride the asteroid
+    // accretion path.  Tile variants have shatter.kind=none here so
+    // they don't compose (only mobile shards merge).
+    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard'
+                || a.type === EntityType.ASTEROID; // legacy fallback
+    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard'
+                || b.type === EntityType.ASTEROID;
 
     // Nebula-shard self-merge — own code path with composition blend +
     // transmutation hook.
@@ -1109,6 +1184,53 @@ export class ShardSystem {
    * brand-new tile at the nearest free hex cell and the host
    * dissolves.
    */
+  /**
+   * Apply the 'absorb' merge outcome.  Smaller entity goes inactive
+   * (no shatter, no drop, no fade); larger entity's
+   * `powerupGlowColor` is set to the nearest weapon-palette colour
+   * to the absorbed entity's blended hex.  If a glow is already
+   * present, the two are blended via the existing blendHex.  A
+   * small glimmer particle burst plays at the absorption point.
+   *
+   * Used today by nebula-shard absorbed into a max-size glass-shard
+   * (the only absorb rule).  Future variants opt in by adding an
+   * absorb rule to their merge.rules.
+   */
+  private applyAbsorb(a: GameEntity, b: GameEntity, entities: GameEntity[]): void {
+    // Larger entity is the host; smaller is consumed.
+    const aR = Math.max(a.size.x, a.size.y);
+    const bR = Math.max(b.size.x, b.size.y);
+    const host = aR >= bR ? a : b;
+    const consumed = host === a ? b : a;
+
+    // Map the consumed entity's colour (or composition blend) to the
+    // closest weapon-palette colour, then blend onto the host's glow.
+    const consumedHex = consumed.nebulaColorComposition
+      ? blendCompositionToHex(consumed.nebulaColorComposition)
+      : (consumed.color || '#ffffff');
+    const tint = closestPowerupHex(consumedHex);
+    host.powerupGlowColor = host.powerupGlowColor
+      ? blendHex(host.powerupGlowColor, tint)
+      : tint;
+
+    // Glimmer at the absorption point — softer than the merge
+    // sparkle so a "rare" absorb event still reads as distinct.
+    this.particles.spawn(entities, consumed.position, 4, '#ffffff', {
+      speedMin: 0.1, speedMax: 0.5,
+      sizeMin: 0.3, sizeMax: 0.9,
+      lifetimeMin: 0.4, lifetimeMax: 0.8,
+      positionJitter: Math.max(consumed.size.x, consumed.size.y) * 0.4,
+    });
+    this.particles.spawn(entities, consumed.position, 5, tint, {
+      speedMin: 0.1, speedMax: 0.4,
+      sizeMin: 0.4, sizeMax: 1.1,
+      lifetimeMin: 0.5, lifetimeMax: 1.0,
+      positionJitter: Math.max(consumed.size.x, consumed.size.y) * 0.5,
+    });
+
+    consumed.active = false;
+  }
+
   private composeNebulaShards(
     larger: GameEntity,
     smaller: GameEntity,
@@ -1204,7 +1326,8 @@ export class ShardSystem {
 
     entities.push({
       id:            nextId('composite'),
-      type:          EntityType.ASTEROID,
+      type:          EntityType.STRUCTURE,
+      shardVariant:  'rock-shard',
       shardType:    'asteroid',
       position:      { x: mx, y: my },
       velocity:      { x: mvx, y: mvy },
@@ -1242,4 +1365,52 @@ function blendHex(hexA: string, hexB: string): string {
   const rA = parseInt(hexA.slice(1, 3), 16), gA = parseInt(hexA.slice(3, 5), 16), bA = parseInt(hexA.slice(5, 7), 16);
   const rB = parseInt(hexB.slice(1, 3), 16), gB = parseInt(hexB.slice(3, 5), 16), bB = parseInt(hexB.slice(5, 7), 16);
   return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Pre-tabulated weapon palette for the absorb side-effect.  Computed
+ * once at module init from WEAPON_LIST + WEAPONS — zero per-call
+ * allocation.  closestPowerupHex picks the nearest entry by squared-
+ * Euclidean RGB distance.
+ */
+const POWERUP_PALETTE: Array<{ r: number; g: number; b: number; hex: string }> = (() => {
+  const out: Array<{ r: number; g: number; b: number; hex: string }> = [];
+  for (let i = 0; i < WEAPON_LIST.length; i++) {
+    const hex = WEAPONS[WEAPON_LIST[i]].color;
+    if (!hex || !hex.startsWith('#') || hex.length < 7) continue;
+    out.push({
+      r: parseInt(hex.slice(1, 3), 16),
+      g: parseInt(hex.slice(3, 5), 16),
+      b: parseInt(hex.slice(5, 7), 16),
+      hex,
+    });
+  }
+  return out;
+})();
+
+/**
+ * Map an arbitrary hex colour to the nearest weapon-palette colour.
+ * Used by the 'absorb' merge outcome (today: nebula-shard absorbed
+ * into a glass-shard).  Plain Euclidean distance in RGB space — no
+ * perceptual weighting; the user signed off on "keep the math
+ * simple".
+ */
+function closestPowerupHex(targetHex: string): string {
+  if (!targetHex || !targetHex.startsWith('#') || targetHex.length < 7) {
+    return POWERUP_PALETTE[0]?.hex ?? '#ffffff';
+  }
+  const tr = parseInt(targetHex.slice(1, 3), 16);
+  const tg = parseInt(targetHex.slice(3, 5), 16);
+  const tb = parseInt(targetHex.slice(5, 7), 16);
+  let bestHex = POWERUP_PALETTE[0]?.hex ?? '#ffffff';
+  let bestDist = Infinity;
+  for (let i = 0; i < POWERUP_PALETTE.length; i++) {
+    const e = POWERUP_PALETTE[i];
+    const dr = e.r - tr;
+    const dg = e.g - tg;
+    const db = e.b - tb;
+    const d = dr * dr + dg * dg + db * db;
+    if (d < bestDist) { bestDist = d; bestHex = e.hex; }
+  }
+  return bestHex;
 }

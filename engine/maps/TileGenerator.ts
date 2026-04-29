@@ -312,7 +312,13 @@ export class TileGenerator {
 
     return {
         id: nextId(`nebula_${r}_${c}`),
-        type: EntityType.NEBULA,
+        // Stage 5: unified shard-family carrier.  Mass=Infinity keeps
+        // the tile pinned to the static grid; passThrough on the
+        // variant config (read by PhysicsSystem) preserves "striker
+        // flies through and shatters on contact" without any
+        // per-EntityType branch.
+        type: EntityType.STRUCTURE,
+        shardVariant: 'nebula-tile',
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 },

@@ -91,12 +91,21 @@ export class DropSystem {
     const pos = entity.position;
     const pv = entity.velocity;
 
-    if (entity.type === EntityType.STRUCTURE) {
+    // Stage 5: shard-family entities are all EntityType.STRUCTURE.
+    // Distinguish static tile (mass=Infinity → glass-shard debris)
+    // from mobile shard (finite mass → asteroid-like drop logic).
+    const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
+    const isMobileShard = (entity.type === EntityType.STRUCTURE && entity.mass !== Infinity)
+                       || entity.type === EntityType.ASTEROID; // legacy
+    if (isStaticTile) {
+      // Glass / reinforced / heavy tile death — visual debris.
+      // Indestructible tiles short-circuit upstream; nebula-tile
+      // skips drops via variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
     } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
       // Drop was destroyed by a player projectile — apply its reward immediately.
       this.applyDropEffect(player, entity, onMessage);
-    } else if (entity.type === EntityType.ASTEROID) {
+    } else if (isMobileShard) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
         for (const comp of entity.dropComposition) {
           if (comp.type === 'ammo') {
@@ -184,7 +193,11 @@ export class DropSystem {
 
       entities.push({
         id:           nextId('enemy_shard'),
-        type:          EntityType.ASTEROID,
+        // Stage 5: shard-family entities live on a single carrier.
+        // shardVariant maps the legacy shardType ('tile'/'asteroid')
+        // to the new variant id at spawn time.
+        type:          EntityType.STRUCTURE,
+        shardVariant:  shardType === 'tile' ? 'glass-shard' : 'rock-shard',
         shardType,
         position:     { x: pos.x, y: pos.y },
         velocity:     { x: vx, y: vy },
@@ -266,7 +279,8 @@ export class DropSystem {
       const size = radius * 4; // diameter; slightly larger so physics feel solid
       entities.push({
         id:            nextId('tile_shard'),
-        type:           EntityType.ASTEROID,
+        type:           EntityType.STRUCTURE,
+        shardVariant:  'glass-shard',
         shardType:     'tile',
         position:      {
           x: tile.position.x + (Math.random() - 0.5) * scatter * 2,

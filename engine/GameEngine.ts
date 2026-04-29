@@ -11,7 +11,7 @@ import { WeaponSystem } from './systems/WeaponSystem';
 import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
-import { ShardSystem } from './systems/ShardSystem';
+import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap } from './maps/MapClasses';
@@ -214,7 +214,7 @@ export class GameEngine {
 
     if (active.length > 0 && this.currentMap) {
       for (const e of this.currentMap.entities) {
-        if (e.type === EntityType.NEBULA || e.type === EntityType.NEBULA_SHARD) {
+        if (e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') {
           e.sprite = active[Math.floor(Math.random() * active.length)];
         }
       }
@@ -630,7 +630,13 @@ export class GameEngine {
       let currentAsteroidCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const e = this.currentMap.entities[i];
-          if (e.type !== EntityType.ASTEROID) continue;
+          // Stage 5: rock-shards are now STRUCTURE+finite-mass with
+          // variant 'rock-shard' (replaces ASTEROID + shardType).
+          // Legacy ASTEROID is kept as a fallback.
+          const isAsteroidLike =
+            e.shardVariant === 'rock-shard'
+            || (e.type === EntityType.ASTEROID);
+          if (!isAsteroidLike) continue;
           currentAsteroidCount++;
           if (!e.active) newlyDestroyed.push(e);
       }
@@ -780,51 +786,64 @@ export class GameEngine {
           this.startExplosion(entity);
       }
 
-      if (entity.type === EntityType.STRUCTURE) {
-          // Indestructible tiles should never reach onDeath in the first
-          // place (all damage paths short-circuit before zeroing health),
-          // but guard defensively: if somehow invoked we just restore
-          // health rather than patching the flow field and queuing a
+      // Stage 5: shard-family death dispatches by variant id rather
+      // than EntityType.  The unified carrier (EntityType.STRUCTURE)
+      // covers tiles (mass=Infinity) and mobile shards (finite mass)
+      // in a single branch; per-variant behaviour falls out of
+      // SHARD_VARIANTS and the variant-aware downstream calls.
+      const variant = shardVariantOf(entity);
+      const isShardFamily = entity.type === EntityType.STRUCTURE && variant !== null;
+      const isStaticTile  = isShardFamily && entity.mass === Infinity;
+      const isNebula      = variant === 'nebula-tile' || variant === 'nebula-shard';
+
+      if (isShardFamily) {
+          // Indestructible tiles should never reach onDeath in the
+          // first place (damage paths short-circuit), but guard
+          // defensively: restore health rather than queuing a
           // pointless regen.
-          if (entity.structureVariant === 'indestructible') {
+          if (variant === 'indestructible-tile') {
               entity.health = entity.maxHealth;
               entity.active = true;
               return;
           }
-          this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
-          // Queue for regeneration; entity stays in the map entities list
-          // as an inactive ghost so the renderer draws an outline during
-          // the wait.  ShardSystem reads SHARD_VARIANTS[variant].regen
-          // for the per-variant delay, pop-burst, and any neighbourhood
-          // -blend hook (Stage 2).
-          this.shards.queueRegen(entity);
+          // Tile destruction patches the analytical flow field so
+          // pursuing enemies don't path through holes that closed
+          // since map load.  Mobile shards have no flow-field
+          // footprint.
+          if (isStaticTile) {
+              this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
+          }
+          // Variant-driven shatter (no-op for kind='none').
+          // - nebula-tile: spawns 2-3 nebula-shards.
+          // - rock-tile: spawns rock-shards (Stage 5+).
+          // - glass-tile / reinforced-tile / heavy-tile: today's
+          //   shatter is via DropSystem.spawnGlassShards (called
+          //   from spawnDrops); the variant config has shatter.kind=
+          //   'powerlaw' aspirationally for Stage 6 unification.
+          if (this.currentMap && variant !== 'glass-tile' && variant !== 'reinforced-tile' && variant !== 'heavy-tile') {
+              this.shards.shatter(entity, this.currentMap.entities);
+          }
       }
 
-      if (entity.type === EntityType.ENEMY) {
-          this.spawnEnemyShards(entity);
-      }
-
-      // Nebula tiles and shards route through ShardSystem (shatter +
-      // regen, Stages 2–3) and NebulaSystem (ammo drop + neighbour-
-      // dirty bookkeeping).  Nebulae skip the generic death-burst
-      // particles below (they fade via nebulaFadeTimer) AND skip the
-      // generic spawnDrops path since the ammo roll lives inside
-      // NebulaSystem.handleDeath.
-      const isNebula = entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD;
       if (isNebula && this.currentMap) {
-          // Variant-driven shatter: nebula-tile spawns 2–3 nebula-shards
-          // via the rear-cone fan; nebula-shard variant has shatter.kind
-          // === 'none' so this is a no-op for shards.
-          this.shards.shatter(entity, this.currentMap.entities);
+          // Nebula-specific ammo-drop roll + neighbour-counts-dirty.
           this.nebulas.handleDeath(
               this.currentMap.entities,
               this.activeDrops,
               entity,
               this.waveIndex,
           );
-          // Variant-driven regen — no-op for nebula-shard, no-op for
-          // nebula-tile when TILE_REGEN_ENABLED is false (current default).
+      }
+
+      if (isShardFamily) {
+          // Variant-driven regen — no-op for variants whose regen.kind
+          // is 'none' / 'merge-only' (every mobile shard, plus nebula-
+          // tile when TILE_REGEN_ENABLED is false, plus indestructible).
           this.shards.queueRegen(entity);
+      }
+
+      if (entity.type === EntityType.ENEMY) {
+          this.spawnEnemyShards(entity);
       }
 
       // Death burst particles — size/color tuned per entity type
@@ -848,10 +867,15 @@ export class GameEngine {
               speedMin: 6, speedMax: 16, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.3,
           });
-      } else if (entity.type === EntityType.ASTEROID) {
-          // Small shard/asteroid break — quick dusty puff
-          const isTileShard = entity.shardType === 'tile';
-          const breakColor = isTileShard ? (entity.color || '#6366f1') : '#94a3b8';
+      } else if (variant === 'rock-shard' || variant === 'glass-shard') {
+          // Small shard break — quick dusty puff.  Tile-shards
+          // (glass-shard) puff the parent's tile colour; rock-shards
+          // puff slate.  Stage 5: drives off shardVariant instead of
+          // shardType so it works for both legacy ASTEROID-typed
+          // entities and post-collapse STRUCTURE-typed shards.
+          const breakColor = variant === 'glass-shard'
+            ? (entity.color || '#6366f1')
+            : '#94a3b8';
           this.spawnParticles(entity.position, 4, breakColor, {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,

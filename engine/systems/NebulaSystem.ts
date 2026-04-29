@@ -114,7 +114,7 @@ export class NebulaSystem {
 
         // A destroyed tile removes itself from its neighbours' counts;
         // flag for recompute on the next frame.
-        if (entity.type === EntityType.NEBULA) this.neighborCountsDirty = true;
+        if (entity.shardVariant === 'nebula-tile') this.neighborCountsDirty = true;
 
         // Low-frequency ammo drop — the ONLY standard drop nebulae produce.
         // Roll is independent of the shard math so shard count/size is
@@ -183,7 +183,7 @@ export class NebulaSystem {
         let tilesProcessed = 0;
         for (let i = 0; i < entities.length; i++) {
             const e = entities[i];
-            if (e.type !== EntityType.NEBULA) continue;
+            if (e.shardVariant !== 'nebula-tile') continue;
             if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
             tilesProcessed++;
             if (!e.active) {
@@ -232,7 +232,7 @@ export class NebulaSystem {
         shard: GameEntity,
         physics: PhysicsSystem,
     ): boolean {
-        if (shard.type !== EntityType.NEBULA_SHARD) return false;
+        if (shard.shardVariant !== 'nebula-shard') return false;
 
         // Effective-area threshold.  Each shard carries a
         // `nebulaTileArea` set at spawn (= HEX_AREA / shardCount) that
@@ -315,7 +315,7 @@ export class NebulaSystem {
         // regenerating.
         for (let i = 0; i < entities.length; i++) {
             const e = entities[i];
-            if (e.type !== EntityType.NEBULA) continue;
+            if (e.shardVariant !== 'nebula-tile') continue;
             if (e.nebulaGridCol === col && e.nebulaGridRow === row) return false;
         }
 
@@ -512,7 +512,7 @@ export class NebulaSystem {
         const index = new Map<number, GameEntity>();
         for (let k = 0; k < entities.length; k++) {
             const e = entities[k];
-            if (e.type !== EntityType.NEBULA) continue;
+            if (e.shardVariant !== 'nebula-tile') continue;
             if (!e.active) continue;
             if (e.nebulaFadeTimer !== undefined) continue;
             if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;

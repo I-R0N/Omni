@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS } from '../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -289,12 +289,15 @@ export class PhysicsSystem {
           // canonical coordinate rather than one drifting off toward ±∞.
           wrapPosition(entity.position);
 
-          // Apply Friction
-          if (entity.type === EntityType.NEBULA_SHARD) {
-            // Nebula shards: custom heavy linear & angular damping (cloud drag).
-            // Uses per-entity damping factors so individual shards can vary if
-            // needed, with a sane default from NEBULA_CONSTANTS.
-            const linearD = entity.linearDamping ?? NEBULA_CONSTANTS.LINEAR_DAMPING;
+          // Apply Friction.  Stage 5: gate by per-entity damping
+          // override (today: nebula-shards) instead of EntityType so
+          // the shard-family unification doesn't lose nebula's
+          // characteristic cloud drag.
+          if (entity.linearDamping !== undefined) {
+            // Custom heavy linear & angular damping (nebula-shards
+            // today, future variants opt in via the same per-entity
+            // field at spawn time).
+            const linearD = entity.linearDamping;
             const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
             const lin = Math.pow(linearD, timeScale);
             const ang = Math.pow(angularD, timeScale);
@@ -307,9 +310,12 @@ export class PhysicsSystem {
                 if (Math.abs(entity.rotationSpeed) < NEBULA_CONSTANTS.REST_SPIN) entity.rotationSpeed = 0;
                 entity.rotation += entity.rotationSpeed * dt;
             }
-          } else if (entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.ASTEROID && entity.type !== EntityType.PARTICLE
-              && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
-            // Apply standard friction to all dynamic entities (Player, Enemies, etc)
+          } else if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY
+              || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+            // Standard friction for player / enemies / non-drop POIs.
+            // STRUCTURE entities (mobile shards post-collapse, plus
+            // tiles which are mass=∞ and skipped earlier) and
+            // projectiles / particles / drops free-drift today.
             entity.velocity.x *= friction;
             entity.velocity.y *= friction;
 
@@ -381,8 +387,11 @@ export class PhysicsSystem {
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
-        // Optimization: Skip particles and structures
-        if (!entity.active || entity.isExploding || entity.mass === Infinity || entity.type === EntityType.STRUCTURE || entity.type === EntityType.PARTICLE) continue;
+        // Optimization: Skip particles and immovable terrain.  Stage 5
+        // collapses STRUCTURE to cover both static tiles and mobile
+        // shards; the mass=Infinity gate alone correctly excludes the
+        // tile case while letting mobile shards participate.
+        if (!entity.active || entity.isExploding || entity.mass === Infinity || entity.type === EntityType.PARTICLE) continue;
 
         for (let j = 0; j < attractors.length; j++) {
             const attractor = attractors[j];
@@ -394,7 +403,10 @@ export class PhysicsSystem {
             const distSq = dx*dx + dy*dy;
             const rangeSq = attractor.gravityRange! ** 2;
 
-            if (distSq < (attractor.size.x / 2)**2 && entity.type === EntityType.ASTEROID) {
+            // Mobile shard-family entities get the close-attractor crush
+            // (replaces the previous EntityType.ASTEROID check).
+            const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
+            if (distSq < (attractor.size.x / 2)**2 && isMobileShard) {
                 entity.active = false;
                 if (onDamage) onDamage(entity.position, COLLISION_CONFIG.DAMAGE.ASTEROID_CRUSH, entity);
                 continue; 
@@ -524,7 +536,14 @@ export class PhysicsSystem {
                         // so they can't share a position, while costing a
                         // few mul/sqrt per pair instead of a full polygon
                         // projection.
-                        if (ta === EntityType.ASTEROID && tb === EntityType.ASTEROID) {
+                        // Mobile-shard pair (post-Stage-5: ASTEROID
+                        // is the legacy fallback; STRUCTURE+finite is
+                        // the unified carrier).  The dynamic grid
+                        // already excludes mass=Infinity tiles, so
+                        // any STRUCTURE entry here is a mobile shard.
+                        const aIsShard = ta === EntityType.ASTEROID || ta === EntityType.STRUCTURE;
+                        const bIsShard = tb === EntityType.ASTEROID || tb === EntityType.STRUCTURE;
+                        if (aIsShard && bIsShard) {
                             this.resolveAsteroidPair(a, b);
                             continue;
                         }
@@ -817,31 +836,31 @@ export class PhysicsSystem {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
 
       // ── NEBULA: pass-through with conditional shatter ──────────────────
-      // Nebula tiles AND nebula shards never apply a collision impulse.
-      // PLAYER/ENEMY contact shatters them into 3 children at 75% of the
-      // parent's linear size (handled in GameEngine.spawnNebulaShards).
-      // Projectiles and everything else pass straight through without
-      // touching the nebula.  Sub-minimum shards pass through without
-      // even shattering (the caller returns early in spawnNebulaShards).
-      const aIsNebula = a.type === EntityType.NEBULA || a.type === EntityType.NEBULA_SHARD;
-      const bIsNebula = b.type === EntityType.NEBULA || b.type === EntityType.NEBULA_SHARD;
-      if (aIsNebula || bIsNebula) {
-          // If both sides are nebula (tile/shard vs tile/shard), no shatter —
-          // those interactions belong to the gravity/merge pass in
-          // GameEngine.updateNebulaDynamics.
-          if (aIsNebula && bIsNebula) return;
+      // Stage 5: per-variant passThrough flag drives the impulse skip
+      // (only nebula-tile sets it today).  Nebula-shards now go
+      // through standard collision impulse; their mass = 0.01 keeps
+      // the striker velocity change negligible (~3 orders of
+      // magnitude smaller than today's mass=size shards) while the
+      // shard itself takes a strong kick that the existing
+      // linearDamping = 0.97 bleeds off in <1s — the same "cloud
+      // shoved aside" feel without a per-EntityType skip.
+      const aPassThrough = a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
+      const bPassThrough = b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
+      // Shatter trigger is independent of pass-through — a nebula
+      // tile shatters on PLAYER/ENEMY contact regardless.
+      const aIsNebulaTile = a.shardVariant === 'nebula-tile';
+      const bIsNebulaTile = b.shardVariant === 'nebula-tile';
+      if (aPassThrough || bPassThrough) {
+          // Both sides pass-through (e.g. tile-vs-tile in some future
+          // configuration) — no impulse, no shatter.
+          if (aPassThrough && bPassThrough) return;
 
-          const nebula = aIsNebula ? a : b;
-          const other  = aIsNebula ? b : a;
+          const nebula = aPassThrough ? a : b;
+          const other  = aPassThrough ? b : a;
 
-          // Striker must be PLAYER or ENEMY to shatter, AND must not be
-          // in the post-shatter cooldown window.  Shards are
-          // INDESTRUCTIBLE — they pass through unchanged — so only
-          // NEBULA tiles are shatterable.  This keeps the total nebula
-          // area conserved: each tile shatter produces exactly one
-          // tile's worth of effective shard mass, which eventually
-          // coalesces back into one new tile via transmutation.
-          const shatters = nebula.type === EntityType.NEBULA
+          // Striker must be PLAYER or ENEMY to shatter, AND must not
+          // be in the post-shatter cooldown window.
+          const shatters = (aIsNebulaTile || bIsNebulaTile)
                             && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
                             && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {
@@ -868,7 +887,7 @@ export class PhysicsSystem {
                   const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
                   nebula.nebulaFadeTimer = scaledFadeDuration;
                   nebula.nebulaFadeDuration = scaledFadeDuration;
-                  if (nebula.type === EntityType.NEBULA) {
+                  if (nebula.shardVariant === 'nebula-tile') {
                       // Tiles live in the static grid — pull them out so
                       // the player can drift through the fading cell.
                       this.removeStaticEntity(nebula);
@@ -925,13 +944,32 @@ export class PhysicsSystem {
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
 
-          // Bouncer projectiles reflect off tiles (STRUCTURE) and tile shards
-          // (ASTEROID with shardType === 'tile') instead of being consumed.
-          // They do NOT damage tiles — a damaged tile dies in one shot (HEALTH=1),
-          // which would leave nothing to bounce off of.
+          // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
+          // (today's "tile shards"); they pass through every other shard
+          // variant (rock-shards, nebula tiles, nebula shards).
+          //
+          // Stage 5: shard-family entities all share EntityType.STRUCTURE
+          // now, so distinguishing static tiles vs glass-shards needs a
+          // variant check.  STRUCTURE-tile variants (glass / reinforced /
+          // heavy / indestructible) are mass=Infinity, so we can short-
+          // circuit on that for tile reflection.  Mobile shards then
+          // need a per-variant check — only glass-shard reflects.
           if (proj.isBouncer) {
-              const isTile = target.type === EntityType.STRUCTURE
-                  || (target.type === EntityType.ASTEROID && target.shardType === 'tile');
+              let isReflective = false;
+              if (target.type === EntityType.STRUCTURE) {
+                if (target.mass === Infinity) {
+                  // Static tile.  All STRUCTURE tile variants reflect EXCEPT
+                  // nebula-tile (passThrough = true).
+                  isReflective = target.shardVariant !== 'nebula-tile';
+                } else {
+                  // Mobile shard.  Only glass-shard reflects.
+                  isReflective = target.shardVariant === 'glass-shard';
+                }
+              } else if (target.type === EntityType.ASTEROID) {
+                // Legacy fallback for any non-migrated spawn site.
+                isReflective = target.shardType === 'tile';
+              }
+              const isTile = isReflective;
               if (isTile && proj.velocity) {
                   // Tiles are axis-aligned AABBs, and the projectile is thin and
                   // rotated along its travel direction — SAT's minimum-overlap axis
@@ -1241,10 +1279,19 @@ export class PhysicsSystem {
       // the next natural full field rebuild (when the player changes
       // grid cells); that's a ~1 s staleness in the worst case, which
       // is cheaper than patching on every crash.
-      if ((a.type === EntityType.ASTEROID && b.type === EntityType.STRUCTURE)
-          || (b.type === EntityType.ASTEROID && a.type === EntityType.STRUCTURE)) {
-          const asteroid = a.type === EntityType.ASTEROID ? a : b;
-          const structure = a.type === EntityType.STRUCTURE ? a : b;
+      // Stage 5: mobile shards (rock-shard / glass-shard) live on
+      // EntityType.STRUCTURE with finite mass; static tiles share
+      // the EntityType but are mass=Infinity.  The crash interaction
+      // is "mobile-shard vs static-tile" — distinguish by mass.
+      const aIsMobileShard = (a.type === EntityType.STRUCTURE && a.mass !== Infinity)
+                          || a.type === EntityType.ASTEROID; // legacy
+      const bIsMobileShard = (b.type === EntityType.STRUCTURE && b.mass !== Infinity)
+                          || b.type === EntityType.ASTEROID;
+      const aIsStaticTile  = a.type === EntityType.STRUCTURE && a.mass === Infinity;
+      const bIsStaticTile  = b.type === EntityType.STRUCTURE && b.mass === Infinity;
+      if ((aIsMobileShard && bIsStaticTile) || (bIsMobileShard && aIsStaticTile)) {
+          const asteroid = aIsMobileShard ? a : b;
+          const structure = aIsStaticTile ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
           const momentum = asteroid.mass * impactSpeed;
           const isIndestructible = structure.structureVariant === 'indestructible';
@@ -1307,9 +1354,14 @@ export class PhysicsSystem {
           // Still below pressure threshold: fall through to elastic bounce.
       }
 
-      // Asteroid vs Player — speed-gated environmental damage (bypasses shield)
-      if ((a.type === EntityType.PLAYER && b.type === EntityType.ASTEROID) || (b.type === EntityType.PLAYER && a.type === EntityType.ASTEROID)) {
-          const player = a.type === EntityType.PLAYER ? a : b;
+      // Mobile-shard vs Player — speed-gated environmental damage
+      // (bypasses shield).  Stage 5: mobile shards now live on
+      // STRUCTURE+finite mass; the legacy ASTEROID type is still
+      // accepted for any not-yet-migrated spawn site.
+      const aIsPlayerLike = a.type === EntityType.PLAYER;
+      const bIsPlayerLike = b.type === EntityType.PLAYER;
+      if ((aIsPlayerLike && bIsMobileShard) || (bIsPlayerLike && aIsMobileShard)) {
+          const player = aIsPlayerLike ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
           if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
