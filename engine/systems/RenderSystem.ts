@@ -1492,7 +1492,11 @@ export class RenderSystem {
                 ctx.closePath();
             };
 
-            if (entity.type === EntityType.STRUCTURE) {
+            if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
+                // Stage 5: only static tiles render with the glass-
+                // tile aesthetic (translucent fill + edge stroke +
+                // specular dot).  Mobile shards (STRUCTURE+finite-
+                // mass) take the asteroid polygon branch below.
                 // ── Regen pop-in scale overshoot ─────────────────────────────
                 if (entity.regenPopTimer !== undefined && entity.regenPopTimer > 0) {
                     const popT = entity.regenPopTimer / REGEN_POP_CONSTANTS.DURATION; // 1→0
