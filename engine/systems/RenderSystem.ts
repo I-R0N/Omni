@@ -400,7 +400,10 @@ export class RenderSystem {
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (!e.active || e.type !== EntityType.STRUCTURE) continue;
+          // Stage 5 fix: only static tiles render via the minimap
+          // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
+          // not pinned to grid cells.
+          if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
           cx.fillStyle = e.color;
           // Map space: entity position is absolute.  Map center = (0,0).
           const dotX = center + e.position.x * scale;
@@ -470,7 +473,11 @@ export class RenderSystem {
         // pre-rendered static layer.  Skip all the per-entity bucket
         // checks and just frustum-cull → visible push.  This keeps the
         // off-screen-tile cost to ~5 ops per entity instead of ~17.
-        if (entity.type === EntityType.STRUCTURE) {
+        // Stage 5: only STATIC tiles get the special STRUCTURE path
+        // (no minimap / trail / indicator buckets).  Mobile shards
+        // (STRUCTURE+finite-mass) need the same buckets as asteroids
+        // — fall through to the generic dispatch below.
+        if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
@@ -1049,7 +1056,11 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
+      // Stage 5: only static tiles (mass=∞) take the hex-sprite fast
+      // path.  Mobile shards (STRUCTURE+finite-mass) fall through to
+      // the generic polygon/sprite render below.
+      if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+          && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
@@ -1394,8 +1405,12 @@ export class RenderSystem {
               try {
                   const maxDim = Math.max(entity.size.x, entity.size.y);
 
+                  // Stage 5: only static tiles (mass=∞) use the tight
+                  // tile drawScale.  Mobile shards (STRUCTURE+finite-
+                  // mass after the EntityType collapse) keep the
+                  // generic 1.5× scale that asteroids used today.
                   let drawScale = 1.5;
-                  if (entity.type === EntityType.STRUCTURE) {
+                  if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
 
@@ -1414,8 +1429,13 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
-                  // Special overlays for sprite-based entities
-                  if (entity.type === EntityType.ASTEROID && entity.maxHealth > 1) {
+                  // Special overlays for sprite-based entities.
+                  // Stage 5: mobile rock-shards live on STRUCTURE+
+                  // finite-mass — give them the same crack overlay
+                  // asteroids had today.
+                  if (entity.maxHealth > 1
+                      && (entity.type === EntityType.ASTEROID
+                          || (entity.type === EntityType.STRUCTURE && entity.mass !== Infinity))) {
                       this.renderCracks(ctx, entity, drawSize/2);
                   }
 
