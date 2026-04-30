@@ -362,13 +362,15 @@ export const STRUCTURE_VARIANTS = {
   // into rock-shards on death (the unified "tile is the parent of
   // every shard" architecture, see docs/SHARD_SYSTEM.md).  Visual:
   // slate / gray to read as rock; HP between glass (1) and heavy (5).
-  // Uses HEX_STRUCTURE_HEAVY as the sprite placeholder until a
-  // dedicated rock hex asset lands.
+  // Sprite intentionally unset so the renderer falls through to the
+  // asteroid polygon path (solid entity.color fill).  This makes
+  // rock-tiles read with the same texture as rock-shards rather than
+  // the glass-aesthetic translucent hex.
   rock: {
     health: 3,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
+    sprite: '',
     color: COLORS.ASTEROID,
     borderColor: '#cbd5e1', // slate-300 — slightly lighter for the edge tint
   },

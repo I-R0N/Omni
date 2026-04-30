@@ -1056,10 +1056,18 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      // Stage 5: only static tiles (mass=∞) take the hex-sprite fast
-      // path.  Mobile shards (STRUCTURE+finite-mass) fall through to
-      // the generic polygon/sprite render below.
-      if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+      // Only glass-family static tiles (glass / reinforced / heavy /
+      // indestructible) take the hex-sprite fast path.  Rock-tile and
+      // mobile shards fall through to the generic polygon/sprite
+      // render below — rock-tile renders with the asteroid solid-fill
+      // aesthetic via the slow-path else branch.
+      const isGlassFamilyStaticTile =
+        entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+        && (entity.shardVariant === 'glass-tile'
+            || entity.shardVariant === 'reinforced-tile'
+            || entity.shardVariant === 'heavy-tile'
+            || entity.shardVariant === 'indestructible-tile');
+      if (isGlassFamilyStaticTile
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
@@ -1489,11 +1497,17 @@ export class RenderSystem {
                 ctx.closePath();
             };
 
-            if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
-                // Stage 5: only static tiles render with the glass-
-                // tile aesthetic (translucent fill + edge stroke +
-                // specular dot).  Mobile shards (STRUCTURE+finite-
-                // mass) take the asteroid polygon branch below.
+            const isGlassFamilyTile =
+              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+              && (entity.shardVariant === 'glass-tile'
+                  || entity.shardVariant === 'reinforced-tile'
+                  || entity.shardVariant === 'heavy-tile'
+                  || entity.shardVariant === 'indestructible-tile');
+            if (isGlassFamilyTile) {
+                // Glass-family static tiles render with the glass-tile
+                // aesthetic (translucent fill + edge stroke + specular
+                // dot).  Rock-tile and mobile shards take the asteroid
+                // polygon branch below (solid fill in entity.color).
                 // ── Regen pop-in scale overshoot ─────────────────────────────
                 if (entity.regenPopTimer !== undefined && entity.regenPopTimer > 0) {
                     const popT = entity.regenPopTimer / REGEN_POP_CONSTANTS.DURATION; // 1→0
