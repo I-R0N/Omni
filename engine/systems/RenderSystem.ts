@@ -1585,6 +1585,28 @@ export class RenderSystem {
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 
+            } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
+                // Non-glass-family static tile (today: rock-tile) that's
+                // inactive (regenerating).  Mirror the glass-family
+                // ghost-outline render — fade-in cyan stroke during the
+                // last 3 s of the regen wait, otherwise nothing.  This
+                // prevents the asteroid solid-fill branch below from
+                // drawing a stale slate hex while the tile is gone.
+                if (entity.regenProgress !== undefined) {
+                    const delay = 12; // mirrors TILE_REGEN_DELAY
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+
             } else {
                 // ── Asteroid / Tile shard ─────────────────────────────────────
                 const isFlash   = entity.hitFlash && entity.hitFlash > 0;
