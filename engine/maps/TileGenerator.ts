@@ -1,6 +1,7 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS } from '../../constants';
+import { ShardVariantId } from '../systems/ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
 import { nextId } from '../systems/IdAllocator';
@@ -238,9 +239,19 @@ export class TileGenerator {
       variant: StructureVariant
   ): GameEntity {
     const cfg = STRUCTURE_VARIANTS[variant];
+    // Map STRUCTURE_VARIANTS key ('glass' / 'reinforced' / 'heavy' /
+    // 'indestructible' / 'rock') to the unified shardVariant id
+    // (suffix '-tile').
+    const variantId: ShardVariantId =
+        variant === 'reinforced'      ? 'reinforced-tile'
+      : variant === 'heavy'           ? 'heavy-tile'
+      : variant === 'indestructible'  ? 'indestructible-tile'
+      : variant === 'rock'            ? 'rock-tile'
+      :                                  'glass-tile';
     return {
         id: nextId(`tile_${r}_${c}`),
         type: EntityType.STRUCTURE,
+        shardVariant: variantId,
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 }, // Slight gap
@@ -252,7 +263,6 @@ export class TileGenerator {
         mass: cfg.mass,
         polygonPoints: pts,
         sprite: cfg.sprite,
-        structureVariant: variant,
     };
   }
 
@@ -312,7 +322,13 @@ export class TileGenerator {
 
     return {
         id: nextId(`nebula_${r}_${c}`),
-        type: EntityType.NEBULA,
+        // Stage 5: unified shard-family carrier.  Mass=Infinity keeps
+        // the tile pinned to the static grid; passThrough on the
+        // variant config (read by PhysicsSystem) preserves "striker
+        // flies through and shatters on contact" without any
+        // per-EntityType branch.
+        type: EntityType.STRUCTURE,
+        shardVariant: 'nebula-tile',
         position: { x: cx, y: cy },
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 },

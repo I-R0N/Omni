@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -172,7 +172,10 @@ export abstract class BaseMapLayer {
 
     return {
         id: nextId('ast'),
-        type: EntityType.ASTEROID,
+        // Free-floating asteroids unify onto the shard-family carrier
+        // as the rock-shard variant.
+        type: EntityType.STRUCTURE,
+        shardVariant: 'rock-shard',
         position: { x, y },
         velocity: { x: vx, y: vy },
         size: { x: size, y: size },
@@ -213,7 +216,7 @@ export class UniverseMap extends BaseMapLayer {
     this.initialized = true;
 
     // Asteroids spread around spawn
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+    const gen = getRockShardFreeSpawn(MapType.UNIVERSE);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     // Asteroids are spawned on a linear radial distribution and may fall
     // just outside the canonical wrap range; normalise so every entity
@@ -297,12 +300,17 @@ export class UniverseMap extends BaseMapLayer {
     // BackgroundManager so the background-nebula layer renders puffs
     // at the same positions — one unified cloud, with parallax drift
     // of the backdrop as the camera moves.
+    // Cluster size span averages the inner + outer values from
+    // MAP_POPULATION[UNIVERSE]['nebula-tile'].
+    const nebPop = MAP_POPULATION[MapType.UNIVERSE]['nebula-tile']?.tileCluster;
+    const nebMinSize = Math.round(((nebPop?.minClusterSize ?? 14) + (nebPop?.outer?.minClusterSize ?? 7)) / 2);
+    const nebMaxSize = Math.round(((nebPop?.maxClusterSize ?? 42) + (nebPop?.outer?.maxClusterSize ?? 26)) / 2);
     this.entities.push(...TileGenerator.generateNebulaClusters(
         CLUSTER_W, CLUSTER_H,
         22,
         NEBULA_COUNT,
-        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
-        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
+        nebMinSize,
+        nebMaxSize,
         occupied,
         this.nebulaClusterCenters
     ));
@@ -352,7 +360,7 @@ export class RingMap extends BaseMapLayer {
 
     // Asteroids follow the concentric flow from spawn (sampleFlow above
     // is called by the base-class helper through `this.sampleFlow`).
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.RING];
+    const gen = getRockShardFreeSpawn(MapType.RING);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -397,7 +405,7 @@ export class SevenRingsMap extends BaseMapLayer {
     if (this.initialized) return;
     this.initialized = true;
 
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.SEVEN_RINGS];
+    const gen = getRockShardFreeSpawn(MapType.SEVEN_RINGS);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -467,7 +475,7 @@ export class PocketMap extends BaseMapLayer {
 
     // Asteroids on the shared analytical meander — same sampler as
     // Deep Space, so motion reads consistently between maps.
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.POCKET];
+    const gen = getRockShardFreeSpawn(MapType.POCKET);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -566,7 +574,7 @@ export class AsteroidFieldMap extends BaseMapLayer {
     if (this.initialized) return;
     this.initialized = true;
 
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.ASTEROID_FIELD];
+    const gen = getRockShardFreeSpawn(MapType.ASTEROID_FIELD);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -674,6 +682,28 @@ export class IndestructibleFieldMap extends SingleVariantTileFieldMap {
 
   constructor() {
     super('indestructible_field_01', 'Indestructible Field', MapType.INDESTRUCTIBLE_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Rock-tile field (Stage 7 of shard-system overhaul) — clusters of
+ * 3-HP rock tiles that, when broken, shatter into mobile rock-shards
+ * (the same drift / merge / accrete lifecycle as today's free-floating
+ * asteroids).  Exercises the unified tile→shard lineage in isolation;
+ * cluster count + size match the other tile-only showcases so DBG
+ * render-time numbers compare apples-to-apples.
+ */
+export class RockFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'rock';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('rock_field_01', 'Rock Field', MapType.ROCK_FIELD);
     this.width  = SingleVariantTileFieldMap.WIDTH;
     this.height = SingleVariantTileFieldMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };

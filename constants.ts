@@ -1,6 +1,11 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType } from './types';
+import {
+  ShardVariantId,
+  ShardVariantDef,
+  PerMapVariantSpawn,
+} from './engine/systems/ShardSystem.types';
 import { ASSETS } from './assets';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
@@ -276,91 +281,10 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
-};
-
-export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
-  [MapType.UNIVERSE]: {
-    // Deep Space population.  Entity count kept at 140 for now; tune up
-    // separately if the 8 000 × 8 000 playfield feels sparse.
-    count: 140,
-    minSize: 20,
-    maxSize: 160,
-    // Spawn radius sized for the 8 000 axis — HALF = 4000, keep a
-    // ~1000u buffer inside the seam so asteroids don't wrap on frame 1.
-    radius: 3000,
-    speedMultiplier: 1.5
-  },
-  [MapType.RING]: {
-    count: 280,
-    minSize: 20,
-    maxSize: 160,
-    // 6000×6000 map — half is 3000, so a 2500 spawn ring leaves a
-    // ~500-unit buffer inside the wrap seam.
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.SEVEN_RINGS]: {
-    count: 280,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.POCKET]: {
-    // 2 000 × 2 000 sandbox — HALF = 1000, so an 800u spawn radius
-    // leaves a 200u buffer inside the seam.  Count dropped to 1 so
-    // tiles and nebulae dominate the showcase; respawn in GameEngine
-    // now honours this per-map value (was effectively 140 before the
-    // fix because the respawn path hardcoded MapType.UNIVERSE).
-    count: 1,
-    minSize: 20,
-    maxSize: 80,
-    radius: 800,
-    speedMultiplier: 1.5
-  },
-  [MapType.ASTEROID_FIELD]: {
-    // 6 000 × 6 000 single-element showcase — dense belt riding a
-    // concentric rotational flow.  Count matches the tile-only
-    // showcases (~1 200 entities each) so render-time / perf
-    // comparisons across the single-element maps are apples-to-apples.
-    count: 1200,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  // Tile/nebula-only showcases never spawn asteroids; set count=0 so
-  // the shared respawn path (keyed by current map type) doesn't
-  // pollute these maps with drifting rocks.  minSize/maxSize stay at
-  // non-zero values because damage-scaling arithmetic clamps against
-  // them even when no asteroids exist.
-  [MapType.GLASS_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.HARD_TILE_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.INDESTRUCTIBLE_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.NEBULA_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
+  [MapType.ROCK_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
   },
 };
 
@@ -433,6 +357,22 @@ export const STRUCTURE_VARIANTS = {
     sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
     borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
+  },
+  // Stage 7: rock-tile family — clusters of solid rock that shatter
+  // into rock-shards on death (the unified "tile is the parent of
+  // every shard" architecture, see docs/SHARD_SYSTEM.md).  Visual:
+  // slate / gray to read as rock; HP between glass (1) and heavy (5).
+  // Sprite intentionally unset so the renderer falls through to the
+  // asteroid polygon path (solid entity.color fill).  This makes
+  // rock-tiles read with the same texture as rock-shards rather than
+  // the glass-aesthetic translucent hex.
+  rock: {
+    health: 3,
+    mass: Infinity,
+    indestructible: false,
+    sprite: '',
+    color: COLORS.ASTEROID,
+    borderColor: '#cbd5e1', // slate-300 — slightly lighter for the edge tint
   },
 } as const;
 
@@ -571,19 +511,9 @@ export const NEBULA_CONSTANTS = {
   // Tune this one number to make nebula tiles visually bigger or smaller;
   // shard sprites follow automatically.
   TILE_SPRITE_WORLD_SIZE: 120,
-  // Cluster generation — tuned for heavy coverage across the map so that
-  // nebula clusters naturally fill empty gaps between glass-tile clusters
-  // and statistically overlap with some of the procedurally placed
-  // background nebula puffs (which live in world space at ±~20 000 units).
-  // The generator shares an "occupied coords" set with the glass pass so
-  // adjacency conflicts are avoided; empty cells get priority naturally.
-  CLUSTER_COUNT: 65,    // halved for 7.5k map (was 130)
-  MIN_CLUSTER_SIZE: 14,
-  MAX_CLUSTER_SIZE: 42,
-  // Outer-zone cluster pass (sparser landmarks spread across the full map).
-  OUTER_CLUSTER_COUNT: 120, // halved for 7.5k map (was 240)
-  OUTER_MIN_CLUSTER_SIZE: 7,
-  OUTER_MAX_CLUSTER_SIZE: 26,
+  // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
+  // 'nebula-tile' tileCluster entries per map for cluster counts +
+  // size ranges.  Inner / outer split lives on the per-map record.
   // Base palette — nebula tiles draw from the full 360° hue wheel
   // (blue / indigo / violet / pink / red / yellow / green all available).
   // Regen uses circular hue math so wraparound is handled correctly.
@@ -1125,4 +1055,376 @@ export function generateWaveDef(index: number): { enemies: { subtype: EnemySubty
     : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
 
   return { enemies, powerup: null };
+}
+
+// ── ShardSystem variant table ───────────────────────────────────────
+// See docs/SHARD_SYSTEM.md for the design rationale.  This table is
+// the source of truth for tile / shard regen, merge, shatter and
+// pass-through behaviour.  Stage 1 lands the table as data only;
+// the existing GameEngine / NebulaSystem code paths still drive
+// behaviour at runtime.  Subsequent stages migrate the read sites.
+//
+// All shard-family entities share `carrier: EntityType.STRUCTURE`;
+// static-vs-dynamic dispatch is by `mass` (Infinity → static grid,
+// finite → dynamic grid).  pass-through is per-variant flag.
+
+const TILE_REGEN_POP_BURST = {
+  chipCount:    REGEN_POP_CONSTANTS.CHIP_COUNT,
+  chipSpeedMin: REGEN_POP_CONSTANTS.CHIP_SPEED_MIN,
+  chipSpeedMax: REGEN_POP_CONSTANTS.CHIP_SPEED_MAX,
+  chipLifetime: REGEN_POP_CONSTANTS.CHIP_LIFETIME,
+};
+
+// Spawn shape used by tile variants whose shatter spawns mobile
+// glass-shards (today's "tile-shard" debris from STRUCTURE death).
+// sizeMin = 20 matches the per-map rock-shard minSize universally
+// (see MAP_POPULATION) so the asteroid-style shatter's MIN_SIZE
+// gate is consistent with the spawn population.
+const GLASS_SHARD_SPAWN_SHAPE = {
+  sizeMin: 20, sizeMax: 200,
+  polyVerticesMin: 4, polyVerticesMax: 6,    // blocky
+  angleJitter: 0.25, radiusMin: 0.60, radiusRange: 0.55,
+  sizeToMass: (d: number) => d,
+};
+
+// Base config shared by glass / reinforced / heavy STRUCTURE tiles.
+// indestructible-tile and rock-tile override pieces of this.
+const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
+  carrier: EntityType.STRUCTURE,
+  // Tiles spawn via TileGenerator at HEX_SIZE; the schema's spawn
+  // shape is unused on the tile entity itself but populated with
+  // sensible defaults so downstream code can read it without a
+  // null-check.
+  spawn: GLASS_SHARD_SPAWN_SHAPE,
+  regen: {
+    kind: 'timer',
+    delaySeconds: STRUCTURE_CONSTANTS.TILE_REGEN_DELAY,
+    popBurst: TILE_REGEN_POP_BURST,
+    rewriteColor: 'none',
+  },
+  merge: {
+    attractedTo: 'none',
+    bondsWith: 'none',
+    defaultOutcome: 'compose',
+  },
+  shatter: {
+    // Today: STRUCTURE tile death does NOT spawn shards directly —
+    // the visual debris comes from DropSystem.spawnGlassShards.  Once
+    // Stage 3 migrates shatter into ShardSystem this becomes the
+    // canonical path; the policy below mirrors today's glass-shard
+    // population.
+    kind: 'powerlaw',
+    style: 'asteroid',
+    countMin: 4, countMax: 6,
+    alphaMin: 1.0, alphaMax: 1.0,
+    childVariant: 'glass-shard',
+    forwardDrag: 0.0, perpScatter: 0.0,
+    scatterHalfCone: Math.PI,
+  },
+  passThrough: false,
+  spawnsDropsOnDeath: true,
+};
+
+const SHARD_SPAWN_SHAPE_ROCK = {
+  sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
+  polyVerticesMin: 5, polyVerticesMax: 7,    // jagged
+  angleJitter: 0.8, radiusMin: 0.55, radiusRange: 0.70,
+  sizeToMass: (d: number) => d,
+};
+
+const SHARD_SPAWN_SHAPE_NEBULA = {
+  sizeMin: 8, sizeMax: 44,                    // diameter = radius*4 from spawnShards
+  polyVerticesMin: 4, polyVerticesMax: 6,
+  angleJitter: 0.25, radiusMin: 0.6, radiusRange: 0.55,
+  // Near-zero mass: striker impulse drops by ~3 orders of magnitude
+  // vs. today's `mass = size` (~8–44).  Combined with linearDamping /
+  // angularDamping fields the shard reads as "cloud being shoved
+  // aside" without slowing the striker.
+  sizeToMass: () => 0.01,
+};
+
+export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
+  'glass-tile': {
+    ...STRUCTURE_TILE_BASE,
+    id: 'glass-tile',
+  },
+  'reinforced-tile': {
+    ...STRUCTURE_TILE_BASE,
+    id: 'reinforced-tile',
+  },
+  'heavy-tile': {
+    ...STRUCTURE_TILE_BASE,
+    id: 'heavy-tile',
+  },
+  'indestructible-tile': {
+    ...STRUCTURE_TILE_BASE,
+    id: 'indestructible-tile',
+    regen:   { kind: 'none' },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'glass-shard',
+      forwardDrag: 0.0, perpScatter: 0.0,
+      scatterHalfCone: Math.PI,
+    },
+    spawnsDropsOnDeath: false,
+  },
+  'rock-tile': {
+    ...STRUCTURE_TILE_BASE,
+    id: 'rock-tile',
+    // Rock-tiles shatter into rock-shards (not glass-shards).
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 2, countMax: 5,
+      alphaMin: 0.4, alphaMax: 2.0,
+      childVariant: 'rock-shard',
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+    },
+  },
+  'nebula-tile': {
+    id: 'nebula-tile',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_NEBULA,
+    regen: {
+      kind: NEBULA_CONSTANTS.TILE_REGEN_ENABLED ? 'timer' : 'none',
+      delaySeconds: NEBULA_CONSTANTS.REGEN_DELAY,
+      // Nebulae fade in instead of pop-burst.
+      rewriteColor: 'neighborhood-blend',
+    },
+    merge: {
+      // Tiles are immutable sinks: shards merge INTO tiles via shard→tile
+      // transmutation, not the other way around.
+      attractedTo: 'none', bondsWith: 'none',
+      defaultOutcome: 'compose',
+    },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'nebula',
+      countMin: 2, countMax: 3,                 // count = 2 + floor(rand*2)
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'nebula-shard',
+      forwardDrag: NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR,
+      perpScatter: NEBULA_CONSTANTS.PERP_SCATTER_FACTOR,
+      scatterHalfCone: NEBULA_CONSTANTS.FAN_HALF_ANGLE,
+      fadeInSeconds: NEBULA_CONSTANTS.FADE_IN_DURATION,
+      postShatterMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
+    },
+    // Mass = ∞ alone makes the tile a solid wall.  passThrough lets
+    // strikers fly through and shatter on contact while the tile
+    // keeps its static-grid placement.  See docs/SHARD_SYSTEM.md §6.C.
+    passThrough: true,
+    // Slow-path tint compute is expensive enough to merit caching.
+    renderCache: 'composition',
+    spawnsDropsOnDeath: false,                  // NebulaSystem handles its own ammo roll
+  },
+  'rock-shard': {
+    id: 'rock-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_ROCK,
+    regen: { kind: 'none' },
+    merge: {
+      attractedTo: 'none',                      // contact-stick only
+      bondsWith: { include: ['rock-shard', 'glass-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self',        outcome: 'compose' },
+        { partner: 'glass-shard', outcome: 'compose', thresholdScale: 2.0 },
+      ],
+      defaultOutcome: 'compose',
+    },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 2, countMax: 5,
+      alphaMin: 0.4, alphaMax: 2.0,
+      childVariant: 'rock-shard',
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+    },
+    onShatterParticles: { color: '#94a3b8', count: 5 },
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+  },
+  'glass-shard': {
+    id: 'glass-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: GLASS_SHARD_SPAWN_SHAPE,
+    regen: { kind: 'none' },
+    merge: {
+      attractedTo: 'none',
+      bondsWith: { include: ['rock-shard', 'glass-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self',       outcome: 'compose' },
+        { partner: 'rock-shard', outcome: 'compose', thresholdScale: 2.0 },
+      ],
+      defaultOutcome: 'compose',
+    },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 2, countMax: 5,
+      alphaMin: 0.4, alphaMax: 2.0,
+      childVariant: 'glass-shard',
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+    },
+    onShatterParticles: 'inherit',
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+  },
+  'nebula-shard': {
+    id: 'nebula-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_NEBULA,
+    regen: { kind: 'merge-only' },              // tiles regrow only via transmutation
+    merge: {
+      // Stage 5b: cross-variant gravity pull from nebula-shards
+      // toward all mobile shard variants (self + rock-shard +
+      // glass-shard).  Pull is unilateral — only nebula-shards have
+      // attractedTo set; rock and glass shards are dragged toward
+      // nebulae but don't pull each other or pull toward nebulae.
+      attractedTo: { include: ['nebula-shard', 'rock-shard', 'glass-shard'] },
+      pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
+      pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
+      pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
+      // Stick-bonds with self → compose (existing coalesce / transmute);
+      // with glass-shard → absorb after long contact, gated on partner
+      // reaching its variant sizeMax (rare, "unique event").
+      // bondTimeSeconds: 0 fires self-compose instantly on contact
+      // (matches today's nebula proximity-merge); glass-shard absorb
+      // uses thresholdScale to scale to ~5× the self-compose time.
+      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
+      bondTimeSeconds: 0,
+      bondTimeSizeRef: 20,
+      bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+        {
+          partner: 'glass-shard',
+          outcome: 'absorb',
+          // bondTimeSeconds=0 + thresholdScale would still be 0.  We
+          // use NEBULA_CONSTANTS.MERGE_COOLDOWN × 5 as the absorb
+          // threshold base by setting thresholdScale to a value the
+          // resolver multiplies AGAINST a stand-in baseTime — handled
+          // inside ShardSystem (see tickBonds gate).  In practice the
+          // partner-size gate dominates: bonds persist (cohesion) and
+          // never fire the absorb until the glass-shard reaches
+          // sizeMax, which is a rare event regardless of timer.
+          thresholdScale: 5.0,
+          requirePartnerSizeFraction: 1.0,
+        },
+      ],
+      defaultOutcome: 'compose',
+      postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
+    },
+    shatter: { kind: 'none', countMin: 0, countMax: 0, alphaMin: 1, alphaMax: 1, childVariant: 'nebula-shard', forwardDrag: 0, perpScatter: 0, scatterHalfCone: 0 },
+    // passThrough = true so shard-vs-shard and shard-vs-striker
+    // contacts skip collision impulse entirely.  Mass = 0.01 alone
+    // would let strikers pass with negligible impulse, but
+    // shard-vs-shard pairs (both low-mass) would bounce apart
+    // elastically — breaking the gravity-pull-then-merge cycle.
+    // The flag is the cleanest fix and matches today's "shards are
+    // INDESTRUCTIBLE — they pass through unchanged" behaviour.
+    passThrough: true,
+    spawnsDropsOnDeath: false,
+  },
+};
+
+// ── Per-map entity-count table ──────────────────────────────────────
+// Source of truth for "how many of variant X spawn on map Y", see
+// docs/SHARD_SYSTEM.md §6.E.  Source of truth for rock-shard
+// free-spawn counts (read via getRockShardFreeSpawn) and per-map
+// tile-cluster sizing (read by MapClasses.populate).  Replaces
+// the legacy ASTEROID_GENERATION_CONFIG + NEBULA_CONSTANTS.CLUSTER_*
+// fields, both deleted in Stage 7.
+
+export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
+  [MapType.UNIVERSE]: {
+    'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
+    // STRUCTURE / NEBULA cluster counts.  Stage 7 inlines the
+    // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
+    // / OUTER_*); MAP_POPULATION is now the single source of truth.
+    'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
+    'reinforced-tile':     { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
+    'heavy-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
+    'nebula-tile': {
+      tileCluster: {
+        clusterCount:    65,    // halved for 7.5k map (was 130)
+        minClusterSize:  14,
+        maxClusterSize:  42,
+        outer: {
+          clusterCount:   120,  // halved for 7.5k map (was 240)
+          minClusterSize: 7,
+          maxClusterSize: 26,
+        },
+      },
+    },
+  },
+  [MapType.RING]: {
+    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
+  },
+  [MapType.SEVEN_RINGS]: {
+    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
+  },
+  [MapType.POCKET]: {
+    'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 800 } },
+    'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
+    'reinforced-tile':     { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
+    'heavy-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
+    'indestructible-tile': { tileCluster: { clusterCount: 2, minClusterSize: 3, maxClusterSize:  5 } },
+    'nebula-tile': {
+      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
+    },
+  },
+  [MapType.ASTEROID_FIELD]: {
+    'rock-shard': { freeSpawn: { count: 1200, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
+  },
+  [MapType.GLASS_FIELD]: {
+    'glass-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+  [MapType.HARD_TILE_FIELD]: {
+    'heavy-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+  [MapType.INDESTRUCTIBLE_FIELD]: {
+    'indestructible-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+  [MapType.NEBULA_FIELD]: {
+    'nebula-tile': {
+      tileCluster: { clusterCount: 65, minClusterSize: 14, maxClusterSize: 42 },
+    },
+  },
+  [MapType.ROCK_FIELD]: {
+    'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+};
+
+/**
+ * Helper: read the rock-shard freeSpawn config for a map type.
+ * Returns the MAP_POPULATION values; falls back to defaults for
+ * maps that don't free-spawn rock-shards (e.g. tile-only showcases)
+ * so the respawn-loop's count/size arithmetic doesn't blow up on
+ * undefined.  Shape mirrors the legacy ASTEROID_GENERATION_CONFIG
+ * record so call sites read like simple field accesses.
+ */
+export function getRockShardFreeSpawn(mapType: MapType): {
+  count: number;
+  minSize: number;
+  maxSize: number;
+  radius: number;
+  speedMultiplier: number;
+} {
+  const cfg = MAP_POPULATION[mapType]?.['rock-shard']?.freeSpawn;
+  return {
+    count:           cfg?.count           ?? 0,
+    minSize:         cfg?.minSize         ?? 20,
+    maxSize:         cfg?.maxSize         ?? 160,
+    radius:          cfg?.spawnRadius     ?? 2500,
+    speedMultiplier: cfg?.speedMultiplier ?? 1.5,
+  };
 }

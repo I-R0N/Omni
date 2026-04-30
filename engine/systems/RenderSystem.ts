@@ -400,7 +400,10 @@ export class RenderSystem {
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
-          if (!e.active || e.type !== EntityType.STRUCTURE) continue;
+          // Stage 5 fix: only static tiles render via the minimap
+          // STRUCTURE pass.  Mobile shards (STRUCTURE+finite mass) are
+          // not pinned to grid cells.
+          if (!e.active || e.type !== EntityType.STRUCTURE || e.mass !== Infinity) continue;
           cx.fillStyle = e.color;
           // Map space: entity position is absolute.  Map center = (0,0).
           const dotX = center + e.position.x * scale;
@@ -470,7 +473,11 @@ export class RenderSystem {
         // pre-rendered static layer.  Skip all the per-entity bucket
         // checks and just frustum-cull → visible push.  This keeps the
         // off-screen-tile cost to ~5 ops per entity instead of ~17.
-        if (entity.type === EntityType.STRUCTURE) {
+        // Stage 5: only STATIC tiles get the special STRUCTURE path
+        // (no minimap / trail / indicator buckets).  Mobile shards
+        // (STRUCTURE+finite-mass) need the same buckets as asteroids
+        // — fall through to the generic dispatch below.
+        if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
@@ -498,7 +505,7 @@ export class RenderSystem {
         // Structures use the pre-rendered static minimap layer — skip them
         // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
-                && entity.type !== EntityType.NEBULA && entity.type !== EntityType.NEBULA_SHARD
+                && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
                 && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
@@ -510,7 +517,7 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push({ entity, rx, ry });
-        } else if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+        } else if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
             // Nebula entities render as a dedicated bottom layer so
             // asteroids / actors / projectiles always draw on top of
             // them, regardless of entity array order.
@@ -1049,7 +1056,19 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      if (entity.type === EntityType.STRUCTURE && entity.active && hexReady
+      // Only glass-family static tiles (glass / reinforced / heavy /
+      // indestructible) take the hex-sprite fast path.  Rock-tile and
+      // mobile shards fall through to the generic polygon/sprite
+      // render below — rock-tile renders with the asteroid solid-fill
+      // aesthetic via the slow-path else branch.
+      const isGlassFamilyStaticTile =
+        entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+        && (entity.shardVariant === 'glass-tile'
+            || entity.shardVariant === 'reinforced-tile'
+            || entity.shardVariant === 'heavy-tile'
+            || entity.shardVariant === 'indestructible-tile');
+      if (isGlassFamilyStaticTile
+          && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
@@ -1074,7 +1093,12 @@ export class RenderSystem {
       // path anyway), and the HUD requires debug mode to be on for the
       // user to see perf numbers — so blocking the fast path on
       // debugMode would mean it never runs while we're measuring.
-      if (entity.type === EntityType.NEBULA
+      // Stage 5: fast-path gate flips from EntityType-keyed to
+      // variant-id-keyed.  Same cost (one string compare), same
+      // shape, same cache invalidation sites.  Only the nebula-tile
+      // variant populates the per-entity tinted-canvas cache —
+      // future variants can opt in via SHARD_VARIANTS[v].renderCache.
+      if (entity.shardVariant === 'nebula-tile'
           && entity.active
           && !entity.hitFlash
           && entity.nebulaFadeTimer === undefined
@@ -1152,7 +1176,7 @@ export class RenderSystem {
       // Cloud-like rendering: tinted sprite drawn at a display-scale larger
       // than the physics size so adjacent tiles blend seamlessly across
       // their shared hex-grid boundaries.  Tinted sprites are cached.
-      if (entity.type === EntityType.NEBULA || entity.type === EntityType.NEBULA_SHARD) {
+      if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
           this.lastNebulaSlowCount++;
           // Per-entity blended-hex cache: populated lazily on first render
           // and invalidated by NebulaSystem when composition mutates
@@ -1169,7 +1193,7 @@ export class RenderSystem {
           // neighbours render progressively darker so cluster edges pop
           // and interiors recede.  Max darkening at 6 neighbours (fully
           // enclosed) caps at 0.55× brightness; shards skip the pass.
-          if (entity.type === EntityType.NEBULA && entity.nebulaNeighborCount) {
+          if (entity.shardVariant === 'nebula-tile' && entity.nebulaNeighborCount) {
               const t = Math.min(1, entity.nebulaNeighborCount / 6);
               const factor = 1 - t * 0.45;
               const [r, g, b] = hexToRgb(tintHex);
@@ -1200,7 +1224,7 @@ export class RenderSystem {
           // fully opaque.  Uses speed² so we skip sqrt; tiles are
           // stationary so we skip the branch entirely for them.
           let speedMul = 1.0;
-          if (entity.type === EntityType.NEBULA_SHARD) {
+          if (entity.shardVariant === 'nebula-shard') {
               const vx = entity.velocity.x;
               const vy = entity.velocity.y;
               const speedSq = vx * vx + vy * vy;
@@ -1218,7 +1242,7 @@ export class RenderSystem {
               // and returns the same canvas.  Tiles keep the default path
               // since their tintHex varies with neighbour-count darkening.
               let tinted: HTMLCanvasElement | null = null;
-              if (entity.type === EntityType.NEBULA_SHARD) {
+              if (entity.shardVariant === 'nebula-shard') {
                   if (entity.nebulaTintedKey === undefined) {
                       entity.nebulaTintedKey = `${spriteSrc}|${tintHex}`;
                   }
@@ -1228,7 +1252,7 @@ export class RenderSystem {
                   tinted = this.getTintedSprite(spriteSrc, tintHex);
               }
               if (tinted) {
-                  const isTile = entity.type === EntityType.NEBULA;
+                  const isTile = entity.shardVariant === 'nebula-tile';
                   // Sprite size is proportional to the effective nebula
                   // area the entity carries.  A fresh shard from a 5-way
                   // shatter draws ≈ 96 × sqrt(1/5) ≈ 43 world units; a
@@ -1263,7 +1287,7 @@ export class RenderSystem {
                   // fields are non-undefined, subsequent frames bypass
                   // this whole slow path until NebulaSystem invalidates
                   // them (composition / neighbour-count / area changes).
-                  if (entity.type === EntityType.NEBULA) {
+                  if (entity.shardVariant === 'nebula-tile') {
                       entity.nebulaCachedTinted = tinted;
                       entity.nebulaCachedDx = dx;
                       entity.nebulaCachedDy = dy;
@@ -1305,7 +1329,7 @@ export class RenderSystem {
                   }
                   ctx.closePath();
                   ctx.stroke();
-              } else if (entity.type === EntityType.NEBULA_SHARD) {
+              } else if (entity.shardVariant === 'nebula-shard') {
                   // Legacy fallback: implicit circle defined by `size`.
                   const r = Math.max(entity.size.x, entity.size.y) / 2;
                   ctx.beginPath();
@@ -1324,7 +1348,7 @@ export class RenderSystem {
           // shard per frame.  Cutting it for shards eliminates that work
           // without a visible change.
           //
-          if (entity.type === EntityType.NEBULA) {
+          if (entity.shardVariant === 'nebula-tile') {
               const now = perfNowSec;
               if (entity.nebulaTwinkleNextAt === undefined) {
                   // First sighting — stagger the initial twinkle randomly
@@ -1389,8 +1413,12 @@ export class RenderSystem {
               try {
                   const maxDim = Math.max(entity.size.x, entity.size.y);
 
+                  // Stage 5: only static tiles (mass=∞) use the tight
+                  // tile drawScale.  Mobile shards (STRUCTURE+finite-
+                  // mass after the EntityType collapse) keep the
+                  // generic 1.5× scale that asteroids used today.
                   let drawScale = 1.5;
-                  if (entity.type === EntityType.STRUCTURE) {
+                  if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
 
@@ -1409,8 +1437,10 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
-                  // Special overlays for sprite-based entities
-                  if (entity.type === EntityType.ASTEROID && entity.maxHealth > 1) {
+                  // Crack overlay for multi-HP mobile shards (the same
+                  // visual asteroids had on the legacy ASTEROID render).
+                  if (entity.maxHealth > 1
+                      && entity.type === EntityType.STRUCTURE && entity.mass !== Infinity) {
                       this.renderCracks(ctx, entity, drawSize/2);
                   }
 
@@ -1446,7 +1476,7 @@ export class RenderSystem {
             ctx.closePath();
             ctx.fill();
 
-          } else if (entity.type === EntityType.ASTEROID || entity.type === EntityType.STRUCTURE) {
+          } else if (entity.type === EntityType.STRUCTURE) {
 
             // Build polygon path (shared by asteroid and tile)
             const buildPath = () => {
@@ -1467,7 +1497,17 @@ export class RenderSystem {
                 ctx.closePath();
             };
 
-            if (entity.type === EntityType.STRUCTURE) {
+            const isGlassFamilyTile =
+              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+              && (entity.shardVariant === 'glass-tile'
+                  || entity.shardVariant === 'reinforced-tile'
+                  || entity.shardVariant === 'heavy-tile'
+                  || entity.shardVariant === 'indestructible-tile');
+            if (isGlassFamilyTile) {
+                // Glass-family static tiles render with the glass-tile
+                // aesthetic (translucent fill + edge stroke + specular
+                // dot).  Rock-tile and mobile shards take the asteroid
+                // polygon branch below (solid fill in entity.color).
                 // ── Regen pop-in scale overshoot ─────────────────────────────
                 if (entity.regenPopTimer !== undefined && entity.regenPopTimer > 0) {
                     const popT = entity.regenPopTimer / REGEN_POP_CONSTANTS.DURATION; // 1→0
@@ -1545,13 +1585,35 @@ export class RenderSystem {
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 
+            } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
+                // Non-glass-family static tile (today: rock-tile) that's
+                // inactive (regenerating).  Mirror the glass-family
+                // ghost-outline render — fade-in cyan stroke during the
+                // last 3 s of the regen wait, otherwise nothing.  This
+                // prevents the asteroid solid-fill branch below from
+                // drawing a stale slate hex while the tile is gone.
+                if (entity.regenProgress !== undefined) {
+                    const delay = 12; // mirrors TILE_REGEN_DELAY
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+
             } else {
                 // ── Asteroid / Tile shard ─────────────────────────────────────
                 const isFlash   = entity.hitFlash && entity.hitFlash > 0;
-                const shardType = entity.shardType ?? 'asteroid';
+                const isTileShard = entity.shardVariant === 'glass-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                if (shardType === 'tile') {
+                if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
                     const [gr, gg, gb] = glowColor ? hexToRgb(glowColor) : [180, 230, 253];
 

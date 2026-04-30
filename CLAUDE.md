@@ -80,8 +80,12 @@ engine/
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
     DropSystem.ts         Ammo + health drop spawn / collection
     WaveSystem.ts         Wave index, grace timer, spawn geometry
-    NebulaSystem.ts       Shatter, shard merge, shard→tile transmutation,
-                          twinkle scheduling
+    ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
+                          driven by SHARD_VARIANTS variant table
+    ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
+    NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
+                          shard→tile transmutation, regen-completion hook,
+                          ammo-drop roll
     FlowField.ts          Analytical flow vector (used at map-load asteroid
                           seeding only)
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
@@ -122,9 +126,14 @@ Per-frame `loop()`:
      4. `PhysicsSystem.update()` — gravity, collisions, on-death dispatch
    - `updateGameLogic(dt)`:
      1. Camera shake tick
-     2. Glass-tile regen (queue lives on `GameEngine`)
+     2. `ShardSystem.update()` — drains the unified regen queue, ticks
+        existing stick-bonds (cohesion + threshold), runs the merge
+        broadphase (gravity-pull + bond formation).  Variant config
+        (SHARD_VARIANTS) drives every policy decision.
      3. Wave-announcement timers
-     4. `NebulaSystem.update()` — nebula regen / merge / transmute
+     4. `NebulaSystem.update()` — neighbour-count refresh + lazy
+        grid-index reset (nebula-specific bookkeeping only;
+        merge/regen/shatter all moved to ShardSystem)
      5. `WaveSystem.update()` — completion check, grace countdown
      6. Drop-collection scan (`activeDrops` cache)
      7. Player weapon tick + input
@@ -140,19 +149,28 @@ physics has resolved deaths.
 
 ## 4. The GameEntity contract
 
-Everything on-screen — player, enemies, tiles, asteroids, projectiles,
-particles, drops, nebulas, nebula shards — is a `GameEntity` (see
-`types.ts`). Discriminated by `type: EntityType` plus optional role fields
-(`enemySubtype`, `structureVariant`, `shardType`, `dropType`,
-`isBouncer`, `isLightningArc`, `isLightningProjectile`, …).
+Everything on-screen — player, enemies, tiles (glass / reinforced /
+heavy / indestructible / nebula), mobile shards (rock / glass /
+nebula), projectiles, particles, drops — is a `GameEntity` (see
+`types.ts`). Discriminated by `type: EntityType` plus optional role
+fields (`enemySubtype`, `shardVariant`, `dropType`, `isBouncer`,
+`isLightningArc`, `isLightningProjectile`, …).
+
+Every shard-family entity (tiles AND shards, glass / rock / nebula)
+shares a single `EntityType.STRUCTURE` carrier; per-variant behaviour
+lives in `SHARD_VARIANTS` (see §5) keyed by the entity's
+`shardVariant` field.  The static-vs-dynamic axis is encoded by
+`mass`: `Infinity` → static grid, finite → dynamic grid.  See §8.
 
 Key invariants:
 
 - **`active: boolean`** — false entities are culled in
   `prepareFrameEntities` and ignored by systems. Don't splice from the
   master array mid-loop; flip `active` and let the next sweep drop it.
-- **`mass: Infinity`** — marks immovable geometry (tiles, drops). Physics
-  skips impulse resolution when either side is infinite-mass.
+- **`mass: Infinity`** — marks immovable geometry (static tiles).
+  PhysicsSystem inserts mass-∞ entities into the static grid (built
+  once on map load) and skips them from dynamic-grid integration.
+  Mobile shards have finite mass and live in the dynamic grid.
 - **`position` is canonical torus-wrapped** — every integration step ends
   with `wrapPosition(entity.position)`. Reads happen in world space; the
   renderer uses `shiftX`/`shiftY` to draw the correct wrapped copy.
@@ -165,7 +183,7 @@ Key invariants:
 Notable existing field categories on `GameEntity`:
 
 - Visual: `sprite`, `color`, `polygonPoints`, `rotationSpeed`, `hitFlash`,
-  `trail`, `shardType`, `powerupGlowColor`
+  `trail`, `powerupGlowColor`
 - AI: `enemySubtype`, `aiState`, `aiTimer`, `visionRange`, `maxSpeed`,
   `aggroTimer`, `orbitRadius`/`orbitSpin`/`preferredDistance`
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
@@ -175,25 +193,30 @@ Notable existing field categories on `GameEntity`:
   `dropWeapon`, `powerupWeapon`, `ammoPickupFlash`, `ammo`,
   `dropComposition`. Note: `gold` exists on the player entity but is
   **not currently consumed** anywhere.
-- Structure / regen: `structureVariant` (`'glass' | 'reinforced' |
-  'heavy' | 'indestructible'`), `asteroidHitCount`, `asteroidHitTimer`,
-  `asteroidHitCooldown`, `regenProgress`, `regenPopTimer`
+- Shard family (tiles + shards): `shardVariant`
+  (`'glass-tile' | 'reinforced-tile' | 'heavy-tile' |
+  'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
+  'glass-shard' | 'nebula-shard'`),
+  `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
+  `regenProgress`, `regenPopTimer`.  Per-variant policy
+  (regen / merge / shatter / passThrough) lives in
+  `SHARD_VARIANTS` (see §5).
 - Nebula: `nebulaColorComposition`, `nebulaBlendedHex`, `nebulaTintedKey`,
   `nebulaTileArea`, `nebulaGridCol/Row`, `nebulaNeighborCount`,
   `nebulaImpactCooldown`, `nebulaMergeCooldown`,
   `nebulaFadeTimer`/`Duration`, `nebulaSpawnTimer`/`Duration`,
-  `nebulaTwinkleNextAt/X/Y`. **Render fast-path cache** (NEBULA tiles
-  only): `nebulaCachedTinted`, `nebulaCachedDx`, `nebulaCachedDy`,
+  `nebulaTwinkleNextAt/X/Y`. **Render fast-path cache** (nebula-tile
+  variant only): `nebulaCachedTinted`, `nebulaCachedDx`, `nebulaCachedDy`,
   `nebulaCachedSize` — populated by RenderSystem after a slow-path
-  draw and invalidated by NebulaSystem at every site that mutates the
-  inputs (composition, neighbour count, tile area).
+  draw and invalidated at every site that mutates the inputs
+  (composition, neighbour count, tile area).
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ammo`, `enemyTier` (set on
   spawn but currently unused by drop scaling), `suppressDrops`
 
-There is **no `asteroidType`** field today. Variant differentiation for
-asteroid-class entities goes through `shardType` (`'asteroid' | 'tile' |
-'nebula'`) only.
+Variant differentiation for shard-family entities goes through
+`shardVariant` only.  The legacy `shardType` and `structureVariant`
+fields are deleted (Stage 6 of the shard-system overhaul).
 
 ---
 
@@ -212,8 +235,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType), `ASTEROID_GENERATION_CONFIG`
   (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / reinforced /
-  heavy / indestructible)
-- `NEBULA_CONSTANTS`
+  heavy / indestructible — visual/health config; behavioural policy
+  lives in `SHARD_VARIANTS` below)
+- `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
+  twinkle scheduling)
+- `SHARD_VARIANTS` — per-variant regen / merge / shatter /
+  passThrough / renderCache policy.  Source of truth for the
+  shard-family behaviour table.  9 variants today: glass-tile /
+  reinforced-tile / heavy-tile / indestructible-tile / rock-tile
+  (Stage 7 wires spawn) / nebula-tile / rock-shard / glass-shard /
+  nebula-shard.  See `engine/systems/ShardSystem.types.ts` for the
+  schema and `docs/SHARD_SYSTEM.md` for the design rationale.
+- `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
+  count table.  Stage 1 lands the data; Stage 7 flips
+  MapClasses.populate() to read from it.  Today the legacy reads
+  (ASTEROID_GENERATION_CONFIG + per-map cluster literals in
+  MapClasses) are still authoritative.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -277,12 +314,16 @@ of `BaseMapLayer`:
   tiles.
 - Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` and
   `ASTEROID_GENERATION_CONFIG` in `constants.ts` — both are
-  `Record<MapType, …>`, so adding a new MapType requires entries in both.
+  `Record<MapType, …>`, so adding a new MapType requires entries in
+  both.  `MAP_POPULATION` (also per-MapType) is the eventual single
+  source of truth for entity counts; today it's data-only — Stage 7
+  flips MapClasses.populate() to read it.
 
 Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add the subclass in `MapClasses.ts`, switch on it in
-`GameEngine.buildMap()`, add per-map config in `constants.ts`, and add
-the menu button in `UIOverlay.tsx`.
+`GameEngine.buildMap()`, add per-map config in `constants.ts`
+(`PLAYER_MOVEMENT_CONFIG`, `ASTEROID_GENERATION_CONFIG`,
+`MAP_POPULATION`), and add the menu button in `UIOverlay.tsx`.
 
 ---
 
@@ -313,10 +354,23 @@ the menu button in `UIOverlay.tsx`.
   pre-allocated `Vector2` buffers and `Float64Array` ring buffers.
   Allocating `{x,y}` inside per-frame loops is the #1 perf-regression
   pattern in this codebase.
-- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (built once
-  on map load — STRUCTURE tiles) and a `dynamicGrid` (rebuilt every
-  frame). Cell size is `SPATIAL_GRID_SIZE = 120`. Add new entity classes
-  to the correct grid; don't branch on `EntityType` inside the broadphase.
+- **Spatial grid layout.** PhysicsSystem keeps a `staticGrid` (built
+  once on map load) and a `dynamicGrid` (rebuilt every frame). Cell
+  size is `SPATIAL_GRID_SIZE = 120`.  Static-vs-dynamic dispatch is
+  by `mass`: `Infinity` → static grid, finite → dynamic grid.  Don't
+  branch on `EntityType` inside the broadphase.
+- **Static vs dynamic via mass.** Setting a tile's mass to a finite
+  value puts it in the dynamic grid and lets strikers shove it off
+  its hex coordinate — breaks the regen / neighbour-count /
+  transmutation logic that all assume `position === hexCoord`.  Use
+  `passThrough: true` on the SHARD_VARIANTS entry for tiles that
+  should not bounce strikers (today: nebula-tile only).
+- **passThrough flag.** PhysicsSystem skips collision-impulse
+  resolution when either party's variant sets passThrough.  Today
+  that's nebula-tile (mass=∞ + passThrough=true → striker passes
+  through and shatters on contact) and nebula-shard (mass=0.01 +
+  passThrough=true → bond-formation works without elastic-bounce
+  feedback in the dynamic-grid fast-path).
 - **Map dimensions are dynamic per-map.** `setMapDimensions(w, h)` is
   called from `loadMap` before any system rebuilds. Modules that cache
   map-size-derived state (e.g. `SPATIAL_COLS` in PhysicsSystem) register
@@ -330,13 +384,15 @@ the menu button in `UIOverlay.tsx`.
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
-- **Enemy death routing.** `PhysicsSystem` raises an on-death callback
+- **Death routing.** `PhysicsSystem` raises an on-death callback
   that `GameEngine.handleEntityDeath` dispatches: explosions for
-  player/enemy, regen-queue for non-indestructible structures, shard
-  spawn for enemies, route-through to `NebulaSystem.handleDeath()` for
-  nebula entities. Drops are spawned by `spawnDrops(entity)` only for
-  asteroids and structures (and only when `suppressDrops` is unset and
-  the entity isn't a nebula).
+  player/enemy, variant-driven shatter + regen-queue via
+  `ShardSystem` for shard-family entities (gated by
+  `SHARD_VARIANTS[v].shatter` / `.regen`), enemy-shard spawn for
+  enemies, ammo-drop roll via `NebulaSystem.handleDeath()` for nebula
+  variants.  Drops are spawned by `spawnDrops(entity)` for shard-
+  family STRUCTURE entities (and only when `suppressDrops` is unset
+  and the variant isn't a nebula).
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when

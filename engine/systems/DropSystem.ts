@@ -1,4 +1,5 @@
-import { GameEntity, EntityType, Vector2, WeaponType, ShardType } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType } from '../../types';
+import { ShardVariantId } from './ShardSystem.types';
 import {
   COLORS,
   WEAPONS,
@@ -91,12 +92,27 @@ export class DropSystem {
     const pos = entity.position;
     const pv = entity.velocity;
 
-    if (entity.type === EntityType.STRUCTURE) {
+    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish
+    // glass-family static tile (glass / reinforced / heavy — produce
+    // glass-shard debris on death) from rock-tile (own ShardSystem
+    // shatter path produces rock-shards) and mobile shards (asteroid-
+    // like drop logic).
+    const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
+    const isGlassFamilyTile = isStaticTile
+      && (entity.shardVariant === 'glass-tile'
+          || entity.shardVariant === 'reinforced-tile'
+          || entity.shardVariant === 'heavy-tile');
+    const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
+    if (isGlassFamilyTile) {
+      // Glass / reinforced / heavy tile death — visual debris.
+      // Indestructible tiles short-circuit upstream; rock-tile spawns
+      // its own rock-shards via ShardSystem.shatter; nebula-tile
+      // skips drops via variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
     } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
       // Drop was destroyed by a player projectile — apply its reward immediately.
       this.applyDropEffect(player, entity, onMessage);
-    } else if (entity.type === EntityType.ASTEROID) {
+    } else if (isMobileShard) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
         for (const comp of entity.dropComposition) {
           if (comp.type === 'ammo') {
@@ -166,7 +182,7 @@ export class DropSystem {
 
       // Physical shard
       const isTile = kind === 'tile';
-      const shardType: ShardType = isTile ? 'tile' : 'asteroid';
+      const variantId: ShardVariantId = isTile ? 'glass-shard' : 'rock-shard';
       const size    = 12 + Math.random() * 10;
       const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
       const jitterK = isTile ? 0.25 : 0.8;
@@ -184,8 +200,8 @@ export class DropSystem {
 
       entities.push({
         id:           nextId('enemy_shard'),
-        type:          EntityType.ASTEROID,
-        shardType,
+        type:          EntityType.STRUCTURE,
+        shardVariant:  variantId,
         position:     { x: pos.x, y: pos.y },
         velocity:     { x: vx, y: vy },
         size:         { x: size, y: size },
@@ -266,8 +282,8 @@ export class DropSystem {
       const size = radius * 4; // diameter; slightly larger so physics feel solid
       entities.push({
         id:            nextId('tile_shard'),
-        type:           EntityType.ASTEROID,
-        shardType:     'tile',
+        type:           EntityType.STRUCTURE,
+        shardVariant:  'glass-shard',
         position:      {
           x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
           y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
