@@ -90,15 +90,15 @@ export enum EntityType {
   ENEMY = 'ENEMY',
   PROJECTILE = 'PROJECTILE',
   INTERACTABLE = 'INTERACTABLE', // Portals, planets, stations
-  ASTEROID = 'ASTEROID',
-  STRUCTURE = 'STRUCTURE', // Destructible walls/blocks
+  // STRUCTURE — the unified shard-family carrier (post-Stage-5
+  // EntityType collapse).  Static tiles (mass = ∞) and mobile
+  // shards (finite mass) share this type; per-variant behaviour
+  // lives in SHARD_VARIANTS, dispatched by the entity's
+  // `shardVariant` field.  TODO: rename — semantics broadened
+  // beyond "destructible walls/blocks" (covers cloud / rock /
+  // glass).  Candidates: MATTER / MATERIAL / BODY.
+  STRUCTURE = 'STRUCTURE',
   PARTICLE = 'PARTICLE',
-  // Nebula tile: occupies a hex grid cell like STRUCTURE, but is pass-through
-  // (no collision impulse) and shatters into NEBULA_SHARDs on player/enemy contact.
-  NEBULA = 'NEBULA',
-  // Cloud-like debris spawned from a destroyed nebula tile.  Heavily damped
-  // translation and rotation; pass-through to all entities.
-  NEBULA_SHARD = 'NEBULA_SHARD',
 }
 
 export enum EnemySubtype {
@@ -280,21 +280,12 @@ export interface GameEntity {
   asteroidHitTimer?: number;
   asteroidHitCooldown?: number;
 
-  // ── Tile variant ─────────────────────────────────────────────────────────
-  // Set on STRUCTURE tiles. Identifies which STRUCTURE_VARIANTS entry drives
-  // health, sprite selection, and destructibility.  Unset = glass (legacy).
-  // 'indestructible' tiles ignore all damage paths and never queue for
-  // regen; tiered variants ('reinforced', 'heavy') pick a damage-state
-  // sprite from their variant's `sprites` list based on health/maxHealth.
-  structureVariant?: 'glass' | 'reinforced' | 'heavy' | 'indestructible';
-
-  // ── Unified shard-variant identity (Stage 1 of shard-system overhaul) ────
-  // Single source of truth for which SHARD_VARIANTS entry an entity belongs
-  // to.  Stage 1 leaves this undefined on every entity — readers should
-  // fall back to the `structureVariant` field via
-  // `shardVariantOf()` (engine/systems/ShardSystem.ts).  Stage 5 stamps
-  // this directly at every spawn site; Stage 6 deletes the legacy fields.
-  // See docs/SHARD_SYSTEM.md for the full migration plan.
+  // ── Unified shard-variant identity ──────────────────────────────────────
+  // Single source of truth for which SHARD_VARIANTS entry a shard-family
+  // entity belongs to.  Set at every spawn site; resolves via
+  // `shardVariantOf()` (engine/systems/ShardSystem.ts) for callers that
+  // also accept legacy entities (none today, kept defensive).
+  // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
   // Blended hex color of all absorbed power-up weapons; drives glow tinting

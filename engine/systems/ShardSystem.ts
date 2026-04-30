@@ -46,36 +46,21 @@ import {
 } from './ShardSystem.types';
 
 /**
- * Resolve an entity's variant id.  Falls back to `structureVariant`
- * for static STRUCTURE tiles whose spawn sites still set the legacy
- * field (TileGenerator.generateStructureClusters); the asteroid /
- * nebula legacy EntityType branches are dead post-Stage-5 but kept
- * defensively until the EntityType enum is collapsed.
- *
- * Returns `null` for non-shard-family entities (PLAYER, ENEMY,
- * PROJECTILE, INTERACTABLE, PARTICLE).  Callers who only need the
- * variant of known shard-family entities can assert non-null.
+ * Resolve an entity's variant id from `shardVariant` (set at every
+ * spawn site).  Returns `null` for non-shard-family entities
+ * (PLAYER, ENEMY, PROJECTILE, INTERACTABLE, PARTICLE).  Callers who
+ * only need the variant of known shard-family entities can assert
+ * non-null.
  */
 export function shardVariantOf(entity: GameEntity): ShardVariantId | null {
   if (entity.shardVariant !== undefined) return entity.shardVariant;
 
   switch (entity.type) {
     case EntityType.STRUCTURE: {
-      const v = entity.structureVariant;
-      if (v === 'reinforced')     return 'reinforced-tile';
-      if (v === 'heavy')          return 'heavy-tile';
-      if (v === 'indestructible') return 'indestructible-tile';
-      // Default (unset or 'glass') — today's STRUCTURE-default = glass.
+      // Defensive default for any spawn site that hasn't stamped
+      // shardVariant — glass-tile matches the legacy STRUCTURE-default.
       return 'glass-tile';
     }
-    case EntityType.ASTEROID: {
-      // Legacy fallback (Stage 6 removes EntityType.ASTEROID).
-      return 'rock-shard';
-    }
-    case EntityType.NEBULA:
-      return 'nebula-tile';
-    case EntityType.NEBULA_SHARD:
-      return 'nebula-shard';
     default:
       return null;
   }
@@ -782,11 +767,7 @@ export class ShardSystem {
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
-      const isMobileShard =
-        (e.type === EntityType.STRUCTURE && e.mass !== Infinity)
-        || e.type === EntityType.ASTEROID
-        || e.type === EntityType.NEBULA_SHARD; // legacy
-      if (!isMobileShard) continue;
+      if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
       if (e.nebulaFadeTimer !== undefined) continue;
       candidates.push(e);
     }
@@ -919,7 +900,7 @@ export class ShardSystem {
             } else if (bVariant && bVariant.merge.bondsWith !== 'none' && aVariantId !== null
                 && this.selects(bVariant.merge.bondsWith, aVariantId, bVariantId)) {
               pullerVariant = bVariant;
-            } else if (a.type !== EntityType.ASTEROID && b.type !== EntityType.ASTEROID
+            } else if (a.type !== EntityType.STRUCTURE && b.type !== EntityType.STRUCTURE
                 && a.dropType && b.dropType) {
               // Drop+drop bonding is variant-less today; preserve via
               // a synthetic threshold (same-type 10s, cross-type 20s).
@@ -1050,10 +1031,8 @@ export class ShardSystem {
     // Mobile-shard family: rock-shard or glass-shard ride the asteroid
     // accretion path.  Tile variants have shatter.kind=none here so
     // they don't compose (only mobile shards merge).
-    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard'
-                || a.type === EntityType.ASTEROID; // legacy fallback
-    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard'
-                || b.type === EntityType.ASTEROID;
+    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard';
+    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard';
 
     // Nebula-shard self-merge — own code path with composition blend +
     // transmutation hook.
@@ -1313,7 +1292,7 @@ export class ShardSystem {
   /**
    * Composite-asteroid spawn — port of GameEngine.spawnCompositeAsteroid.
    * Fires only on cross-type drop+drop merges (e.g. ammo + health).
-   * Result is an EntityType.ASTEROID with a packed dropComposition
+   * Result is a rock-shard with a packed dropComposition
    * carrying both drops' payloads.
    */
   private spawnCompositeAsteroid(

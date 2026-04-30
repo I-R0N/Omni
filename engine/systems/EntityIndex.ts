@@ -70,14 +70,6 @@ export class EntityIndex {
         case EntityType.ENEMY:
           this.enemies.push(e);
           break;
-        case EntityType.ASTEROID:
-          // Legacy fallback for any not-yet-migrated spawn site.
-          // After Stage 5, every shard-family entity should land
-          // in EntityType.STRUCTURE; this branch is dead but kept
-          // as defense until Stage 6's enum cleanup.
-          this.asteroids.push(e);
-          this.shardCandidates.push(e);
-          break;
         case EntityType.STRUCTURE:
           // Mobile shards only — static tiles (mass = Infinity) live
           // in PhysicsSystem.staticGrid and aren't merge candidates.

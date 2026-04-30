@@ -404,7 +404,7 @@ export class PhysicsSystem {
             const rangeSq = attractor.gravityRange! ** 2;
 
             // Mobile shard-family entities get the close-attractor crush
-            // (replaces the previous EntityType.ASTEROID check).
+            // (mobile shards = STRUCTURE with finite mass).
             const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
             if (distSq < (attractor.size.x / 2)**2 && isMobileShard) {
                 entity.active = false;
@@ -537,13 +537,10 @@ export class PhysicsSystem {
                         // few mul/sqrt per pair instead of a full polygon
                         // projection.
                         // Mobile-shard pair (post-Stage-5: ASTEROID
-                        // is the legacy fallback; STRUCTURE+finite is
-                        // the unified carrier).  The dynamic grid
-                        // already excludes mass=Infinity tiles, so
-                        // any STRUCTURE entry here is a mobile shard.
-                        const aIsShard = ta === EntityType.ASTEROID || ta === EntityType.STRUCTURE;
-                        const bIsShard = tb === EntityType.ASTEROID || tb === EntityType.STRUCTURE;
-                        if (aIsShard && bIsShard) {
+                        // The dynamic grid already excludes
+                        // mass=Infinity tiles, so any STRUCTURE entry
+                        // here is a mobile shard.
+                        if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) {
                             this.resolveAsteroidPair(a, b);
                             continue;
                         }
@@ -935,7 +932,7 @@ export class PhysicsSystem {
               // Only player projectiles can break collectible drops.
               // Enemy shots pass through them so enemies can't farm the player's loot.
               const isPlayerShot = other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER;
-              if (!isPlayerShot && other.type !== EntityType.ASTEROID && other.type !== EntityType.STRUCTURE
+              if (!isPlayerShot && other.type !== EntityType.STRUCTURE
                       && other.type !== EntityType.PLAYER) return;
               // Health drops: player passes through without a physics impulse.
               // Collection is handled by proximity check in GameEngine each frame.
@@ -1069,14 +1066,14 @@ export class PhysicsSystem {
               // health — flash only, health stays pinned.  Everything
               // else takes the full projectile damage.
               const isIndestructibleTile = target.type === EntityType.STRUCTURE
-                  && target.structureVariant === 'indestructible';
+                  && target.shardVariant === 'indestructible-tile';
               if (!isIndestructibleTile) {
                   target.health -= projDmg;
               }
               target.hitFlash = 0.1;
           }
 
-          if (onShake && target.type !== EntityType.STRUCTURE && target.type !== EntityType.ASTEROID) {
+          if (onShake && target.type !== EntityType.STRUCTURE) {
               const shakeAmount = target.type === EntityType.PLAYER
                   ? COLLISION_CONFIG.SHAKE.MEDIUM
                   : COLLISION_CONFIG.SHAKE.MICRO;
@@ -1089,7 +1086,7 @@ export class PhysicsSystem {
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
-              if (target.type === EntityType.ASTEROID || target.type === EntityType.STRUCTURE) {
+              if (target.type === EntityType.STRUCTURE) {
                   if (proj.velocity) target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
                   target.lastImpactDamage = proj.damage ?? 1;
               }
@@ -1204,7 +1201,7 @@ export class PhysicsSystem {
       if (isPlayerCollision && onShake) {
           const impactSpeed = Math.abs(velAlongNormal);
           const other = a.type === EntityType.PLAYER ? b : a;
-          const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.ASTEROID || other.type === EntityType.STRUCTURE;
+          const isHardTarget = other.type === EntityType.ENEMY || other.type === EntityType.STRUCTURE;
           
           if (impactSpeed > 2.0 && isHardTarget) {
               onShake(Math.min(impactSpeed, COLLISION_CONFIG.SHAKE.HEAVY) * COLLISION_CONFIG.SHAKE.CAP_MULTIPLIER);
@@ -1236,7 +1233,7 @@ export class PhysicsSystem {
           const player = a.type === EntityType.PLAYER ? a : b;
           const structure = a.type === EntityType.STRUCTURE ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
-          const isIndestructible = structure.structureVariant === 'indestructible';
+          const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
               player.velocity.x *= 0.5;
@@ -1286,14 +1283,12 @@ export class PhysicsSystem {
       // the next natural full field rebuild (when the player changes
       // grid cells); that's a ~1 s staleness in the worst case, which
       // is cheaper than patching on every crash.
-      // Stage 5: mobile shards (rock-shard / glass-shard) live on
+      // Mobile shards (rock-shard / glass-shard) live on
       // EntityType.STRUCTURE with finite mass; static tiles share
       // the EntityType but are mass=Infinity.  The crash interaction
       // is "mobile-shard vs static-tile" — distinguish by mass.
-      const aIsMobileShard = (a.type === EntityType.STRUCTURE && a.mass !== Infinity)
-                          || a.type === EntityType.ASTEROID; // legacy
-      const bIsMobileShard = (b.type === EntityType.STRUCTURE && b.mass !== Infinity)
-                          || b.type === EntityType.ASTEROID;
+      const aIsMobileShard = a.type === EntityType.STRUCTURE && a.mass !== Infinity;
+      const bIsMobileShard = b.type === EntityType.STRUCTURE && b.mass !== Infinity;
       const aIsStaticTile  = a.type === EntityType.STRUCTURE && a.mass === Infinity;
       const bIsStaticTile  = b.type === EntityType.STRUCTURE && b.mass === Infinity;
       if ((aIsMobileShard && bIsStaticTile) || (bIsMobileShard && aIsStaticTile)) {
@@ -1301,7 +1296,7 @@ export class PhysicsSystem {
           const structure = aIsStaticTile ? a : b;
           const impactSpeed = Math.abs(velAlongNormal);
           const momentum = asteroid.mass * impactSpeed;
-          const isIndestructible = structure.structureVariant === 'indestructible';
+          const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (momentum > STRUCTURE_CONSTANTS.ASTEROID_CRASH_MOMENTUM) {
               // Rough momentum transfer to the tile fragments.

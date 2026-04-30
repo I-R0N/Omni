@@ -1429,13 +1429,10 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
-                  // Special overlays for sprite-based entities.
-                  // Stage 5: mobile rock-shards live on STRUCTURE+
-                  // finite-mass — give them the same crack overlay
-                  // asteroids had today.
+                  // Crack overlay for multi-HP mobile shards (the same
+                  // visual asteroids had on the legacy ASTEROID render).
                   if (entity.maxHealth > 1
-                      && (entity.type === EntityType.ASTEROID
-                          || (entity.type === EntityType.STRUCTURE && entity.mass !== Infinity))) {
+                      && entity.type === EntityType.STRUCTURE && entity.mass !== Infinity) {
                       this.renderCracks(ctx, entity, drawSize/2);
                   }
 
@@ -1471,7 +1468,7 @@ export class RenderSystem {
             ctx.closePath();
             ctx.fill();
 
-          } else if (entity.type === EntityType.ASTEROID || entity.type === EntityType.STRUCTURE) {
+          } else if (entity.type === EntityType.STRUCTURE) {
 
             // Build polygon path (shared by asteroid and tile)
             const buildPath = () => {

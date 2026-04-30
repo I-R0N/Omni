@@ -92,12 +92,11 @@ export class DropSystem {
     const pos = entity.position;
     const pv = entity.velocity;
 
-    // Stage 5: shard-family entities are all EntityType.STRUCTURE.
-    // Distinguish static tile (mass=Infinity → glass-shard debris)
-    // from mobile shard (finite mass → asteroid-like drop logic).
+    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish
+    // static tile (mass=Infinity → glass-shard debris) from mobile
+    // shard (finite mass → asteroid-like drop logic).
     const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
-    const isMobileShard = (entity.type === EntityType.STRUCTURE && entity.mass !== Infinity)
-                       || entity.type === EntityType.ASTEROID; // legacy
+    const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isStaticTile) {
       // Glass / reinforced / heavy tile death — visual debris.
       // Indestructible tiles short-circuit upstream; nebula-tile

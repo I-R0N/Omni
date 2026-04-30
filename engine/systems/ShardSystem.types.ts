@@ -200,7 +200,7 @@ export interface ShardVariantDef {
   onShatterParticles?: 'inherit' | 'none' | { color: string; count: number };
   spawnsDropsOnDeath: boolean;
   /** When true, PhysicsSystem skips collision impulse on contact.
-   *  Replaces the EntityType.NEBULA / NEBULA_SHARD pass-through
+   *  Replaces the legacy nebula-only pass-through
    *  branch that exists today.  Striker velocity is unchanged on
    *  contact; the variant still takes damage and may shatter.  Only
    *  the nebula-tile variant uses this. */
