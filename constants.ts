@@ -1511,3 +1511,28 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
 };
+
+/**
+ * Helper: read the rock-shard freeSpawn config for a map type.
+ * Mirrors today's `ASTEROID_GENERATION_CONFIG[mapType]` shape so
+ * callers can flip the read site one-line without restructuring.
+ * Returns the variant-table values; falls back to defaults for maps
+ * that don't free-spawn rock-shards (e.g. tile-only showcases) so
+ * the respawn-loop's count/size arithmetic doesn't blow up on undefined.
+ */
+export function getRockShardFreeSpawn(mapType: MapType): {
+  count: number;
+  minSize: number;
+  maxSize: number;
+  radius: number;
+  speedMultiplier: number;
+} {
+  const cfg = MAP_POPULATION[mapType]?.['rock-shard']?.freeSpawn;
+  return {
+    count:           cfg?.count           ?? 0,
+    minSize:         cfg?.minSize         ?? 20,
+    maxSize:         cfg?.maxSize         ?? 160,
+    radius:          cfg?.spawnRadius     ?? 2500,
+    speedMultiplier: cfg?.speedMultiplier ?? 1.5,
+  };
+}

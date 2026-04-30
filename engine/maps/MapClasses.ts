@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, ASTEROID_GENERATION_CONFIG, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, StructureVariant } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -216,7 +216,7 @@ export class UniverseMap extends BaseMapLayer {
     this.initialized = true;
 
     // Asteroids spread around spawn
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.UNIVERSE];
+    const gen = getRockShardFreeSpawn(MapType.UNIVERSE);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     // Asteroids are spawned on a linear radial distribution and may fall
     // just outside the canonical wrap range; normalise so every entity
@@ -355,7 +355,7 @@ export class RingMap extends BaseMapLayer {
 
     // Asteroids follow the concentric flow from spawn (sampleFlow above
     // is called by the base-class helper through `this.sampleFlow`).
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.RING];
+    const gen = getRockShardFreeSpawn(MapType.RING);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -400,7 +400,7 @@ export class SevenRingsMap extends BaseMapLayer {
     if (this.initialized) return;
     this.initialized = true;
 
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.SEVEN_RINGS];
+    const gen = getRockShardFreeSpawn(MapType.SEVEN_RINGS);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -470,7 +470,7 @@ export class PocketMap extends BaseMapLayer {
 
     // Asteroids on the shared analytical meander — same sampler as
     // Deep Space, so motion reads consistently between maps.
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.POCKET];
+    const gen = getRockShardFreeSpawn(MapType.POCKET);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 
@@ -569,7 +569,7 @@ export class AsteroidFieldMap extends BaseMapLayer {
     if (this.initialized) return;
     this.initialized = true;
 
-    const gen = ASTEROID_GENERATION_CONFIG[MapType.ASTEROID_FIELD];
+    const gen = getRockShardFreeSpawn(MapType.ASTEROID_FIELD);
     this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
     for (const e of this.entities) wrapPosition(e.position);
 

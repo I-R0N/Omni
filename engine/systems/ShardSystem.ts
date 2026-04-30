@@ -20,7 +20,7 @@ import {
   NEBULA_CONSTANTS,
   WEAPONS,
   WEAPON_LIST,
-  ASTEROID_GENERATION_CONFIG,
+  getRockShardFreeSpawn,
   nebulaFadeRateScale,
 } from '../../constants';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -1068,7 +1068,7 @@ export class ShardSystem {
       // Size cap from ASTEROID_GENERATION_CONFIG (Stage 5 will switch
       // this read to MAP_POPULATION).  If the area-conserving merge
       // would exceed the cap, skip the merge — pair stays separate.
-      const sizeCap = ASTEROID_GENERATION_CONFIG[this.currentMapType].maxSize;
+      const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
       if (newDiam > sizeCap) return;
 
       // Larger entity by area dominates the surviving variant id;
