@@ -132,7 +132,7 @@ export class ShardSystem {
   /**
    * Caller-provided lookup for the current map type.  Used inside
    * composeEntities to read the asteroid-size cap from
-   * ASTEROID_GENERATION_CONFIG (today's mergeEntities call site
+   * MAP_POPULATION (today's mergeEntities call site
    * read GameEngine.currentMap.type for this).
    */
   private currentMapType: MapType = MapType.UNIVERSE;
@@ -1065,7 +1065,7 @@ export class ShardSystem {
       const rB = b.size.x / 2;
       const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
 
-      // Size cap from ASTEROID_GENERATION_CONFIG (Stage 5 will switch
+      // Size cap from MAP_POPULATION (Stage 5 will switch
       // this read to MAP_POPULATION).  If the area-conserving merge
       // would exceed the cap, skip the merge — pair stays separate.
       const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;

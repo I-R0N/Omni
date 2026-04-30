@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, NEBULA_CONSTANTS, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -300,12 +300,17 @@ export class UniverseMap extends BaseMapLayer {
     // BackgroundManager so the background-nebula layer renders puffs
     // at the same positions — one unified cloud, with parallax drift
     // of the backdrop as the camera moves.
+    // Cluster size span averages the inner + outer values from
+    // MAP_POPULATION[UNIVERSE]['nebula-tile'].
+    const nebPop = MAP_POPULATION[MapType.UNIVERSE]['nebula-tile']?.tileCluster;
+    const nebMinSize = Math.round(((nebPop?.minClusterSize ?? 14) + (nebPop?.outer?.minClusterSize ?? 7)) / 2);
+    const nebMaxSize = Math.round(((nebPop?.maxClusterSize ?? 42) + (nebPop?.outer?.maxClusterSize ?? 26)) / 2);
     this.entities.push(...TileGenerator.generateNebulaClusters(
         CLUSTER_W, CLUSTER_H,
         22,
         NEBULA_COUNT,
-        Math.round((NEBULA_CONSTANTS.MIN_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE) / 2),
-        Math.round((NEBULA_CONSTANTS.MAX_CLUSTER_SIZE + NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE) / 2),
+        nebMinSize,
+        nebMaxSize,
         occupied,
         this.nebulaClusterCenters
     ));

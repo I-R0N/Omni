@@ -288,100 +288,6 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
   },
 };
 
-export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
-  [MapType.UNIVERSE]: {
-    // Deep Space population.  Entity count kept at 140 for now; tune up
-    // separately if the 8 000 × 8 000 playfield feels sparse.
-    count: 140,
-    minSize: 20,
-    maxSize: 160,
-    // Spawn radius sized for the 8 000 axis — HALF = 4000, keep a
-    // ~1000u buffer inside the seam so asteroids don't wrap on frame 1.
-    radius: 3000,
-    speedMultiplier: 1.5
-  },
-  [MapType.RING]: {
-    count: 280,
-    minSize: 20,
-    maxSize: 160,
-    // 6000×6000 map — half is 3000, so a 2500 spawn ring leaves a
-    // ~500-unit buffer inside the wrap seam.
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.SEVEN_RINGS]: {
-    count: 280,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.POCKET]: {
-    // 2 000 × 2 000 sandbox — HALF = 1000, so an 800u spawn radius
-    // leaves a 200u buffer inside the seam.  Count dropped to 1 so
-    // tiles and nebulae dominate the showcase; respawn in GameEngine
-    // now honours this per-map value (was effectively 140 before the
-    // fix because the respawn path hardcoded MapType.UNIVERSE).
-    count: 1,
-    minSize: 20,
-    maxSize: 80,
-    radius: 800,
-    speedMultiplier: 1.5
-  },
-  [MapType.ASTEROID_FIELD]: {
-    // 6 000 × 6 000 single-element showcase — dense belt riding a
-    // concentric rotational flow.  Count matches the tile-only
-    // showcases (~1 200 entities each) so render-time / perf
-    // comparisons across the single-element maps are apples-to-apples.
-    count: 1200,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  // Tile/nebula-only showcases never spawn asteroids; set count=0 so
-  // the shared respawn path (keyed by current map type) doesn't
-  // pollute these maps with drifting rocks.  minSize/maxSize stay at
-  // non-zero values because damage-scaling arithmetic clamps against
-  // them even when no asteroids exist.
-  [MapType.GLASS_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.HARD_TILE_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.INDESTRUCTIBLE_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.NEBULA_FIELD]: {
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-  [MapType.ROCK_FIELD]: {
-    // No free-floating rocks — rock-shards spawn from rock-tile shatter.
-    count: 0,
-    minSize: 20,
-    maxSize: 160,
-    radius: 2500,
-    speedMultiplier: 1.5
-  },
-};
-
 export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
   HEALTH: 1, // Single shot destroy
@@ -603,19 +509,9 @@ export const NEBULA_CONSTANTS = {
   // Tune this one number to make nebula tiles visually bigger or smaller;
   // shard sprites follow automatically.
   TILE_SPRITE_WORLD_SIZE: 120,
-  // Cluster generation — tuned for heavy coverage across the map so that
-  // nebula clusters naturally fill empty gaps between glass-tile clusters
-  // and statistically overlap with some of the procedurally placed
-  // background nebula puffs (which live in world space at ±~20 000 units).
-  // The generator shares an "occupied coords" set with the glass pass so
-  // adjacency conflicts are avoided; empty cells get priority naturally.
-  CLUSTER_COUNT: 65,    // halved for 7.5k map (was 130)
-  MIN_CLUSTER_SIZE: 14,
-  MAX_CLUSTER_SIZE: 42,
-  // Outer-zone cluster pass (sparser landmarks spread across the full map).
-  OUTER_CLUSTER_COUNT: 120, // halved for 7.5k map (was 240)
-  OUTER_MIN_CLUSTER_SIZE: 7,
-  OUTER_MAX_CLUSTER_SIZE: 26,
+  // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
+  // 'nebula-tile' tileCluster entries per map for cluster counts +
+  // size ranges.  Inner / outer split lives on the per-map record.
   // Base palette — nebula tiles draw from the full 360° hue wheel
   // (blue / indigo / violet / pink / red / yellow / green all available).
   // Regen uses circular hue math so wraparound is handled correctly.
@@ -1179,9 +1075,9 @@ const TILE_REGEN_POP_BURST = {
 
 // Spawn shape used by tile variants whose shatter spawns mobile
 // glass-shards (today's "tile-shard" debris from STRUCTURE death).
-// sizeMin matches ASTEROID_GENERATION_CONFIG[*].minSize (universally
-// 20 across maps) so the asteroid-style shatter's MIN_SIZE gate
-// matches today's behaviour byte-for-byte.
+// sizeMin = 20 matches the per-map rock-shard minSize universally
+// (see MAP_POPULATION) so the asteroid-style shatter's MIN_SIZE
+// gate is consistent with the spawn population.
 const GLASS_SHARD_SPAWN_SHAPE = {
   sizeMin: 20, sizeMax: 200,
   polyVerticesMin: 4, polyVerticesMax: 6,    // blocky
@@ -1228,7 +1124,7 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
 };
 
 const SHARD_SPAWN_SHAPE_ROCK = {
-  sizeMin: 20, sizeMax: 200,                  // matches ASTEROID_GENERATION_CONFIG.minSize
+  sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
   polyVerticesMin: 5, polyVerticesMax: 7,    // jagged
   angleJitter: 0.8, radiusMin: 0.55, radiusRange: 0.70,
   sizeToMass: (d: number) => d,
@@ -1439,33 +1335,31 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 
 // ── Per-map entity-count table ──────────────────────────────────────
 // Source of truth for "how many of variant X spawn on map Y", see
-// docs/SHARD_SYSTEM.md §6.E.  Stage 1 lands this populated from
-// today's literal values; Stage 5 flips MapClasses.populate() to
-// read it instead of inlining counts / reading
-// ASTEROID_GENERATION_CONFIG.  Old constants stay in place as
-// orphans until Stage 6 deletes them.
+// docs/SHARD_SYSTEM.md §6.E.  Source of truth for rock-shard
+// free-spawn counts (read via getRockShardFreeSpawn) and per-map
+// tile-cluster sizing (read by MapClasses.populate).  Replaces
+// the legacy ASTEROID_GENERATION_CONFIG + NEBULA_CONSTANTS.CLUSTER_*
+// fields, both deleted in Stage 7.
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
-    // STRUCTURE / NEBULA cluster counts live in MapClasses.populate()
-    // today; mirroring them here as the eventual single source of
-    // truth.  Counts derived from UniverseMap.populate (~line 271).
-    // These are illustrative — Stage 5 reconciles with the actual
-    // proportional formulas in MapClasses.
+    // STRUCTURE / NEBULA cluster counts.  Stage 7 inlines the
+    // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
+    // / OUTER_*); MAP_POPULATION is now the single source of truth.
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
     'reinforced-tile':     { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
     'heavy-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
     'nebula-tile': {
       tileCluster: {
-        clusterCount:    NEBULA_CONSTANTS.CLUSTER_COUNT,
-        minClusterSize:  NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
-        maxClusterSize:  NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
+        clusterCount:    65,    // halved for 7.5k map (was 130)
+        minClusterSize:  14,
+        maxClusterSize:  42,
         outer: {
-          clusterCount:   NEBULA_CONSTANTS.OUTER_CLUSTER_COUNT,
-          minClusterSize: NEBULA_CONSTANTS.OUTER_MIN_CLUSTER_SIZE,
-          maxClusterSize: NEBULA_CONSTANTS.OUTER_MAX_CLUSTER_SIZE,
+          clusterCount:   120,  // halved for 7.5k map (was 240)
+          minClusterSize: 7,
+          maxClusterSize: 26,
         },
       },
     },
@@ -1500,11 +1394,7 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   },
   [MapType.NEBULA_FIELD]: {
     'nebula-tile': {
-      tileCluster: {
-        clusterCount:   NEBULA_CONSTANTS.CLUSTER_COUNT,
-        minClusterSize: NEBULA_CONSTANTS.MIN_CLUSTER_SIZE,
-        maxClusterSize: NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
-      },
+      tileCluster: { clusterCount: 65, minClusterSize: 14, maxClusterSize: 42 },
     },
   },
   [MapType.ROCK_FIELD]: {
@@ -1514,11 +1404,11 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
 
 /**
  * Helper: read the rock-shard freeSpawn config for a map type.
- * Mirrors today's `ASTEROID_GENERATION_CONFIG[mapType]` shape so
- * callers can flip the read site one-line without restructuring.
- * Returns the variant-table values; falls back to defaults for maps
- * that don't free-spawn rock-shards (e.g. tile-only showcases) so
- * the respawn-loop's count/size arithmetic doesn't blow up on undefined.
+ * Returns the MAP_POPULATION values; falls back to defaults for
+ * maps that don't free-spawn rock-shards (e.g. tile-only showcases)
+ * so the respawn-loop's count/size arithmetic doesn't blow up on
+ * undefined.  Shape mirrors the legacy ASTEROID_GENERATION_CONFIG
+ * record so call sites read like simple field accesses.
  */
 export function getRockShardFreeSpawn(mapType: MapType): {
   count: number;

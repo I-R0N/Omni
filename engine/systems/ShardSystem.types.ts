@@ -225,11 +225,11 @@ export interface FreeSpawnConfig {
   minSize: number;
   maxSize: number;
   /** Multiplier on the spawn-time velocity from the analytical flow
-   *  field.  Today this lives on ASTEROID_GENERATION_CONFIG. */
+   *  field.  Today this lives on MAP_POPULATION. */
   speedMultiplier?: number;
   /** Optional spawn radius constraint — entities seed within this
    *  distance of map centre.  Today this lives on
-   *  ASTEROID_GENERATION_CONFIG. */
+   *  MAP_POPULATION. */
   spawnRadius?: number;
 }
 
