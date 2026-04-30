@@ -281,6 +281,11 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.ROCK_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSize: number, maxSize: number, radius: number, speedMultiplier: number }> = {
@@ -367,6 +372,14 @@ export const ASTEROID_GENERATION_CONFIG: Record<MapType, { count: number, minSiz
     radius: 2500,
     speedMultiplier: 1.5
   },
+  [MapType.ROCK_FIELD]: {
+    // No free-floating rocks — rock-shards spawn from rock-tile shatter.
+    count: 0,
+    minSize: 20,
+    maxSize: 160,
+    radius: 2500,
+    speedMultiplier: 1.5
+  },
 };
 
 export const STRUCTURE_CONSTANTS = {
@@ -438,6 +451,20 @@ export const STRUCTURE_VARIANTS = {
     sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
     borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
+  },
+  // Stage 7: rock-tile family — clusters of solid rock that shatter
+  // into rock-shards on death (the unified "tile is the parent of
+  // every shard" architecture, see docs/SHARD_SYSTEM.md).  Visual:
+  // slate / gray to read as rock; HP between glass (1) and heavy (5).
+  // Uses HEX_STRUCTURE_HEAVY as the sprite placeholder until a
+  // dedicated rock hex asset lands.
+  rock: {
+    health: 3,
+    mass: Infinity,
+    indestructible: false,
+    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
+    color: COLORS.ASTEROID,
+    borderColor: '#cbd5e1', // slate-300 — slightly lighter for the edge tint
   },
 } as const;
 
@@ -1479,5 +1506,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
         maxClusterSize: NEBULA_CONSTANTS.MAX_CLUSTER_SIZE,
       },
     },
+  },
+  [MapType.ROCK_FIELD]: {
+    'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
 };

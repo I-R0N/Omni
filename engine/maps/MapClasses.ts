@@ -684,6 +684,28 @@ export class IndestructibleFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
+ * Rock-tile field (Stage 7 of shard-system overhaul) — clusters of
+ * 3-HP rock tiles that, when broken, shatter into mobile rock-shards
+ * (the same drift / merge / accrete lifecycle as today's free-floating
+ * asteroids).  Exercises the unified tile→shard lineage in isolation;
+ * cluster count + size match the other tile-only showcases so DBG
+ * render-time numbers compare apples-to-apples.
+ */
+export class RockFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'rock';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('rock_field_01', 'Rock Field', MapType.ROCK_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
  * Nebula-only field — pass-through nebula clusters spread across the
  * 6k map.  Each cluster center is recorded into `nebulaClusterCenters`
  * so the background layer renders puffs at the same positions as the

@@ -26,6 +26,10 @@ export enum MapType {
   HARD_TILE_FIELD      = 'HARD_TILE_FIELD',
   INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
   NEBULA_FIELD         = 'NEBULA_FIELD',
+  // Rock-tile single-element showcase (Stage 7 of shard-system overhaul)
+  // — exercises the new tile→shard lineage where a rock-tile cluster
+  // shatters into rock-shards that drift / merge / accrete.
+  ROCK_FIELD           = 'ROCK_FIELD',
 }
 
 export enum GameState {

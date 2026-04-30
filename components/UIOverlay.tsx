@@ -246,6 +246,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 { type: MapType.HARD_TILE_FIELD,      label: 'Hard Tiles' },
                 { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
                 { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
+                { type: MapType.ROCK_FIELD,           label: 'Rock Field' },
               ].map(opt => (
                 <button
                   key={opt.type}
