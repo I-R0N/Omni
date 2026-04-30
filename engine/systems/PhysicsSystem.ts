@@ -975,9 +975,6 @@ export class PhysicsSystem {
                   // Mobile shard.  Only glass-shard reflects.
                   isReflective = target.shardVariant === 'glass-shard';
                 }
-              } else if (target.type === EntityType.ASTEROID) {
-                // Legacy fallback for any non-migrated spawn site.
-                isReflective = target.shardType === 'tile';
               }
               const isTile = isReflective;
               if (isTile && proj.velocity) {

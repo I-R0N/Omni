@@ -145,11 +145,6 @@ export interface WeaponConfig {
   burstDelay?: number; // Time between burst shots
 }
 
-// ── Shard type ────────────────────────────────────────────────────────────────
-// Discriminates the visual and physical origin of an asteroid-type entity.
-// Add new variants here as the game gains new destructible material types.
-export type ShardType = 'asteroid' | 'tile' | 'nebula';
-
 // ── Nebula colour composition ────────────────────────────────────────────────
 // Weighted list of base-palette hexes that make up a nebula tile or shard.
 // Weights sum to 1 (within rounding).  Stored rather than pre-blended so that
@@ -293,15 +288,10 @@ export interface GameEntity {
   // sprite from their variant's `sprites` list based on health/maxHealth.
   structureVariant?: 'glass' | 'reinforced' | 'heavy' | 'indestructible';
 
-  // ── Shard identity ───────────────────────────────────────────────────────
-  // Set on EntityType.ASTEROID entities that originate from a destructible
-  // material.  Drives visual style and bonding affinity in the stick system.
-  shardType?: ShardType;
-
   // ── Unified shard-variant identity (Stage 1 of shard-system overhaul) ────
   // Single source of truth for which SHARD_VARIANTS entry an entity belongs
   // to.  Stage 1 leaves this undefined on every entity — readers should
-  // fall back to the legacy `shardType` / `structureVariant` fields via
+  // fall back to the `structureVariant` field via
   // `shardVariantOf()` (engine/systems/ShardSystem.ts).  Stage 5 stamps
   // this directly at every spawn site; Stage 6 deletes the legacy fields.
   // See docs/SHARD_SYSTEM.md for the full migration plan.
@@ -471,7 +461,7 @@ export interface PerfSnapshot {
   // Entity counts (snapshot of most recent sim step)
   totalEntities: number;
   enemyCount: number;
-  asteroidCount: number;    // Includes asteroid shards (shardType='asteroid'|'tile')
+  asteroidCount: number;    // Includes mobile shards (shardVariant ∈ {rock-shard, glass-shard})
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs

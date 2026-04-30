@@ -1577,10 +1577,10 @@ export class RenderSystem {
             } else {
                 // ── Asteroid / Tile shard ─────────────────────────────────────
                 const isFlash   = entity.hitFlash && entity.hitFlash > 0;
-                const shardType = entity.shardType ?? 'asteroid';
+                const isTileShard = entity.shardVariant === 'glass-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                if (shardType === 'tile') {
+                if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
                     const [gr, gg, gb] = glowColor ? hexToRgb(glowColor) : [180, 230, 253];
 

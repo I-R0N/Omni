@@ -46,9 +46,11 @@ import {
 } from './ShardSystem.types';
 
 /**
- * Resolve an entity's variant id.  Reads the legacy `shardType` /
- * `structureVariant` fields when `shardVariant` is unset (stage 5+
- * stamps the field directly on every spawn site).
+ * Resolve an entity's variant id.  Falls back to `structureVariant`
+ * for static STRUCTURE tiles whose spawn sites still set the legacy
+ * field (TileGenerator.generateStructureClusters); the asteroid /
+ * nebula legacy EntityType branches are dead post-Stage-5 but kept
+ * defensively until the EntityType enum is collapsed.
  *
  * Returns `null` for non-shard-family entities (PLAYER, ENEMY,
  * PROJECTILE, INTERACTABLE, PARTICLE).  Callers who only need the
@@ -67,10 +69,7 @@ export function shardVariantOf(entity: GameEntity): ShardVariantId | null {
       return 'glass-tile';
     }
     case EntityType.ASTEROID: {
-      const s = entity.shardType;
-      if (s === 'tile')   return 'glass-shard';
-      if (s === 'nebula') return 'nebula-shard';
-      // Default (unset or 'asteroid') — today's free-floating asteroids.
+      // Legacy fallback (Stage 6 removes EntityType.ASTEROID).
       return 'rock-shard';
     }
     case EntityType.NEBULA:
@@ -442,9 +441,6 @@ export class ShardSystem {
         id:           nextId('shard'),
         type:          EntityType.STRUCTURE,
         shardVariant:  childVariant.id,
-        // Legacy field — kept stamped for systems that haven't fully
-        // migrated to shardVariant yet (deleted in Stage 6).
-        shardType:     isTile ? 'tile' : 'asteroid',
         position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
         velocity:     { x: vx, y: vy },
         size:         { x: newSize, y: newSize },
@@ -604,7 +600,6 @@ export class ShardSystem {
         // negligible without needing a per-EntityType skip.
         type:            EntityType.STRUCTURE,
         shardVariant:   childVariant.id,
-        shardType:      'nebula',
         position:       { x: spawnPos.x, y: spawnPos.y },
         velocity:       { x: velX, y: velY },
         size:           { x: size, y: size },
@@ -1020,7 +1015,7 @@ export class ShardSystem {
    *                                 transmutation (host area ≥ HEX_AREA
    *                                 → new tile, host dissolves).
    *   asteroid + asteroid         → area-conserving accretion; larger
-   *                                 dominates shardType / glow / hp.
+   *                                 dominates shardVariant / glow / hp.
    *   drop + drop                 → same-type grows; cross-type
    *                                 collapses into a composite asteroid.
    *   asteroid + drop             → asteroid absorbs drop's payload.
@@ -1097,8 +1092,10 @@ export class ShardSystem {
       const sizeCap = ASTEROID_GENERATION_CONFIG[this.currentMapType].maxSize;
       if (newDiam > sizeCap) return;
 
-      // Larger entity by area dominates shardType; blend glow colors.
-      const dominant = (rA >= rB ? a.shardType : b.shardType) ?? 'asteroid';
+      // Larger entity by area dominates the surviving variant id;
+      // blend glow colors.  Today the only mobile variants that
+      // bond are rock-shard and glass-shard.
+      const dominantVariant = (rA >= rB ? a.shardVariant : b.shardVariant) ?? 'rock-shard';
       const glowA = a.powerupGlowColor;
       const glowB = b.powerupGlowColor;
       const newGlow = glowA && glowB ? blendHex(glowA, glowB) : (glowA ?? glowB);
@@ -1108,8 +1105,9 @@ export class ShardSystem {
         ...(b.dropComposition ?? []),
       ];
 
-      // Regenerate polygon at new size; blocky for tile, jagged for asteroid.
-      const isTile  = dominant === 'tile';
+      // Regenerate polygon at new size; blocky for tile-derived
+      // glass-shard, jagged for rock-shard.
+      const isTile  = dominantVariant === 'glass-shard';
       const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (7 + Math.floor(Math.random() * 4));
       const jitterK = isTile ? 0.25 : 0.7;
       const rMin    = isTile ? 0.60 : 0.60;
@@ -1117,9 +1115,9 @@ export class ShardSystem {
       const baseR   = (newDiam / 2) * 0.82;
       a.polygonPoints = this.generateShardPolygon(baseR, numPts, numPts, jitterK, rMin, rRange);
 
-      a.shardType        = dominant;
+      a.shardVariant     = dominantVariant;
       a.powerupGlowColor = newGlow;
-      if (a.shardType !== b.shardType) a.color = blendHex(a.color, b.color);
+      if (a.shardVariant !== b.shardVariant) a.color = blendHex(a.color, b.color);
       a.size.x = newDiam; a.size.y = newDiam;
       a.mass   = newDiam;
       a.position.x = nmx; a.position.y = nmy;
@@ -1337,7 +1335,6 @@ export class ShardSystem {
       id:            nextId('composite'),
       type:          EntityType.STRUCTURE,
       shardVariant:  'rock-shard',
-      shardType:    'asteroid',
       position:      { x: mx, y: my },
       velocity:      { x: mvx, y: mvy },
       size:          { x: newSize, y: newSize },

@@ -1,4 +1,5 @@
-import { GameEntity, EntityType, Vector2, WeaponType, ShardType } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType } from '../../types';
+import { ShardVariantId } from './ShardSystem.types';
 import {
   COLORS,
   WEAPONS,
@@ -175,7 +176,7 @@ export class DropSystem {
 
       // Physical shard
       const isTile = kind === 'tile';
-      const shardType: ShardType = isTile ? 'tile' : 'asteroid';
+      const variantId: ShardVariantId = isTile ? 'glass-shard' : 'rock-shard';
       const size    = 12 + Math.random() * 10;
       const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (5 + Math.floor(Math.random() * 3));
       const jitterK = isTile ? 0.25 : 0.8;
@@ -193,12 +194,8 @@ export class DropSystem {
 
       entities.push({
         id:           nextId('enemy_shard'),
-        // Stage 5: shard-family entities live on a single carrier.
-        // shardVariant maps the legacy shardType ('tile'/'asteroid')
-        // to the new variant id at spawn time.
         type:          EntityType.STRUCTURE,
-        shardVariant:  shardType === 'tile' ? 'glass-shard' : 'rock-shard',
-        shardType,
+        shardVariant:  variantId,
         position:     { x: pos.x, y: pos.y },
         velocity:     { x: vx, y: vy },
         size:         { x: size, y: size },
@@ -281,7 +278,6 @@ export class DropSystem {
         id:            nextId('tile_shard'),
         type:           EntityType.STRUCTURE,
         shardVariant:  'glass-shard',
-        shardType:     'tile',
         position:      {
           x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
           y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
