@@ -136,6 +136,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
 
+  const handleConfirmJamPortal = () => {
+      if (engineRef.current) engineRef.current.confirmJamPortal();
+  };
+
+  const handleCancelJamPortal = () => {
+      if (engineRef.current) engineRef.current.cancelJamPortal();
+  };
+
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
       <canvas 
@@ -154,6 +162,8 @@ const App: React.FC = () => {
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}
         onSkipWave={handleSkipWave}
+        onConfirmJamPortal={handleConfirmJamPortal}
+        onCancelJamPortal={handleCancelJamPortal}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
         mapType={mapType}

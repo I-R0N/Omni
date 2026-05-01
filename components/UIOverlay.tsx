@@ -15,6 +15,8 @@ interface UIOverlayProps {
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
   onSkipWave?: () => void;
+  onConfirmJamPortal?: () => void;
+  onCancelJamPortal?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
   mapType?: MapType;
@@ -49,6 +51,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleTrailShape,
   onCycleTrailEmitMode,
   onSkipWave,
+  onConfirmJamPortal,
+  onCancelJamPortal,
   difficulty = 3,
   onSetDifficulty,
   mapType = MapType.UNIVERSE,
@@ -309,8 +313,44 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
+      {/* ── Vibe Jam portal confirmation ── */}
+      {/* Engine sets `pendingJamPortal` and pauses the sim when the
+          player walks into a portal.  This modal renders above the
+          standard pause overlay (which is suppressed below) so the
+          confirm/cancel choice is the only thing on screen. */}
+      {stats.pendingJamPortal && (
+        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-[60]">
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-2 tracking-wide text-center px-6">
+            {stats.pendingJamPortal.prompt}
+          </h2>
+          <p className="text-slate-400 text-sm mb-8 text-center px-6 max-w-md">
+            {stats.pendingJamPortal.kind === 'spawn'
+              ? 'You\'ll leave this game and return to where you came from.'
+              : 'You\'ll leave this game and travel to another Vibe Jam entry.'}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 w-64 sm:w-auto">
+            <button
+              onClick={onConfirmJamPortal}
+              className={`${stats.pendingJamPortal.kind === 'spawn'
+                ? 'bg-violet-600 hover:bg-violet-500'
+                : 'bg-emerald-600 hover:bg-emerald-500'} text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-all active:scale-95`}
+            >
+              YES, GO
+            </button>
+            <button
+              onClick={onCancelJamPortal}
+              className="bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-all active:scale-95"
+            >
+              STAY HERE
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Pause Menu ── */}
-      {stats.gameState === GameState.PAUSED && (
+      {/* Suppressed while a portal confirm modal is up — the engine
+          pauses for that flow but the modal handles its own buttons. */}
+      {stats.gameState === GameState.PAUSED && !stats.pendingJamPortal && (
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50">
           <h2 className="text-4xl font-bold text-white mb-6 tracking-widest">PAUSED</h2>
           <div className="mb-8">

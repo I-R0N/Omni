@@ -478,6 +478,10 @@ export interface EngineStats {
   // WaveSystem.initialDelay > 0; undefined otherwise.  Drives the
   // onboarding controls panel in UIOverlay.
   preWaveTimer?: number;
+  // Vibe Jam portal confirmation state — populated while the player
+  // has walked into a portal and the engine is waiting on a confirm
+  // / cancel decision.  UIOverlay renders the modal off this field.
+  pendingJamPortal?: { kind: 'spawn' | 'exit'; prompt: string };
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;

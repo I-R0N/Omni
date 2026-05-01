@@ -24,7 +24,8 @@ import {
     VIBE_JAM_MODE,
     JAM_MAP_SIZE,
     JAM_FIRST_WAVE_DELAY,
-    PORTAL_POS,
+    SPAWN_PORTAL_POS,
+    EXIT_PORTAL_POS,
     PORTAL_RADIUS,
     readPortalEntryParams,
     buildPortalExitUrl,
@@ -336,12 +337,19 @@ export class GameEngine {
   // preserved when hopping along the webring.
   private jamPortalEntry: PortalEntryParams = { isFromPortal: false };
 
-  // Arm gate for the bidirectional portal: false while the player is
-  // still inside the portal radius after spawning on it (inbound
-  // `?portal=true` flow), true once they've stepped clear.  Prevents
-  // an inbound spawn from instantly re-triggering the outbound
-  // redirect.  Default true so a normal start arms it from frame 0.
-  private jamPortalArmed: boolean = true;
+  // Lockout: id of the portal the player is "still inside" after
+  // their last interaction (initial spawn or a Cancel).  While set,
+  // re-entering that same portal does not re-open the confirm
+  // modal; cleared when the player is outside every portal radius.
+  private jamPortalLockoutId: string | null = null;
+
+  // Active confirmation prompt — non-null while the player is being
+  // asked whether to leave through a portal.  The engine pauses the
+  // simulation until confirm/cancel resolves, surfaces the prompt
+  // text via EngineStats, and uses redirectUrl on confirm.
+  private pendingJamPortal:
+    | { kind: 'spawn' | 'exit'; portalId: string; redirectUrl: string; prompt: string }
+    | null = null;
 
   /** Factory for the per-run map class so both the constructor and
    *  restartGame() share a single construction path. */
@@ -367,57 +375,72 @@ export class GameEngine {
   }
 
   // ── Vibe Jam portal helpers ────────────────────────────────────────────────
-  // Seed the single bidirectional portal into the active map.  Called once at
+  // Seed the start + exit portals into the active map.  Called once at
   // construction (after loadMap) and again on restart so a regen pass
   // doesn't leak portals between runs.
   private seedJamPortals() {
     if (!this.currentMap) return;
-    // Drop any stale portals from a previous run before pushing a
-    // fresh one — restartGame() rebuilds the map but the portal seed
+    // Drop any stale portals from a previous run before pushing the
+    // fresh pair — restartGame() rebuilds the map but the portal seed
     // runs outside loadMap, so this guard is a defense in depth.
     this.currentMap.entities = this.currentMap.entities.filter(e => !e.name?.startsWith('JAM_PORTAL'));
 
-    const portal: GameEntity = {
-      id: nextId('jam-portal'),
+    const spawnPortal: GameEntity = {
+      id: nextId('jam-portal-spawn'),
       type: EntityType.INTERACTABLE,
-      name: 'JAM_PORTAL',
-      position: { ...PORTAL_POS },
+      name: 'JAM_PORTAL_SPAWN',
+      position: { ...SPAWN_PORTAL_POS },
       velocity: { x: 0, y: 0 },
       size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
       rotation: 0,
-      color: '#34d399', // emerald
+      color: '#a855f7', // violet — return / arrival
       active: true,
       health: 1,
       maxHealth: 1,
       mass: Infinity,
     };
-    this.currentMap.entities.push(portal);
+    const exitPortal: GameEntity = {
+      id: nextId('jam-portal-exit'),
+      type: EntityType.INTERACTABLE,
+      name: 'JAM_PORTAL_EXIT',
+      position: { ...EXIT_PORTAL_POS },
+      velocity: { x: 0, y: 0 },
+      size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
+      rotation: 0,
+      color: '#34d399', // emerald — outgoing
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+    };
+    this.currentMap.entities.push(spawnPortal, exitPortal);
   }
 
   // Apply state captured by readPortalEntryParams() to the player.
-  // - `?portal=true` lands the player on the portal so the next game
-  //   in the webring isn't a stranded teleport into the middle, and
-  //   disarms the redirect until the player steps clear.
+  // - `?portal=true` lands the player on the start portal so the next
+  //   game in the webring isn't a stranded teleport into the middle,
+  //   and locks that portal out until they step clear.
   // - `?speed=` seeds initial velocity so a fast incoming player doesn't
   //   jolt to a stop.
   // Default (no `?portal=true`): player stays at the map's playerSpawn
-  // and the portal is armed from frame 0.
+  // and no portal lockout is set.
   private applyJamPortalEntryState() {
+    this.pendingJamPortal = null;
     if (!this.jamPortalEntry.isFromPortal) {
-      this.jamPortalArmed = true;
+      this.jamPortalLockoutId = null;
       return;
     }
-    this.player.position = { ...PORTAL_POS };
-    // Disarm — re-armed by checkJamExitPortal once the player has
-    // stepped outside the portal radius.
-    this.jamPortalArmed = false;
+    this.player.position = { ...SPAWN_PORTAL_POS };
+    // Lock the start portal until the player walks out of its radius.
+    const spawnPortal = this.currentMap?.entities.find(e => e.name === 'JAM_PORTAL_SPAWN');
+    this.jamPortalLockoutId = spawnPortal?.id ?? null;
     if (this.jamPortalEntry.speed && this.jamPortalEntry.speed > 0) {
-        // Send the player toward the centre of the arena so they read
-        // the in-portal as a one-way arrival rather than facing back
-        // out; magnitude clamped to the standard player MAX_SPEED.
+        // Send the player toward the centre of the arena so the spawn
+        // portal reads as an arrival rather than facing back out;
+        // magnitude clamped to the standard player MAX_SPEED.
         const target = { x: 0, y: 0 };
-        const dx = target.x - PORTAL_POS.x;
-        const dy = target.y - PORTAL_POS.y;
+        const dx = target.x - SPAWN_PORTAL_POS.x;
+        const dy = target.y - SPAWN_PORTAL_POS.y;
         const mag = Math.sqrt(dx * dx + dy * dy) || 1;
         const speed = Math.min(this.jamPortalEntry.speed, PHYSICS_CONSTANTS.MAX_SPEED);
         this.player.velocity = { x: (dx / mag) * speed, y: (dy / mag) * speed };
@@ -425,46 +448,110 @@ export class GameEngine {
     this.camera.position = { ...this.player.position };
   }
 
-  // Per-frame proximity check: if the player overlaps the portal,
-  // hand off to the Vibe Jam portal redirector with player state.
-  // Inbound players spawn ON the portal, so the arm flag waits for
-  // them to step clear before allowing a redirect.
-  private checkJamExitPortal() {
+  // Per-frame proximity check: if the player overlaps either portal,
+  // open the confirmation modal and pause the sim until the player
+  // confirms or cancels.  Lockout stays set until the player steps
+  // clear of every portal so a Cancel doesn't immediately reopen.
+  private checkJamPortals() {
     if (!VIBE_JAM_MODE || !this.currentMap) return;
     if (this.gameState !== GameState.PLAYING) return;
     if (this.player.isExploding || !this.player.active) return;
+    if (this.pendingJamPortal !== null) return;
+
     const ents = this.currentMap.entities;
+    let touchedId: string | null = null;
+    let touchedKind: 'spawn' | 'exit' | null = null;
+    let touchedAny = false;
+    const radius = PORTAL_RADIUS + this.player.size.x * 0.5;
+    const radiusSq = radius * radius;
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
-      if (e.name !== 'JAM_PORTAL' || !e.active) continue;
+      if (!e.active) continue;
+      if (e.name !== 'JAM_PORTAL_SPAWN' && e.name !== 'JAM_PORTAL_EXIT') continue;
       const dx = wrapDeltaX(this.player.position.x, e.position.x);
       const dy = wrapDeltaY(this.player.position.y, e.position.y);
-      const r  = PORTAL_RADIUS + this.player.size.x * 0.5;
-      const inside = dx * dx + dy * dy <= r * r;
-      if (!this.jamPortalArmed) {
-        // Inbound spawn — wait for the player to leave the ring once
-        // before we'll start listening for an exit-touch.
-        if (!inside) this.jamPortalArmed = true;
-        return;
+      if (dx * dx + dy * dy > radiusSq) continue;
+      touchedAny = true;
+      // First contact this frame wins — portals are far apart, so the
+      // player can't overlap both at once.
+      if (touchedId === null) {
+        touchedId = e.id;
+        touchedKind = e.name === 'JAM_PORTAL_SPAWN' ? 'spawn' : 'exit';
       }
-      if (inside) {
-        const speed = Math.sqrt(
-            this.player.velocity.x * this.player.velocity.x +
-            this.player.velocity.y * this.player.velocity.y,
-        );
-        const url = buildPortalExitUrl({
+    }
+
+    if (!touchedAny) {
+      // Outside every portal — clear the lockout so the next entry
+      // re-opens the prompt.
+      this.jamPortalLockoutId = null;
+      return;
+    }
+
+    if (touchedId === this.jamPortalLockoutId) return; // still in the locked-out ring
+
+    // Build the redirect URL + prompt for the touched portal.
+    const speed = Math.sqrt(
+      this.player.velocity.x * this.player.velocity.x +
+      this.player.velocity.y * this.player.velocity.y,
+    );
+    const ourHost = typeof window !== 'undefined' ? window.location.host : undefined;
+    let redirectUrl: string;
+    let prompt: string;
+    if (touchedKind === 'spawn') {
+      const ref = this.jamPortalEntry.ref;
+      if (ref) {
+        // Start portal sends the player back to the game they came
+        // from.  ref is a host (per the Vibe Jam rules); prepend
+        // https:// so window.location accepts it.
+        redirectUrl = /^https?:\/\//.test(ref) ? ref : `https://${ref}`;
+        prompt = `Return to ${ref}?`;
+      } else {
+        // No inbound ref (player started directly on this URL) — the
+        // start portal still needs to do something useful, so fall
+        // through to the Vibe Jam portal redirector with our own
+        // host as the ref.
+        redirectUrl = buildPortalExitUrl({
           username: this.jamPortalEntry.username,
           color: this.jamPortalEntry.color,
           speed: Math.round(speed),
-          // Forward our own URL as `ref` so the next game in the ring
-          // can credit/return; falls back to the inbound ref so a long
-          // chain of portals still keeps the original origin visible.
-          ref: typeof window !== 'undefined' ? window.location.host : this.jamPortalEntry.ref,
+          ref: ourHost,
         });
-        if (typeof window !== 'undefined') window.location.href = url;
-        return;
+        prompt = 'Travel to a Vibe Jam game?';
       }
+    } else {
+      redirectUrl = buildPortalExitUrl({
+        username: this.jamPortalEntry.username,
+        color: this.jamPortalEntry.color,
+        speed: Math.round(speed),
+        // Forward our own URL as `ref` so the next game in the ring
+        // can credit / return-portal back to us.
+        ref: ourHost ?? this.jamPortalEntry.ref,
+      });
+      prompt = 'Travel to another Vibe Jam game?';
     }
+
+    this.pendingJamPortal = { kind: touchedKind!, portalId: touchedId!, redirectUrl, prompt };
+    this.jamPortalLockoutId = touchedId;
+    // Pause the sim while the player chooses — keeps them from dying
+    // mid-confirmation and freezes the on-screen drift.
+    if (this.gameState === GameState.PLAYING) this.gameState = GameState.PAUSED;
+  }
+
+  /** UIOverlay → engine: confirm the pending portal redirect. */
+  public confirmJamPortal() {
+    const pending = this.pendingJamPortal;
+    if (!pending) return;
+    this.pendingJamPortal = null;
+    if (typeof window !== 'undefined') window.location.href = pending.redirectUrl;
+  }
+
+  /** UIOverlay → engine: cancel the pending portal redirect.  Resumes
+   *  the sim; the touched portal stays locked out until the player
+   *  walks out of its radius. */
+  public cancelJamPortal() {
+    if (!this.pendingJamPortal) return;
+    this.pendingJamPortal = null;
+    if (this.gameState === GameState.PAUSED) this.gameState = GameState.PLAYING;
   }
 
   /** Set the map style that the next restart / startGame will use.
@@ -632,6 +719,9 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       preWaveTimer: this.waves.initialDelay > 0 ? Math.ceil(this.waves.initialDelay) : undefined,
+      pendingJamPortal: this.pendingJamPortal
+        ? { kind: this.pendingJamPortal.kind, prompt: this.pendingJamPortal.prompt }
+        : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
@@ -1410,8 +1500,9 @@ export class GameEngine {
     }
     this.activeDrops.length = dropWriteIdx;
 
-    // Vibe Jam exit portal — redirect when the player crosses the ring.
-    this.checkJamExitPortal();
+    // Vibe Jam portals — open the confirm modal when the player
+    // crosses either ring.
+    this.checkJamPortals();
 
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
