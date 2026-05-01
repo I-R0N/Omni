@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
+import { VIBE_JAM_MODE } from '../vibejam';
 
 interface UIOverlayProps {
   stats: EngineStats;
@@ -207,7 +208,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
 
       {/* ── Main Menu ── */}
-      {stats.gameState === GameState.MENU && (
+      {/* Vibe Jam build skips the menu entirely — game auto-starts in App.tsx. */}
+      {!VIBE_JAM_MODE && stats.gameState === GameState.MENU && (
         <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50">
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-8 tracking-tight drop-shadow-lg">
             OMNIVERSE

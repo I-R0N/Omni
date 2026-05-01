@@ -1945,7 +1945,49 @@ export class RenderSystem {
 
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
-                 if (Number.isFinite(r) && r > 0) {
+                 const isJamPortal = entity.name === 'JAM_PORTAL_EXIT' || entity.name === 'JAM_PORTAL_SPAWN';
+                 if (isJamPortal && Number.isFinite(r) && r > 0) {
+                     // Vibe Jam portal: pulsing concentric rings + soft
+                     // radial bloom keyed off perfNowSec so the swirl
+                     // animates without needing per-entity sim state.
+                     const t = perfNowSec;
+                     const pulse = 0.85 + 0.15 * Math.sin(t * 3.0);
+                     const swirl = (t * 1.4) % (Math.PI * 2);
+
+                     // Bloom halo
+                     const bloom = ctx.createRadialGradient(0, 0, r * 0.15, 0, 0, r * 1.35);
+                     bloom.addColorStop(0, entity.color);
+                     bloom.addColorStop(0.55, entity.color + '55');
+                     bloom.addColorStop(1, 'rgba(0,0,0,0)');
+                     ctx.fillStyle = bloom;
+                     ctx.beginPath();
+                     ctx.arc(0, 0, r * 1.35 * pulse, 0, Math.PI * 2);
+                     ctx.fill();
+
+                     // Outer rim
+                     ctx.strokeStyle = entity.color;
+                     ctx.lineWidth = 4;
+                     ctx.globalAlpha = 0.95;
+                     ctx.beginPath();
+                     ctx.arc(0, 0, r, 0, Math.PI * 2);
+                     ctx.stroke();
+
+                     // Inner ring rotates against the outer for motion
+                     ctx.lineWidth = 2;
+                     ctx.globalAlpha = 0.75;
+                     ctx.beginPath();
+                     ctx.arc(0, 0, r * 0.62, swirl, swirl + Math.PI * 1.55);
+                     ctx.stroke();
+
+                     // Centre core — bright dot so the portal reads from
+                     // far away on the minimap-zoom view too.
+                     ctx.globalAlpha = 0.85 * pulse;
+                     ctx.fillStyle = '#ffffff';
+                     ctx.beginPath();
+                     ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+                     ctx.fill();
+                     ctx.globalAlpha = 1.0;
+                 } else if (Number.isFinite(r) && r > 0) {
                      ctx.beginPath();
                      ctx.arc(0, 0, r, 0, Math.PI * 2);
                      ctx.fill();
@@ -1953,10 +1995,16 @@ export class RenderSystem {
 
                  ctx.rotate(-entity.rotation);
                  ctx.fillStyle = '#ffffff';
-                 ctx.font = '12px monospace';
+                 ctx.font = isJamPortal ? 'bold 14px monospace' : '12px monospace';
                  ctx.textAlign = 'center';
                  if (entity.name) {
-                    ctx.fillText(entity.name, 0, (entity.size.x / 2) + 20);
+                    const label = entity.name === 'JAM_PORTAL_EXIT'  ? 'VIBE JAM PORTAL →'
+                                : entity.name === 'JAM_PORTAL_SPAWN' ? '← VIBE JAM ARRIVAL'
+                                : entity.name;
+                    ctx.shadowColor = 'black';
+                    ctx.shadowBlur = 4;
+                    ctx.fillText(label, 0, (entity.size.x / 2) + 20);
+                    ctx.shadowBlur = 0;
                  }
             } else {
                  ctx.fillRect(-entity.size.x / 2, -entity.size.y / 2, entity.size.x, entity.size.y);

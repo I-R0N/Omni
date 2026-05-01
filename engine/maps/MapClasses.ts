@@ -204,10 +204,14 @@ export class UniverseMap extends BaseMapLayer {
   public static readonly WIDTH  = 8000;
   public static readonly HEIGHT = 8000;
 
-  constructor() {
+  // The Vibe Jam build constructs a smaller variant via
+  // `new UniverseMap({ width, height })`; cluster generation reads
+  // MAP_WIDTH / MAP_HEIGHT (set by GameEngine.loadMap from this.width/
+  // this.height) so the cluster footprint scales automatically.
+  constructor(opts?: { width?: number; height?: number }) {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
-    this.width  = UniverseMap.WIDTH;
-    this.height = UniverseMap.HEIGHT;
+    this.width  = opts?.width  ?? UniverseMap.WIDTH;
+    this.height = opts?.height ?? UniverseMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };
   }
 

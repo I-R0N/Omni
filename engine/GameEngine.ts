@@ -20,6 +20,16 @@ import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLA
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
+import {
+    VIBE_JAM_MODE,
+    JAM_MAP_SIZE,
+    EXIT_PORTAL_POS,
+    SPAWN_PORTAL_POS,
+    PORTAL_RADIUS,
+    readPortalEntryParams,
+    buildPortalExitUrl,
+    PortalEntryParams,
+} from '../vibejam';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -309,7 +319,22 @@ export class GameEngine {
     };
 
     this.loadMap(this.buildMap(this.selectedMapType));
+
+    // Vibe Jam 2026 build: drop the player straight into the arena
+    // (no menu), seed the portal pair, and apply any inbound-portal
+    // state from the URL.  See vibejam.ts for the master switch.
+    if (VIBE_JAM_MODE) {
+        this.jamPortalEntry = readPortalEntryParams();
+        this.seedJamPortals();
+        this.applyJamPortalEntryState();
+    }
   }
+
+  // Vibe Jam 2026 — inbound portal state captured from the URL when
+  // VIBE_JAM_MODE is on.  Forwarded back out via buildPortalExitUrl
+  // so player identity (username/color) and motion (speed/ref) are
+  // preserved when hopping along the webring.
+  private jamPortalEntry: PortalEntryParams = { isFromPortal: false };
 
   /** Factory for the per-run map class so both the constructor and
    *  restartGame() share a single construction path. */
@@ -325,7 +350,109 @@ export class GameEngine {
       case MapType.NEBULA_FIELD:         return new NebulaFieldMap();
       case MapType.ROCK_FIELD:           return new RockFieldMap();
       case MapType.UNIVERSE:
-      default:                           return new UniverseMap();
+      default:
+        // Vibe Jam build uses a smaller Deep Space arena so the player
+        // hits enemies (and the exit portal) faster.
+        return VIBE_JAM_MODE
+            ? new UniverseMap({ width: JAM_MAP_SIZE, height: JAM_MAP_SIZE })
+            : new UniverseMap();
+    }
+  }
+
+  // ── Vibe Jam portal helpers ────────────────────────────────────────────────
+  // Seed the spawn + exit portal pair into the active map.  Called once at
+  // construction (after loadMap) and again on restart so a regen pass
+  // doesn't leak portals between runs.
+  private seedJamPortals() {
+    if (!this.currentMap) return;
+    // Drop any stale portals from a previous run before pushing fresh
+    // pair — restartGame() rebuilds the map but the portal seed runs
+    // outside loadMap, so this guard is a defense in depth.
+    this.currentMap.entities = this.currentMap.entities.filter(e => !e.name?.startsWith('JAM_PORTAL'));
+
+    const exitPortal: GameEntity = {
+      id: nextId('jam-portal-exit'),
+      type: EntityType.INTERACTABLE,
+      name: 'JAM_PORTAL_EXIT',
+      position: { ...EXIT_PORTAL_POS },
+      velocity: { x: 0, y: 0 },
+      size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
+      rotation: 0,
+      color: '#34d399', // emerald — outgoing
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+    };
+    const spawnPortal: GameEntity = {
+      id: nextId('jam-portal-spawn'),
+      type: EntityType.INTERACTABLE,
+      name: 'JAM_PORTAL_SPAWN',
+      position: { ...SPAWN_PORTAL_POS },
+      velocity: { x: 0, y: 0 },
+      size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
+      rotation: 0,
+      color: '#a855f7', // violet — incoming
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+    };
+    this.currentMap.entities.push(exitPortal, spawnPortal);
+  }
+
+  // Apply state captured by readPortalEntryParams() to the player.
+  // - `?portal=true` lands the player on the spawn portal so the next
+  //   game in the webring isn't a stranded teleport into the middle.
+  // - `?speed=` seeds initial velocity so a fast incoming player doesn't
+  //   jolt to a stop.
+  private applyJamPortalEntryState() {
+    if (!this.jamPortalEntry.isFromPortal) return;
+    this.player.position = { ...SPAWN_PORTAL_POS };
+    if (this.jamPortalEntry.speed && this.jamPortalEntry.speed > 0) {
+        // Send the player toward the centre of the arena so they read
+        // the in-portal as a one-way arrival rather than facing back
+        // out; magnitude clamped to the standard player MAX_SPEED.
+        const target = { x: 0, y: 0 };
+        const dx = target.x - SPAWN_PORTAL_POS.x;
+        const dy = target.y - SPAWN_PORTAL_POS.y;
+        const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+        const speed = Math.min(this.jamPortalEntry.speed, PHYSICS_CONSTANTS.MAX_SPEED);
+        this.player.velocity = { x: (dx / mag) * speed, y: (dy / mag) * speed };
+    }
+    this.camera.position = { ...this.player.position };
+  }
+
+  // Per-frame proximity check: if the player overlaps the exit portal,
+  // hand off to the Vibe Jam portal redirector with player state.
+  private checkJamExitPortal() {
+    if (!VIBE_JAM_MODE || !this.currentMap) return;
+    if (this.gameState !== GameState.PLAYING) return;
+    if (this.player.isExploding || !this.player.active) return;
+    const ents = this.currentMap.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (e.name !== 'JAM_PORTAL_EXIT' || !e.active) continue;
+      const dx = wrapDeltaX(this.player.position.x, e.position.x);
+      const dy = wrapDeltaY(this.player.position.y, e.position.y);
+      const r  = PORTAL_RADIUS + this.player.size.x * 0.5;
+      if (dx * dx + dy * dy <= r * r) {
+        const speed = Math.sqrt(
+            this.player.velocity.x * this.player.velocity.x +
+            this.player.velocity.y * this.player.velocity.y,
+        );
+        const url = buildPortalExitUrl({
+          username: this.jamPortalEntry.username,
+          color: this.jamPortalEntry.color,
+          speed: Math.round(speed),
+          // Forward our own URL as `ref` so the next game in the ring
+          // can credit/return; falls back to the inbound ref so a long
+          // chain of portals still keeps the original origin visible.
+          ref: typeof window !== 'undefined' ? window.location.host : this.jamPortalEntry.ref,
+        });
+        if (typeof window !== 'undefined') window.location.href = url;
+        return;
+      }
     }
   }
 
@@ -439,6 +566,16 @@ export class GameEngine {
       this.camera.shakeOffset = { x: 0, y: 0 };
 
       this.gameState = GameState.MENU;
+
+      // Vibe Jam build: re-seed portals into the freshly-loaded map and
+      // skip the menu round-trip so the restart button drops straight
+      // back into the arena (the menu UI is hidden in this mode anyway).
+      if (VIBE_JAM_MODE) {
+          this.seedJamPortals();
+          this.applyJamPortalEntryState();
+          this.startGame();
+      }
+
       this.prepareFrameEntities();
   }
 
@@ -1258,6 +1395,8 @@ export class GameEngine {
     }
     this.activeDrops.length = dropWriteIdx;
 
+    // Vibe Jam exit portal — redirect when the player crosses the ring.
+    this.checkJamExitPortal();
 
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;

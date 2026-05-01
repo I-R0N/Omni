@@ -3,21 +3,27 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { EngineStats, MapType, GameState } from './types';
 import UIOverlay from './components/UIOverlay';
+import { VIBE_JAM_MODE, JAM_DIFFICULTY } from './vibejam';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
-  
+
+  // Vibe Jam build skips the menu, so seed initial difficulty and the
+  // initial gameState directly to the in-game values.
+  const initialDifficulty = VIBE_JAM_MODE ? JAM_DIFFICULTY : 3;
+  const initialGameState  = VIBE_JAM_MODE ? GameState.PLAYING : GameState.MENU;
+
   const [stats, setStats] = useState<EngineStats>({
     fps: 0,
     entityCount: 0,
     currentMapName: 'Initializing',
     currentMapType: MapType.UNIVERSE,
     currentWeapon: 'Blaster',
-    gameState: GameState.MENU,
-    difficulty: 3
+    gameState: initialGameState,
+    difficulty: initialDifficulty,
   });
-  const [difficulty, setDifficulty] = useState<number>(3);
+  const [difficulty, setDifficulty] = useState<number>(initialDifficulty);
   const [mapType, setMapType] = useState<MapType>(MapType.UNIVERSE);
   // Mirror difficulty into a ref so the one-shot mount effect below can
   // read the latest value without closing over stale state.
@@ -61,6 +67,11 @@ const App: React.FC = () => {
     handleResize(); // Set initial size before first frame
     engine.start();
     engineRef.current = engine;
+
+    // Vibe Jam build: drop straight into the arena without a menu.
+    if (VIBE_JAM_MODE) {
+      engine.startGame();
+    }
 
     window.addEventListener('resize', handleResize);
 
