@@ -437,6 +437,17 @@ export interface PerfSnapshot {
   // pass can be A/B'd against the twinkle / background-puff ablation
   // toggles.
   nebulaMs: number;
+  // Prototype WebGL renderer cost (ms).  When the DBG → WebGL toggle is
+  // off this is 0 and renderMs reflects the full Canvas2D cost.  When
+  // on, renderMs drops by the background + tile cost (now in WebGL) and
+  // webglMs reports what moved.  Sum (renderMs + webglMs) is the
+  // apples-to-apples per-frame total.
+  webglMs: number;
+  // Tile-instance counts surfaced for the WebGL pass — visible vs total
+  // baked.  `lastVisibleTileCount` is what actually rasterised; the gap
+  // tells you how many destroyed tiles are sitting idle in the buffer.
+  webglVisibleTiles: number;
+  webglTotalTiles: number;
   // Visible-nebula-entity count post frustum cull (latest frame, not
   // averaged).  Lets the user weigh nebulaMs against how many tiles the
   // pass is actually iterating — at default zoom 0.65 the visible

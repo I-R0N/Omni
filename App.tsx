@@ -6,6 +6,7 @@ import UIOverlay from './components/UIOverlay';
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const webglCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   
   const [stats, setStats] = useState<EngineStats>({
@@ -33,34 +34,39 @@ const App: React.FC = () => {
     }, difficultyRef.current);
 
     const handleResize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
       if (canvasRef.current) {
         const canvas = canvasRef.current;
-        const dpr = window.devicePixelRatio || 1;
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-
-        // Match CSS size
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
-
-        // Set internal resolution for HiDPI displays
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
-
-        // Reset transform before scaling
         const context = canvas.getContext('2d');
         if (context) {
           context.setTransform(1, 0, 0, 1, 0, 0);
           context.scale(dpr, dpr);
         }
       }
+      if (webglCanvasRef.current) {
+        const wc = webglCanvasRef.current;
+        wc.style.width = `${width}px`;
+        wc.style.height = `${height}px`;
+        // Three.js owns the backing-store size via setSize+setPixelRatio.
+      }
+      engineRef.current?.handleResize(width, height);
     };
 
     const ctx = canvasRef.current.getContext('2d')!;
-    engine.initCanvas(ctx);
+    engine.initCanvas(ctx, webglCanvasRef.current);
+    // Set engineRef BEFORE the initial resize so handleResize can forward
+    // dimensions to engine.handleResize on the very first call (the WebGL
+    // renderer needs them to size its drawing buffer / uResolution).
+    engineRef.current = engine;
     handleResize(); // Set initial size before first frame
     engine.start();
-    engineRef.current = engine;
 
     window.addEventListener('resize', handleResize);
 
@@ -104,6 +110,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleDebug();
   };
 
+  const handleToggleWebGL = () => {
+      if (engineRef.current) engineRef.current.toggleWebGL();
+  };
+
   const handleSetMapType = (type: MapType) => {
       setMapType(type);
       if (engineRef.current) engineRef.current.setMapType(type);
@@ -127,9 +137,16 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden select-none">
-      <canvas 
-        ref={canvasRef} 
-        className="block w-full h-full"
+      {/* WebGL canvas sits behind the Canvas2D one — when the prototype
+          WebGL renderer is enabled it paints background + static tiles;
+          otherwise it stays inert and the 2D canvas paints everything. */}
+      <canvas
+        ref={webglCanvasRef}
+        className="block absolute inset-0 w-full h-full"
+      />
+      <canvas
+        ref={canvasRef}
+        className="block absolute inset-0 w-full h-full"
       />
       <UIOverlay
         stats={stats}
@@ -139,6 +156,7 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
+        onToggleWebGL={handleToggleWebGL}
         onToggleNebulaSet={handleToggleNebulaSet}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}

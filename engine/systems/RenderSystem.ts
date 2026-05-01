@@ -76,10 +76,21 @@ function roundRectPath(
     ctx.closePath();
 }
 
+// Minimal interface the RenderSystem needs from the prototype WebGL
+// renderer.  Importing the class directly would create a render→webgl
+// dependency that's awkward for the WebGL module's own (currently nil)
+// imports from RenderSystem; this keeps the coupling one-way.
+interface WebGLBridge { isEnabled(): boolean; }
+
 export class RenderSystem {
   private ctx: CanvasRenderingContext2D | null = null;
   private backgroundManager: BackgroundManager;
   private debugMode: boolean = false;
+  // Set by GameEngine after construction.  When non-null and enabled,
+  // RenderSystem skips its background draw and all static structure /
+  // nebula tile rendering — those layers are painted by the WebGL canvas
+  // sitting BEHIND this one (see WebGLRenderer + App.tsx).
+  private webgl: WebGLBridge | null = null;
   // Player trail shape — selectable from the debug panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
 
@@ -105,6 +116,8 @@ export class RenderSystem {
   public lastNebulaSlowCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
+  public setWebGLRenderer(w: WebGLBridge) { this.webgl = w; }
+  private webglOn(): boolean { return !!this.webgl && this.webgl.isEnabled(); }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
@@ -481,6 +494,12 @@ export class RenderSystem {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
+            // WebGL prototype: static tiles render via InstancedMesh on
+            // the WebGL canvas — skip the Canvas2D bucket entirely so
+            // we don't double-draw and so the perf delta is honest.
+            // (Drops the regen-ghost outline as a small visual cost; the
+            // prototype trades visual fidelity here for clean A/B perf.)
+            if (this.webglOn()) continue;
             this._visibleEntities.push({ entity, rx, ry });
             continue;
         }
@@ -521,7 +540,14 @@ export class RenderSystem {
             // Nebula entities render as a dedicated bottom layer so
             // asteroids / actors / projectiles always draw on top of
             // them, regardless of entity array order.
-            this._nebulaEntities.push({ entity, rx, ry });
+            // WebGL prototype: static nebula TILES render via instanced
+            // hex meshes in WebGL.  Mobile nebula SHARDS still go
+            // through the Canvas2D path (they have rotation, motion-
+            // dependent opacity, and bond animations the prototype
+            // doesn't model).
+            if (!(this.webglOn() && entity.shardVariant === 'nebula-tile')) {
+                this._nebulaEntities.push({ entity, rx, ry });
+            }
         } else {
             this._visibleEntities.push({ entity, rx, ry });
         }
@@ -546,9 +572,14 @@ export class RenderSystem {
 
     // 1. Clear & Background
     ctx.clearRect(0, 0, width, height);
-    
-    // Pass attractors and ZOOM to background for star warping
-    this.backgroundManager.render(ctx, camera.position, this._attractors, camera.zoom);
+
+    // Pass attractors and ZOOM to background for star warping.  When the
+    // prototype WebGL renderer is on, the WebGL canvas underneath is
+    // painting background + tiles, and this layer must stay transparent
+    // so they show through — skip the background pass entirely.
+    if (!this.webglOn()) {
+        this.backgroundManager.render(ctx, camera.position, this._attractors, camera.zoom);
+    }
 
     // 2. Camera Transform
     ctx.save();

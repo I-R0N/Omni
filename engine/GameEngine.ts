@@ -3,6 +3,7 @@
 import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
+import { WebGLRenderer } from './systems/WebGLRenderer';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -32,6 +33,10 @@ export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
   private renderer: RenderSystem;
+  // Prototype WebGL renderer — paints background + static tiles when
+  // enabled (see toggleWebGL).  RenderSystem checks `webgl.isEnabled()`
+  // to skip its own background pass and static-tile fast-paths.
+  private webgl: WebGLRenderer;
   private ai: AISystem;
   private particles: ParticleSystem;
   private trails: TrailSystem;
@@ -169,6 +174,7 @@ export class GameEngine {
   // and paused states as well, so this is tracked on its own cursor)
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfWebGL          = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -260,6 +266,8 @@ export class GameEngine {
     this.input = new InputSystem();
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
+    this.webgl = new WebGLRenderer();
+    this.renderer.setWebGLRenderer(this.webgl);
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();
@@ -344,8 +352,38 @@ export class GameEngine {
     }
   }
 
-  public initCanvas(ctx: CanvasRenderingContext2D) {
+  public initCanvas(ctx: CanvasRenderingContext2D, webglCanvas: HTMLCanvasElement | null = null) {
     this.renderer.setContext(ctx);
+    if (webglCanvas) {
+      this.webgl.setCanvas(webglCanvas);
+      // Hidden by default until the user flips the DBG → WebGL toggle.
+      this.webgl.setEnabled(false);
+    }
+  }
+
+  /**
+   * Called from App.tsx whenever the window resizes.  Forwards CSS-pixel
+   * dimensions to the WebGL renderer so it can resize its drawing buffer
+   * + update its uResolution uniform.  The Canvas2D side already
+   * reconfigures itself in App.tsx's resize handler.
+   */
+  public handleResize(widthCss: number, heightCss: number) {
+    this.webgl.resize(widthCss, heightCss);
+  }
+
+  /**
+   * Toggle the prototype WebGL background + tile renderer.  When on, the
+   * Canvas2D layer becomes transparent (skips background fill) and skips
+   * its static-tile fast-paths; tiles + starfield + nebula puffs render
+   * via the WebGL canvas underneath.
+   */
+  public toggleWebGL() {
+    this.webgl.setEnabled(!this.webgl.isEnabled());
+    // Re-upload tiles whenever WebGL flips on.  Cheap (one-time per map),
+    // and avoids stale state if the map was loaded while WebGL was off.
+    if (this.webgl.isEnabled() && this.currentMap) {
+      this.webgl.setStaticTiles(this.currentMap.entities);
+    }
   }
 
   public start() {
@@ -1699,12 +1737,22 @@ export class GameEngine {
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // WebGL prototype: bake every static tile into per-variant
+      // InstancedMeshes once, here.  No-op when WebGL is disabled — the
+      // call only allocates GPU buffers, which idle harmlessly.  Always
+      // run on map load so the toggle is instant when the user flips it.
+      this.webgl.setStaticTiles(map.entities);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
   }
 
   private draw() {
       if (!this.currentMap) return;
+
+      // WebGL pass first — paints background + static tiles into the
+      // canvas BEHIND the Canvas2D one.  No-op when disabled, so the
+      // per-frame cost of the toggle off is a single boolean check.
+      this.webgl.render(this.camera);
 
       this.renderer.render(
           this.frameEntities,
@@ -1745,6 +1793,7 @@ export class GameEngine {
   private recordRenderPerf() {
       this.perfRender[this.perfRenderIdx] = this.renderer.lastRenderMs;
       this.perfNebula[this.perfRenderIdx] = this.renderer.lastNebulaMs;
+      this.perfWebGL[this.perfRenderIdx]  = this.webgl.lastWebGLMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -1789,6 +1838,9 @@ export class GameEngine {
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),
+          webglMs:        GameEngine.ringAvg(this.perfWebGL,        this.perfRenderFilled),
+          webglVisibleTiles: this.webgl.lastVisibleTileCount,
+          webglTotalTiles:   this.webgl.lastTotalTileCount,
           nebulaVisible:  this.renderer.lastNebulaVisible,
           nebulaFast:     this.renderer.lastNebulaFastCount,
           nebulaSlow:     this.renderer.lastNebulaSlowCount,

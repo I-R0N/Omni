@@ -10,6 +10,7 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onToggleDebug?: () => void;
+  onToggleWebGL?: () => void;
   onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -28,6 +29,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onToggleDebug,
+  onToggleWebGL,
   onToggleNebulaSet,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -74,6 +76,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {stats.debugMode && (
             <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
               <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
+
+              {/* Prototype WebGL renderer toggle — bg + tiles to GPU */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">WebGL</span>
+                <button
+                  onClick={onToggleWebGL}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle prototype WebGL renderer (background + static tiles via three.js InstancedMesh)"
+                >
+                  {(perf?.webglMs ?? 0) > 0 ? 'On' : 'Off'}
+                </button>
+              </div>
 
               {/* Nebula-set A/B toggle — compares Nebula00-08 vs Nebula09-16 */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -156,6 +170,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
+                  <div className="flex justify-between"><span>webgl</span><span className="text-white">{fmtMs(perf.webglMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·tiles</span><span className="text-white">{perf.webglVisibleTiles}/{perf.webglTotalTiles}</span></div>
+                  <div className="flex justify-between"><span>render+webgl</span><span className="text-white">{fmtMs(perf.renderMs + perf.webglMs)}</span></div>
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>
