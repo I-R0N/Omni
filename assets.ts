@@ -28,10 +28,14 @@ export type AssetManifest = {
   NEBULA_PUFF: string;
 };
 
-// Placeholder path used for assets that have no real image yet.
-// A local 404 completes in milliseconds and lets the canvas fallback
-// render immediately, without hanging external HTTP requests.
-const PLACEHOLDER = '/assets/placeholder.png';
+// Sentinel string used for assets that have no real image yet.
+// RenderSystem.getImage skips src assignment for non-URL values, so
+// this never triggers a network request — the cached Image stays
+// !naturalWidth and sprite-readiness checks fall through to the
+// procedural canvas fallback.  Switched from '/assets/placeholder.png'
+// (which 404'd by design but logged on every load) so the dev console
+// stays clean.
+const PLACEHOLDER = '__placeholder__';
 
 // Nebula images are auto-discovered at build time by vite.config.ts's
 // nebula-manifest plugin, which scans public/assets/ for every file matching
