@@ -82,10 +82,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">WebGL</span>
                 <button
                   onClick={onToggleWebGL}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  className={`border rounded px-1.5 py-0.5 text-[8px] font-bold transition-colors ${
+                    stats.webglEnabled
+                      ? 'bg-emerald-700/40 border-emerald-400/70 text-emerald-200'
+                      : 'bg-slate-800/70 border-slate-600/60 text-slate-200 hover:border-amber-400/70 hover:text-amber-300'
+                  }`}
                   title="Toggle prototype WebGL renderer (background + static tiles via three.js InstancedMesh)"
                 >
-                  {(perf?.webglMs ?? 0) > 0 ? 'On' : 'Off'}
+                  {stats.webglEnabled ? 'On' : 'Off'}
                 </button>
               </div>
 

@@ -486,6 +486,7 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
+  webglEnabled?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

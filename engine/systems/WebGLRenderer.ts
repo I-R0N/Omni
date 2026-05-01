@@ -61,7 +61,13 @@ export class WebGLRenderer {
     // matrix carries world position + tint, per-instance `aActive` byte
     // gates gl_Position so destroyed tiles vanish without a rebuild.
     private tileGroups: Map<string, InstancedTileGroup> = new Map();
-    private tileMaterial: THREE.ShaderMaterial | null = null;
+    // Two materials — solid for structure variants (glass/reinforced/
+    // heavy/indestructible/rock) and soft alpha-falloff for nebula
+    // tiles, which need to read as cloud-tinted hexes rather than solid
+    // blocks (Canvas2D draws them as alpha-0.55 tinted nebula sprites
+    // with soft edges).  Per-variant material picked in setStaticTiles.
+    private tileMaterialSolid: THREE.ShaderMaterial | null = null;
+    private tileMaterialSoft: THREE.ShaderMaterial | null = null;
     private tileGeometry: THREE.BufferGeometry | null = null;
 
     // Per-frame perf — read by GameEngine.recordRenderPerf and surfaced
@@ -143,7 +149,7 @@ export class WebGLRenderer {
             this.scene.remove(g.mesh);
         }
         this.tileGroups.clear();
-        if (!this.tileMaterial || !this.tileGeometry) return;
+        if (!this.tileMaterialSolid || !this.tileMaterialSoft || !this.tileGeometry) return;
 
         // Bucket by variant
         const buckets = new Map<string, GameEntity[]>();
@@ -164,9 +170,15 @@ export class WebGLRenderer {
             // data is shared (small) and the instance buffer is the
             // expensive part anyway.
             const geom = this.tileGeometry.clone();
-            const mesh = new THREE.InstancedMesh(geom, this.tileMaterial, capacity);
+            const mat = variant === 'nebula-tile'
+                ? this.tileMaterialSoft
+                : this.tileMaterialSolid;
+            const mesh = new THREE.InstancedMesh(geom, mat, capacity);
             mesh.frustumCulled = false; // We do our own torus-aware cull in shader.
-            mesh.renderOrder = 1;
+            // Nebula tiles render BENEATH structure tiles (matches the
+            // Canvas2D dedicated bottom-layer pass that draws nebulae
+            // before everything else).
+            mesh.renderOrder = variant === 'nebula-tile' ? 1 : 2;
             mesh.matrixAutoUpdate = false;
 
             const dummy = new THREE.Object3D();
@@ -251,8 +263,11 @@ export class WebGLRenderer {
             u.uCamera.value.set(camX, camY);
             u.uZoom.value = camera.zoom;
         }
-        if (this.tileMaterial) {
-            const u = this.tileMaterial.uniforms;
+        // Both tile materials share the same uniform value objects (see
+        // initTileMaterial), so updating either one's uniforms propagates
+        // to the other without a duplicate write.
+        if (this.tileMaterialSolid) {
+            const u = this.tileMaterialSolid.uniforms;
             u.uCamera.value.set(camX, camY);
             u.uHalfWorld.value.set(halfWWorld, halfHWorld);
             u.uMapSize.value.set(MAP_WIDTH, MAP_HEIGHT);
@@ -303,17 +318,21 @@ export class WebGLRenderer {
                 // star with random brightness.  Camera offset is scaled by
                 // a per-layer parallax factor so layers drift at different
                 // rates as the player moves.
-                vec3 starLayer(vec2 px, float parallax, float density, float brightness, vec3 tint) {
-                    float CELL = 60.0;
-                    vec2 p = (px - uCamera * parallax * 0.2) / CELL;
+                //
+                // Sign on uCamera is +, not - : when the camera moves +x,
+                // pixel sampling shifts to read from a HIGHER cell-x, so
+                // contents that lived at cell K now appear at screen-x K-Δ.
+                // i.e. stars translate LEFT, matching BackgroundManager's
+                // shiftX→offsetX-= behaviour (and basic parallax intuition).
+                vec3 starLayer(vec2 px, float cellSize, float parallax, float density, float radius, float brightness, vec3 tint) {
+                    vec2 p = (px + uCamera * parallax * 0.2) / cellSize;
                     vec2 cell = floor(p);
                     vec2 sub = fract(p);
                     float seed = hash21(cell);
                     if (seed > density) return vec3(0.0);
-                    // Star position inside the cell (deterministic per cell)
                     vec2 starPos = vec2(hash21(cell + 1.7), hash21(cell + 4.3));
                     float d = distance(sub, starPos);
-                    float r = 0.04 + 0.05 * hash21(cell + 7.1);
+                    float r = radius * (0.6 + 0.6 * hash21(cell + 7.1));
                     float falloff = smoothstep(r, 0.0, d);
                     float bright = brightness * (0.4 + 0.6 * hash21(cell + 9.5));
                     return tint * falloff * bright;
@@ -323,10 +342,17 @@ export class WebGLRenderer {
                     // Pixel coords in CSS pixels, origin top-left.
                     vec2 px = vec2(vUv.x, 1.0 - vUv.y) * uResolution;
                     vec3 acc = vec3(0.0);
-                    // Far / mid / near layers — depth, density, brightness
-                    acc += starLayer(px, 0.05, 0.40, 0.45, vec3(0.85, 0.90, 1.00));
-                    acc += starLayer(px + vec2(371.0, 119.0), 0.20, 0.30, 0.70, vec3(1.00, 0.95, 0.85));
-                    acc += starLayer(px + vec2(817.0, 503.0), 0.55, 0.15, 1.00, vec3(1.00, 0.80, 0.55));
+                    // Six layers — far→near, denser cells + smaller stars
+                    // approximating BackgroundManager's ~24k-star feel.
+                    // Each (cellSize, density, radius) trio controls a
+                    // depth slice; tints lean cool→warm front-to-back to
+                    // mirror the spectral-class palette mix.
+                    acc += starLayer(px,                              22.0, 0.05, 0.55, 0.10, 0.35, vec3(0.85, 0.90, 1.00));
+                    acc += starLayer(px + vec2(311.0, 173.0),         18.0, 0.10, 0.50, 0.10, 0.45, vec3(1.00, 1.00, 1.00));
+                    acc += starLayer(px + vec2(617.0, 419.0),         24.0, 0.20, 0.45, 0.12, 0.55, vec3(1.00, 0.95, 0.85));
+                    acc += starLayer(px + vec2(901.0, 251.0),         32.0, 0.35, 0.40, 0.13, 0.70, vec3(1.00, 0.92, 0.78));
+                    acc += starLayer(px + vec2( 73.0, 547.0),         40.0, 0.55, 0.30, 0.15, 0.85, vec3(1.00, 0.85, 0.65));
+                    acc += starLayer(px + vec2(457.0, 829.0),         48.0, 0.85, 0.20, 0.18, 1.05, vec3(1.00, 0.75, 0.50));
                     gl_FragColor = vec4(acc, 1.0);
                 }
             `,
@@ -345,10 +371,12 @@ export class WebGLRenderer {
         // (size.x / size.y, set in setStaticTiles).
         // Geometry is a unit hex (apex-distance = 0.5 in both axes) so
         // dummy.scale.set(size.x, size.y, 1) renders at the desired size.
+        // Each vertex carries its local 2D coord in a vLocal varying so
+        // the soft-alpha nebula material can compute distance-from-center
+        // without an extra attribute.
         const verts: number[] = [];
         const idx: number[] = [];
         const n = 6;
-        // Center vertex (0, 0)
         verts.push(0, 0, 0);
         for (let i = 0; i < n; i++) {
             const a = Math.PI / 2 - (i * Math.PI * 2) / n; // pointy-top
@@ -362,58 +390,70 @@ export class WebGLRenderer {
         geom.setIndex(idx);
         this.tileGeometry = geom;
 
-        this.tileMaterial = new THREE.ShaderMaterial({
+        // Shared uniforms — both materials reference the same Uniform
+        // value objects so updating once in render() propagates to both.
+        const sharedUniforms = {
+            uCamera: { value: new THREE.Vector2(0, 0) },
+            uHalfWorld: { value: new THREE.Vector2(1, 1) },
+            uMapSize: { value: new THREE.Vector2(MAP_WIDTH, MAP_HEIGHT) },
+            uHalfMap: { value: new THREE.Vector2(HALF_MAP_WIDTH, HALF_MAP_HEIGHT) },
+        };
+
+        const vertexShader = `
+            // ShaderMaterial does NOT auto-include the THREE chunk that
+            // declares instanceMatrix when USE_INSTANCING is on, so
+            // declare it ourselves.  Three.js sets up the buffer binding
+            // automatically because the mesh is InstancedMesh.
+            attribute mat4 instanceMatrix;
+            attribute vec3 aColor;
+            attribute float aActive;
+            uniform vec2 uCamera;
+            uniform vec2 uHalfWorld;
+            uniform vec2 uMapSize;
+            uniform vec2 uHalfMap;
+            varying vec3 vColor;
+            varying float vDiscard;
+            varying vec2 vLocal;
+
+            void main() {
+                vColor = aColor;
+                vLocal = position.xy; // unit-hex local coords ([-0.5, 0.5])
+                if (aActive < 0.5) {
+                    // Collapse off-screen — single tri-area waste, no
+                    // fragment work.  Cheaper than per-frame matrix
+                    // rewrites for tiles that flip active state.
+                    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                    vDiscard = 1.0;
+                    return;
+                }
+                vDiscard = 0.0;
+
+                // Instance world position lives in instanceMatrix's
+                // translation; pull it directly to apply torus wrap
+                // before any further transforms.
+                vec3 worldPos = (instanceMatrix * vec4(position, 1.0)).xyz;
+                vec2 d = worldPos.xy - uCamera;
+                if (d.x >  uHalfMap.x) worldPos.x -= uMapSize.x;
+                else if (d.x < -uHalfMap.x) worldPos.x += uMapSize.x;
+                if (d.y >  uHalfMap.y) worldPos.y -= uMapSize.y;
+                else if (d.y < -uHalfMap.y) worldPos.y += uMapSize.y;
+
+                vec2 ndc = (worldPos.xy - uCamera) / uHalfWorld;
+                // Three.js NDC y is up, our world y is down — invert.
+                gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
+            }
+        `;
+
+        // Solid hex — used by glass / reinforced / heavy / indestructible /
+        // rock tile variants.  Matches the Canvas2D fallback look (when the
+        // HEX_STRUCTURE sprite is a placeholder, the slow path renders a
+        // solid polygon fill of entity.color).  Opaque alpha so cheap blend.
+        this.tileMaterialSolid = new THREE.ShaderMaterial({
             depthTest: false,
             depthWrite: false,
-            transparent: true,
-            uniforms: {
-                uCamera: { value: new THREE.Vector2(0, 0) },
-                uHalfWorld: { value: new THREE.Vector2(1, 1) },
-                uMapSize: { value: new THREE.Vector2(MAP_WIDTH, MAP_HEIGHT) },
-                uHalfMap: { value: new THREE.Vector2(HALF_MAP_WIDTH, HALF_MAP_HEIGHT) },
-            },
-            vertexShader: `
-                // ShaderMaterial does NOT auto-include the THREE chunk
-                // that declares instanceMatrix when USE_INSTANCING is on,
-                // so declare it ourselves.  Three.js sets up the buffer
-                // binding automatically because the mesh is InstancedMesh.
-                attribute mat4 instanceMatrix;
-                attribute vec3 aColor;
-                attribute float aActive;
-                uniform vec2 uCamera;
-                uniform vec2 uHalfWorld;
-                uniform vec2 uMapSize;
-                uniform vec2 uHalfMap;
-                varying vec3 vColor;
-                varying float vDiscard;
-
-                void main() {
-                    vColor = aColor;
-                    if (aActive < 0.5) {
-                        // Collapse off-screen — single tri-area waste, no
-                        // fragment work.  Cheaper than per-frame matrix
-                        // rewrites for tiles that flip active state.
-                        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-                        vDiscard = 1.0;
-                        return;
-                    }
-                    vDiscard = 0.0;
-
-                    // Instance world position lives in instanceMatrix's
-                    // translation; pull it directly to apply torus wrap
-                    // before any further transforms.
-                    vec3 worldPos = (instanceMatrix * vec4(position, 1.0)).xyz;
-                    vec2 d = worldPos.xy - uCamera;
-                    if (d.x >  uHalfMap.x) worldPos.x -= uMapSize.x;
-                    else if (d.x < -uHalfMap.x) worldPos.x += uMapSize.x;
-                    if (d.y >  uHalfMap.y) worldPos.y -= uMapSize.y;
-                    else if (d.y < -uHalfMap.y) worldPos.y += uMapSize.y;
-
-                    vec2 ndc = (worldPos.xy - uCamera) / uHalfWorld;
-                    // Three.js NDC y is up, our world y is down — invert.
-                    gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
-                }
-            `,
+            transparent: false,
+            uniforms: sharedUniforms,
+            vertexShader,
             fragmentShader: `
                 precision highp float;
                 varying vec3 vColor;
@@ -421,6 +461,42 @@ export class WebGLRenderer {
                 void main() {
                     if (vDiscard > 0.5) discard;
                     gl_FragColor = vec4(vColor, 1.0);
+                }
+            `,
+        });
+
+        // Soft hex — used by nebula-tile variant.  Distance-from-center
+        // alpha falloff so adjacent tiles blend into each other and the
+        // visual reads as a continuous tinted cloud, matching the Canvas2D
+        // alpha-0.55 tinted-sprite render.  Additive blending so multiple
+        // tiles brighten where they overlap.  Color is also multiplied
+        // upward so dim composition palettes stay readable.
+        this.tileMaterialSoft = new THREE.ShaderMaterial({
+            depthTest: false,
+            depthWrite: false,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            uniforms: sharedUniforms,
+            vertexShader,
+            fragmentShader: `
+                precision highp float;
+                varying vec3 vColor;
+                varying float vDiscard;
+                varying vec2 vLocal;
+                void main() {
+                    if (vDiscard > 0.5) discard;
+                    // Distance from hex center, normalized so the hex apex
+                    // sits at d≈1.0.  Smooth radial falloff for the cloud
+                    // edge softness; centre stays near full intensity.
+                    float d = length(vLocal) * 2.0;
+                    float alpha = smoothstep(1.0, 0.0, d) * 0.55;
+                    // Slight brightness lift so palette colours read against
+                    // black bg.  AdditiveBlending uses src*src.a + dst, so
+                    // emitting (c, alpha) is the right linear additive
+                    // form — emitting (c*alpha, alpha) would add c*alpha²
+                    // and dim the edges quadratically.
+                    vec3 c = vColor * 1.6;
+                    gl_FragColor = vec4(c, alpha);
                 }
             `,
         });
