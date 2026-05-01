@@ -38,6 +38,17 @@ export const JAM_DIFFICULTY = 3;
  *  before enemies arrive. */
 export const JAM_FIRST_WAVE_DELAY = 10;
 
+/** Hard cap on simultaneous mobile shards (rock-shard + glass-shard)
+ *  on the map.  Backstop for the rock-shard free-spawn target — once
+ *  the live count crosses this, the asteroid respawn loop pauses
+ *  until merges / culls bring the total back below.  Caps the
+ *  framerate impact of tile-shatter buildup since glass-shards
+ *  outlive their parents.
+ *
+ *  The free-spawn target itself lives in MAP_POPULATION
+ *  ('rock-shard'.count = 60 for the jam map). */
+export const JAM_MAX_MOBILE_SHARDS = 100;
+
 /** Start (return) portal anchor — players arriving via `?portal=true`
  *  spawn here; touching it sends them back to the inbound `ref` URL.
  *  Falls back to the Vibe Jam home page when no ref is provided. */

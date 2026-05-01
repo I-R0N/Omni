@@ -1345,7 +1345,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   [MapType.UNIVERSE]: {
-    'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
+    'rock-shard': { freeSpawn: { count: 60, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
     // STRUCTURE / NEBULA cluster counts.  Stage 7 inlines the
     // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
     // / OUTER_*); MAP_POPULATION is now the single source of truth.

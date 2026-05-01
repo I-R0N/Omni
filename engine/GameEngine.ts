@@ -24,6 +24,7 @@ import {
     VIBE_JAM_MODE,
     JAM_MAP_SIZE,
     JAM_FIRST_WAVE_DELAY,
+    JAM_MAX_MOBILE_SHARDS,
     SPAWN_PORTAL_POS,
     EXIT_PORTAL_POS,
     PORTAL_RADIUS,
@@ -881,11 +882,22 @@ export class GameEngine {
       const config = getRockShardFreeSpawn(this.currentMap.type);
       const newlyDestroyed: GameEntity[] = [];
       let currentAsteroidCount = 0;
+      // Total mobile shards (rock + glass) — used as a hard cap in the
+      // jam build so a long session of tile shatters can't grow the
+      // shard population unbounded and crater the framerate.  Tile
+      // shatters add glass-shards on top of the rock-shard free-spawn
+      // target; without this gate, repeated bond-and-fail pairs near
+      // the per-merge size cap pile up indefinitely.
+      let currentMobileShardCount = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const e = this.currentMap.entities[i];
-          if (e.shardVariant !== 'rock-shard') continue;
-          currentAsteroidCount++;
-          if (!e.active) newlyDestroyed.push(e);
+          if (e.shardVariant === 'rock-shard') {
+              currentAsteroidCount++;
+              if (e.active && e.mass !== Infinity) currentMobileShardCount++;
+              if (!e.active) newlyDestroyed.push(e);
+          } else if (e.shardVariant === 'glass-shard' && e.active && e.mass !== Infinity) {
+              currentMobileShardCount++;
+          }
       }
       for (const ast of newlyDestroyed) {
           // Asteroid-style shatter is variant-driven via ShardSystem
@@ -893,7 +905,8 @@ export class GameEngine {
           // and the size-floor check now lives inside shatter() too.
           if (this.currentMap) this.shards.shatter(ast, this.currentMap.entities);
       }
-      if (currentAsteroidCount < config.count) {
+      const overMobileCap = VIBE_JAM_MODE && currentMobileShardCount >= JAM_MAX_MOBILE_SHARDS;
+      if (currentAsteroidCount < config.count && !overMobileCap) {
           this.handleAsteroidRespawn(config);
       }
 
