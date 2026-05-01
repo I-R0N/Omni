@@ -1754,7 +1754,9 @@ export class GameEngine {
       // WebGL pass first — paints background + static tiles into the
       // canvas BEHIND the Canvas2D one.  No-op when disabled, so the
       // per-frame cost of the toggle off is a single boolean check.
-      this.webgl.render(this.camera);
+      // Passes the live map entity list so the renderer can pick up
+      // tiles spawned at runtime (shard→tile transmutation).
+      this.webgl.render(this.currentMap.entities, this.camera);
 
       this.renderer.render(
           this.frameEntities,

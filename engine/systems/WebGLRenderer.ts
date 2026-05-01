@@ -136,16 +136,18 @@ export class WebGLRenderer {
     /**
      * Called from GameEngine.loadMap.  Walks the full entity list,
      * extracts every static structure tile (mass=Infinity), and builds
-     * one InstancedMesh per shardVariant.  All instances are baked once
-     * here; per-frame the renderer only updates the `aActive` byte per
-     * tile (cheap) and the camera uniform.  Calling this with a new
-     * entity list disposes the previous groups.
+     * one InstancedMesh per shardVariant.  At runtime, render() also
+     * calls this internally whenever a variant's tile count grows
+     * (shard→tile transmutation spawns new nebula tiles after merge),
+     * so the buffer stays in sync with the live entity set.
      */
     public setStaticTiles(entities: GameEntity[]): void {
-        // Tear down existing groups
+        // Tear down existing groups.  Materials are shared between
+        // groups (solid + soft, see initTileMaterial), so dispose ONLY
+        // the geometry clone — disposing the material here would break
+        // every group built afterwards.
         for (const g of this.tileGroups.values()) {
             g.mesh.geometry.dispose();
-            (g.mesh.material as THREE.Material).dispose?.();
             this.scene.remove(g.mesh);
         }
         this.tileGroups.clear();
@@ -164,72 +166,120 @@ export class WebGLRenderer {
 
         let total = 0;
         for (const [variant, list] of buckets) {
-            const capacity = list.length;
-            // Each group gets its own geometry clone so we can attach
-            // its own InstancedBufferAttribute; the underlying vertex
-            // data is shared (small) and the instance buffer is the
-            // expensive part anyway.
-            const geom = this.tileGeometry.clone();
-            const mat = variant === 'nebula-tile'
-                ? this.tileMaterialSoft
-                : this.tileMaterialSolid;
-            const mesh = new THREE.InstancedMesh(geom, mat, capacity);
-            mesh.frustumCulled = false; // We do our own torus-aware cull in shader.
-            // Nebula tiles render BENEATH structure tiles (matches the
-            // Canvas2D dedicated bottom-layer pass that draws nebulae
-            // before everything else).
-            mesh.renderOrder = variant === 'nebula-tile' ? 1 : 2;
-            mesh.matrixAutoUpdate = false;
-
-            const dummy = new THREE.Object3D();
-            const colorAttr = new Float32Array(capacity * 3);
-            const activeBytes = new Float32Array(capacity);
-            for (let i = 0; i < capacity; i++) {
-                const e = list[i];
-                dummy.position.set(e.position.x, e.position.y, 0);
-                // Hex orientation matches TileGenerator's pointy-top hexes
-                // (createNebulaTileEntity / buildStructureTile use the same
-                // polygon).  Our geometry is already pointy-top so no
-                // rotation is needed.
-                dummy.scale.set(e.size.x, e.size.y, 1);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(i, dummy.matrix);
-                const [r, g, b] = hexToRgb01(e.color);
-                colorAttr[i * 3 + 0] = r;
-                colorAttr[i * 3 + 1] = g;
-                colorAttr[i * 3 + 2] = b;
-                activeBytes[i] = e.active ? 1 : 0;
-            }
-            mesh.instanceMatrix.needsUpdate = true;
-
-            const colorBufAttr = new THREE.InstancedBufferAttribute(colorAttr, 3);
-            geom.setAttribute('aColor', colorBufAttr);
-            const activeAttr = new THREE.InstancedBufferAttribute(activeBytes, 1);
-            activeAttr.setUsage(THREE.DynamicDrawUsage);
-            geom.setAttribute('aActive', activeAttr);
-
-            this.scene.add(mesh);
-            this.tileGroups.set(variant, {
-                variant, mesh, activeAttr,
-                entities: list, activeBytes, capacity,
-            });
-            total += capacity;
+            this.buildGroup(variant, list);
+            total += list.length;
         }
         this.lastTotalTileCount = total;
     }
 
     /**
-     * Per-frame entry point.  Updates the camera uniform, syncs each
-     * tile group's `aActive` attribute from its entities, and fires
-     * one render pass.  No-op when disabled, so it can be called
-     * unconditionally from GameEngine.draw().
+     * Build (or rebuild) one InstancedMesh group for the given variant.
+     * Used by both initial bake (setStaticTiles) and runtime resync
+     * (when transmutation grows a variant's tile count).
      */
-    public render(camera: CameraState): void {
+    private buildGroup(variant: string, list: GameEntity[]): void {
+        if (!this.tileMaterialSolid || !this.tileMaterialSoft || !this.tileGeometry) return;
+        // If a group already exists for this variant, drop its geometry
+        // and remove its mesh from the scene before replacing it.
+        const prev = this.tileGroups.get(variant);
+        if (prev) {
+            prev.mesh.geometry.dispose();
+            this.scene.remove(prev.mesh);
+        }
+
+        const capacity = list.length;
+        const geom = this.tileGeometry.clone();
+        const mat = variant === 'nebula-tile'
+            ? this.tileMaterialSoft
+            : this.tileMaterialSolid;
+        const mesh = new THREE.InstancedMesh(geom, mat, capacity);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = variant === 'nebula-tile' ? 1 : 2;
+        mesh.matrixAutoUpdate = false;
+
+        const dummy = new THREE.Object3D();
+        const colorAttr = new Float32Array(capacity * 3);
+        const activeBytes = new Float32Array(capacity);
+        for (let i = 0; i < capacity; i++) {
+            const e = list[i];
+            dummy.position.set(e.position.x, e.position.y, 0);
+            dummy.scale.set(e.size.x, e.size.y, 1);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+            const [r, g, b] = hexToRgb01(e.color);
+            colorAttr[i * 3 + 0] = r;
+            colorAttr[i * 3 + 1] = g;
+            colorAttr[i * 3 + 2] = b;
+            activeBytes[i] = e.active ? 1 : 0;
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+
+        const colorBufAttr = new THREE.InstancedBufferAttribute(colorAttr, 3);
+        geom.setAttribute('aColor', colorBufAttr);
+        const activeAttr = new THREE.InstancedBufferAttribute(activeBytes, 1);
+        activeAttr.setUsage(THREE.DynamicDrawUsage);
+        geom.setAttribute('aActive', activeAttr);
+
+        this.scene.add(mesh);
+        this.tileGroups.set(variant, {
+            variant, mesh, activeAttr,
+            entities: list, activeBytes, capacity,
+        });
+    }
+
+    /**
+     * Walk the live entity list and rebuild any variant group whose
+     * STRUCTURE+Infinity tile count grew since the last bake — happens
+     * when shard→tile transmutation spawns new nebula tiles after a
+     * merge.  Shrinkage is fine to ignore; destroyed tiles just keep
+     * their slot with aActive=0 (dim cost, no correctness issue).
+     */
+    private resyncTileGroups(entities: GameEntity[]): void {
+        // Bucket the live list once.  Cheap (one pass, ~thousands of
+        // entities max on the densest map) and lets us compare counts
+        // against each baked group's capacity.
+        const lists = new Map<string, GameEntity[]>();
+        for (const e of entities) {
+            if (e.type !== EntityType.STRUCTURE) continue;
+            if (e.mass !== Infinity) continue;
+            const v = e.shardVariant ?? 'glass-tile';
+            let list = lists.get(v);
+            if (!list) { list = []; lists.set(v, list); }
+            list.push(e);
+        }
+        let dirty = false;
+        for (const [variant, list] of lists) {
+            const existing = this.tileGroups.get(variant);
+            if (!existing || list.length > existing.capacity) {
+                this.buildGroup(variant, list);
+                dirty = true;
+            }
+        }
+        if (dirty) {
+            let total = 0;
+            for (const g of this.tileGroups.values()) total += g.capacity;
+            this.lastTotalTileCount = total;
+        }
+    }
+
+    /**
+     * Per-frame entry point.  Detects newly-spawned static tiles
+     * (shard→tile transmutation) and rebuilds any affected variant
+     * group; then updates the camera uniform, syncs each group's
+     * `aActive` attribute from its entities, and fires one render
+     * pass.  No-op when disabled — caller can invoke unconditionally.
+     */
+    public render(entities: GameEntity[], camera: CameraState): void {
         if (!this.enabled || !this.renderer) {
             this.lastWebGLMs = 0;
             return;
         }
         const t0 = performance.now();
+
+        // Pick up tiles that were created since the last bake.  Cheap:
+        // single linear pass over the entity list, only triggers a
+        // group rebuild when a variant's count actually grew.
+        this.resyncTileGroups(entities);
 
         // Sync per-instance active flags
         let visible = 0;
