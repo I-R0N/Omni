@@ -26,6 +26,10 @@ export type AssetManifest = {
   HEX_STRUCTURE_HEAVY: string;
   HEX_STRUCTURE_INDESTRUCTIBLE: string;
   NEBULA_PUFF: string;
+  // Seamless rock surface textures, drawn polygon-clipped onto rock-shard
+  // and rock-tile silhouettes (see RenderSystem rocky-asteroid branch).
+  ROCK_TEXTURE_1: string;
+  ROCK_TEXTURE_2: string;
 };
 
 // Placeholder path used for assets that have no real image yet.
@@ -120,4 +124,6 @@ export const ASSETS: AssetManifest = {
   HEX_STRUCTURE_REINFORCED:     PLACEHOLDER,
   HEX_STRUCTURE_HEAVY:          PLACEHOLDER,
   HEX_STRUCTURE_INDESTRUCTIBLE: PLACEHOLDER,
+  ROCK_TEXTURE_1: '/assets/Rock00.png',
+  ROCK_TEXTURE_2: '/assets/Rock01.png',
 };

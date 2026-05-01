@@ -147,13 +147,6 @@ export abstract class BaseMapLayer {
         y: Math.sin(p.angle) * p.r,
     }));
 
-    let asteroidAssets = [ASSETS.ASTEROID_1, ASSETS.ASTEROID_2, ASSETS.ASTEROID_3, ASSETS.ASTEROID_ICE, ASSETS.ASTEROID_VOLCANIC];
-
-    if (allowedSprites.length > 0) {
-        asteroidAssets = allowedSprites;
-    }
-
-    const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
     const hp = size > 30 ? 2 : 1;
 
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
@@ -187,7 +180,9 @@ export abstract class BaseMapLayer {
         maxHealth: hp,
         polygonPoints: points,
         mass: size,
-        sprite: randomSprite
+        // No sprite — rock-shards render via the polygon-clipped rock-texture
+        // path in RenderSystem (see ASSETS.ROCK_TEXTURE_1/2).  The sprite
+        // branch would draw a square ignoring polygonPoints.
     };
   }
 }

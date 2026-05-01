@@ -330,6 +330,20 @@ export class RenderSystem {
       return c;
   }
 
+  // Deterministic per-shard rock texture pick + sub-rotation.  Uses a
+  // cheap djb2-ish string hash so the same shard id always yields the
+  // same texture and orientation across frames (no allocation, no
+  // GameEntity field).  Static rock-tiles otherwise share rotation=0
+  // and would all sample the texture at the identical orientation.
+  private rockTextureFor(id: string): { src: string; angle: number } {
+      let h = 5381 | 0;
+      for (let i = 0; i < id.length; i++) h = (((h << 5) + h) ^ id.charCodeAt(i)) | 0;
+      const u = (h >>> 0);
+      const src = (u & 1) === 0 ? ASSETS.ROCK_TEXTURE_1 : ASSETS.ROCK_TEXTURE_2;
+      const angle = ((u >>> 1) / 0x7fffffff) * Math.PI * 2;
+      return { src, angle };
+  }
+
   // Helper to load/get images
   private getImage(src: string): HTMLImageElement {
       if (this.images.has(src)) {
@@ -1645,11 +1659,39 @@ export class RenderSystem {
                     ctx.stroke();
 
                 } else {
-                    // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
-                    buildPath();
-                    ctx.globalAlpha = 1.0;
-                    ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
-                    ctx.fill();
+                    // ── Rocky asteroid — polygon-clipped rock texture, with
+                    // a solid-color fallback for hit-flash / texture not yet
+                    // loaded.  Texture is drawn full-bleed inside the polygon
+                    // clip; the polygon (plus existing outline stroke at the
+                    // bottom of this branch) supplies the silhouette.
+                    if (isFlash) {
+                        buildPath();
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = '#ffffff';
+                        ctx.fill();
+                    } else {
+                        const tex = this.rockTextureFor(entity.id);
+                        const rockImg = this.getImage(tex.src);
+                        const haveTexture = rockImg.complete && rockImg.naturalWidth > 0;
+
+                        if (haveTexture) {
+                            ctx.save();
+                            buildPath();
+                            ctx.clip();
+                            // Cover the polygon's bounding circle at any sub-
+                            // rotation.  1.5× matches drawScale used by the
+                            // sprite branch above.
+                            const cover = Math.max(entity.size.x, entity.size.y) * 1.5;
+                            ctx.rotate(tex.angle);
+                            ctx.drawImage(rockImg, -cover / 2, -cover / 2, cover, cover);
+                            ctx.restore();
+                        } else {
+                            buildPath();
+                            ctx.globalAlpha = 1.0;
+                            ctx.fillStyle   = entity.color;
+                            ctx.fill();
+                        }
+                    }
 
                     if (glowColor && !isFlash) {
                         // Subtle powerup color overlay — semi-transparent, mixes with rock color
