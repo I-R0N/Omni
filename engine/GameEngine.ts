@@ -1677,6 +1677,23 @@ export class GameEngine {
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
       this.camera.position = { ...this.player.position };
+
+      // Reset waves to wave 1 on death.  Cull all live enemies and
+      // any in-flight enemy projectiles so the freshly-respawned
+      // player isn't gunned down before they can move, then re-init
+      // the wave system — which on jam mode also re-arms the
+      // JAM_FIRST_WAVE_DELAY breather.
+      if (this.currentMap) {
+          for (const e of this.currentMap.entities) {
+              if (!e.active) continue;
+              if (e.type === EntityType.ENEMY) {
+                  e.active = false;
+              } else if (e.type === EntityType.PROJECTILE && e.ownerType === EntityType.ENEMY) {
+                  e.active = false;
+              }
+          }
+      }
+      this.initWaveSystem();
   }
 
   private handleShooting(target: Vector2) {
