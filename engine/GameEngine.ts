@@ -645,17 +645,30 @@ export class GameEngine {
       // Reset Player
       this.player.position = { x: 0, y: 0 };
       this.player.velocity = { x: 0, y: 0 };
+      this.player.rotation = 0;
+      this.player.isExploding = false;
+      this.player.explosionTimer = undefined;
+      this.player.active = true;
+      this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
       this.player.ammo = {};
       this.player.gold = 0;
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex = 0;
+      this.player.weaponCooldown = 0;
+      this.player.burstQueue = 0;
+      this.player.burstTimer = 0;
+      this.player.ammoPickupFlash = undefined;
+      this.player.powerupGlowColor = undefined;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
       this.damageTexts = [];
+      this.playerMessages = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
       
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
@@ -1240,7 +1253,15 @@ export class GameEngine {
         if (this.player.explosionTimer !== undefined) {
             this.player.explosionTimer -= dt;
             if (this.player.explosionTimer <= 0) {
-                this.respawnPlayer();
+                // Vibe Jam build: full reset on death — fresh map, ammo
+                // wiped, weapon back to BLASTER, waves back to 1, plus
+                // the standard pre-wave breather.  Outside jam mode,
+                // respawnPlayer keeps the existing partial-reset feel.
+                if (VIBE_JAM_MODE) {
+                    this.restartGame();
+                } else {
+                    this.respawnPlayer();
+                }
             }
         }
         this.camera.position.x = this.player.position.x;
@@ -1677,23 +1698,6 @@ export class GameEngine {
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
       this.camera.position = { ...this.player.position };
-
-      // Reset waves to wave 1 on death.  Cull all live enemies and
-      // any in-flight enemy projectiles so the freshly-respawned
-      // player isn't gunned down before they can move, then re-init
-      // the wave system — which on jam mode also re-arms the
-      // JAM_FIRST_WAVE_DELAY breather.
-      if (this.currentMap) {
-          for (const e of this.currentMap.entities) {
-              if (!e.active) continue;
-              if (e.type === EntityType.ENEMY) {
-                  e.active = false;
-              } else if (e.type === EntityType.PROJECTILE && e.ownerType === EntityType.ENEMY) {
-                  e.active = false;
-              }
-          }
-      }
-      this.initWaveSystem();
   }
 
   private handleShooting(target: Vector2) {
