@@ -336,15 +336,23 @@ export class RenderSystem {
           return this.images.get(src)!;
       }
       const img = new Image();
-      img.crossOrigin = "Anonymous"; // Enable CORS for external images
-      img.src = src;
-      img.onerror = () => {
-          // Log once per source to aid debugging missing/blocked assets
-          if (!this.images.has(`${src}-error`)) {
-              console.warn(`Asset failed to load: ${src}`);
-              this.images.set(`${src}-error`, img);
-          }
-      };
+      // Skip src assignment for non-URL sentinels (e.g. 'generated_puff'
+      // — used as a "render procedurally" marker).  Without this guard
+      // the browser tries to GET '/generated_puff' relative to the page
+      // and logs a noisy 404; the empty Image stays !naturalWidth so
+      // sprite-readiness checks fall through to the procedural fallback.
+      const isUrl = src.startsWith('/') || src.startsWith('http') || src.startsWith('data:');
+      if (isUrl) {
+          img.crossOrigin = "Anonymous"; // Enable CORS for external images
+          img.src = src;
+          img.onerror = () => {
+              // Log once per source to aid debugging missing/blocked assets
+              if (!this.images.has(`${src}-error`)) {
+                  console.warn(`Asset failed to load: ${src}`);
+                  this.images.set(`${src}-error`, img);
+              }
+          };
+      }
       this.images.set(src, img);
       return img;
   }
