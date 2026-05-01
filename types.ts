@@ -364,6 +364,15 @@ export interface GameEntity {
   nebulaCachedDx?: number;
   nebulaCachedDy?: number;
   nebulaCachedSize?: number;
+  // ── Render cache (rock-shard / rock-tile) ───────────────────────────────
+  // Per-entity offscreen canvas holding the polygon-clipped rock texture.
+  // Baked lazily by RenderSystem on first draw; reused every subsequent
+  // frame so the hot path is one `drawImage` instead of clip + drawImage.
+  // Invalidated implicitly by reference: `rockBakedFor` snapshots the
+  // polygon array used for the bake, so when ShardSystem reassigns
+  // `polygonPoints` on merge (a new array), the next render rebuilds.
+  rockBakedCanvas?: HTMLCanvasElement;
+  rockBakedFor?: Vector2[];
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;

@@ -351,6 +351,55 @@ export class RenderSystem {
       return { src, angle, ox, oy };
   }
 
+  // Bake the polygon-clipped rock texture once into an offscreen canvas
+  // sized to the entity's bounding box.  The per-frame draw becomes a
+  // single drawImage of this bake, no clip().  Bake is invalidated by
+  // reference: ShardSystem reassigns `polygonPoints` to a new array on
+  // merge, which triggers a rebuild on the next render.
+  private bakeRockTexture(
+      entity: GameEntity,
+      rockImg: HTMLImageElement,
+      angle: number,
+      ox: number,
+      oy: number,
+  ): HTMLCanvasElement {
+      const ZOOM = 3.0;
+      const maxDim = Math.max(entity.size.x, entity.size.y);
+      const cover = maxDim * 1.5 * ZOOM;
+      const maxOff = (cover - maxDim) / (2 * Math.SQRT2);
+
+      // Bake-canvas size = polygon bounding box, rounded up.  Per-frame
+      // draw places the canvas at (-w/2, -h/2) so its centre lines up
+      // with the entity origin (where polygonPoints are expressed).
+      const bakeSize = Math.max(2, Math.ceil(maxDim));
+      const c = document.createElement('canvas');
+      c.width = bakeSize;
+      c.height = bakeSize;
+      const cx = c.getContext('2d')!;
+
+      // Move to canvas centre — polygonPoints are entity-local, centred at 0.
+      cx.translate(bakeSize / 2, bakeSize / 2);
+
+      // Polygon clip (mirrors buildPath() in the slow render path).
+      cx.beginPath();
+      const pts = entity.polygonPoints;
+      if (pts && pts.length > 0) {
+          cx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i].x, pts[i].y);
+      } else {
+          cx.arc(0, 0, maxDim / 2, 0, Math.PI * 2);
+      }
+      cx.closePath();
+      cx.clip();
+
+      // Same per-shard rotation + UV offset as the live path.
+      cx.rotate(angle);
+      cx.translate(ox * maxOff, oy * maxOff);
+      cx.drawImage(rockImg, -cover / 2, -cover / 2, cover, cover);
+
+      return c;
+  }
+
   // Helper to load/get images
   private getImage(src: string): HTMLImageElement {
       if (this.images.has(src)) {
@@ -1682,26 +1731,21 @@ export class RenderSystem {
                         const haveTexture = rockImg.complete && rockImg.naturalWidth > 0;
 
                         if (haveTexture) {
-                            ctx.save();
-                            buildPath();
-                            ctx.clip();
-                            // Texture cover ≫ polygon size so each shard samples
-                            // a small zoomed-in region.  ZOOM bumps the drawn
-                            // texture beyond the polygon's bounding box; the
-                            // hash-derived (ox, oy) shifts which sub-region
-                            // is sampled so neighbouring shards aren't identical.
-                            const ZOOM = 3.0;
-                            const maxDim = Math.max(entity.size.x, entity.size.y);
-                            const cover = maxDim * 1.5 * ZOOM;
-                            // Cap |offset| so the polygon's bounding circle
-                            // (radius maxDim/2) stays inside the rotated
-                            // texture square (radius cover/2).  /√2 keeps the
-                            // L2 magnitude bounded when both axes are at peak.
-                            const maxOff = (cover - maxDim) / (2 * Math.SQRT2);
-                            ctx.rotate(tex.angle);
-                            ctx.translate(tex.ox * maxOff, tex.oy * maxOff);
-                            ctx.drawImage(rockImg, -cover / 2, -cover / 2, cover, cover);
-                            ctx.restore();
+                            // Polygon-clipped texture is baked into a per-
+                            // entity offscreen canvas on first draw and
+                            // reused every frame after.  Eliminates the
+                            // costly per-frame ctx.clip() — Canvas2D's
+                            // typical hot-path bottleneck — at the price
+                            // of one bake per merge (polygon ref change).
+                            if (!entity.rockBakedCanvas
+                                || entity.rockBakedFor !== entity.polygonPoints) {
+                                entity.rockBakedCanvas = this.bakeRockTexture(
+                                    entity, rockImg, tex.angle, tex.ox, tex.oy,
+                                );
+                                entity.rockBakedFor = entity.polygonPoints;
+                            }
+                            const baked = entity.rockBakedCanvas;
+                            ctx.drawImage(baked, -baked.width / 2, -baked.height / 2);
                         } else {
                             buildPath();
                             ctx.globalAlpha = 1.0;
