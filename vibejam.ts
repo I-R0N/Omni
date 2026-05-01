@@ -3,9 +3,10 @@
 // This module is the single switch that turns Omni's standard build
 // into a Vibe Jam 2026 entry: it skips the main-menu / difficulty
 // pickers, drops the player straight into a slightly smaller Deep
-// Space arena on Hard difficulty, and adds an exit portal that
-// hands the player off to the Vibe Jam portal redirector
-// (https://vibej.am/portal/2026 — see https://vibej.am/2026/).
+// Space arena on Hard difficulty, and adds a single portal that
+// serves both as the inbound spawn point (when arriving via
+// `?portal=true`) and the outbound exit (touch to redirect to
+// https://vibej.am/portal/2026 — see https://vibej.am/2026/).
 //
 // The widget badge itself is a separate concern — it's wired up
 // directly in index.html via the official `<script async
@@ -15,9 +16,9 @@ import { Vector2 } from './types';
 
 /**
  * Master switch.  When `true`, App.tsx skips the menu, the engine
- * auto-starts the game on a JAM_MAP_SIZE Deep Space map, and a pair
- * of portals is seeded near spawn.  Flip back to `false` to restore
- * the regular menu-driven build.
+ * auto-starts the game on a JAM_MAP_SIZE Deep Space map, and a
+ * single bidirectional portal is seeded near spawn.  Flip back to
+ * `false` to restore the regular menu-driven build.
  */
 export const VIBE_JAM_MODE = true;
 
@@ -31,16 +32,14 @@ export const JAM_MAP_SIZE = 5000;
 /** Hard difficulty index — matches DIFFICULTY_SCALES indexing. */
 export const JAM_DIFFICULTY = 3;
 
-/** World-space anchor of the exit portal.  Visible from spawn. */
-export const EXIT_PORTAL_POS: Vector2 = { x: 600, y: 0 };
-
-/** World-space anchor of the spawn portal.  Players arriving from
- *  another Vibe Jam game (`?portal=true`) land here. */
-export const SPAWN_PORTAL_POS: Vector2 = { x: -600, y: 0 };
+/** World-space anchor of the bidirectional portal.  Inbound players
+ *  (`?portal=true`) land here; touching it from inside the arena
+ *  redirects out via the Vibe Jam portal redirector. */
+export const PORTAL_POS: Vector2 = { x: 600, y: 0 };
 
 /** Touch radius in world units — once the player gets within this,
- *  the exit portal redirects.  Sized so a fast player can't glance
- *  past it without triggering. */
+ *  the portal redirects.  Sized so a fast player can't glance past
+ *  it without triggering. */
 export const PORTAL_RADIUS = 110;
 
 export interface PortalEntryParams {

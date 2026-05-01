@@ -1945,7 +1945,7 @@ export class RenderSystem {
 
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
-                 const isJamPortal = entity.name === 'JAM_PORTAL_EXIT' || entity.name === 'JAM_PORTAL_SPAWN';
+                 const isJamPortal = entity.name === 'JAM_PORTAL';
                  if (isJamPortal && Number.isFinite(r) && r > 0) {
                      // Vibe Jam portal: pulsing concentric rings + soft
                      // radial bloom keyed off perfNowSec so the swirl
@@ -1998,9 +1998,7 @@ export class RenderSystem {
                  ctx.font = isJamPortal ? 'bold 14px monospace' : '12px monospace';
                  ctx.textAlign = 'center';
                  if (entity.name) {
-                    const label = entity.name === 'JAM_PORTAL_EXIT'  ? 'VIBE JAM PORTAL →'
-                                : entity.name === 'JAM_PORTAL_SPAWN' ? '← VIBE JAM ARRIVAL'
-                                : entity.name;
+                    const label = entity.name === 'JAM_PORTAL' ? 'VIBE JAM PORTAL' : entity.name;
                     ctx.shadowColor = 'black';
                     ctx.shadowBlur = 4;
                     ctx.fillText(label, 0, (entity.size.x / 2) + 20);

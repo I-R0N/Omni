@@ -56,17 +56,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {/* Top-left: debug panel (visible only when debug is on) */}
         <div className="flex flex-col gap-1">
-          {/* Debug toggle button — always visible */}
-          <button
-            onClick={onToggleDebug}
-            className={`pointer-events-auto self-start px-2 py-1 rounded text-[10px] font-mono font-bold tracking-widest border transition-all ${
-              stats.debugMode
-                ? 'bg-amber-500/30 border-amber-400/70 text-amber-300'
-                : 'bg-slate-800/70 border-slate-600/50 text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            DBG
-          </button>
+          {/* Debug toggle button — hidden in the Vibe Jam build. */}
+          {!VIBE_JAM_MODE && (
+            <button
+              onClick={onToggleDebug}
+              className={`pointer-events-auto self-start px-2 py-1 rounded text-[10px] font-mono font-bold tracking-widest border transition-all ${
+                stats.debugMode
+                  ? 'bg-amber-500/30 border-amber-400/70 text-amber-300'
+                  : 'bg-slate-800/70 border-slate-600/50 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              DBG
+            </button>
+          )}
 
           {/* Debug info + perf instrumentation panel.  Shown only while
               debug mode is active (DBG button).  Deliberately small and

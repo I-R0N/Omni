@@ -23,8 +23,7 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDime
 import {
     VIBE_JAM_MODE,
     JAM_MAP_SIZE,
-    EXIT_PORTAL_POS,
-    SPAWN_PORTAL_POS,
+    PORTAL_POS,
     PORTAL_RADIUS,
     readPortalEntryParams,
     buildPortalExitUrl,
@@ -336,6 +335,13 @@ export class GameEngine {
   // preserved when hopping along the webring.
   private jamPortalEntry: PortalEntryParams = { isFromPortal: false };
 
+  // Arm gate for the bidirectional portal: false while the player is
+  // still inside the portal radius after spawning on it (inbound
+  // `?portal=true` flow), true once they've stepped clear.  Prevents
+  // an inbound spawn from instantly re-triggering the outbound
+  // redirect.  Default true so a normal start arms it from frame 0.
+  private jamPortalArmed: boolean = true;
+
   /** Factory for the per-run map class so both the constructor and
    *  restartGame() share a single construction path. */
   private buildMap(type: MapType): BaseMapLayer {
@@ -360,62 +366,57 @@ export class GameEngine {
   }
 
   // ── Vibe Jam portal helpers ────────────────────────────────────────────────
-  // Seed the spawn + exit portal pair into the active map.  Called once at
+  // Seed the single bidirectional portal into the active map.  Called once at
   // construction (after loadMap) and again on restart so a regen pass
   // doesn't leak portals between runs.
   private seedJamPortals() {
     if (!this.currentMap) return;
-    // Drop any stale portals from a previous run before pushing fresh
-    // pair — restartGame() rebuilds the map but the portal seed runs
-    // outside loadMap, so this guard is a defense in depth.
+    // Drop any stale portals from a previous run before pushing a
+    // fresh one — restartGame() rebuilds the map but the portal seed
+    // runs outside loadMap, so this guard is a defense in depth.
     this.currentMap.entities = this.currentMap.entities.filter(e => !e.name?.startsWith('JAM_PORTAL'));
 
-    const exitPortal: GameEntity = {
-      id: nextId('jam-portal-exit'),
+    const portal: GameEntity = {
+      id: nextId('jam-portal'),
       type: EntityType.INTERACTABLE,
-      name: 'JAM_PORTAL_EXIT',
-      position: { ...EXIT_PORTAL_POS },
+      name: 'JAM_PORTAL',
+      position: { ...PORTAL_POS },
       velocity: { x: 0, y: 0 },
       size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
       rotation: 0,
-      color: '#34d399', // emerald — outgoing
+      color: '#34d399', // emerald
       active: true,
       health: 1,
       maxHealth: 1,
       mass: Infinity,
     };
-    const spawnPortal: GameEntity = {
-      id: nextId('jam-portal-spawn'),
-      type: EntityType.INTERACTABLE,
-      name: 'JAM_PORTAL_SPAWN',
-      position: { ...SPAWN_PORTAL_POS },
-      velocity: { x: 0, y: 0 },
-      size: { x: PORTAL_RADIUS * 2, y: PORTAL_RADIUS * 2 },
-      rotation: 0,
-      color: '#a855f7', // violet — incoming
-      active: true,
-      health: 1,
-      maxHealth: 1,
-      mass: Infinity,
-    };
-    this.currentMap.entities.push(exitPortal, spawnPortal);
+    this.currentMap.entities.push(portal);
   }
 
   // Apply state captured by readPortalEntryParams() to the player.
-  // - `?portal=true` lands the player on the spawn portal so the next
-  //   game in the webring isn't a stranded teleport into the middle.
+  // - `?portal=true` lands the player on the portal so the next game
+  //   in the webring isn't a stranded teleport into the middle, and
+  //   disarms the redirect until the player steps clear.
   // - `?speed=` seeds initial velocity so a fast incoming player doesn't
   //   jolt to a stop.
+  // Default (no `?portal=true`): player stays at the map's playerSpawn
+  // and the portal is armed from frame 0.
   private applyJamPortalEntryState() {
-    if (!this.jamPortalEntry.isFromPortal) return;
-    this.player.position = { ...SPAWN_PORTAL_POS };
+    if (!this.jamPortalEntry.isFromPortal) {
+      this.jamPortalArmed = true;
+      return;
+    }
+    this.player.position = { ...PORTAL_POS };
+    // Disarm — re-armed by checkJamExitPortal once the player has
+    // stepped outside the portal radius.
+    this.jamPortalArmed = false;
     if (this.jamPortalEntry.speed && this.jamPortalEntry.speed > 0) {
         // Send the player toward the centre of the arena so they read
         // the in-portal as a one-way arrival rather than facing back
         // out; magnitude clamped to the standard player MAX_SPEED.
         const target = { x: 0, y: 0 };
-        const dx = target.x - SPAWN_PORTAL_POS.x;
-        const dy = target.y - SPAWN_PORTAL_POS.y;
+        const dx = target.x - PORTAL_POS.x;
+        const dy = target.y - PORTAL_POS.y;
         const mag = Math.sqrt(dx * dx + dy * dy) || 1;
         const speed = Math.min(this.jamPortalEntry.speed, PHYSICS_CONSTANTS.MAX_SPEED);
         this.player.velocity = { x: (dx / mag) * speed, y: (dy / mag) * speed };
@@ -423,8 +424,10 @@ export class GameEngine {
     this.camera.position = { ...this.player.position };
   }
 
-  // Per-frame proximity check: if the player overlaps the exit portal,
+  // Per-frame proximity check: if the player overlaps the portal,
   // hand off to the Vibe Jam portal redirector with player state.
+  // Inbound players spawn ON the portal, so the arm flag waits for
+  // them to step clear before allowing a redirect.
   private checkJamExitPortal() {
     if (!VIBE_JAM_MODE || !this.currentMap) return;
     if (this.gameState !== GameState.PLAYING) return;
@@ -432,11 +435,18 @@ export class GameEngine {
     const ents = this.currentMap.entities;
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
-      if (e.name !== 'JAM_PORTAL_EXIT' || !e.active) continue;
+      if (e.name !== 'JAM_PORTAL' || !e.active) continue;
       const dx = wrapDeltaX(this.player.position.x, e.position.x);
       const dy = wrapDeltaY(this.player.position.y, e.position.y);
       const r  = PORTAL_RADIUS + this.player.size.x * 0.5;
-      if (dx * dx + dy * dy <= r * r) {
+      const inside = dx * dx + dy * dy <= r * r;
+      if (!this.jamPortalArmed) {
+        // Inbound spawn — wait for the player to leave the ring once
+        // before we'll start listening for an exit-touch.
+        if (!inside) this.jamPortalArmed = true;
+        return;
+      }
+      if (inside) {
         const speed = Math.sqrt(
             this.player.velocity.x * this.player.velocity.x +
             this.player.velocity.y * this.player.velocity.y,
