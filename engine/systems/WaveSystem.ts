@@ -28,18 +28,44 @@ export class WaveSystem {
   public waveState: 'inactive' | 'active' | 'cleared' | 'complete' = 'inactive';
   public waveGraceTimer: number = 0;
   public announcements: WaveAnnouncement[] = [];
+  // Seconds remaining before wave 0 spawns when init() was given a
+  // non-zero `initialDelay`.  > 0 means we're in the pre-wave window
+  // (no enemies, no banner yet); ticked down by tickInitialDelay().
+  public initialDelay: number = 0;
 
   /** Reset all wave state and spawn wave 0.  Skipped entirely when
    *  enemyScale is 0 (difficulty "None") — the map loads with waves
-   *  disabled: no wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext) {
+   *  disabled: no wave 1 banner, no grace-period cycling, no enemies.
+   *
+   *  When `initialDelay` > 0, defer wave 0's spawn by that many
+   *  seconds.  The engine keeps `waveState = 'inactive'` for the
+   *  duration so HUD code can detect the pre-wave window via
+   *  `initialDelay > 0` and render an onboarding panel. */
+  public init(ctx: WaveSpawnContext, initialDelay: number = 0) {
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
     this.waveGraceTimer = 0;
+    this.initialDelay = 0;
     this.announcements = [];
     if (ctx.enemyScale <= 0) return;
+    if (initialDelay > 0) {
+      this.initialDelay = initialDelay;
+      return;
+    }
     this.spawn(0, ctx);
+  }
+
+  /** Tick down the pre-wave timer set by init({ initialDelay }).
+   *  When it expires, spawn wave 0 — same code path tickGrace uses
+   *  when the post-clear grace period ends. */
+  public tickInitialDelay(dt: number, ctx: WaveSpawnContext) {
+    if (this.initialDelay <= 0) return;
+    this.initialDelay -= dt;
+    if (this.initialDelay <= 0) {
+      this.initialDelay = 0;
+      this.spawn(0, ctx);
+    }
   }
 
   /**

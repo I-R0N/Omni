@@ -23,6 +23,7 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDime
 import {
     VIBE_JAM_MODE,
     JAM_MAP_SIZE,
+    JAM_FIRST_WAVE_DELAY,
     PORTAL_POS,
     PORTAL_RADIUS,
     readPortalEntryParams,
@@ -630,6 +631,7 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+      preWaveTimer: this.waves.initialDelay > 0 ? Math.ceil(this.waves.initialDelay) : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
@@ -1173,7 +1175,10 @@ export class GameEngine {
       });
 
       const graceCtx = this.waveContext();
-      if (graceCtx) this.waves.tickGrace(dt, graceCtx);
+      if (graceCtx) {
+        this.waves.tickInitialDelay(dt, graceCtx);
+        this.waves.tickGrace(dt, graceCtx);
+      }
     }
 
     // Auto-collapse minimap
@@ -1750,7 +1755,10 @@ export class GameEngine {
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
-    this.waves.init(ctx);
+    // Vibe Jam build defers wave 1 by JAM_FIRST_WAVE_DELAY so the
+    // controls panel has a beat on screen before enemies arrive.
+    const initialDelay = VIBE_JAM_MODE ? JAM_FIRST_WAVE_DELAY : 0;
+    this.waves.init(ctx, initialDelay);
   }
 
   private spawnWave(index: number) {

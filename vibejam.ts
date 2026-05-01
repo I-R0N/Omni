@@ -32,6 +32,11 @@ export const JAM_MAP_SIZE = 5000;
 /** Hard difficulty index — matches DIFFICULTY_SCALES indexing. */
 export const JAM_DIFFICULTY = 3;
 
+/** Seconds the engine waits before the first wave spawns.  Gives the
+ *  player a beat to read the controls panel and look at the arena
+ *  before enemies arrive. */
+export const JAM_FIRST_WAVE_DELAY = 10;
+
 /** World-space anchor of the bidirectional portal.  Inbound players
  *  (`?portal=true`) land here; touching it from inside the arena
  *  redirects out via the Vibe Jam portal redirector. */

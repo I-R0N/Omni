@@ -474,6 +474,10 @@ export interface EngineStats {
   waveTotal?: number;
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
+  // Pre-wave countdown shown before wave 1.  Populated only while
+  // WaveSystem.initialDelay > 0; undefined otherwise.  Drives the
+  // onboarding controls panel in UIOverlay.
+  preWaveTimer?: number;
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;

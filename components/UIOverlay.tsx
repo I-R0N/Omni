@@ -21,6 +21,22 @@ interface UIOverlayProps {
   onSetMapType?: (type: MapType) => void;
 }
 
+// Reusable controls block — shown both during the pre-wave countdown
+// and inside the pause menu so players have one consistent place to
+// see how to play the game.
+const ControlsHelp: React.FC<{ compact?: boolean }> = ({ compact }) => (
+  <div className={`flex flex-col items-center gap-1 ${compact ? 'text-xs' : 'text-sm'} text-slate-200 font-medium tracking-wide`}>
+    <div className="flex items-center gap-2">
+      <span className="text-emerald-300 font-bold">TAP</span>
+      <span className="text-slate-400">to shoot</span>
+    </div>
+    <div className="flex items-center gap-2">
+      <span className="text-emerald-300 font-bold">HOLD</span>
+      <span className="text-slate-400">to accelerate</span>
+    </div>
+  </div>
+);
+
 const UIOverlay: React.FC<UIOverlayProps> = ({
   stats,
   onCycleWeapon,
@@ -39,6 +55,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSetMapType,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
+  const preWaveCountdown = stats.preWaveTimer;
+  const isPreWave = stats.gameState === GameState.PLAYING && preWaveCountdown !== undefined;
   const perf = stats.perf;
   // Two-digit ms formatter for the perf overlay.  Values under 10 ms get a
   // decimal so sub-millisecond jitter is still visible; bigger numbers
@@ -275,10 +293,29 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
+      {/* ── Pre-wave onboarding panel ── */}
+      {/* Visible during the initial pre-wave delay (Vibe Jam build).
+          Shows controls + countdown so the player knows how to play
+          and roughly when wave 1 lands.  Auto-dismisses when the
+          countdown expires. */}
+      {isPreWave && (
+        <div className="absolute inset-x-0 bottom-12 flex flex-col items-center pointer-events-none z-40">
+          <div className="bg-slate-900/75 border border-slate-600/60 rounded-xl px-6 py-4 backdrop-blur-sm shadow-2xl flex flex-col items-center gap-3">
+            <ControlsHelp />
+            <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
+              Wave 1 in {preWaveCountdown}s
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Pause Menu ── */}
       {stats.gameState === GameState.PAUSED && (
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50">
-          <h2 className="text-4xl font-bold text-white mb-8 tracking-widest">PAUSED</h2>
+          <h2 className="text-4xl font-bold text-white mb-6 tracking-widest">PAUSED</h2>
+          <div className="mb-8">
+            <ControlsHelp />
+          </div>
           <div className="flex flex-col gap-4 w-56">
             <button
               onClick={onResume}
