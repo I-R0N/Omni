@@ -330,18 +330,25 @@ export class RenderSystem {
       return c;
   }
 
-  // Deterministic per-shard rock texture pick + sub-rotation.  Uses a
-  // cheap djb2-ish string hash so the same shard id always yields the
-  // same texture and orientation across frames (no allocation, no
-  // GameEntity field).  Static rock-tiles otherwise share rotation=0
-  // and would all sample the texture at the identical orientation.
-  private rockTextureFor(id: string): { src: string; angle: number } {
+  // Deterministic per-shard rock texture pick + sub-rotation + UV
+  // offset (fractional, in [-1, +1]).  Uses a cheap djb2-ish string
+  // hash so the same shard id always yields the same sample across
+  // frames (no allocation, no GameEntity field).  Static rock-tiles
+  // otherwise share rotation=0 and would sample the texture's center
+  // identically; the offset breaks repetition once the texture is
+  // zoomed past 1×.
+  private rockTextureFor(id: string): { src: string; angle: number; ox: number; oy: number } {
       let h = 5381 | 0;
       for (let i = 0; i < id.length; i++) h = (((h << 5) + h) ^ id.charCodeAt(i)) | 0;
       const u = (h >>> 0);
       const src = (u & 1) === 0 ? ASSETS.ROCK_TEXTURE_1 : ASSETS.ROCK_TEXTURE_2;
       const angle = ((u >>> 1) / 0x7fffffff) * Math.PI * 2;
-      return { src, angle };
+      // Two more decorrelated axes from cheap LCG steps over the same hash.
+      const a = Math.imul(h, 1103515245) + 12345 | 0;
+      const b = Math.imul(h, 134775813)  + 1     | 0;
+      const ox = ((a >>> 0) / 0xffffffff) * 2 - 1;
+      const oy = ((b >>> 0) / 0xffffffff) * 2 - 1;
+      return { src, angle, ox, oy };
   }
 
   // Helper to load/get images
@@ -1678,11 +1685,21 @@ export class RenderSystem {
                             ctx.save();
                             buildPath();
                             ctx.clip();
-                            // Cover the polygon's bounding circle at any sub-
-                            // rotation.  1.5× matches drawScale used by the
-                            // sprite branch above.
-                            const cover = Math.max(entity.size.x, entity.size.y) * 1.5;
+                            // Texture cover ≫ polygon size so each shard samples
+                            // a small zoomed-in region.  ZOOM bumps the drawn
+                            // texture beyond the polygon's bounding box; the
+                            // hash-derived (ox, oy) shifts which sub-region
+                            // is sampled so neighbouring shards aren't identical.
+                            const ZOOM = 3.0;
+                            const maxDim = Math.max(entity.size.x, entity.size.y);
+                            const cover = maxDim * 1.5 * ZOOM;
+                            // Cap |offset| so the polygon's bounding circle
+                            // (radius maxDim/2) stays inside the rotated
+                            // texture square (radius cover/2).  /√2 keeps the
+                            // L2 magnitude bounded when both axes are at peak.
+                            const maxOff = (cover - maxDim) / (2 * Math.SQRT2);
                             ctx.rotate(tex.angle);
+                            ctx.translate(tex.ox * maxOff, tex.oy * maxOff);
                             ctx.drawImage(rockImg, -cover / 2, -cover / 2, cover, cover);
                             ctx.restore();
                         } else {
