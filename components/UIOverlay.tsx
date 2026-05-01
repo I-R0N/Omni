@@ -11,6 +11,7 @@ interface UIOverlayProps {
   onRestart?: () => void;
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
+  onToggleRockTextureMode?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
   onSkipWave?: () => void;
@@ -29,6 +30,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onRestart,
   onToggleDebug,
   onToggleNebulaSet,
+  onToggleRockTextureMode,
   onCycleTrailShape,
   onCycleTrailEmitMode,
   onSkipWave,
@@ -90,6 +92,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     : stats.nebulaSet === 'N16'
                     ? 'N16 only'
                     : 'ALL'}
+                </button>
+              </div>
+
+              {/* Rock-texture toggle — A/B between Rock00 and Rock01, plus a
+                  per-shard MIX so the production look is one click away. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Rocks</span>
+                <button
+                  onClick={onToggleRockTextureMode}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle MIX (per-shard) → Rock00 only → Rock01 only"
+                >
+                  {stats.rockTextureMode === 'ROCK00'
+                    ? 'Rock00 only'
+                    : stats.rockTextureMode === 'ROCK01'
+                    ? 'Rock01 only'
+                    : 'MIX'}
                 </button>
               </div>
 

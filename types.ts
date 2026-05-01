@@ -373,6 +373,7 @@ export interface GameEntity {
   // `polygonPoints` on merge (a new array), the next render rebuilds.
   rockBakedCanvas?: HTMLCanvasElement;
   rockBakedFor?: Vector2[];
+  rockBakedTexSrc?: string;
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
@@ -471,6 +472,11 @@ export interface PerfSnapshot {
   interactableCount: number; // Drops, portals, POIs
 }
 
+// Rock-texture debug selector.  MIX cycles per-shard (default — hash
+// picks Rock00 or Rock01); ROCK00 / ROCK01 force every rocky entity
+// onto a single texture for A/B comparison.
+export type RockTextureMode = 'MIX' | 'ROCK00' | 'ROCK01';
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
@@ -485,6 +491,7 @@ export interface EngineStats {
   waveGraceTimer?: number;
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
+  rockTextureMode?: RockTextureMode;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   weaponCount?: number;

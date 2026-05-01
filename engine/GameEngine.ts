@@ -15,7 +15,7 @@ import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, RockTextureMode } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -88,6 +88,11 @@ export class GameEngine {
   // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
   // comparison.
   private nebulaSet: NebulaSet = 'ALL';
+  // Rock-texture debug selector — MIX (per-shard hash, default) → ROCK00 →
+  // ROCK01 → MIX.  Toggle pushed to RenderSystem; per-entity bakes
+  // invalidate on next render because tex.src no longer matches the
+  // recorded rockBakedTexSrc.
+  private rockTextureMode: RockTextureMode = 'MIX';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -219,6 +224,20 @@ export class GameEngine {
         }
       }
     }
+  }
+
+  /**
+   * Cycle rock-texture mode: MIX → ROCK00 → ROCK01 → MIX.  Pushed to
+   * RenderSystem so per-shard bakes invalidate on next render (the
+   * cache check compares against tex.src, which the mode override
+   * changes).  No entity walk needed — invalidation is lazy.
+   */
+  public toggleRockTextureMode() {
+    this.rockTextureMode =
+        this.rockTextureMode === 'MIX'    ? 'ROCK00'
+      : this.rockTextureMode === 'ROCK00' ? 'ROCK01'
+      :                                     'MIX';
+    this.renderer.setRockTextureMode(this.rockTextureMode);
   }
 
   /**
@@ -387,6 +406,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      rockTextureMode: this.rockTextureMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
@@ -485,6 +505,7 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
+      rockTextureMode: this.rockTextureMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,

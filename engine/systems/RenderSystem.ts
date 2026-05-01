@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, RockTextureMode } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -82,6 +82,11 @@ export class RenderSystem {
   private debugMode: boolean = false;
   // Player trail shape — selectable from the debug panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
+  // Rock-texture debug selector.  MIX = per-shard hash pick (default,
+  // production look); ROCK00 / ROCK01 force every rocky entity onto a
+  // single texture for A/B comparison.  Cache invalidates automatically
+  // because entity.rockBakedTexSrc no longer matches the picked src.
+  private rockTextureMode: RockTextureMode = 'MIX';
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -106,6 +111,7 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
+  public setRockTextureMode(m: RockTextureMode) { this.rockTextureMode = m; }
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -341,7 +347,13 @@ export class RenderSystem {
       let h = 5381 | 0;
       for (let i = 0; i < id.length; i++) h = (((h << 5) + h) ^ id.charCodeAt(i)) | 0;
       const u = (h >>> 0);
-      const src = (u & 1) === 0 ? ASSETS.ROCK_TEXTURE_1 : ASSETS.ROCK_TEXTURE_2;
+      // Mode override pins all shards to one texture for A/B comparison.
+      // Per-shard angle/offset still come from the hash so individual
+      // shards stay visually distinct.
+      const src =
+          this.rockTextureMode === 'ROCK00' ? ASSETS.ROCK_TEXTURE_1
+        : this.rockTextureMode === 'ROCK01' ? ASSETS.ROCK_TEXTURE_2
+        : ((u & 1) === 0 ? ASSETS.ROCK_TEXTURE_1 : ASSETS.ROCK_TEXTURE_2);
       const angle = ((u >>> 1) / 0x7fffffff) * Math.PI * 2;
       // Two more decorrelated axes from cheap LCG steps over the same hash.
       const a = Math.imul(h, 1103515245) + 12345 | 0;
@@ -1738,11 +1750,13 @@ export class RenderSystem {
                             // typical hot-path bottleneck — at the price
                             // of one bake per merge (polygon ref change).
                             if (!entity.rockBakedCanvas
-                                || entity.rockBakedFor !== entity.polygonPoints) {
+                                || entity.rockBakedFor !== entity.polygonPoints
+                                || entity.rockBakedTexSrc !== tex.src) {
                                 entity.rockBakedCanvas = this.bakeRockTexture(
                                     entity, rockImg, tex.angle, tex.ox, tex.oy,
                                 );
                                 entity.rockBakedFor = entity.polygonPoints;
+                                entity.rockBakedTexSrc = tex.src;
                             }
                             const baked = entity.rockBakedCanvas;
                             ctx.drawImage(baked, -baked.width / 2, -baked.height / 2);
