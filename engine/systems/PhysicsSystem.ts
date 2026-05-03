@@ -581,12 +581,14 @@ export class PhysicsSystem {
                                 const rangeSq = repel.range * repel.range;
                                 if (distSq > 1 && distSq < rangeSq) {
                                     const dist = Math.sqrt(distSq);
-                                    // Linear falloff — peaks at centre,
-                                    // zero at the range edge.  Cheaper
-                                    // than inverse-square and visually
-                                    // indistinguishable at this range.
+                                    // Quadratic falloff — peaks at centre,
+                                    // zero at the range edge.  Steeper
+                                    // outer ramp than linear (force ~0.25
+                                    // at half-range vs 0.5 linear) so the
+                                    // outer field is a soft hint and most
+                                    // of the push comes near the tile.
                                     const t = 1 - dist / repel.range;
-                                    const accel = repel.strength * t * timeScale;
+                                    const accel = repel.strength * t * t * timeScale;
                                     a.velocity.x += (dx / dist) * accel;
                                     a.velocity.y += (dy / dist) * accel;
                                 }
@@ -627,7 +629,7 @@ export class PhysicsSystem {
                         if (distSq > 1 && distSq < rangeSq) {
                             const dist = Math.sqrt(distSq);
                             const t = 1 - dist / repel.range;
-                            const accel = repel.strength * t * timeScale;
+                            const accel = repel.strength * t * t * timeScale;
                             a.velocity.x += (dx / dist) * accel;
                             a.velocity.y += (dy / dist) * accel;
                         }
