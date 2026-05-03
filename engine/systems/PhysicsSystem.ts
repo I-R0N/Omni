@@ -48,6 +48,14 @@ export class PhysicsSystem {
   // at access time so a destroyed attractor stops contributing mid-game.
   private attractorsCache: GameEntity[] = [];
 
+  // Debug-only override for the glass-tile repel strength.  When set,
+  // it replaces `SHARD_VARIANTS[v].repel.strength` at every emitter
+  // site; null means "use the variant config".  Driven by the DBG
+  // panel's REPEL slider.  Today glass-tile is the only emitter, so
+  // a single global override is sufficient — if we add more emitters
+  // later, this becomes a per-variant table.
+  public repelStrengthOverride: number | null = null;
+
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Last-step wall time (ms) for the main update phases.  Written once per
   // update() call and read by GameEngine for the dev perf overlay.  Kept as
@@ -588,7 +596,8 @@ export class PhysicsSystem {
                                     // outer field is a soft hint and most
                                     // of the push comes near the tile.
                                     const t = 1 - dist / repel.range;
-                                    const accel = repel.strength * t * t * timeScale;
+                                    const strength = this.repelStrengthOverride ?? repel.strength;
+                                    const accel = strength * t * t * timeScale;
                                     a.velocity.x += (dx / dist) * accel;
                                     a.velocity.y += (dy / dist) * accel;
                                 }
@@ -629,7 +638,8 @@ export class PhysicsSystem {
                         if (distSq > 1 && distSq < rangeSq) {
                             const dist = Math.sqrt(distSq);
                             const t = 1 - dist / repel.range;
-                            const accel = repel.strength * t * t * timeScale;
+                            const strength = this.repelStrengthOverride ?? repel.strength;
+                            const accel = strength * t * t * timeScale;
                             a.velocity.x += (dx / dist) * accel;
                             a.velocity.y += (dy / dist) * accel;
                         }

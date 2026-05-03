@@ -12,6 +12,7 @@ interface UIOverlayProps {
   onToggleDebug?: () => void;
   onToggleNebulaSet?: () => void;
   onToggleRockTextureMode?: () => void;
+  onSetRepelStrength?: (v: number) => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
   onSkipWave?: () => void;
@@ -31,6 +32,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleDebug,
   onToggleNebulaSet,
   onToggleRockTextureMode,
+  onSetRepelStrength,
   onCycleTrailShape,
   onCycleTrailEmitMode,
   onSkipWave,
@@ -112,6 +114,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     ? 'SOLID'
                     : 'MIX'}
                 </button>
+              </div>
+
+              {/* Glass-tile repel-strength slider — log10 steps from 0.0015
+                  to 1500 (7 stops).  Index = log10(strength / 0.0015), so
+                  the production default 1.5 lands on index 3 (mid). */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Repel</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={6}
+                    step={1}
+                    value={Math.round(Math.log10((stats.repelStrength ?? 1.5) / 0.0015))}
+                    onChange={(e) => onSetRepelStrength?.(0.0015 * Math.pow(10, parseInt(e.target.value, 10)))}
+                    className="w-16 accent-amber-400 cursor-pointer"
+                    title="Glass-tile repel strength — 7 stops, ×10 each (0.0015 → 1500)"
+                  />
+                  <span className="text-slate-200 font-bold text-[8px] w-8 text-right tabular-nums">
+                    {(stats.repelStrength ?? 1.5) >= 1
+                      ? (stats.repelStrength ?? 1.5).toString()
+                      : (stats.repelStrength ?? 1.5).toFixed(4).replace(/0+$/, '')}
+                  </span>
+                </div>
               </div>
 
               {/* Player trail shape selector */}

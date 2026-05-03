@@ -494,6 +494,9 @@ export interface EngineStats {
   debugMode?: boolean;
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   rockTextureMode?: RockTextureMode;
+  // Live glass-tile repel strength (DBG slider override).  Default
+  // mirrors the SHARD_VARIANTS glass-tile config.
+  repelStrength?: number;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   weaponCount?: number;

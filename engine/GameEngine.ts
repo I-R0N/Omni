@@ -93,6 +93,10 @@ export class GameEngine {
   // invalidate on next render because tex.src no longer matches the
   // recorded rockBakedTexSrc.
   private rockTextureMode: RockTextureMode = 'MIX';
+  // Live glass-tile repel-strength override, settable from the DBG
+  // panel.  Default matches the SHARD_VARIANTS glass-tile config so
+  // the slider's middle position is the production value.
+  private repelStrength: number = 1.5;
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -233,6 +237,16 @@ export class GameEngine {
    * mode override changes; SOLID skips the textured branch entirely).
    * No entity walk needed — invalidation is lazy.
    */
+  /**
+   * Set the live glass-tile repel strength (DBG slider).  Pushed to
+   * PhysicsSystem.repelStrengthOverride; the next sim substep uses
+   * the new value.  No bake / cache invalidation needed.
+   */
+  public setRepelStrength(v: number) {
+    this.repelStrength = v;
+    this.physics.repelStrengthOverride = v;
+  }
+
   public toggleRockTextureMode() {
     this.rockTextureMode =
         this.rockTextureMode === 'MIX'    ? 'ROCK00'
@@ -409,6 +423,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       rockTextureMode: this.rockTextureMode,
+      repelStrength: this.repelStrength,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
@@ -508,6 +523,7 @@ export class GameEngine {
       debugMode: this.debugMode,
       nebulaSet: this.nebulaSet,
       rockTextureMode: this.rockTextureMode,
+      repelStrength: this.repelStrength,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       weaponCount: this.currentWeaponIndex + 1,
