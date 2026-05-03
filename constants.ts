@@ -1147,6 +1147,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Outward repel field — pushes player / enemies / non-immune mobile
+    // shards away before the SAT collision fires.  Range must stay
+    // below SPATIAL_GRID_SIZE (120) so the static-grid 3×3 broadphase
+    // visits every affected pair.  ~2.5× HEX_SIZE (22) gives a soft
+    // ~hex-radius-thick corona around each tile.
+    repel: { range: 55, strength: 0.18 },
   },
   'reinforced-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1275,6 +1281,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     onShatterParticles: 'inherit',
     passThrough: false,
+    // Glass-shards drift through the glass-tile repel field — they're
+    // the same substance, so the field doesn't push them away.
+    repelImmune: true,
     spawnsDropsOnDeath: true,
   },
   'nebula-shard': {

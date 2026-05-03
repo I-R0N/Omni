@@ -328,7 +328,7 @@ export class PhysicsSystem {
 
     // Optimized Entity-Entity Collision (Spatial Hash Grid)
     const tCol = performance.now();
-    this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+    this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
     this.lastCollisionsMs = performance.now() - tCol;
 
     this.lastUpdateMs = performance.now() - t0;
@@ -432,6 +432,7 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
+    timeScale: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
@@ -551,9 +552,46 @@ export class PhysicsSystem {
 
                 // Check Dynamic vs Static
                 if (staticCandidates) {
+                    // Pre-compute the dynamic side of the repel-immunity
+                    // check once per scanner.  Projectiles and particles
+                    // are exempt regardless; mobile-shard variants opt
+                    // in via SHARD_VARIANTS[v].repelImmune.
+                    const aRepellable =
+                        a.type !== EntityType.PROJECTILE
+                        && a.type !== EntityType.PARTICLE
+                        && !(a.shardVariant !== undefined
+                             && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
+
                     for (let j = 0; j < staticCandidates.length; j++) {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
+
+                        // Outward repel field emitted by static tiles
+                        // whose variant declares one (today: glass-tile).
+                        // Rides on the broadphase pair we're already
+                        // visiting — adds one variant lookup + one
+                        // distance check + (when in range) a single
+                        // sqrt and velocity nudge per pair.
+                        if (aRepellable && b.shardVariant !== undefined) {
+                            const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                            if (repel !== undefined) {
+                                const dx = wrapDeltaX(b.position.x, a.position.x);
+                                const dy = wrapDeltaY(b.position.y, a.position.y);
+                                const distSq = dx * dx + dy * dy;
+                                const rangeSq = repel.range * repel.range;
+                                if (distSq > 1 && distSq < rangeSq) {
+                                    const dist = Math.sqrt(distSq);
+                                    // Linear falloff — peaks at centre,
+                                    // zero at the range edge.  Cheaper
+                                    // than inverse-square and visually
+                                    // indistinguishable at this range.
+                                    const t = 1 - dist / repel.range;
+                                    const accel = repel.strength * t * timeScale;
+                                    a.velocity.x += (dx / dist) * accel;
+                                    a.velocity.y += (dy / dist) * accel;
+                                }
+                            }
+                        }
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
