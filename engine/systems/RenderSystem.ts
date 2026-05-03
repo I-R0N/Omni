@@ -489,7 +489,16 @@ export class RenderSystem {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
-            this._visibleEntities.push({ entity, rx, ry });
+            // Nebula tiles render as the bottom layer so every other
+            // tile / shard / actor draws on top — must be routed to
+            // the nebula bucket here, not _visibleEntities, otherwise
+            // the variant-aware split at the bottom of this loop
+            // never gets to see them.
+            if (entity.shardVariant === 'nebula-tile') {
+                this._nebulaEntities.push({ entity, rx, ry });
+            } else {
+                this._visibleEntities.push({ entity, rx, ry });
+            }
             continue;
         }
 
