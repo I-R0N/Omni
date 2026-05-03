@@ -474,8 +474,10 @@ export interface PerfSnapshot {
 
 // Rock-texture debug selector.  MIX cycles per-shard (default — hash
 // picks Rock00 or Rock01); ROCK00 / ROCK01 force every rocky entity
-// onto a single texture for A/B comparison.
-export type RockTextureMode = 'MIX' | 'ROCK00' | 'ROCK01';
+// onto a single texture for A/B comparison.  SOLID skips the texture
+// path entirely and falls back to entity.color (slate, the look
+// before the rock textures landed).
+export type RockTextureMode = 'MIX' | 'ROCK00' | 'ROCK01' | 'SOLID';
 
 export interface EngineStats {
   fps: number;

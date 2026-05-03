@@ -563,7 +563,16 @@ export class RenderSystem {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
-            this._visibleEntities.push({ entity, rx, ry });
+            // Nebula tiles share the static-STRUCTURE shape but must
+            // render in the dedicated bottom layer so non-nebula tiles
+            // (rock / glass / reinforced / heavy / indestructible)
+            // always draw on top of them — same guarantee nebula
+            // shards already get from the slow-path dispatch below.
+            if (entity.shardVariant === 'nebula-tile') {
+                this._nebulaEntities.push({ entity, rx, ry });
+            } else {
+                this._visibleEntities.push({ entity, rx, ry });
+            }
             continue;
         }
 
@@ -1736,6 +1745,13 @@ export class RenderSystem {
                         buildPath();
                         ctx.globalAlpha = 1.0;
                         ctx.fillStyle   = '#ffffff';
+                        ctx.fill();
+                    } else if (this.rockTextureMode === 'SOLID') {
+                        // Forced solid-color fallback — the pre-texture look,
+                        // exposed via the DBG ROCKS cycle for A/B comparison.
+                        buildPath();
+                        ctx.globalAlpha = 1.0;
+                        ctx.fillStyle   = entity.color;
                         ctx.fill();
                     } else {
                         const tex = this.rockTextureFor(entity.id);

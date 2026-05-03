@@ -227,15 +227,17 @@ export class GameEngine {
   }
 
   /**
-   * Cycle rock-texture mode: MIX → ROCK00 → ROCK01 → MIX.  Pushed to
-   * RenderSystem so per-shard bakes invalidate on next render (the
-   * cache check compares against tex.src, which the mode override
-   * changes).  No entity walk needed — invalidation is lazy.
+   * Cycle rock-texture mode: MIX → ROCK00 → ROCK01 → SOLID → MIX.
+   * Pushed to RenderSystem so per-shard bakes invalidate on next
+   * render (the cache check compares against tex.src, which the
+   * mode override changes; SOLID skips the textured branch entirely).
+   * No entity walk needed — invalidation is lazy.
    */
   public toggleRockTextureMode() {
     this.rockTextureMode =
         this.rockTextureMode === 'MIX'    ? 'ROCK00'
       : this.rockTextureMode === 'ROCK00' ? 'ROCK01'
+      : this.rockTextureMode === 'ROCK01' ? 'SOLID'
       :                                     'MIX';
     this.renderer.setRockTextureMode(this.rockTextureMode);
   }

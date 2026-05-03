@@ -102,12 +102,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   onClick={onToggleRockTextureMode}
                   className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle MIX (per-shard) → Rock00 only → Rock01 only"
+                  title="Cycle MIX (per-shard) → Rock00 only → Rock01 only → SOLID (no texture)"
                 >
                   {stats.rockTextureMode === 'ROCK00'
                     ? 'Rock00 only'
                     : stats.rockTextureMode === 'ROCK01'
                     ? 'Rock01 only'
+                    : stats.rockTextureMode === 'SOLID'
+                    ? 'SOLID'
                     : 'MIX'}
                 </button>
               </div>
