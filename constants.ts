@@ -1155,7 +1155,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // velocity delta at the tile centre, falling off linearly to zero
     // at `range`; for reference applyGravity caps non-player accel at
     // 5.0 and player accel at 0.2.
-    repel: { range: 200, strength: 15 },
+    repel: { range: 200, strength: 1.5 },
   },
   'reinforced-tile': {
     ...STRUCTURE_TILE_BASE,
