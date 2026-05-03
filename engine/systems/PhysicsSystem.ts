@@ -492,6 +492,16 @@ export class PhysicsSystem {
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
         const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
 
+        // Hoisted: the dynamic side of the repel-immunity check is
+        // pair-independent so we compute it once per scanner instead
+        // of once per (x, y) cell.  Static side (variant.repel
+        // emitter check) still varies per pair and stays inline.
+        const aRepellable =
+            a.type !== EntityType.PROJECTILE
+            && a.type !== EntityType.PARTICLE
+            && !(a.shardVariant !== undefined
+                 && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
+
         // Check 3x3 neighbor cells — cell coords wrap across the seam so
         // entities near the edge see their counterparts on the opposite
         // side of the map.  checkAndResolveCollision handles the world-
@@ -552,16 +562,6 @@ export class PhysicsSystem {
 
                 // Check Dynamic vs Static
                 if (staticCandidates) {
-                    // Pre-compute the dynamic side of the repel-immunity
-                    // check once per scanner.  Projectiles and particles
-                    // are exempt regardless; mobile-shard variants opt
-                    // in via SHARD_VARIANTS[v].repelImmune.
-                    const aRepellable =
-                        a.type !== EntityType.PROJECTILE
-                        && a.type !== EntityType.PARTICLE
-                        && !(a.shardVariant !== undefined
-                             && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
-
                     for (let j = 0; j < staticCandidates.length; j++) {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
@@ -594,6 +594,43 @@ export class PhysicsSystem {
                         }
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                    }
+                }
+            }
+        }
+
+        // Outer-ring repel-only scan — cells in the 5×5 box around the
+        // scanner that the inner 3×3 didn't reach (16 cells).  Lets
+        // glass-tile (and any future variant declaring `repel`) push
+        // out to ranges between SPATIAL_GRID_SIZE and 2× it without
+        // widening the costly SAT broadphase above.  Per cell: a Map
+        // lookup + variant-emitter check; per repel-emitting tile: a
+        // single distance compare and (when in range) one sqrt + one
+        // velocity nudge.  Skipped wholesale for projectiles, particles,
+        // and immune mobile shards.
+        if (aRepellable) {
+            for (let x = -2; x <= 2; x++) {
+                for (let y = -2; y <= 2; y++) {
+                    if (x >= -1 && x <= 1 && y >= -1 && y <= 1) continue;
+                    const key = cellKeyFromCell(cx + x, cy + y);
+                    const cell = this.staticGrid.get(key);
+                    if (!cell) continue;
+                    for (let j = 0; j < cell.length; j++) {
+                        const b = cell[j];
+                        if (!b.active || b.shardVariant === undefined) continue;
+                        const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                        if (repel === undefined) continue;
+                        const dx = wrapDeltaX(b.position.x, a.position.x);
+                        const dy = wrapDeltaY(b.position.y, a.position.y);
+                        const distSq = dx * dx + dy * dy;
+                        const rangeSq = repel.range * repel.range;
+                        if (distSq > 1 && distSq < rangeSq) {
+                            const dist = Math.sqrt(distSq);
+                            const t = 1 - dist / repel.range;
+                            const accel = repel.strength * t * timeScale;
+                            a.velocity.x += (dx / dist) * accel;
+                            a.velocity.y += (dy / dist) * accel;
+                        }
                     }
                 }
             }
