@@ -1150,9 +1150,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Outward repel field — pushes player / enemies / non-immune mobile
     // shards away before the SAT collision fires.  Range must stay
     // below SPATIAL_GRID_SIZE (120) so the static-grid 3×3 broadphase
-    // visits every affected pair.  ~2.5× HEX_SIZE (22) gives a soft
-    // ~hex-radius-thick corona around each tile.
-    repel: { range: 55, strength: 0.18 },
+    // visits every affected pair.  Strength is per-substep velocity
+    // delta at the tile centre, falling off linearly to zero at
+    // `range`; for reference applyGravity caps non-player accel at
+    // 5.0 and player accel at 0.2, so 1.5 is a clearly-felt push
+    // without overpowering player input.
+    repel: { range: 90, strength: 1.5 },
   },
   'reinforced-tile': {
     ...STRUCTURE_TILE_BASE,
