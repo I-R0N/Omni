@@ -116,29 +116,45 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Glass-tile repel-strength slider — log10 steps from 0.0015
-                  to 1500 (7 stops).  Index = log10(strength / 0.0015), so
-                  the production default 1.5 lands on index 3 (mid). */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Repel</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="range"
-                    min={0}
-                    max={6}
-                    step={1}
-                    value={Math.round(Math.log10((stats.repelStrength ?? 1.5) / 0.0015))}
-                    onChange={(e) => onSetRepelStrength?.(0.0015 * Math.pow(10, parseInt(e.target.value, 10)))}
-                    className="w-16 accent-amber-400 cursor-pointer"
-                    title="Glass-tile repel strength — 7 stops, ×10 each (0.0015 → 1500)"
-                  />
-                  <span className="text-slate-200 font-bold text-[8px] w-8 text-right tabular-nums">
-                    {(stats.repelStrength ?? 1.5) >= 1
-                      ? (stats.repelStrength ?? 1.5).toString()
-                      : (stats.repelStrength ?? 1.5).toFixed(4).replace(/0+$/, '')}
-                  </span>
-                </div>
-              </div>
+              {/* Glass-tile repel-strength stepper — log10 stops from 0.0015
+                  to 1500 (7 levels).  Index = log10(strength / 0.0015), so
+                  the production default 1.5 lands on index 3 (mid).  − / +
+                  step one factor of 10 each, clamped at the ends. */}
+              {(() => {
+                const repelStrength = stats.repelStrength ?? 1.5;
+                const idx = Math.round(Math.log10(repelStrength / 0.0015));
+                const stepTo = (delta: number) =>
+                  onSetRepelStrength?.(0.0015 * Math.pow(10, Math.max(0, Math.min(6, idx + delta))));
+                const fmt = repelStrength >= 1
+                  ? repelStrength.toString()
+                  : repelStrength.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+                return (
+                  <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                    <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Repel</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => stepTo(-1)}
+                        disabled={idx <= 0}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
+                        title="Step down ×10"
+                      >
+                        −
+                      </button>
+                      <span className="text-slate-200 font-bold text-[8px] min-w-[2.25rem] text-center tabular-nums">
+                        {fmt}
+                      </span>
+                      <button
+                        onClick={() => stepTo(+1)}
+                        disabled={idx >= 6}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
+                        title="Step up ×10"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Player trail shape selector */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
