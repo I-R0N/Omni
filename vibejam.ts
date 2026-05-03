@@ -49,6 +49,20 @@ export const JAM_FIRST_WAVE_DELAY = 10;
  *  ('rock-shard'.count = 60 for the jam map). */
 export const JAM_MAX_MOBILE_SHARDS = 100;
 
+/** Hard cap on total active dynamic entities (i.e. anything that's
+ *  not a static-mass-Infinity tile).  Static tiles are cheap (one-
+ *  shot static spatial grid + pre-rendered minimap layer), so the
+ *  cap targets the entities that actually drive per-frame cost:
+ *  shards, drops, particles, projectiles, enemies, etc.
+ *
+ *  Once the active dynamic count crosses this, the engine culls the
+ *  oldest non-essential entities (everything except player, enemies,
+ *  static tiles, and the Vibe Jam portals) until the count is back
+ *  below.  Acts as a final framerate safety net when caps further
+ *  upstream (MAX_PARTICLES, MAX_PROJECTILES, JAM_MAX_MOBILE_SHARDS)
+ *  haven't been enough on their own. */
+export const JAM_MAX_ACTIVE_ENTITIES = 1000;
+
 /** Start (return) portal anchor — players arriving via `?portal=true`
  *  spawn here; touching it sends them back to the inbound `ref` URL.
  *  Falls back to the Vibe Jam home page when no ref is provided. */

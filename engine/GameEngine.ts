@@ -25,6 +25,7 @@ import {
     JAM_MAP_SIZE,
     JAM_FIRST_WAVE_DELAY,
     JAM_MAX_MOBILE_SHARDS,
+    JAM_MAX_ACTIVE_ENTITIES,
     SPAWN_PORTAL_POS,
     EXIT_PORTAL_POS,
     PORTAL_RADIUS,
@@ -553,6 +554,58 @@ export class GameEngine {
     if (!this.pendingJamPortal) return;
     this.pendingJamPortal = null;
     if (this.gameState === GameState.PAUSED) this.gameState = GameState.PLAYING;
+  }
+
+  /**
+   * Hard cap on active dynamic entities — backstop framerate fix for
+   * the cases where MAX_PARTICLES / MAX_PROJECTILES / JAM_MAX_MOBILE_
+   * SHARDS upstream haven't been enough on their own.  When the live
+   * non-static-tile active count crosses JAM_MAX_ACTIVE_ENTITIES,
+   * deactivate the oldest non-essential entities (anything but
+   * player, enemies, static tiles, and the Vibe Jam portals) until
+   * the count is back under the cap.
+   *
+   * Age is read off the trailing numeric suffix of `id` — IdAllocator
+   * hands out monotonic counters as `${prefix}_${n}`, so a smaller n
+   * means the entity was spawned earlier.
+   */
+  private enforceEntityCap() {
+    if (!VIBE_JAM_MODE || !this.currentMap) return;
+    const ents = this.currentMap.entities;
+
+    // Count active dynamic entities (the ones the cap targets).
+    let activeDynamic = 0;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (!e.active) continue;
+      if (e.type === EntityType.STRUCTURE && e.mass === Infinity) continue;
+      activeDynamic++;
+    }
+    if (activeDynamic <= JAM_MAX_ACTIVE_ENTITIES) return;
+
+    let toCull = activeDynamic - JAM_MAX_ACTIVE_ENTITIES;
+
+    // Build the cull-eligible set: active, dynamic, not player /
+    // enemy / static tile / portal.  Tag with parsed birth order so
+    // a single sort gives oldest-first.
+    const cullables: { entity: GameEntity; order: number }[] = [];
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (!e.active) continue;
+      if (e.type === EntityType.PLAYER) continue;
+      if (e.type === EntityType.ENEMY)  continue;
+      if (e.type === EntityType.STRUCTURE && e.mass === Infinity) continue;
+      if (e.name && e.name.startsWith('JAM_PORTAL')) continue;
+      const u = e.id.lastIndexOf('_');
+      const order = u >= 0 ? parseInt(e.id.slice(u + 1), 10) || 0 : 0;
+      cullables.push({ entity: e, order });
+    }
+    if (cullables.length === 0) return;
+    cullables.sort((a, b) => a.order - b.order);
+    for (let i = 0; i < cullables.length && toCull > 0; i++) {
+      cullables[i].entity.active = false;
+      toCull--;
+    }
   }
 
   /** Set the map style that the next restart / startGame will use.
@@ -1537,6 +1590,11 @@ export class GameEngine {
     // Vibe Jam portals — open the confirm modal when the player
     // crosses either ring.
     this.checkJamPortals();
+
+    // Final framerate safety net — if the active dynamic entity count
+    // crossed the per-step cap, deactivate the oldest non-essential
+    // entries so prepareFrameEntities sweeps them on the next pass.
+    this.enforceEntityCap();
 
     this.camera.position.x = this.player.position.x;
     this.camera.position.y = this.player.position.y;
