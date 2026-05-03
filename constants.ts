@@ -1155,7 +1155,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // `range`; for reference applyGravity caps non-player accel at
     // 5.0 and player accel at 0.2, so 1.5 is a clearly-felt push
     // without overpowering player input.
-    repel: { range: 90, strength: 1.5 },
+    repel: { range: 90, strength: 15 },
   },
   'reinforced-tile': {
     ...STRUCTURE_TILE_BASE,
