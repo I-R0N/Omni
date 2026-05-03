@@ -183,6 +183,13 @@ export interface GameEntity {
   friction?: number; // Per-entity friction override
   gravityRange?: number; // Radius of gravitational influence
   gravityStrength?: number; // Force multiplier (G * Mass)
+  // Sum of per-substep repel impulse magnitudes from all glass-tile (or
+  // future repel-emitter) tiles in range, written by PhysicsSystem each
+  // substep and read by RenderSystem for the player opacity fade.
+  // Reset to 0 at the start of each substep; only the last substep's
+  // value is rendered (substeps are constant-FIXED_DT so any one of
+  // them is a fair proxy for the current force).
+  repelImpulse?: number;
 
   // AI
   enemySubtype?: EnemySubtype;

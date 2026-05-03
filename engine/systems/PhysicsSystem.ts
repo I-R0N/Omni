@@ -481,6 +481,11 @@ export class PhysicsSystem {
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
 
+        // Reset per-substep repel impulse accumulator before the broadphase
+        // pass writes into it.  Read by RenderSystem (player only today)
+        // for the opacity fade while traversing a glass-tile field.
+        e.repelImpulse = 0;
+
         const key = cellKey(e.position.x, e.position.y);
 
         let cell = this.dynamicGrid.get(key);
@@ -600,6 +605,7 @@ export class PhysicsSystem {
                                     const accel = strength * t * t * timeScale;
                                     a.velocity.x += (dx / dist) * accel;
                                     a.velocity.y += (dy / dist) * accel;
+                                    a.repelImpulse = (a.repelImpulse ?? 0) + accel;
                                 }
                             }
                         }
@@ -642,6 +648,7 @@ export class PhysicsSystem {
                             const accel = strength * t * t * timeScale;
                             a.velocity.x += (dx / dist) * accel;
                             a.velocity.y += (dy / dist) * accel;
+                            a.repelImpulse = (a.repelImpulse ?? 0) + accel;
                         }
                     }
                 }

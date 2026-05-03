@@ -1516,7 +1516,26 @@ export class RenderSystem {
                   const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
+                  // Player-only: fade the sprite as a function of repel
+                  // impulse currently being applied.  Mapped so deep glass
+                  // clusters dim the ship visibly without losing it; min
+                  // opacity 0.4.  Repel impulse is the per-substep accel
+                  // sum from PhysicsSystem; threshold tuned against the
+                  // current strength=0.08 / quadratic-falloff scale, so a
+                  // single tile near minimum distance saturates near full
+                  // fade and a cluster pegs at the floor.
+                  let playerAlpha = 1;
+                  if (entity.type === EntityType.PLAYER && entity.repelImpulse) {
+                      const REPEL_FADE_SCALE = 0.1;
+                      const REPEL_FADE_MAX   = 0.6;
+                      const fade = Math.min(REPEL_FADE_MAX, entity.repelImpulse / REPEL_FADE_SCALE * REPEL_FADE_MAX);
+                      playerAlpha = 1 - fade;
+                      ctx.globalAlpha = playerAlpha;
+                  }
+
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
+
+                  if (playerAlpha < 1) ctx.globalAlpha = 1;
 
                   // Hit flash: re-draw with brightness instead of filling the bounding box (prevents white square)
                   if (entity.hitFlash && entity.hitFlash > 0) {
