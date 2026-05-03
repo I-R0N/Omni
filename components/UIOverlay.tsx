@@ -116,38 +116,40 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Glass-tile repel-strength stepper — log10 stops from 0.0015
-                  to 1500 (7 levels).  Index = log10(strength / 0.0015), so
-                  the production default 1.5 lands on index 3 (mid).  − / +
-                  step one factor of 10 each, clamped at the ends. */}
+              {/* Glass-tile repel-strength stepper — linear 0.01 increments
+                  in [0.01, 0.15].  Boundary buttons grey out at the ends. */}
               {(() => {
-                const repelStrength = stats.repelStrength ?? 1.5;
-                const idx = Math.round(Math.log10(repelStrength / 0.0015));
+                const REPEL_MIN = 0.01;
+                const REPEL_MAX = 0.15;
+                const REPEL_STEP = 0.01;
+                const repelStrength = stats.repelStrength ?? REPEL_MIN;
+                // Snap to step grid so click-to-step lands on clean values
+                // even if the live value drifted by floating-point noise.
+                const snap = (v: number) =>
+                  Math.max(REPEL_MIN, Math.min(REPEL_MAX,
+                    Math.round(v / REPEL_STEP) * REPEL_STEP));
                 const stepTo = (delta: number) =>
-                  onSetRepelStrength?.(0.0015 * Math.pow(10, Math.max(0, Math.min(6, idx + delta))));
-                const fmt = repelStrength >= 1
-                  ? repelStrength.toString()
-                  : repelStrength.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+                  onSetRepelStrength?.(snap(repelStrength + delta * REPEL_STEP));
                 return (
                   <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                     <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Repel</span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => stepTo(-1)}
-                        disabled={idx <= 0}
+                        disabled={repelStrength <= REPEL_MIN + 1e-6}
                         className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
-                        title="Step down ×10"
+                        title="Step down 0.01"
                       >
                         −
                       </button>
                       <span className="text-slate-200 font-bold text-[8px] min-w-[2.25rem] text-center tabular-nums">
-                        {fmt}
+                        {repelStrength.toFixed(2)}
                       </span>
                       <button
                         onClick={() => stepTo(+1)}
-                        disabled={idx >= 6}
+                        disabled={repelStrength >= REPEL_MAX - 1e-6}
                         className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
-                        title="Step up ×10"
+                        title="Step up 0.01"
                       >
                         +
                       </button>

@@ -95,8 +95,8 @@ export class GameEngine {
   private rockTextureMode: RockTextureMode = 'MIX';
   // Live glass-tile repel-strength override, settable from the DBG
   // panel.  Default matches the SHARD_VARIANTS glass-tile config so
-  // the slider's middle position is the production value.
-  private repelStrength: number = 1.5;
+  // the stepper's starting position is the production value.
+  private repelStrength: number = 0.08;
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
