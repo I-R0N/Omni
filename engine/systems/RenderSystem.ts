@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, RockTextureMode } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, SHARD_VARIANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -1516,26 +1516,7 @@ export class RenderSystem {
                   const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
-                  // Player-only: fade the sprite as a function of repel
-                  // impulse currently being applied.  Mapped so deep glass
-                  // clusters dim the ship visibly without losing it; min
-                  // opacity 0.4.  Repel impulse is the per-substep accel
-                  // sum from PhysicsSystem; threshold tuned against the
-                  // current strength=0.08 / quadratic-falloff scale, so a
-                  // single tile near minimum distance saturates near full
-                  // fade and a cluster pegs at the floor.
-                  let playerAlpha = 1;
-                  if (entity.type === EntityType.PLAYER && entity.repelImpulse) {
-                      const REPEL_FADE_SCALE = 0.1;
-                      const REPEL_FADE_MAX   = 0.6;
-                      const fade = Math.min(REPEL_FADE_MAX, entity.repelImpulse / REPEL_FADE_SCALE * REPEL_FADE_MAX);
-                      playerAlpha = 1 - fade;
-                      ctx.globalAlpha = playerAlpha;
-                  }
-
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
-
-                  if (playerAlpha < 1) ctx.globalAlpha = 1;
 
                   // Hit flash: re-draw with brightness instead of filling the bounding box (prevents white square)
                   if (entity.hitFlash && entity.hitFlash > 0) {
@@ -1672,6 +1653,34 @@ export class RenderSystem {
                     ctx.globalAlpha = 0.09;
                     ctx.fillStyle = '#ffffff';
                     ctx.fill();
+                }
+
+                // Layer 2b — repel-field glow.  Tiles brighten as the
+                // player enters their repel field, with intensity tied
+                // directly to the outward force this tile is currently
+                // applying to the player (same quadratic falloff as
+                // PhysicsSystem).  Only glass-tile carries `repel`
+                // today, but the lookup is variant-driven so any future
+                // emitter automatically picks up the visual.
+                if (!isFlash && playerPos && entity.shardVariant !== undefined) {
+                    const repel = SHARD_VARIANTS[entity.shardVariant].repel;
+                    if (repel !== undefined) {
+                        // pdx/pdy were computed above as (player - tile);
+                        // squared distance reuses the same numbers.
+                        const distSq = pdx * pdx + pdy * pdy;
+                        const rangeSq = repel.range * repel.range;
+                        if (distSq < rangeSq) {
+                            const t = 1 - Math.sqrt(distSq) / repel.range;
+                            const intensity = t * t;        // 0 at edge, 1 at centre
+                            ctx.globalAlpha = intensity * 0.85;
+                            // Cyan-200 — clearly hotter than the base
+                            // (186,230,253) layer-1 colour so the lit
+                            // state reads as a deliberate glow, not just
+                            // a brighter fill.
+                            ctx.fillStyle = '#a5f3fc';
+                            ctx.fill();
+                        }
+                    }
                 }
 
                 // Layer 3 — edge stroke (proximity-tinted)
