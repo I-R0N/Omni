@@ -141,8 +141,8 @@ k. After N waves, spawn a portal to a new map.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| e | Offscreen-only enemy wave spawns | code complete on `claude/offscreen-enemy-spawning-vYW3c`; awaiting (d1) before merge | `claude/offscreen-enemy-spawning-vYW3c` | First task. **Bundled with (d1)** in same session/branch/PR. PR base must be `claude/game-feedback-plan-UN3MV`. |
-| d1 | Shared-ammo consolidation | pending — bundled with (e) | (same as e) | Single shared ammo pool. Tune per-shot costs and max-cap to preserve today's shots-per-pickup feel. HUD readout. Mechanical refactor only — **no combat-feel changes**. |
+| e | Offscreen-only enemy wave spawns | shipped (PR #47, merged into plan branch) | `claude/offscreen-enemy-spawning-vYW3c` | First task. **Bundled with (d1)** in same session/branch/PR. |
+| d1 | Shared-ammo consolidation | shipped (PR #47, merged into plan branch) | (same as e) | Single shared ammo pool, per-shot costs tuned to preserve shots-per-pickup feel, dedicated HUD readout box, ammo-drop visual (black core / white rim / white glow). |
 | j | Graceful cleanup + density compaction | pending | `claude/density-cleanup-<suffix>` | Offscreen-priority removal, slow pacing, density-merge for rock/glass/nebula shards. Darker tint baseline. Touches ShardSystem, EntityIndex, render tinting. |
 | g1 | Plastic/metal rename + revisualize | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. Behavior unchanged. |
 | g2 | Dent/deform + break-loose physics | pending | `claude/material-tiles-physics-<suffix>` | Progressive dent on hit → break loose as one durable shard per tile. Plug into (j)'s density system. New variants: `plastic-shard`, `metal-shard`. |
