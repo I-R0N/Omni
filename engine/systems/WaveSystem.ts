@@ -52,7 +52,7 @@ export class WaveSystem {
    * inactive forever so nothing cycles and the "WAVE N" banner never fires.
    */
   public spawn(index: number, ctx: WaveSpawnContext) {
-    const { entities, player, physics, enemyScale, difficultyLevel } = ctx;
+    const { entities, player, physics, enemyScale, difficultyLevel, viewportHalfDiagonal } = ctx;
     if (enemyScale <= 0) return;
     this.waveIndex = index;
     this.waveEnemyIds.clear();
@@ -73,7 +73,12 @@ export class WaveSystem {
       for (let i = 0; i < group.count; i++) {
         const flankIdx = enemyIdx % numFlanks;
         const baseAngle = flankBaseRotation + flankIdx * flankSpacing + (Math.random() - 0.5) * flankSpacing * 0.35;
-        const safeRadius = (ENEMY_VARIANTS[group.subtype].size / 2) + 30;
+        const enemyHalfSize = ENEMY_VARIANTS[group.subtype].size / 2;
+        const safeRadius = enemyHalfSize + 30;
+        // Minimum spawn distance keeps the enemy fully outside the visible
+        // viewport, padded by the configured offscreen margin and the
+        // enemy's own half-size so even its sprite edge stays off-screen.
+        const minSpawnDistance = viewportHalfDiagonal + WAVE_CONSTANTS.OFFSCREEN_MARGIN + enemyHalfSize;
         let x = 0, y = 0;
         // Try up to 8 candidate positions; pick first one clear of static tiles.
         // Candidate positions are wrapped into canonical world coords so spawns
@@ -81,7 +86,7 @@ export class WaveSystem {
         const pos = { x: 0, y: 0 };
         for (let attempt = 0; attempt < 8; attempt++) {
           const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
-          const dist = 550 + Math.random() * 200;
+          const dist = minSpawnDistance + Math.random() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
           pos.x = player.position.x + Math.cos(a) * dist;
           pos.y = player.position.y + Math.sin(a) * dist;
           wrapPosition(pos);
@@ -228,6 +233,11 @@ export interface WaveSpawnContext {
   physics: PhysicsSystem;
   enemyScale: number;
   difficultyLevel: number;
+  /** World-unit half-diagonal of the player's current viewport.  Used by
+   *  spawn() to compute a minimum radial distance that keeps every enemy
+   *  outside the visible window on any aspect ratio.  Computed by the
+   *  caller (GameEngine) at spawn time from window size + camera zoom. */
+  viewportHalfDiagonal: number;
 }
 
 // Re-export for callers that want to destructure a Vector2 from enemy spawn

@@ -820,6 +820,14 @@ export const SHIELD_CONSTANTS = {
 
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
+  // Extra world-unit buffer beyond the visible half-diagonal when picking
+  // wave-spawn radii.  Guarantees enemies materialise comfortably outside
+  // the player's viewport on every aspect ratio.
+  OFFSCREEN_MARGIN: 120,
+  // Radial depth of the spawn ring (added on top of the viewport-derived
+  // minimum distance).  Keeps the ring visually varied without bringing
+  // any spawn point on-screen.
+  SPAWN_RING_SPREAD: 200,
 };
 
 // Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.

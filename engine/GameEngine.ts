@@ -1588,12 +1588,20 @@ export class GameEngine {
    *  through the same factory. */
   private waveContext(): WaveSpawnContext | null {
     if (!this.currentMap) return null;
+    // Read the live window size + camera zoom at spawn time so a recent
+    // browser resize is reflected without needing a resize listener.
+    // halfW/halfH match RenderSystem's viewport math exactly.
+    const zoom = this.camera.zoom || 1;
+    const halfW = (window.innerWidth / 2) / zoom;
+    const halfH = (window.innerHeight / 2) / zoom;
+    const viewportHalfDiagonal = Math.hypot(halfW, halfH);
     return {
       entities: this.currentMap.entities,
       player: this.player,
       physics: this.physics,
       enemyScale: this.enemyScale,
       difficultyLevel: this.difficultyLevel,
+      viewportHalfDiagonal,
     };
   }
 
