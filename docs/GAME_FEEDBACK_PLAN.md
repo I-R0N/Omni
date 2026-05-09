@@ -102,26 +102,42 @@ k. After N waves, spawn a portal to a new map.
 7. **Phase 1 reordering** — (j) moved before (g1)/(g2) so density
    compaction lands as a generic capability across existing shards
    first; (g2) then plugs metal/plastic shards into it additively.
+8. **(d) split into d1 + d2** — original (d) was framed as "consolidate
+   ammo currency + balance drops." User scope expanded it to also
+   include a weapon-system overhaul (gamified damage / ROF / function
+   variety / charge effects, plus green-laser and purple-cannon
+   redesigns). Split:
+   - **(d1)** = mechanical refactor: one shared ammo pool, tune
+     per-shot costs and max-cap to preserve today's "shots per pickup"
+     feel, update HUD/drops. No combat-feel changes. Bundleable with
+     (e).
+   - **(d2)** = weapon overhaul. Begins with an `AskUserQuestion`
+     design phase (taxonomy, per-weapon stat budgets, charge-effect
+     model, green-laser + purple-cannon proposals) — user approves
+     before implementation. Own branch / PR. Must land before (h)
+     since the boss roster references weapon types.
 
 ---
 
-## Phase 1 — Foundation (sequential)
+## Phase 1 — Foundation (mostly sequential)
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| e | Offscreen-only enemy wave spawns | in progress | `claude/wave-offscreen-spawn-<suffix>` | First task. **Bundled with (d)** in same session/branch/PR per user direction (small enough). |
-| d | Unified ammo + health pickups | pending — bundled with (e) | (same as e) | Collapse per-weapon ammo into plain ammo. Touches DropSystem, WEAPONS, HUD ammo readout. Simplifies later balance. |
+| e | Offscreen-only enemy wave spawns | in progress | `claude/wave-offscreen-spawn-<suffix>` | First task. **Bundled with (d1)** in same session/branch/PR per user direction. |
+| d1 | Shared-ammo consolidation | pending — bundled with (e) | (same as e) | Single shared ammo pool. Tune per-shot costs and max-cap to preserve today's shots-per-pickup feel. HUD readout. Mechanical refactor only — **no combat-feel changes**. |
 | j | Graceful cleanup + density compaction | pending | `claude/density-cleanup-<suffix>` | Offscreen-priority removal, slow pacing, density-merge for rock/glass/nebula shards. Darker tint baseline. Touches ShardSystem, EntityIndex, render tinting. |
 | g1 | Plastic/metal rename + revisualize | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. Behavior unchanged. |
 | g2 | Dent/deform + break-loose physics | pending | `claude/material-tiles-physics-<suffix>` | Progressive dent on hit → break loose as one durable shard per tile. Plug into (j)'s density system. New variants: `plastic-shard`, `metal-shard`. |
+| d2 | Weapon system overhaul | pending | `claude/weapon-overhaul-<suffix>` | **Runs in parallel with the j/g1/g2 chain.** Independent code surface (weapons, projectiles). Session begins with up-front `AskUserQuestion` design phase covering function taxonomy, per-weapon stat budgets, charge-effect model, and green-laser + purple-cannon redesigns. User approves before implementation. **Must land before (h)** since the boss roster references weapon types. |
 
 ### Dependency chain
 
 ```
-e ──► d ──► j ──► g1 ──► g2
+e ──► d1 ──┬──► j ──► g1 ──► g2
+           └──► d2  (parallelizable with the j/g1/g2 chain)
 ```
 
-Each task pulls the merged state of the previous before branching.
+Each task pulls the merged state of its predecessor(s) before branching.
 
 ---
 
@@ -164,7 +180,10 @@ each pair.
 
 ## Conflict map
 
-- Phase 1: all touch shard / drop / structure code → strictly sequential.
+- Phase 1 main chain (e → d1 → j → g1 → g2): all touch shard / drop /
+  structure code → strictly sequential.
+- (d2) sits outside that chain — touches weapons / projectiles only.
+  Safe to run in parallel with j/g1/g2 once d1 has merged.
 - Phase 2: all touch WaveSystem → strictly sequential.
 - Phase 3 within-pair: A independent; B shares particle/audio; C shares
   input/UI.
