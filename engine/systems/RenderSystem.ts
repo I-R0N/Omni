@@ -907,6 +907,39 @@ export class RenderSystem {
               continue;
           }
 
+          // Cannon explosion shock ring: radius scales from 0 → full over
+          // the particle's lifetime; alpha fades 1 → 0.  Drawn in `lighter`
+          // composite mode so the ring blooms over enemies/sparks.
+          if (p.isExplosionRing) {
+              const r = p.explosionRadius ?? 0;
+              if (r > 0) {
+                  const life = p.lifetime || 0;
+                  const maxLife = p.maxLifetime || 1;
+                  const lifeRatio = Math.max(0, Math.min(1, life / maxLife));
+                  const expand = 1 - lifeRatio; // 0 at spawn, 1 at end
+                  const radius = r * expand;
+                  const alpha = lifeRatio;     // fade out as it grows
+
+                  // Outer purple ring (the shock front).
+                  ctx.strokeStyle = p.color;
+                  ctx.globalAlpha = alpha;
+                  ctx.lineWidth = 3 + 4 * (1 - lifeRatio); // thickens slightly as it grows
+                  ctx.beginPath();
+                  ctx.arc(rx, ry, radius, 0, Math.PI * 2);
+                  ctx.stroke();
+
+                  // Inner white-hot rim — thinner, brighter, just inside
+                  // the shock front, enhances the "snap" of the impact.
+                  ctx.strokeStyle = '#ffffff';
+                  ctx.globalAlpha = alpha * 0.55;
+                  ctx.lineWidth = 1.5;
+                  ctx.beginPath();
+                  ctx.arc(rx, ry, Math.max(0, radius - 3), 0, Math.PI * 2);
+                  ctx.stroke();
+              }
+              continue;
+          }
+
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
           ctx.globalAlpha = lifeRatio;
           ctx.fillStyle = p.color;

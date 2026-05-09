@@ -351,6 +351,12 @@ export interface GameEntity {
   isLightningArc?: boolean;
   arcPoints?: Vector2[];
 
+  // Cannon explosion ring — when true, RenderSystem draws an expanding
+  // ring particle whose radius scales from 0 → explosionRadius over its
+  // lifetime.  Stroke colour comes from `color`.  Spawned in
+  // GameEngine.applyExplosionAoE alongside the existing spark particles.
+  isExplosionRing?: boolean;
+
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
 

@@ -1676,6 +1676,28 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
 
+      // Expanding shockwave ring — grows from 0 to explosionRadius over
+      // its lifetime so the player can see exactly which entities the
+      // blast covered.  RenderSystem branches on isExplosionRing.
+      const ringLifetime = 0.35;
+      this.currentMap.entities.push({
+          id: nextId('explosion-ring'),
+          type: EntityType.PARTICLE,
+          position: { x: impactPos.x, y: impactPos.y },
+          velocity: { x: 0, y: 0 },
+          size: { x: 1, y: 1 },
+          rotation: 0,
+          color: WEAPONS[WeaponType.CANNON].color, // purple to match the weapon
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: ringLifetime,
+          maxLifetime: ringLifetime,
+          mass: 0,
+          isExplosionRing: true,
+          explosionRadius: radius,
+      });
+
       // Walk the master entity list once.  Static tiles aren't in
       // entityIndex.asteroids (that list holds only mobile shards), so we
       // need the unfiltered sweep to catch them.  All checks are O(1) per
