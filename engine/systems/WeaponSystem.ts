@@ -9,6 +9,7 @@ import {
   COLLISION_CONFIG,
   LIGHTNING_CHAIN_COUNT,
   LIGHTNING_CHAIN_RANGE,
+  LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -40,7 +41,12 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
     case WeaponType.LIGHTNING:
       // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
       // ProjectileSystem.spawn copies these onto the projectile at spawn.
-      return { ...config, chainCount: LIGHTNING_CHAIN_COUNT * 2, chainRange: LIGHTNING_CHAIN_RANGE * 2 };
+      return {
+        ...config,
+        chainCount: LIGHTNING_CHAIN_COUNT * 2,
+        chainRange: LIGHTNING_CHAIN_RANGE * 2,
+        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2 — one extra simultaneous jump per node
+      };
     case WeaponType.HOMING:
       return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };
     case WeaponType.CANNON:

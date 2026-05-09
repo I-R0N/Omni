@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -1518,99 +1518,133 @@ export class GameEngine {
       if (!this.currentMap) return;
 
       // Per-projectile chain overrides (set by ProjectileSystem.spawn from
-      // WeaponConfig.chainCount/chainRange — populated by the charged
-      // Lightning variant).  Fall back to the global LIGHTNING_CHAIN_*
-      // constants for normal shots.
-      const hopBudget = proj?.chainCount ?? LIGHTNING_CHAIN_COUNT;
-      const hopRange  = proj?.chainRange ?? LIGHTNING_CHAIN_RANGE;
+      // WeaponConfig.chainCount/chainRange/chainBranches — populated by
+      // the charged Lightning variant).  Fall back to the global
+      // LIGHTNING_CHAIN_* constants for normal shots.
+      const hopBudget = proj?.chainCount    ?? LIGHTNING_CHAIN_COUNT;
+      const hopRange  = proj?.chainRange    ?? LIGHTNING_CHAIN_RANGE;
+      const branches  = proj?.chainBranches ?? LIGHTNING_CHAIN_BRANCHES;
       const hopRangeSq = hopRange * hopRange;
 
-      // Build chain: hop from the initial target to nearby enemies/asteroids.
+      // Build a branching chain (tree, not list).  Each frontier node forks
+      // to up to `branches` nearest unhit targets within `hopRange`.  Damage
+      // falls off by depth (preserving the existing 1-d/maxDepth feel from
+      // the old linear chain).  hitSet is shared globally so two parents at
+      // the same depth never compete for the same child.
       // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
       // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may mid-animation.
+      // index holds `active` entities that may be mid-animation.
       const enemies = this.entityIndex.enemies;
       const asteroids = this.entityIndex.asteroids;
-      const chain: GameEntity[] = [firstTarget];
+      const nodesByDepth: GameEntity[][] = [[firstTarget]];
+      const edges: { from: GameEntity; to: GameEntity }[] = [];
       const hitSet = new Set<string>([firstTarget.id]);
 
-      const pickNearest = (prev: GameEntity): GameEntity | null => {
-          let nextTarget: GameEntity | null = null;
-          let nextDistSq = hopRangeSq;
+      // Reused candidate buffer.  Cleared at the top of each pickNearestK
+      // call so repeated picks within a single chain don't pile allocations.
+      const candidates: { e: GameEntity; d2: number }[] = [];
+
+      const pickNearestK = (parent: GameEntity, k: number): GameEntity[] => {
+          candidates.length = 0;
           for (let i = 0; i < enemies.length; i++) {
               const e = enemies[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(prev.position.x, e.position.x);
-              const dy = wrapDeltaY(prev.position.y, e.position.y);
+              const dx = wrapDeltaX(parent.position.x, e.position.x);
+              const dy = wrapDeltaY(parent.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
-              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+              if (d2 < hopRangeSq) candidates.push({ e, d2 });
           }
           for (let i = 0; i < asteroids.length; i++) {
               const e = asteroids[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(prev.position.x, e.position.x);
-              const dy = wrapDeltaY(prev.position.y, e.position.y);
+              const dx = wrapDeltaX(parent.position.x, e.position.x);
+              const dy = wrapDeltaY(parent.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
-              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+              if (d2 < hopRangeSq) candidates.push({ e, d2 });
           }
-          return nextTarget;
+          candidates.sort((a, b) => a.d2 - b.d2);
+          const picked: GameEntity[] = [];
+          for (let i = 0; i < candidates.length && picked.length < k; i++) {
+              const c = candidates[i];
+              if (hitSet.has(c.e.id)) continue; // race-resilient (shouldn't happen — defensive)
+              picked.push(c.e);
+              hitSet.add(c.e.id);
+          }
+          return picked;
       };
 
-      for (let hop = 0; hop < hopBudget; hop++) {
-          const next = pickNearest(chain[chain.length - 1]);
-          if (!next) break;
-          chain.push(next);
-          hitSet.add(next.id);
+      for (let depth = 1; depth <= hopBudget; depth++) {
+          const prev = nodesByDepth[depth - 1];
+          const next: GameEntity[] = [];
+          for (let p = 0; p < prev.length; p++) {
+              const parent = prev[p];
+              const picked = pickNearestK(parent, branches);
+              for (let c = 0; c < picked.length; c++) {
+                  edges.push({ from: parent, to: picked[c] });
+                  next.push(picked[c]);
+              }
+          }
+          if (next.length === 0) break;
+          nodesByDepth.push(next);
       }
 
-      // Apply chain damage (skip index 0 — the first target already took projectile damage).
-      // Damage reduces by 1/(totalHops-1) per hop: e.g. 3 total → 0.5× on hop 1, 0× on hop 2.
+      // Apply chain damage by depth.  Depth 0 is the direct-hit target
+      // (already damaged upstream by the projectile collision).  Damage at
+      // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
+      // pre-branching linear chain so balance per-target stays consistent.
       const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
-      const totalHops = chain.length; // includes direct hit at index 0
-      const reductionPerHop = totalHops > 1 ? 1 / (totalHops - 1) : 1;
+      const maxDepth = nodesByDepth.length - 1;
+      for (let d = 1; d <= maxDepth; d++) {
+          const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
+          const dmg = baseDmg * factor;
+          const tier = nodesByDepth[d];
+          for (let i = 0; i < tier.length; i++) {
+              const target = tier[i];
+              if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
 
-      for (let i = 1; i < chain.length; i++) {
-          const target = chain[i];
-          const dmg = Math.max(0, baseDmg * (1 - i * reductionPerHop));
-          if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
+              target.health -= dmg;
+              target.hitFlash = 0.15;
+              this.spawnDamageText(target.position, dmg, target);
 
-          target.health -= dmg;
-          target.hitFlash = 0.15;
-          this.spawnDamageText(target.position, dmg, target);
-
-          if (target.health <= 0 && !target.isExploding) {
-              target.lastImpactDamage = dmg;
-              this.handleEntityDeath(target);
+              if (target.health <= 0 && !target.isExploding) {
+                  target.lastImpactDamage = dmg;
+                  this.handleEntityDeath(target);
+              }
           }
       }
 
-      // Only spawn arc visual if there's at least one chain hop
-      if (chain.length < 2) return;
+      // Only spawn arc visuals if at least one hop landed.
+      if (edges.length === 0) return;
 
-      // Build arc points: impact → target1 → target2 (target 0 is the direct hit)
-      const arcPoints: Vector2[] = [];
-      for (const t of chain) {
-          arcPoints.push({ x: t.position.x, y: t.position.y });
+      // Spawn one PARTICLE arc entity per edge in the tree.  Each arc is a
+      // 2-point polyline (parent.position → child.position).  RenderSystem's
+      // existing isLightningArc branch handles the rest.  Cap loosely at
+      // MAX_PARTICLES via ParticleSystem's own bookkeeping; a fully-saturated
+      // default tree (branches=2, depth=2) produces 6 arcs per impact.
+      const arcColor = WEAPONS[WeaponType.LIGHTNING].color;
+      for (let i = 0; i < edges.length; i++) {
+          const { from, to } = edges[i];
+          this.currentMap.entities.push({
+              id: nextId('lightning'),
+              type: EntityType.PARTICLE,
+              position: { x: from.position.x, y: from.position.y },
+              velocity: { x: 0, y: 0 },
+              size: { x: 1, y: 1 },
+              rotation: 0,
+              color: arcColor,
+              active: true,
+              health: 1,
+              maxHealth: 1,
+              lifetime: LIGHTNING_ARC_LIFETIME,
+              maxLifetime: LIGHTNING_ARC_LIFETIME,
+              mass: 0,
+              isLightningArc: true,
+              arcPoints: [
+                  { x: from.position.x, y: from.position.y },
+                  { x: to.position.x,   y: to.position.y   },
+              ],
+          });
       }
-
-      // Spawn a single PARTICLE entity carrying the arc data for rendering
-      this.currentMap.entities.push({
-          id: nextId('lightning'),
-          type: EntityType.PARTICLE,
-          position: { x: impactPos.x, y: impactPos.y },
-          velocity: { x: 0, y: 0 },
-          size: { x: 1, y: 1 },
-          rotation: 0,
-          color: WEAPONS[WeaponType.LIGHTNING].color,
-          active: true,
-          health: 1,
-          maxHealth: 1,
-          lifetime: LIGHTNING_ARC_LIFETIME,
-          maxLifetime: LIGHTNING_ARC_LIFETIME,
-          mass: 0,
-          isLightningArc: true,
-          arcPoints,
-      });
   }
 
   // ─── Cannon AoE — radial damage on projectile impact ───────────────────

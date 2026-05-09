@@ -114,6 +114,7 @@ export class ProjectileSystem {
         // the LIGHTNING_CHAIN_* constants when undefined.
         chainCount: config.chainCount,
         chainRange: config.chainRange,
+        chainBranches: config.chainBranches,
       });
     }
 

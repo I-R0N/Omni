@@ -163,11 +163,12 @@ export interface WeaponConfig {
   explosionDamage?: number;
   explosionKnockback?: number;
   // Lightning chain overrides — when set, replaces the default
-  // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE constants for the
-  // chain triggered by this projectile's impact.  Used by the charged
-  // Lightning variant to double both.
+  // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE / LIGHTNING_CHAIN_BRANCHES
+  // constants for the chain triggered by this projectile's impact.  Used
+  // by the charged Lightning variant to amplify all three.
   chainCount?: number;
   chainRange?: number;
+  chainBranches?: number;
   homing?: boolean; // Does it track targets?
   // Per-weapon homing turn-rate multiplier (1.0 = full tracking).  Charged
   // Homing volleys reduce this so the missiles fan out rather than all
@@ -367,6 +368,7 @@ export interface GameEntity {
   // Lightning chain overrides on the projectile (charged-shot only).
   chainCount?: number;
   chainRange?: number;
+  chainBranches?: number;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
   homingStrength?: number;
 
