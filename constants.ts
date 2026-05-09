@@ -609,6 +609,18 @@ export const CHARGE_CONSTANTS = {
 export const LIGHTNING_CHAIN_RANGE = 280;           // hop range for subsequent chains
 export const LIGHTNING_CHAIN_COUNT = 3;             // additional chain hops (depth) after projectile impact — depth 0 is the direct hit
 export const LIGHTNING_CHAIN_BRANCHES = 2;          // simultaneous jumps per chain node — turns the chain into a branching tree (saturated tree: 1+2+4+8 = 15 entities)
+// Mobile shard variants the lightning chain refuses to hop to.  Conductive
+// targets (enemies, glass-shards, nebula-shards) still chain freely — only
+// inert/dielectric materials sit this dance out.  Static tiles are already
+// excluded structurally (entityIndex.asteroids holds mobile shards only).
+//
+// NOTE for future material work (Phase 1 g2 — plastic-shard / metal-shard):
+//   - 'plastic-shard' SHOULD be added here (plastic is an insulator).
+//   - 'metal-shard'   should NOT be added (metal conducts — let it chain).
+// Update this set when those variants are introduced.
+export const LIGHTNING_CHAIN_EXCLUDED_VARIANTS: ReadonlySet<ShardVariantId> = new Set<ShardVariantId>([
+  'rock-shard',
+]);
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
