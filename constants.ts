@@ -156,9 +156,10 @@ export const AMMO_HUD_CONSTANTS = {
   SLOT_W_MIN:    22,
   SLOT_H:        48,
   SLOT_GAP:      4,
-  // Wider gap separating logical groups: BLASTER | AMMO READOUT | other
-  // weapons.  Visually distinguishes the always-firable blaster and the
-  // shared-pool readout from the ammo-gated weapon slots.
+  // Wider gap separating the always-firable blaster from the rest of the
+  // bar.  The ammo readout + ammo-gated weapons sit on the right, glued
+  // together by the regular SLOT_GAP, so the ammo box reads as belonging
+  // to the weapon group rather than floating between two halves.
   SLOT_SEP:      14,
   SLOT_RADIUS:   5,
   BOTTOM_MARGIN: 14,
@@ -897,15 +898,17 @@ export const DROP_CONFIG = {
 /**
  * Compute the ammo-HUD slot layout for a given screen size.
  *
- * Slot order (post-d1): [BLASTER]  ⎢gap⎥  [AMMO]  ⎢gap⎥  [BURST][SHOTGUN]…
- * The blaster sits alone (infinite ammo, never gated).  The shared-pool
- * readout sits in its own slot-sized box separated from both the blaster
- * and the ammo-gated weapons by a wider SLOT_SEP gap so the three groups
- * read as visually distinct.
+ * Slot order (post-d1): [BLASTER]  ⎢SLOT_SEP⎥  [AMMO]⎢SLOT_GAP⎥[BURST][SHOTGUN]…
+ *
+ * The blaster sits alone on the left (infinite ammo, never gated).  The
+ * shared-pool readout joins the ammo-gated weapons on the right, glued
+ * together by the regular SLOT_GAP so the readout reads as part of that
+ * group rather than floating in between.  Only one wider SLOT_SEP gap
+ * separates blaster from the ammo+weapons cluster.
  *
  * Total cells = 1 (blaster) + 1 (ammo) + (WEAPON_LIST.length - 1) (other
- * weapons).  Two SLOT_SEP gaps separate the three groups; the remaining
- * inter-weapon gaps are the standard SLOT_GAP.
+ * weapons).  One SLOT_SEP gap (after blaster) + (WEAPON_LIST.length - 1)
+ * SLOT_GAP gaps (ammo→burst + the inter-weapon gaps).
  */
 export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
   startY: number;
@@ -925,8 +928,10 @@ export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number):
 
   // Cells: blaster (1) + ammo (1) + non-blaster weapons (WEAPON_LIST.length - 1)
   const cells           = WEAPON_LIST.length + 1;
-  const otherWeaponGaps = WEAPON_LIST.length - 2; // gaps between non-blaster weapon slots
-  const fixedGapsW      = 2 * SLOT_SEP + otherWeaponGaps * SLOT_GAP;
+  // Gaps: 1 SLOT_SEP after the blaster + (cells - 2) regular gaps between
+  // every other adjacent pair (ammo→burst + the inter-weapon gaps).
+  const standardGaps    = cells - 2;
+  const fixedGapsW      = SLOT_SEP + standardGaps * SLOT_GAP;
 
   // Scale slot width to fit
   const slotW = Math.max(
@@ -939,7 +944,7 @@ export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number):
   const groupStartX = leftClear + Math.max(0, (availableW - totalW) / 2);
   const blasterX       = groupStartX;
   const ammoX          = blasterX + slotW + SLOT_SEP;
-  const weaponsStartX  = ammoX + slotW + SLOT_SEP;
+  const weaponsStartX  = ammoX + slotW + SLOT_GAP;
   const startY         = screenHeight - SLOT_H - BOTTOM_MARGIN;
 
   return { startY, slotW, blasterX, ammoX, weaponsStartX, totalW };
