@@ -98,13 +98,11 @@ export class NebulaSystem {
      * @param entities     Current map's entities list (shards are appended).
      * @param activeDrops  Drop-lookup cache (ammo drop registers here too).
      * @param entity       The NEBULA tile or NEBULA_SHARD that just died.
-     * @param waveIndex    Current wave number — used to pick the ammo tier.
      */
     public handleDeath(
         entities: GameEntity[],
         activeDrops: GameEntity[],
         entity: GameEntity,
-        waveIndex: number,
     ): void {
         // Stage 3: shatter is owned by ShardSystem and is invoked
         // directly from GameEngine.handleEntityDeath via
@@ -120,12 +118,10 @@ export class NebulaSystem {
         // Roll is independent of the shard math so shard count/size is
         // unaffected; the drop (if any) is a bonus alongside the shards.
         if (Math.random() < NEBULA_CONSTANTS.AMMO_DROP_CHANCE) {
-            const ammoType = this.drops.getAsteroidAmmoType(waveIndex);
             this.drops.spawnAmmoDrop(
                 entities,
                 activeDrops,
                 entity.position,
-                ammoType,
                 NEBULA_CONSTANTS.AMMO_PER_NEBULA,
                 entity.lastImpactVelocity,
             );

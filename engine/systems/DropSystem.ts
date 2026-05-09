@@ -1,11 +1,9 @@
-import { GameEntity, EntityType, Vector2, WeaponType } from '../../types';
+import { GameEntity, EntityType, Vector2 } from '../../types';
 import { ShardVariantId } from './ShardSystem.types';
 import {
   COLORS,
-  WEAPONS,
+  AMMO_CONSTANTS,
   DROP_CONFIG,
-  ENEMY_AMMO_DROP,
-  ASTEROID_AMMO_PROGRESSION,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -26,17 +24,6 @@ import { nextId } from './IdAllocator';
 export class DropSystem {
   constructor(private particles: ParticleSystem) {}
 
-  // --- Wave-scaled ammo dispensing ----------------------------------------
-
-  /** Returns the ammo type asteroids should drop for the current wave. */
-  public getAsteroidAmmoType(waveIndex: number): WeaponType {
-    const idx = Math.min(
-      Math.floor(waveIndex / 3),
-      ASTEROID_AMMO_PROGRESSION.length - 1,
-    );
-    return ASTEROID_AMMO_PROGRESSION[idx];
-  }
-
   // --- Reward application --------------------------------------------------
 
   /**
@@ -51,17 +38,16 @@ export class DropSystem {
     entity: GameEntity,
     onMessage?: (text: string, color: string) => void,
   ) {
-    if (entity.dropType === 'ammo' && entity.dropWeapon !== undefined) {
-      const wType  = entity.dropWeapon;
+    if (entity.dropType === 'ammo') {
       const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
-      if (!player.ammo) player.ammo = {};
-      player.ammo[wType] = (player.ammo[wType] ?? 0) + amount;
-      // Trigger slot flash — accumulate amount if picked up in quick succession
-      if (!player.ammoPickupFlash) player.ammoPickupFlash = {};
-      const prev = player.ammoPickupFlash[wType];
-      player.ammoPickupFlash[wType] = {
+      const before = player.ammo ?? 0;
+      player.ammo = Math.min(AMMO_CONSTANTS.MAX_POOL, before + amount);
+      const gained = player.ammo - before;
+      // Shared-pool flash — accumulate amount if picked up in quick succession
+      const prev = player.ammoPickupFlash;
+      player.ammoPickupFlash = {
         timer:  0.75,
-        amount: (prev && prev.timer > 0 ? prev.amount : 0) + amount,
+        amount: (prev && prev.timer > 0 ? prev.amount : 0) + gained,
       };
     } else if (entity.dropType === 'health') {
       const healAmount = entity.dropValue ?? DROP_CONFIG.HEALTH_HEAL_AMOUNT;
@@ -86,7 +72,6 @@ export class DropSystem {
     activeDrops: GameEntity[],
     player: GameEntity,
     entity: GameEntity,
-    waveIndex: number,
     onMessage?: (text: string, color: string) => void,
   ) {
     const pos = entity.position;
@@ -116,16 +101,15 @@ export class DropSystem {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
         for (const comp of entity.dropComposition) {
           if (comp.type === 'ammo') {
-            this.spawnAmmoDrop(entities, activeDrops, pos, comp.weapon, comp.value, pv);
+            this.spawnAmmoDrop(entities, activeDrops, pos, comp.value, pv);
           } else if (comp.type === 'health') {
             this.spawnHealthDrop(entities, activeDrops, pos, comp.value, pv);
           }
           // 'powerup' entries no longer spawn — powerup drops have been removed
         }
       } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
-        // Wave-scaled ammo drop — only some asteroids drop ammo
-        const waveAmmoType = this.getAsteroidAmmoType(waveIndex);
-        this.spawnAmmoDrop(entities, activeDrops, pos, waveAmmoType, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
+        // Generic shared-ammo drop — single rate for every asteroid
+        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
       }
     }
   }
@@ -134,8 +118,11 @@ export class DropSystem {
 
   /**
    * Break a dead enemy into debris.  Uses a fixed slot plan (6 tile shards +
-   * 1 own-ammo + 1 next-ammo + maybe an empty asteroid) which is then
-   * shuffled before spawning so drops aren't always positioned last.
+   * 1 primary-ammo + 1 secondary-ammo + maybe an empty asteroid) which is
+   * then shuffled before spawning so drops aren't always positioned last.
+   * Both ammo slots roll the shared-ammo currency at independent rates;
+   * combined expected ammo per enemy ≈ 0.55*3 + 0.25*2 = 2.15 (matches the
+   * pre-d1 own+next economy).
    */
   public spawnEnemyShards(
     entities: GameEntity[],
@@ -144,16 +131,15 @@ export class DropSystem {
   ) {
     const pos     = enemy.position;
     const pv      = enemy.velocity;
-    const subtype = enemy.enemySubtype;
-    const ammoMap = subtype ? ENEMY_AMMO_DROP[subtype] : null;
 
-    // Plan: 6 tile shards + 1 own ammo + 1 next ammo + 1 empty asteroid (50 % chance)
+    // Plan: 6 tile shards + 1 primary ammo + 1 secondary ammo + 1 empty asteroid (50 % chance)
     const TOTAL_PHYSICAL = 6 + 1 + 1 + (Math.random() < 0.5 ? 1 : 0);
 
-    type SlotKind = 'tile' | 'asteroid' | 'own' | 'next';
+    type SlotKind = 'tile' | 'asteroid' | 'ammoPrimary' | 'ammoSecondary';
     const slots: SlotKind[] = [];
     for (let i = 0; i < 6; i++) slots.push('tile');
-    if (ammoMap) { slots.push('own'); slots.push('next'); }
+    slots.push('ammoPrimary');
+    slots.push('ammoSecondary');
     if (TOTAL_PHYSICAL > 8) slots.push('asteroid');
     // Shuffle so drops aren't always last
     for (let i = slots.length - 1; i > 0; i--) {
@@ -171,12 +157,12 @@ export class DropSystem {
 
       const kind = slots[i];
 
-      if (kind === 'own' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_OWN) {
-        this.spawnAmmoDrop(entities, activeDrops, pos, ammoMap.own, DROP_CONFIG.AMMO_PER_ENEMY_OWN, { x: vx * 5, y: vy * 5 });
+      if (kind === 'ammoPrimary' && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_PRIMARY) {
+        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ENEMY_PRIMARY, { x: vx * 5, y: vy * 5 });
         continue;
       }
-      if (kind === 'next' && ammoMap && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_NEXT) {
-        this.spawnAmmoDrop(entities, activeDrops, pos, ammoMap.next, DROP_CONFIG.AMMO_PER_ENEMY_NEXT, { x: vx * 5, y: vy * 5 });
+      if (kind === 'ammoSecondary' && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_SECONDARY) {
+        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ENEMY_SECONDARY, { x: vx * 5, y: vy * 5 });
         continue;
       }
 
@@ -320,28 +306,26 @@ export class DropSystem {
   // --- Collectible drop spawning ------------------------------------------
 
   /**
-   * Spawn a single collectible ammo drop and register it in `activeDrops`.
-   * Blaster drops are silently skipped (blaster ammo is infinite).
+   * Spawn a single collectible shared-ammo drop and register it in
+   * `activeDrops`.  All ammo drops use the same canonical pickup colour;
+   * post-d1 there is no per-weapon variant.
    */
   public spawnAmmoDrop(
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
-    weapon: WeaponType,
     amount: number,
     parentVelocity?: Vector2,
   ) {
-    if (weapon === WeaponType.BLASTER) return;
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
     const drop = this.makeDropEntity(
-      nextId(`drop_ammo_${weapon}`),
+      nextId('drop_ammo'),
       pos,
       parentVelocity,
-      WEAPONS[weapon].color,
+      AMMO_CONSTANTS.DROP_COLOR,
       amount,
       'ammo',
     );
-    drop.dropWeapon = weapon;
     drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
     entities.push(drop);
     activeDrops.push(drop);

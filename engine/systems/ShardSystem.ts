@@ -1129,9 +1129,9 @@ export class ShardSystem {
       const drop = aIsAst ? b : a;
       const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
 
-      if (drop.dropType === 'ammo' && drop.dropWeapon !== undefined) {
-        comp.push({ type: 'ammo', value: drop.dropValue ?? 1, weapon: drop.dropWeapon });
-        const wColor = WEAPONS[drop.dropWeapon]?.color ?? '#ffffff';
+      if (drop.dropType === 'ammo') {
+        comp.push({ type: 'ammo', value: drop.dropValue ?? 1 });
+        const wColor = drop.color || '#ffffff';
         ast.powerupGlowColor = ast.powerupGlowColor
           ? blendHex(ast.powerupGlowColor, wColor)
           : wColor;
@@ -1326,13 +1326,13 @@ export class ShardSystem {
       mass:          newSize,
       polygonPoints: points,
       dropComposition: [
-        ...(dropA.dropType === 'ammo' && dropA.dropWeapon
-          ? [{ type: 'ammo' as const, value: dropA.dropValue ?? 1, weapon: dropA.dropWeapon }]
+        ...(dropA.dropType === 'ammo'
+          ? [{ type: 'ammo' as const, value: dropA.dropValue ?? 1 }]
           : dropA.dropType === 'health'
           ? [{ type: 'health' as const, value: dropA.dropValue ?? 1 }]
           : []),
-        ...(dropB.dropType === 'ammo' && dropB.dropWeapon
-          ? [{ type: 'ammo' as const, value: dropB.dropValue ?? 1, weapon: dropB.dropWeapon }]
+        ...(dropB.dropType === 'ammo'
+          ? [{ type: 'ammo' as const, value: dropB.dropValue ?? 1 }]
           : dropB.dropType === 'health'
           ? [{ type: 'health' as const, value: dropB.dropValue ?? 1 }]
           : []),

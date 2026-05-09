@@ -42,21 +42,22 @@ export class WeaponSystem {
     if (player.weaponCooldown && player.weaponCooldown > 0) return false;
 
     let weaponType = player.currentWeapon || WeaponType.BLASTER;
+    let config = WEAPONS[weaponType];
 
-    // If non-blaster and out of ammo, auto-fallback to blaster
-    if (weaponType !== WeaponType.BLASTER && (player.ammo?.[weaponType] ?? 0) <= 0) {
+    // If shared pool can't cover this weapon's ammoCost, fall back to blaster
+    // (which has ammoCost 0 and bypasses the pool entirely).
+    if (config.ammoCost > 0 && (player.ammo ?? 0) < config.ammoCost) {
       weaponType = WeaponType.BLASTER;
       player.currentWeapon = WeaponType.BLASTER;
       player.burstQueue = 0;
+      config = WEAPONS[WeaponType.BLASTER];
     }
 
-    const config = WEAPONS[weaponType];
     player.weaponCooldown = config.cooldown;
 
-    // Deduct ammo for non-blaster weapons (one shot = one ammo unit)
-    if (weaponType !== WeaponType.BLASTER && player.ammo) {
-      const before = player.ammo[weaponType] ?? 0;
-      player.ammo[weaponType] = Math.max(0, before - 1);
+    // Deduct shared-pool ammo (no-op for blaster: ammoCost 0)
+    if (config.ammoCost > 0) {
+      player.ammo = Math.max(0, (player.ammo ?? 0) - config.ammoCost);
     }
 
     if (onShake) {
@@ -160,18 +161,21 @@ export class WeaponSystem {
   }
 
   /**
-   * Weapon selection semantics for the player's ammo HUD:
-   * - Tapping an unowned / empty slot does nothing.
+   * Weapon selection semantics for the player's ammo HUD (shared-pool
+   * model):
+   * - Tapping a non-blaster slot when the shared pool can't cover its
+   *   ammoCost is a no-op (matches the pre-d1 "empty slot" behaviour).
    * - Tapping the active non-blaster weapon toggles it off (→ blaster).
-   * - Tapping any other owned weapon switches to it.
+   * - Tapping any other weapon switches to it.
    * Returns the new currentWeapon index in WEAPON_LIST for UI state.
    */
   public selectWeapon(player: GameEntity, wType: WeaponType): number {
-    const isBlaster = wType === WeaponType.BLASTER;
-    const ammo = player.ammo?.[wType] ?? 0;
-    if (!isBlaster && ammo <= 0) return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
+    const cfg = WEAPONS[wType];
+    if (cfg.ammoCost > 0 && (player.ammo ?? 0) < cfg.ammoCost) {
+      return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
+    }
 
-    if (!isBlaster && player.currentWeapon === wType) {
+    if (wType !== WeaponType.BLASTER && player.currentWeapon === wType) {
       // Toggle off: deselect and fall back to blaster
       player.currentWeapon = WeaponType.BLASTER;
       player.burstQueue = 0;
@@ -184,14 +188,15 @@ export class WeaponSystem {
   }
 
   /**
-   * Cycle to the next owned weapon (blaster is always owned; other weapons
-   * are only cycled through if they have ammo > 0).  Returns the new index.
+   * Cycle to the next firable weapon — blaster always qualifies; other
+   * weapons qualify only if the shared pool can cover their ammoCost.
    */
   public cycleWeapon(player: GameEntity): number {
-    const owned = WEAPON_LIST.filter(w =>
-      w === WeaponType.BLASTER ||
-      ((player.ammo?.[w] ?? 0) > 0)
-    );
+    const pool = player.ammo ?? 0;
+    const owned = WEAPON_LIST.filter(w => {
+      const cfg = WEAPONS[w];
+      return cfg.ammoCost === 0 || pool >= cfg.ammoCost;
+    });
     if (owned.length <= 1) return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
     const currentIdx = owned.indexOf(player.currentWeapon || WeaponType.BLASTER);
     const nextIdx = (currentIdx + 1) % owned.length;

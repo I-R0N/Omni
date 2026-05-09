@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -187,12 +187,9 @@ export class GameEngine {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
 
-    // Fill all weapon ammo when entering debug mode
-    if (this.debugMode && this.player.ammo) {
-      for (const w of WEAPON_LIST) {
-        if (w === WeaponType.BLASTER) continue; // blaster is always infinite
-        this.player.ammo[w] = 999;
-      }
+    // Fill the shared ammo pool when entering debug mode
+    if (this.debugMode) {
+      this.player.ammo = AMMO_CONSTANTS.MAX_POOL;
     }
   }
 
@@ -293,7 +290,7 @@ export class GameEngine {
       burstTimer: 0,
       trail: [],
       sprite: ASSETS.PLAYER_SHIP,
-      ammo: {},  // BLASTER is always ∞ (no entry); other weapons stored here when unlocked
+      ammo: 0,   // shared-ammo pool (post-d1) — BLASTER bypasses, every other weapon draws by ammoCost
       gold: 0,
       shield: SHIELD_CONSTANTS.MAX_CHARGE,
       maxShield: SHIELD_CONSTANTS.MAX_CHARGE,
@@ -424,7 +421,7 @@ export class GameEngine {
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
-      this.player.ammo = {};
+      this.player.ammo = 0;
       this.player.gold = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
@@ -826,7 +823,6 @@ export class GameEngine {
               this.currentMap.entities,
               this.activeDrops,
               entity,
-              this.waveIndex,
           );
       }
 
@@ -1211,14 +1207,11 @@ export class GameEngine {
     }
     this.playerMessages.length = msgIdx;
 
-    // Tick down per-weapon ammo pickup flash timers
-    if (this.player.ammoPickupFlash) {
-      for (const wType of WEAPON_LIST) {
-        const f = this.player.ammoPickupFlash[wType];
-        if (f && f.timer > 0) {
-          f.timer -= dt;
-          if (f.timer <= 0) delete this.player.ammoPickupFlash[wType];
-        }
+    // Tick down the shared ammo-pickup flash timer
+    if (this.player.ammoPickupFlash && this.player.ammoPickupFlash.timer > 0) {
+      this.player.ammoPickupFlash.timer -= dt;
+      if (this.player.ammoPickupFlash.timer <= 0) {
+        this.player.ammoPickupFlash = undefined;
       }
     }
 
@@ -1635,7 +1628,6 @@ export class GameEngine {
       this.activeDrops,
       this.player,
       entity,
-      this.waveIndex,
       (t, c) => this.pushPlayerMessage(t, c),
     );
   }
@@ -1667,9 +1659,9 @@ export class GameEngine {
     this.drops.spawnGlassShards(this.currentMap.entities, tile);
   }
 
-  private spawnAmmoDrop(pos: Vector2, weapon: WeaponType, amount: number, parentVelocity?: Vector2) {
+  private spawnAmmoDrop(pos: Vector2, amount: number, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    this.drops.spawnAmmoDrop(this.currentMap.entities, this.activeDrops, pos, weapon, amount, parentVelocity);
+    this.drops.spawnAmmoDrop(this.currentMap.entities, this.activeDrops, pos, amount, parentVelocity);
   }
 
   private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {
