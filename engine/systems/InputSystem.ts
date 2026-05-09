@@ -131,24 +131,26 @@ export class InputSystem {
   private checkTap(x: number, y: number) {
     const duration = (performance.now() - this.touchStartTime) / 1000; // seconds
 
-    // Calculate distance moved during the hold
-    const dist = Math.sqrt(
-        Math.pow(x - this.touchStartPos.x, 2) +
-        Math.pow(y - this.touchStartPos.y, 2)
-    );
-
-    // Drag cancels the shot entirely (matches old behaviour).
-    if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
-
-    // Charge model: release before threshold = normal shot, release after =
-    // charged shot.  Any release that didn't drag fires something — there's
-    // no dead zone where a release produces nothing (was previously the
-    // case for >TAP_THRESHOLD holds).
+    // Charged shot path: any release after CHARGE_THRESHOLD fires a charged
+    // shot, regardless of drag distance.  Movement input (mouse hold +
+    // drag from screen centre) shares the same gesture as charging, so
+    // gating the charge on a small drag would break charging while
+    // moving.  The deliberate ≥0.5s hold is intent enough — accidental
+    // long swipes are unlikely.  When a separate controller shoot
+    // button lands, that input will replace this path entirely.
     if (duration >= INPUT_CONSTANTS.CHARGE_THRESHOLD) {
         this.chargeReleaseEvents.push({ x, y });
-    } else {
-        this.fireEvents.push({ x, y });
+        return;
     }
+
+    // Tap-shot path: short release.  Keep the drag-cancel so a fast
+    // swipe doesn't accidentally tap-fire.
+    const dx = x - this.touchStartPos.x;
+    const dy = y - this.touchStartPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
+
+    this.fireEvents.push({ x, y });
   }
 
   public isKeyDown(code: string): boolean {
@@ -224,15 +226,14 @@ export class InputSystem {
 
   /**
    * Live hold duration (seconds) of the current mouse/touch press.  Returns
-   * 0 when not held or when the press has dragged past TAP_DISTANCE_LIMIT
-   * (charge cancelled).  Used by GameEngine to drive `player.chargeProgress`
-   * for the charge-ring HUD.
+   * 0 only when the press isn't active.  Drag distance is intentionally
+   * NOT a cancel signal here: in this game the same mouse-hold gesture
+   * doubles as the movement input (held + dragged from screen centre),
+   * so cancelling on drag would break charging while moving.  Used by
+   * GameEngine to drive `player.chargeProgress` for the charge-ring HUD.
    */
   public getMouseHoldDuration(): number {
     if (!this.mouseDown) return 0;
-    const dx = this.mousePosition.x - this.touchStartPos.x;
-    const dy = this.mousePosition.y - this.touchStartPos.y;
-    if (Math.sqrt(dx * dx + dy * dy) >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return 0;
     return (performance.now() - this.touchStartTime) / 1000;
   }
 
