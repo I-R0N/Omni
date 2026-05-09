@@ -152,10 +152,15 @@ export const UI_CONSTANTS = {
 };
 
 export const AMMO_HUD_CONSTANTS = {
-  SLOT_W_MAX:    44,   // shrinks on narrow screens to clear the minimap
-  SLOT_W_MIN:    24,
+  SLOT_W_MAX:    36,   // shrunk post-d1 — per-slot ammo number moved to a dedicated box
+  SLOT_W_MIN:    22,
   SLOT_H:        48,
   SLOT_GAP:      4,
+  // Wider gap separating the always-firable blaster from the rest of the
+  // bar.  The ammo readout + ammo-gated weapons sit on the right, glued
+  // together by the regular SLOT_GAP, so the ammo box reads as belonging
+  // to the weapon group rather than floating between two halves.
+  SLOT_SEP:      14,
   SLOT_RADIUS:   5,
   BOTTOM_MARGIN: 14,
 };
@@ -547,10 +552,10 @@ export const NEBULA_CONSTANTS = {
   // occasional reward without flooding the map.  The roll is
   // independent of shard creation: shard count/size math is
   // untouched, the ammo drop (if any) is a bonus that spawns
-  // alongside the usual shards.  Ammo type follows the same
-  // wave-scaled ASTEROID_AMMO_PROGRESSION used by asteroids.
+  // alongside the usual shards.  Post-d1 every ammo drop awards the
+  // shared currency, so there is no per-weapon variant here.
   AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
-  AMMO_PER_NEBULA: 3,     // ammo units per nebula drop
+  AMMO_PER_NEBULA: 3,     // shared-pool ammo units per nebula drop
 };
 
 /**
@@ -666,6 +671,15 @@ export const DAMAGE_TEXT_CONSTANTS = {
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
+  // Shared-ammo cost rationale (d1):
+  //   Pre-refactor every non-blaster weapon consumed exactly 1 unit per
+  //   trigger pull from its own per-weapon pool, so the felt
+  //   "shots-per-pickup" was uniform across BURST / SHOTGUN / BOUNCER /
+  //   LIGHTNING / HOMING / CANNON.  Keeping every non-blaster ammoCost = 1
+  //   on the new shared pool reproduces that ratio exactly (today's pickup
+  //   amounts are unchanged in DROP_CONFIG, so 1 pickup = same number of
+  //   trigger pulls regardless of which weapon is selected).  d2 will
+  //   retune these alongside the broader weapon overhaul.
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
     name: 'Blaster',
@@ -678,7 +692,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 2,
     recoil: 0.5,
-    pierce: 0
+    pierce: 0,
+    ammoCost: 0,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
@@ -694,7 +709,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.3,
     pierce: 2,
     burstCount: 3,
-    burstDelay: 0.05
+    burstDelay: 0.05,
+    ammoCost: 1,
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -708,7 +724,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 6,
     spread: 35,
     recoil: 3.0,
-    pierce: 1
+    pierce: 1,
+    ammoCost: 1,
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -723,6 +740,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 2,
     recoil: 0.5,
     pierce: 0,
+    ammoCost: 1,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -736,7 +754,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 3,
     recoil: 0.3,
-    pierce: 0          // stops on first hit, then chains
+    pierce: 0,         // stops on first hit, then chains
+    ammoCost: 1,
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -751,7 +770,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 10,
     recoil: 0.5,
     pierce: 0,
-    homing: true
+    homing: true,
+    ammoCost: 1,
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
@@ -765,7 +785,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 0,
     recoil: 8.0,
-    pierce: 5
+    pierce: 5,
+    ammoCost: 1,
   },
 };
 
@@ -801,7 +822,8 @@ export const ENEMY_WEAPON: WeaponConfig = {
   count: 1,
   spread: 4,
   recoil: 0,
-  pierce: 0
+  pierce: 0,
+  ammoCost: 0, // unused — enemies don't draw from a shared pool
 };
 
 // --- ASSETS ---
@@ -820,6 +842,14 @@ export const SHIELD_CONSTANTS = {
 
 export const WAVE_CONSTANTS = {
   GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
+  // Extra world-unit buffer beyond the visible half-diagonal when picking
+  // wave-spawn radii.  Guarantees enemies materialise comfortably outside
+  // the player's viewport on every aspect ratio.
+  OFFSCREEN_MARGIN: 120,
+  // Radial depth of the spawn ring (added on top of the viewport-derived
+  // minimum distance).  Keeps the ring visually varied without bringing
+  // any spawn point on-screen.
+  SPAWN_RING_SPREAD: 200,
 };
 
 // Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
@@ -833,15 +863,30 @@ export const WAVE_CONFIG = {
   INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
 };
 
+// Shared-ammo pool config (post-d1).  Caps the player's single ammo number
+// and provides the canonical pickup colour used by every ammo drop entity
+// (enemy / asteroid / nebula sources all reuse this).
+//
+// MAX_POOL rationale: pre-refactor there was no explicit per-weapon cap;
+// debug fills filled to 999 and a typical playthrough stockpiled ~30-60 per
+// weapon across ~6 weapons (~200-360 total).  200 in shared form keeps the
+// "well-stocked" feel without drifting into infinite-ammo territory.
+export const AMMO_CONSTANTS = {
+  MAX_POOL:    200,
+  DROP_COLOR: '#facc15', // canonical ammo-pickup yellow
+};
+
 export const DROP_CONFIG = {
-  // Ammo drop values
-  AMMO_PER_ENEMY_OWN:         3,    // own-color ammo units per enemy drop
-  AMMO_PER_ENEMY_NEXT:        2,    // next-color ammo units per enemy drop
-  AMMO_PER_ASTEROID:          4,    // ammo units per asteroid drop
+  // Per-pickup ammo amounts — chosen to keep today's per-encounter expected
+  // ammo close to the per-weapon-pool model (asteroid 1.80, enemy 2.15,
+  // nebula 0.18 — see also NEBULA_CONSTANTS.AMMO_PER_NEBULA).
+  AMMO_PER_ENEMY_PRIMARY:   3,    // primary enemy ammo drop (paired with AMMO_DROP_CHANCE_ENEMY_PRIMARY)
+  AMMO_PER_ENEMY_SECONDARY: 2,    // secondary enemy ammo drop (independent roll)
+  AMMO_PER_ASTEROID:        4,    // ammo units per asteroid drop
   // Drop-spawn probabilities
-  AMMO_DROP_CHANCE_ASTEROID:  0.45, // 45 % chance an asteroid drops ammo
-  AMMO_DROP_CHANCE_ENEMY_OWN: 0.55, // 55 % chance an enemy drops its own-color ammo
-  AMMO_DROP_CHANCE_ENEMY_NEXT:0.25, // 25 % chance an enemy drops next-tier ammo
+  AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
+  AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
+  AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
   // General
@@ -850,39 +895,30 @@ export const DROP_CONFIG = {
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };
 
-// Maps each enemy subtype to the ammo type they drop (own-color) and the next tier.
-// RAMMER_1 is red (blaster color) — blaster is infinite, so they drop the first
-// ammo-based weapon (BURST) instead.
-export const ENEMY_AMMO_DROP: Record<EnemySubtype, { own: WeaponType; next: WeaponType }> = {
-  [EnemySubtype.RAMMER_1]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
-  [EnemySubtype.RAMMER_2]:  { own: WeaponType.BURST,     next: WeaponType.SHOTGUN   },
-  [EnemySubtype.RAMMER_3]:  { own: WeaponType.SHOTGUN,   next: WeaponType.BOUNCER   },
-  [EnemySubtype.SHOOTER_1]: { own: WeaponType.BOUNCER,   next: WeaponType.LIGHTNING },
-  [EnemySubtype.SHOOTER_2]: { own: WeaponType.LIGHTNING, next: WeaponType.HOMING    },
-  [EnemySubtype.SHOOTER_3]: { own: WeaponType.HOMING,    next: WeaponType.CANNON    },
-};
-
-// Wave-scaled asteroid ammo progression — earlier waves give cheaper ammo,
-// later waves give rarer ammo.  Index into WEAPON_LIST (skip BLASTER at 0).
-export const ASTEROID_AMMO_PROGRESSION: WeaponType[] = [
-  WeaponType.BURST,     // waves 1–3
-  WeaponType.BURST,     // waves 4–6
-  WeaponType.SHOTGUN,   // waves 7–9
-  WeaponType.SHOTGUN,   // waves 10–12
-  WeaponType.BOUNCER,     // waves 13–15
-  WeaponType.LIGHTNING, // waves 16–18
-  WeaponType.HOMING,    // waves 19–21
-  WeaponType.CANNON,    // waves 22+
-];
-
 /**
  * Compute the ammo-HUD slot layout for a given screen size.
- * Slots live to the right of the minimap, scaled to fit the available space.
+ *
+ * Slot order (post-d1): [BLASTER]  ⎢SLOT_SEP⎥  [AMMO]⎢SLOT_GAP⎥[BURST][SHOTGUN]…
+ *
+ * The blaster sits alone on the left (infinite ammo, never gated).  The
+ * shared-pool readout joins the ammo-gated weapons on the right, glued
+ * together by the regular SLOT_GAP so the readout reads as part of that
+ * group rather than floating in between.  Only one wider SLOT_SEP gap
+ * separates blaster from the ammo+weapons cluster.
+ *
+ * Total cells = 1 (blaster) + 1 (ammo) + (WEAPON_LIST.length - 1) (other
+ * weapons).  One SLOT_SEP gap (after blaster) + (WEAPON_LIST.length - 1)
+ * SLOT_GAP gaps (ammo→burst + the inter-weapon gaps).
  */
 export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
-  startX: number; startY: number; slotW: number; totalW: number;
+  startY: number;
+  slotW: number;
+  blasterX: number;
+  ammoX: number;
+  weaponsStartX: number;
+  totalW: number;
 } {
-  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, SLOT_SEP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
   const { MARGIN: MM, SIZE: MS } = MINIMAP_CONSTANTS;
 
   // Horizontal: start just right of the minimap, leave symmetric margin on the right
@@ -890,18 +926,28 @@ export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number):
   const rightEdge   = screenWidth - MM;
   const availableW  = rightEdge - leftClear;
 
-  // Scale slot width to fill available space without overflowing
+  // Cells: blaster (1) + ammo (1) + non-blaster weapons (WEAPON_LIST.length - 1)
+  const cells           = WEAPON_LIST.length + 1;
+  // Gaps: 1 SLOT_SEP after the blaster + (cells - 2) regular gaps between
+  // every other adjacent pair (ammo→burst + the inter-weapon gaps).
+  const standardGaps    = cells - 2;
+  const fixedGapsW      = SLOT_SEP + standardGaps * SLOT_GAP;
+
+  // Scale slot width to fit
   const slotW = Math.max(
     SLOT_W_MIN,
-    Math.min(SLOT_W_MAX, Math.floor((availableW - (WEAPON_LIST.length - 1) * SLOT_GAP) / WEAPON_LIST.length))
+    Math.min(SLOT_W_MAX, Math.floor((availableW - fixedGapsW) / cells))
   );
-  const totalW = WEAPON_LIST.length * (slotW + SLOT_GAP) - SLOT_GAP;
+  const totalW = cells * slotW + fixedGapsW;
 
   // Center the scaled group within the available width
-  const startX = leftClear + Math.max(0, (availableW - totalW) / 2);
-  const startY = screenHeight - SLOT_H - BOTTOM_MARGIN;
+  const groupStartX = leftClear + Math.max(0, (availableW - totalW) / 2);
+  const blasterX       = groupStartX;
+  const ammoX          = blasterX + slotW + SLOT_SEP;
+  const weaponsStartX  = ammoX + slotW + SLOT_GAP;
+  const startY         = screenHeight - SLOT_H - BOTTOM_MARGIN;
 
-  return { startX, startY, slotW, totalW };
+  return { startY, slotW, blasterX, ammoX, weaponsStartX, totalW };
 }
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full

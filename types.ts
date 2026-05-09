@@ -144,6 +144,11 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
+  // Shared-ammo deduction per trigger pull (post-d1 model).  Blaster = 0
+  // (infinite); every other weapon = 1 today (preserves the 1-trigger-per-
+  // pickup feel of the per-weapon model since pickup amounts are unchanged).
+  // d2 will retune costs alongside the broader weapon overhaul.
+  ammoCost: number;
   homing?: boolean; // Does it track targets?
   burstCount?: number; // How many shots in a burst sequence
   burstDelay?: number; // Time between burst shots
@@ -161,8 +166,11 @@ export interface NebulaColorStop {
 
 // ── Drop composition entry ────────────────────────────────────────────────────
 // Tracks drops stored inside a composite asteroid, including absorbed power-ups.
+// Post-d1: ammo is a single shared currency, so ammo entries no longer carry
+// a per-weapon tag — `value` is the shared-pool amount the drop will award on
+// release.
 export type DropCompositionEntry =
-  | { type: 'ammo'; value: number; weapon: WeaponType }
+  | { type: 'ammo'; value: number }
   | { type: 'health'; value: number };
 
 export interface GameEntity {
@@ -248,11 +256,13 @@ export interface GameEntity {
   // Powerup pickup
   powerupWeapon?: WeaponType;
 
-  // Per-weapon ammo-pickup flash: timer counts down from FLASH_DURATION → 0; amount shown as +N
-  ammoPickupFlash?: Partial<Record<WeaponType, { timer: number; amount: number }>>;
+  // Shared-pool ammo-pickup flash: timer counts down from FLASH_DURATION → 0;
+  // `amount` accumulates +N pickups inside the same flash window.
+  ammoPickupFlash?: { timer: number; amount: number };
 
-  // Ammo per weapon (undefined key = not owned; BLASTER is always ∞ and has no entry)
-  ammo?: Partial<Record<WeaponType, number>>;
+  // Shared ammo pool — single currency consumed by every non-blaster weapon
+  // at its per-weapon `ammoCost`.  Blaster is infinite and bypasses this pool.
+  ammo?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -260,7 +270,6 @@ export interface GameEntity {
   // Drop item fields
   dropType?: 'ammo' | 'health' | 'glass';
   dropValue?: number;
-  dropWeapon?: WeaponType;
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
