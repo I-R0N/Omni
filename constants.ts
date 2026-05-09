@@ -768,7 +768,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.50,    // 2 shots/s
-    speed: 30,         // fast projectile; gravity pull still curves it toward targets
+    speed: 6,          // slow drifting projectile; gravity pull curves it toward targets
     damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
