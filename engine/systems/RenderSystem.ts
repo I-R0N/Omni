@@ -1890,8 +1890,14 @@ export class RenderSystem {
                 if (entity.dropType === 'health') {
                     coreColor = '#6ef09a'; rimColor = '#22c55e';
                     glowRgb = [74, 222, 128];
+                } else if (entity.dropType === 'ammo') {
+                    // Black core with a white rim + halo so ammo drops read
+                    // distinctly against the colourful weapon palette and
+                    // the yellow HUD readout.
+                    coreColor = '#000000'; rimColor = '#ffffff';
+                    glowRgb = [255, 255, 255];
                 } else {
-                    // 'ammo', 'powerup', or any other — use entity.color (weapon color)
+                    // 'powerup' or any other — use entity.color
                     coreColor = entity.color; rimColor = entity.color;
                     glowRgb = hexToRgb(entity.color);
                 }
