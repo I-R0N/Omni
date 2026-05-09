@@ -1150,14 +1150,23 @@ export class GameEngine {
             return;
         }
 
-        // Ammo HUD slot selection — intercept taps on the weapon slots
+        // Ammo HUD slot selection — intercept taps on the weapon slots.
+        // Layout: [BLASTER] gap [AMMO READOUT] gap [BURST][SHOTGUN]…
+        // The ammo readout box (between the blaster and the other weapons)
+        // is informational only and not selectable.
         const { SLOT_H, SLOT_GAP } = AMMO_HUD_CONSTANTS;
-        const { startX: slotStartX, startY: slotStartY, slotW } =
+        const { startY: slotStartY, slotW, blasterX, weaponsStartX } =
             computeAmmoHUDLayout(window.innerWidth, window.innerHeight);
 
         if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
-            for (let i = 0; i < WEAPON_LIST.length; i++) {
-                const sx = slotStartX + i * (slotW + SLOT_GAP);
+            // Blaster slot (index 0)
+            if (evt.x >= blasterX && evt.x <= blasterX + slotW) {
+                this.selectWeapon(WEAPON_LIST[0]);
+                return;
+            }
+            // Non-blaster weapon slots (indices 1..N-1)
+            for (let i = 1; i < WEAPON_LIST.length; i++) {
+                const sx = weaponsStartX + (i - 1) * (slotW + SLOT_GAP);
                 if (evt.x >= sx && evt.x <= sx + slotW) {
                     this.selectWeapon(WEAPON_LIST[i]);
                     return;

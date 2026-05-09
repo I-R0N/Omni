@@ -152,10 +152,14 @@ export const UI_CONSTANTS = {
 };
 
 export const AMMO_HUD_CONSTANTS = {
-  SLOT_W_MAX:    44,   // shrinks on narrow screens to clear the minimap
-  SLOT_W_MIN:    24,
+  SLOT_W_MAX:    36,   // shrunk post-d1 — per-slot ammo number moved to a dedicated box
+  SLOT_W_MIN:    22,
   SLOT_H:        48,
   SLOT_GAP:      4,
+  // Wider gap separating logical groups: BLASTER | AMMO READOUT | other
+  // weapons.  Visually distinguishes the always-firable blaster and the
+  // shared-pool readout from the ammo-gated weapon slots.
+  SLOT_SEP:      14,
   SLOT_RADIUS:   5,
   BOTTOM_MARGIN: 14,
 };
@@ -892,12 +896,26 @@ export const DROP_CONFIG = {
 
 /**
  * Compute the ammo-HUD slot layout for a given screen size.
- * Slots live to the right of the minimap, scaled to fit the available space.
+ *
+ * Slot order (post-d1): [BLASTER]  ⎢gap⎥  [AMMO]  ⎢gap⎥  [BURST][SHOTGUN]…
+ * The blaster sits alone (infinite ammo, never gated).  The shared-pool
+ * readout sits in its own slot-sized box separated from both the blaster
+ * and the ammo-gated weapons by a wider SLOT_SEP gap so the three groups
+ * read as visually distinct.
+ *
+ * Total cells = 1 (blaster) + 1 (ammo) + (WEAPON_LIST.length - 1) (other
+ * weapons).  Two SLOT_SEP gaps separate the three groups; the remaining
+ * inter-weapon gaps are the standard SLOT_GAP.
  */
 export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
-  startX: number; startY: number; slotW: number; totalW: number;
+  startY: number;
+  slotW: number;
+  blasterX: number;
+  ammoX: number;
+  weaponsStartX: number;
+  totalW: number;
 } {
-  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, SLOT_SEP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
   const { MARGIN: MM, SIZE: MS } = MINIMAP_CONSTANTS;
 
   // Horizontal: start just right of the minimap, leave symmetric margin on the right
@@ -905,18 +923,26 @@ export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number):
   const rightEdge   = screenWidth - MM;
   const availableW  = rightEdge - leftClear;
 
-  // Scale slot width to fill available space without overflowing
+  // Cells: blaster (1) + ammo (1) + non-blaster weapons (WEAPON_LIST.length - 1)
+  const cells           = WEAPON_LIST.length + 1;
+  const otherWeaponGaps = WEAPON_LIST.length - 2; // gaps between non-blaster weapon slots
+  const fixedGapsW      = 2 * SLOT_SEP + otherWeaponGaps * SLOT_GAP;
+
+  // Scale slot width to fit
   const slotW = Math.max(
     SLOT_W_MIN,
-    Math.min(SLOT_W_MAX, Math.floor((availableW - (WEAPON_LIST.length - 1) * SLOT_GAP) / WEAPON_LIST.length))
+    Math.min(SLOT_W_MAX, Math.floor((availableW - fixedGapsW) / cells))
   );
-  const totalW = WEAPON_LIST.length * (slotW + SLOT_GAP) - SLOT_GAP;
+  const totalW = cells * slotW + fixedGapsW;
 
   // Center the scaled group within the available width
-  const startX = leftClear + Math.max(0, (availableW - totalW) / 2);
-  const startY = screenHeight - SLOT_H - BOTTOM_MARGIN;
+  const groupStartX = leftClear + Math.max(0, (availableW - totalW) / 2);
+  const blasterX       = groupStartX;
+  const ammoX          = blasterX + slotW + SLOT_SEP;
+  const weaponsStartX  = ammoX + slotW + SLOT_SEP;
+  const startY         = screenHeight - SLOT_H - BOTTOM_MARGIN;
 
-  return { startX, startY, slotW, totalW };
+  return { startY, slotW, blasterX, ammoX, weaponsStartX, totalW };
 }
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
