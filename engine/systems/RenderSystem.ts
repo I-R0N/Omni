@@ -1744,6 +1744,32 @@ export class RenderSystem {
                     ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
+                } else if (entity.isCharged) {
+                    // ── Charged Blaster: red+orange fireball ──
+                    // Larger glow with explicit two-tone red+orange ring
+                    // around a hot white core.  Only charged Blaster sets
+                    // isCharged today; other charged variants render with
+                    // the standard weapon-colour gradient below.
+                    const pulse = 0.88 + Math.sin(nowSec * 18 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * 3.2;
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    grad.addColorStop(0,    'rgba(255, 255, 235, 1)');    // hot white core
+                    grad.addColorStop(0.10, 'rgba(255, 220, 100, 1)');    // pale yellow inner
+                    grad.addColorStop(0.25, 'rgba(251, 146,  60, 1)');    // orange (orange-400)
+                    grad.addColorStop(0.45, 'rgba(239,  68,  68, 0.85)'); // red (red-500)
+                    grad.addColorStop(0.75, 'rgba(220,  38,  38, 0.25)'); // deep red glow
+                    grad.addColorStop(1,    'rgba(220,  38,  38, 0)');
+
+                    ctx.beginPath();
+                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+
+                    ctx.restore();
                 } else {
                     // ── Standard projectile: radial gradient glow ──
                     const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;

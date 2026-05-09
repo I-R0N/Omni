@@ -169,6 +169,10 @@ export interface WeaponConfig {
   chainCount?: number;
   chainRange?: number;
   chainBranches?: number;
+  // Charged-shot render hint — ProjectileSystem.spawn copies this onto
+  // the projectile so RenderSystem can pick a custom visual (today only
+  // the charged Blaster fireball uses it).
+  isCharged?: boolean;
   homing?: boolean; // Does it track targets?
   // Per-weapon homing turn-rate multiplier (1.0 = full tracking).  Charged
   // Homing volleys reduce this so the missiles fan out rather than all
@@ -365,6 +369,12 @@ export interface GameEntity {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // Charged-shot render hint — set on the projectile when the charged
+  // variant should render with a custom visual (e.g. fireball gradient
+  // for charged Blaster).  Other charged variants (Burst / Shotgun /
+  // Homing / Cannon) leave this unset and render with the standard
+  // weapon-color gradient.
+  isCharged?: boolean;
   // Lightning chain overrides on the projectile (charged-shot only).
   chainCount?: number;
   chainRange?: number;

@@ -115,6 +115,7 @@ export class ProjectileSystem {
         chainCount: config.chainCount,
         chainRange: config.chainRange,
         chainBranches: config.chainBranches,
+        isCharged: config.isCharged,
       });
     }
 

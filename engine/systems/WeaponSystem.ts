@@ -29,7 +29,16 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 function chargedConfigOf(config: WeaponConfig): WeaponConfig {
   switch (config.type) {
     case WeaponType.BLASTER:
-      return { ...config, damage: config.damage * 5, pierce: 3, recoil: 0 };
+      // Larger fireball-style projectile; RenderSystem picks the red+orange
+      // two-tone gradient when isCharged is set.
+      return {
+        ...config,
+        damage: config.damage * 5,
+        pierce: 3,
+        recoil: 0,
+        size: config.size * 2.6,  // 6 → ~16
+        isCharged: true,
+      };
     case WeaponType.BURST:
       return { ...config, pierce: 3, burstCount: 5 };
     case WeaponType.SHOTGUN:
