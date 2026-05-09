@@ -43,9 +43,9 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
       // ProjectileSystem.spawn copies these onto the projectile at spawn.
       return {
         ...config,
-        chainCount: LIGHTNING_CHAIN_COUNT * 2,
-        chainRange: LIGHTNING_CHAIN_RANGE * 2,
-        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2 — one extra simultaneous jump per node
+        chainCount:    LIGHTNING_CHAIN_COUNT + 2,    // 5 vs base 3 — two extra depth tiers
+        chainRange:    LIGHTNING_CHAIN_RANGE * 2,    // 560 vs base 280
+        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 4 vs base 3 — one extra simultaneous jump per node
       };
     case WeaponType.HOMING:
       return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };
