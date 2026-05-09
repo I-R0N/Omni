@@ -737,11 +737,11 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
     speed: 12,
     damage: 3,
-    lifetime: 0.4,
+    lifetime: 0.8,     // doubled — pellets reach further before fading
     color: '#facc15', // Yellow
     size: 5,
     count: 6,
-    spread: 35,
+    spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
     pierce: 1,
     ammoCost: 1,
@@ -768,8 +768,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.50,    // 2 shots/s
-    speed: 3,          // slow drifting projectile; gravity pull curves it toward targets
-    damage: 3,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
+    speed: 30,         // fast projectile; gravity pull still curves it toward targets
+    damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
     size: 6,

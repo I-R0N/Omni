@@ -34,7 +34,7 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
     case WeaponType.BURST:
       return { ...config, pierce: 3, burstCount: 5 };
     case WeaponType.SHOTGUN:
-      return { ...config, count: 12, spread: 50, pierce: 2 };
+      return { ...config, count: 12, spread: 25, pierce: 2 };
     case WeaponType.BOUNCER:
       return { ...config, count: 3, spread: 30 };
     case WeaponType.LIGHTNING:
