@@ -1688,6 +1688,30 @@ export class GameEngine {
       // updateExplosionRings reads explosionDamage / explosionKnockback /
       // hitEntityIds to apply the damage in lock-step with the visual.
       const ringLifetime = 0.35;
+
+      // Snapshot ids of eligible in-range entities at spawn time.  The
+      // wave only damages entities in this set, so freshly-spawned
+      // shards / drops that come from the wave's own kills (their ids
+      // didn't exist when the ring spawned) are naturally excluded.
+      // This is the fix for the "every cannon shot dumps a pile of
+      // ammo drops" bug — wave was killing newborn glass-/rock-shards,
+      // each of which rolled the 45 % asteroid ammo drop.
+      const radiusSq = radius * radius;
+      const validHitIds = new Set<string>();
+      const entitiesAtSpawn = this.currentMap.entities;
+      for (let i = 0; i < entitiesAtSpawn.length; i++) {
+          const e = entitiesAtSpawn[i];
+          if (!e.active || e.isExploding) continue;
+          if (e.type === EntityType.PROJECTILE) continue;
+          if (e.type === EntityType.PARTICLE) continue;
+          if (e.type === EntityType.INTERACTABLE) continue;
+          const dx = wrapDeltaX(impactPos.x, e.position.x);
+          const dy = wrapDeltaY(impactPos.y, e.position.y);
+          if (dx * dx + dy * dy <= radiusSq) {
+              validHitIds.add(e.id);
+          }
+      }
+
       this.currentMap.entities.push({
           id: nextId('explosion-ring'),
           type: EntityType.PARTICLE,
@@ -1713,6 +1737,7 @@ export class GameEngine {
           // self-damage).  Future enemy cannons would still skip the
           // shooter's own kind via ownerType in the per-frame tick.
           hitEntityIds: [directTarget.id, 'player'],
+          validHitIds,
       });
   }
 
@@ -1747,17 +1772,16 @@ export class GameEngine {
           const knock = ring.explosionKnockback ?? 0;
           const hits  = ring.hitEntityIds ?? (ring.hitEntityIds = []);
 
+          // Only candidates that were in range AT SPAWN are eligible —
+          // entities born during the sweep (e.g. glass-shards from tiles
+          // the wave just shattered) are excluded.
+          const valid = ring.validHitIds;
+          if (!valid || valid.size === 0) continue;
+
           for (let i = 0; i < entities.length; i++) {
               const e = entities[i];
               if (!e.active || e.isExploding) continue;
-              if (e.type === EntityType.PROJECTILE) continue;
-              if (e.type === EntityType.PARTICLE) continue;
-              if (e.type === EntityType.INTERACTABLE) continue;
-              // Friendly-fire: skip same-team entities (cannon is player
-              // today; if enemies ever get one, they won't damage other
-              // enemies via their own shockwave).
-              if (ring.ownerType === EntityType.PLAYER && e.type === EntityType.PLAYER) continue;
-              if (ring.ownerType === EntityType.ENEMY  && e.type === EntityType.ENEMY)  continue;
+              if (!valid.has(e.id)) continue;
               if (hits.includes(e.id)) continue;
 
               const dx = wrapDeltaX(ring.position.x, e.position.x);

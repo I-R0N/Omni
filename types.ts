@@ -356,6 +356,15 @@ export interface GameEntity {
   // lifetime.  Stroke colour comes from `color`.  Spawned in
   // GameEngine.applyExplosionAoE alongside the existing spark particles.
   isExplosionRing?: boolean;
+  // Snapshot of entity ids that were in range AND eligible at the moment
+  // the ring spawned.  updateExplosionRings only damages entities whose
+  // id is in this set — prevents the expanding wave from re-hitting
+  // shards/drops that were spawned **as a result of** the wave's own
+  // kills (e.g. glass-shards from a tile the wave shattered earlier in
+  // its sweep).  Without this, every cannon hit cascaded into a pile of
+  // ammo drops because each newborn shard rolled the asteroid drop
+  // table when the wave killed it.
+  validHitIds?: Set<string>;
 
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
