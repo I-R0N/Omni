@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -1998,6 +1998,48 @@ export class RenderSystem {
           ctx.beginPath();
           ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.rotate(rot);
+      }
+
+      // Charge-shot ring — drawn while the player holds the fire button.
+      // Stored on player.chargeProgress as a fraction of CHARGE_FULL ([0,1]).
+      // Below the threshold ratio: priming colour, partial arc.
+      // Past threshold: ready colour (yellow → white at full).
+      if (entity.type === EntityType.PLAYER && entity.chargeProgress && entity.chargeProgress > 0) {
+          const cp = entity.chargeProgress; // [0..1] fraction of CHARGE_FULL
+          const thresholdRatio = INPUT_CONSTANTS.CHARGE_THRESHOLD / INPUT_CONSTANTS.CHARGE_FULL;
+          const isReady = cp >= thresholdRatio;
+          const isFull = cp >= 1;
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const ringR = (maxDim / 2) + CHARGE_CONSTANTS.RING_RADIUS_OFFSET;
+
+          // Undo entity rotation so the ring is axis-aligned and the arc
+          // sweep starts at the top (12 o'clock) regardless of facing.
+          const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          ctx.rotate(-rot);
+
+          ctx.strokeStyle = isFull
+              ? CHARGE_CONSTANTS.RING_COLOR_FULL
+              : (isReady ? CHARGE_CONSTANTS.RING_COLOR_READY : CHARGE_CONSTANTS.RING_COLOR_PRIMING);
+          ctx.lineWidth = CHARGE_CONSTANTS.RING_WIDTH;
+          ctx.globalAlpha = isReady ? 0.9 : 0.5;
+
+          // Background dim ring at full circumference for context.
+          if (!isFull) {
+              ctx.beginPath();
+              ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+              ctx.globalAlpha = 0.15;
+              ctx.stroke();
+              ctx.globalAlpha = isReady ? 0.9 : 0.5;
+          }
+
+          // Foreground arc — fills clockwise from top, ending at the current
+          // charge fraction.
+          ctx.beginPath();
+          ctx.arc(0, 0, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cp);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
           ctx.rotate(rot);
       }
 

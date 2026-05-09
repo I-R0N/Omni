@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -1175,9 +1175,26 @@ export class GameEngine {
         }
 
         if (!this.minimapExpanded) {
-            this.handleShooting(evt);
+            this.handleShooting(evt, false);
         }
     });
+
+    // Charge-release events: held past INPUT_CONSTANTS.CHARGE_THRESHOLD then
+    // released without dragging.  Fire a charged shot.
+    const chargeReleaseEvents = this.input.getChargeReleaseEvents();
+    chargeReleaseEvents.forEach(evt => {
+        if (!this.minimapExpanded) {
+            this.handleShooting(evt, true);
+        }
+    });
+
+    // Update player.chargeProgress for the charge-ring HUD.  Stored as
+    // fraction of CHARGE_FULL ([0, 1]).  RenderSystem decides ring colour
+    // by comparing against the CHARGE_THRESHOLD/CHARGE_FULL ratio.
+    const heldFor = this.input.getMouseHoldDuration();
+    this.player.chargeProgress = heldFor > 0
+        ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
+        : 0;
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem.
     if (this.currentMap) {
@@ -1368,7 +1385,14 @@ export class GameEngine {
 
     // Lightning projectile: chain to nearby entities on impact
     if (proj.isLightningProjectile) {
-        this.fireLightningChainFromImpact(impactPos, target);
+        this.fireLightningChainFromImpact(impactPos, target, proj);
+    }
+
+    // Cannon AoE: every entity within proj.explosionRadius takes
+    // proj.explosionDamage and a knockback impulse.  Direct-hit target
+    // is excluded (it already took config.damage in PhysicsSystem).
+    if (proj.explosionRadius && proj.explosionRadius > 0) {
+        this.applyExplosionAoE(impactPos, proj, target);
     }
   };
 
@@ -1436,7 +1460,7 @@ export class GameEngine {
       this.camera.position = { ...this.player.position };
   }
 
-  private handleShooting(target: Vector2) {
+  private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
 
       // Convert screen-space target to world coords once; the rest of the
@@ -1451,6 +1475,7 @@ export class GameEngine {
           this.player,
           { x: worldX, y: worldY },
           this.handleScreenShake,
+          charged,
       );
 
       // Keep the HUD weapon index aligned with the player's current weapon in
@@ -1489,8 +1514,16 @@ export class GameEngine {
 
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
-  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity) {
       if (!this.currentMap) return;
+
+      // Per-projectile chain overrides (set by ProjectileSystem.spawn from
+      // WeaponConfig.chainCount/chainRange — populated by the charged
+      // Lightning variant).  Fall back to the global LIGHTNING_CHAIN_*
+      // constants for normal shots.
+      const hopBudget = proj?.chainCount ?? LIGHTNING_CHAIN_COUNT;
+      const hopRange  = proj?.chainRange ?? LIGHTNING_CHAIN_RANGE;
+      const hopRangeSq = hopRange * hopRange;
 
       // Build chain: hop from the initial target to nearby enemies/asteroids.
       // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
@@ -1503,7 +1536,7 @@ export class GameEngine {
 
       const pickNearest = (prev: GameEntity): GameEntity | null => {
           let nextTarget: GameEntity | null = null;
-          let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
+          let nextDistSq = hopRangeSq;
           for (let i = 0; i < enemies.length; i++) {
               const e = enemies[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
@@ -1523,7 +1556,7 @@ export class GameEngine {
           return nextTarget;
       };
 
-      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
+      for (let hop = 0; hop < hopBudget; hop++) {
           const next = pickNearest(chain[chain.length - 1]);
           if (!next) break;
           chain.push(next);
@@ -1578,6 +1611,88 @@ export class GameEngine {
           isLightningArc: true,
           arcPoints,
       });
+  }
+
+  // ─── Cannon AoE — radial damage on projectile impact ───────────────────
+  //
+  // Reused for both normal and charged cannon shots.  Damages every
+  // enemy / structure within `proj.explosionRadius` (toroidal-corrected),
+  // applies a falloff knockback impulse, and spawns visual sparks.
+  // Direct-hit target is excluded — it already took config.damage upstream.
+  // Player is excluded (the cannon is the player's weapon; AoE shouldn't
+  // self-damage).
+  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
+      if (!this.currentMap) return;
+      const radius = proj.explosionRadius!;
+      const dmg = proj.explosionDamage ?? 0;
+      const knock = proj.explosionKnockback ?? 0;
+      const radiusSq = radius * radius;
+
+      // Visual: bright orange ring of sparks at the impact point so the
+      // AoE is read clearly even when no targets are inside the radius.
+      this.spawnParticles(impactPos, 14, '#fb923c', {
+          speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3,
+      });
+      this.spawnParticles(impactPos, 6, '#ffffff', {
+          speedMin: 6, speedMax: 14, sizeMin: 0.5, sizeMax: 1.5,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+
+      // Walk the master entity list once.  Static tiles aren't in
+      // entityIndex.asteroids (that list holds only mobile shards), so we
+      // need the unfiltered sweep to catch them.  All checks are O(1) per
+      // entity with an early-out on the radius gate, so this is bounded
+      // by ~one radius² scan per cannon shot (cannon ROF ≤ 1/s).
+      const entities = this.currentMap.entities;
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.isExploding) continue;
+          if (e.id === directTarget.id) continue;
+          if (e.id === 'player') continue;       // never self-damage the player
+          if (e.type === EntityType.PROJECTILE) continue;
+          if (e.type === EntityType.PARTICLE) continue;
+          if (e.type === EntityType.INTERACTABLE) continue; // drops shouldn't be wiped by AoE
+
+          const dx = wrapDeltaX(impactPos.x, e.position.x);
+          const dy = wrapDeltaY(impactPos.y, e.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 > radiusSq) continue;
+
+          const dist = Math.sqrt(d2);
+          const falloff = 1 - (dist / radius); // 1 at centre, 0 at rim
+
+          if (dmg > 0) {
+              const applied = dmg * falloff;
+              // Indestructible tiles still flash but take no damage.
+              const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
+              if (!isIndestructible) e.health -= applied;
+              e.hitFlash = 0.12;
+              this.spawnDamageText(e.position, applied, e);
+              if (e.health <= 0 && !e.isExploding) {
+                  e.lastImpactDamage = applied;
+                  // Stamp a blast-direction velocity so shard scatter reads as "blown outward".
+                  if (e.type === EntityType.STRUCTURE && dist > 0) {
+                      e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
+                  }
+                  // Static tiles must be unregistered from the static grid
+                  // before death dispatch — PhysicsSystem normally does this
+                  // in the projectile-collision branch, but we're outside
+                  // that path here.
+                  if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
+                      this.physics.removeStaticEntity(e);
+                  }
+                  this.handleEntityDeath(e);
+                  e.active = false;
+              }
+          }
+
+          // Knockback impulse — only on movable bodies.
+          if (knock > 0 && e.mass !== Infinity && dist > 0) {
+              const k = knock * falloff;
+              e.velocity.x += (dx / dist) * k;
+              e.velocity.y += (dy / dist) * k;
+          }
+      }
   }
 
   // createAsteroidShards moved to ShardSystem.shatter in Stage 3 of

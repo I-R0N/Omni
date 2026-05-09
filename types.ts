@@ -144,12 +144,35 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
-  // Shared-ammo deduction per trigger pull (post-d1 model).  Blaster = 0
-  // (infinite); every other weapon = 1 today (preserves the 1-trigger-per-
-  // pickup feel of the per-weapon model since pickup amounts are unchanged).
-  // d2 will retune costs alongside the broader weapon overhaul.
+  // Shared-ammo deduction per normal (tap) trigger pull.  Blaster = 0
+  // (infinite); every other weapon = 1.  Charged shots use chargedAmmoCost.
   ammoCost: number;
+  // Shared-ammo deduction for a charged (hold-to-fire) trigger pull.
+  // Blaster = 0; every other weapon = 2.  When the shared pool is short of
+  // chargedAmmoCost on charge release, WeaponSystem falls back to a normal
+  // shot at ammoCost.
+  chargedAmmoCost: number;
+  // Maximum tile-bounces for a bouncer projectile.  Bouncer is the only
+  // weapon that uses this today; absent on other configs.
+  bounceCount?: number;
+  // Cannon AoE-on-impact primitive.  When set, every entity within
+  // `explosionRadius` of the impact (toroidal-corrected) takes
+  // `explosionDamage` and a knockback impulse with magnitude scaling from
+  // `explosionKnockback` at the centre to 0 at the rim.
+  explosionRadius?: number;
+  explosionDamage?: number;
+  explosionKnockback?: number;
+  // Lightning chain overrides — when set, replaces the default
+  // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE constants for the
+  // chain triggered by this projectile's impact.  Used by the charged
+  // Lightning variant to double both.
+  chainCount?: number;
+  chainRange?: number;
   homing?: boolean; // Does it track targets?
+  // Per-weapon homing turn-rate multiplier (1.0 = full tracking).  Charged
+  // Homing volleys reduce this so the missiles fan out rather than all
+  // converging on the same target.
+  homingStrength?: number;
   burstCount?: number; // How many shots in a burst sequence
   burstDelay?: number; // Time between burst shots
 }
@@ -252,6 +275,15 @@ export interface GameEntity {
   weaponCooldown?: number;
   burstQueue?: number; // How many shots left in current burst
   burstTimer?: number; // Timer for next burst shot
+  // Set on the trigger pull that started the current burst — true if the
+  // burst was a charged shot.  Read by tickPlayerBurst so sub-shots inherit
+  // the charged config (pierce 3 instead of 2, etc.).
+  burstCharged?: boolean;
+
+  // Charge-shot progress: 0 (not charging) … 1 (full).  Updated each frame
+  // by GameEngine from InputSystem.getMouseHoldDuration().  Read by
+  // RenderSystem to draw the charge ring around the player ship.
+  chargeProgress?: number;
 
   // Powerup pickup
   powerupWeapon?: WeaponType;
@@ -322,6 +354,19 @@ export interface GameEntity {
 
   // Marks a projectile as a bouncer (thin green laser that reflects off tiles)
   isBouncer?: boolean;
+  // Remaining tile-bounces for a bouncer projectile (decremented on each
+  // reflection in PhysicsSystem; the projectile is deactivated when it
+  // would bounce past 0).  Absent on non-bouncer projectiles.
+  bouncesRemaining?: number;
+  // Cannon AoE-on-impact: copied from WeaponConfig at spawn.  PhysicsSystem
+  // raises an onExplosion callback for any projectile with explosionRadius
+  // > 0 after the direct-hit damage resolves.
+  explosionRadius?: number;
+  explosionDamage?: number;
+  explosionKnockback?: number;
+  // Lightning chain overrides on the projectile (charged-shot only).
+  chainCount?: number;
+  chainRange?: number;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
   homingStrength?: number;
 

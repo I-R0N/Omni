@@ -93,11 +93,27 @@ export class ProjectileSystem {
         mass: PROJECTILE_CONSTANTS.MASS,
         damage: config.damage,
         homing: config.homing,
+        homingStrength: config.homingStrength,
         ownerType,
         pierceCount: config.pierce,
         trail: [],
         isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
         isBouncer: config.type === WeaponType.BOUNCER || undefined,
+        // Bouncer projectiles carry a remaining-bounces counter so they
+        // dissipate after `bounceCount` reflections.  Other projectile
+        // types ignore this field.
+        bouncesRemaining: config.type === WeaponType.BOUNCER ? config.bounceCount : undefined,
+        // Explosion-AoE primitive (Cannon).  PhysicsSystem dispatches an
+        // onExplosion callback when these are set on a projectile that
+        // resolves a direct hit.
+        explosionRadius: config.explosionRadius,
+        explosionDamage: config.explosionDamage,
+        explosionKnockback: config.explosionKnockback,
+        // Lightning chain overrides (charged Lightning).  GameEngine
+        // .fireLightningChainFromImpact reads these and falls back to
+        // the LIGHTNING_CHAIN_* constants when undefined.
+        chainCount: config.chainCount,
+        chainRange: config.chainRange,
       });
     }
 

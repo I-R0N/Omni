@@ -8,10 +8,14 @@ export class InputSystem {
   private mousePosition: Vector2;
   private mouseDown: boolean;
   
-  // Tap detection
+  // Tap / charge detection
   private touchStartTime: number = 0;
   private touchStartPos: Vector2 = { x: 0, y: 0 };
+  // Tap (release before INPUT_CONSTANTS.CHARGE_THRESHOLD): normal shot.
   private fireEvents: Vector2[] = [];
+  // Charge release (held past INPUT_CONSTANTS.CHARGE_THRESHOLD then released
+  // without dragging out of TAP_DISTANCE_LIMIT): charged shot.
+  private chargeReleaseEvents: Vector2[] = [];
   
   constructor() {
     this.keys = new Set();
@@ -125,20 +129,25 @@ export class InputSystem {
   };
 
   private checkTap(x: number, y: number) {
-    const duration = performance.now() - this.touchStartTime;
-    
+    const duration = (performance.now() - this.touchStartTime) / 1000; // seconds
+
     // Calculate distance moved during the hold
     const dist = Math.sqrt(
         Math.pow(x - this.touchStartPos.x, 2) +
         Math.pow(y - this.touchStartPos.y, 2)
     );
 
-    // It is a tap if held for short time AND didn't drag far
-    // OR if ZERO_DELAY_SHOOTING is on, we allow "taps" even if they took longer, provided distance is short
-    if (dist < INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) {
-        if (INPUT_CONSTANTS.ZERO_DELAY_SHOOTING || duration < INPUT_CONSTANTS.TAP_THRESHOLD) {
-             this.fireEvents.push({ x, y });
-        }
+    // Drag cancels the shot entirely (matches old behaviour).
+    if (dist >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return;
+
+    // Charge model: release before threshold = normal shot, release after =
+    // charged shot.  Any release that didn't drag fires something — there's
+    // no dead zone where a release produces nothing (was previously the
+    // case for >TAP_THRESHOLD holds).
+    if (duration >= INPUT_CONSTANTS.CHARGE_THRESHOLD) {
+        this.chargeReleaseEvents.push({ x, y });
+    } else {
+        this.fireEvents.push({ x, y });
     }
   }
 
@@ -204,6 +213,27 @@ export class InputSystem {
     const events = [...this.fireEvents];
     this.fireEvents = [];
     return events;
+  }
+
+  /** Drain queued charge-release events (held past CHARGE_THRESHOLD). */
+  public getChargeReleaseEvents(): Vector2[] {
+    const events = [...this.chargeReleaseEvents];
+    this.chargeReleaseEvents = [];
+    return events;
+  }
+
+  /**
+   * Live hold duration (seconds) of the current mouse/touch press.  Returns
+   * 0 when not held or when the press has dragged past TAP_DISTANCE_LIMIT
+   * (charge cancelled).  Used by GameEngine to drive `player.chargeProgress`
+   * for the charge-ring HUD.
+   */
+  public getMouseHoldDuration(): number {
+    if (!this.mouseDown) return 0;
+    const dx = this.mousePosition.x - this.touchStartPos.x;
+    const dy = this.mousePosition.y - this.touchStartPos.y;
+    if (Math.sqrt(dx * dx + dy * dy) >= INPUT_CONSTANTS.TAP_DISTANCE_LIMIT) return 0;
+    return (performance.now() - this.touchStartTime) / 1000;
   }
 
   public cleanup() {

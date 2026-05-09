@@ -563,7 +563,7 @@ export class PhysicsSystem {
     }
   }
 
-  private removeStaticEntity(entity: GameEntity) {
+  public removeStaticEntity(entity: GameEntity) {
       const key = cellKey(entity.position.x, entity.position.y);
       const cell = this.staticGrid.get(key);
       if (cell) {
@@ -974,6 +974,17 @@ export class PhysicsSystem {
                 }
               }
               const isTile = isReflective;
+              // Bounce-count gate: when bouncesRemaining is set (post-d2
+              // pierce-beam), the projectile dissipates after N reflections
+              // instead of bouncing forever inside its lifetime window.
+              // bouncesRemaining=0 means "no bounces left" → deactivate on
+              // the contact frame, fire onHit at the contact point, skip
+              // the reflection math.
+              if (isTile && proj.velocity && proj.bouncesRemaining !== undefined && proj.bouncesRemaining <= 0) {
+                  if (onHit) onHit(proj.position, proj, target);
+                  proj.active = false;
+                  return;
+              }
               if (isTile && proj.velocity) {
                   // Tiles are axis-aligned AABBs, and the projectile is thin and
                   // rotated along its travel direction — SAT's minimum-overlap axis
@@ -1042,6 +1053,15 @@ export class PhysicsSystem {
                       proj.position.y = target.position.y + ny * (tileHY + hyEff + 0.5);
                   }
                   proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+
+                  // Decrement remaining-bounces counter (set on bouncer
+                  // projectiles via WeaponConfig.bounceCount).  Counter is
+                  // checked at the top of the reflection branch on the
+                  // *next* tile contact; the projectile keeps moving on
+                  // this frame after the reflection.
+                  if (proj.bouncesRemaining !== undefined) {
+                      proj.bouncesRemaining -= 1;
+                  }
 
                   // Fire the impact callback AFTER the reflection so sparks spawn
                   // on the tile's surface and spray along the outgoing (reflected)
