@@ -988,6 +988,12 @@ export class GameEngine {
         this.nebulas.update(this.currentMap.entities, dt, this.physics);
     }
 
+    // Cannon shockwave — tick any active explosion rings, damaging any
+    // entity the wavefront has just reached.  Runs after physics so
+    // entity positions reflect this step's movement before being tested
+    // against the ring radius.
+    this.updateExplosionRings();
+
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
         this.handleEntityDeath(this.player);
@@ -1653,21 +1659,22 @@ export class GameEngine {
 
   // ─── Cannon AoE — radial damage on projectile impact ───────────────────
   //
-  // Reused for both normal and charged cannon shots.  Damages every
-  // enemy / structure within `proj.explosionRadius` (toroidal-corrected),
-  // applies a falloff knockback impulse, and spawns visual sparks.
-  // Direct-hit target is excluded — it already took config.damage upstream.
-  // Player is excluded (the cannon is the player's weapon; AoE shouldn't
-  // self-damage).
+  // Reused for both normal and charged cannon shots.  The shockwave is now
+  // **deferred** — instead of damaging every entity in the radius on the
+  // impact frame, this spawns a ring particle whose currentRadius grows
+  // from 0 → maxRadius across its lifetime.  updateExplosionRings (called
+  // each fixed step from updateGameLogic) ticks the ring and damages
+  // entities as the wavefront reaches them.  Direct-hit target is
+  // pre-populated into hitEntityIds so it isn't double-damaged (it
+  // already took config.damage from the projectile collision upstream).
+  // Player is also pre-populated to prevent self-damage.
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
       if (!this.currentMap) return;
       const radius = proj.explosionRadius!;
-      const dmg = proj.explosionDamage ?? 0;
-      const knock = proj.explosionKnockback ?? 0;
-      const radiusSq = radius * radius;
 
-      // Visual: bright orange ring of sparks at the impact point so the
-      // AoE is read clearly even when no targets are inside the radius.
+      // Impact-frame visuals (instant): bright spark burst + screen shake.
+      // These don't wait for the wavefront — the player should feel the
+      // hit immediately while the ring continues outward.
       this.spawnParticles(impactPos, 14, '#fb923c', {
           speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3,
       });
@@ -1676,9 +1683,10 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
 
-      // Expanding shockwave ring — grows from 0 to explosionRadius over
-      // its lifetime so the player can see exactly which entities the
-      // blast covered.  RenderSystem branches on isExplosionRing.
+      // Spawn the damaging ring particle.  RenderSystem reads
+      // explosionRadius + lifetime to draw the expanding shock front;
+      // updateExplosionRings reads explosionDamage / explosionKnockback /
+      // hitEntityIds to apply the damage in lock-step with the visual.
       const ringLifetime = 0.35;
       this.currentMap.entities.push({
           id: nextId('explosion-ring'),
@@ -1687,7 +1695,7 @@ export class GameEngine {
           velocity: { x: 0, y: 0 },
           size: { x: 1, y: 1 },
           rotation: 0,
-          color: WEAPONS[WeaponType.CANNON].color, // purple to match the weapon
+          color: WEAPONS[WeaponType.CANNON].color, // purple — matches the weapon
           active: true,
           health: 1,
           maxHealth: 1,
@@ -1696,61 +1704,95 @@ export class GameEngine {
           mass: 0,
           isExplosionRing: true,
           explosionRadius: radius,
+          explosionDamage: proj.explosionDamage,
+          explosionKnockback: proj.explosionKnockback,
+          ownerType: proj.ownerType,
+          // Pre-populate with entities the ring should never damage:
+          // the projectile's direct-hit target (already took config.damage)
+          // and the player (cannon is player-owned today; ring shouldn't
+          // self-damage).  Future enemy cannons would still skip the
+          // shooter's own kind via ownerType in the per-frame tick.
+          hitEntityIds: [directTarget.id, 'player'],
       });
+  }
 
-      // Walk the master entity list once.  Static tiles aren't in
-      // entityIndex.asteroids (that list holds only mobile shards), so we
-      // need the unfiltered sweep to catch them.  All checks are O(1) per
-      // entity with an early-out on the radius gate, so this is bounded
-      // by ~one radius² scan per cannon shot (cannon ROF ≤ 1/s).
+  // ─── Cannon AoE — per-frame shockwave tick ─────────────────────────────
+  //
+  // Walks isExplosionRing particles each fixed step.  For each, computes
+  // currentRadius via the same `1 − lifetime/maxLifetime` formula the
+  // renderer uses (so the damage front is always pixel-aligned with the
+  // visible ring).  Then walks the master entity list once, damaging /
+  // knocking back any entity whose current toroidal distance falls
+  // within currentRadius and that hasn't been hit yet.  hitEntityIds
+  // grows monotonically to prevent double-hits as the wave widens.
+  private updateExplosionRings() {
+      if (!this.currentMap) return;
       const entities = this.currentMap.entities;
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (!e.active || e.isExploding) continue;
-          if (e.id === directTarget.id) continue;
-          if (e.id === 'player') continue;       // never self-damage the player
-          if (e.type === EntityType.PROJECTILE) continue;
-          if (e.type === EntityType.PARTICLE) continue;
-          if (e.type === EntityType.INTERACTABLE) continue; // drops shouldn't be wiped by AoE
 
-          const dx = wrapDeltaX(impactPos.x, e.position.x);
-          const dy = wrapDeltaY(impactPos.y, e.position.y);
-          const d2 = dx * dx + dy * dy;
-          if (d2 > radiusSq) continue;
+      for (let r = 0; r < entities.length; r++) {
+          const ring = entities[r];
+          if (!ring.active || !ring.isExplosionRing) continue;
 
-          const dist = Math.sqrt(d2);
-          const falloff = 1 - (dist / radius); // 1 at centre, 0 at rim
+          const maxRadius = ring.explosionRadius;
+          if (!maxRadius || maxRadius <= 0) continue;
 
-          if (dmg > 0) {
-              const applied = dmg * falloff;
-              // Indestructible tiles still flash but take no damage.
-              const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
-              if (!isIndestructible) e.health -= applied;
-              e.hitFlash = 0.12;
-              this.spawnDamageText(e.position, applied, e);
-              if (e.health <= 0 && !e.isExploding) {
-                  e.lastImpactDamage = applied;
-                  // Stamp a blast-direction velocity so shard scatter reads as "blown outward".
-                  if (e.type === EntityType.STRUCTURE && dist > 0) {
-                      e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
+          const life = ring.lifetime ?? 0;
+          const maxLife = ring.maxLifetime ?? 1;
+          const expand = Math.max(0, Math.min(1, 1 - life / maxLife));
+          const currentRadius = maxRadius * expand;
+          if (currentRadius <= 0) continue;
+
+          const currentR2 = currentRadius * currentRadius;
+          const dmg   = ring.explosionDamage ?? 0;
+          const knock = ring.explosionKnockback ?? 0;
+          const hits  = ring.hitEntityIds ?? (ring.hitEntityIds = []);
+
+          for (let i = 0; i < entities.length; i++) {
+              const e = entities[i];
+              if (!e.active || e.isExploding) continue;
+              if (e.type === EntityType.PROJECTILE) continue;
+              if (e.type === EntityType.PARTICLE) continue;
+              if (e.type === EntityType.INTERACTABLE) continue;
+              // Friendly-fire: skip same-team entities (cannon is player
+              // today; if enemies ever get one, they won't damage other
+              // enemies via their own shockwave).
+              if (ring.ownerType === EntityType.PLAYER && e.type === EntityType.PLAYER) continue;
+              if (ring.ownerType === EntityType.ENEMY  && e.type === EntityType.ENEMY)  continue;
+              if (hits.includes(e.id)) continue;
+
+              const dx = wrapDeltaX(ring.position.x, e.position.x);
+              const dy = wrapDeltaY(ring.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 > currentR2) continue;
+
+              hits.push(e.id);
+              const dist = Math.sqrt(d2);
+              const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
+
+              if (dmg > 0) {
+                  const applied = dmg * falloff;
+                  const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
+                  if (!isIndestructible) e.health -= applied;
+                  e.hitFlash = 0.12;
+                  this.spawnDamageText(e.position, applied, e);
+                  if (e.health <= 0 && !e.isExploding) {
+                      e.lastImpactDamage = applied;
+                      if (e.type === EntityType.STRUCTURE && dist > 0) {
+                          e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
+                      }
+                      if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
+                          this.physics.removeStaticEntity(e);
+                      }
+                      this.handleEntityDeath(e);
+                      e.active = false;
                   }
-                  // Static tiles must be unregistered from the static grid
-                  // before death dispatch — PhysicsSystem normally does this
-                  // in the projectile-collision branch, but we're outside
-                  // that path here.
-                  if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
-                      this.physics.removeStaticEntity(e);
-                  }
-                  this.handleEntityDeath(e);
-                  e.active = false;
               }
-          }
 
-          // Knockback impulse — only on movable bodies.
-          if (knock > 0 && e.mass !== Infinity && dist > 0) {
-              const k = knock * falloff;
-              e.velocity.x += (dx / dist) * k;
-              e.velocity.y += (dy / dist) * k;
+              if (knock > 0 && e.mass !== Infinity && dist > 0) {
+                  const k = knock * falloff;
+                  e.velocity.x += (dx / dist) * k;
+                  e.velocity.y += (dy / dist) * k;
+              }
           }
       }
   }
