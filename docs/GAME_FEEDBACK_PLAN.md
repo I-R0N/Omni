@@ -16,20 +16,38 @@ session re-reads it on cold start and updates it as PRs land.
 - **Orchestration session** (planning branch
   `claude/game-feedback-plan-UN3MV`): owns this file, drafts task
   prompts, sequences work. Does not write code.
-- **Task sessions** (one per task by default): branch off latest
-  `main`, implement one task, open a standard PR, merge, end.
+- **Task sessions** (one per task by default): branch off the latest
+  tip of `claude/game-feedback-plan-UN3MV`, implement one task, open
+  a PR **against `claude/game-feedback-plan-UN3MV`** (NOT `main`),
+  merge, end.
 - **Same-session bundling** is allowed when a task is small enough that
   spinning up a fresh session is more overhead than the work. When
   bundled, both tasks land on the same branch in the same PR — note
   this in the Status field of both tasks.
 
+### Branch strategy
+
+To minimize Netlify deploy triggers (only `main` pushes deploy),
+`claude/game-feedback-plan-UN3MV` is the **long-lived integration
+branch** for all feedback work:
+
+- Every feature task PRs into this branch, never directly into `main`.
+- After each feature PR merges in, the orchestration session pulls,
+  updates this doc to reflect new state, and commits.
+- A single final PR from `claude/game-feedback-plan-UN3MV` → `main`
+  ships the entire feedback plan in one deploy.
+- Feature sessions branch off the tip of this plan branch, so each
+  picks up prior shipped work automatically.
+
 ### PR conventions
 
 - Standard PRs (no drafts, no special labels, no required reviewers
   beyond repo defaults).
+- **Base branch: `claude/game-feedback-plan-UN3MV`** (until the final
+  ship-it PR, which targets `main`).
 - Branch naming: `claude/<short-feature>-<suffix>`.
-- Each task session pulls the latest `main` first so prior merged
-  tasks are already present.
+- Each task session pulls the latest plan-branch tip first so prior
+  merged tasks are already present.
 
 ### Phase rules
 
@@ -123,7 +141,7 @@ k. After N waves, spawn a portal to a new map.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| e | Offscreen-only enemy wave spawns | in progress | `claude/wave-offscreen-spawn-<suffix>` | First task. **Bundled with (d1)** in same session/branch/PR per user direction. |
+| e | Offscreen-only enemy wave spawns | code complete on `claude/offscreen-enemy-spawning-vYW3c`; awaiting (d1) before merge | `claude/offscreen-enemy-spawning-vYW3c` | First task. **Bundled with (d1)** in same session/branch/PR. PR base must be `claude/game-feedback-plan-UN3MV`. |
 | d1 | Shared-ammo consolidation | pending — bundled with (e) | (same as e) | Single shared ammo pool. Tune per-shot costs and max-cap to preserve today's shots-per-pickup feel. HUD readout. Mechanical refactor only — **no combat-feel changes**. |
 | j | Graceful cleanup + density compaction | pending | `claude/density-cleanup-<suffix>` | Offscreen-priority removal, slow pacing, density-merge for rock/glass/nebula shards. Darker tint baseline. Touches ShardSystem, EntityIndex, render tinting. |
 | g1 | Plastic/metal rename + revisualize | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. Behavior unchanged. |
