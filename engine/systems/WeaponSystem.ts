@@ -7,8 +7,6 @@ import {
   ENEMY_CONSTANTS,
   ENEMY_ROLE,
   COLLISION_CONFIG,
-  LIGHTNING_CHAIN_COUNT,
-  LIGHTNING_CHAIN_RANGE,
   LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
@@ -41,11 +39,13 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
     case WeaponType.LIGHTNING:
       // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
       // ProjectileSystem.spawn copies these onto the projectile at spawn.
+      // Charged variant adds one extra simultaneous jump per node — saturated
+      // tree grows from 1+2+4+8=15 (base) to 1+3+9+27=40.  Depth and range
+      // are kept identical to base so the charge premium is purely "wider"
+      // rather than "further".
       return {
         ...config,
-        chainCount:    LIGHTNING_CHAIN_COUNT + 2,    // 5 vs base 3 — two extra depth tiers
-        chainRange:    LIGHTNING_CHAIN_RANGE * 2,    // 560 vs base 280
-        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 4 vs base 3 — one extra simultaneous jump per node
+        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
       };
     case WeaponType.HOMING:
       return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };

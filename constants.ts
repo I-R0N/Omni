@@ -608,7 +608,7 @@ export const CHARGE_CONSTANTS = {
 // ── Lightning chain tuning ───────────────────────────────────────────────────
 export const LIGHTNING_CHAIN_RANGE = 280;           // hop range for subsequent chains
 export const LIGHTNING_CHAIN_COUNT = 3;             // additional chain hops (depth) after projectile impact — depth 0 is the direct hit
-export const LIGHTNING_CHAIN_BRANCHES = 3;          // simultaneous jumps per chain node — turns the chain into a branching tree
+export const LIGHTNING_CHAIN_BRANCHES = 2;          // simultaneous jumps per chain node — turns the chain into a branching tree (saturated tree: 1+2+4+8 = 15 entities)
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
