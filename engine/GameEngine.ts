@@ -12,6 +12,7 @@ import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
+import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
@@ -1497,7 +1498,7 @@ export class GameEngine {
     }
   };
 
-  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {
+  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
       // Player damage goes to the HUD list, not the world-space float
       if (target?.type === EntityType.PLAYER) {
           const isCrit = amount > 3;
@@ -1523,34 +1524,117 @@ export class GameEngine {
           active: true
       });
 
-      // Intermediate dent-shard spawn — for dent variants with an
-      // intermediateShards spec, check whether `health / maxHealth`
-      // just crossed any entry's threshold and spawn the
-      // corresponding shard.  Skipped when the tile has died from
-      // this damage (target.health <= 0); the full-break path
-      // handles that.  Rock-tile uses this for the "shard breaks off
-      // the side at 1/3 HP remaining" effect.
+      // Dent-policy post-damage hooks — fire only while the tile is
+      // still alive (target.health > 0).  Killing hits route through
+      // the normal breakShards path in DropSystem.spawnDrops.
       if (target?.shardVariant && target.active && target.health > 0 && this.currentMap) {
           const dent = SHARD_VARIANTS[target.shardVariant].dent;
-          if (dent?.intermediateShards && dent.intermediateShards.length > 0) {
-              const maxH = target.maxHealth || 1;
-              // Dent variants take 1 HP per hit (see PhysicsSystem
-              // projectile damage path), regardless of `amount`.
-              const preHealth = target.health + 1;
-              const fractionBefore = preHealth / maxH;
-              const fractionAfter  = target.health / maxH;
-              for (let i = 0; i < dent.intermediateShards.length; i++) {
-                  const inter = dent.intermediateShards[i];
-                  if (fractionBefore > inter.healthFraction
-                      && fractionAfter <= inter.healthFraction) {
-                      this.drops.spawnDentShard(this.currentMap.entities, target, [
-                          { variant: inter.variant, sizeFraction: inter.sizeFraction },
-                      ]);
+          if (dent) {
+              // 'triangle-delete' kind: each hit removes the closest
+              // vertex (+ angleOffset) and releases a triangle shard
+              // shaped like the deleted corner.  Polygon loses one
+              // vertex per hit; the dent kind on PhysicsSystem.
+              // applyDentStep early-returns so it doesn't fight us
+              // for the same polygon.
+              if (dent.kind === 'triangle-delete' && impactWorldPos) {
+                  this.applyTriangleDelete(target, impactWorldPos, dent);
+              }
+              // Intermediate dent-shard spawn (pull-kind variants):
+              // when health / maxHealth crosses an entry's threshold,
+              // spawn that shard once.  Today no variant uses both
+              // triangle-delete and intermediateShards, but they're
+              // independent toggles.
+              if (dent.intermediateShards && dent.intermediateShards.length > 0) {
+                  const maxH = target.maxHealth || 1;
+                  // Dent variants take 1 HP per hit (see PhysicsSystem
+                  // projectile damage path), regardless of `amount`.
+                  const preHealth = target.health + 1;
+                  const fractionBefore = preHealth / maxH;
+                  const fractionAfter  = target.health / maxH;
+                  for (let i = 0; i < dent.intermediateShards.length; i++) {
+                      const inter = dent.intermediateShards[i];
+                      if (fractionBefore > inter.healthFraction
+                          && fractionAfter <= inter.healthFraction) {
+                          this.drops.spawnDentShard(this.currentMap.entities, target, [
+                              { variant: inter.variant, sizeFraction: inter.sizeFraction },
+                          ]);
+                      }
                   }
               }
           }
       }
   };
+
+  /**
+   * Triangle-delete dent step.  Finds the polygon vertex closest to
+   * the impact direction (with optional dentVertexAngleOffset),
+   * removes it from the tile's polygon — the two adjacent vertices
+   * stay, forming a new flat edge where the corner used to be — and
+   * spawns a triangle-shaped shard at that corner via
+   * DropSystem.spawnTriangleShard.  The polygon stays convex (a
+   * convex polygon minus an extreme vertex is still convex), so SAT
+   * collision keeps working.
+   *
+   * Bails when the polygon is too small to safely remove another
+   * vertex (< 4 verts left) — the killing hit will trigger
+   * breakShards via the normal on-death path.
+   */
+  private applyTriangleDelete(
+      target: GameEntity,
+      impactWorldPos: Vector2,
+      dent: NonNullable<typeof SHARD_VARIANTS[keyof typeof SHARD_VARIANTS]['dent']>,
+  ) {
+      const pts = target.polygonPoints;
+      if (!pts || pts.length < 4) return;
+      if (!this.currentMap) return;
+
+      const N = pts.length;
+      const localX = wrapDeltaX(target.position.x, impactWorldPos.x);
+      const localY = wrapDeltaY(target.position.y, impactWorldPos.y);
+      let dirX = localX, dirY = localY;
+      const angleOffset = dent.dentVertexAngleOffset;
+      if (angleOffset !== undefined && angleOffset !== 0) {
+          const cosA = Math.cos(angleOffset);
+          const sinA = Math.sin(angleOffset);
+          dirX = localX * cosA - localY * sinA;
+          dirY = localX * sinA + localY * cosA;
+      }
+
+      let bestIdx = 0;
+      let bestD2 = Infinity;
+      for (let i = 0; i < N; i++) {
+          const dx = pts[i].x - dirX;
+          const dy = pts[i].y - dirY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+              bestD2 = d2;
+              bestIdx = i;
+          }
+      }
+      const prevIdx = (bestIdx - 1 + N) % N;
+      const nextIdx = (bestIdx + 1) % N;
+
+      // Snapshot the triangle BEFORE mutating the array.  Fresh
+      // copies of each Vector2 so the spawned shard owns its own
+      // vertex objects.
+      const trianglePts: Vector2[] = [
+          { x: pts[prevIdx].x, y: pts[prevIdx].y },
+          { x: pts[bestIdx].x, y: pts[bestIdx].y },
+          { x: pts[nextIdx].x, y: pts[nextIdx].y },
+      ];
+
+      pts.splice(bestIdx, 1);
+      // Renderer's lazy-bake of originalCircumradiusSq used the old
+      // vertex set; force a rebake on next render so deformation
+      // metrics stay accurate.
+      target.originalCircumradiusSq = undefined;
+
+      const childVariant: ShardVariantId =
+          dent.breakShards[0]?.variant ?? 'rock-shard';
+      this.drops.spawnTriangleShard(
+          this.currentMap.entities, target, trianglePts, childVariant,
+      );
+  }
 
   private startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;

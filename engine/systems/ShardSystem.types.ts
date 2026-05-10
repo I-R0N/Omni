@@ -306,22 +306,32 @@ export interface ShardVariantDef {
     /** Per-vertex inward pull magnitude as a fraction of current
      *  radius.  Random magnitude in [0, vertexJitter] is drawn for
      *  each vertex each hit; cumulative.  Plastic ~0.25 (visibly
-     *  warps each hit), metal ~0.13 (subtle per-hit change). */
+     *  warps each hit), metal ~0.13 (subtle per-hit change).  Only
+     *  used when `kind` is 'pull'. */
     vertexJitter: number;
+    /** Strategy for the per-hit deformation.  Default 'pull' (used
+     *  by plastic / metal / their shards): the vertex closest to
+     *  the impact direction is pulled inward, polygon shrinks
+     *  asymmetrically while the vertex count stays at 6.
+     *  'triangle-delete' (used by rock-tile): the closest vertex is
+     *  REMOVED from the polygon — the two adjacent vertices stay,
+     *  forming a new flat edge where the corner used to be — and a
+     *  triangle-shaped shard (the deleted corner) is released at
+     *  that location.  The polygon loses one vertex per hit, and
+     *  the released shard inherits the deleted triangle's exact
+     *  shape so the tile and the freed chunk read as fitting
+     *  together. */
+    kind?: 'pull' | 'triangle-delete';
     /** Rotation in radians applied to the impact direction before
      *  searching for the vertex to deform.  0 (default) deforms the
-     *  vertex closest to the impact (the "front" of the tile);
-     *  Math.PI/2 deforms a side vertex (~90° offset, used by rock so
-     *  the dent reads as "a chunk pinching off the side while the
-     *  tile stays in the grid"); Math.PI would deform the far
-     *  side. */
+     *  vertex closest to the impact; Math.PI/2 deforms the
+     *  perpendicular side; Math.PI deforms the far side. */
     dentVertexAngleOffset?: number;
     /** Optional one-off shard releases that fire WHILE the tile is
      *  still alive in the grid, triggered the first time `health /
      *  maxHealth` falls below the entry's `healthFraction` threshold.
      *  Sized like breakShards (linear sizeFraction × deformed
-     *  diameter).  Today rock uses this for the "shard breaks off
-     *  the side at 1/3 HP" effect. */
+     *  diameter). */
     intermediateShards?: Array<{
       healthFraction: number;
       variant: ShardVariantId;
@@ -339,7 +349,9 @@ export interface ShardVariantDef {
      *  Each shard inherits the dented polygon scaled to its target
      *  size so the dent character is preserved.  Spawned with a
      *  small radial spread so multiple shards don't pile up at the
-     *  tile centre. */
+     *  tile centre.  For 'triangle-delete' variants, the first
+     *  entry's `variant` is also used as the variant for per-hit
+     *  triangle shards. */
     breakShards: Array<{
       variant: ShardVariantId;
       sizeFraction: number;

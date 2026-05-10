@@ -166,7 +166,7 @@ export class PhysicsSystem {
     player: GameEntity,
     mapType: MapType,
     dt: number,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -458,7 +458,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void) {
     // Phase 2: use the attractors cache populated on map load instead of
     // re-scanning the full entity array every substep.  Individual dead
     // attractors are skipped at access time by the `active` check below so
@@ -513,7 +513,7 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -690,6 +690,11 @@ export class PhysicsSystem {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
       if (dent === undefined) return;
+      // Triangle-delete variants do their polygon mutation + shard
+      // spawn in GameEngine.spawnDamageText (it needs entities-array
+      // access for the spawn).  Skip the in-place vertex pull here so
+      // the two paths don't fight over the same polygon.
+      if (dent.kind !== undefined && dent.kind !== 'pull') return;
 
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
@@ -1013,7 +1018,7 @@ export class PhysicsSystem {
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -1129,7 +1134,7 @@ export class PhysicsSystem {
     a: GameEntity,
     b: GameEntity,
     mtv: Vector2,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -1434,7 +1439,7 @@ export class PhysicsSystem {
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1, target);
+          if (onDamage) onDamage(target.position, proj.damage || 1, target, proj.position);
 
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
@@ -1595,12 +1600,12 @@ export class PhysicsSystem {
               if (isIndestructible) {
                   // Permanent wall — signal the hit for SFX/shake but don't
                   // touch health or queue destruction.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }
               structure.health -= 1;
               PhysicsSystem.applyDentStep(structure, player.position);
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
                   structure.health = 0;
                   structure.active = false;
@@ -1659,12 +1664,12 @@ export class PhysicsSystem {
               structure.hitFlash = 0.1;
               if (isIndestructible) {
                   // Asteroid bounces off a permanent wall — no damage.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;
@@ -1697,7 +1702,7 @@ export class PhysicsSystem {
                   structure.health -= 1;
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;

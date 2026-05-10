@@ -1506,14 +1506,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Rock-tile is a dent variant: deforms in the grid on each hit,
-    // releases an intermediate rock-shard "off the side" at 1/3 HP
-    // remaining, and breaks the entire remaining tile into 2-3
-    // rock-shards on the killing hit.  No regen — accumulated
-    // deformation persists.  Shatter is left at kind='none' here so
-    // ShardSystem.shatter doesn't double-spawn on top of the dent
+    // Rock-tile is a dent variant using the 'triangle-delete' kind:
+    // on every hit the closest polygon vertex is REMOVED (the two
+    // adjacent vertices stay, forming a new flat edge where the
+    // corner used to be) and a triangle-shaped rock-shard is
+    // released at that location.  The polygon loses one vertex per
+    // hit; on the killing hit, the remaining deformed polygon
+    // breaks into the breakShards list.  No regen — accumulated
+    // deformation persists.  Shatter stays kind='none' so
+    // ShardSystem.shatter doesn't double-spawn on top of dent's
     // breakShards (GameEngine.handleEntityDeath skips shatter for
-    // any dent variant — see that file).
+    // any dent variant).
     regen: { kind: 'none' },
     shatter: {
       kind: 'none',
@@ -1525,22 +1528,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       scatterHalfCone: 0,
     },
     dent: {
-      // Mid-range jitter — rocks visibly chip per hit but not as
-      // dramatically as plastic.
+      // vertexJitter is unused when kind === 'triangle-delete' (the
+      // per-hit deformation is the vertex deletion itself, not a
+      // partial pull).  Kept as a sensible default in case the kind
+      // is ever flipped back to 'pull'.
       vertexJitter: 0.18,
-      // 90° offset: dent appears on a side perpendicular to the
-      // impact, reading as a chunk pinching off the side rather
-      // than the front caving in.
-      dentVertexAngleOffset: Math.PI / 2,
-      // At 1/3 HP remaining (after the 2nd hit on a 3-HP rock-tile)
-      // a single rock-shard breaks off.  sizeFraction 0.5 is roughly
-      // a quarter of the deformed tile's area — small enough to
-      // read as "broken off a corner," not "tile is gone."
-      intermediateShards: [
-        { healthFraction: 0.34, variant: 'rock-shard', sizeFraction: 0.5 },
-      ],
+      kind: 'triangle-delete',
       // Final break: 3 roughly equal rock-shards whose areas sum to
-      // ~the deformed tile's area.  sqrt(1/3) ≈ 0.577 linear.
+      // ~the deformed tile's area.  sqrt(1/3) ≈ 0.577 linear.  The
+      // first entry's variant ('rock-shard') is also the variant
+      // used for per-hit triangle shards spawned via
+      // DropSystem.spawnTriangleShard.
       breakShards: [
         { variant: 'rock-shard', sizeFraction: 0.577 },
         { variant: 'rock-shard', sizeFraction: 0.577 },

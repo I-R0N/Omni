@@ -495,6 +495,105 @@ export class DropSystem {
     });
   }
 
+  /**
+   * Spawn a single mobile shard whose polygon is the supplied triangle
+   * (3 vertices in tile-local coords).  Used by the triangle-delete
+   * dent variant (today: rock-tile): when a vertex is removed from the
+   * tile's polygon, this method takes the freshly-deleted corner
+   * (the closest vertex + its two adjacent vertices) and turns it into
+   * a mobile shard at the same world location with the same shape.
+   *
+   * Spawn position is the triangle's centroid in world coords; the
+   * shard's polygonPoints are the triangle re-centred around that
+   * centroid so the shard's origin sits inside its silhouette.  Mass
+   * scales with size via the variant's spawn.sizeToMass.  Launch
+   * direction inherits lastImpactVelocity with a small random scatter.
+   */
+  public spawnTriangleShard(
+    entities: GameEntity[],
+    tile: GameEntity,
+    triangleLocalPts: Vector2[],
+    childVariant: ShardVariantId,
+  ) {
+    if (triangleLocalPts.length !== 3) return;
+    const variantDef = SHARD_VARIANTS[childVariant];
+
+    // Triangle centroid in tile-local coords — used as both the
+    // spawn position (offset from tile.position) and the origin
+    // around which the shard's polygon is recentred.
+    let cx = 0, cy = 0;
+    for (let i = 0; i < 3; i++) {
+      cx += triangleLocalPts[i].x;
+      cy += triangleLocalPts[i].y;
+    }
+    cx /= 3;
+    cy /= 3;
+
+    // Recenter vertices around the centroid (origin in shard-local
+    // coords) so the shard polygon is balanced around (0, 0).
+    const shardPts: Vector2[] = [
+      { x: triangleLocalPts[0].x - cx, y: triangleLocalPts[0].y - cy },
+      { x: triangleLocalPts[1].x - cx, y: triangleLocalPts[1].y - cy },
+      { x: triangleLocalPts[2].x - cx, y: triangleLocalPts[2].y - cy },
+    ];
+
+    let halfW = 0, halfH = 0;
+    for (let i = 0; i < 3; i++) {
+      const ax = Math.abs(shardPts[i].x);
+      const ay = Math.abs(shardPts[i].y);
+      if (ax > halfW) halfW = ax;
+      if (ay > halfH) halfH = ay;
+    }
+    const sizeX = Math.max(2, halfW * 2);
+    const sizeY = Math.max(2, halfH * 2);
+    const size  = Math.max(sizeX, sizeY);
+    const mass  = variantDef.spawn.sizeToMass(size);
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x)
+      : Math.random() * Math.PI * 2;
+    // Mild speed inherited from the projectile so the freed triangle
+    // pops off rather than launches.
+    const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.3;
+
+    entities.push({
+      id:            nextId('triangle_shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  childVariant,
+      position:      {
+        x: tile.position.x + cx,
+        y: tile.position.y + cy,
+      },
+      velocity:      {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:          { x: sizeX, y: sizeY },
+      rotation:      Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, size / 30)),
+      color:         tile.color,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass,
+      polygonPoints: shardPts,
+    });
+
+    // Small puff at the spawn point so the detach reads as a discrete
+    // event rather than a tile silently losing a corner.
+    this.particles.spawn(entities, {
+      x: tile.position.x + cx,
+      y: tile.position.y + cy,
+    }, 4, tile.color, {
+      speedMin: 1.5, speedMax: 3.5, sizeMin: 1, sizeMax: 2,
+      lifetimeMin: 0.15, lifetimeMax: 0.3,
+      spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
   // --- Collectible drop spawning ------------------------------------------
 
   /**
