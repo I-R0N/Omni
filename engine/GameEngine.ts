@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -308,13 +308,18 @@ export class GameEngine {
 
   /**
    * Cycle the shard ↔ shard pair-resolution interval through
-   * 1 → 2 → 3 → 4 → 1.  N=1 = every substep (original behaviour);
-   * N=4 = every 4th substep (cheapest, ~67 ms max overlap window).
-   * Surfaced in EngineStats so the DBG panel can render the live N.
+   * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 3 → 4 → 6 → 8).
+   * AUTO (= 0) lets PhysicsSystem pick N from the previous step's
+   * peak collision-cell density; numeric values pin the interval.
+   * The effective N (whether AUTO or manual) is mirrored into
+   * EngineStats.shardPairInterval so the DBG panel can render
+   * "auto (3)" or "every 3" accordingly.
    */
   public cycleShardPairInterval() {
-    const n = this.physics.shardPairFrameInterval;
-    const next = n >= 4 ? 1 : n + 1;
+    const order = SHARD_PAIR_CONSTANTS.CYCLE_ORDER;
+    const cur = this.physics.shardPairFrameInterval;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
     this.physics.shardPairFrameInterval = next;
   }
 
@@ -466,6 +471,7 @@ export class GameEngine {
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
+      shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -568,6 +574,7 @@ export class GameEngine {
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
+      shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

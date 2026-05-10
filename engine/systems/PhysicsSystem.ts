@@ -76,8 +76,14 @@ export class PhysicsSystem {
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
   // Shard ↔ shard pair resolution runs every Nth physics step.
-  // Cycled via DBG panel (1/2/3/4); default from constants.
+  // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
+  // Cycled via DBG panel; default from constants.
   public shardPairFrameInterval: number = SHARD_PAIR_CONSTANTS.FRAME_INTERVAL;
+  // Effective interval used by the most recent
+  // handleEntityCollisions call — exposed so the DBG panel can
+  // render "auto/3" while the slider value stays at 0.  Mirrors
+  // the manual value when not in AUTO mode.
+  public lastEffectiveShardPairInterval: number = 1;
   // Internal counter, ticked once per handleEntityCollisions call.
   // Used as `counter % interval === 0` to gate shard-shard pairs.
   private shardPairTick: number = 0;
@@ -494,7 +500,22 @@ export class PhysicsSystem {
     // resolution; in between, those pairs are skipped entirely.  The
     // counter ticks regardless of the gate value so toggling the
     // interval mid-run doesn't drift the phase visibly.
-    const interval = Math.max(1, this.shardPairFrameInterval | 0);
+    //
+    // N=0 (AUTO) selects the interval from the previous step's
+    // `lastMaxCellDensity` per SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS.
+    // Light fields keep N=1 (every-frame resolution); dense fields
+    // climb up to N=4 so settled piles don't eat the frame budget.
+    let interval = this.shardPairFrameInterval | 0;
+    if (interval <= 0) {
+        const density = this.lastMaxCellDensity;
+        const table = SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS;
+        let auto = table[table.length - 1].interval;
+        for (let i = 0; i < table.length; i++) {
+            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
+        }
+        interval = auto;
+    }
+    this.lastEffectiveShardPairInterval = interval;
     const runShardPair = (this.shardPairTick % interval) === 0;
     this.shardPairTick++;
 

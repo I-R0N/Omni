@@ -179,8 +179,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Shard ↔ shard pair-resolution interval — cycle 1→2→3→4.
-                  Higher N = cheaper (resolution runs less often) but
+              {/* Shard ↔ shard pair-resolution interval — cycle
+                  AUTO → 1 → 2 → 3 → 4 → 6 → 8.  AUTO scales N with
+                  the previous step's peak shard-cell density; manual
+                  values pin the interval.  Higher N = cheaper but
                   shards may overlap visibly for a few frames before
                   separating. */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -188,9 +190,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <button
                   onClick={onCycleShardPairInterval}
                   className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle shard-pair resolution interval (1=every substep, 4=every 4th).  Higher = cheaper but laggier separation."
+                  title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it.  Higher = cheaper but laggier separation."
                 >
-                  every {stats.shardPairInterval ?? 1}
+                  {stats.shardPairInterval === 0
+                    ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
+                    : `every ${stats.shardPairInterval ?? 1}`}
                 </button>
               </div>
 

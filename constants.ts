@@ -240,9 +240,11 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 //      to evaluate.
 export const SHARD_PAIR_CONSTANTS = {
   // Physics substeps between shard-shard resolution passes.  Cycled
-  // via the DBG panel ShPair button (1→2→3→4).  Default 3 is the
-  // "good enough" tradeoff — observably smooth, ~3x cheaper.
-  FRAME_INTERVAL: 3,
+  // via the DBG panel ShPair button (AUTO → 1 → 2 → 3 → 4 → 6 → 8).
+  // 0 = AUTO (scaled by previous frame's maxCellDensity per the
+  // table below); ≥1 = manual override.  Default AUTO so the field
+  // self-tunes to dense fights without dev intervention.
+  FRAME_INTERVAL: 0,
   // (rel-vel)² gate for stable-pair skip.  Combines with the overlap
   // gate below — both must be true to bail early inside
   // resolveAsteroidPair.  0.04 ≈ 0.2 px/frame relative drift.
@@ -250,6 +252,25 @@ export const SHARD_PAIR_CONSTANTS = {
   // Overlap fraction of (rA + rB) below which a pair is considered
   // settled.  0.04 = 4 % of contact distance — visually unnoticeable.
   STABLE_OVERLAP_FRACTION: 0.04,
+  // ── AUTO-mode density → interval mapping ────────────────────────
+  // In AUTO mode the effective interval is selected from the
+  // previous step's `maxCellDensity` (the peak shard count in any
+  // single 3x3 collision cell — direct signal for shard-pair
+  // pressure).  Steps are deliberately coarse so the active interval
+  // doesn't hop every frame as density fluctuates by 1-2.  Light
+  // fields (a few drifting shards) keep N=1 so impact response
+  // feels crisp; dense piles (cannon spam) climb to N=4 so settled
+  // clusters don't dominate the frame budget.  First entry whose
+  // `maxDensity` ≥ observed wins.
+  AUTO_THRESHOLDS: [
+    { maxDensity: 8,   interval: 1 },
+    { maxDensity: 16,  interval: 2 },
+    { maxDensity: 28,  interval: 3 },
+    { maxDensity: 999, interval: 4 },
+  ] as const,
+  // Manual cycle order, including AUTO sentinel (0).  Picked to
+  // give plenty of granularity without an unwieldy menu.
+  CYCLE_ORDER: [0, 1, 2, 3, 4, 6, 8] as const,
 };
 
 export const TRAIL_CONSTANTS = {

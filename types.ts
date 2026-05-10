@@ -599,9 +599,14 @@ export interface EngineStats {
   localGravityEnabled?: boolean;
   attractorGravityEnabled?: boolean;
   collisionsEnabled?: boolean;
-  // Shard-shard pair resolution interval (1 = every substep, 4 = every
-  // 4th).  Cycled via the DBG panel's "ShPair" button.
+  // Shard-shard pair resolution interval.  The manual setting (0 =
+  // AUTO; ≥1 = manual override).  Cycled via the DBG panel's
+  // "ShPair" button.
   shardPairInterval?: number;
+  // Effective interval used by the most recent physics step.  Mirrors
+  // shardPairInterval when the manual value is ≥1; in AUTO mode this
+  // tracks the density-scaled value selected by PhysicsSystem.
+  shardPairEffectiveInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
