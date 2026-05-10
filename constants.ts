@@ -179,13 +179,14 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
-  // Charge-to-fire model (post-d2): tap (release before CHARGE_THRESHOLD) =
-  // normal shot via fireEvents; hold past CHARGE_THRESHOLD then release =
-  // charged shot via chargeReleaseEvents.  Same TAP_DISTANCE_LIMIT applies
-  // to both — dragging the cursor cancels the shot entirely.
-  CHARGE_THRESHOLD: 0.5,   // seconds: min hold to qualify as a charged shot
-  CHARGE_FULL: 1.0,        // seconds: hold time at which the charge ring is "full" (visual cap)
-  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for tap or charge-release to register
+  // Charge-to-fire model (post-d2): tap (release before CHARGE_FULL) =
+  // normal shot via fireEvents; hold for the full CHARGE_FULL duration
+  // and release = charged shot via chargeReleaseEvents.  The ring HUD
+  // fills 0 → 1 over the same window so the player only sees a charged
+  // shot land when the ring is visibly complete.  Same TAP_DISTANCE_LIMIT
+  // applies to the tap path — dragging the cursor cancels a tap.
+  CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
+  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 };
 
@@ -595,14 +596,15 @@ export const PARTICLE_CONSTANTS = {
 
 // ── Charge-shot HUD tuning ───────────────────────────────────────────────────
 // Visual feedback for the hold-to-charge model.  Ring is drawn around the
-// player ship while `player.chargeProgress` > 0; fills from 0 → 1 across
-// the [INPUT_CONSTANTS.CHARGE_THRESHOLD, INPUT_CONSTANTS.CHARGE_FULL] window.
+// player ship while `player.chargeProgress` > 0; fills from 0 → 1 over
+// INPUT_CONSTANTS.CHARGE_FULL seconds.  Two visual states only:
+// "priming" while filling, "full" at completion (matches the firing
+// gate — charged shot only fires when the ring is full).
 export const CHARGE_CONSTANTS = {
   RING_RADIUS_OFFSET: 14,    // px past player half-extent for the ring
   RING_WIDTH: 3,             // line width
-  RING_COLOR_PRIMING: '#94a3b8', // slate-400 — held but below threshold
-  RING_COLOR_READY:   '#fde047', // yellow-300 — held past threshold (shot is charged)
-  RING_COLOR_FULL:    '#ffffff', // white — held past CHARGE_FULL (capped)
+  RING_COLOR_PRIMING: '#94a3b8', // slate-400 — held but not yet full
+  RING_COLOR_FULL:    '#ffffff', // white — held to full (charged shot armed)
 };
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
@@ -706,9 +708,9 @@ export const DAMAGE_TEXT_CONSTANTS = {
 //   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
 //   composes existing primitives (homing / pierce / bounce / lightning /
 //   spread / burst) plus the new `explosionRadius` AoE primitive on the
-//   Cannon.  Charged-shot variants (held mouse ≥ INPUT_CONSTANTS
-//   .CHARGE_THRESHOLD then released) consume `chargedAmmoCost` instead and
-//   are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
+//   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
+//   .CHARGE_FULL window then released) consume `chargedAmmoCost` instead
+//   and are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
@@ -741,8 +743,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     pierce: 2,
     burstCount: 3,
     burstDelay: 0.04,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 2,
+    chargedAmmoCost: 3,
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -757,8 +759,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
     pierce: 1,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 4,
+    chargedAmmoCost: 6,
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -774,8 +776,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 6,
+    chargedAmmoCost: 9,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -790,8 +792,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 3,
     recoil: 0.3,
     pierce: 0,         // stops on first hit, then chains
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 8,
+    chargedAmmoCost: 12,
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -807,8 +809,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 0,
     homing: true,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 10,
+    chargedAmmoCost: 15,
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
@@ -826,8 +828,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     explosionRadius: 110,   // world units of radial AoE on impact
     explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 12,
+    chargedAmmoCost: 18,
   },
 };
 

@@ -2062,12 +2062,10 @@ export class RenderSystem {
 
       // Charge-shot ring — drawn while the player holds the fire button.
       // Stored on player.chargeProgress as a fraction of CHARGE_FULL ([0,1]).
-      // Below the threshold ratio: priming colour, partial arc.
-      // Past threshold: ready colour (yellow → white at full).
+      // Two states: priming (filling, slate) → full (white).  Charged shot
+      // only arms when the ring is full, matching what the player sees.
       if (entity.type === EntityType.PLAYER && entity.chargeProgress && entity.chargeProgress > 0) {
           const cp = entity.chargeProgress; // [0..1] fraction of CHARGE_FULL
-          const thresholdRatio = INPUT_CONSTANTS.CHARGE_THRESHOLD / INPUT_CONSTANTS.CHARGE_FULL;
-          const isReady = cp >= thresholdRatio;
           const isFull = cp >= 1;
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const ringR = (maxDim / 2) + CHARGE_CONSTANTS.RING_RADIUS_OFFSET;
@@ -2079,9 +2077,9 @@ export class RenderSystem {
 
           ctx.strokeStyle = isFull
               ? CHARGE_CONSTANTS.RING_COLOR_FULL
-              : (isReady ? CHARGE_CONSTANTS.RING_COLOR_READY : CHARGE_CONSTANTS.RING_COLOR_PRIMING);
+              : CHARGE_CONSTANTS.RING_COLOR_PRIMING;
           ctx.lineWidth = CHARGE_CONSTANTS.RING_WIDTH;
-          ctx.globalAlpha = isReady ? 0.9 : 0.5;
+          ctx.globalAlpha = isFull ? 0.95 : 0.5;
 
           // Background dim ring at full circumference for context.
           if (!isFull) {
@@ -2089,7 +2087,7 @@ export class RenderSystem {
               ctx.arc(0, 0, ringR, 0, Math.PI * 2);
               ctx.globalAlpha = 0.15;
               ctx.stroke();
-              ctx.globalAlpha = isReady ? 0.9 : 0.5;
+              ctx.globalAlpha = 0.5;
           }
 
           // Foreground arc — fills clockwise from top, ending at the current
