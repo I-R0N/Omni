@@ -1444,12 +1444,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
     // visibly more dramatic per-hit warp.  Detaches as a single
-    // plastic-shard sized to ~1/3 of the original tile.
+    // plastic-shard sized to match the deformed tile's area.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.25,
       breakShards: [
-        { variant: 'plastic-shard', sizeFraction: 0.33 },
+        // sizeFraction is a LINEAR fraction of the deformed tile's
+        // effective diameter (2 × avgVertexRadius).  1.0 → shard
+        // diameter ≈ deformed diameter, so the shard's area matches
+        // the deformed tile (≈ half the original area at max
+        // deformation per playtest).
+        { variant: 'plastic-shard', sizeFraction: 1.0 },
       ],
     },
   },
@@ -1459,14 +1464,22 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp
-    // and the post-break fragmentation: two shards at 1/3 + 1/6 the
-    // original size instead of one larger chunk.
+    // and the post-break fragmentation: a 2-shard pair split 2:1 by
+    // area, summing to the deformed tile's area.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
       breakShards: [
-        { variant: 'metal-shard', sizeFraction: 0.33 },
-        { variant: 'metal-shard', sizeFraction: 0.167 },
+        // Areas sum to the deformed tile's area (≈ half original
+        // area at break, per playtest).  Primary takes 2/3, secondary
+        // 1/3 — keeps the original "1/3 vs 1/6 of the tile" intent
+        // (those are fractions of the ORIGINAL tile area, and
+        // 1/3 + 1/6 = 1/2 = deformed area).
+        // Linear sizeFraction = sqrt(area fraction of deformed),
+        // so primary uses sqrt(2/3) ≈ 0.816, secondary sqrt(1/3)
+        // ≈ 0.577.
+        { variant: 'metal-shard', sizeFraction: 0.816 },
+        { variant: 'metal-shard', sizeFraction: 0.577 },
       ],
     },
   },

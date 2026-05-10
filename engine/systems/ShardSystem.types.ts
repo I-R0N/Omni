@@ -309,13 +309,18 @@ export interface ShardVariantDef {
      *  warps each hit), metal ~0.13 (subtle per-hit change). */
     vertexJitter: number;
     /** Mobile shards spawned when the tile detaches.  `sizeFraction`
-     *  is a multiplier on the tile's original max axis (entity.size).
+     *  is a LINEAR multiplier on the deformed tile's effective
+     *  diameter (2 × avgVertexRadius of the dented polygon).  At
+     *  sizeFraction = 1.0 the shard's diameter equals the deformed
+     *  tile's diameter, so its area matches the deformed tile.
+     *  For a two-shard split that should sum to the deformed area,
+     *  pick sizeFractions whose squares sum to 1.0 (e.g. sqrt(2/3)
+     *  and sqrt(1/3) → ~0.816 and ~0.577 for a 2:1 area split).
+     *
      *  Each shard inherits the dented polygon scaled to its target
      *  size so the dent character is preserved.  Spawned with a
      *  small radial spread so multiple shards don't pile up at the
-     *  tile centre.  Plastic uses a single ~1/3-size shard; metal
-     *  uses a 1/3 + 1/6 pair so the heavier material reads as
-     *  "fragmented" on break. */
+     *  tile centre. */
     breakShards: Array<{
       variant: ShardVariantId;
       sizeFraction: number;
