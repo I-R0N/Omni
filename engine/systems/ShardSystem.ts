@@ -18,11 +18,13 @@ import {
   REGEN_POP_CONSTANTS,
   COLORS,
   NEBULA_CONSTANTS,
+  CLEANUP_CONSTANTS,
   WEAPONS,
   WEAPON_LIST,
   getRockShardFreeSpawn,
   nebulaFadeRateScale,
 } from '../../constants';
+import { EntityIndex } from './EntityIndex';
 import { HEX_AREA } from '../maps/TileGenerator';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition,
@@ -137,6 +139,13 @@ export class ShardSystem {
    */
   private currentMapType: MapType = MapType.UNIVERSE;
 
+  /**
+   * Optional viewport-aware EntityIndex.  Null in headless tests / pre-
+   * map-load; once wired, the large-shard-collapse pass uses it to
+   * prefer offscreen candidates so collapses never pop on the player.
+   */
+  private entityIndex: EntityIndex | null = null;
+
   constructor(private particles: ParticleSystem) {}
 
   /** Wire the variant-specific completion adapter.  Called once at
@@ -160,14 +169,28 @@ export class ShardSystem {
   }
 
   /**
+   * Wire the per-frame viewport-aware EntityIndex used by the
+   * graceful-cleanup paths (large-shard collapse, post-merge
+   * fade-out).  Called once at GameEngine construction; the index
+   * is then consulted each tick via `isOffscreen(entity)`.
+   */
+  public setEntityIndex(index: EntityIndex): void {
+    this.entityIndex = index;
+  }
+
+  /**
    * Per-frame tick.  Called from GameEngine.updateGameLogic at the
    * fixed-step dt.  Stage 4: ticks regens + merges (existing bonds +
-   * new gravity-pull / bond-formation pass).
+   * new gravity-pull / bond-formation pass).  The density-compaction
+   * passes (large-shard collapse + paced cleanup) run last so any
+   * candidates that were just merged this frame don't get double-
+   * processed.
    */
   public update(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
     this.tickRegens(entities, dt, physics);
     this.tickBonds(entities, dt, physics);
     this.runMergeBroadphase(entities, dt, physics);
+    this.runLargeShardCollapse(entities);
   }
 
   /**
@@ -665,6 +688,16 @@ export class ShardSystem {
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
+    // Per-frame merge budget — caps how many density-compaction merges
+    // may fire this tick.  Prevents a freshly-shattered cluster (whose
+    // bond timers all elapse in the same frame) from collapsing into a
+    // single shard in one frame; instead, the cluster compacts visibly
+    // over a few frames.  Once exhausted, surplus bonds defer their
+    // resolution by reverting timer to (threshold - dt) so they fire
+    // next tick.  Sized at MAX_REMOVALS_PER_FRAME for the same reason
+    // the cleanup pacing uses that budget — fade-pacing and merge-
+    // pacing should breathe at the same rate.
+    let mergeBudget = CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME;
 
     let writeIdx = 0;
     for (let bi = 0; bi < this.bonds.length; bi++) {
@@ -709,7 +742,18 @@ export class ShardSystem {
           }
         }
         if (gateMet) {
+          // Per-frame merge budget — surplus bonds defer to next tick
+          // so a cluster of bonds whose timers all elapse in the same
+          // frame compacts visibly over several frames instead of in
+          // one.  Defer by clamping timer just below threshold so the
+          // bond stays alive and re-checks next tick.
+          if (mergeBudget <= 0) {
+            bond.timer = bond.threshold - dt;
+            this.bonds[writeIdx++] = bond;
+            continue;
+          }
           this.composeEntities(a, b, entities, physics, bond.outcome);
+          mergeBudget--;
           continue; // bond resolved — drop
         }
         // Gate unmet — cap the timer at threshold and keep the bond
@@ -769,6 +813,12 @@ export class ShardSystem {
       if (!e.active) continue;
       if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
       if (e.nebulaFadeTimer !== undefined) continue;
+      // Density-compaction fade-out — same exclusion as nebula's
+      // existing `nebulaFadeTimer` skip.  Once a shard is in its
+      // graceful retire window it must not pull, bond, or get
+      // pulled.  Otherwise its velocity blends with surviving
+      // partners and the dissolve looks chaotic.
+      if (e.mergeFadeTimer !== undefined) continue;
       candidates.push(e);
     }
     for (let i = 0; i < this.activeDrops.length; i++) {
@@ -987,6 +1037,140 @@ export class ShardSystem {
   }
 
   /**
+   * Begin a graceful retire on a shard that's been merged out.
+   * Replaces today's instant `b.active = false` so the smaller
+   * party of a density-compaction merge dissolves over a short
+   * window instead of popping.  PhysicsSystem ticks
+   * `mergeFadeTimer` each substep; on reaching 0 the entity
+   * goes inactive and the in-place compaction in
+   * GameEngine.updatePhysics drops it from the master list.
+   *
+   * For nebula entities, today's `nebulaFadeTimer` already covers
+   * the same purpose with a tuned fade-rate-vs-impact-speed
+   * scaling — leave it alone.  For other shard families, fall
+   * through to the generic `mergeFadeTimer` path.
+   */
+  private startMergeFadeOut(entity: GameEntity): void {
+    // Skip if entity is already fading out (avoid retriggering the
+    // timer mid-fade, which would extend the dissolve).
+    if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) return;
+    if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) return;
+
+    const variantId = shardVariantOf(entity);
+    if (variantId === 'nebula-shard' || variantId === 'nebula-tile') {
+      // Nebula uses its own fade pipeline (tied to fade-rate scaling
+      // off impact speed).  Use the matching tuning so a non-impact-
+      // driven retire still feels nebula-paced.
+      entity.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
+      entity.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+      return;
+    }
+
+    entity.mergeFadeTimer    = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    entity.mergeFadeDuration = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+  }
+
+  // ── Large-shard collapse ──────────────────────────────────────────
+  // Shards whose diameter meets a variant's `density.largeShardCollapseSize`
+  // contract inward in the next tick: replaced with a smaller, denser
+  // version of themselves (single-input merge).  Reuses the same
+  // shrink path as compose so the visual reads identical to a
+  // multi-shard density merge — just with a single source.
+  //
+  // Per-frame budget (`CLEANUP_CONSTANTS.LARGE_COLLAPSE_BUDGET_PER_FRAME`)
+  // caps the cascade so a giant freshly-spawned field doesn't all snap
+  // to the dense baseline in one frame.  Offscreen candidates are
+  // preferred — collapses never pop on the player's view.
+
+  private runLargeShardCollapse(entities: GameEntity[]): void {
+    let budget = CLEANUP_CONSTANTS.LARGE_COLLAPSE_BUDGET_PER_FRAME;
+    if (budget <= 0) return;
+
+    // Two-pass selection: prefer offscreen candidates first, then
+    // onscreen if budget remains.  Both passes share the same
+    // qualification check (variant has density, size >= threshold,
+    // not at max tier, not already fading).  Avoid allocating a
+    // candidate list — direct-walk the master entity array twice.
+    for (let onscreen = 0; onscreen <= 1 && budget > 0; onscreen++) {
+      for (let i = 0; i < entities.length && budget > 0; i++) {
+        const e = entities[i];
+        if (!e.active) continue;
+        if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
+        if (e.nebulaFadeTimer !== undefined) continue;
+        if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
+
+        const variantId = shardVariantOf(e);
+        if (variantId === null) continue;
+        const variant = SHARD_VARIANTS[variantId];
+        const density = variant.density;
+        if (!density?.enabled) continue;
+
+        // Threshold gate — diameter must be at/above the collapse
+        // size, and below max tier.
+        if (e.size.x < density.largeShardCollapseSize) continue;
+        const tier = e.densityTier ?? 0;
+        if (tier >= density.maxSteps) continue;
+
+        // First pass picks only offscreen entities; second pass
+        // picks anything still qualifying.  When the EntityIndex is
+        // unwired (no viewport rect) `isOffscreen` returns false for
+        // every entity, so the first pass is empty and the second
+        // pass picks normally — keeps unit-test paths working.
+        const off = this.entityIndex?.isOffscreen(e) ?? false;
+        if (onscreen === 0 && !off) continue;
+        if (onscreen === 1 && off) continue; // already handled
+
+        this.collapseLargeShard(e, density, variantId);
+        budget--;
+      }
+    }
+  }
+
+  /**
+   * Single-input density step.  Replaces the entity in place with a
+   * smaller, denser version of itself: tier += 1, size *= shrink,
+   * mass preserved (already sums when shards merge; for single-input
+   * the mass stays put — the entity just compresses geometrically).
+   * Polygon regenerated at the new radius so SAT collisions track
+   * the new bounds.  Density tint cache invalidated so the renderer
+   * picks up the darker hue on next draw.
+   */
+  private collapseLargeShard(
+    entity: GameEntity,
+    density: NonNullable<typeof SHARD_VARIANTS[ShardVariantId]['density']>,
+    variantId: ShardVariantId,
+  ): void {
+    const newTier = (entity.densityTier ?? 0) + 1;
+    const newDiam = entity.size.x * density.shrinkFactor;
+
+    // Polygon regen — match the variant's spawn shape so the
+    // collapsed shard reads as the same kind of debris.
+    const variant = SHARD_VARIANTS[variantId];
+    const baseR = (newDiam / 2) * 0.82;
+    entity.polygonPoints = this.generateShardPolygon(
+      baseR,
+      variant.spawn.polyVerticesMin,
+      variant.spawn.polyVerticesMax,
+      variant.spawn.angleJitter,
+      variant.spawn.radiusMin,
+      variant.spawn.radiusRange,
+    );
+
+    entity.size.x = newDiam;
+    entity.size.y = newDiam;
+    entity.densityTier = newTier;
+    entity.densityCachedTint = undefined;
+    // Nebula fast-path cache lives on tiles (not shards), but the
+    // shard's tinted-key cache also encodes the resolved colour.
+    // Drop both so the next render reflects the darker tier.
+    if (variantId === 'nebula-shard') {
+      entity.nebulaTintedKey = undefined;
+      entity.nebulaCachedTinted = undefined;
+    }
+  }
+
+  /**
    * Apply the resolved merge outcome between two stick-bonded
    * entities.  Today's three flavours preserved verbatim:
    *
@@ -1059,22 +1243,53 @@ export class ShardSystem {
     { const p = { x: nmx, y: nmy }; wrapPosition(p); nmx = p.x; nmy = p.y; }
 
     if (aIsAst && bIsAst) {
-      // Asteroid + Asteroid — area-conserving accretion.
+      // Asteroid + Asteroid — density compaction (smaller-but-denser).
+      // When the dominant variant has `density.enabled`, the surviving
+      // shard takes:
+      //   mass     = a.mass + b.mass        (sum, per task brief)
+      //   tier     = max(tiers) + 1, capped (per task brief)
+      //   diameter = max(inputs) × shrink   (per task brief)
+      // For variants without density (none today, kept defensive),
+      // the legacy area-conserving accretion remains.
       const MAX_HP = 6;
       const rA = a.size.x / 2;
       const rB = b.size.x / 2;
-      const newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+      const aDia = a.size.x;
+      const bDia = b.size.x;
 
-      // Size cap from MAP_POPULATION (Stage 5 will switch
-      // this read to MAP_POPULATION).  If the area-conserving merge
-      // would exceed the cap, skip the merge — pair stays separate.
-      const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
-      if (newDiam > sizeCap) return;
+      // Larger entity by diameter dominates surviving variant id +
+      // glow blend.  Today the only mobile variants that bond are
+      // rock-shard and glass-shard.
+      const aIsLarger = aDia >= bDia;
+      const dominantVariant = (aIsLarger ? a.shardVariant : b.shardVariant) ?? 'rock-shard';
+      const dominantDef = SHARD_VARIANTS[dominantVariant];
+      const density = dominantDef.density;
 
-      // Larger entity by area dominates the surviving variant id;
-      // blend glow colors.  Today the only mobile variants that
-      // bond are rock-shard and glass-shard.
-      const dominantVariant = (rA >= rB ? a.shardVariant : b.shardVariant) ?? 'rock-shard';
+      // Density gate: refuse the merge if the dominant variant has
+      // hit max tier OR the combined area is below the variant's
+      // areaThreshold (skip trivial micro-shard merges).  Without
+      // density (or disabled), fall through to legacy accretion.
+      let newDiam: number;
+      let newMass: number;
+      let newTier: number | undefined = undefined;
+      if (density?.enabled) {
+        const tierA = a.densityTier ?? 0;
+        const tierB = b.densityTier ?? 0;
+        const proposedTier = Math.max(tierA, tierB) + 1;
+        if (proposedTier > density.maxSteps) return; // capped — leave pair separate
+        const combinedArea = aDia * aDia + bDia * bDia;
+        if (combinedArea < density.areaThreshold) return; // micro-shards stay separate
+        newTier = proposedTier;
+        const largerDia = aIsLarger ? aDia : bDia;
+        newDiam = largerDia * density.shrinkFactor;
+        newMass = a.mass + b.mass;
+      } else {
+        newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
+        const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
+        if (newDiam > sizeCap) return;
+        newMass = newDiam;
+      }
+
       const glowA = a.powerupGlowColor;
       const glowB = b.powerupGlowColor;
       const newGlow = glowA && glowB ? blendHex(glowA, glowB) : (glowA ?? glowB);
@@ -1098,13 +1313,27 @@ export class ShardSystem {
       a.powerupGlowColor = newGlow;
       if (a.shardVariant !== b.shardVariant) a.color = blendHex(a.color, b.color);
       a.size.x = newDiam; a.size.y = newDiam;
-      a.mass   = newDiam;
+      a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
       a.health     = Math.min(MAX_HP, a.health + b.health);
       a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
       a.dropComposition = composition.length > 0 ? composition : undefined;
-      b.active = false;
+      // Density bookkeeping — invalidate the per-entity tint cache so
+      // the renderer picks up the darker tier on its next draw, then
+      // commit the new tier.  Without the cache invalidation a freshly-
+      // merged shard would render at the previous tier's tint until
+      // some other path happened to clear the cache.
+      if (density?.enabled && newTier !== undefined) {
+        a.densityTier = newTier;
+        a.densityCachedTint = undefined;
+      }
+      // Graceful retire — fade the smaller party out instead of
+      // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
+      // each substep and flips active=false on completion;
+      // RenderSystem multiplies alpha by the fraction remaining so
+      // the dissolve reads visibly across the field.
+      this.startMergeFadeOut(b);
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
       if (a.dropType === b.dropType) {
@@ -1227,12 +1456,51 @@ export class ShardSystem {
     const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
     const largeArea = Math.PI * largeR * largeR;
     const smallArea = Math.PI * smallR * smallR;
-    const newArea = largeArea + smallArea;
-    const newDiameter = Math.sqrt(newArea / Math.PI) * 2;
+
+    // Density-aware sizing.  When nebula-shard's density.enabled is set
+    // (today: yes), the merged shard is intentionally smaller than the
+    // larger input to read as compaction; mass = sum of inputs.  The
+    // existing nebulaTileArea accumulation (driving shard→tile
+    // transmutation) is independent of this, so the cycle still fires
+    // at HEX_AREA regardless of physical size.
+    const density = SHARD_VARIANTS['nebula-shard'].density;
+    let newDiameter: number;
+    let newMass: number;
+    let newTier: number | undefined = undefined;
+    if (density?.enabled) {
+      const tierA = larger.densityTier ?? 0;
+      const tierB = smaller.densityTier ?? 0;
+      const proposed = Math.max(tierA, tierB) + 1;
+      if (proposed > density.maxSteps) {
+        // Capped — fall back to legacy area-conserving accretion so
+        // shards continue to grow toward transmutation rather than
+        // refusing to merge.  Tier stays at maxSteps.
+        const newArea = largeArea + smallArea;
+        newDiameter = Math.sqrt(newArea / Math.PI) * 2;
+        newMass = newDiameter;
+      } else {
+        newTier = proposed;
+        newDiameter = larger.size.x * density.shrinkFactor;
+        newMass = larger.mass + smaller.mass;
+      }
+    } else {
+      const newArea = largeArea + smallArea;
+      newDiameter = Math.sqrt(newArea / Math.PI) * 2;
+      newMass = newDiameter;
+    }
 
     larger.size.x = newDiameter;
     larger.size.y = newDiameter;
-    larger.mass   = newDiameter;
+    larger.mass   = newMass;
+    if (newTier !== undefined) {
+      larger.densityTier = newTier;
+      // Tier change invalidates BOTH the generic density tint cache
+      // AND the nebula fast-path cache — both are functions of the
+      // resolved render colour which now darkens.  Matches the
+      // existing pattern in the regen / merge invalidation sites
+      // (NebulaSystem.recomputeNeighborCounts:188).
+      larger.densityCachedTint = undefined;
+    }
 
     // Accumulate effective area carried by both shards onto the
     // larger.  Decoupled from physical disc area so shards can stay

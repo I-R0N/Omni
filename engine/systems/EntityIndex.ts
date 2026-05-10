@@ -1,4 +1,18 @@
 import { GameEntity, EntityType } from '../../types';
+import { isVisibleOnTorus } from '../toroidal';
+
+/**
+ * Camera-aligned viewport rectangle in world coordinates.  Set once
+ * per frame by GameEngine before any system that needs visibility
+ * partitioning runs.  Coords are unwrapped — toroidal containment is
+ * resolved through `isVisibleOnTorus`.
+ */
+export interface ViewportRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
 
 /**
  * EntityIndex — type-filtered candidate lists rebuilt once per sim step.
@@ -47,6 +61,44 @@ export class EntityIndex {
   public interactableCount: number = 0;
   /** Total active entities (all types, including types we don't list). */
   public activeCount: number = 0;
+
+  // ── Viewport rect (set per frame by GameEngine) ─────────────────────────
+  // Used by `isOffscreen` for graceful-cleanup priority decisions —
+  // offscreen shards are preferred candidates for retirement so the
+  // player never sees a shard pop out of existence.  Null until the
+  // first frame that calls setViewportRect (GameEngine wires this in
+  // prepareFrameEntities); callers should treat null as "everything
+  // counts as on-screen" so cleanup falls back to its non-priority path.
+  private viewportRect: ViewportRect | null = null;
+
+  /** Update the per-frame viewport rect.  Reused buffer is fine — the
+   *  rect's contents are read synchronously inside the same frame. */
+  public setViewportRect(rect: ViewportRect): void {
+    this.viewportRect = rect;
+  }
+
+  public clearViewportRect(): void {
+    this.viewportRect = null;
+  }
+
+  /**
+   * Torus-aware "is this entity offscreen" check.  Wraps `isVisibleOnTorus`
+   * so the renderer's seam-crossing visibility logic and the cleanup
+   * priority logic agree.  Returns true when the entity (and every
+   * wrapped copy) sits outside the current viewport rect.
+   *
+   * Returns false when no viewport rect is set so callers default to
+   * the conservative "treat as on-screen" branch.
+   */
+  public isOffscreen(entity: GameEntity): boolean {
+    const rect = this.viewportRect;
+    if (!rect) return false;
+    const r = Math.max(entity.size.x, entity.size.y) * 0.5;
+    return !isVisibleOnTorus(
+      entity.position.x, entity.position.y, r,
+      rect.left, rect.right, rect.top, rect.bottom,
+    );
+  }
 
   /**
    * Rebuild all filtered lists from the master entity array.  Inactive

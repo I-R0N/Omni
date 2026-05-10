@@ -71,7 +71,13 @@ export class GameEngine {
   private minimapDebounce: number = 0;
   private interactionCooldown: number = 0;
   private frameEntities: GameEntity[] = [];
-  
+
+  // Reusable viewport rect — refreshed once per frame in
+  // prepareFrameEntities and shared with EntityIndex / ShardSystem so
+  // graceful-cleanup picks can prefer offscreen candidates without
+  // allocating a fresh rect every frame.
+  private _viewportRect = { left: 0, right: 0, top: 0, bottom: 0 };
+
   private respawnTimer: number = 0;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
@@ -270,6 +276,10 @@ export class GameEngine {
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
     this.entityIndex = new EntityIndex();
+    // Wire the EntityIndex into ShardSystem so the large-shard-collapse
+    // pass can prefer offscreen candidates (graceful cleanup — never
+    // pop a shard out of existence in the player's view).
+    this.shards.setEntityIndex(this.entityIndex);
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -555,6 +565,22 @@ export class GameEngine {
       // master entity list.  Rebuilt once per sim substep; consumers must
       // not cache these references across steps.
       this.entityIndex.rebuild(this.currentMap.entities);
+
+      // Refresh the camera-aligned viewport rect so the graceful-cleanup
+      // path inside ShardSystem can prefer offscreen candidates.  Reuses
+      // the same halfW/halfH math as RenderSystem so visibility
+      // partitioning and on-screen rendering agree at the seam.  The
+      // padding (CAMERA_CONSTANTS.CULL_MARGIN) keeps shards that are
+      // about-to-enter-frame on the on-screen side of the partition.
+      const zoom = this.camera.zoom || 1;
+      const halfW = (window.innerWidth / 2) / zoom;
+      const halfH = (window.innerHeight / 2) / zoom;
+      const margin = CAMERA_CONSTANTS.CULL_MARGIN;
+      this._viewportRect.left   = this.camera.position.x - halfW - margin;
+      this._viewportRect.right  = this.camera.position.x + halfW + margin;
+      this._viewportRect.top    = this.camera.position.y - halfH - margin;
+      this._viewportRect.bottom = this.camera.position.y + halfH + margin;
+      this.entityIndex.setViewportRect(this._viewportRect);
 
       // Mirror the latest entity-type counts into the perf snapshot — the
       // index just walked the full list anyway, so this is O(0) extra work.

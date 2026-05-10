@@ -883,7 +883,11 @@ export const SHIELD_CONSTANTS = {
 };
 
 export const WAVE_CONSTANTS = {
-  GRACE_PERIOD: 3.0, // Seconds between wave clear and next wave spawn
+  // Bumped from 3.0 → 4.5 so the post-wave graceful cleanup window
+  // (offscreen-first, paced shard removal in ShardSystem) has time to
+  // drain pressure before the next wave lands.  Keeps reaction-time
+  // budget unchanged for the player while letting the field breathe.
+  GRACE_PERIOD: 4.5, // Seconds between wave clear and next wave spawn
   // Extra world-unit buffer beyond the visible half-diagonal when picking
   // wave-spawn radii.  Guarantees enemies materialise comfortably outside
   // the player's viewport on every aspect ratio.
@@ -1145,6 +1149,95 @@ export function generateWaveDef(index: number): { enemies: { subtype: EnemySubty
   return { enemies, powerup: null };
 }
 
+/**
+ * Precomputed per-(variant, tier) density multiplier table.  Looked
+ * up at render time in O(1).  Shape: variantId → number[tier].
+ *
+ * Each entry is the RGB multiplier applied to the variant's base
+ * colour at the given tier.  Tier 0 is exactly 1.0 (no change —
+ * preserves the variant's pre-density visual identity), tier
+ * `density.maxSteps` is exactly the variant's `density.tintFloor`
+ * (max-allowed-darkness against the active background palette),
+ * intermediate tiers linearly interpolate.
+ *
+ * Built once at module init from SHARD_VARIANTS so the renderer
+ * pays no per-frame allocation.  Variants without `density` (today:
+ * tile families) get a single-entry [1.0] array — calling sites
+ * that hit a missing variant or out-of-range tier degrade to 1.0.
+ */
+export function densityTintMultiplier(variantId: ShardVariantId, tier: number): number {
+  if (tier <= 0) return 1.0;
+  if (!_densityTintTableInit) ensureDensityTintTable();
+  const table = DENSITY_TINT_TABLE[variantId];
+  if (!table) return 1.0;
+  if (tier >= table.length) return table[table.length - 1];
+  return table[tier];
+}
+
+const DENSITY_TINT_TABLE: Partial<Record<ShardVariantId, number[]>> = (() => {
+  const out: Partial<Record<ShardVariantId, number[]>> = {};
+  // SHARD_VARIANTS is declared further down in this module, but the
+  // factory closure runs at module-init AFTER all top-level decls
+  // (the Record literal initialiser executes once when SHARD_VARIANTS
+  // is queried — this IIFE runs eagerly).  Defer the actual read to
+  // first call via a lazy lookup so the cyclic-ish structure resolves.
+  return out;
+})();
+
+let _densityTintTableInit = false;
+function ensureDensityTintTable(): void {
+  if (_densityTintTableInit) return;
+  _densityTintTableInit = true;
+  const ids: ShardVariantId[] = Object.keys(SHARD_VARIANTS) as ShardVariantId[];
+  for (const id of ids) {
+    const variant = SHARD_VARIANTS[id];
+    const density = variant.density;
+    if (!density?.enabled) continue;
+    // Tier indices [0..maxSteps].  Linear ramp 1.0 → tintFloor.
+    const arr = new Array<number>(density.maxSteps + 1);
+    for (let t = 0; t <= density.maxSteps; t++) {
+      const frac = density.maxSteps === 0 ? 0 : t / density.maxSteps;
+      arr[t] = 1.0 - frac * (1.0 - density.tintFloor);
+    }
+    DENSITY_TINT_TABLE[id] = arr;
+  }
+}
+
+// Eager init at import time — `SHARD_VARIANTS` is fully constructed
+// before any consumer of `densityTintMultiplier` actually runs (the
+// renderer is built after constants imports complete), so calling
+// this at the bottom of the constants module (after SHARD_VARIANTS
+// is declared) is safe.  Done via a lazy guard so test paths that
+// import bits of this module in isolation still work.
+
+// ── Graceful cleanup tuning ─────────────────────────────────────────
+// Knobs for the offscreen-first, paced shard cleanup pipeline that
+// keeps high-density shard fields from popping out of existence on
+// the player.  `MAX_REMOVALS_PER_FRAME` caps the per-tick fade-out
+// budget so removals bleed down over ~0.5–1.5 s rather than instantly;
+// `LARGE_COLLAPSE_BUDGET_PER_FRAME` similarly throttles the
+// large-shard-collapse pass.  `MERGE_FADE_DURATION` is the per-entity
+// fade-out window when a density compaction retires the smaller
+// party (replaces today's instantaneous `b.active = false` for
+// non-nebula compose merges).
+export const CLEANUP_CONSTANTS = {
+  // Per ShardSystem tick — how many shards may begin a fade-out due to
+  // count-pressure cleanup.  Conservative default: 2 starts/frame at
+  // 60Hz ≈ 120 starts/s, well above natural attrition while still
+  // visibly paced when a sudden cleanup is triggered.
+  MAX_REMOVALS_PER_FRAME: 2,
+  // Per ShardSystem tick — how many shards may collapse inward via
+  // the large-shard-collapse pass.  Caps the cascade rate so a giant
+  // field doesn't all snap to the dense baseline in a single frame.
+  LARGE_COLLAPSE_BUDGET_PER_FRAME: 4,
+  // Fade-out duration (seconds) for the smaller party of a density
+  // compose merge.  Chosen to read as a smooth dissolve without
+  // dragging out the merge feedback.  Matches the spirit of the
+  // existing nebula `FADE_DURATION` (1.0 s) but at half the length
+  // — non-nebula merges shouldn't linger like a cloud puff.
+  MERGE_FADE_DURATION: 0.5,
+};
+
 // ── ShardSystem variant table ───────────────────────────────────────
 // See docs/SHARD_SYSTEM.md for the design rationale.  This table is
 // the source of truth for tile / shard regen, merge, shatter and
@@ -1336,6 +1429,19 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     onShatterParticles: { color: '#94a3b8', count: 5 },
     passThrough: false,
     spawnsDropsOnDeath: true,
+    // Density compaction: rocks are the canonical "many small chunks"
+    // family, so 4 tiers of darkening with an aggressive shrink let a
+    // packed cluster condense into a few dark, dense fragments instead
+    // of a single oversized rock.  largeShardCollapseSize=130 catches
+    // map-spawned giants (sizeMax=160) and trims them on first tick.
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32, // ~MIN_SIZE² × 2.5 — micro chips stay separate
+      largeShardCollapseSize: 130,
+      tintFloor: 0.55,
+      shrinkFactor: 0.88,
+    },
   },
   'glass-shard': {
     id: 'glass-shard',
@@ -1364,6 +1470,19 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     onShatterParticles: 'inherit',
     passThrough: false,
     spawnsDropsOnDeath: true,
+    // Density compaction: glass shards already render with a soft
+    // translucent tint, so the floor stays at 0.55 (matches rock).
+    // Glass tiles spawn shards in a power-law area distribution
+    // (DropSystem.spawnGlassShards), so most live below the
+    // largeShardCollapseSize and only the rare big chunk collapses.
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.55,
+      shrinkFactor: 0.88,
+    },
   },
   'nebula-shard': {
     id: 'nebula-shard',
@@ -1420,6 +1539,24 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // INDESTRUCTIBLE — they pass through unchanged" behaviour.
     passThrough: true,
     spawnsDropsOnDeath: false,
+    // Density compaction: nebula shards already grow toward
+    // transmutation (HEX_AREA accumulation).  Density layers a
+    // visual signal — successive merges darken the cloud — without
+    // touching the existing area-based tile transmutation, which is
+    // gated on `nebulaTileArea`, not size or tier.  Lower maxSteps
+    // (3) since most shards transmute well before reaching the cap;
+    // gentler shrinkFactor (0.92) preserves the cloud-style growth
+    // feel while still trimming the merged shard slightly so it
+    // reads as compaction.  areaThreshold=0 keeps every nebula
+    // merge eligible — transmutation depends on it.
+    density: {
+      enabled: true,
+      maxSteps: 3,
+      areaThreshold: 0,
+      largeShardCollapseSize: 110,
+      tintFloor: 0.55,
+      shrinkFactor: 0.92,
+    },
   },
 };
 

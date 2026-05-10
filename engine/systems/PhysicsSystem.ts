@@ -228,6 +228,20 @@ export class PhysicsSystem {
               entity.active = false;
           }
       }
+      // Generic merge fade-out — same lifecycle as the nebula timer
+      // but applies across non-nebula shard families (rock / glass).
+      // The smaller party of a density-compaction merge stays active
+      // and rendered (with multiplied alpha) while this counts down,
+      // then flips inactive so the in-place compaction in
+      // GameEngine.updatePhysics drops it.
+      if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
+          entity.mergeFadeTimer -= dt;
+          if (entity.mergeFadeTimer <= 0) {
+              entity.mergeFadeTimer = undefined;
+              entity.mergeFadeDuration = undefined;
+              entity.active = false;
+          }
+      }
       // Nebula birth fade-in — newly-created tiles and shards count this
       // down from FADE_IN_DURATION to 0; the renderer scales alpha by
       // 1 − (timer / FADE_IN_DURATION) so they slowly materialise.

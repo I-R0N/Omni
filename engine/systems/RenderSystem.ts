@@ -1,7 +1,8 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier } from '../../constants';
+import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -49,6 +50,56 @@ function hexToRgb(hex: string): [number, number, number] {
         _rgbCache.set(hex, cached);
     }
     return cached;
+}
+
+// Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
+// channel is clamped to [0, 255] then 0-padded.  Used by the density
+// tint helper to format a per-(variant, tier) cached colour string.
+function rgbToHex(r: number, g: number, b: number): string {
+    const ri = Math.max(0, Math.min(255, Math.round(r))).toString(16).padStart(2, '0');
+    const gi = Math.max(0, Math.min(255, Math.round(g))).toString(16).padStart(2, '0');
+    const bi = Math.max(0, Math.min(255, Math.round(b))).toString(16).padStart(2, '0');
+    return `#${ri}${gi}${bi}`;
+}
+
+/**
+ * Resolve a shard's render colour for the current density tier.
+ * Tier 0 (or no variant / no density) returns `baseHex` unchanged so
+ * existing colours are preserved bit-for-bit.  Tier > 0 multiplies
+ * each channel by the per-(variant, tier) multiplier from
+ * `densityTintMultiplier`, caches the formatted hex on the entity
+ * (`densityCachedTint`), and returns it.  ShardSystem invalidates
+ * the cache (`densityCachedTint = undefined`) at every site that
+ * mutates `densityTier`.
+ */
+function densityTintForRender(entity: GameEntity, baseHex: string): string {
+    const tier = entity.densityTier ?? 0;
+    if (tier <= 0) return baseHex;
+    const variantId = entity.shardVariant as ShardVariantId | undefined;
+    if (!variantId) return baseHex;
+    if (entity.densityCachedTint !== undefined) return entity.densityCachedTint;
+    const mul = densityTintMultiplier(variantId, tier);
+    if (mul >= 1.0) return baseHex;
+    const [r, g, b] = hexToRgb(baseHex);
+    const out = rgbToHex(r * mul, g * mul, b * mul);
+    entity.densityCachedTint = out;
+    return out;
+}
+
+/**
+ * Combined alpha multiplier for graceful retire windows on a shard.
+ * Returns 1.0 outside any fade window; during a `mergeFadeTimer`
+ * it returns the remaining-fraction (timer / duration) so the entity
+ * smoothly dissolves instead of popping.  Stacks multiplicatively
+ * with any nebula-specific fade (handled inside the nebula render
+ * branch already).
+ */
+function shardMergeFadeAlpha(entity: GameEntity): number {
+    const t = entity.mergeFadeTimer;
+    if (t === undefined || t <= 0) return 1.0;
+    const dur = entity.mergeFadeDuration;
+    if (dur === undefined || dur <= 0) return 1.0;
+    return Math.max(0, Math.min(1, t / dur));
 }
 
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
@@ -1234,6 +1285,16 @@ export class RenderSystem {
                   .toString(16).padStart(2, '0');
               tintHex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
           }
+          // Density tier darkens nebula shards (only — tiles have density
+          // disabled in the variant config).  Stacks multiplicatively
+          // with the interior-darken rule above for tiles, but in
+          // practice tiles never reach this branch with a positive
+          // tier.  Skipped at tier 0 so existing shard colour matches
+          // pre-density visuals exactly.
+          if (entity.densityTier && entity.densityTier > 0
+              && entity.shardVariant === 'nebula-shard') {
+              tintHex = densityTintForRender(entity, tintHex);
+          }
           const spriteSrc = entity.sprite;
           // Fade-out multiplier — per-entity duration lets fast-collision
           // shatters use a shorter, snappier fade than slow drift-through
@@ -1648,7 +1709,15 @@ export class RenderSystem {
 
                 if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
-                    const [gr, gg, gb] = glowColor ? hexToRgb(glowColor) : [180, 230, 253];
+                    // Density tier darkens the base hue (cool blue-white → muted
+                    // slate as tier climbs); merge-fade alpha multiplies every
+                    // layer.  When a glow is present we keep its colour pure
+                    // (powerup readability matters more than density darkening),
+                    // but the base panel still reads denser.
+                    const fadeAlpha = shardMergeFadeAlpha(entity);
+                    const baseHex = glowColor ?? '#b4e6fd';
+                    const tintedHex = glowColor ? glowColor : densityTintForRender(entity, baseHex);
+                    const [gr, gg, gb] = hexToRgb(tintedHex);
 
                     if (glowColor) {
                         // Power-up glow bloom — strong, opaque tint
@@ -1658,7 +1727,7 @@ export class RenderSystem {
                         bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0.55)`);
                         bloom.addColorStop(0.5, `rgba(${gr},${gg},${gb},0.25)`);
                         bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
-                        ctx.globalAlpha = 1.0;
+                        ctx.globalAlpha = 1.0 * fadeAlpha;
                         ctx.fillStyle   = bloom;
                         ctx.beginPath();
                         ctx.arc(0, 0, glowR, 0, Math.PI * 2);
@@ -1667,21 +1736,25 @@ export class RenderSystem {
 
                     // Base fill — more opaque than a plain tile, solid color tint
                     buildPath();
-                    ctx.globalAlpha = isFlash ? 0.85 : (glowColor ? 0.55 : 0.22);
+                    ctx.globalAlpha = (isFlash ? 0.85 : (glowColor ? 0.55 : 0.22)) * fadeAlpha;
                     ctx.fillStyle   = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},1)`;
                     ctx.fill();
 
                     // Edge stroke
-                    ctx.globalAlpha = 1.0;
+                    ctx.globalAlpha = 1.0 * fadeAlpha;
                     ctx.strokeStyle = isFlash ? '#ffffff' : `rgba(${gr},${gg},${gb},0.85)`;
                     ctx.lineWidth   = isFlash ? 2.5 : 1.5;
                     ctx.stroke();
 
                 } else {
                     // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
+                    // Density tier darkens the base colour; merge-fade alpha
+                    // multiplies every layer so the dissolve is uniform.
+                    const densityHex = densityTintForRender(entity, entity.color);
+                    const fadeAlpha = shardMergeFadeAlpha(entity);
                     buildPath();
-                    ctx.globalAlpha = 1.0;
-                    ctx.fillStyle   = isFlash ? '#ffffff' : entity.color;
+                    ctx.globalAlpha = 1.0 * fadeAlpha;
+                    ctx.fillStyle   = isFlash ? '#ffffff' : densityHex;
                     ctx.fill();
 
                     if (glowColor && !isFlash) {
@@ -1689,7 +1762,7 @@ export class RenderSystem {
                         const [gr, gg, gb] = hexToRgb(glowColor);
                         const pulse = 0.6 + Math.sin(nowSec * 4.5) * 0.15;
                         buildPath();
-                        ctx.globalAlpha = 0.28 * pulse;
+                        ctx.globalAlpha = 0.28 * pulse * fadeAlpha;
                         ctx.fillStyle   = `rgb(${gr},${gg},${gb})`;
                         ctx.fill();
 
@@ -1699,14 +1772,14 @@ export class RenderSystem {
                         bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0)`);
                         bloom.addColorStop(0.6, `rgba(${gr},${gg},${gb},0.12)`);
                         bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
-                        ctx.globalAlpha = 1.0;
+                        ctx.globalAlpha = 1.0 * fadeAlpha;
                         ctx.fillStyle   = bloom;
                         ctx.beginPath();
                         ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                         ctx.fill();
                     }
 
-                    ctx.globalAlpha = 1.0;
+                    ctx.globalAlpha = 1.0 * fadeAlpha;
                     this.renderCracks(ctx, entity, entity.size.x / 2);
                     ctx.strokeStyle = 'rgba(0,0,0,0.3)';
                     ctx.lineWidth   = 2;
