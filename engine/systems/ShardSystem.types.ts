@@ -18,8 +18,8 @@ import { EntityType } from '../../types';
 export type ShardVariantId =
   // STRUCTURE-tile variants (static, hex-clustered, mass = ∞)
   | 'glass-tile'
-  | 'reinforced-tile'
-  | 'heavy-tile'
+  | 'plastic-tile'
+  | 'metal-tile'
   | 'indestructible-tile'
   | 'rock-tile'
   | 'nebula-tile'
@@ -262,6 +262,26 @@ export interface ShardVariantDef {
    *  pipeline; legacy compose math continues to apply.  Today set
    *  on rock-shard, glass-shard, nebula-shard. */
   density?: ShardDensityPolicy;
+  /** Per-tile additive glow visual.  When set, RenderSystem's
+   *  static-tile draw loop (layer 2b) fills the polygon with `color`
+   *  at alpha = `peakAlpha * entity.glowIntensity`.  Activation is
+   *  externally driven — whatever system owns the trigger writes
+   *  `glowIntensity` (0..1) on the entity each frame and resets it
+   *  next frame.  `range` is informational metadata for trigger
+   *  systems that compute a quadratic-falloff `glowIntensity`
+   *  relative to a source position; the renderer itself does not
+   *  read it.  Unset on every variant today — (g2) populates it
+   *  for the variants that should glow. */
+  glow?: {
+    /** Glow color when fully lit, hex string. */
+    color: string;
+    /** Range over which the glow falls off, world units.  Used by
+     *  external trigger systems; not read by the renderer. */
+    range: number;
+    /** Quadratic-falloff peak alpha (0..1) — multiplied by
+     *  `entity.glowIntensity` to produce the rendered alpha. */
+    peakAlpha: number;
+  };
 }
 
 // ── Map population entry ────────────────────────────────────────────

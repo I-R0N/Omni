@@ -23,10 +23,16 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400
-  STRUCTURE_REINFORCED: '#8b5cf6',        // Violet 500
-  STRUCTURE_REINFORCED_BORDER: '#a78bfa', // Violet 400
-  STRUCTURE_HEAVY: '#f59e0b',             // Amber 500
-  STRUCTURE_HEAVY_BORDER: '#fbbf24',      // Amber 400
+  // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
+  // outline so the surface reads as soft injection-moulded plastic
+  // rather than the violet sheen of the prior reinforced tile.
+  STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
+  STRUCTURE_PLASTIC_BORDER: '#fbbf24',    // Amber 400 — gentle highlight, not specular
+  // Metal — cool steel-blue with a brighter edge, so silhouettes pop
+  // against the indigo glass tiles.  Higher outline contrast than
+  // plastic to read as a hard surface.
+  STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
+  STRUCTURE_METAL_BORDER: '#e2e8f0',      // Slate 200 — chrome edge highlight
   STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
   STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
 };
@@ -392,7 +398,7 @@ export const STRUCTURE_CONSTANTS = {
 // sprite each, not a per-tier atlas.
 //
 // Glass (default) is single-hit to match the original behaviour.
-// Reinforced and heavy add intermediate HP.  Indestructible tiles never
+// Plastic and metal add intermediate HP.  Indestructible tiles never
 // take damage and never regenerate — they're permanent walls.
 export const STRUCTURE_VARIANTS = {
   glass: {
@@ -403,21 +409,21 @@ export const STRUCTURE_VARIANTS = {
     color: COLORS.STRUCTURE,
     borderColor: COLORS.STRUCTURE_BORDER,
   },
-  reinforced: {
+  plastic: {
     health: 3,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_REINFORCED,
-    color: COLORS.STRUCTURE_REINFORCED,
-    borderColor: COLORS.STRUCTURE_REINFORCED_BORDER,
+    sprite: ASSETS.HEX_STRUCTURE_PLASTIC,
+    color: COLORS.STRUCTURE_PLASTIC,
+    borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
-  heavy: {
+  metal: {
     health: 5,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
-    color: COLORS.STRUCTURE_HEAVY,
-    borderColor: COLORS.STRUCTURE_HEAVY_BORDER,
+    sprite: ASSETS.HEX_STRUCTURE_METAL,
+    color: COLORS.STRUCTURE_METAL,
+    borderColor: COLORS.STRUCTURE_METAL_BORDER,
   },
   indestructible: {
     // Sentinel health — tile is never destroyed, but keep a finite positive
@@ -1331,7 +1337,7 @@ const GLASS_SHARD_SPAWN_SHAPE = {
   sizeToMass: (d: number) => d,
 };
 
-// Base config shared by glass / reinforced / heavy STRUCTURE tiles.
+// Base config shared by glass / plastic / metal STRUCTURE tiles.
 // indestructible-tile and rock-tile override pieces of this.
 const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
   carrier: EntityType.STRUCTURE,
@@ -1392,13 +1398,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
   },
-  'reinforced-tile': {
+  'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
-    id: 'reinforced-tile',
+    id: 'plastic-tile',
   },
-  'heavy-tile': {
+  'metal-tile': {
     ...STRUCTURE_TILE_BASE,
-    id: 'heavy-tile',
+    id: 'metal-tile',
   },
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1638,8 +1644,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
     // / OUTER_*); MAP_POPULATION is now the single source of truth.
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
-    'reinforced-tile':     { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
-    'heavy-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
+    'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
     'nebula-tile': {
       tileCluster: {
@@ -1663,8 +1669,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.POCKET]: {
     'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 800 } },
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
-    'reinforced-tile':     { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
-    'heavy-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
+    'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
+    'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
     'indestructible-tile': { tileCluster: { clusterCount: 2, minClusterSize: 3, maxClusterSize:  5 } },
     'nebula-tile': {
       tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
@@ -1677,7 +1683,7 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'glass-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
   [MapType.HARD_TILE_FIELD]: {
-    'heavy-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+    'metal-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {
     'indestructible-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },

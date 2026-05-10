@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1140,7 +1140,7 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      // Only glass-family static tiles (glass / reinforced / heavy /
+      // Only glass-family static tiles (glass / plastic / metal /
       // indestructible) take the hex-sprite fast path.  Rock-tile and
       // mobile shards fall through to the generic polygon/sprite
       // render below — rock-tile renders with the asteroid solid-fill
@@ -1148,8 +1148,8 @@ export class RenderSystem {
       const isGlassFamilyStaticTile =
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
-            || entity.shardVariant === 'reinforced-tile'
-            || entity.shardVariant === 'heavy-tile'
+            || entity.shardVariant === 'plastic-tile'
+            || entity.shardVariant === 'metal-tile'
             || entity.shardVariant === 'indestructible-tile');
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
@@ -1594,8 +1594,8 @@ export class RenderSystem {
             const isGlassFamilyTile =
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
               && (entity.shardVariant === 'glass-tile'
-                  || entity.shardVariant === 'reinforced-tile'
-                  || entity.shardVariant === 'heavy-tile'
+                  || entity.shardVariant === 'plastic-tile'
+                  || entity.shardVariant === 'metal-tile'
                   || entity.shardVariant === 'indestructible-tile');
             if (isGlassFamilyTile) {
                 // Glass-family static tiles render with the glass-tile
@@ -1658,6 +1658,25 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
+                // Layer 2b — variant-driven additive glow.  Externally
+                // gated by `entity.glowIntensity` (0..1, written each
+                // frame by whatever system owns the trigger and reset
+                // next frame).  When unset / zero, or when the variant
+                // has no `glow` config, the layer short-circuits before
+                // any state mutation — the cheap field check keeps the
+                // hot path allocation-free for non-glowing tiles.
+                if (!isFlash
+                    && entity.glowIntensity !== undefined
+                    && entity.glowIntensity > 0
+                    && entity.shardVariant !== undefined) {
+                    const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+                    if (glow !== undefined) {
+                        ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
+                        ctx.fillStyle = glow.color;
+                        ctx.fill();
+                    }
+                }
+
                 // Layer 3 — edge stroke (proximity-tinted)
                 ctx.globalAlpha = 1.0;
                 ctx.strokeStyle = edgeColor;
@@ -1671,7 +1690,7 @@ export class RenderSystem {
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
-                // Damage cracks for multi-HP variants (reinforced / heavy).
+                // Damage cracks for multi-HP variants (plastic / metal).
                 // renderCracks early-returns at ≥95 % health, so undamaged
                 // tiles pay only one property read — same pattern asteroids
                 // use for their damage visualisation.

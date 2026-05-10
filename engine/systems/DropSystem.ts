@@ -78,18 +78,18 @@ export class DropSystem {
     const pv = entity.velocity;
 
     // Shard-family entities are all EntityType.STRUCTURE.  Distinguish
-    // glass-family static tile (glass / reinforced / heavy — produce
+    // glass-family static tile (glass / plastic / metal — produce
     // glass-shard debris on death) from rock-tile (own ShardSystem
     // shatter path produces rock-shards) and mobile shards (asteroid-
     // like drop logic).
     const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
     const isGlassFamilyTile = isStaticTile
       && (entity.shardVariant === 'glass-tile'
-          || entity.shardVariant === 'reinforced-tile'
-          || entity.shardVariant === 'heavy-tile');
+          || entity.shardVariant === 'plastic-tile'
+          || entity.shardVariant === 'metal-tile');
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isGlassFamilyTile) {
-      // Glass / reinforced / heavy tile death — visual debris.
+      // Glass / plastic / metal tile death — visual debris.
       // Indestructible tiles short-circuit upstream; rock-tile spawns
       // its own rock-shards via ShardSystem.shatter; nebula-tile
       // skips drops via variant.spawnsDropsOnDeath = false.

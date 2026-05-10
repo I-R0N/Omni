@@ -877,11 +877,11 @@ export class GameEngine {
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
           // - rock-tile: spawns rock-shards (Stage 5+).
-          // - glass-tile / reinforced-tile / heavy-tile: today's
+          // - glass-tile / plastic-tile / metal-tile: today's
           //   shatter is via DropSystem.spawnGlassShards (called
           //   from spawnDrops); the variant config has shatter.kind=
           //   'powerlaw' aspirationally for Stage 6 unification.
-          if (this.currentMap && variant !== 'glass-tile' && variant !== 'reinforced-tile' && variant !== 'heavy-tile') {
+          if (this.currentMap && variant !== 'glass-tile' && variant !== 'plastic-tile' && variant !== 'metal-tile') {
               this.shards.shatter(entity, this.currentMap.entities);
           }
       }

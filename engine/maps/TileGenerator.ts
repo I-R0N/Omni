@@ -239,12 +239,12 @@ export class TileGenerator {
       variant: StructureVariant
   ): GameEntity {
     const cfg = STRUCTURE_VARIANTS[variant];
-    // Map STRUCTURE_VARIANTS key ('glass' / 'reinforced' / 'heavy' /
+    // Map STRUCTURE_VARIANTS key ('glass' / 'plastic' / 'metal' /
     // 'indestructible' / 'rock') to the unified shardVariant id
     // (suffix '-tile').
     const variantId: ShardVariantId =
-        variant === 'reinforced'      ? 'reinforced-tile'
-      : variant === 'heavy'           ? 'heavy-tile'
+        variant === 'plastic'         ? 'plastic-tile'
+      : variant === 'metal'           ? 'metal-tile'
       : variant === 'indestructible'  ? 'indestructible-tile'
       : variant === 'rock'            ? 'rock-tile'
       :                                  'glass-tile';

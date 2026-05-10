@@ -1158,8 +1158,8 @@ export class PhysicsSystem {
           //
           // Stage 5: shard-family entities all share EntityType.STRUCTURE
           // now, so distinguishing static tiles vs glass-shards needs a
-          // variant check.  STRUCTURE-tile variants (glass / reinforced /
-          // heavy / indestructible) are mass=Infinity, so we can short-
+          // variant check.  STRUCTURE-tile variants (glass / plastic /
+          // metal / indestructible) are mass=Infinity, so we can short-
           // circuit on that for tile reflection.  Mobile shards then
           // need a per-variant check — only glass-shard reflects.
           if (proj.isBouncer) {
@@ -1443,7 +1443,7 @@ export class PhysicsSystem {
       // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
       // The player loses half its velocity to the tile break.
       //
-      // Tiered tiles (reinforced/heavy) with maxHealth > 1 consume one
+      // Tiered tiles (plastic/metal) with maxHealth > 1 consume one
       // health tier per above-threshold crash rather than shattering in
       // one hit — the tile only onDeath's when health hits 0.
       //

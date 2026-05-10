@@ -13,7 +13,7 @@ export enum MapType {
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
   // 1 000 × 1 000 sandbox containing every element (asteroids, glass /
-  // reinforced / heavy / indestructible tiles, nebula clusters).  Useful
+  // plastic / metal / indestructible tiles, nebula clusters).  Useful
   // for quickly validating interactions between systems without having
   // to fly across a full-size map to find them.
   POCKET      = 'POCKET',
@@ -375,6 +375,13 @@ export interface GameEntity {
   // in the renderer.  Computed/blended in GameEngine when a power-up is
   // absorbed; undefined means no power-up content.
   powerupGlowColor?: string;
+
+  // Per-frame variant-glow activation (0..1).  Externally driven — the
+  // system that owns the trigger (e.g. proximity scan, damage pulse)
+  // writes this each frame and clears it the next frame.  Read by
+  // RenderSystem layer 2b alongside SHARD_VARIANTS[v].glow.peakAlpha
+  // to produce the rendered alpha.  Undefined or 0 → layer skipped.
+  glowIntensity?: number;
 
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.
