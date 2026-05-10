@@ -565,9 +565,22 @@ export class PhysicsSystem {
     }
     this.lastMaxCellDensity = maxDensity;
 
-    // 3. Check Collisions: Only iterate DYNAMIC entities as primary subjects
+    // 3. Check Collisions: Only iterate DYNAMIC entities as primary
+    //    subjects, AND skip shards as outer-loop subjects entirely.
+    //    Shards stay in dynamicGrid so non-shard outer loops still
+    //    catch them in 3×3 scans (covers shard ↔ projectile / player /
+    //    enemy pairs once each via id ordering).  Shard ↔ shard pairs
+    //    are handled by resolveShardPairs() at the ShPair cadence.
+    //    Removing shard outer loops cuts the per-frame pair-enum
+    //    work by roughly the shard:non-shard ratio — a major win on
+    //    populated maps where shards dominate.
     for (let i = 0; i < dynamicEntities.length; i++) {
         const a = dynamicEntities[i];
+        // Mobile shards (STRUCTURE finite mass) are SKIPPED as
+        // outer-loop subjects — non-shard outer loops cover their
+        // pairs via 3x3 mutual scan, and shard ↔ shard runs in
+        // resolveShardPairs.
+        if (a.type === EntityType.STRUCTURE) continue;
 
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
         const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
@@ -590,8 +603,15 @@ export class PhysicsSystem {
                         const b = dynamicCandidates[j];
                         if (a === b) continue;
                         if (!b.active || b.isExploding) continue;
-                        // Avoid double checking dynamic pairs
-                        if (a.id > b.id) continue;
+                        // Avoid double-processing: id ordering is only
+                        // needed when BOTH parties may iterate the pair
+                        // from their own outer loop.  Shards are
+                        // skipped from outer-loop iteration above, so
+                        // when b is a shard the pair can ONLY be hit
+                        // from a's (non-shard) outer loop — process it
+                        // regardless of id ordering.  For non-shard
+                        // pairs the id check still dedupes.
+                        if (b.type !== EntityType.STRUCTURE && a.id > b.id) continue;
 
                         // ── Type-pair filter: skip pairs that resolve-
                         // Collision always discards BEFORE the expensive
@@ -604,29 +624,10 @@ export class PhysicsSystem {
                         // immediately (no proj-proj interaction).
                         if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
 
-                        // Asteroid-asteroid: route through a dedicated
-                        // circle-only resolver instead of the full SAT +
-                        // resolveCollision path.  Full SAT is too expensive
-                        // for dense clusters (O(k²) pairs per cell × O(v²)
-                        // per pair), so the previous build skipped this
-                        // pair type entirely — but that let shards stack
-                        // at the same centre, where mutual gravity trapped
-                        // them and the flow field couldn't budge the pile.
-                        // The cheap resolver still physically separates
-                        // overlapping shards and applies an elastic bounce
-                        // so they can't share a position, while costing a
-                        // few mul/sqrt per pair instead of a full polygon
-                        // projection.
-                        // Mobile-shard pair: handled by the dedicated
-                        // resolveShardPairs() pass which only runs on
-                        // Nth physics substeps per the ShPair pacing.
-                        // Skipping here means the broadphase enumeration
-                        // for this pair stops cold — the slider's effect
-                        // on `coll` ms scales with N as expected.  Note:
-                        // shards still appear in the dynamic grid so
-                        // shard ↔ projectile / shard ↔ player /
-                        // shard ↔ enemy pairs run every frame as before.
-                        if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) continue;
+                        // Note: shard ↔ shard is unreachable here
+                        // because shards are skipped from the outer
+                        // loop above.  Those pairs run in
+                        // resolveShardPairs() at the ShPair cadence.
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
