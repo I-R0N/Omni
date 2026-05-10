@@ -5,7 +5,7 @@ import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRI
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
-import { HEX_AREA } from '../maps/TileGenerator';
+import { HEX_AREA, HEX_SIZE } from '../maps/TileGenerator';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
@@ -157,6 +157,14 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
+
+  // Optional PhysicsSystem reference for spatial queries — today only the
+  // material-tile branch uses it (to suppress edge strokes on edges that
+  // are cleanly butted against a neighbour tile).  Null is treated as "no
+  // neighbour data available" → fall back to drawing the full outline.
+  private physics: import('./PhysicsSystem').PhysicsSystem | null = null;
+  public setPhysics(p: import('./PhysicsSystem').PhysicsSystem) { this.physics = p; }
+
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -1734,18 +1742,87 @@ export class RenderSystem {
                     ctx.fillStyle = isFlash ? '#ffffff' : entity.color;
                     ctx.fill();
 
-                    // Layer 2 — outline.  Plastic uses a soft warm edge,
-                    // metal a brighter chrome edge for the hard-surface
-                    // read; both come from STRUCTURE_VARIANTS borderColor
-                    // mirrored on the entity at spawn time (TileGenerator
-                    // already 80 %-rolls borderColor into entity.color, so
-                    // we use a fixed light tone here for the outline).
+                    // Layer 2 — selective outline.  Skip edges that are
+                    // both (a) at their original radius (no dent on either
+                    // endpoint) and (b) butted against a neighbour tile.
+                    // Draw deformed edges and cluster-boundary edges so
+                    // the silhouette reads as one continuous cluster
+                    // outline with internal dents visible.  Plastic uses
+                    // a soft warm edge, metal a brighter chrome edge.
                     ctx.globalAlpha = 1.0;
                     ctx.strokeStyle = isFlash
                         ? '#ffffff'
                         : (entity.shardVariant === 'plastic-tile' ? '#fbbf24' : '#e2e8f0');
                     ctx.lineWidth = isFlash ? 2.5 : 1.5;
-                    ctx.stroke();
+
+                    const pts = entity.polygonPoints;
+                    if (pts && pts.length > 0) {
+                        // Original circumradius — for un-touched vertices
+                        // this equals the spawn-time hex radius (HEX_SIZE
+                        // for our hex grid).  Lazy bake from the current
+                        // max vertex distance so we don't need a new
+                        // GameEntity field; dent only ever pulls inward,
+                        // so the max captures the original at first
+                        // render and stays accurate afterwards.
+                        let origR2 = entity.originalCircumradiusSq ?? 0;
+                        if (origR2 === 0) {
+                            for (let i = 0; i < pts.length; i++) {
+                                const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+                                if (r2 > origR2) origR2 = r2;
+                            }
+                            // 1 % tolerance so floating-point jitter from
+                            // entity-local math doesn't false-trigger
+                            // "deformed" on un-touched vertices.
+                            entity.originalCircumradiusSq = origR2 * 0.98;
+                        }
+                        const deformThresholdR2 = entity.originalCircumradiusSq;
+
+                        // Probe distance for neighbour lookup: the un-dented
+                        // edge midpoint sits at the hex inradius from the
+                        // tile centre; scaling it by 2.0 lands the probe at
+                        // 2× inradius = HEX_WIDTH — exactly where a
+                        // touching neighbour's centre sits.  Probe radius
+                        // ~HEX_SIZE × 0.5 catches the neighbour even if its
+                        // centre is jittered slightly.
+                        const probeFactor = 2.0;
+                        const probeRadius = HEX_SIZE * 0.5;
+
+                        ctx.beginPath();
+                        for (let i = 0; i < pts.length; i++) {
+                            const p1 = pts[i];
+                            const p2 = pts[(i + 1) % pts.length];
+
+                            const r1Sq = p1.x * p1.x + p1.y * p1.y;
+                            const r2Sq = p2.x * p2.x + p2.y * p2.y;
+                            const deformed = r1Sq < deformThresholdR2 || r2Sq < deformThresholdR2;
+
+                            let drawEdge = deformed;
+                            if (!deformed && this.physics) {
+                                // Probe outward from the edge midpoint to
+                                // see if a neighbour tile covers the
+                                // adjacent hex cell.  No neighbour →
+                                // cluster-boundary edge → draw.
+                                const midX = (p1.x + p2.x) * 0.5;
+                                const midY = (p1.y + p2.y) * 0.5;
+                                const probeWorldX = entity.position.x + midX * probeFactor;
+                                const probeWorldY = entity.position.y + midY * probeFactor;
+                                drawEdge = !this.physics.hasStaticTileNear(
+                                    probeWorldX, probeWorldY, probeRadius, entity.id,
+                                );
+                            } else if (!deformed && !this.physics) {
+                                // No physics ref wired — fall back to the
+                                // full outline so nothing renders worse
+                                // than before.
+                                drawEdge = true;
+                            }
+
+                            if (drawEdge) {
+                                ctx.moveTo(p1.x, p1.y);
+                                ctx.lineTo(p2.x, p2.y);
+                            }
+                        }
+                        ctx.stroke();
+                    }
 
                     // Damage cracks for multi-HP variants — early-returns
                     // at ≥95 % health so undamaged tiles cost nothing.

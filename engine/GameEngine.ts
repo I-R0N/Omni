@@ -358,6 +358,10 @@ export class GameEngine {
     this.input = new InputSystem();
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
+    // Wire physics into the renderer so the material-tile branch can
+    // suppress edge strokes on edges that are cleanly butted against
+    // a neighbour tile (queried via hasStaticTileNear).
+    this.renderer.setPhysics(this.physics);
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();

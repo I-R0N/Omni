@@ -2,7 +2,7 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS } from '../../constants';
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
@@ -742,6 +742,36 @@ export class PhysicsSystem {
           }
       }
       return true;
+  }
+
+  // Returns true if an active static tile's centre lies within `radius` of
+  // world-space point (x, y), ignoring the tile whose id matches `ignoreId`
+  // (so a tile can probe for its own neighbours without finding itself).
+  // Used by RenderSystem to suppress outline strokes on edges that are
+  // cleanly butted against a neighbour tile.  Wraps the probe coordinates
+  // so callers probing across the toroidal seam still find neighbours on
+  // the opposite side.
+  public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
+      const wx = wrapX(x);
+      const wy = wrapY(y);
+      const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
+      const rSq = radius * radius;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  if (ignoreId !== undefined && t.id === ignoreId) continue;
+                  const tdx = wrapDeltaX(t.position.x, wx);
+                  const tdy = wrapDeltaY(t.position.y, wy);
+                  if (tdx * tdx + tdy * tdy < rSq) return true;
+              }
+          }
+      }
+      return false;
   }
 
   /**

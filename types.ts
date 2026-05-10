@@ -384,6 +384,15 @@ export interface GameEntity {
   // to produce the rendered alpha.  Undefined or 0 → layer skipped.
   glowIntensity?: number;
 
+  // Lazily-baked original circumradius² for dent-policy tiles
+  // (plastic-tile, metal-tile).  Computed in RenderSystem on first
+  // material-tile render as max(polygonPoints[i].r²) × 0.98 (small
+  // tolerance for FP jitter).  Used to detect whether a polygon
+  // vertex has been pulled inward — vertices below this threshold
+  // are "deformed", and their adjacent edges always draw regardless
+  // of neighbour presence.
+  originalCircumradiusSq?: number;
+
 
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.
