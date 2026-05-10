@@ -1506,15 +1506,46 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Rock-tiles shatter into rock-shards (not glass-shards).
+    // Rock-tile is a dent variant: deforms in the grid on each hit,
+    // releases an intermediate rock-shard "off the side" at 1/3 HP
+    // remaining, and breaks the entire remaining tile into 2-3
+    // rock-shards on the killing hit.  No regen — accumulated
+    // deformation persists.  Shatter is left at kind='none' here so
+    // ShardSystem.shatter doesn't double-spawn on top of the dent
+    // breakShards (GameEngine.handleEntityDeath skips shatter for
+    // any dent variant — see that file).
+    regen: { kind: 'none' },
     shatter: {
-      kind: 'powerlaw',
+      kind: 'none',
       style: 'asteroid',
-      countMin: 2, countMax: 5,
-      alphaMin: 0.4, alphaMax: 2.0,
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'rock-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
-      scatterHalfCone: Math.PI * 0.55,
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
+    },
+    dent: {
+      // Mid-range jitter — rocks visibly chip per hit but not as
+      // dramatically as plastic.
+      vertexJitter: 0.18,
+      // 90° offset: dent appears on a side perpendicular to the
+      // impact, reading as a chunk pinching off the side rather
+      // than the front caving in.
+      dentVertexAngleOffset: Math.PI / 2,
+      // At 1/3 HP remaining (after the 2nd hit on a 3-HP rock-tile)
+      // a single rock-shard breaks off.  sizeFraction 0.5 is roughly
+      // a quarter of the deformed tile's area — small enough to
+      // read as "broken off a corner," not "tile is gone."
+      intermediateShards: [
+        { healthFraction: 0.34, variant: 'rock-shard', sizeFraction: 0.5 },
+      ],
+      // Final break: 3 roughly equal rock-shards whose areas sum to
+      // ~the deformed tile's area.  sqrt(1/3) ≈ 0.577 linear.
+      breakShards: [
+        { variant: 'rock-shard', sizeFraction: 0.577 },
+        { variant: 'rock-shard', sizeFraction: 0.577 },
+        { variant: 'rock-shard', sizeFraction: 0.577 },
+      ],
     },
   },
   'nebula-tile': {

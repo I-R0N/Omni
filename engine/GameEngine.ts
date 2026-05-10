@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_VARIANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -881,14 +881,15 @@ export class GameEngine {
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
-          // - rock-tile: spawns rock-shards (Stage 5+).
           // - glass-tile: visual debris via DropSystem.spawnGlassShards
           //   (called from spawnDrops); SHARD_VARIANTS shatter is
           //   aspirational for Stage 6 unification.
-          // - plastic-tile / metal-tile: dent-policy variants — the
-          //   tile detaches as a single material-shard via
-          //   DropSystem.spawnDentShard; no fan, no scatter.
-          if (this.currentMap && variant !== 'glass-tile' && variant !== 'plastic-tile' && variant !== 'metal-tile') {
+          // - dent variants (plastic-tile / metal-tile / rock-tile):
+          //   tile detaches via DropSystem.spawnDentShard reading
+          //   dent.breakShards — skip ShardSystem.shatter entirely so
+          //   the two paths don't double-spawn.
+          const isDentVariant = SHARD_VARIANTS[variant].dent !== undefined;
+          if (this.currentMap && variant !== 'glass-tile' && !isDentVariant) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
       }
@@ -1521,6 +1522,34 @@ export class GameEngine {
           color: isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR,
           active: true
       });
+
+      // Intermediate dent-shard spawn — for dent variants with an
+      // intermediateShards spec, check whether `health / maxHealth`
+      // just crossed any entry's threshold and spawn the
+      // corresponding shard.  Skipped when the tile has died from
+      // this damage (target.health <= 0); the full-break path
+      // handles that.  Rock-tile uses this for the "shard breaks off
+      // the side at 1/3 HP remaining" effect.
+      if (target?.shardVariant && target.active && target.health > 0 && this.currentMap) {
+          const dent = SHARD_VARIANTS[target.shardVariant].dent;
+          if (dent?.intermediateShards && dent.intermediateShards.length > 0) {
+              const maxH = target.maxHealth || 1;
+              // Dent variants take 1 HP per hit (see PhysicsSystem
+              // projectile damage path), regardless of `amount`.
+              const preHealth = target.health + 1;
+              const fractionBefore = preHealth / maxH;
+              const fractionAfter  = target.health / maxH;
+              for (let i = 0; i < dent.intermediateShards.length; i++) {
+                  const inter = dent.intermediateShards[i];
+                  if (fractionBefore > inter.healthFraction
+                      && fractionAfter <= inter.healthFraction) {
+                      this.drops.spawnDentShard(this.currentMap.entities, target, [
+                          { variant: inter.variant, sizeFraction: inter.sizeFraction },
+                      ]);
+                  }
+              }
+          }
+      }
   };
 
   private startExplosion(entity: GameEntity) {

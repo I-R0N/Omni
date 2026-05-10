@@ -308,6 +308,25 @@ export interface ShardVariantDef {
      *  each vertex each hit; cumulative.  Plastic ~0.25 (visibly
      *  warps each hit), metal ~0.13 (subtle per-hit change). */
     vertexJitter: number;
+    /** Rotation in radians applied to the impact direction before
+     *  searching for the vertex to deform.  0 (default) deforms the
+     *  vertex closest to the impact (the "front" of the tile);
+     *  Math.PI/2 deforms a side vertex (~90° offset, used by rock so
+     *  the dent reads as "a chunk pinching off the side while the
+     *  tile stays in the grid"); Math.PI would deform the far
+     *  side. */
+    dentVertexAngleOffset?: number;
+    /** Optional one-off shard releases that fire WHILE the tile is
+     *  still alive in the grid, triggered the first time `health /
+     *  maxHealth` falls below the entry's `healthFraction` threshold.
+     *  Sized like breakShards (linear sizeFraction × deformed
+     *  diameter).  Today rock uses this for the "shard breaks off
+     *  the side at 1/3 HP" effect. */
+    intermediateShards?: Array<{
+      healthFraction: number;
+      variant: ShardVariantId;
+      sizeFraction: number;
+    }>;
     /** Mobile shards spawned when the tile detaches.  `sizeFraction`
      *  is a LINEAR multiplier on the deformed tile's effective
      *  diameter (2 × avgVertexRadius of the dented polygon).  At

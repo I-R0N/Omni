@@ -699,14 +699,29 @@ export class PhysicsSystem {
       // wrapDeltaX(from, to) returns (to - from), so pass tile first
       // to get (impact - tile) — i.e. the impact's offset from the
       // tile centre.
-      const localX = wrapDeltaX(tile.position.x, impactWorldPos.x);
-      const localY = wrapDeltaY(tile.position.y, impactWorldPos.y);
+      let dirX = wrapDeltaX(tile.position.x, impactWorldPos.x);
+      let dirY = wrapDeltaY(tile.position.y, impactWorldPos.y);
+
+      // Optional rotation of the impact direction before the closest-
+      // vertex search.  Rock uses Math.PI/2 so the dent appears on a
+      // side perpendicular to the impact — reads as "a chunk pinches
+      // off the side while the tile stays in the grid."  Plastic and
+      // metal leave this 0 (dent where hit).
+      const angleOffset = dent.dentVertexAngleOffset;
+      if (angleOffset !== undefined && angleOffset !== 0) {
+          const cosA = Math.cos(angleOffset);
+          const sinA = Math.sin(angleOffset);
+          const rx = dirX * cosA - dirY * sinA;
+          const ry = dirX * sinA + dirY * cosA;
+          dirX = rx;
+          dirY = ry;
+      }
 
       let bestIdx = 0;
       let bestD2 = Infinity;
       for (let i = 0; i < pts.length; i++) {
-          const dx = pts[i].x - localX;
-          const dy = pts[i].y - localY;
+          const dx = pts[i].x - dirX;
+          const dy = pts[i].y - dirY;
           const d2 = dx * dx + dy * dy;
           if (d2 < bestD2) {
               bestD2 = d2;
@@ -1385,6 +1400,16 @@ export class PhysicsSystem {
                   // world position; applyDentStep finds the closest
                   // vertex.
                   PhysicsSystem.applyDentStep(target, proj.position);
+                  // Stamp lastImpactVelocity on every dent hit (not
+                  // only the killing blow) so intermediate shard
+                  // spawns at HP thresholds know which direction to
+                  // launch the freed chunk.  This was previously
+                  // only set inside the `target.health <= 0` block
+                  // below.
+                  if (isDentEntity && target.type === EntityType.STRUCTURE && proj.velocity) {
+                      target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+                      target.lastImpactDamage = proj.damage ?? 1;
+                  }
                   // Mobile dent shards (plastic-shard, metal-shard) get
                   // a velocity kick from the projectile — they're free-
                   // floating, so a hit should both deform AND push.
