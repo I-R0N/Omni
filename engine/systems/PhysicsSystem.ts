@@ -61,6 +61,14 @@ export class PhysicsSystem {
   // GameEngine sets this from the DBG panel for A/B perf testing.
   // Default true matches today's production behaviour.
   public localGravityEnabled: boolean = true;
+  // Debug toggle — flips applyGravity (POI/attractor scan over the
+  // master entity list) on/off.  When false the pass returns
+  // immediately and lastGravityMs reads zero.
+  public attractorGravityEnabled: boolean = true;
+  // Debug toggle — flips handleEntityCollisions on/off.  When false
+  // the entire broadphase + SAT pass is skipped (game-breaking;
+  // strictly for measuring the isolated cost in the perf overlay).
+  public collisionsEnabled: boolean = true;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -143,9 +151,13 @@ export class PhysicsSystem {
     const timeScale = dt * 60;
     const friction = Math.pow(baseFriction, timeScale);
 
-    // Apply Planetary/Stellar Gravity (Scaled by time)
+    // Apply Planetary/Stellar Gravity (Scaled by time).
+    // DBG-toggleable: when attractorGravityEnabled is false the scan
+    // is skipped entirely and lastGravityMs reads zero.
     const tGrav = performance.now();
-    this.applyGravity(entities, timeScale, onDamage);
+    if (this.attractorGravityEnabled) {
+      this.applyGravity(entities, timeScale, onDamage);
+    }
     this.lastGravityMs = performance.now() - tGrav;
 
     // Apply Player-Asteroid Mutual Gravity (Scaled by time).
@@ -350,9 +362,14 @@ export class PhysicsSystem {
       }
     }
 
-    // Optimized Entity-Entity Collision (Spatial Hash Grid)
+    // Optimized Entity-Entity Collision (Spatial Hash Grid).
+    // DBG-toggleable: when collisionsEnabled is false the broadphase +
+    // SAT pass is skipped entirely (game-breaking — projectiles fly
+    // through, tiles are inert).  Strictly a perf measurement aid.
     const tCol = performance.now();
-    this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+    if (this.collisionsEnabled) {
+      this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+    }
     this.lastCollisionsMs = performance.now() - tCol;
 
     this.lastUpdateMs = performance.now() - t0;

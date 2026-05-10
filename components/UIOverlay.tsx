@@ -13,8 +13,9 @@ interface UIOverlayProps {
   onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
-  onCycleClusterMode?: () => void;
   onToggleLocalGravity?: () => void;
+  onToggleAttractorGravity?: () => void;
+  onToggleCollisions?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -33,8 +34,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaSet,
   onCycleTrailShape,
   onCycleTrailEmitMode,
-  onCycleClusterMode,
   onToggleLocalGravity,
+  onToggleAttractorGravity,
+  onToggleCollisions,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -133,24 +135,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Asteroid pull model — pairwise grav vs density bias vs none.
-                  Watch the `grav` and `lgrv` perf timers below to see the cost
-                  drop as you cycle through modes. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Pull</span>
-                <button
-                  onClick={onCycleClusterMode}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle asteroid clustering: pairwise grav → density bias → none"
-                >
-                  {stats.clusterMode === 'density-bias'
-                    ? 'Density'
-                    : stats.clusterMode === 'none'
-                    ? 'None'
-                    : 'Pairwise'}
-                </button>
-              </div>
-
               {/* Player↔asteroid local-gravity toggle — pure on/off so the
                   `lgrv` perf timer shows the isolated cost when off. */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -161,6 +145,35 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
                 >
                   {stats.localGravityEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* POI / attractor gravity toggle — gates PhysicsSystem.applyGravity.
+                  When off the master-list outer loop is skipped and the `grav`
+                  perf timer drops to zero. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grav</span>
+                <button
+                  onClick={onToggleAttractorGravity}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle attractor gravity scan (PhysicsSystem.applyGravity).  Outer loop walks the master entity list each frame."
+                >
+                  {stats.attractorGravityEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* SAT collision broadphase toggle — gates handleEntityCollisions.
+                  Off mode is GAME-BREAKING (projectiles fly through, tiles
+                  inert) — strictly for measuring isolated cost in the `coll`
+                  perf timer. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Coll</span>
+                <button
+                  onClick={onToggleCollisions}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
+                >
+                  {stats.collisionsEnabled === false ? 'Off' : 'On'}
                 </button>
               </div>
 

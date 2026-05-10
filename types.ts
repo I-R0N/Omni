@@ -593,10 +593,12 @@ export interface EngineStats {
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   // ── Performance toggle state (debug menu) ─────────────────────
-  // Mirrors GameEngine's clusterMode / localGravityEnabled so the
-  // DBG panel can render the live state.
-  clusterMode?: 'pairwise' | 'density-bias' | 'none';
+  // Mirrors GameEngine's perf-toggle fields so the DBG panel can
+  // render the live state.  All default true (production) and flip
+  // off for isolated cost measurement in the perf overlay.
   localGravityEnabled?: boolean;
+  attractorGravityEnabled?: boolean;
+  collisionsEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

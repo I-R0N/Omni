@@ -16,8 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, CLUSTER_CONSTANTS } from '../constants';
-import type { ClusterMode } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -106,13 +105,6 @@ export class GameEngine {
   // from the DBG panel.
   private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
-  // ── Performance toggle: asteroid clustering force model ─────────
-  // Cycled from the DBG panel.  Default reads from
-  // CLUSTER_CONSTANTS.DEFAULT_MODE so the production behaviour is
-  // unchanged on a fresh session; dev sweeps the modes via the
-  // "Pull" button to A/B cost vs feel.  See applyClusterForce in
-  // updatePhysics for the dispatch.
-  private clusterMode: ClusterMode = CLUSTER_CONSTANTS.DEFAULT_MODE;
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
   // between the player ship and nearby asteroids (LOCAL_GRAVITY_
@@ -120,6 +112,21 @@ export class GameEngine {
   // panel's "LGrav" button flips it for measuring its cost in
   // isolation.
   private localGravityEnabled: boolean = true;
+  // ── Performance toggle: attractor gravity scan ──────────────────
+  // PhysicsSystem.applyGravity walks the master entity list every
+  // frame to apply each POI / attractor's gravity to in-range
+  // entities.  On populated maps the outer loop iterates ~22k
+  // tiles + shards + particles even when there are no attractors
+  // active.  DBG panel's "Grav" button flips it off so the cost
+  // can be measured in isolation.
+  private attractorGravityEnabled: boolean = true;
+  // ── Performance toggle: SAT collision broadphase ────────────────
+  // PhysicsSystem.handleEntityCollisions is the dynamic-grid
+  // broadphase + SAT polygon resolver.  Off mode disables the
+  // entire pass — projectiles fly through everything, ships clip,
+  // tiles aren't destructible — purely for measuring the isolated
+  // cost in the perf overlay.  Defaults to ON.
+  private collisionsEnabled: boolean = true;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -269,19 +276,6 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the asteroid clustering force model:
-   *   pairwise → density-bias → none → pairwise.
-   * Read by updatePhysics and dispatched there.  No restart required;
-   * mode change takes effect on the next sim step.
-   */
-  public cycleClusterMode() {
-    this.clusterMode =
-        this.clusterMode === 'pairwise'     ? 'density-bias'
-      : this.clusterMode === 'density-bias' ? 'none'
-      : 'pairwise';
-  }
-
-  /**
    * Toggle the player↔asteroid local-gravity scan on/off.  When off,
    * `PhysicsSystem.applyLocalGravity` is skipped entirely and the
    * `lgrv` perf timer should drop to zero.
@@ -289,6 +283,27 @@ export class GameEngine {
   public toggleLocalGravity() {
     this.localGravityEnabled = !this.localGravityEnabled;
     this.physics.localGravityEnabled = this.localGravityEnabled;
+  }
+
+  /**
+   * Toggle the attractor gravity pass on/off.  When off,
+   * `PhysicsSystem.applyGravity` is skipped entirely and the
+   * `grav` perf timer should drop to zero.  Used to measure the
+   * cost of the full-master-list outer loop in isolation.
+   */
+  public toggleAttractorGravity() {
+    this.attractorGravityEnabled = !this.attractorGravityEnabled;
+    this.physics.attractorGravityEnabled = this.attractorGravityEnabled;
+  }
+
+  /**
+   * Toggle the SAT collision broadphase on/off.  Off mode is
+   * game-breaking (projectiles fly through, tiles are inert) —
+   * it's strictly a perf measurement aid for the `coll` timer.
+   */
+  public toggleCollisions() {
+    this.collisionsEnabled = !this.collisionsEnabled;
+    this.physics.collisionsEnabled = this.collisionsEnabled;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -435,8 +450,9 @@ export class GameEngine {
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
-      clusterMode: this.clusterMode,
       localGravityEnabled: this.localGravityEnabled,
+      attractorGravityEnabled: this.attractorGravityEnabled,
+      collisionsEnabled: this.collisionsEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -535,8 +551,9 @@ export class GameEngine {
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
-      clusterMode: this.clusterMode,
       localGravityEnabled: this.localGravityEnabled,
+      attractorGravityEnabled: this.attractorGravityEnabled,
+      collisionsEnabled: this.collisionsEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -720,16 +737,13 @@ export class GameEngine {
       //   forward at target.
       //
       //   perpDeficit: how much velocity the asteroid has *perpendicular* to
-      //   the flow — ramps up whenever something (collisions, mutual gravity,
-      //   bond cohesion with a neighbour in a different flow cell) has
-      //   dragged it off its streamline.  Without this term, an asteroid at
-      //   the target parallel speed dropped to urgency = 1 regardless of
-      //   how much sideways drift it had accumulated, so the perpendicular
-      //   component of mutual gravity went essentially uncontested and
-      //   asteroids slowly pulled each other into dense packs that still
-      //   drifted at target speed together.  Keeping the perp-deficit hot
-      //   makes the correction actively damp sideways motion, so packs
-      //   spread back out onto the flow lines.
+      //   the flow — ramps up whenever something (collisions, bond cohesion
+      //   with a neighbour in a different flow cell) has dragged it off its
+      //   streamline.  Without this term, an asteroid at the target parallel
+      //   speed dropped to urgency = 1 regardless of how much sideways drift
+      //   it had accumulated.  Keeping the perp-deficit hot makes the
+      //   correction actively damp sideways motion, so packs spread back
+      //   out onto the flow lines.
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
@@ -756,179 +770,6 @@ export class GameEngine {
           applyFlow(d);
       }
 
-      // ── Asteroid clustering force (debug-toggle dispatched) ──────
-      // Three modes (CLUSTER_CONSTANTS) drive the chaotic-debris feel
-      // while letting us A/B the cost vs. gameplay tradeoff:
-      //
-      //   'pairwise'     — original mutual gravity over a spatial hash
-      //   'density-bias' — O(n) per-cell density-centroid steering
-      //   'none'         — no pull at all (incidental contact only)
-      //
-      // Switch via the DBG panel's "Pull" button.  Per-frame
-      // candidate-list build is shared so the mode-switch only
-      // trades the inner force model.  Glass shards are purely
-      // debris and excluded.
-      const mode = this.clusterMode;
-      if (mode !== 'none') {
-          const gravCandidates: GameEntity[] = [this.player];
-          for (let i = 0; i < asteroids.length; i++) gravCandidates.push(asteroids[i]);
-          for (let i = 0; i < this.activeDrops.length; i++) {
-              const d = this.activeDrops[i];
-              if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
-          }
-
-          if (mode === 'pairwise') {
-              // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
-              // causing gradual clustering as they drift through the flow field.
-              // Spatial grid (cell = interaction radius) reduces O(n²) pairs to O(n·k)
-              // where k is the local candidate density — typically 1–5 vs. all candidates.
-              const GRAV_G        = 2.5;
-              const GRAV_RANGE    = 120;
-              const GRAV_RANGE_SQ = GRAV_RANGE * GRAV_RANGE;
-              const GRAV_MIN_SQ   = 12 * 12;
-
-              // Bucket candidate indices by grid cell — cell indices wrap modulo
-              // the grid count so entities near a seam end up in the same bucket
-              // as their counterparts on the far side (pair reasoning below uses
-              // toroidal delta to compute the actual interaction force).
-              const GRAV_GRID_COLS = Math.ceil(MAP_WIDTH  / GRAV_RANGE);
-              const GRAV_GRID_ROWS = Math.ceil(MAP_HEIGHT / GRAV_RANGE);
-              const gravCellKey = (cx: number, cy: number) => {
-                  const wx = ((cx % GRAV_GRID_COLS) + GRAV_GRID_COLS) % GRAV_GRID_COLS;
-                  const wy = ((cy % GRAV_GRID_ROWS) + GRAV_GRID_ROWS) % GRAV_GRID_ROWS;
-                  return (wx << 16) | (wy & 0xFFFF);
-              };
-              const gravGrid = new Map<number, number[]>();
-              for (let i = 0; i < gravCandidates.length; i++) {
-                  const e = gravCandidates[i];
-                  const cx = Math.floor(e.position.x / GRAV_RANGE);
-                  const cy = Math.floor(e.position.y / GRAV_RANGE);
-                  let cell = gravGrid.get(gravCellKey(cx, cy));
-                  if (!cell) { cell = []; gravGrid.set(gravCellKey(cx, cy), cell); }
-                  cell.push(i);
-              }
-
-              // Check only same + 8 neighbouring cells; j > i ensures each pair is processed once
-              for (let i = 0; i < gravCandidates.length; i++) {
-                  const a = gravCandidates[i];
-                  const acx = Math.floor(a.position.x / GRAV_RANGE);
-                  const acy = Math.floor(a.position.y / GRAV_RANGE);
-                  for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-                      for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                          const cell = gravGrid.get(gravCellKey(ncx, ncy));
-                          if (!cell) continue;
-                          for (let k = 0; k < cell.length; k++) {
-                              const j = cell[k];
-                              if (j <= i) continue;
-                              const b = gravCandidates[j];
-                              const dx = wrapDeltaX(a.position.x, b.position.x);
-                              const dy = wrapDeltaY(a.position.y, b.position.y);
-                              const distSq = dx * dx + dy * dy;
-                              if (distSq > GRAV_RANGE_SQ) continue;
-                              const effSq = Math.max(distSq, GRAV_MIN_SQ);
-                              const f    = GRAV_G / effSq;
-                              const fx   = dx * f;
-                              const fy   = dy * f;
-                              a.velocity.x += fx * dt;
-                              a.velocity.y += fy * dt;
-                              b.velocity.x -= fx * dt;
-                              b.velocity.y -= fy * dt;
-                          }
-                      }
-                  }
-              }
-          } else {
-              // ── Density-bias clustering ───────────────────────────
-              // Two-pass O(n): build a per-cell entity-count + position-
-              // sum grid, then for each entity sample its 3x3
-              // neighbourhood, compute the population-weighted centroid
-              // (using accumulated wrapped-relative offsets so the seam
-              // is handled correctly), and apply a small force toward
-              // it.  Costs ~9 grid lookups per entity instead of N pair
-              // tests — 5–10x cheaper than pairwise on populated maps.
-              const CELL = CLUSTER_CONSTANTS.DENSITY_CELL_SIZE;
-              const COLS = Math.ceil(MAP_WIDTH  / CELL);
-              const ROWS = Math.ceil(MAP_HEIGHT / CELL);
-              const cellKey = (cx: number, cy: number) => {
-                  const wx = ((cx % COLS) + COLS) % COLS;
-                  const wy = ((cy % ROWS) + ROWS) % ROWS;
-                  return (wx << 16) | (wy & 0xFFFF);
-              };
-              // Pass 1 — accumulate count + position-sum per cell.
-              // Position sum is the unwrapped world position; cells
-              // straddling the seam still aggregate cleanly because
-              // we resolve relative offsets at sample time below.
-              type CellAcc = { count: number; sumX: number; sumY: number };
-              const grid = new Map<number, CellAcc>();
-              for (let i = 0; i < gravCandidates.length; i++) {
-                  const e = gravCandidates[i];
-                  const cx = Math.floor(e.position.x / CELL);
-                  const cy = Math.floor(e.position.y / CELL);
-                  const key = cellKey(cx, cy);
-                  let acc = grid.get(key);
-                  if (!acc) { acc = { count: 0, sumX: 0, sumY: 0 }; grid.set(key, acc); }
-                  acc.count++;
-                  acc.sumX += e.position.x;
-                  acc.sumY += e.position.y;
-              }
-              // Pass 2 — apply a force toward the 3x3 neighbourhood
-              // density centroid.  Toroidal-aware: each neighbour's
-              // centroid is shifted into the entity's frame via
-              // wrapDeltaX/Y so cells across the seam attract correctly.
-              const FORCE = CLUSTER_CONSTANTS.DENSITY_FORCE;
-              const MIN_NEIGHBORS = CLUSTER_CONSTANTS.DENSITY_MIN_NEIGHBORS;
-              const MAX_DELTA = CLUSTER_CONSTANTS.DENSITY_MAX_DELTA;
-              for (let i = 0; i < gravCandidates.length; i++) {
-                  const e = gravCandidates[i];
-                  const acx = Math.floor(e.position.x / CELL);
-                  const acy = Math.floor(e.position.y / CELL);
-                  let totalCount = 0;
-                  let totalDx = 0;
-                  let totalDy = 0;
-                  for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-                      for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                          const acc = grid.get(cellKey(ncx, ncy));
-                          if (!acc) continue;
-                          // Mean position of the cell, then unwrap to
-                          // the entity's frame.  Subtract the entity's
-                          // own contribution from its home cell so we
-                          // pull toward neighbours, not self.
-                          const isHome = ncx === acx && ncy === acy;
-                          const cnt = isHome ? acc.count - 1 : acc.count;
-                          if (cnt <= 0) continue;
-                          const meanX = isHome
-                              ? (acc.sumX - e.position.x) / cnt
-                              : acc.sumX / acc.count;
-                          const meanY = isHome
-                              ? (acc.sumY - e.position.y) / cnt
-                              : acc.sumY / acc.count;
-                          const dx = wrapDeltaX(e.position.x, meanX);
-                          const dy = wrapDeltaY(e.position.y, meanY);
-                          totalCount += cnt;
-                          totalDx += dx * cnt;
-                          totalDy += dy * cnt;
-                      }
-                  }
-                  if (totalCount < MIN_NEIGHBORS) continue;
-                  const cdx = totalDx / totalCount;
-                  const cdy = totalDy / totalCount;
-                  const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
-                  if (cdist < 0.001) continue;
-                  // Force scales with dt (rate-independent) and is
-                  // capped per-frame so a dense cell doesn't catapult
-                  // its members.
-                  let dvx = (cdx / cdist) * FORCE * dt;
-                  let dvy = (cdy / cdist) * FORCE * dt;
-                  const dvMag = Math.sqrt(dvx * dvx + dvy * dvy);
-                  if (dvMag > MAX_DELTA) {
-                      const k = MAX_DELTA / dvMag;
-                      dvx *= k; dvy *= k;
-                  }
-                  e.velocity.x += dvx;
-                  e.velocity.y += dvy;
-              }
-          }
-      }
 
       // Stage 4: stick-bond + nebula gravity-merge are owned by
       // ShardSystem.update (called from updateGameLogic alongside

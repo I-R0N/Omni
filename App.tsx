@@ -121,12 +121,16 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleTrailEmitMode();
   };
 
-  const handleCycleClusterMode = () => {
-      if (engineRef.current) engineRef.current.cycleClusterMode();
-  };
-
   const handleToggleLocalGravity = () => {
       if (engineRef.current) engineRef.current.toggleLocalGravity();
+  };
+
+  const handleToggleAttractorGravity = () => {
+      if (engineRef.current) engineRef.current.toggleAttractorGravity();
+  };
+
+  const handleToggleCollisions = () => {
+      if (engineRef.current) engineRef.current.toggleCollisions();
   };
 
   const handleSkipWave = () => {
@@ -150,8 +154,9 @@ const App: React.FC = () => {
         onToggleNebulaSet={handleToggleNebulaSet}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}
-        onCycleClusterMode={handleCycleClusterMode}
         onToggleLocalGravity={handleToggleLocalGravity}
+        onToggleAttractorGravity={handleToggleAttractorGravity}
+        onToggleCollisions={handleToggleCollisions}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
