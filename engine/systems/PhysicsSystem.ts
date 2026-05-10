@@ -670,6 +670,38 @@ export class PhysicsSystem {
       }
   }
 
+  // Apply one dent step to a tile whose variant declares a `dent` policy.
+  // Called immediately after each damage event (projectile hit, player
+  // crash, asteroid crash) and short-circuits for variants without a
+  // dent policy.  Mutates entity.size, entity.dentScale, and the
+  // polygon vertex array in place; the next render pass picks up the
+  // new shape automatically (the material-tile branch reads
+  // polygonPoints directly).  No allocation in the hot path.
+  public static applyDentStep(tile: GameEntity) {
+      if (tile.shardVariant === undefined) return;
+      const dent = SHARD_VARIANTS[tile.shardVariant].dent;
+      if (dent === undefined) return;
+      if (tile.dentScale === undefined) tile.dentScale = 1.0;
+
+      tile.dentScale *= dent.scalePerHit;
+      tile.size.x *= dent.scalePerHit;
+      tile.size.y *= dent.scalePerHit;
+
+      const pts = tile.polygonPoints;
+      if (!pts || pts.length === 0) return;
+      // Each vertex shrinks toward the polygon centroid (origin in
+      // entity-local coords), then takes a random inward push of up
+      // to vertexJitter as a fraction of its post-shrink radius.  The
+      // multiplicative factor (scalePerHit × (1 - jitterFrac)) folds
+      // both ops into a single per-vertex multiply.
+      for (let i = 0; i < pts.length; i++) {
+          const jitterFrac = Math.random() * dent.vertexJitter;
+          const k = dent.scalePerHit * (1 - jitterFrac);
+          pts[i].x *= k;
+          pts[i].y *= k;
+      }
+  }
+
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
   public isPositionClear(x: number, y: number, r: number): boolean {
@@ -1290,6 +1322,10 @@ export class PhysicsSystem {
                   && target.shardVariant === 'indestructible-tile';
               if (!isIndestructibleTile) {
                   target.health -= projDmg;
+                  // Dent-policy tiles deform on every damage event, even
+                  // the killing blow — the spawned mobile shard inherits
+                  // the dented polygon at the post-deformation size.
+                  PhysicsSystem.applyDentStep(target);
               }
               target.hitFlash = 0.1;
           }
@@ -1467,6 +1503,7 @@ export class PhysicsSystem {
                   return;
               }
               structure.health -= 1;
+              PhysicsSystem.applyDentStep(structure);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               if (structure.health <= 0) {
                   structure.health = 0;
@@ -1530,6 +1567,7 @@ export class PhysicsSystem {
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
+                  PhysicsSystem.applyDentStep(structure);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
                   if (structure.health <= 0) {
                       structure.health = 0;

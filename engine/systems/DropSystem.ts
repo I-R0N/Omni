@@ -4,6 +4,7 @@ import {
   COLORS,
   AMMO_CONSTANTS,
   DROP_CONFIG,
+  SHARD_VARIANTS,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -77,22 +78,36 @@ export class DropSystem {
     const pos = entity.position;
     const pv = entity.velocity;
 
-    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish
-    // glass-family static tile (glass / plastic / metal — produce
-    // glass-shard debris on death) from rock-tile (own ShardSystem
-    // shatter path produces rock-shards) and mobile shards (asteroid-
-    // like drop logic).
+    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish:
+    //   - glass-tile death  → fan of glass-shard debris (legacy path)
+    //   - dent-policy tile  → single mobile material-shard at the
+    //                          tile's current dented size (plastic /
+    //                          metal — the tile deformed in place
+    //                          via PhysicsSystem.applyDentStep, and
+    //                          this is its detach moment)
+    //   - rock-tile         → own ShardSystem shatter path → rock-shards
+    //   - nebula-tile       → skips drops via spawnsDropsOnDeath = false
+    //   - mobile shards     → asteroid-like drop logic
     const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
+    const tileDent = entity.shardVariant !== undefined
+      ? SHARD_VARIANTS[entity.shardVariant].dent
+      : undefined;
+    const isDentTile   = isStaticTile && tileDent !== undefined;
     const isGlassFamilyTile = isStaticTile
-      && (entity.shardVariant === 'glass-tile'
-          || entity.shardVariant === 'plastic-tile'
-          || entity.shardVariant === 'metal-tile');
+      && entity.shardVariant === 'glass-tile';
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
-    if (isGlassFamilyTile) {
-      // Glass / plastic / metal tile death — visual debris.
-      // Indestructible tiles short-circuit upstream; rock-tile spawns
-      // its own rock-shards via ShardSystem.shatter; nebula-tile
-      // skips drops via variant.spawnsDropsOnDeath = false.
+    if (isDentTile) {
+      // Dented-out tile detaches as one mobile material-shard at the
+      // current dented polygon and size; the impactor's velocity (set
+      // on lastImpactVelocity by PhysicsSystem) is inherited so the
+      // shard scatters in the impact direction.  No fan, no scatter
+      // cone — single piece.
+      this.spawnDentShard(entities, entity, tileDent!.breakChildVariant);
+    } else if (isGlassFamilyTile) {
+      // Glass tile death — visual debris.  Indestructible tiles
+      // short-circuit upstream; rock-tile spawns its own rock-shards
+      // via ShardSystem.shatter; nebula-tile skips drops via
+      // variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
     } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
       // Drop was destroyed by a player projectile — apply its reward immediately.
@@ -300,6 +315,76 @@ export class DropSystem {
       speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
       lifetimeMin: 0.1, lifetimeMax: 0.25,
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
+    });
+  }
+
+  /**
+   * Spawn a single mobile shard at the position of a dented-out tile.
+   * Inherits the tile's current dented polygon and size — both already
+   * mutated in place by PhysicsSystem.applyDentStep on each damage
+   * event — so the shard reads as "the broken-loose piece of what
+   * was just there".  Velocity comes from the impactor's last hit;
+   * mass from the variant's spawn.sizeToMass; rotation is light
+   * (large mass means the freed shard barely spins on its own).
+   *
+   * No fan / no scatter cone / no splinter chips — that's the
+   * spawnGlassShards aesthetic.  Dent-break is a single coherent
+   * piece detaching cleanly.
+   */
+  public spawnDentShard(entities: GameEntity[], tile: GameEntity, childVariant: ShardVariantId) {
+    const variantDef = SHARD_VARIANTS[childVariant];
+    const size = Math.max(tile.size.x, tile.size.y);
+    const mass = variantDef.spawn.sizeToMass(size);
+
+    // Clone the dented polygon — the tile entity is going inactive
+    // but its polygonPoints array would otherwise be shared with the
+    // new shard.  Better to give the shard its own array so future
+    // shard-side ops (shatter / density compaction) don't reach back
+    // into the tile.
+    const dentedPts = tile.polygonPoints
+      ? tile.polygonPoints.map(p => ({ x: p.x, y: p.y }))
+      : undefined;
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    // Damp the inherited speed so the shard drifts rather than rockets
+    // away — projectile speeds are typically 30–100, and we want a
+    // gentle pop-off, not a launch.
+    const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+    const launchAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x) + (Math.random() - 0.5) * 0.4
+      : Math.random() * Math.PI * 2;
+
+    entities.push({
+      id:            nextId('dent_shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  childVariant,
+      position:      { x: tile.position.x, y: tile.position.y },
+      velocity:      {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:          { x: size, y: size },
+      rotation:      Math.random() * Math.PI * 2,
+      // Light angular momentum — heavier than typical free-spawn
+      // shards because the freed piece is a chunky tile remnant,
+      // not a small chip.  Halve the rate as size grows.
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, size / 30)),
+      color:         tile.color,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass,
+      polygonPoints: dentedPts,
+    });
+
+    // Subtle puff in the material's accent colour so the detach reads
+    // as a deliberate event rather than a tile silently vanishing.
+    const puffColor = childVariant === 'plastic-shard' ? '#fbbf24' : '#cbd5e1';
+    this.particles.spawn(entities, tile.position, 5, puffColor, {
+      speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
+      lifetimeMin: 0.15, lifetimeMax: 0.35,
+      spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
     });
   }
 
