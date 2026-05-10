@@ -290,28 +290,36 @@ export interface ShardVariantDef {
    *  [0, vertexJitter] of their current radius (toward the polygon
    *  centroid).  The tile's `entity.size` is deliberately NOT touched
    *  so collision footprint stays stable while the visible silhouette
-   *  crumples asymmetrically.  When health hits 0 the tile detaches,
-   *  becomes a single mobile shard of `breakChildVariant` sized to the
-   *  dented polygon's actual extent, and skips the variant's
-   *  `shatter` policy entirely.  Dent variants do NOT regen.  Today:
-   *  plastic-tile (deforms heavily, breaks quickly),
-   *  metal-tile (deforms subtly, breaks slowly).  Glass /
-   *  indestructible / rock / nebula tiles leave this unset and
-   *  continue to shatter or pass-through on death.
+   *  crumples asymmetrically.  When health hits 0 the tile detaches
+   *  and spawns the shards listed in `breakShards` (each at a fraction
+   *  of the tile's original size, all sharing the dented polygon
+   *  shape scaled to fit) and skips the variant's `shatter` policy
+   *  entirely.  Dent variants do NOT regen.  Today: plastic-tile and
+   *  metal-tile.
    *
    *  Hits-to-break is driven by the variant's STRUCTURE_VARIANTS
    *  health value (a plain HP integer), so adjusting hardness is one
-   *  edit there. */
+   *  edit there.  Per-hit deformation magnitude differentiates the
+   *  materials visually — plastic uses higher vertexJitter than
+   *  metal even when their HP matches. */
   dent?: {
     /** Per-vertex inward pull magnitude as a fraction of current
      *  radius.  Random magnitude in [0, vertexJitter] is drawn for
      *  each vertex each hit; cumulative.  Plastic ~0.25 (visibly
      *  warps each hit), metal ~0.13 (subtle per-hit change). */
     vertexJitter: number;
-    /** Variant id of the mobile shard spawned when the tile detaches.
-     *  Must be a member of ShardVariantId — typically the matching
-     *  '${material}-shard'. */
-    breakChildVariant: ShardVariantId;
+    /** Mobile shards spawned when the tile detaches.  `sizeFraction`
+     *  is a multiplier on the tile's original max axis (entity.size).
+     *  Each shard inherits the dented polygon scaled to its target
+     *  size so the dent character is preserved.  Spawned with a
+     *  small radial spread so multiple shards don't pile up at the
+     *  tile centre.  Plastic uses a single ~1/3-size shard; metal
+     *  uses a 1/3 + 1/6 pair so the heavier material reads as
+     *  "fragmented" on break. */
+    breakShards: Array<{
+      variant: ShardVariantId;
+      sizeFraction: number;
+    }>;
   };
 }
 

@@ -415,9 +415,11 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_BORDER,
   },
   plastic: {
-    // 4 HP → 3 dent steps while alive in the grid, then a 4th
-    // deforming hit detaches the tile as a plastic-shard.
-    health: 4,
+    // 8 HP — same hits-to-break as metal.  Differentiation is purely
+    // visual: plastic deforms more per hit (higher dent.vertexJitter)
+    // and detaches as a single ~1/3-size shard; metal warps subtly
+    // and breaks into a 1/3 + 1/6 pair.
+    health: 8,
     mass: Infinity,
     indestructible: false,
     // sprite left empty so RenderSystem's sprite branch falls through
@@ -429,9 +431,9 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
   metal: {
-    // 8 HP → 7 dent steps while alive, 8th detaches.  Reads as
-    // harder than plastic via both hit count and per-hit dent
-    // magnitude (vertexJitter is also lower).
+    // 8 HP → 7 dent steps while alive, 8th detaches.  Same hit count
+    // as plastic but reads as harder via the subtle per-hit dent and
+    // the post-break fragmentation (two shards instead of one).
     health: 8,
     mass: Infinity,
     indestructible: false,
@@ -1438,29 +1440,34 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
-    // Plastic deforms heavily per hit — each vertex pulled inward by
-    // up to 25 % of its current radius — but the overall silhouette
-    // does NOT uniformly scale.  Combined with 4 HP that's 3 visible
-    // deforms in the grid and a 4th deforming-then-detaching hit.
-    // Dent variants do not regen.
+    // Plastic deforms heavily per hit — each closest-to-impact vertex
+    // pulled inward by up to 25 % of its current radius.  Same hit
+    // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
+    // visibly more dramatic per-hit warp.  Detaches as a single
+    // plastic-shard sized to ~1/3 of the original tile.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.25,
-      breakChildVariant: 'plastic-shard',
+      breakShards: [
+        { variant: 'plastic-shard', sizeFraction: 0.33 },
+      ],
     },
   },
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
-    // Metal deforms subtly — each vertex pulled inward by up to 13 %
-    // per hit.  Cumulative over 8 HP the silhouette warps visibly,
-    // but per-hit change is small enough that the surface reads as
-    // hard.  Hits-to-break is roughly double plastic so metal feels
-    // harder by both metrics.
+    // Metal deforms subtly — each closest-to-impact vertex pulled
+    // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
+    // but the surface reads as harder via the smaller per-hit warp
+    // and the post-break fragmentation: two shards at 1/3 + 1/6 the
+    // original size instead of one larger chunk.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
-      breakChildVariant: 'metal-shard',
+      breakShards: [
+        { variant: 'metal-shard', sizeFraction: 0.33 },
+        { variant: 'metal-shard', sizeFraction: 0.167 },
+      ],
     },
   },
   'indestructible-tile': {
