@@ -268,12 +268,12 @@ export const SHARD_PAIR_CONSTANTS = {
     { maxDensity: 28,  interval: 3 },
     { maxDensity: 999, interval: 4 },
   ] as const,
-  // Manual slider range — 0 (AUTO) up through MAX_INTERVAL.  At
-  // 50, settled piles only resolve every ~830 ms (50 × 1/60), which
-  // is well past the visible-overlap threshold for static debris
-  // but still recovers separation eventually.  Slider in DBG panel
-  // steps in 1s.
-  MAX_INTERVAL: 50,
+  // Manual cycle order, including AUTO sentinel (0).  Spans 1..100
+  // so dense fields can pin a much higher interval for stress
+  // testing.  Powers-of-2 progression in the upper range keeps the
+  // cycle short while still giving 1-frame granularity at the low
+  // end where it matters most.
+  CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 100] as const,
 };
 
 export const TRAIL_CONSTANTS = {
