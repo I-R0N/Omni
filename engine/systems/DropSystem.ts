@@ -344,23 +344,40 @@ export class DropSystem {
 
     // Base tile size — entity.size is never updated by applyDentStep,
     // so this still equals the original tile footprint (the shrunken
-    // silhouette is in polygonPoints only).
+    // silhouette is in polygonPoints only).  Used as a fallback when
+    // the polygon is missing.
     const baseSize = Math.max(tile.size.x, tile.size.y);
 
-    // Current dented polygon max-radius — used as the reference when
-    // scaling the polygon down to each shard's target size.  If the
-    // polygon is missing (defensive), fall back to an undented hex
-    // approximation.
+    // Single pass over the dented polygon to compute two metrics:
+    //  - dentedMaxR: max vertex radius — used to scale the polygon so
+    //                it fits inside each shard's target AABB.
+    //  - avgR:       average vertex radius — proxy for the deformed
+    //                tile's effective area.  For a regular polygon
+    //                area ≈ k × r², so avgR scales linearly with
+    //                sqrt(area) and the constant k cancels in
+    //                relative comparisons.  Used to size shards: each
+    //                shard's diameter = 2 × avgR × sizeFraction, so a
+    //                tile that's been heavily dented produces
+    //                proportionally smaller shards while a barely-
+    //                dented tile produces shards close to the
+    //                nominal (sizeFraction × original_diameter)
+    //                sizing.  All math is cheap: one loop + two
+    //                sqrts, no per-frame work.
     let dentedMaxR = baseSize / 2;
+    let avgR = dentedMaxR;
     if (tile.polygonPoints && tile.polygonPoints.length > 0) {
       let maxR2 = 0;
+      let sumR2 = 0;
       for (let i = 0; i < tile.polygonPoints.length; i++) {
         const p = tile.polygonPoints[i];
         const r2 = p.x * p.x + p.y * p.y;
+        sumR2 += r2;
         if (r2 > maxR2) maxR2 = r2;
       }
       dentedMaxR = Math.max(0.001, Math.sqrt(maxR2));
+      avgR = Math.sqrt(sumR2 / tile.polygonPoints.length);
     }
+    const deformedDiameter = avgR * 2;
 
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -380,11 +397,14 @@ export class DropSystem {
       const spec = breakShards[i];
       const variantDef = SHARD_VARIANTS[spec.variant];
 
-      // Target shard size = fraction of the original tile size.
+      // Target shard size = fraction of the deformed tile's effective
+      // diameter (= 2 × avgR), so heavier deformation produces
+      // proportionally smaller shards while a barely-dented tile
+      // produces shards near the nominal sizeFraction × original size.
       // Polygon scale factor brings the dented polygon's max radius
-      // down to (or up to, if the dent ate more than the spec) the
-      // target half-size, preserving the dent shape character.
-      const targetSize = Math.max(2, baseSize * spec.sizeFraction);
+      // down to the target half-size, preserving the dent shape
+      // character at the smaller scale.
+      const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
       const targetHalf = targetSize / 2;
       const polyScale = targetHalf / dentedMaxR;
       const scaledPts: Vector2[] | undefined = tile.polygonPoints
