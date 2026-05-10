@@ -179,13 +179,14 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
-  // Charge-to-fire model (post-d2): tap (release before CHARGE_THRESHOLD) =
-  // normal shot via fireEvents; hold past CHARGE_THRESHOLD then release =
-  // charged shot via chargeReleaseEvents.  Same TAP_DISTANCE_LIMIT applies
-  // to both — dragging the cursor cancels the shot entirely.
-  CHARGE_THRESHOLD: 0.5,   // seconds: min hold to qualify as a charged shot
-  CHARGE_FULL: 1.0,        // seconds: hold time at which the charge ring is "full" (visual cap)
-  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for tap or charge-release to register
+  // Charge-to-fire model (post-d2): tap (release before CHARGE_FULL) =
+  // normal shot via fireEvents; hold for the full CHARGE_FULL duration
+  // and release = charged shot via chargeReleaseEvents.  The ring HUD
+  // fills 0 → 1 over the same window so the player only sees a charged
+  // shot land when the ring is visibly complete.  Same TAP_DISTANCE_LIMIT
+  // applies to the tap path — dragging the cursor cancels a tap.
+  CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
+  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 };
 
@@ -595,14 +596,15 @@ export const PARTICLE_CONSTANTS = {
 
 // ── Charge-shot HUD tuning ───────────────────────────────────────────────────
 // Visual feedback for the hold-to-charge model.  Ring is drawn around the
-// player ship while `player.chargeProgress` > 0; fills from 0 → 1 across
-// the [INPUT_CONSTANTS.CHARGE_THRESHOLD, INPUT_CONSTANTS.CHARGE_FULL] window.
+// player ship while `player.chargeProgress` > 0; fills from 0 → 1 over
+// INPUT_CONSTANTS.CHARGE_FULL seconds.  Two visual states only:
+// "priming" while filling, "full" at completion (matches the firing
+// gate — charged shot only fires when the ring is full).
 export const CHARGE_CONSTANTS = {
   RING_RADIUS_OFFSET: 14,    // px past player half-extent for the ring
   RING_WIDTH: 3,             // line width
-  RING_COLOR_PRIMING: '#94a3b8', // slate-400 — held but below threshold
-  RING_COLOR_READY:   '#fde047', // yellow-300 — held past threshold (shot is charged)
-  RING_COLOR_FULL:    '#ffffff', // white — held past CHARGE_FULL (capped)
+  RING_COLOR_PRIMING: '#94a3b8', // slate-400 — held but not yet full
+  RING_COLOR_FULL:    '#ffffff', // white — held to full (charged shot armed)
 };
 
 // ── Lightning chain tuning ───────────────────────────────────────────────────
@@ -706,9 +708,9 @@ export const DAMAGE_TEXT_CONSTANTS = {
 //   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
 //   composes existing primitives (homing / pierce / bounce / lightning /
 //   spread / burst) plus the new `explosionRadius` AoE primitive on the
-//   Cannon.  Charged-shot variants (held mouse ≥ INPUT_CONSTANTS
-//   .CHARGE_THRESHOLD then released) consume `chargedAmmoCost` instead and
-//   are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
+//   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
+//   .CHARGE_FULL window then released) consume `chargedAmmoCost` instead
+//   and are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,

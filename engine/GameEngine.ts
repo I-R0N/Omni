@@ -1185,8 +1185,8 @@ export class GameEngine {
         }
     });
 
-    // Charge-release events: held past INPUT_CONSTANTS.CHARGE_THRESHOLD then
-    // released without dragging.  Fire a charged shot.
+    // Charge-release events: held for the full CHARGE_FULL window then
+    // released.  Fire a charged shot.
     const chargeReleaseEvents = this.input.getChargeReleaseEvents();
     chargeReleaseEvents.forEach(evt => {
         if (!this.minimapExpanded) {
@@ -1195,8 +1195,7 @@ export class GameEngine {
     });
 
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
-    // fraction of CHARGE_FULL ([0, 1]).  RenderSystem decides ring colour
-    // by comparing against the CHARGE_THRESHOLD/CHARGE_FULL ratio.
+    // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
     this.player.chargeProgress = heldFor > 0
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)

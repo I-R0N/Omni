@@ -11,10 +11,12 @@ export class InputSystem {
   // Tap / charge detection
   private touchStartTime: number = 0;
   private touchStartPos: Vector2 = { x: 0, y: 0 };
-  // Tap (release before INPUT_CONSTANTS.CHARGE_THRESHOLD): normal shot.
+  // Tap (release before INPUT_CONSTANTS.CHARGE_FULL, no drag): normal shot.
   private fireEvents: Vector2[] = [];
-  // Charge release (held past INPUT_CONSTANTS.CHARGE_THRESHOLD then released
-  // without dragging out of TAP_DISTANCE_LIMIT): charged shot.
+  // Charge release (held for the full CHARGE_FULL duration then released):
+  // charged shot.  Drag-cancel does NOT apply — the same gesture doubles
+  // as the movement input, so a long held + dragged release should still
+  // fire the charged shot.
   private chargeReleaseEvents: Vector2[] = [];
   
   constructor() {
@@ -131,20 +133,18 @@ export class InputSystem {
   private checkTap(x: number, y: number) {
     const duration = (performance.now() - this.touchStartTime) / 1000; // seconds
 
-    // Charged shot path: any release after CHARGE_THRESHOLD fires a charged
-    // shot, regardless of drag distance.  Movement input (mouse hold +
-    // drag from screen centre) shares the same gesture as charging, so
-    // gating the charge on a small drag would break charging while
-    // moving.  The deliberate ≥0.5s hold is intent enough — accidental
-    // long swipes are unlikely.  When a separate controller shoot
-    // button lands, that input will replace this path entirely.
-    if (duration >= INPUT_CONSTANTS.CHARGE_THRESHOLD) {
+    // Charged shot path: only fires when the player has held for the full
+    // CHARGE_FULL window (the visible ring is also complete at this
+    // point, so what they see and what fires match exactly).  Drag is
+    // not a cancel signal — the mouse hold + drag gesture also drives
+    // movement, so gating on drag would break charging while moving.
+    if (duration >= INPUT_CONSTANTS.CHARGE_FULL) {
         this.chargeReleaseEvents.push({ x, y });
         return;
     }
 
-    // Tap-shot path: short release.  Keep the drag-cancel so a fast
-    // swipe doesn't accidentally tap-fire.
+    // Tap-shot path: any release before full charge.  Keep the drag-
+    // cancel so a fast swipe doesn't accidentally tap-fire.
     const dx = x - this.touchStartPos.x;
     const dy = y - this.touchStartPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -217,7 +217,7 @@ export class InputSystem {
     return events;
   }
 
-  /** Drain queued charge-release events (held past CHARGE_THRESHOLD). */
+  /** Drain queued charge-release events (held for the full CHARGE_FULL window). */
   public getChargeReleaseEvents(): Vector2[] {
     const events = [...this.chargeReleaseEvents];
     this.chargeReleaseEvents = [];
