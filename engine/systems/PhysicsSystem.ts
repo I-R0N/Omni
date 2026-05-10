@@ -564,17 +564,6 @@ export class PhysicsSystem {
                         // immediately (no proj-proj interaction).
                         if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
 
-                        // Shard ↔ projectile: ALL shards (rock / glass /
-                        // nebula) are visual debris from a projectile's
-                        // perspective.  Skip the SAT pass entirely so
-                        // projectiles fly cleanly through clouds of
-                        // debris instead of paying O(v²) per shard per
-                        // frame.  Tiles (mass=Infinity, in the static
-                        // grid) are NOT affected by this filter — they
-                        // still take projectile damage normally.
-                        if ((ta === EntityType.STRUCTURE && tb === EntityType.PROJECTILE)
-                         || (ta === EntityType.PROJECTILE && tb === EntityType.STRUCTURE)) continue;
-
                         // Asteroid-asteroid: route through a dedicated
                         // circle-only resolver instead of the full SAT +
                         // resolveCollision path.  Full SAT is too expensive
