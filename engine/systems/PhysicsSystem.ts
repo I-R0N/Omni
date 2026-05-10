@@ -564,6 +564,17 @@ export class PhysicsSystem {
                         // immediately (no proj-proj interaction).
                         if (ta === EntityType.PROJECTILE && tb === EntityType.PROJECTILE) continue;
 
+                        // Shard ↔ projectile: ALL shards (rock / glass /
+                        // nebula) are visual debris from a projectile's
+                        // perspective.  Skip the SAT pass entirely so
+                        // projectiles fly cleanly through clouds of
+                        // debris instead of paying O(v²) per shard per
+                        // frame.  Tiles (mass=Infinity, in the static
+                        // grid) are NOT affected by this filter — they
+                        // still take projectile damage normally.
+                        if ((ta === EntityType.STRUCTURE && tb === EntityType.PROJECTILE)
+                         || (ta === EntityType.PROJECTILE && tb === EntityType.STRUCTURE)) continue;
+
                         // Asteroid-asteroid: route through a dedicated
                         // circle-only resolver instead of the full SAT +
                         // resolveCollision path.  Full SAT is too expensive
@@ -595,6 +606,17 @@ export class PhysicsSystem {
                     for (let j = 0; j < staticCandidates.length; j++) {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
+
+                        // Mobile shard ↔ static tile: shards drift through
+                        // tile geometry as visual-only debris.  `a` is in
+                        // the dynamic grid so it's mobile (finite mass);
+                        // `b` is in the static grid so it's a tile
+                        // (mass=Infinity STRUCTURE).  Skip the SAT pass —
+                        // flow field handles the shard's motion through
+                        // tile clusters without per-frame per-tile
+                        // resolution cost.  Player / enemy / projectile
+                        // ↔ tile pairs still resolve normally.
+                        if (a.type === EntityType.STRUCTURE && b.type === EntityType.STRUCTURE) continue;
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
