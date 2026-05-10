@@ -1921,15 +1921,24 @@ export class RenderSystem {
                     // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
                     // Density tier darkens the base colour; merge-fade alpha
                     // multiplies every layer so the dissolve is uniform.
-                    // Metal stays on the gray palette even on hit flash
-                    // (no white) to match the metal-tile rule.
+                    // Per-variant tweaks so dent shards look identical
+                    // to their parent tile:
+                    //  - plastic-shard renders at the same 0.6 alpha
+                    //    as plastic-tile (translucent polymer).
+                    //  - metal-shard stays on the gray palette even on
+                    //    hit flash (no white) to match metal-tile.
+                    //  - Other rocky shards (rock-shard, rock-tile)
+                    //    keep their fully-opaque default.
                     const densityHex = densityTintForRender(entity, entity.color);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const flashColor = entity.shardVariant === 'metal-shard'
                         ? '#cbd5e1'
                         : '#ffffff';
+                    const baseAlpha = entity.shardVariant === 'plastic-shard'
+                        ? 0.6
+                        : 1.0;
                     buildPath();
-                    ctx.globalAlpha = 1.0 * fadeAlpha;
+                    ctx.globalAlpha = (isFlash ? 0.95 : baseAlpha) * fadeAlpha;
                     ctx.fillStyle   = isFlash ? flashColor : densityHex;
                     ctx.fill();
 
