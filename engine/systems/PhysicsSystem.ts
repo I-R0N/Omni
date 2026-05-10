@@ -673,29 +673,46 @@ export class PhysicsSystem {
   // Apply one dent step to a tile whose variant declares a `dent` policy.
   // Called immediately after each damage event (projectile hit, player
   // crash, asteroid crash) and short-circuits for variants without a
-  // dent policy.  Mutates the polygon vertex array in place — each
-  // vertex is pulled inward by a random fraction in [0, vertexJitter]
-  // of its current radius from the polygon centroid (entity-local
-  // origin).  No allocation in the hot path.
+  // dent policy.  Mutates only the single polygon vertex closest to
+  // the impactor's world position — pulled inward by a random fraction
+  // in [0, vertexJitter] of its current radius from the polygon
+  // centroid (entity-local origin).  Other vertices stay put so the
+  // edges shared with neighbouring tiles don't separate.  No
+  // allocation in the hot path.
   //
   // Deliberately does NOT touch entity.size: the collision footprint
   // stays stable so AABB broadphase keeps working unchanged.  The
-  // visible silhouette shrinks asymmetrically as vertices crumple,
-  // not uniformly.  The shard spawned at detach time reads its true
-  // size from the polygon's bounding extent (see
-  // DropSystem.spawnDentShard).
-  public static applyDentStep(tile: GameEntity) {
+  // visible silhouette crumples asymmetrically on the hit side as
+  // vertices accumulate inward pulls; the shard spawned at detach
+  // time reads its size from the dented polygon's bounding extent
+  // (see DropSystem.spawnDentShard).
+  public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
       if (dent === undefined) return;
 
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
+
+      // Impact in entity-local coords (centroid at origin), with
+      // toroidal wrap so impacts across the seam pick the right side.
+      const localX = wrapDeltaX(impactWorldPos.x, tile.position.x);
+      const localY = wrapDeltaY(impactWorldPos.y, tile.position.y);
+
+      let bestIdx = 0;
+      let bestD2 = Infinity;
       for (let i = 0; i < pts.length; i++) {
-          const k = 1 - Math.random() * dent.vertexJitter;
-          pts[i].x *= k;
-          pts[i].y *= k;
+          const dx = pts[i].x - localX;
+          const dy = pts[i].y - localY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+              bestD2 = d2;
+              bestIdx = i;
+          }
       }
+      const k = 1 - Math.random() * dent.vertexJitter;
+      pts[bestIdx].x *= k;
+      pts[bestIdx].y *= k;
   }
 
   // Returns true if world-space point (x, y) with radius r is clear of all
@@ -1321,7 +1338,9 @@ export class PhysicsSystem {
                   // Dent-policy tiles deform on every damage event, even
                   // the killing blow — the spawned mobile shard inherits
                   // the dented polygon at the post-deformation size.
-                  PhysicsSystem.applyDentStep(target);
+                  // Impact position is the projectile's current world
+                  // position; applyDentStep finds the closest vertex.
+                  PhysicsSystem.applyDentStep(target, proj.position);
               }
               target.hitFlash = 0.1;
           }
@@ -1499,7 +1518,7 @@ export class PhysicsSystem {
                   return;
               }
               structure.health -= 1;
-              PhysicsSystem.applyDentStep(structure);
+              PhysicsSystem.applyDentStep(structure, player.position);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
               if (structure.health <= 0) {
                   structure.health = 0;
@@ -1563,7 +1582,7 @@ export class PhysicsSystem {
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
-                  PhysicsSystem.applyDentStep(structure);
+                  PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
                   if (structure.health <= 0) {
                       structure.health = 0;
