@@ -1352,13 +1352,14 @@ const TILE_REGEN_POP_BURST = {
 // sizeMin = 20 matches the per-map rock-shard minSize universally
 // (see MAP_POPULATION) so the asteroid-style shatter's MIN_SIZE
 // gate is consistent with the spawn population.
-// Glass shards: always 3 vertices.  Sharp, narrow-angled triangles
-// — high angle jitter pushes vertices off-axis and high radius
-// variance makes some sides long and others short, producing
-// elongated splinter shapes typical of broken glass.
+// Glass shards: 3 or 4 vertices.  Sharp/narrow silhouettes from
+// high angle jitter and high radius variance — splinter-like.  When
+// 4 verts roll, the irregular jitter produces kite-like / asymmetric
+// quads that don't overlap with plastic-shard's near-square shape.
 const GLASS_SHARD_SPAWN_SHAPE = {
   sizeMin: 20, sizeMax: 200,
-  polyVerticesMin: 3, polyVerticesMax: 3,
+  polyVerticesMin: 3, polyVerticesMax: 4,
+  polyVerticesOptions: [3, 4],
   angleJitter: 0.5, radiusMin: 0.45, radiusRange: 0.75,
   sizeToMass: (d: number) => d,
 };
@@ -1401,13 +1402,15 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
   spawnsDropsOnDeath: true,
 };
 
-// Rock shards: always 5 vertices.  Moderate jitter + moderate
-// radius variance for an organic, irregular silhouette — reads as
-// stone without looking like cut glass (3 verts) or machined metal
-// (6 verts).
+// Rock shards: 5, 7, or 9 vertices (odd counts only).  Organic /
+// irregular silhouette with moderate jitter and moderate radius
+// variance.  Discrete odd counts keep the visual distinct from
+// metal's even counts (6/8/10) so a player can tell rock from metal
+// at a glance.
 const SHARD_SPAWN_SHAPE_ROCK = {
   sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
-  polyVerticesMin: 5, polyVerticesMax: 5,
+  polyVerticesMin: 5, polyVerticesMax: 9,
+  polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
   sizeToMass: (d: number) => d,
 };
@@ -1434,12 +1437,14 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeToMass: (d: number) => d * 0.7,
 };
 
-// Metal shards: always 6 vertices.  Low jitter + low radius
-// variance for a clean, hex-like silhouette — reads as machined
-// or stamped metal rather than fractured stone.
+// Metal shards: 6, 8, or 10 vertices (even counts only).  Low
+// jitter + low radius variance for a clean, hex-like or polygon-
+// machined silhouette.  Discrete even counts pair with rock's odd
+// counts so the two materials read as visually distinct families.
 const SHARD_SPAWN_SHAPE_METAL = {
   sizeMin: 20, sizeMax: 120,
-  polyVerticesMin: 6, polyVerticesMax: 6,
+  polyVerticesMin: 6, polyVerticesMax: 10,
+  polyVerticesOptions: [6, 8, 10],
   angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
   sizeToMass: (d: number) => d * 1.3,
 };
@@ -1455,18 +1460,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Plastic deforms heavily per hit — each closest-to-impact vertex
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
-    // visibly more dramatic per-hit warp.  Detaches as a single
-    // plastic-shard sized to match the deformed tile's area.
+    // visibly more dramatic per-hit warp.  Detaches into 3
+    // plastic-shards whose areas sum to the deformed tile's area.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.25,
       breakShards: [
-        // sizeFraction is a LINEAR fraction of the deformed tile's
-        // effective diameter (2 × avgVertexRadius).  1.0 → shard
-        // diameter ≈ deformed diameter, so the shard's area matches
-        // the deformed tile (≈ half the original area at max
-        // deformation per playtest).
-        { variant: 'plastic-shard', sizeFraction: 1.0 },
+        // 3 equal-area shards — each carries 1/3 of the deformed
+        // tile's area.  Linear sizeFraction = sqrt(1/3) ≈ 0.577
+        // (relative to the deformed tile's diameter), so the three
+        // shards sum to a full-area split.  More fragments than
+        // metal's 2-shard break to play up plastic's lower
+        // structural integrity on the killing hit.
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
       ],
     },
   },

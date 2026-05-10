@@ -679,8 +679,14 @@ export class DropSystem {
    */
   public generateMaterialShardPolygon(variant: ShardVariantId, targetDiameter: number): Vector2[] {
     const spawn = SHARD_VARIANTS[variant].spawn;
-    const numVerts = spawn.polyVerticesMin
-      + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    // Discrete vertex-count list (polyVerticesOptions) takes priority
+    // over the continuous Min/Max range — used by rock-shard
+    // ([5, 7, 9]) and metal-shard ([6, 8, 10]) to keep their
+    // silhouettes snapped to specific counts.
+    const numVerts = spawn.polyVerticesOptions
+      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      : spawn.polyVerticesMin
+        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
     const baseR = targetDiameter / 2;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numVerts; i++) {

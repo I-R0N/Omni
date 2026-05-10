@@ -374,9 +374,13 @@ export class ShardSystem {
     angleJitter: number,
     radiusMin: number,
     radiusRange: number,
+    polyVerticesOptions?: number[],
   ): Vector2[] {
-    const verticesRange = polyVerticesMax - polyVerticesMin + 1;
-    const numPoints = polyVerticesMin + Math.floor(Math.random() * verticesRange);
+    // Discrete options take priority over the continuous Min/Max range
+    // (used by rock-shard / metal-shard to snap to specific counts).
+    const numPoints = polyVerticesOptions !== undefined && polyVerticesOptions.length > 0
+      ? polyVerticesOptions[Math.floor(Math.random() * polyVerticesOptions.length)]
+      : polyVerticesMin + Math.floor(Math.random() * (polyVerticesMax - polyVerticesMin + 1));
     const rawPts: { angle: number; r: number }[] = [];
     for (let j = 0; j < numPoints; j++) {
       const baseAngle  = (j / numPoints) * Math.PI * 2;
@@ -459,6 +463,7 @@ export class ShardSystem {
         childSpawn.angleJitter,
         childSpawn.radiusMin,
         childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
       );
 
       const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
@@ -590,6 +595,7 @@ export class ShardSystem {
         childSpawn.angleJitter,
         childSpawn.radiusMin,
         childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
       );
       const size = radius * 4; // diameter with a bit of slack for physics feel
 
@@ -1185,6 +1191,7 @@ export class ShardSystem {
       variant.spawn.angleJitter,
       variant.spawn.radiusMin,
       variant.spawn.radiusRange,
+      variant.spawn.polyVerticesOptions,
     );
 
     entity.size.x = newDiam;

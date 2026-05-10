@@ -93,6 +93,13 @@ export interface ShardSpawnShape {
   sizeMax: number;
   polyVerticesMin: number;
   polyVerticesMax: number;
+  /** When set, overrides polyVerticesMin/Max with a discrete list of
+   *  allowed vertex counts (one is picked uniformly per spawn).  Used
+   *  for variants that should snap to specific counts rather than fill
+   *  a continuous range — today rock-shard uses [5, 7, 9] and
+   *  metal-shard uses [6, 8, 10] to keep the silhouettes distinct
+   *  from each other and from glass / plastic. */
+  polyVerticesOptions?: number[];
   /** Per-vertex angle jitter strength, fraction of (2π / verts). */
   angleJitter: number;
   /** Radial range for jitter, fraction of base radius. */

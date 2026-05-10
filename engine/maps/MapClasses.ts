@@ -127,12 +127,15 @@ export abstract class BaseMapLayer {
     ): GameEntity {
     // Free-spawned rock-shards use the variant's spawn config so the
     // free-floating rocks read the same as tile-detached rock-shards
-    // (always 5 verts, organic / irregular silhouette).  Vertex count,
+    // (5 / 7 / 9 verts, organic / irregular silhouette).  Vertex count,
     // angle jitter, and radius variance all come from
-    // SHARD_VARIANTS['rock-shard'].spawn — see constants.ts.
+    // SHARD_VARIANTS['rock-shard'].spawn — see constants.ts.  Discrete
+    // polyVerticesOptions (when set) takes priority over Min/Max.
     const spawn = SHARD_VARIANTS['rock-shard'].spawn;
-    const numPoints = spawn.polyVerticesMin
-      + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const numPoints = spawn.polyVerticesOptions
+      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      : spawn.polyVerticesMin
+        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
     const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
