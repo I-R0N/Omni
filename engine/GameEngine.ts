@@ -200,8 +200,22 @@ export class GameEngine {
   private perfShardSys       = new Float64Array(GameEngine.PERF_WINDOW);
   private perfUpdatePhysics  = new Float64Array(GameEngine.PERF_WINDOW);
   private perfUpdateLogic    = new Float64Array(GameEngine.PERF_WINDOW);
+  // Finer-grained sim sub-timers — added to pin down where the
+  // updPhys/updLogic gaps live.  Each tracks one of the bigger
+  // chunks NOT covered by the existing sub-timers (physics / coll /
+  // shards / ai / homing / etc.).
+  private perfPhysMisc       = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLogicMisc      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfDrops          = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfExplosionRings = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfWeapons        = new Float64Array(GameEngine.PERF_WINDOW);
   private lastUpdatePhysicsMs: number = 0;
   private lastUpdateGameLogicMs: number = 0;
+  private lastPhysMiscMs: number = 0;
+  private lastLogicMiscMs: number = 0;
+  private lastDropsMs: number = 0;
+  private lastExplosionRingsMs: number = 0;
+  private lastWeaponsMs: number = 0;
   private perfSimIdx: number = 0;   // shared write index for every sim-side buffer
   private perfSimFilled: number = 0;
   // Render timings (one sample per rendered frame — may be written in menu
@@ -1053,7 +1067,9 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
+    const tRings = performance.now();
     this.updateExplosionRings();
+    this.lastExplosionRingsMs = performance.now() - tRings;
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -1264,9 +1280,11 @@ export class GameEngine {
         : 0;
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    const tWeapons = performance.now();
     if (this.currentMap) {
         this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
+    this.lastWeaponsMs = performance.now() - tWeapons;
 
     // Refresh the candidate index before projectile post-processing: the
     // physics / AI / burst pass above may have spawned new projectiles or
@@ -1311,6 +1329,7 @@ export class GameEngine {
     // Proximity collection + magnetic pull — single pass over activeDrops.
     // Ammo shards get a magnet accelerator; health hearts collect on contact
     // only (static pickup).
+    const tDrops = performance.now();
     if (!this.player.isExploding) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const MAGNET_RANGE_SQ = 150 * 150;
@@ -1343,6 +1362,7 @@ export class GameEngine {
         if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
+    this.lastDropsMs = performance.now() - tDrops;
 
 
     this.camera.position.x = this.player.position.x;
@@ -2048,6 +2068,25 @@ export class GameEngine {
       this.perfShardSys[idx]      = this.shards.lastUpdateMs;
       this.perfUpdatePhysics[idx] = this.lastUpdatePhysicsMs;
       this.perfUpdateLogic[idx]   = this.lastUpdateGameLogicMs;
+      this.perfDrops[idx]         = this.lastDropsMs;
+      this.perfExplosionRings[idx] = this.lastExplosionRingsMs;
+      this.perfWeapons[idx]       = this.lastWeaponsMs;
+      // physMisc = updPhys − everything we already time inside it
+      // (physics, ai, gravity, lgrv, coll, flow).  Captures the
+      // surrounding GameEngine glue: entity compaction, asteroid
+      // census, flow nudge over asteroids + drops, etc.
+      const physMisc = Math.max(0, this.lastUpdatePhysicsMs
+          - this.physics.lastUpdateMs - this.ai.lastUpdateMs - this.flowField.lastFlushMs);
+      this.perfPhysMisc[idx] = physMisc;
+      // logicMisc = updLogic − the explicit sub-timers we now track.
+      const logicMisc = Math.max(0, this.lastUpdateGameLogicMs
+          - this.shards.lastUpdateMs
+          - this.lastExplosionRingsMs
+          - this.lastWeaponsMs
+          - this.lastDropsMs
+          - this.projectiles.lastHomingMs
+          - this.projectiles.lastLightningMs);
+      this.perfLogicMisc[idx] = logicMisc;
       const next = idx + 1;
       this.perfSimIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfSimFilled < GameEngine.PERF_WINDOW) this.perfSimFilled++;
@@ -2103,6 +2142,11 @@ export class GameEngine {
           shardSysMs:     GameEngine.ringAvg(this.perfShardSys,     simN),
           updatePhysicsMs: GameEngine.ringAvg(this.perfUpdatePhysics, simN),
           updateLogicMs:  GameEngine.ringAvg(this.perfUpdateLogic,  simN),
+          physMiscMs:     GameEngine.ringAvg(this.perfPhysMisc,     simN),
+          logicMiscMs:    GameEngine.ringAvg(this.perfLogicMisc,    simN),
+          dropsMs:        GameEngine.ringAvg(this.perfDrops,        simN),
+          explosionRingsMs: GameEngine.ringAvg(this.perfExplosionRings, simN),
+          weaponsMs:      GameEngine.ringAvg(this.perfWeapons,      simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),

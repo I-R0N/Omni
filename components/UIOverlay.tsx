@@ -218,12 +218,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.physMiscMs)}</span></div>
                   <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
-                  <div className="flex justify-between"><span>ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
-                  <div className="flex justify-between"><span>homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
-                  <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
-                  <div className="flex justify-between"><span>flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·rings</span><span className="text-white">{fmtMs(perf.explosionRingsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·weapons</span><span className="text-white">{fmtMs(perf.weaponsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·drops</span><span className="text-white">{fmtMs(perf.dropsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.logicMiscMs)}</span></div>
                   <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>

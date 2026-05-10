@@ -555,6 +555,17 @@ export interface PerfSnapshot {
   // Wall time of the whole updateGameLogic call (includes shardSysMs
   // + drops + weapons + projectile lifetime + wave check + ...).
   updateLogicMs: number;
+  // Residual: updPhys minus the explicit physics / ai / flow sub-
+  // timers.  Captures the GameEngine-level glue inside updatePhysics
+  // (entity compaction, asteroid census, flow-field nudge over
+  // asteroids+drops).
+  physMiscMs: number;
+  // Residual: updLogic minus the explicit logic sub-timers.  Captures
+  // the input/HUD/wave-check/projectile-trail/damage-text glue.
+  logicMiscMs: number;
+  dropsMs: number;
+  explosionRingsMs: number;
+  weaponsMs: number;
   renderMs: number;
   // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
   // debug overlay alongside renderMs so the contribution of the nebula
