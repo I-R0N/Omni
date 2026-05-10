@@ -306,6 +306,18 @@ export class GameEngine {
     this.physics.collisionsEnabled = this.collisionsEnabled;
   }
 
+  /**
+   * Cycle the shard ↔ shard pair-resolution interval through
+   * 1 → 2 → 3 → 4 → 1.  N=1 = every substep (original behaviour);
+   * N=4 = every 4th substep (cheapest, ~67 ms max overlap window).
+   * Surfaced in EngineStats so the DBG panel can render the live N.
+   */
+  public cycleShardPairInterval() {
+    const n = this.physics.shardPairFrameInterval;
+    const next = n >= 4 ? 1 : n + 1;
+    this.physics.shardPairFrameInterval = next;
+  }
+
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
@@ -453,6 +465,7 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardPairInterval: this.physics.shardPairFrameInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -554,6 +567,7 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardPairInterval: this.physics.shardPairFrameInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

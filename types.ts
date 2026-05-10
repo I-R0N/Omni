@@ -599,6 +599,9 @@ export interface EngineStats {
   localGravityEnabled?: boolean;
   attractorGravityEnabled?: boolean;
   collisionsEnabled?: boolean;
+  // Shard-shard pair resolution interval (1 = every substep, 4 = every
+  // 4th).  Cycled via the DBG panel's "ShPair" button.
+  shardPairInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

@@ -221,6 +221,37 @@ export const LOCAL_GRAVITY_CONSTANTS = {
 // pairwise + density-bias implementations.  Today the chaotic-debris
 // feel relies on the flow-field nudge and stick-bond cohesion alone.
 
+// ── Shard-pair collision pacing ─────────────────────────────────────
+// Shard ↔ shard pairs run through the cheap `resolveAsteroidPair`
+// (circle-only, no SAT) but still pay O(k²) per cell × hundreds of
+// shards in dense fields — the dominant cost of the collision pass
+// during cannon spam.  Two lightweight optimisations applied:
+//
+//   1. FRAME_INTERVAL — resolve shard-shard pairs only every Nth
+//      physics substep.  Other dynamic-vs-dynamic pairs (player,
+//      enemy, projectile) still resolve every frame.  N=1 matches
+//      pre-optimisation behaviour; N=3 default cuts work to ~1/3
+//      with at most ~50 ms of visible overlap (3 frames @ 60 Hz)
+//      before separation kicks in next interval frame.
+//   2. STABLE_REL_VEL_SQ + STABLE_OVERLAP_FRACTION — inside the
+//      resolver, skip the impulse + position correction when both
+//      relative velocity² is below threshold AND overlap is below
+//      a fraction of contact distance.  Settled piles become free
+//      to evaluate.
+export const SHARD_PAIR_CONSTANTS = {
+  // Physics substeps between shard-shard resolution passes.  Cycled
+  // via the DBG panel ShPair button (1→2→3→4).  Default 3 is the
+  // "good enough" tradeoff — observably smooth, ~3x cheaper.
+  FRAME_INTERVAL: 3,
+  // (rel-vel)² gate for stable-pair skip.  Combines with the overlap
+  // gate below — both must be true to bail early inside
+  // resolveAsteroidPair.  0.04 ≈ 0.2 px/frame relative drift.
+  STABLE_REL_VEL_SQ: 0.04,
+  // Overlap fraction of (rA + rB) below which a pair is considered
+  // settled.  0.04 = 4 % of contact distance — visually unnoticeable.
+  STABLE_OVERLAP_FRACTION: 0.04,
+};
+
 export const TRAIL_CONSTANTS = {
   LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point

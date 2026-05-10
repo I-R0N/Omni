@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS } from '../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -33,6 +33,12 @@ function cellKey(x: number, y: number): number {
 function cellKeyFromCell(cx: number, cy: number): number {
     return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
 }
+
+// Precompute the squared "still-settled" distance multiplier:
+// pair is considered stable when distSq > sumRSq × STABLE_DIST_FACTOR_SQ.
+// Derived from `dist > sumR × (1 − STABLE_OVERLAP_FRACTION)`, i.e. the
+// overlap is below the configured fraction of contact distance.
+const STABLE_DIST_FACTOR_SQ = (1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION) ** 2;
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -69,6 +75,12 @@ export class PhysicsSystem {
   // the entire broadphase + SAT pass is skipped (game-breaking;
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
+  // Shard ↔ shard pair resolution runs every Nth physics step.
+  // Cycled via DBG panel (1/2/3/4); default from constants.
+  public shardPairFrameInterval: number = SHARD_PAIR_CONSTANTS.FRAME_INTERVAL;
+  // Internal counter, ticked once per handleEntityCollisions call.
+  // Used as `counter % interval === 0` to gate shard-shard pairs.
+  private shardPairTick: number = 0;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -478,6 +490,14 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
+    // Shard-pair pacing: every Nth substep we run shard ↔ shard
+    // resolution; in between, those pairs are skipped entirely.  The
+    // counter ticks regardless of the gate value so toggling the
+    // interval mid-run doesn't drift the phase visibly.
+    const interval = Math.max(1, this.shardPairFrameInterval | 0);
+    const runShardPair = (this.shardPairTick % interval) === 0;
+    this.shardPairTick++;
+
     // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
     this.dynamicGrid.clear();
 
@@ -580,9 +600,14 @@ export class PhysicsSystem {
                         // Mobile-shard pair (post-Stage-5: ASTEROID
                         // The dynamic grid already excludes
                         // mass=Infinity tiles, so any STRUCTURE entry
-                        // here is a mobile shard.
+                        // here is a mobile shard.  Throttled by the
+                        // SHARD_PAIR_CONSTANTS.FRAME_INTERVAL pacing —
+                        // resolution runs every Nth substep, freeing
+                        // the in-between substeps from O(k²) shard
+                        // pile cost.  At 60 Hz with N=3 the longest
+                        // any pair waits for separation is ~50 ms.
                         if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) {
-                            this.resolveAsteroidPair(a, b);
+                            if (runShardPair) this.resolveAsteroidPair(a, b);
                             continue;
                         }
 
@@ -679,15 +704,8 @@ export class PhysicsSystem {
    * quickly.
    */
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
-      // Stage 5 fix: respect per-variant passThrough on the dynamic-
-      // grid fast-path.  Without this, nebula-shards (passThrough=
-      // true, mass=0.01) get an elastic bounce here that gives them a
-      // huge velocity kick (invMassA = 100), and the bond-cohesion
-      // pass smears that energy onto the glass partner.  The full
-      // resolveCollision path already honours passThrough; the fast-
-      // path needs the same gate.
-      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
-      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      // Cheapest possible early-outs first — most pair calls discard
+      // here before paying any further work.
 
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
       const rA = a.size.x * 0.42;
@@ -699,6 +717,37 @@ export class PhysicsSystem {
       const dy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = dx * dx + dy * dy;
       if (distSq > sumRSq) return;
+
+      // Settled-pair skip: when the pair is barely overlapping AND
+      // already drifting at almost the same velocity, separation /
+      // bounce produces an imperceptible nudge while costing the
+      // full impulse + mass-correction math.  Bail before any of
+      // it.  Overlap test stays squared by comparing distSq to
+      //   sumR² × (1 − STABLE_OVERLAP_FRACTION)²
+      // which is the largest distance² that still counts as
+      // "settled".  Active collisions (overlap > fraction × sumR or
+      // rel-vel above threshold) skip the early-out and resolve
+      // normally.
+      const rvx0 = b.velocity.x - a.velocity.x;
+      const rvy0 = b.velocity.y - a.velocity.y;
+      const relVelSq = rvx0 * rvx0 + rvy0 * rvy0;
+      const stableMinDistSq = sumRSq * STABLE_DIST_FACTOR_SQ;
+      if (relVelSq < SHARD_PAIR_CONSTANTS.STABLE_REL_VEL_SQ
+          && distSq > stableMinDistSq) {
+          return;
+      }
+
+      // Stage 5 fix: respect per-variant passThrough on the dynamic-
+      // grid fast-path.  Without this, nebula-shards (passThrough=
+      // true, mass=0.01) get an elastic bounce here that gives them a
+      // huge velocity kick (invMassA = 100), and the bond-cohesion
+      // pass smears that energy onto the glass partner.  The full
+      // resolveCollision path already honours passThrough; the fast-
+      // path needs the same gate.  Moved past the early-outs above
+      // so most pair calls (no overlap, or settled) skip the dict
+      // lookup entirely.
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
 
       let nx: number;
       let ny: number;

@@ -16,6 +16,7 @@ interface UIOverlayProps {
   onToggleLocalGravity?: () => void;
   onToggleAttractorGravity?: () => void;
   onToggleCollisions?: () => void;
+  onCycleShardPairInterval?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -37,6 +38,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleLocalGravity,
   onToggleAttractorGravity,
   onToggleCollisions,
+  onCycleShardPairInterval,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -174,6 +176,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
                 >
                   {stats.collisionsEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* Shard ↔ shard pair-resolution interval — cycle 1→2→3→4.
+                  Higher N = cheaper (resolution runs less often) but
+                  shards may overlap visibly for a few frames before
+                  separating. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
+                <button
+                  onClick={onCycleShardPairInterval}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle shard-pair resolution interval (1=every substep, 4=every 4th).  Higher = cheaper but laggier separation."
+                >
+                  every {stats.shardPairInterval ?? 1}
                 </button>
               </div>
 
