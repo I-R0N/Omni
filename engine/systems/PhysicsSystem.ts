@@ -596,17 +596,6 @@ export class PhysicsSystem {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
 
-                        // Mobile shard ↔ static tile: shards drift through
-                        // tile geometry as visual-only debris.  `a` is in
-                        // the dynamic grid so it's mobile (finite mass);
-                        // `b` is in the static grid so it's a tile
-                        // (mass=Infinity STRUCTURE).  Skip the SAT pass —
-                        // flow field handles the shard's motion through
-                        // tile clusters without per-frame per-tile
-                        // resolution cost.  Player / enemy / projectile
-                        // ↔ tile pairs still resolve normally.
-                        if (a.type === EntityType.STRUCTURE && b.type === EntityType.STRUCTURE) continue;
-
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
                 }
