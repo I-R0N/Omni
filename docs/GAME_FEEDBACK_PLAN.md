@@ -134,6 +134,28 @@ k. After N waves, spawn a portal to a new map.
      model, green-laser + purple-cannon proposals) — user approves
      before implementation. Own branch / PR. Must land before (h)
      since the boss roster references weapon types.
+9. **PR #45 partial cherry-pick into materials work** — PR #45
+   (branch `claude/test-nebulae-textures-Sdp4D`, currently open
+   against `main`) bundles four independent changes under a
+   misleading "nebula textures" title: nebula-texture test mode,
+   rock-shard textures, glass-tile **repel field**, and a
+   variant-driven **proximity-glow animation**. Pull only the latter
+   two; rock textures and the nebula test mode are explicitly
+   excluded. Per user direction:
+   - **(g1)** absorbs the **glow visual primitive** (canvas layer 2b
+     in `RenderSystem`, including the SHARD_VARIANTS schema field
+     for it). Decoupled from triggers; no glow fires yet. Behavior
+     and visuals on existing variants unchanged.
+   - **(g2)** absorbs the **repel field** (glass-tile only):
+     `SHARD_VARIANTS[v].repel: { range, strength }`, `repelImmune`
+     opt-out, `PhysicsSystem` 5×5 outer-ring repel-only scan,
+     per-entity `repelImpulse` accumulator, DBG strength slider.
+     Plus the **glow trigger wiring**: glass-tile → proximity-to-
+     repel intensity (PR #45 layer 2b mapping); metal-tile →
+     damage-pulse keyed to dent state from g2's main scope.
+   - PR #45 itself stays open or gets closed; its diff is reference
+     material, not a literal cherry-pick. The implementing sessions
+     write fresh code on top of the post-(j) plan-branch tip.
 
 ---
 
@@ -144,9 +166,9 @@ k. After N waves, spawn a portal to a new map.
 | e | Offscreen-only enemy wave spawns | shipped (PR #47, merged into plan branch) | `claude/offscreen-enemy-spawning-vYW3c` | First task. **Bundled with (d1)** in same session/branch/PR. |
 | d1 | Shared-ammo consolidation | shipped (PR #47, merged into plan branch) | (same as e) | Single shared ammo pool, per-shot costs tuned to preserve shots-per-pickup feel, dedicated HUD readout box, ammo-drop visual (black core / white rim / white glow). |
 | j | Graceful cleanup + density compaction | pending | `claude/density-cleanup-<suffix>` | Offscreen-priority removal, slow pacing, density-merge for rock/glass/nebula shards. Darker tint baseline. Touches ShardSystem, EntityIndex, render tinting. |
-| g1 | Plastic/metal rename + revisualize | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. Behavior unchanged. |
-| g2 | Dent/deform + break-loose physics | pending | `claude/material-tiles-physics-<suffix>` | Progressive dent on hit → break loose as one durable shard per tile. Plug into (j)'s density system. New variants: `plastic-shard`, `metal-shard`. |
-| d2 | Weapon system overhaul | pending | `claude/weapon-overhaul-<suffix>` | **Runs in parallel with the j/g1/g2 chain.** Independent code surface (weapons, projectiles). Session begins with up-front `AskUserQuestion` design phase covering function taxonomy, per-weapon stat budgets, charge-effect model, and green-laser + purple-cannon redesigns. User approves before implementation. **Must land before (h)** since the boss roster references weapon types. |
+| g1 | Plastic/metal rename + revisualize + glow primitive | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. **Plus** lift the canvas-layer-2b glow visual primitive from PR #45 (variant-driven, decoupled from any trigger; glow stays unwired so no variant glows yet). Behavior unchanged. |
+| g2 | Dent/deform + break-loose + repel field | pending | `claude/material-tiles-physics-<suffix>` | Progressive dent on hit → break loose as one durable shard per tile. Plug into (j)'s density system. New variants: `plastic-shard`, `metal-shard`. **Plus** the PR #45 glass-tile repel field (range / strength schema, broadphase 5×5 outer-ring scan, repelImmune opt-out, DBG strength slider) and the glow-trigger wiring: glass-tile glows on player proximity (mapped to repel intensity); metal-tile glows as a damage-pulse keyed to its dent state. |
+| d2 | Weapon system overhaul | shipped (PRs #48 + #49, merged into plan branch) | `claude/weapon-system-overhaul-LLSqp` (+ `claude/charge-full-gate-7Hk2x`) | Charge model, per-shot ammo cost scaling, cannon shockwave, bouncer fan/nova, green-laser & purple-cannon redesigns. |
 
 ### Dependency chain
 
