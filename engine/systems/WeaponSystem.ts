@@ -7,9 +7,71 @@ import {
   ENEMY_CONSTANTS,
   ENEMY_ROLE,
   COLLISION_CONFIG,
+  LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+
+/**
+ * Build the per-weapon config used for a charged-shot trigger.  The base
+ * config is shallow-copied and the relevant fields are overridden.  Each
+ * weapon owns its own thematic charge effect (see docs/GAME_FEEDBACK_PLAN.md
+ * d2 design notes):
+ *   - BLASTER: 5× damage slug, pierces 3, no recoil
+ *   - BURST:   5-shot piercing burst (vs 3) with pierce 3
+ *   - SHOTGUN: 12-pellet wide cone (50°), each pellet pierces 2
+ *   - BOUNCER: 3-beam fan (±15°) — beams keep their per-shot pierce/bounce
+ *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
+ *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
+ *              each missile pierces 1
+ *   - CANNON:  2× explosion radius, 1.5× explosion damage + knockback
+ */
+function chargedConfigOf(config: WeaponConfig): WeaponConfig {
+  switch (config.type) {
+    case WeaponType.BLASTER:
+      // Larger fireball-style projectile; RenderSystem picks the red+orange
+      // two-tone gradient when isCharged is set.
+      return {
+        ...config,
+        damage: config.damage * 5,
+        pierce: 3,
+        recoil: 0,
+        size: config.size * 2.6,  // 6 → ~16
+        isCharged: true,
+      };
+    case WeaponType.BURST:
+      return { ...config, pierce: 3, burstCount: 5 };
+    case WeaponType.SHOTGUN:
+      return { ...config, count: 12, spread: 25, pierce: 2 };
+    case WeaponType.BOUNCER:
+      // Omnidirectional nova — 8 beams equally spaced around 360°
+      // (every 45°).  ProjectileSystem.spawn handles the equal-angle
+      // ring layout when omniDirectional is set.  Recoil zeroed since
+      // forces cancel in all directions.
+      return { ...config, count: 8, spread: 360, omniDirectional: true, recoil: 0 };
+    case WeaponType.LIGHTNING:
+      // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
+      // ProjectileSystem.spawn copies these onto the projectile at spawn.
+      // Charged variant adds one extra simultaneous jump per node — saturated
+      // tree grows from 1+2+4+8=15 (base) to 1+3+9+27=40.  Depth and range
+      // are kept identical to base so the charge premium is purely "wider"
+      // rather than "further".
+      return {
+        ...config,
+        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
+      };
+    case WeaponType.HOMING:
+      return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };
+    case WeaponType.CANNON:
+      return {
+        ...config,
+        explosionRadius:    (config.explosionRadius    ?? 0) * 2,
+        explosionDamage:    (config.explosionDamage    ?? 0) * 1.5,
+        explosionKnockback: (config.explosionKnockback ?? 0) * 1.5,
+      };
+  }
+  return config;
+}
 
 /**
  * WeaponSystem — owns shooting behavior for both players and enemies.
@@ -26,8 +88,9 @@ export class WeaponSystem {
    * Fire the player's currently-selected weapon at a world-space target.
    * Handles:
    *   - cooldown gating
-   *   - ammo deduction (non-blaster weapons)
+   *   - ammo deduction (charged shots cost chargedAmmoCost, normal shots cost ammoCost)
    *   - auto-fallback to blaster when selected weapon is empty
+   *   - charged-shot fallback to a normal shot when the pool can't cover chargedAmmoCost
    *   - burst-fire state setup
    *   - screen shake
    *   - projectile spawning via ProjectileSystem
@@ -37,42 +100,56 @@ export class WeaponSystem {
     entities: GameEntity[],
     player: GameEntity,
     target: Vector2,
-    onShake?: (amount: number) => void
+    onShake?: (amount: number) => void,
+    charged: boolean = false,
   ): boolean {
     if (player.weaponCooldown && player.weaponCooldown > 0) return false;
 
     let weaponType = player.currentWeapon || WeaponType.BLASTER;
-    let config = WEAPONS[weaponType];
+    let baseConfig = WEAPONS[weaponType];
 
-    // If shared pool can't cover this weapon's ammoCost, fall back to blaster
-    // (which has ammoCost 0 and bypasses the pool entirely).
-    if (config.ammoCost > 0 && (player.ammo ?? 0) < config.ammoCost) {
+    // Charged-shot ammo gating: if the pool can't cover chargedAmmoCost,
+    // fall back to a normal shot at ammoCost.
+    let isCharged = charged;
+    if (isCharged && baseConfig.chargedAmmoCost > 0 && (player.ammo ?? 0) < baseConfig.chargedAmmoCost) {
+      isCharged = false;
+    }
+
+    // Normal-shot ammo gating: if the pool still can't cover the basic
+    // ammoCost, fall back to blaster (ammoCost 0).
+    if (!isCharged && baseConfig.ammoCost > 0 && (player.ammo ?? 0) < baseConfig.ammoCost) {
       weaponType = WeaponType.BLASTER;
       player.currentWeapon = WeaponType.BLASTER;
       player.burstQueue = 0;
-      config = WEAPONS[WeaponType.BLASTER];
+      baseConfig = WEAPONS[WeaponType.BLASTER];
     }
 
-    player.weaponCooldown = config.cooldown;
+    const config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    player.weaponCooldown = baseConfig.cooldown; // cooldown read from base — charge variant doesn't change cadence
 
-    // Deduct shared-pool ammo (no-op for blaster: ammoCost 0)
-    if (config.ammoCost > 0) {
-      player.ammo = Math.max(0, (player.ammo ?? 0) - config.ammoCost);
+    // Deduct shared-pool ammo (no-op for blaster: ammoCost 0).  Charged
+    // shots use chargedAmmoCost; normal shots use ammoCost.
+    const cost = isCharged ? baseConfig.chargedAmmoCost : baseConfig.ammoCost;
+    if (cost > 0) {
+      player.ammo = Math.max(0, (player.ammo ?? 0) - cost);
     }
 
     if (onShake) {
       if (config.type === WeaponType.SHOTGUN) {
-        onShake(5);
+        onShake(isCharged ? 8 : 5);
       } else if (config.type === WeaponType.CANNON) {
-        onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+        onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM);
       } else if (config.type === WeaponType.BURST) {
         onShake(3);
+      } else if (config.type === WeaponType.BLASTER && isCharged) {
+        onShake(COLLISION_CONFIG.SHAKE.MEDIUM);
       }
     }
 
     if (config.type === WeaponType.BURST && config.burstCount) {
       player.burstQueue = config.burstCount - 1;
       player.burstTimer = config.burstDelay;
+      player.burstCharged = isCharged || undefined;
     }
 
     this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
@@ -100,12 +177,17 @@ export class WeaponSystem {
     if (player.burstTimer > 0) return;
 
     player.burstQueue--;
-    const config = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+    const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
+    const config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
     this.projectiles.spawn(entities, player, { x: targetX, y: targetY }, config, EntityType.PLAYER);
     if (onShake && config.type === WeaponType.BURST) onShake(3);
+
+    // Clear the charged flag once the burst fully drains so the next
+    // trigger pull starts fresh.
+    if (player.burstQueue === 0) player.burstCharged = undefined;
   }
 
   /**

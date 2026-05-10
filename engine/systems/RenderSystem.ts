@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS } from '../../constants';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA } from '../maps/TileGenerator';
@@ -907,6 +907,39 @@ export class RenderSystem {
               continue;
           }
 
+          // Cannon explosion shock ring: radius scales from 0 → full over
+          // the particle's lifetime; alpha fades 1 → 0.  Drawn in `lighter`
+          // composite mode so the ring blooms over enemies/sparks.
+          if (p.isExplosionRing) {
+              const r = p.explosionRadius ?? 0;
+              if (r > 0) {
+                  const life = p.lifetime || 0;
+                  const maxLife = p.maxLifetime || 1;
+                  const lifeRatio = Math.max(0, Math.min(1, life / maxLife));
+                  const expand = 1 - lifeRatio; // 0 at spawn, 1 at end
+                  const radius = r * expand;
+                  const alpha = lifeRatio;     // fade out as it grows
+
+                  // Outer purple ring (the shock front).
+                  ctx.strokeStyle = p.color;
+                  ctx.globalAlpha = alpha;
+                  ctx.lineWidth = 3 + 4 * (1 - lifeRatio); // thickens slightly as it grows
+                  ctx.beginPath();
+                  ctx.arc(rx, ry, radius, 0, Math.PI * 2);
+                  ctx.stroke();
+
+                  // Inner white-hot rim — thinner, brighter, just inside
+                  // the shock front, enhances the "snap" of the impact.
+                  ctx.strokeStyle = '#ffffff';
+                  ctx.globalAlpha = alpha * 0.55;
+                  ctx.lineWidth = 1.5;
+                  ctx.beginPath();
+                  ctx.arc(rx, ry, Math.max(0, radius - 3), 0, Math.PI * 2);
+                  ctx.stroke();
+              }
+              continue;
+          }
+
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
           ctx.globalAlpha = lifeRatio;
           ctx.fillStyle = p.color;
@@ -1744,6 +1777,32 @@ export class RenderSystem {
                     ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
+                } else if (entity.isCharged) {
+                    // ── Charged Blaster: red+orange fireball ──
+                    // Larger glow with explicit two-tone red+orange ring
+                    // around a hot white core.  Only charged Blaster sets
+                    // isCharged today; other charged variants render with
+                    // the standard weapon-colour gradient below.
+                    const pulse = 0.88 + Math.sin(nowSec * 18 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * 3.2;
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, lifetimeFrac);
+
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    grad.addColorStop(0,    'rgba(255, 255, 235, 1)');    // hot white core
+                    grad.addColorStop(0.10, 'rgba(255, 220, 100, 1)');    // pale yellow inner
+                    grad.addColorStop(0.25, 'rgba(251, 146,  60, 1)');    // orange (orange-400)
+                    grad.addColorStop(0.45, 'rgba(239,  68,  68, 0.85)'); // red (red-500)
+                    grad.addColorStop(0.75, 'rgba(220,  38,  38, 0.25)'); // deep red glow
+                    grad.addColorStop(1,    'rgba(220,  38,  38, 0)');
+
+                    ctx.beginPath();
+                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+
+                    ctx.restore();
                 } else {
                     // ── Standard projectile: radial gradient glow ──
                     const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
@@ -1998,6 +2057,48 @@ export class RenderSystem {
           ctx.beginPath();
           ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.rotate(rot);
+      }
+
+      // Charge-shot ring — drawn while the player holds the fire button.
+      // Stored on player.chargeProgress as a fraction of CHARGE_FULL ([0,1]).
+      // Below the threshold ratio: priming colour, partial arc.
+      // Past threshold: ready colour (yellow → white at full).
+      if (entity.type === EntityType.PLAYER && entity.chargeProgress && entity.chargeProgress > 0) {
+          const cp = entity.chargeProgress; // [0..1] fraction of CHARGE_FULL
+          const thresholdRatio = INPUT_CONSTANTS.CHARGE_THRESHOLD / INPUT_CONSTANTS.CHARGE_FULL;
+          const isReady = cp >= thresholdRatio;
+          const isFull = cp >= 1;
+          const maxDim = Math.max(entity.size.x, entity.size.y);
+          const ringR = (maxDim / 2) + CHARGE_CONSTANTS.RING_RADIUS_OFFSET;
+
+          // Undo entity rotation so the ring is axis-aligned and the arc
+          // sweep starts at the top (12 o'clock) regardless of facing.
+          const rot = entity.rotation + SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET;
+          ctx.rotate(-rot);
+
+          ctx.strokeStyle = isFull
+              ? CHARGE_CONSTANTS.RING_COLOR_FULL
+              : (isReady ? CHARGE_CONSTANTS.RING_COLOR_READY : CHARGE_CONSTANTS.RING_COLOR_PRIMING);
+          ctx.lineWidth = CHARGE_CONSTANTS.RING_WIDTH;
+          ctx.globalAlpha = isReady ? 0.9 : 0.5;
+
+          // Background dim ring at full circumference for context.
+          if (!isFull) {
+              ctx.beginPath();
+              ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+              ctx.globalAlpha = 0.15;
+              ctx.stroke();
+              ctx.globalAlpha = isReady ? 0.9 : 0.5;
+          }
+
+          // Foreground arc — fills clockwise from top, ending at the current
+          // charge fraction.
+          ctx.beginPath();
+          ctx.arc(0, 0, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cp);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
           ctx.rotate(rot);
       }
 

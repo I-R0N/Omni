@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -988,6 +988,12 @@ export class GameEngine {
         this.nebulas.update(this.currentMap.entities, dt, this.physics);
     }
 
+    // Cannon shockwave — tick any active explosion rings, damaging any
+    // entity the wavefront has just reached.  Runs after physics so
+    // entity positions reflect this step's movement before being tested
+    // against the ring radius.
+    this.updateExplosionRings();
+
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
         this.handleEntityDeath(this.player);
@@ -1175,9 +1181,26 @@ export class GameEngine {
         }
 
         if (!this.minimapExpanded) {
-            this.handleShooting(evt);
+            this.handleShooting(evt, false);
         }
     });
+
+    // Charge-release events: held past INPUT_CONSTANTS.CHARGE_THRESHOLD then
+    // released without dragging.  Fire a charged shot.
+    const chargeReleaseEvents = this.input.getChargeReleaseEvents();
+    chargeReleaseEvents.forEach(evt => {
+        if (!this.minimapExpanded) {
+            this.handleShooting(evt, true);
+        }
+    });
+
+    // Update player.chargeProgress for the charge-ring HUD.  Stored as
+    // fraction of CHARGE_FULL ([0, 1]).  RenderSystem decides ring colour
+    // by comparing against the CHARGE_THRESHOLD/CHARGE_FULL ratio.
+    const heldFor = this.input.getMouseHoldDuration();
+    this.player.chargeProgress = heldFor > 0
+        ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
+        : 0;
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem.
     if (this.currentMap) {
@@ -1368,7 +1391,14 @@ export class GameEngine {
 
     // Lightning projectile: chain to nearby entities on impact
     if (proj.isLightningProjectile) {
-        this.fireLightningChainFromImpact(impactPos, target);
+        this.fireLightningChainFromImpact(impactPos, target, proj);
+    }
+
+    // Cannon AoE: every entity within proj.explosionRadius takes
+    // proj.explosionDamage and a knockback impulse.  Direct-hit target
+    // is excluded (it already took config.damage in PhysicsSystem).
+    if (proj.explosionRadius && proj.explosionRadius > 0) {
+        this.applyExplosionAoE(impactPos, proj, target);
     }
   };
 
@@ -1436,7 +1466,7 @@ export class GameEngine {
       this.camera.position = { ...this.player.position };
   }
 
-  private handleShooting(target: Vector2) {
+  private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
 
       // Convert screen-space target to world coords once; the rest of the
@@ -1451,6 +1481,7 @@ export class GameEngine {
           this.player,
           { x: worldX, y: worldY },
           this.handleScreenShake,
+          charged,
       );
 
       // Keep the HUD weapon index aligned with the player's current weapon in
@@ -1489,95 +1520,305 @@ export class GameEngine {
 
   // ─── Lightning chain (triggered on projectile impact) ───────────────────
 
-  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity) {
+  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity) {
       if (!this.currentMap) return;
 
-      // Build chain: hop from the initial target to nearby enemies/asteroids.
+      // Per-projectile chain overrides (set by ProjectileSystem.spawn from
+      // WeaponConfig.chainCount/chainRange/chainBranches — populated by
+      // the charged Lightning variant).  Fall back to the global
+      // LIGHTNING_CHAIN_* constants for normal shots.
+      const hopBudget = proj?.chainCount    ?? LIGHTNING_CHAIN_COUNT;
+      const hopRange  = proj?.chainRange    ?? LIGHTNING_CHAIN_RANGE;
+      const branches  = proj?.chainBranches ?? LIGHTNING_CHAIN_BRANCHES;
+      const hopRangeSq = hopRange * hopRange;
+
+      // Build a branching chain (tree, not list).  Each frontier node forks
+      // to up to `branches` nearest unhit targets within `hopRange`.  Damage
+      // falls off by depth (preserving the existing 1-d/maxDepth feel from
+      // the old linear chain).  hitSet is shared globally so two parents at
+      // the same depth never compete for the same child.
       // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
       // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may mid-animation.
+      // index holds `active` entities that may be mid-animation.
       const enemies = this.entityIndex.enemies;
       const asteroids = this.entityIndex.asteroids;
-      const chain: GameEntity[] = [firstTarget];
+      const nodesByDepth: GameEntity[][] = [[firstTarget]];
+      const edges: { from: GameEntity; to: GameEntity }[] = [];
       const hitSet = new Set<string>([firstTarget.id]);
 
-      const pickNearest = (prev: GameEntity): GameEntity | null => {
-          let nextTarget: GameEntity | null = null;
-          let nextDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
+      // Reused candidate buffer.  Cleared at the top of each pickNearestK
+      // call so repeated picks within a single chain don't pile allocations.
+      const candidates: { e: GameEntity; d2: number }[] = [];
+
+      const pickNearestK = (parent: GameEntity, k: number): GameEntity[] => {
+          candidates.length = 0;
           for (let i = 0; i < enemies.length; i++) {
               const e = enemies[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(prev.position.x, e.position.x);
-              const dy = wrapDeltaY(prev.position.y, e.position.y);
+              const dx = wrapDeltaX(parent.position.x, e.position.x);
+              const dy = wrapDeltaY(parent.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
-              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+              if (d2 < hopRangeSq) candidates.push({ e, d2 });
           }
           for (let i = 0; i < asteroids.length; i++) {
               const e = asteroids[i];
               if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(prev.position.x, e.position.x);
-              const dy = wrapDeltaY(prev.position.y, e.position.y);
+              // Filter inert / dielectric shard variants out of the chain.
+              // See LIGHTNING_CHAIN_EXCLUDED_VARIANTS for the table and
+              // for the plastic-/metal-shard note (Phase 1 g2).
+              if (e.shardVariant && LIGHTNING_CHAIN_EXCLUDED_VARIANTS.has(e.shardVariant)) continue;
+              const dx = wrapDeltaX(parent.position.x, e.position.x);
+              const dy = wrapDeltaY(parent.position.y, e.position.y);
               const d2 = dx * dx + dy * dy;
-              if (d2 < nextDistSq) { nextDistSq = d2; nextTarget = e; }
+              if (d2 < hopRangeSq) candidates.push({ e, d2 });
           }
-          return nextTarget;
+          candidates.sort((a, b) => a.d2 - b.d2);
+          const picked: GameEntity[] = [];
+          for (let i = 0; i < candidates.length && picked.length < k; i++) {
+              const c = candidates[i];
+              if (hitSet.has(c.e.id)) continue; // race-resilient (shouldn't happen — defensive)
+              picked.push(c.e);
+              hitSet.add(c.e.id);
+          }
+          return picked;
       };
 
-      for (let hop = 0; hop < LIGHTNING_CHAIN_COUNT; hop++) {
-          const next = pickNearest(chain[chain.length - 1]);
-          if (!next) break;
-          chain.push(next);
-          hitSet.add(next.id);
+      for (let depth = 1; depth <= hopBudget; depth++) {
+          const prev = nodesByDepth[depth - 1];
+          const next: GameEntity[] = [];
+          for (let p = 0; p < prev.length; p++) {
+              const parent = prev[p];
+              const picked = pickNearestK(parent, branches);
+              for (let c = 0; c < picked.length; c++) {
+                  edges.push({ from: parent, to: picked[c] });
+                  next.push(picked[c]);
+              }
+          }
+          if (next.length === 0) break;
+          nodesByDepth.push(next);
       }
 
-      // Apply chain damage (skip index 0 — the first target already took projectile damage).
-      // Damage reduces by 1/(totalHops-1) per hop: e.g. 3 total → 0.5× on hop 1, 0× on hop 2.
+      // Apply chain damage by depth.  Depth 0 is the direct-hit target
+      // (already damaged upstream by the projectile collision).  Damage at
+      // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
+      // pre-branching linear chain so balance per-target stays consistent.
       const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage;
-      const totalHops = chain.length; // includes direct hit at index 0
-      const reductionPerHop = totalHops > 1 ? 1 / (totalHops - 1) : 1;
+      const maxDepth = nodesByDepth.length - 1;
+      for (let d = 1; d <= maxDepth; d++) {
+          const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
+          const dmg = baseDmg * factor;
+          const tier = nodesByDepth[d];
+          for (let i = 0; i < tier.length; i++) {
+              const target = tier[i];
+              if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
 
-      for (let i = 1; i < chain.length; i++) {
-          const target = chain[i];
-          const dmg = Math.max(0, baseDmg * (1 - i * reductionPerHop));
-          if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
+              target.health -= dmg;
+              target.hitFlash = 0.15;
+              this.spawnDamageText(target.position, dmg, target);
 
-          target.health -= dmg;
-          target.hitFlash = 0.15;
-          this.spawnDamageText(target.position, dmg, target);
-
-          if (target.health <= 0 && !target.isExploding) {
-              target.lastImpactDamage = dmg;
-              this.handleEntityDeath(target);
+              if (target.health <= 0 && !target.isExploding) {
+                  target.lastImpactDamage = dmg;
+                  this.handleEntityDeath(target);
+              }
           }
       }
 
-      // Only spawn arc visual if there's at least one chain hop
-      if (chain.length < 2) return;
+      // Only spawn arc visuals if at least one hop landed.
+      if (edges.length === 0) return;
 
-      // Build arc points: impact → target1 → target2 (target 0 is the direct hit)
-      const arcPoints: Vector2[] = [];
-      for (const t of chain) {
-          arcPoints.push({ x: t.position.x, y: t.position.y });
+      // Spawn one PARTICLE arc entity per edge in the tree.  Each arc is a
+      // 2-point polyline (parent.position → child.position).  RenderSystem's
+      // existing isLightningArc branch handles the rest.  Cap loosely at
+      // MAX_PARTICLES via ParticleSystem's own bookkeeping; a fully-saturated
+      // default tree (branches=2, depth=2) produces 6 arcs per impact.
+      const arcColor = WEAPONS[WeaponType.LIGHTNING].color;
+      for (let i = 0; i < edges.length; i++) {
+          const { from, to } = edges[i];
+          this.currentMap.entities.push({
+              id: nextId('lightning'),
+              type: EntityType.PARTICLE,
+              position: { x: from.position.x, y: from.position.y },
+              velocity: { x: 0, y: 0 },
+              size: { x: 1, y: 1 },
+              rotation: 0,
+              color: arcColor,
+              active: true,
+              health: 1,
+              maxHealth: 1,
+              lifetime: LIGHTNING_ARC_LIFETIME,
+              maxLifetime: LIGHTNING_ARC_LIFETIME,
+              mass: 0,
+              isLightningArc: true,
+              arcPoints: [
+                  { x: from.position.x, y: from.position.y },
+                  { x: to.position.x,   y: to.position.y   },
+              ],
+          });
+      }
+  }
+
+  // ─── Cannon AoE — radial damage on projectile impact ───────────────────
+  //
+  // Reused for both normal and charged cannon shots.  The shockwave is now
+  // **deferred** — instead of damaging every entity in the radius on the
+  // impact frame, this spawns a ring particle whose currentRadius grows
+  // from 0 → maxRadius across its lifetime.  updateExplosionRings (called
+  // each fixed step from updateGameLogic) ticks the ring and damages
+  // entities as the wavefront reaches them.  Direct-hit target is
+  // pre-populated into hitEntityIds so it isn't double-damaged (it
+  // already took config.damage from the projectile collision upstream).
+  // Player is also pre-populated to prevent self-damage.
+  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
+      if (!this.currentMap) return;
+      const radius = proj.explosionRadius!;
+
+      // Impact-frame visuals (instant): bright spark burst + screen shake.
+      // These don't wait for the wavefront — the player should feel the
+      // hit immediately while the ring continues outward.
+      this.spawnParticles(impactPos, 14, '#fb923c', {
+          speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3,
+      });
+      this.spawnParticles(impactPos, 6, '#ffffff', {
+          speedMin: 6, speedMax: 14, sizeMin: 0.5, sizeMax: 1.5,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+
+      // Spawn the damaging ring particle.  RenderSystem reads
+      // explosionRadius + lifetime to draw the expanding shock front;
+      // updateExplosionRings reads explosionDamage / explosionKnockback /
+      // hitEntityIds to apply the damage in lock-step with the visual.
+      const ringLifetime = 0.35;
+
+      // Snapshot ids of eligible in-range entities at spawn time.  The
+      // wave only damages entities in this set, so freshly-spawned
+      // shards / drops that come from the wave's own kills (their ids
+      // didn't exist when the ring spawned) are naturally excluded.
+      // This is the fix for the "every cannon shot dumps a pile of
+      // ammo drops" bug — wave was killing newborn glass-/rock-shards,
+      // each of which rolled the 45 % asteroid ammo drop.
+      const radiusSq = radius * radius;
+      const validHitIds = new Set<string>();
+      const entitiesAtSpawn = this.currentMap.entities;
+      for (let i = 0; i < entitiesAtSpawn.length; i++) {
+          const e = entitiesAtSpawn[i];
+          if (!e.active || e.isExploding) continue;
+          if (e.type === EntityType.PROJECTILE) continue;
+          if (e.type === EntityType.PARTICLE) continue;
+          if (e.type === EntityType.INTERACTABLE) continue;
+          const dx = wrapDeltaX(impactPos.x, e.position.x);
+          const dy = wrapDeltaY(impactPos.y, e.position.y);
+          if (dx * dx + dy * dy <= radiusSq) {
+              validHitIds.add(e.id);
+          }
       }
 
-      // Spawn a single PARTICLE entity carrying the arc data for rendering
       this.currentMap.entities.push({
-          id: nextId('lightning'),
+          id: nextId('explosion-ring'),
           type: EntityType.PARTICLE,
           position: { x: impactPos.x, y: impactPos.y },
           velocity: { x: 0, y: 0 },
           size: { x: 1, y: 1 },
           rotation: 0,
-          color: WEAPONS[WeaponType.LIGHTNING].color,
+          color: WEAPONS[WeaponType.CANNON].color, // purple — matches the weapon
           active: true,
           health: 1,
           maxHealth: 1,
-          lifetime: LIGHTNING_ARC_LIFETIME,
-          maxLifetime: LIGHTNING_ARC_LIFETIME,
+          lifetime: ringLifetime,
+          maxLifetime: ringLifetime,
           mass: 0,
-          isLightningArc: true,
-          arcPoints,
+          isExplosionRing: true,
+          explosionRadius: radius,
+          explosionDamage: proj.explosionDamage,
+          explosionKnockback: proj.explosionKnockback,
+          ownerType: proj.ownerType,
+          // Pre-populate with entities the ring should never damage:
+          // the projectile's direct-hit target (already took config.damage)
+          // and the player (cannon is player-owned today; ring shouldn't
+          // self-damage).  Future enemy cannons would still skip the
+          // shooter's own kind via ownerType in the per-frame tick.
+          hitEntityIds: [directTarget.id, 'player'],
+          validHitIds,
       });
+  }
+
+  // ─── Cannon AoE — per-frame shockwave tick ─────────────────────────────
+  //
+  // Walks isExplosionRing particles each fixed step.  For each, computes
+  // currentRadius via the same `1 − lifetime/maxLifetime` formula the
+  // renderer uses (so the damage front is always pixel-aligned with the
+  // visible ring).  Then walks the master entity list once, damaging /
+  // knocking back any entity whose current toroidal distance falls
+  // within currentRadius and that hasn't been hit yet.  hitEntityIds
+  // grows monotonically to prevent double-hits as the wave widens.
+  private updateExplosionRings() {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+
+      for (let r = 0; r < entities.length; r++) {
+          const ring = entities[r];
+          if (!ring.active || !ring.isExplosionRing) continue;
+
+          const maxRadius = ring.explosionRadius;
+          if (!maxRadius || maxRadius <= 0) continue;
+
+          const life = ring.lifetime ?? 0;
+          const maxLife = ring.maxLifetime ?? 1;
+          const expand = Math.max(0, Math.min(1, 1 - life / maxLife));
+          const currentRadius = maxRadius * expand;
+          if (currentRadius <= 0) continue;
+
+          const currentR2 = currentRadius * currentRadius;
+          const dmg   = ring.explosionDamage ?? 0;
+          const knock = ring.explosionKnockback ?? 0;
+          const hits  = ring.hitEntityIds ?? (ring.hitEntityIds = []);
+
+          // Only candidates that were in range AT SPAWN are eligible —
+          // entities born during the sweep (e.g. glass-shards from tiles
+          // the wave just shattered) are excluded.
+          const valid = ring.validHitIds;
+          if (!valid || valid.size === 0) continue;
+
+          for (let i = 0; i < entities.length; i++) {
+              const e = entities[i];
+              if (!e.active || e.isExploding) continue;
+              if (!valid.has(e.id)) continue;
+              if (hits.includes(e.id)) continue;
+
+              const dx = wrapDeltaX(ring.position.x, e.position.x);
+              const dy = wrapDeltaY(ring.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 > currentR2) continue;
+
+              hits.push(e.id);
+              const dist = Math.sqrt(d2);
+              const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
+
+              if (dmg > 0) {
+                  const applied = dmg * falloff;
+                  const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
+                  if (!isIndestructible) e.health -= applied;
+                  e.hitFlash = 0.12;
+                  this.spawnDamageText(e.position, applied, e);
+                  if (e.health <= 0 && !e.isExploding) {
+                      e.lastImpactDamage = applied;
+                      if (e.type === EntityType.STRUCTURE && dist > 0) {
+                          e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
+                      }
+                      if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
+                          this.physics.removeStaticEntity(e);
+                      }
+                      this.handleEntityDeath(e);
+                      e.active = false;
+                  }
+              }
+
+              if (knock > 0 && e.mass !== Infinity && dist > 0) {
+                  const k = knock * falloff;
+                  e.velocity.x += (dx / dist) * k;
+                  e.velocity.y += (dy / dist) * k;
+              }
+          }
+      }
   }
 
   // createAsteroidShards moved to ShardSystem.shatter in Stage 3 of

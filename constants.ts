@@ -179,9 +179,13 @@ export const MINIMAP_CONSTANTS = {
 };
 
 export const INPUT_CONSTANTS = {
-  TAP_THRESHOLD: 200,      // ms: max hold duration for a tap-to-fire
-  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap-to-fire
-  ZERO_DELAY_SHOOTING: false, // if true, checkTap ignores hold duration
+  // Charge-to-fire model (post-d2): tap (release before CHARGE_THRESHOLD) =
+  // normal shot via fireEvents; hold past CHARGE_THRESHOLD then release =
+  // charged shot via chargeReleaseEvents.  Same TAP_DISTANCE_LIMIT applies
+  // to both — dragging the cursor cancels the shot entirely.
+  CHARGE_THRESHOLD: 0.5,   // seconds: min hold to qualify as a charged shot
+  CHARGE_FULL: 1.0,        // seconds: hold time at which the charge ring is "full" (visual cap)
+  TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for tap or charge-release to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 };
 
@@ -589,9 +593,34 @@ export const PARTICLE_CONSTANTS = {
 };
 
 
+// ── Charge-shot HUD tuning ───────────────────────────────────────────────────
+// Visual feedback for the hold-to-charge model.  Ring is drawn around the
+// player ship while `player.chargeProgress` > 0; fills from 0 → 1 across
+// the [INPUT_CONSTANTS.CHARGE_THRESHOLD, INPUT_CONSTANTS.CHARGE_FULL] window.
+export const CHARGE_CONSTANTS = {
+  RING_RADIUS_OFFSET: 14,    // px past player half-extent for the ring
+  RING_WIDTH: 3,             // line width
+  RING_COLOR_PRIMING: '#94a3b8', // slate-400 — held but below threshold
+  RING_COLOR_READY:   '#fde047', // yellow-300 — held past threshold (shot is charged)
+  RING_COLOR_FULL:    '#ffffff', // white — held past CHARGE_FULL (capped)
+};
+
 // ── Lightning chain tuning ───────────────────────────────────────────────────
-export const LIGHTNING_CHAIN_RANGE = 200;           // hop range for subsequent chains
-export const LIGHTNING_CHAIN_COUNT = 2;             // additional chain hops after projectile impact (up to 3 targets total)
+export const LIGHTNING_CHAIN_RANGE = 280;           // hop range for subsequent chains
+export const LIGHTNING_CHAIN_COUNT = 3;             // additional chain hops (depth) after projectile impact — depth 0 is the direct hit
+export const LIGHTNING_CHAIN_BRANCHES = 2;          // simultaneous jumps per chain node — turns the chain into a branching tree (saturated tree: 1+2+4+8 = 15 entities)
+// Mobile shard variants the lightning chain refuses to hop to.  Conductive
+// targets (enemies, glass-shards, nebula-shards) still chain freely — only
+// inert/dielectric materials sit this dance out.  Static tiles are already
+// excluded structurally (entityIndex.asteroids holds mobile shards only).
+//
+// NOTE for future material work (Phase 1 g2 — plastic-shard / metal-shard):
+//   - 'plastic-shard' SHOULD be added here (plastic is an insulator).
+//   - 'metal-shard'   should NOT be added (metal conducts — let it chain).
+// Update this set when those variants are introduced.
+export const LIGHTNING_CHAIN_EXCLUDED_VARIANTS: ReadonlySet<ShardVariantId> = new Set<ShardVariantId>([
+  'rock-shard',
+]);
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
@@ -670,22 +699,23 @@ export const DAMAGE_TEXT_CONSTANTS = {
 };
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
+//
+// Stat budgeting (d2 weapon overhaul):
+//   Each weapon owns a distinct tactical niche.  ROF spans ~10× across the
+//   lineup (Blaster 7/s vs Cannon ~0.7/s); damage trades inversely with ROF
+//   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
+//   composes existing primitives (homing / pierce / bounce / lightning /
+//   spread / burst) plus the new `explosionRadius` AoE primitive on the
+//   Cannon.  Charged-shot variants (held mouse ≥ INPUT_CONSTANTS
+//   .CHARGE_THRESHOLD then released) consume `chargedAmmoCost` instead and
+//   are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
-  // Shared-ammo cost rationale (d1):
-  //   Pre-refactor every non-blaster weapon consumed exactly 1 unit per
-  //   trigger pull from its own per-weapon pool, so the felt
-  //   "shots-per-pickup" was uniform across BURST / SHOTGUN / BOUNCER /
-  //   LIGHTNING / HOMING / CANNON.  Keeping every non-blaster ammoCost = 1
-  //   on the new shared pool reproduces that ratio exactly (today's pickup
-  //   amounts are unchanged in DROP_CONFIG, so 1 pickup = same number of
-  //   trigger pulls regardless of which weapon is selected).  d2 will
-  //   retune these alongside the broader weapon overhaul.
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
     name: 'Blaster',
-    cooldown: 0.005,
+    cooldown: 0.14,    // 7 shots/s — all-rounder cadence
     speed: 9,
-    damage: 2,
+    damage: 4,
     lifetime: 1.5,
     color: '#ef4444', // Red — infinite ammo starter
     size: 6,
@@ -694,13 +724,14 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 0,
     ammoCost: 0,
+    chargedAmmoCost: 0,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
     name: 'Burst Rifle',
-    cooldown: 0.005,
+    cooldown: 0.45,    // ~2.2 bursts/s
     speed: 12,
-    damage: 3,
+    damage: 5,
     lifetime: 3.0,
     color: '#f97316', // Orange
     size: 5,
@@ -709,45 +740,49 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.3,
     pierce: 2,
     burstCount: 3,
-    burstDelay: 0.05,
+    burstDelay: 0.04,
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
     name: 'Shotgun',
-    cooldown: 0.005,
+    cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
     speed: 12,
-    damage: 1,
-    lifetime: 0.4,
+    damage: 3,
+    lifetime: 0.8,     // doubled — pellets reach further before fading
     color: '#facc15', // Yellow
     size: 5,
     count: 6,
-    spread: 35,
+    spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
     pierce: 1,
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
-    name: 'Bouncer',
-    cooldown: 0.005,   // matches BLASTER
-    speed: 9,          // matches BLASTER
-    damage: 2,         // matches BLASTER
-    lifetime: 7,       // bounded beam life — cuts steady-state count ~3× vs 20s
-    color: '#22c55e',  // Green — thin laser beam that bounces off tiles
+    name: 'Pierce Beam',
+    cooldown: 0.40,    // 2.5 shots/s
+    speed: 18,         // ~2× Blaster — fast straight beam
+    damage: 5,
+    lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
+    color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
     size: 6,
-    count: 1,
-    spread: 2,
+    count: 3,          // 3-beam forward fan
+    spread: 30,        // ±15° cone
     recoil: 0.5,
-    pierce: 0,
+    pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
+    bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
-    cooldown: 0.2,     // fast fire rate
-    speed: 3,          // slow drifting projectile; gravity pull curves it toward targets
-    damage: 1,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
+    cooldown: 0.50,    // 2 shots/s
+    speed: 16,         // gravity pull curves the projectile toward targets
+    damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
     size: 6,
@@ -756,13 +791,14 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.3,
     pierce: 0,         // stops on first hit, then chains
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
-    cooldown: 0.005,
+    cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
     speed: 7,
-    damage: 2,
+    damage: 6,
     lifetime: 3.0,
     color: '#3b82f6', // Blue
     size: 8,
@@ -772,21 +808,26 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     pierce: 0,
     homing: true,
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
     name: 'Plasma Cannon',
-    cooldown: 0.005,
+    cooldown: 1.40,    // ~0.7 shots/s — heavy artillery
     speed: 10,
-    damage: 5,
+    damage: 18,
     lifetime: 2.5,
     color: '#a855f7', // Purple
     size: 16,
     count: 1,
     spread: 0,
-    recoil: 8.0,
-    pierce: 5,
+    recoil: 4.0,       // halved from 8.0 — a slower ROF + AoE makes huge recoil punitive
+    pierce: 0,
+    explosionRadius: 110,   // world units of radial AoE on impact
+    explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
+    explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
     ammoCost: 1,
+    chargedAmmoCost: 2,
   },
 };
 
@@ -823,7 +864,8 @@ export const ENEMY_WEAPON: WeaponConfig = {
   spread: 4,
   recoil: 0,
   pierce: 0,
-  ammoCost: 0, // unused — enemies don't draw from a shared pool
+  ammoCost: 0,        // unused — enemies don't draw from a shared pool
+  chargedAmmoCost: 0, // unused — enemies don't charge
 };
 
 // --- ASSETS ---
