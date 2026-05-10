@@ -696,8 +696,11 @@ export class PhysicsSystem {
 
       // Impact in entity-local coords (centroid at origin), with
       // toroidal wrap so impacts across the seam pick the right side.
-      const localX = wrapDeltaX(impactWorldPos.x, tile.position.x);
-      const localY = wrapDeltaY(impactWorldPos.y, tile.position.y);
+      // wrapDeltaX(from, to) returns (to - from), so pass tile first
+      // to get (impact - tile) — i.e. the impact's offset from the
+      // tile centre.
+      const localX = wrapDeltaX(tile.position.x, impactWorldPos.x);
+      const localY = wrapDeltaY(tile.position.y, impactWorldPos.y);
 
       let bestIdx = 0;
       let bestD2 = Infinity;
