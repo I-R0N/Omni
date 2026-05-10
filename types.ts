@@ -23,7 +23,8 @@ export enum MapType {
   // isolation without cross-element interference.
   ASTEROID_FIELD       = 'ASTEROID_FIELD',
   GLASS_FIELD          = 'GLASS_FIELD',
-  HARD_TILE_FIELD      = 'HARD_TILE_FIELD',
+  PLASTIC_FIELD        = 'PLASTIC_FIELD',
+  METAL_FIELD          = 'METAL_FIELD',
   INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
   NEBULA_FIELD         = 'NEBULA_FIELD',
   // Rock-tile single-element showcase (Stage 7 of shard-system overhaul)

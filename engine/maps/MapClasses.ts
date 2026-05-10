@@ -649,18 +649,38 @@ export class GlassFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Hard-damageable field — 5-HP metal tiles spread across the map.  The
+ * Plastic-only field — 3-HP plastic tiles spread across the map.  The
+ * mid-tier destructible: harder than glass, softer than metal; useful
+ * for tuning damage feel and crack visuals against the matte polymer
+ * aesthetic in isolation.
+ */
+export class PlasticFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'plastic';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('plastic_field_01', 'Plastic Field', MapType.PLASTIC_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Metal-only field — 5-HP metal tiles spread across the map.  The
  * hardest destructible variant; every cluster requires sustained fire
  * (or a high-momentum asteroid crash) to break.
  */
-export class HardTileFieldMap extends SingleVariantTileFieldMap {
+export class MetalFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'metal';
   protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
   protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
   protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
-    super('hard_tile_field_01', 'Hard Tile Field', MapType.HARD_TILE_FIELD);
+    super('metal_field_01', 'Metal Field', MapType.METAL_FIELD);
     this.width  = SingleVariantTileFieldMap.WIDTH;
     this.height = SingleVariantTileFieldMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };

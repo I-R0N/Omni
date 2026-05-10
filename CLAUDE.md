@@ -60,8 +60,9 @@ engine/
                           RingMap, SevenRingsMap, PocketMap) and the
                           single-element 6k showcase maps
                           (AsteroidFieldMap, GlassFieldMap,
-                          HardTileFieldMap, IndestructibleFieldMap,
-                          NebulaFieldMap) sharing the abstract
+                          PlasticFieldMap, MetalFieldMap,
+                          IndestructibleFieldMap, NebulaFieldMap)
+                          sharing the abstract
                           SingleVariantTileFieldMap base
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
@@ -298,13 +299,12 @@ of `BaseMapLayer`:
   asteroids, structures (multiple variants), and nebulae and are the
   ones a normal play session uses.
 - **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
-  (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`), `HardTileFieldMap`
-  (`HARD_TILE_FIELD`, uses the `'metal'` STRUCTURE variant — note the
-  naming mismatch; the showcase MapType keeps its public id),
+  (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`),
+  `PlasticFieldMap` (`PLASTIC_FIELD`), `MetalFieldMap` (`METAL_FIELD`),
   `IndestructibleFieldMap` (`INDESTRUCTIBLE_FIELD`),
   `NebulaFieldMap` (`NEBULA_FIELD`). Each populates the playfield with
   exactly one entity type so a single system (flow field, regen, nebula
-  shatter, etc.) can be stress-tested in isolation. The four tile-only
+  shatter, etc.) can be stress-tested in isolation. The five tile-only
   showcases share an abstract `SingleVariantTileFieldMap` base; entity
   counts are tuned to ≈1 200 per map so the debug HUD's render-time
   numbers compare apples-to-apples across showcases.

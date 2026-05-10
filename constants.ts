@@ -343,7 +343,12 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
-  [MapType.HARD_TILE_FIELD]: {
+  [MapType.PLASTIC_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.METAL_FIELD]: {
     maxSpeed: 140,
     acceleration: 0.077,
     friction: 0.998
@@ -1682,7 +1687,10 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.GLASS_FIELD]: {
     'glass-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
-  [MapType.HARD_TILE_FIELD]: {
+  [MapType.PLASTIC_FIELD]: {
+    'plastic-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+  [MapType.METAL_FIELD]: {
     'metal-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {

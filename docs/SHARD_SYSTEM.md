@@ -1062,7 +1062,7 @@ new entries for rock-tile clusters):
 [MapType.GLASS_FIELD]: {
   'glass-tile':     { tileCluster: { clusterCount: /* tuned to ≈1200 tiles */ ... } },
 },
-[MapType.HARD_TILE_FIELD]: {
+[MapType.METAL_FIELD]: {
   'metal-tile':     { tileCluster: { ... } },
 },
 [MapType.INDESTRUCTIBLE_FIELD]: {
