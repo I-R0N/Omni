@@ -46,6 +46,12 @@ export class PhysicsSystem {
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
   private dynamicGrid: Map<number, GameEntity[]> = new Map();
+  // Separate spatial hash for shard ↔ shard pair resolution.
+  // Walked only on Nth physics steps per the ShPair pacing —
+  // skipping the rebuild + walk entirely on off-frames is the
+  // savings the DBG slider was missing when shard-shard pairs
+  // were inline in the main collision pass.
+  private shardGrid: Map<number, GameEntity[]> = new Map();
 
   // Cached list of gravitational attractors (planets/stars — entities with
   // `gravityRange > 0`).  Populated once per map via initializeAttractors()
@@ -384,9 +390,18 @@ export class PhysicsSystem {
     // DBG-toggleable: when collisionsEnabled is false the broadphase +
     // SAT pass is skipped entirely (game-breaking — projectiles fly
     // through, tiles are inert).  Strictly a perf measurement aid.
+    //
+    // Shard ↔ shard pairs run as a separate dedicated pass at the
+    // ShPair-paced cadence — skipping the entire build + walk on
+    // off-frames is what makes the slider visibly move `coll` ms.
+    // Both passes share the same `tCol` window so the perf timer
+    // reports total collision cost (main + shard-pair).
     const tCol = performance.now();
     if (this.collisionsEnabled) {
       this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+      if (this.shouldRunShardPairsThisStep()) {
+        this.resolveShardPairs(asteroids);
+      }
     }
     this.lastCollisionsMs = performance.now() - tCol;
 
@@ -496,29 +511,6 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
-    // Shard-pair pacing: every Nth substep we run shard ↔ shard
-    // resolution; in between, those pairs are skipped entirely.  The
-    // counter ticks regardless of the gate value so toggling the
-    // interval mid-run doesn't drift the phase visibly.
-    //
-    // N=0 (AUTO) selects the interval from the previous step's
-    // `lastMaxCellDensity` per SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS.
-    // Light fields keep N=1 (every-frame resolution); dense fields
-    // climb up to N=4 so settled piles don't eat the frame budget.
-    let interval = this.shardPairFrameInterval | 0;
-    if (interval <= 0) {
-        const density = this.lastMaxCellDensity;
-        const table = SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS;
-        let auto = table[table.length - 1].interval;
-        for (let i = 0; i < table.length; i++) {
-            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
-        }
-        interval = auto;
-    }
-    this.lastEffectiveShardPairInterval = interval;
-    const runShardPair = (this.shardPairTick % interval) === 0;
-    this.shardPairTick++;
-
     // 1. Clear ONLY Dynamic Grid (Static Grid is persistent)
     this.dynamicGrid.clear();
 
@@ -618,19 +610,16 @@ export class PhysicsSystem {
                         // so they can't share a position, while costing a
                         // few mul/sqrt per pair instead of a full polygon
                         // projection.
-                        // Mobile-shard pair (post-Stage-5: ASTEROID
-                        // The dynamic grid already excludes
-                        // mass=Infinity tiles, so any STRUCTURE entry
-                        // here is a mobile shard.  Throttled by the
-                        // SHARD_PAIR_CONSTANTS.FRAME_INTERVAL pacing —
-                        // resolution runs every Nth substep, freeing
-                        // the in-between substeps from O(k²) shard
-                        // pile cost.  At 60 Hz with N=3 the longest
-                        // any pair waits for separation is ~50 ms.
-                        if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) {
-                            if (runShardPair) this.resolveAsteroidPair(a, b);
-                            continue;
-                        }
+                        // Mobile-shard pair: handled by the dedicated
+                        // resolveShardPairs() pass which only runs on
+                        // Nth physics substeps per the ShPair pacing.
+                        // Skipping here means the broadphase enumeration
+                        // for this pair stops cold — the slider's effect
+                        // on `coll` ms scales with N as expected.  Note:
+                        // shards still appear in the dynamic grid so
+                        // shard ↔ projectile / shard ↔ player /
+                        // shard ↔ enemy pairs run every frame as before.
+                        if (ta === EntityType.STRUCTURE && tb === EntityType.STRUCTURE) continue;
 
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                     }
@@ -724,6 +713,98 @@ export class PhysicsSystem {
    * applied every frame regardless so separation velocity builds up
    * quickly.
    */
+
+  /**
+   * Resolve the effective shard-pair frame interval, tick the
+   * counter, and return whether the shard-pair pass should fire on
+   * this physics substep.  Pulled out of handleEntityCollisions so
+   * physics.update can decide whether to call resolveShardPairs at
+   * all — skipping the function entirely (build + walk) is what
+   * makes the DBG slider meaningfully move `coll` ms.
+   *
+   * N=0 (AUTO) selects the interval from the previous step's
+   * `lastMaxCellDensity` per SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS.
+   * Light fields keep N=1 (every-frame resolution); dense fields
+   * climb so settled piles don't eat the frame budget.
+   */
+  public shouldRunShardPairsThisStep(): boolean {
+    let interval = this.shardPairFrameInterval | 0;
+    if (interval <= 0) {
+        const density = this.lastMaxCellDensity;
+        const table = SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS;
+        let auto = table[table.length - 1].interval;
+        for (let i = 0; i < table.length; i++) {
+            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
+        }
+        interval = auto;
+    }
+    this.lastEffectiveShardPairInterval = interval;
+    const run = (this.shardPairTick % interval) === 0;
+    this.shardPairTick++;
+    return run;
+  }
+
+  /**
+   * Dedicated shard ↔ shard pair-resolution pass.  Builds a fresh
+   * shard-only spatial hash from the caller-supplied list of mobile
+   * shards (typically `entityIndex.shardCandidates`), then walks
+   * each shard's 3×3 cell neighbourhood for pairs and dispatches to
+   * `resolveAsteroidPair`.
+   *
+   * Called from physics.update gated by `shouldRunShardPairsThisStep()`,
+   * so on skip-frames the entire build + walk are bypassed (this is
+   * the savings the inline branch in handleEntityCollisions was
+   * missing).  Fading shards (nebulaFadeTimer / mergeFadeTimer set)
+   * are filtered out — they shouldn't pull or push other shards
+   * during their death animation.
+   */
+  private resolveShardPairs(shards: GameEntity[]): void {
+    if (shards.length < 2) return;
+
+    // Build the shard-only grid.  Same SPATIAL_GRID_SIZE as the main
+    // dynamic grid so cell math and 3×3 scan radius are consistent
+    // with everything else in the broadphase.
+    this.shardGrid.clear();
+    for (let i = 0; i < shards.length; i++) {
+        const e = shards[i];
+        if (!e.active || e.isExploding) continue;
+        if (e.nebulaFadeTimer !== undefined) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
+        const key = cellKey(e.position.x, e.position.y);
+        let cell = this.shardGrid.get(key);
+        if (!cell) { cell = []; this.shardGrid.set(key, cell); }
+        cell.push(e);
+    }
+
+    // Walk the shard list and resolve pairs.  j > i ordering via
+    // id comparison ensures each unordered pair is processed once.
+    // The inner pair body is identical in spirit to the main loop's
+    // shard-shard branch (now removed), but iterates a much smaller
+    // set since non-shard entities aren't here.
+    for (let i = 0; i < shards.length; i++) {
+        const a = shards[i];
+        if (!a.active || a.isExploding) continue;
+        if (a.nebulaFadeTimer !== undefined) continue;
+        if (a.mergeFadeTimer !== undefined) continue;
+
+        const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+        const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+        for (let x = -1; x <= 1; x++) {
+            for (let y = -1; y <= 1; y++) {
+                const cell = this.shardGrid.get(cellKeyFromCell(cx + x, cy + y));
+                if (!cell) continue;
+                for (let j = 0; j < cell.length; j++) {
+                    const b = cell[j];
+                    if (a === b) continue;
+                    if (a.id > b.id) continue; // process each pair once
+                    this.resolveAsteroidPair(a, b);
+                }
+            }
+        }
+    }
+  }
+
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
       // Cheapest possible early-outs first — most pair calls discard
       // here before paying any further work.
