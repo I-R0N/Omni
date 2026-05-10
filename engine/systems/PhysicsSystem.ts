@@ -673,30 +673,26 @@ export class PhysicsSystem {
   // Apply one dent step to a tile whose variant declares a `dent` policy.
   // Called immediately after each damage event (projectile hit, player
   // crash, asteroid crash) and short-circuits for variants without a
-  // dent policy.  Mutates entity.size, entity.dentScale, and the
-  // polygon vertex array in place; the next render pass picks up the
-  // new shape automatically (the material-tile branch reads
-  // polygonPoints directly).  No allocation in the hot path.
+  // dent policy.  Mutates the polygon vertex array in place — each
+  // vertex is pulled inward by a random fraction in [0, vertexJitter]
+  // of its current radius from the polygon centroid (entity-local
+  // origin).  No allocation in the hot path.
+  //
+  // Deliberately does NOT touch entity.size: the collision footprint
+  // stays stable so AABB broadphase keeps working unchanged.  The
+  // visible silhouette shrinks asymmetrically as vertices crumple,
+  // not uniformly.  The shard spawned at detach time reads its true
+  // size from the polygon's bounding extent (see
+  // DropSystem.spawnDentShard).
   public static applyDentStep(tile: GameEntity) {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
       if (dent === undefined) return;
-      if (tile.dentScale === undefined) tile.dentScale = 1.0;
-
-      tile.dentScale *= dent.scalePerHit;
-      tile.size.x *= dent.scalePerHit;
-      tile.size.y *= dent.scalePerHit;
 
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
-      // Each vertex shrinks toward the polygon centroid (origin in
-      // entity-local coords), then takes a random inward push of up
-      // to vertexJitter as a fraction of its post-shrink radius.  The
-      // multiplicative factor (scalePerHit × (1 - jitterFrac)) folds
-      // both ops into a single per-vertex multiply.
       for (let i = 0; i < pts.length; i++) {
-          const jitterFrac = Math.random() * dent.vertexJitter;
-          const k = dent.scalePerHit * (1 - jitterFrac);
+          const k = 1 - Math.random() * dent.vertexJitter;
           pts[i].x *= k;
           pts[i].y *= k;
       }

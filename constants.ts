@@ -415,7 +415,9 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_BORDER,
   },
   plastic: {
-    health: 3,
+    // 4 HP → 3 dent steps while alive in the grid, then a 4th
+    // deforming hit detaches the tile as a plastic-shard.
+    health: 4,
     mass: Infinity,
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE_PLASTIC,
@@ -423,7 +425,10 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
   metal: {
-    health: 5,
+    // 8 HP → 7 dent steps while alive, 8th detaches.  Reads as
+    // harder than plastic via both hit count and per-hit dent
+    // magnitude (vertexJitter is also lower).
+    health: 8,
     mass: Infinity,
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE_METAL,
@@ -1428,29 +1433,28 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
-    // Plastic deforms heavily per hit — vertices warp inward and the
-    // overall silhouette squashes by ~30 %.  Combined with the 3-HP
-    // base, the tile reaches ~34 % of its original size on its third
-    // hit and detaches as a single mobile plastic-shard.  Dent
-    // variants do not regen.
+    // Plastic deforms heavily per hit — each vertex pulled inward by
+    // up to 25 % of its current radius — but the overall silhouette
+    // does NOT uniformly scale.  Combined with 4 HP that's 3 visible
+    // deforms in the grid and a 4th deforming-then-detaching hit.
+    // Dent variants do not regen.
     regen: { kind: 'none' },
     dent: {
-      scalePerHit: 0.70,
-      vertexJitter: 0.18,
+      vertexJitter: 0.25,
       breakChildVariant: 'plastic-shard',
     },
   },
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
-    // Metal barely deforms per hit — vertices warp slightly and the
-    // silhouette holds most of its size until late in the damage
-    // ramp.  At 5 HP and scalePerHit 0.85 the tile reaches ~44 %
-    // size on its fifth hit, then detaches as a metal-shard.
+    // Metal deforms subtly — each vertex pulled inward by up to 13 %
+    // per hit.  Cumulative over 8 HP the silhouette warps visibly,
+    // but per-hit change is small enough that the surface reads as
+    // hard.  Hits-to-break is roughly double plastic so metal feels
+    // harder by both metrics.
     regen: { kind: 'none' },
     dent: {
-      scalePerHit: 0.85,
-      vertexJitter: 0.06,
+      vertexJitter: 0.13,
       breakChildVariant: 'metal-shard',
     },
   },

@@ -1749,7 +1749,21 @@ export class RenderSystem {
 
                     // Damage cracks for multi-HP variants — early-returns
                     // at ≥95 % health so undamaged tiles cost nothing.
-                    this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
+                    // Sized to the dented polygon's max-radius (not
+                    // entity.size, which the dent system deliberately
+                    // doesn't shrink) so cracks stay inside the visible
+                    // silhouette as vertices crumple inward.
+                    let crackR = Math.max(entity.size.x, entity.size.y) / 2;
+                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                        let maxR2 = 0;
+                        for (let i = 0; i < entity.polygonPoints.length; i++) {
+                            const p = entity.polygonPoints[i];
+                            const r2 = p.x * p.x + p.y * p.y;
+                            if (r2 > maxR2) maxR2 = r2;
+                        }
+                        crackR = Math.sqrt(maxR2);
+                    }
+                    this.renderCracks(ctx, entity, crackR);
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {

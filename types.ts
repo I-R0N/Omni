@@ -384,13 +384,6 @@ export interface GameEntity {
   // to produce the rendered alpha.  Undefined or 0 → layer skipped.
   glowIntensity?: number;
 
-  // Cumulative dent state for variants with a `dent` policy (today:
-  // plastic-tile, metal-tile).  Starts at 1.0; each damage event
-  // multiplies by SHARD_VARIANTS[v].dent.scalePerHit.  When the tile
-  // dies, this is the polygon scale at which it detaches and a mobile
-  // shard of the breakChildVariant spawns.  Undefined for variants
-  // without a dent policy.
-  dentScale?: number;
 
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.

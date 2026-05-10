@@ -286,22 +286,27 @@ export interface ShardVariantDef {
   };
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
-   *  vertices are pushed inward (random magnitude × `vertexJitter` of
-   *  current size) and the entity's collision size shrinks by
-   *  `scalePerHit`.  When health hits 0 the tile detaches, becomes a
-   *  single mobile shard of `breakChildVariant` at the current dented
-   *  size, and skips the variant's `shatter` policy entirely.  Dent
-   *  variants do NOT regen.  Today: plastic-tile (deforms heavily),
-   *  metal-tile (deforms slowly).  Glass / indestructible / rock /
-   *  nebula tiles leave this unset and continue to shatter or
-   *  passthrough on death. */
+   *  vertices are pulled inward by a random fraction in
+   *  [0, vertexJitter] of their current radius (toward the polygon
+   *  centroid).  The tile's `entity.size` is deliberately NOT touched
+   *  so collision footprint stays stable while the visible silhouette
+   *  crumples asymmetrically.  When health hits 0 the tile detaches,
+   *  becomes a single mobile shard of `breakChildVariant` sized to the
+   *  dented polygon's actual extent, and skips the variant's
+   *  `shatter` policy entirely.  Dent variants do NOT regen.  Today:
+   *  plastic-tile (deforms heavily, breaks quickly),
+   *  metal-tile (deforms subtly, breaks slowly).  Glass /
+   *  indestructible / rock / nebula tiles leave this unset and
+   *  continue to shatter or pass-through on death.
+   *
+   *  Hits-to-break is driven by the variant's STRUCTURE_VARIANTS
+   *  health value (a plain HP integer), so adjusting hardness is one
+   *  edit there. */
   dent?: {
-    /** Multiplier on entity.size and polygon scale per damage event.
-     *  Plastic ~0.7 (visibly squashes), metal ~0.85 (subtle). */
-    scalePerHit: number;
-    /** Per-vertex inward perturbation magnitude as a fraction of
-     *  current size.  Random offset is drawn each hit; cumulative.
-     *  Plastic ~0.18 (warps a lot), metal ~0.06 (barely warps). */
+    /** Per-vertex inward pull magnitude as a fraction of current
+     *  radius.  Random magnitude in [0, vertexJitter] is drawn for
+     *  each vertex each hit; cumulative.  Plastic ~0.25 (visibly
+     *  warps each hit), metal ~0.13 (subtle per-hit change). */
     vertexJitter: number;
     /** Variant id of the mobile shard spawned when the tile detaches.
      *  Must be a member of ShardVariantId — typically the matching

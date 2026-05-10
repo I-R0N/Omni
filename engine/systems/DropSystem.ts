@@ -333,8 +333,6 @@ export class DropSystem {
    */
   public spawnDentShard(entities: GameEntity[], tile: GameEntity, childVariant: ShardVariantId) {
     const variantDef = SHARD_VARIANTS[childVariant];
-    const size = Math.max(tile.size.x, tile.size.y);
-    const mass = variantDef.spawn.sizeToMass(size);
 
     // Clone the dented polygon — the tile entity is going inactive
     // but its polygonPoints array would otherwise be shared with the
@@ -344,6 +342,30 @@ export class DropSystem {
     const dentedPts = tile.polygonPoints
       ? tile.polygonPoints.map(p => ({ x: p.x, y: p.y }))
       : undefined;
+
+    // Size the spawned shard to the dented polygon's bounding extent.
+    // entity.size on the tile is never updated by applyDentStep (so
+    // collision broadphase stays stable while alive), but the freed
+    // shard should match its visible silhouette — otherwise the shard
+    // would inherit the full tile footprint despite being a small
+    // crumpled remnant.  Fall back to entity.size only if there's no
+    // polygon (defensive — every shard-family entity ships with one).
+    let halfW = tile.size.x / 2;
+    let halfH = tile.size.y / 2;
+    if (dentedPts && dentedPts.length > 0) {
+      halfW = 0;
+      halfH = 0;
+      for (let i = 0; i < dentedPts.length; i++) {
+        const ax = Math.abs(dentedPts[i].x);
+        const ay = Math.abs(dentedPts[i].y);
+        if (ax > halfW) halfW = ax;
+        if (ay > halfH) halfH = ay;
+      }
+    }
+    const sizeX = Math.max(2, halfW * 2);
+    const sizeY = Math.max(2, halfH * 2);
+    const size  = Math.max(sizeX, sizeY);
+    const mass  = variantDef.spawn.sizeToMass(size);
 
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -364,7 +386,7 @@ export class DropSystem {
         x: Math.cos(launchAngle) * launchSpeed,
         y: Math.sin(launchAngle) * launchSpeed,
       },
-      size:          { x: size, y: size },
+      size:          { x: sizeX, y: sizeY },
       rotation:      Math.random() * Math.PI * 2,
       // Light angular momentum — heavier than typical free-spawn
       // shards because the freed piece is a chunky tile remnant,
