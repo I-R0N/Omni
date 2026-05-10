@@ -592,6 +592,11 @@ export interface EngineStats {
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
+  // ── Performance toggle state (debug menu) ─────────────────────
+  // Mirrors GameEngine's clusterMode / localGravityEnabled so the
+  // DBG panel can render the live state.
+  clusterMode?: 'pairwise' | 'density-bias' | 'none';
+  localGravityEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

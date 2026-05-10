@@ -13,6 +13,8 @@ interface UIOverlayProps {
   onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
+  onCycleClusterMode?: () => void;
+  onToggleLocalGravity?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -31,6 +33,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaSet,
   onCycleTrailShape,
   onCycleTrailEmitMode,
+  onCycleClusterMode,
+  onToggleLocalGravity,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -126,6 +130,37 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   title="Toggle trail direction: VELOCITY (trail extends opposite to velocity) vs THRUST (trail extends opposite to thrust input)"
                 >
                   {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
+                </button>
+              </div>
+
+              {/* Asteroid pull model — pairwise grav vs density bias vs none.
+                  Watch the `grav` and `lgrv` perf timers below to see the cost
+                  drop as you cycle through modes. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Pull</span>
+                <button
+                  onClick={onCycleClusterMode}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle asteroid clustering: pairwise grav → density bias → none"
+                >
+                  {stats.clusterMode === 'density-bias'
+                    ? 'Density'
+                    : stats.clusterMode === 'none'
+                    ? 'None'
+                    : 'Pairwise'}
+                </button>
+              </div>
+
+              {/* Player↔asteroid local-gravity toggle — pure on/off so the
+                  `lgrv` perf timer shows the isolated cost when off. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
+                <button
+                  onClick={onToggleLocalGravity}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
+                >
+                  {stats.localGravityEnabled === false ? 'Off' : 'On'}
                 </button>
               </div>
 

@@ -217,6 +217,55 @@ export const LOCAL_GRAVITY_CONSTANTS = {
   PLAYER_INFLUENCE: 0.00001 // Reduced 100x again
 };
 
+// ── Asteroid clustering force model ─────────────────────────────────
+// The "chaotic debris" feel comes from asteroids slowly drifting
+// together through mutual attraction.  Two implementations + an
+// off-switch are exposed for A/B testing:
+//
+//   'pairwise'      — original O(n·k) pairwise mutual gravity (spatial
+//                     hash on a GRAV_RANGE cell).  Highest cost; richest
+//                     clustering — every pair contributes a per-frame
+//                     force.
+//   'density-bias'  — O(n) two-pass: build a per-cell entity-count
+//                     grid, then for each entity sample its own cell +
+//                     8 neighbours and apply a small force toward the
+//                     density-weighted centroid of the 3x3 neighbourhood.
+//                     ~5–10x cheaper than pairwise on populated maps;
+//                     produces softer, more diffuse clustering.
+//   'none'          — no pull whatsoever.  Asteroids drift solo on the
+//                     flow field; clustering only emerges from
+//                     incidental contact + stick-bond cohesion.  The
+//                     cheapest baseline for measuring the cost of the
+//                     two pull models.
+//
+// Tunables for the density-bias path live alongside.
+export type ClusterMode = 'pairwise' | 'density-bias' | 'none';
+
+export const CLUSTER_CONSTANTS = {
+  // Default mode at engine init.  Matches today's behaviour so a
+  // fresh session reads the same as before.
+  DEFAULT_MODE: 'pairwise' as ClusterMode,
+  // Density-bias cell size (px).  Larger cells = smoother density
+  // field but coarser steering; smaller cells = sharper clustering
+  // but more population variance.  120 matches today's
+  // SPATIAL_GRID_SIZE so the cost scales with cells the physics
+  // broadphase already maintains.
+  DENSITY_CELL_SIZE: 120,
+  // Acceleration applied per frame toward the 3x3 neighbourhood
+  // centroid.  Small (subtle drift) — clustering should develop
+  // over seconds, not snap.  Tuned against the 0.16 px/frame
+  // baseline force of pairwise gravity at typical separations.
+  DENSITY_FORCE: 1.5,
+  // Minimum total population in the 3x3 neighbourhood for a force
+  // to apply (less than this = isolated entity, leave it on the
+  // flow field alone).
+  DENSITY_MIN_NEIGHBORS: 2,
+  // Cap on per-frame velocity injection — keeps the bias from
+  // accumulating into chaotic high-speed pile-ups when a cell is
+  // densely packed.
+  DENSITY_MAX_DELTA: 0.05,
+};
+
 export const TRAIL_CONSTANTS = {
   LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point

@@ -56,6 +56,11 @@ export class PhysicsSystem {
   public lastGravityMs: number = 0;      // applyGravity scan + pair loop
   public lastLocalGravityMs: number = 0; // applyLocalGravity scan
   public lastCollisionsMs: number = 0;   // handleEntityCollisions broadphase + SAT
+
+  // Debug toggle — flips the player↔asteroid mutual-gravity scan on/off.
+  // GameEngine sets this from the DBG panel for A/B perf testing.
+  // Default true matches today's production behaviour.
+  public localGravityEnabled: boolean = true;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -143,9 +148,14 @@ export class PhysicsSystem {
     this.applyGravity(entities, timeScale, onDamage);
     this.lastGravityMs = performance.now() - tGrav;
 
-    // Apply Player-Asteroid Mutual Gravity (Scaled by time)
+    // Apply Player-Asteroid Mutual Gravity (Scaled by time).
+    // DBG-toggleable: when localGravityEnabled is false, the scan is
+    // skipped entirely and lastLocalGravityMs reads zero — letting the
+    // perf overlay show the cost dropping to baseline in real time.
     const tLocal = performance.now();
-    this.applyLocalGravity(asteroids, player, timeScale);
+    if (this.localGravityEnabled) {
+      this.applyLocalGravity(asteroids, player, timeScale);
+    }
     this.lastLocalGravityMs = performance.now() - tLocal;
 
     for (let i = 0; i < entities.length; i++) {
