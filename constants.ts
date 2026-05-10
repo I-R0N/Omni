@@ -268,9 +268,12 @@ export const SHARD_PAIR_CONSTANTS = {
     { maxDensity: 28,  interval: 3 },
     { maxDensity: 999, interval: 4 },
   ] as const,
-  // Manual cycle order, including AUTO sentinel (0).  Picked to
-  // give plenty of granularity without an unwieldy menu.
-  CYCLE_ORDER: [0, 1, 2, 3, 4, 6, 8] as const,
+  // Manual slider range — 0 (AUTO) up through MAX_INTERVAL.  At
+  // 50, settled piles only resolve every ~830 ms (50 × 1/60), which
+  // is well past the visible-overlap threshold for static debris
+  // but still recovers separation eventually.  Slider in DBG panel
+  // steps in 1s.
+  MAX_INTERVAL: 50,
 };
 
 export const TRAIL_CONSTANTS = {

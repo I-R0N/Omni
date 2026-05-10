@@ -307,20 +307,17 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the shard ↔ shard pair-resolution interval through
-   * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 3 → 4 → 6 → 8).
-   * AUTO (= 0) lets PhysicsSystem pick N from the previous step's
-   * peak collision-cell density; numeric values pin the interval.
-   * The effective N (whether AUTO or manual) is mirrored into
-   * EngineStats.shardPairInterval so the DBG panel can render
-   * "auto (3)" or "every 3" accordingly.
+   * Set the shard ↔ shard pair-resolution interval directly.  0 =
+   * AUTO (PhysicsSystem picks N from the previous step's peak
+   * collision-cell density); 1..MAX_INTERVAL = manual override.
+   * The effective N (whether AUTO-resolved or manual) is mirrored
+   * into EngineStats.shardPairEffectiveInterval.  Wired to the DBG
+   * panel slider; clamps + integer-rounds defensively.
    */
-  public cycleShardPairInterval() {
-    const order = SHARD_PAIR_CONSTANTS.CYCLE_ORDER;
-    const cur = this.physics.shardPairFrameInterval;
-    const idx = order.indexOf(cur as (typeof order)[number]);
-    const next = order[(idx + 1) % order.length];
-    this.physics.shardPairFrameInterval = next;
+  public setShardPairInterval(n: number) {
+    const max = SHARD_PAIR_CONSTANTS.MAX_INTERVAL;
+    const clamped = Math.max(0, Math.min(max, Math.round(n)));
+    this.physics.shardPairFrameInterval = clamped;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;

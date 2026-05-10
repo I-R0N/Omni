@@ -16,7 +16,7 @@ interface UIOverlayProps {
   onToggleLocalGravity?: () => void;
   onToggleAttractorGravity?: () => void;
   onToggleCollisions?: () => void;
-  onCycleShardPairInterval?: () => void;
+  onSetShardPairInterval?: (n: number) => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -38,7 +38,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleLocalGravity,
   onToggleAttractorGravity,
   onToggleCollisions,
-  onCycleShardPairInterval,
+  onSetShardPairInterval,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -179,23 +179,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
-              {/* Shard ↔ shard pair-resolution interval — cycle
-                  AUTO → 1 → 2 → 3 → 4 → 6 → 8.  AUTO scales N with
-                  the previous step's peak shard-cell density; manual
-                  values pin the interval.  Higher N = cheaper but
-                  shards may overlap visibly for a few frames before
-                  separating. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
-                <button
-                  onClick={onCycleShardPairInterval}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it.  Higher = cheaper but laggier separation."
-                >
-                  {stats.shardPairInterval === 0
-                    ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
-                    : `every ${stats.shardPairInterval ?? 1}`}
-                </button>
+              {/* Shard ↔ shard pair-resolution interval — slider
+                  0..50.  0 = AUTO (scales N with previous step's
+                  peak shard-cell density); ≥1 = manual pin.  Higher
+                  N = cheaper but shards may overlap visibly for
+                  longer before separating.  Label below shows
+                  "auto (3)" or "every N" so the live effective
+                  value is always readable. */}
+              <div className="pointer-events-auto mt-1">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
+                  <span className="text-[8px] font-bold text-slate-200">
+                    {stats.shardPairInterval === 0
+                      ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
+                      : `every ${stats.shardPairInterval ?? 1}`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={50}
+                  step={1}
+                  value={stats.shardPairInterval ?? 0}
+                  onChange={(e) => onSetShardPairInterval && onSetShardPairInterval(Number(e.target.value))}
+                  className="w-full h-2 mt-0.5 accent-amber-400 cursor-pointer"
+                  title="Shard-pair resolution interval.  0 = AUTO (density-scaled); 1..50 pins N."
+                />
               </div>
 
               <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
