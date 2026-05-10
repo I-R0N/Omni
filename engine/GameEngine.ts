@@ -1439,12 +1439,19 @@ export class GameEngine {
 
       case EntityType.STRUCTURE:
         // Stage 6: STRUCTURE covers both static tiles (mass=∞) and
-        // mobile shards (finite mass).  Mobile rock-shards get the
-        // gray rocky dust the legacy ASTEROID branch produced;
-        // mobile glass-shards keep the tile-spark layer.
-        if (target.mass !== Infinity && target.shardVariant === 'rock-shard') {
+        // mobile shards (finite mass).  Mobile rock / plastic / metal
+        // shards get a material-coloured dust puff; mobile glass-shards
+        // keep the tile-spark layer.
+        if (target.mass !== Infinity
+            && (target.shardVariant === 'rock-shard'
+                || target.shardVariant === 'plastic-shard'
+                || target.shardVariant === 'metal-shard')) {
           const dustCount = target.size.x > 50 ? 5 : 3;
-          this.spawnParticles(impactPos, dustCount, '#94a3b8', {
+          const dustColor =
+              target.shardVariant === 'plastic-shard' ? '#fbbf24'
+            : target.shardVariant === 'metal-shard'   ? '#cbd5e1'
+            :                                            '#94a3b8'; // rock-shard
+          this.spawnParticles(impactPos, dustCount, dustColor, {
             speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
             spreadAngle: impactAngle, spreadCone: Math.PI * 0.55,
             baseVelocity: { x: target.velocity.x * 0.3, y: target.velocity.y * 0.3 },

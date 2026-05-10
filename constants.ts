@@ -1398,6 +1398,28 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   sizeToMass: () => 0.01,
 };
 
+// Plastic shards — softer than rock, lighter mass.  Slightly smoother
+// vertex set (5–6 verts, lower jitter) so the silhouette reads as
+// extruded polymer rather than fractured stone.  Tile-detached shards
+// inherit the dented-tile polygon at break time, so these spawn-shape
+// numbers only matter for shatter children + any future free-spawn.
+const SHARD_SPAWN_SHAPE_PLASTIC = {
+  sizeMin: 20, sizeMax: 120,
+  polyVerticesMin: 5, polyVerticesMax: 6,
+  angleJitter: 0.4, radiusMin: 0.65, radiusRange: 0.55,
+  sizeToMass: (d: number) => d * 0.7,
+};
+
+// Metal shards — denser than rock, sharper edges.  6–7 verts with
+// modest jitter for an angular gunmetal look; mass scales above
+// rock so striker impulse reads as "hitting steel."
+const SHARD_SPAWN_SHAPE_METAL = {
+  sizeMin: 20, sizeMax: 120,
+  polyVerticesMin: 6, polyVerticesMax: 7,
+  angleJitter: 0.5, radiusMin: 0.70, radiusRange: 0.55,
+  sizeToMass: (d: number) => d * 1.3,
+};
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1406,10 +1428,31 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // Plastic deforms heavily per hit — vertices warp inward and the
+    // overall silhouette squashes by ~30 %.  Combined with the 3-HP
+    // base, the tile reaches ~34 % of its original size on its third
+    // hit and detaches as a single mobile plastic-shard.  Dent
+    // variants do not regen.
+    regen: { kind: 'none' },
+    dent: {
+      scalePerHit: 0.70,
+      vertexJitter: 0.18,
+      breakChildVariant: 'plastic-shard',
+    },
   },
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Metal barely deforms per hit — vertices warp slightly and the
+    // silhouette holds most of its size until late in the damage
+    // ramp.  At 5 HP and scalePerHit 0.85 the tile reaches ~44 %
+    // size on its fifth hit, then detaches as a metal-shard.
+    regen: { kind: 'none' },
+    dent: {
+      scalePerHit: 0.85,
+      vertexJitter: 0.06,
+      breakChildVariant: 'metal-shard',
+    },
   },
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1555,6 +1598,82 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       areaThreshold: 32 * 32,
       largeShardCollapseSize: 130,
       tintFloor: 0.55,
+      shrinkFactor: 0.88,
+    },
+  },
+  'plastic-shard': {
+    id: 'plastic-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_PLASTIC,
+    regen: { kind: 'none' },
+    // Self-bond only for now — plastic shards stick to other plastic
+    // shards via the standard rock-style cohesion.  No cross-material
+    // bonds with rock / glass / metal yet (kept narrow until we see
+    // how the dent system shakes out).
+    merge: {
+      attractedTo: 'none',
+      bondsWith: { include: ['plastic-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
+      defaultOutcome: 'compose',
+    },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 2, countMax: 4,
+      alphaMin: 0.4, alphaMax: 2.0,
+      childVariant: 'plastic-shard',
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+    },
+    // Warm amber particle puff matches the matte-polymer body colour.
+    onShatterParticles: { color: '#fbbf24', count: 5 },
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.60,                         // slightly higher floor — plastic stays warmer when dense
+      shrinkFactor: 0.88,
+    },
+  },
+  'metal-shard': {
+    id: 'metal-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_METAL,
+    regen: { kind: 'none' },
+    merge: {
+      attractedTo: 'none',
+      bondsWith: { include: ['metal-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
+      defaultOutcome: 'compose',
+    },
+    shatter: {
+      kind: 'powerlaw',
+      style: 'asteroid',
+      countMin: 2, countMax: 4,
+      alphaMin: 0.4, alphaMax: 2.0,
+      childVariant: 'metal-shard',
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+    },
+    // Cool slate particle puff matches the gunmetal body colour.
+    onShatterParticles: { color: '#cbd5e1', count: 5 },
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.50,                         // metal goes darker when packed dense
       shrinkFactor: 0.88,
     },
   },

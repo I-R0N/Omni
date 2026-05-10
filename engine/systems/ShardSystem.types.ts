@@ -26,6 +26,8 @@ export type ShardVariantId =
   // Mobile shard variants (dynamic grid, finite mass)
   | 'rock-shard'
   | 'glass-shard'
+  | 'plastic-shard'
+  | 'metal-shard'
   | 'nebula-shard';
 
 // ── Carrier EntityType ──────────────────────────────────────────────
@@ -281,6 +283,30 @@ export interface ShardVariantDef {
     /** Quadratic-falloff peak alpha (0..1) — multiplied by
      *  `entity.glowIntensity` to produce the rendered alpha. */
     peakAlpha: number;
+  };
+  /** Dent-in-place policy.  When set, the variant deforms in its grid
+   *  cell on each damage event instead of shattering — polygon
+   *  vertices are pushed inward (random magnitude × `vertexJitter` of
+   *  current size) and the entity's collision size shrinks by
+   *  `scalePerHit`.  When health hits 0 the tile detaches, becomes a
+   *  single mobile shard of `breakChildVariant` at the current dented
+   *  size, and skips the variant's `shatter` policy entirely.  Dent
+   *  variants do NOT regen.  Today: plastic-tile (deforms heavily),
+   *  metal-tile (deforms slowly).  Glass / indestructible / rock /
+   *  nebula tiles leave this unset and continue to shatter or
+   *  passthrough on death. */
+  dent?: {
+    /** Multiplier on entity.size and polygon scale per damage event.
+     *  Plastic ~0.7 (visibly squashes), metal ~0.85 (subtle). */
+    scalePerHit: number;
+    /** Per-vertex inward perturbation magnitude as a fraction of
+     *  current size.  Random offset is drawn each hit; cumulative.
+     *  Plastic ~0.18 (warps a lot), metal ~0.06 (barely warps). */
+    vertexJitter: number;
+    /** Variant id of the mobile shard spawned when the tile detaches.
+     *  Must be a member of ShardVariantId — typically the matching
+     *  '${material}-shard'. */
+    breakChildVariant: ShardVariantId;
   };
 }
 
