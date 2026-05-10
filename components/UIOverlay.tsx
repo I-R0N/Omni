@@ -13,6 +13,10 @@ interface UIOverlayProps {
   onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
+  onToggleLocalGravity?: () => void;
+  onToggleAttractorGravity?: () => void;
+  onToggleCollisions?: () => void;
+  onCycleShardPairInterval?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -31,6 +35,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaSet,
   onCycleTrailShape,
   onCycleTrailEmitMode,
+  onToggleLocalGravity,
+  onToggleAttractorGravity,
+  onToggleCollisions,
+  onCycleShardPairInterval,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -129,6 +137,67 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </button>
               </div>
 
+              {/* Player↔asteroid local-gravity toggle — pure on/off so the
+                  `lgrv` perf timer shows the isolated cost when off. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
+                <button
+                  onClick={onToggleLocalGravity}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
+                >
+                  {stats.localGravityEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* POI / attractor gravity toggle — gates PhysicsSystem.applyGravity.
+                  When off the master-list outer loop is skipped and the `grav`
+                  perf timer drops to zero. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grav</span>
+                <button
+                  onClick={onToggleAttractorGravity}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle attractor gravity scan (PhysicsSystem.applyGravity).  Outer loop walks the master entity list each frame."
+                >
+                  {stats.attractorGravityEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* SAT collision broadphase toggle — gates handleEntityCollisions.
+                  Off mode is GAME-BREAKING (projectiles fly through, tiles
+                  inert) — strictly for measuring isolated cost in the `coll`
+                  perf timer. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Coll</span>
+                <button
+                  onClick={onToggleCollisions}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
+                >
+                  {stats.collisionsEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* Shard ↔ shard pair-resolution interval — cycle
+                  AUTO → 1 → 2 → 4 → 8 → 16 → 32 → 64 → 128 → 256 →
+                  512 → 1028.  AUTO scales N with the previous step's
+                  peak shard-cell density; manual values pin the
+                  interval.  Higher N = cheaper but shards may
+                  overlap visibly for longer before separating. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
+                <button
+                  onClick={onCycleShardPairInterval}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it.  Higher = cheaper but laggier separation."
+                >
+                  {stats.shardPairInterval === 0
+                    ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
+                    : `every ${stats.shardPairInterval ?? 1}`}
+                </button>
+              </div>
+
               <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
               <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
               <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>
@@ -144,14 +213,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Broadphase</div>
                   <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
                   <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Timing (ms)</div>
-                  <div className="flex justify-between"><span>physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
-                  <div className="flex justify-between"><span>ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
-                  <div className="flex justify-between"><span>homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
-                  <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
-                  <div className="flex justify-between"><span>flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                  <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.physMiscMs)}</span></div>
+                  <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·rings</span><span className="text-white">{fmtMs(perf.explosionRingsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·weapons</span><span className="text-white">{fmtMs(perf.weaponsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·drops</span><span className="text-white">{fmtMs(perf.dropsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.logicMiscMs)}</span></div>
                   <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>

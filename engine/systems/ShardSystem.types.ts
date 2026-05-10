@@ -186,6 +186,53 @@ export interface ShardShatterPolicy {
   style?: 'asteroid' | 'nebula';
 }
 
+// ── Density compaction policy ───────────────────────────────────────
+// Generalizes the "merge clusters into fewer, denser-but-smaller
+// entities" mechanism across mobile shard families.  When
+// `density` is present and `enabled`, the variant participates in
+// density compaction — successful compose merges produce a single
+// output shard whose mass and damage value are the sum of inputs,
+// whose density tier is one above the larger input (capped at
+// `maxSteps`), and whose physical size is slightly smaller than the
+// larger input ("denser but smaller").  The same shrink path is
+// reused for single-input large-shard collapse when an entity's
+// size meets `largeShardCollapseSize`.
+//
+// Tier 0 must match the variant's pre-density visual exactly so
+// existing screenshots / videos read the same.  The tint ramp
+// darkens proportionally with tier, capped at `tintFloor` (RGB
+// multiplier at max tier) to keep shards readable against the
+// active background palette.
+
+export interface ShardDensityPolicy {
+  /** Variant participates in density compaction when true.  When
+   *  false (or `density` absent) compose follows the legacy
+   *  area-conserving grow path. */
+  enabled: boolean;
+  /** Maximum density tier a shard can climb to.  Once tier ===
+   *  maxSteps the entity refuses further density merges (the merge
+   *  pair stays separate); pull / cohesion / non-density merges
+   *  still apply. */
+  maxSteps: number;
+  /** Combined-area floor below which a density merge is skipped.
+   *  Stops trivial sub-pixel shards from cascading.  Compared
+   *  against (sizeA² + sizeB²) for compose, against (size²) alone
+   *  for large-shard collapse. */
+  areaThreshold: number;
+  /** Diameter at/above which a shard collapses inward in the next
+   *  ShardSystem tick (single-input density step).  Used to compress
+   *  freshly-spawned giant rocks into the field's denser-but-smaller
+   *  baseline. */
+  largeShardCollapseSize: number;
+  /** Per-channel RGB multiplier at max tier (e.g. 0.55 = 45 %
+   *  darker).  Tier 0 multiplier is always 1.0 (no change).
+   *  Linearly interpolates from 1 → tintFloor across tiers. */
+  tintFloor: number;
+  /** Output diameter = max(inputs).size × shrinkFactor.  Below 1
+   *  to enforce the "smaller-but-denser" rule.  Typical: 0.85–0.92. */
+  shrinkFactor: number;
+}
+
 // ── Variant definition ──────────────────────────────────────────────
 
 export interface ShardVariantDef {
@@ -210,6 +257,11 @@ export interface ShardVariantDef {
    *  RenderSystem fast-path gating flips from EntityType-keyed to
    *  variant-id-keyed in Stage 5. */
   renderCache?: 'none' | 'composition';
+  /** Density compaction policy.  Absent (or `enabled: false`) opts
+   *  the variant out of the smaller-but-denser merge / collapse
+   *  pipeline; legacy compose math continues to apply.  Today set
+   *  on rock-shard, glass-shard, nebula-shard. */
+  density?: ShardDensityPolicy;
 }
 
 // ── Map population entry ────────────────────────────────────────────

@@ -16,7 +16,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -71,7 +71,13 @@ export class GameEngine {
   private minimapDebounce: number = 0;
   private interactionCooldown: number = 0;
   private frameEntities: GameEntity[] = [];
-  
+
+  // Reusable viewport rect — refreshed once per frame in
+  // prepareFrameEntities and shared with EntityIndex / ShardSystem so
+  // graceful-cleanup picks can prefer offscreen candidates without
+  // allocating a fresh rect every frame.
+  private _viewportRect = { left: 0, right: 0, top: 0, bottom: 0 };
+
   private respawnTimer: number = 0;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
@@ -98,6 +104,29 @@ export class GameEngine {
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
   private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
+
+  // ── Performance toggle: player↔asteroid local gravity ───────────
+  // PhysicsSystem.applyLocalGravity is the bidirectional pull
+  // between the player ship and nearby asteroids (LOCAL_GRAVITY_
+  // CONSTANTS).  Defaults to ON to match production; the DBG
+  // panel's "LGrav" button flips it for measuring its cost in
+  // isolation.
+  private localGravityEnabled: boolean = true;
+  // ── Performance toggle: attractor gravity scan ──────────────────
+  // PhysicsSystem.applyGravity walks the master entity list every
+  // frame to apply each POI / attractor's gravity to in-range
+  // entities.  On populated maps the outer loop iterates ~22k
+  // tiles + shards + particles even when there are no attractors
+  // active.  DBG panel's "Grav" button flips it off so the cost
+  // can be measured in isolation.
+  private attractorGravityEnabled: boolean = true;
+  // ── Performance toggle: SAT collision broadphase ────────────────
+  // PhysicsSystem.handleEntityCollisions is the dynamic-grid
+  // broadphase + SAT polygon resolver.  Off mode disables the
+  // entire pass — projectiles fly through everything, ships clip,
+  // tiles aren't destructible — purely for measuring the isolated
+  // cost in the perf overlay.  Defaults to ON.
+  private collisionsEnabled: boolean = true;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -163,6 +192,30 @@ export class GameEngine {
   private perfCollisions     = new Float64Array(GameEngine.PERF_WINDOW);
   private perfFlowField      = new Float64Array(GameEngine.PERF_WINDOW);
   private perfDensity        = new Float64Array(GameEngine.PERF_WINDOW);
+  // Wall-clock timers for whole sim-phase calls — catches the work
+  // that lives outside the per-system sub-timers (entity compaction,
+  // flow-field nudge, weapon ticks, drop scan, ShardSystem, ...).
+  // The gap between simMs and the sum of sub-timers is the
+  // "untimed" budget per substep.
+  private perfShardSys       = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfUpdatePhysics  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfUpdateLogic    = new Float64Array(GameEngine.PERF_WINDOW);
+  // Finer-grained sim sub-timers — added to pin down where the
+  // updPhys/updLogic gaps live.  Each tracks one of the bigger
+  // chunks NOT covered by the existing sub-timers (physics / coll /
+  // shards / ai / homing / etc.).
+  private perfPhysMisc       = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfLogicMisc      = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfDrops          = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfExplosionRings = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfWeapons        = new Float64Array(GameEngine.PERF_WINDOW);
+  private lastUpdatePhysicsMs: number = 0;
+  private lastUpdateGameLogicMs: number = 0;
+  private lastPhysMiscMs: number = 0;
+  private lastLogicMiscMs: number = 0;
+  private lastDropsMs: number = 0;
+  private lastExplosionRingsMs: number = 0;
+  private lastWeaponsMs: number = 0;
   private perfSimIdx: number = 0;   // shared write index for every sim-side buffer
   private perfSimFilled: number = 0;
   // Render timings (one sample per rendered frame — may be written in menu
@@ -246,6 +299,54 @@ export class GameEngine {
       : TrailEmitMode.THRUST;
   }
 
+  /**
+   * Toggle the player↔asteroid local-gravity scan on/off.  When off,
+   * `PhysicsSystem.applyLocalGravity` is skipped entirely and the
+   * `lgrv` perf timer should drop to zero.
+   */
+  public toggleLocalGravity() {
+    this.localGravityEnabled = !this.localGravityEnabled;
+    this.physics.localGravityEnabled = this.localGravityEnabled;
+  }
+
+  /**
+   * Toggle the attractor gravity pass on/off.  When off,
+   * `PhysicsSystem.applyGravity` is skipped entirely and the
+   * `grav` perf timer should drop to zero.  Used to measure the
+   * cost of the full-master-list outer loop in isolation.
+   */
+  public toggleAttractorGravity() {
+    this.attractorGravityEnabled = !this.attractorGravityEnabled;
+    this.physics.attractorGravityEnabled = this.attractorGravityEnabled;
+  }
+
+  /**
+   * Toggle the SAT collision broadphase on/off.  Off mode is
+   * game-breaking (projectiles fly through, tiles are inert) —
+   * it's strictly a perf measurement aid for the `coll` timer.
+   */
+  public toggleCollisions() {
+    this.collisionsEnabled = !this.collisionsEnabled;
+    this.physics.collisionsEnabled = this.collisionsEnabled;
+  }
+
+  /**
+   * Cycle the shard ↔ shard pair-resolution interval through
+   * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 4 → 8 → 16 →
+   * 32 → 64 → 128 → 256 → 512 → 1028).  AUTO (= 0) lets
+   * PhysicsSystem pick N from the previous step's peak collision-
+   * cell density; numeric values pin the interval.  The effective
+   * N (whether AUTO or manual) is mirrored into EngineStats so the
+   * DBG panel can render `auto (3)` or `every 256` accordingly.
+   */
+  public cycleShardPairInterval() {
+    const order = SHARD_PAIR_CONSTANTS.CYCLE_ORDER;
+    const cur = this.physics.shardPairFrameInterval;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.physics.shardPairFrameInterval = next;
+  }
+
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
@@ -270,6 +371,10 @@ export class GameEngine {
     // neighbourhood-blend regen path (today: nebula-tile only).
     this.shards.setRegenAdapter(this.nebulas);
     this.entityIndex = new EntityIndex();
+    // Wire the EntityIndex into ShardSystem so the large-shard-collapse
+    // pass can prefer offscreen candidates (graceful cleanup — never
+    // pop a shard out of existence in the player's view).
+    this.shards.setEntityIndex(this.entityIndex);
     this.flowField = new FlowFieldGrid();
 
     this.player = {
@@ -386,6 +491,11 @@ export class GameEngine {
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
+      localGravityEnabled: this.localGravityEnabled,
+      attractorGravityEnabled: this.attractorGravityEnabled,
+      collisionsEnabled: this.collisionsEnabled,
+      shardPairInterval: this.physics.shardPairFrameInterval,
+      shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -484,6 +594,11 @@ export class GameEngine {
       nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
+      localGravityEnabled: this.localGravityEnabled,
+      attractorGravityEnabled: this.attractorGravityEnabled,
+      collisionsEnabled: this.collisionsEnabled,
+      shardPairInterval: this.physics.shardPairFrameInterval,
+      shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -515,8 +630,16 @@ export class GameEngine {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
+        // Wall-clock the two top-level sim phases so the perf overlay
+        // can show the gap between summed sub-timers and total sim
+        // time.  Untimed work (entity compaction, flow-field nudge,
+        // weapon ticks, drop scan, etc.) shows up as the difference.
+        const tPhys0 = performance.now();
         try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
+        const tLogic0 = performance.now();
         try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
         // Push per-substep perf samples.  Every timed sub-phase was written
         // to instance fields on its owning system during the two calls above;
         // the recorder just reads and ring-buffers them in one shot.
@@ -555,6 +678,22 @@ export class GameEngine {
       // master entity list.  Rebuilt once per sim substep; consumers must
       // not cache these references across steps.
       this.entityIndex.rebuild(this.currentMap.entities);
+
+      // Refresh the camera-aligned viewport rect so the graceful-cleanup
+      // path inside ShardSystem can prefer offscreen candidates.  Reuses
+      // the same halfW/halfH math as RenderSystem so visibility
+      // partitioning and on-screen rendering agree at the seam.  The
+      // padding (CAMERA_CONSTANTS.CULL_MARGIN) keeps shards that are
+      // about-to-enter-frame on the on-screen side of the partition.
+      const zoom = this.camera.zoom || 1;
+      const halfW = (window.innerWidth / 2) / zoom;
+      const halfH = (window.innerHeight / 2) / zoom;
+      const margin = CAMERA_CONSTANTS.CULL_MARGIN;
+      this._viewportRect.left   = this.camera.position.x - halfW - margin;
+      this._viewportRect.right  = this.camera.position.x + halfW + margin;
+      this._viewportRect.top    = this.camera.position.y - halfH - margin;
+      this._viewportRect.bottom = this.camera.position.y + halfH + margin;
+      this.entityIndex.setViewportRect(this._viewportRect);
 
       // Mirror the latest entity-type counts into the perf snapshot — the
       // index just walked the full list anyway, so this is O(0) extra work.
@@ -651,16 +790,13 @@ export class GameEngine {
       //   forward at target.
       //
       //   perpDeficit: how much velocity the asteroid has *perpendicular* to
-      //   the flow — ramps up whenever something (collisions, mutual gravity,
-      //   bond cohesion with a neighbour in a different flow cell) has
-      //   dragged it off its streamline.  Without this term, an asteroid at
-      //   the target parallel speed dropped to urgency = 1 regardless of
-      //   how much sideways drift it had accumulated, so the perpendicular
-      //   component of mutual gravity went essentially uncontested and
-      //   asteroids slowly pulled each other into dense packs that still
-      //   drifted at target speed together.  Keeping the perp-deficit hot
-      //   makes the correction actively damp sideways motion, so packs
-      //   spread back out onto the flow lines.
+      //   the flow — ramps up whenever something (collisions, bond cohesion
+      //   with a neighbour in a different flow cell) has dragged it off its
+      //   streamline.  Without this term, an asteroid at the target parallel
+      //   speed dropped to urgency = 1 regardless of how much sideways drift
+      //   it had accumulated.  Keeping the perp-deficit hot makes the
+      //   correction actively damp sideways motion, so packs spread back
+      //   out onto the flow lines.
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
@@ -687,73 +823,6 @@ export class GameEngine {
           applyFlow(d);
       }
 
-      // Mild mutual gravity — pulls nearby asteroids and collectible drops together,
-      // causing gradual clustering as they drift through the flow field.
-      // Glass shards are purely debris and excluded.
-      // Spatial grid (cell = interaction radius) reduces O(n²) pairs to O(n·k)
-      // where k is the local candidate density — typically 1–5 vs. all candidates.
-      const GRAV_G        = 2.5;
-      const GRAV_RANGE    = 120;
-      const GRAV_RANGE_SQ = GRAV_RANGE * GRAV_RANGE;
-      const GRAV_MIN_SQ   = 12 * 12;
-
-      const gravCandidates: GameEntity[] = [this.player];
-      for (let i = 0; i < asteroids.length; i++) gravCandidates.push(asteroids[i]);
-      for (let i = 0; i < this.activeDrops.length; i++) {
-          const d = this.activeDrops[i];
-          if (d.active && d.dropType && d.dropType !== 'glass') gravCandidates.push(d);
-      }
-
-      // Bucket candidate indices by grid cell — cell indices wrap modulo
-      // the grid count so entities near a seam end up in the same bucket
-      // as their counterparts on the far side (pair reasoning below uses
-      // toroidal delta to compute the actual interaction force).
-      const GRAV_GRID_COLS = Math.ceil(MAP_WIDTH  / GRAV_RANGE);
-      const GRAV_GRID_ROWS = Math.ceil(MAP_HEIGHT / GRAV_RANGE);
-      const gravCellKey = (cx: number, cy: number) => {
-          const wx = ((cx % GRAV_GRID_COLS) + GRAV_GRID_COLS) % GRAV_GRID_COLS;
-          const wy = ((cy % GRAV_GRID_ROWS) + GRAV_GRID_ROWS) % GRAV_GRID_ROWS;
-          return (wx << 16) | (wy & 0xFFFF);
-      };
-      const gravGrid = new Map<number, number[]>();
-      for (let i = 0; i < gravCandidates.length; i++) {
-          const e = gravCandidates[i];
-          const cx = Math.floor(e.position.x / GRAV_RANGE);
-          const cy = Math.floor(e.position.y / GRAV_RANGE);
-          let cell = gravGrid.get(gravCellKey(cx, cy));
-          if (!cell) { cell = []; gravGrid.set(gravCellKey(cx, cy), cell); }
-          cell.push(i);
-      }
-
-      // Check only same + 8 neighbouring cells; j > i ensures each pair is processed once
-      for (let i = 0; i < gravCandidates.length; i++) {
-          const a = gravCandidates[i];
-          const acx = Math.floor(a.position.x / GRAV_RANGE);
-          const acy = Math.floor(a.position.y / GRAV_RANGE);
-          for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
-              for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
-                  const cell = gravGrid.get(gravCellKey(ncx, ncy));
-                  if (!cell) continue;
-                  for (let k = 0; k < cell.length; k++) {
-                      const j = cell[k];
-                      if (j <= i) continue;
-                      const b = gravCandidates[j];
-                      const dx = wrapDeltaX(a.position.x, b.position.x);
-                      const dy = wrapDeltaY(a.position.y, b.position.y);
-                      const distSq = dx * dx + dy * dy;
-                      if (distSq > GRAV_RANGE_SQ) continue;
-                      const effSq = Math.max(distSq, GRAV_MIN_SQ);
-                      const f    = GRAV_G / effSq;
-                      const fx   = dx * f;
-                      const fy   = dy * f;
-                      a.velocity.x += fx * dt;
-                      a.velocity.y += fy * dt;
-                      b.velocity.x -= fx * dt;
-                      b.velocity.y -= fy * dt;
-                  }
-              }
-          }
-      }
 
       // Stage 4: stick-bond + nebula gravity-merge are owned by
       // ShardSystem.update (called from updateGameLogic alongside
@@ -958,7 +1027,13 @@ export class GameEngine {
     // policy decision (delay / threshold / pull-range / etc.).
     if (this.currentMap) {
         this.shards.setMergeContext(this.activeDrops, this.currentMap.type);
-        this.shards.update(this.currentMap.entities, dt, this.physics);
+        // Pace the shard merge / cohesion passes to the same cadence
+        // as PhysicsSystem.resolveShardPairs (computed inside the
+        // physics.update call earlier this substep).  Without this,
+        // bond formation + cohesion run every frame while separation
+        // runs only every Nth, and dense clusters collapse to a
+        // single point on high-N ShPair settings.
+        this.shards.update(this.currentMap.entities, dt, this.physics, this.physics.lastRunShardPair);
     }
 
     // Tick down regenPopTimer on tiles
@@ -992,7 +1067,9 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
+    const tRings = performance.now();
     this.updateExplosionRings();
+    this.lastExplosionRingsMs = performance.now() - tRings;
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -1202,9 +1279,11 @@ export class GameEngine {
         : 0;
 
     // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    const tWeapons = performance.now();
     if (this.currentMap) {
         this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
+    this.lastWeaponsMs = performance.now() - tWeapons;
 
     // Refresh the candidate index before projectile post-processing: the
     // physics / AI / burst pass above may have spawned new projectiles or
@@ -1249,6 +1328,7 @@ export class GameEngine {
     // Proximity collection + magnetic pull — single pass over activeDrops.
     // Ammo shards get a magnet accelerator; health hearts collect on contact
     // only (static pickup).
+    const tDrops = performance.now();
     if (!this.player.isExploding) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const MAGNET_RANGE_SQ = 150 * 150;
@@ -1281,6 +1361,7 @@ export class GameEngine {
         if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
+    this.lastDropsMs = performance.now() - tDrops;
 
 
     this.camera.position.x = this.player.position.x;
@@ -1983,6 +2064,28 @@ export class GameEngine {
       this.perfCollisions[idx]    = this.physics.lastCollisionsMs;
       this.perfFlowField[idx]     = this.flowField.lastFlushMs;
       this.perfDensity[idx]       = this.physics.lastMaxCellDensity;
+      this.perfShardSys[idx]      = this.shards.lastUpdateMs;
+      this.perfUpdatePhysics[idx] = this.lastUpdatePhysicsMs;
+      this.perfUpdateLogic[idx]   = this.lastUpdateGameLogicMs;
+      this.perfDrops[idx]         = this.lastDropsMs;
+      this.perfExplosionRings[idx] = this.lastExplosionRingsMs;
+      this.perfWeapons[idx]       = this.lastWeaponsMs;
+      // physMisc = updPhys − everything we already time inside it
+      // (physics, ai, gravity, lgrv, coll, flow).  Captures the
+      // surrounding GameEngine glue: entity compaction, asteroid
+      // census, flow nudge over asteroids + drops, etc.
+      const physMisc = Math.max(0, this.lastUpdatePhysicsMs
+          - this.physics.lastUpdateMs - this.ai.lastUpdateMs - this.flowField.lastFlushMs);
+      this.perfPhysMisc[idx] = physMisc;
+      // logicMisc = updLogic − the explicit sub-timers we now track.
+      const logicMisc = Math.max(0, this.lastUpdateGameLogicMs
+          - this.shards.lastUpdateMs
+          - this.lastExplosionRingsMs
+          - this.lastWeaponsMs
+          - this.lastDropsMs
+          - this.projectiles.lastHomingMs
+          - this.projectiles.lastLightningMs);
+      this.perfLogicMisc[idx] = logicMisc;
       const next = idx + 1;
       this.perfSimIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfSimFilled < GameEngine.PERF_WINDOW) this.perfSimFilled++;
@@ -2035,6 +2138,14 @@ export class GameEngine {
           gravityMs:      GameEngine.ringAvg(this.perfGravity,      simN),
           localGravityMs: GameEngine.ringAvg(this.perfLocalGravity, simN),
           collisionsMs:   GameEngine.ringAvg(this.perfCollisions,   simN),
+          shardSysMs:     GameEngine.ringAvg(this.perfShardSys,     simN),
+          updatePhysicsMs: GameEngine.ringAvg(this.perfUpdatePhysics, simN),
+          updateLogicMs:  GameEngine.ringAvg(this.perfUpdateLogic,  simN),
+          physMiscMs:     GameEngine.ringAvg(this.perfPhysMisc,     simN),
+          logicMiscMs:    GameEngine.ringAvg(this.perfLogicMisc,    simN),
+          dropsMs:        GameEngine.ringAvg(this.perfDrops,        simN),
+          explosionRingsMs: GameEngine.ringAvg(this.perfExplosionRings, simN),
+          weaponsMs:      GameEngine.ringAvg(this.perfWeapons,      simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),

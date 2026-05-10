@@ -343,6 +343,34 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // ── Density compaction state ────────────────────────────────────────────
+  // Tracks how many density-merge steps a shard has accumulated.  0 (or
+  // unset) = baseline visual; tier N renders proportionally darker via
+  // the per-variant tint ramp.  Bumped by ShardSystem.composeEntities and
+  // by the large-shard-collapse pass; capped at the variant's
+  // density.maxSteps.  Tier-driven render cache invalidation: any site
+  // mutating this MUST also clear `densityCachedTint` and (for nebula
+  // variants) `nebulaCachedTinted`/`nebulaTintedKey`.
+  densityTier?: number;
+  // Per-entity render cache for the resolved density-tinted hex.  Built
+  // lazily by RenderSystem on first draw at the current tier; invalidated
+  // by ShardSystem at every site that mutates densityTier.  Skips the
+  // per-frame RGB multiply when the tier hasn't changed.
+  densityCachedTint?: string;
+
+  // Generic merge fade-out timer.  Set on the smaller party of a
+  // density-compaction merge so it dissolves over a short window
+  // instead of vanishing instantly.  Unlike `nebulaFadeTimer` (which
+  // gates re-entry into the static grid + nebula-specific render alpha),
+  // this is a uniform fade visible on rock / glass / nebula shards
+  // alike.  PhysicsSystem ticks it down each substep; on reaching 0
+  // the entity goes inactive.  RenderSystem multiplies alpha by the
+  // remaining-fraction during the window.  `mergeFadeDuration` records
+  // the value the timer started at so the renderer can compute the
+  // alpha curve without keeping a separate constant lookup.
+  mergeFadeTimer?: number;
+  mergeFadeDuration?: number;
+
   // Blended hex color of all absorbed power-up weapons; drives glow tinting
   // in the renderer.  Computed/blended in GameEngine when a power-up is
   // absorbed; undefined means no power-up content.
@@ -517,6 +545,27 @@ export interface PerfSnapshot {
   gravityMs: number;      // PhysicsSystem.applyGravity (attractor fields)
   localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
   collisionsMs: number;   // PhysicsSystem.handleEntityCollisions (broadphase + SAT)
+  // Wall time of ShardSystem.update — merge broadphase + bonds +
+  // density compaction.  Lives in updateGameLogic, NOT physicsMs.
+  shardSysMs: number;
+  // Wall time of the whole updatePhysics call (includes physicsMs +
+  // entity compaction + flow-field nudge + asteroid census).  Gap
+  // vs. summed sub-timers reveals untimed work.
+  updatePhysicsMs: number;
+  // Wall time of the whole updateGameLogic call (includes shardSysMs
+  // + drops + weapons + projectile lifetime + wave check + ...).
+  updateLogicMs: number;
+  // Residual: updPhys minus the explicit physics / ai / flow sub-
+  // timers.  Captures the GameEngine-level glue inside updatePhysics
+  // (entity compaction, asteroid census, flow-field nudge over
+  // asteroids+drops).
+  physMiscMs: number;
+  // Residual: updLogic minus the explicit logic sub-timers.  Captures
+  // the input/HUD/wave-check/projectile-trail/damage-text glue.
+  logicMiscMs: number;
+  dropsMs: number;
+  explosionRingsMs: number;
+  weaponsMs: number;
   renderMs: number;
   // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
   // debug overlay alongside renderMs so the contribution of the nebula
@@ -564,6 +613,21 @@ export interface EngineStats {
   nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
+  // ── Performance toggle state (debug menu) ─────────────────────
+  // Mirrors GameEngine's perf-toggle fields so the DBG panel can
+  // render the live state.  All default true (production) and flip
+  // off for isolated cost measurement in the perf overlay.
+  localGravityEnabled?: boolean;
+  attractorGravityEnabled?: boolean;
+  collisionsEnabled?: boolean;
+  // Shard-shard pair resolution interval.  The manual setting (0 =
+  // AUTO; ≥1 = manual override).  Cycled via the DBG panel's
+  // "ShPair" button.
+  shardPairInterval?: number;
+  // Effective interval used by the most recent physics step.  Mirrors
+  // shardPairInterval when the manual value is ≥1; in AUTO mode this
+  // tracks the density-scaled value selected by PhysicsSystem.
+  shardPairEffectiveInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
