@@ -44,7 +44,11 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
     case WeaponType.SHOTGUN:
       return { ...config, count: 12, spread: 25, pierce: 2 };
     case WeaponType.BOUNCER:
-      return { ...config, count: 3, spread: 30 };
+      // Omnidirectional nova — 8 beams equally spaced around 360°
+      // (every 45°).  ProjectileSystem.spawn handles the equal-angle
+      // ring layout when omniDirectional is set.  Recoil zeroed since
+      // forces cancel in all directions.
+      return { ...config, count: 8, spread: 360, omniDirectional: true, recoil: 0 };
     case WeaponType.LIGHTNING:
       // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
       // ProjectileSystem.spawn copies these onto the projectile at spawn.

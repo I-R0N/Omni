@@ -173,6 +173,11 @@ export interface WeaponConfig {
   // the projectile so RenderSystem can pick a custom visual (today only
   // the charged Blaster fireball uses it).
   isCharged?: boolean;
+  // When set with count > 1, ProjectileSystem.spawn distributes the
+  // projectiles in an equal-angle ring around the aim direction (every
+  // 360°/count) instead of a forward-cone fan.  Used by the charged
+  // Bouncer's omnidirectional nova.
+  omniDirectional?: boolean;
   homing?: boolean; // Does it track targets?
   // Per-weapon homing turn-rate multiplier (1.0 = full tracking).  Charged
   // Homing volleys reduce this so the missiles fan out rather than all

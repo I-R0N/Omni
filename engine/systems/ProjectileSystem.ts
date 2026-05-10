@@ -53,10 +53,19 @@ export class ProjectileSystem {
     }
 
     const halfSpread = (config.spread * (Math.PI / 180)) / 2;
+    // Omnidirectional layout: count projectiles at equal angular spacing
+    // around 360° starting at the aim direction.  Used by the charged
+    // Bouncer nova; falls through to the standard fan when omniDirectional
+    // is unset.
+    const omniStep = config.omniDirectional && config.count > 1
+      ? (Math.PI * 2) / config.count
+      : 0;
 
     for (let i = 0; i < config.count; i++) {
       let currentAngle = angle;
-      if (config.count > 1) {
+      if (omniStep > 0) {
+        currentAngle = angle + omniStep * i;
+      } else if (config.count > 1) {
         const step = (halfSpread * 2) / (config.count - 1);
         currentAngle = (angle - halfSpread) + (step * i);
       } else if (config.spread > 0) {

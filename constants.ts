@@ -769,8 +769,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
     color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
     size: 6,
-    count: 1,
-    spread: 2,
+    count: 3,          // 3-beam forward fan
+    spread: 30,        // ±15° cone
     recoil: 0.5,
     pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
