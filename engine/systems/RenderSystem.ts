@@ -1140,16 +1140,15 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      // Only glass-family static tiles (glass / plastic / metal /
-      // indestructible) take the hex-sprite fast path.  Rock-tile and
-      // mobile shards fall through to the generic polygon/sprite
-      // render below — rock-tile renders with the asteroid solid-fill
-      // aesthetic via the slow-path else branch.
+      // Only glass-family static tiles (glass / indestructible) take the
+      // hex-sprite fast path.  Plastic / metal use the material-tile slow-
+      // path branch (variant color + per-vertex dent jitter).  Rock-tile
+      // and mobile shards also fall through to the polygon/sprite render
+      // below — rock-tile renders with the asteroid solid-fill aesthetic
+      // via the slow-path else branch.
       const isGlassFamilyStaticTile =
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
-            || entity.shardVariant === 'plastic-tile'
-            || entity.shardVariant === 'metal-tile'
             || entity.shardVariant === 'indestructible-tile');
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
@@ -1594,9 +1593,15 @@ export class RenderSystem {
             const isGlassFamilyTile =
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
               && (entity.shardVariant === 'glass-tile'
-                  || entity.shardVariant === 'plastic-tile'
-                  || entity.shardVariant === 'metal-tile'
                   || entity.shardVariant === 'indestructible-tile');
+            // Material tiles (plastic / metal) — solid-color polygon fill
+            // with per-variant alpha.  Distinct from glass-family because
+            // they will dent in place (vertex jitter + scale-down) instead
+            // of shattering.
+            const isMaterialTile =
+              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+              && (entity.shardVariant === 'plastic-tile'
+                  || entity.shardVariant === 'metal-tile');
             if (isGlassFamilyTile) {
                 // Glass-family static tiles render with the glass-tile
                 // aesthetic (translucent fill + edge stroke + specular
@@ -1690,13 +1695,62 @@ export class RenderSystem {
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
-                // Damage cracks for multi-HP variants (plastic / metal).
-                // renderCracks early-returns at ≥95 % health, so undamaged
-                // tiles pay only one property read — same pattern asteroids
-                // use for their damage visualisation.
+                // Damage cracks (no-op for single-HP glass-tile; included
+                // for parity with the historic multi-HP glass-family render
+                // path).  renderCracks early-returns at ≥95 % health.
                 this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
 
                 } // end else (glass tile — paired with regen ghost if/else above)
+
+            } else if (isMaterialTile) {
+                // ── Material tile (plastic / metal) ────────────────────────
+                // Solid-color polygon fill at variant-specific alpha.  No
+                // glass overlay, no specular dot, no proximity tint — these
+                // are matte / metallic surfaces, not translucent glass.  The
+                // polygon shape is whatever the dent system has perturbed
+                // entity.polygonPoints into; the renderer just draws it.
+                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+                const fillAlpha =
+                    entity.shardVariant === 'plastic-tile' ? 0.6 : 1.0;
+
+                // ── Regen ghost (parity with glass-family ghost outline) ──
+                if (!entity.active && entity.regenProgress !== undefined) {
+                    const delay = 12;
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    // Layer 1 — flat-color fill
+                    buildPath();
+                    ctx.globalAlpha = isFlash ? 0.95 : fillAlpha;
+                    ctx.fillStyle = isFlash ? '#ffffff' : entity.color;
+                    ctx.fill();
+
+                    // Layer 2 — outline.  Plastic uses a soft warm edge,
+                    // metal a brighter chrome edge for the hard-surface
+                    // read; both come from STRUCTURE_VARIANTS borderColor
+                    // mirrored on the entity at spawn time (TileGenerator
+                    // already 80 %-rolls borderColor into entity.color, so
+                    // we use a fixed light tone here for the outline).
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = isFlash
+                        ? '#ffffff'
+                        : (entity.shardVariant === 'plastic-tile' ? '#fbbf24' : '#e2e8f0');
+                    ctx.lineWidth = isFlash ? 2.5 : 1.5;
+                    ctx.stroke();
+
+                    // Damage cracks for multi-HP variants — early-returns
+                    // at ≥95 % health so undamaged tiles cost nothing.
+                    this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
+                }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
                 // Non-glass-family static tile (today: rock-tile) that's
