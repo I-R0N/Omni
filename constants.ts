@@ -743,8 +743,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     pierce: 2,
     burstCount: 3,
     burstDelay: 0.04,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 2,
+    chargedAmmoCost: 3,
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -759,8 +759,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
     pierce: 1,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 4,
+    chargedAmmoCost: 6,
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -776,8 +776,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 6,
+    chargedAmmoCost: 9,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -792,8 +792,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 3,
     recoil: 0.3,
     pierce: 0,         // stops on first hit, then chains
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 8,
+    chargedAmmoCost: 12,
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -809,8 +809,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 0,
     homing: true,
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 10,
+    chargedAmmoCost: 15,
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
@@ -828,8 +828,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     explosionRadius: 110,   // world units of radial AoE on impact
     explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
-    ammoCost: 1,
-    chargedAmmoCost: 2,
+    ammoCost: 12,
+    chargedAmmoCost: 18,
   },
 };
 
