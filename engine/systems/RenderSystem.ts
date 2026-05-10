@@ -1736,10 +1736,16 @@ export class RenderSystem {
                     }
                     ctx.globalAlpha = 1.0;
                 } else {
-                    // Layer 1 — flat-color fill
+                    // Layer 1 — flat-color fill.  Metal sticks to the
+                    // gray palette even on hit flash; plastic keeps a
+                    // bright white flash since warm-orange + white reads
+                    // as polymer plastic, not metal.
                     buildPath();
                     ctx.globalAlpha = isFlash ? 0.95 : fillAlpha;
-                    ctx.fillStyle = isFlash ? '#ffffff' : entity.color;
+                    const flashColor = entity.shardVariant === 'metal-tile'
+                        ? '#cbd5e1' // slate-300 — bright but still gray
+                        : '#ffffff';
+                    ctx.fillStyle = isFlash ? flashColor : entity.color;
                     ctx.fill();
 
                     // Layer 2 — selective outline.  Skip edges that are
@@ -1747,12 +1753,13 @@ export class RenderSystem {
                     // endpoint) and (b) butted against a neighbour tile.
                     // Draw deformed edges and cluster-boundary edges so
                     // the silhouette reads as one continuous cluster
-                    // outline with internal dents visible.  Plastic uses
-                    // a soft warm edge, metal a brighter chrome edge.
+                    // outline with internal dents visible.  Outline color
+                    // matches the corresponding shard's outline
+                    // (rocky-asteroid branch uses rgba(0,0,0,0.3)) so
+                    // detaching reads as continuous, not "tile in one
+                    // style, shard in another."
                     ctx.globalAlpha = 1.0;
-                    ctx.strokeStyle = isFlash
-                        ? '#ffffff'
-                        : (entity.shardVariant === 'plastic-tile' ? '#fbbf24' : '#e2e8f0');
+                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
                     ctx.lineWidth = isFlash ? 2.5 : 1.5;
 
                     const pts = entity.polygonPoints;
@@ -1914,11 +1921,16 @@ export class RenderSystem {
                     // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
                     // Density tier darkens the base colour; merge-fade alpha
                     // multiplies every layer so the dissolve is uniform.
+                    // Metal stays on the gray palette even on hit flash
+                    // (no white) to match the metal-tile rule.
                     const densityHex = densityTintForRender(entity, entity.color);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
+                    const flashColor = entity.shardVariant === 'metal-shard'
+                        ? '#cbd5e1'
+                        : '#ffffff';
                     buildPath();
                     ctx.globalAlpha = 1.0 * fadeAlpha;
-                    ctx.fillStyle   = isFlash ? '#ffffff' : densityHex;
+                    ctx.fillStyle   = isFlash ? flashColor : densityHex;
                     ctx.fill();
 
                     if (glowColor && !isFlash) {
