@@ -1352,10 +1352,14 @@ const TILE_REGEN_POP_BURST = {
 // sizeMin = 20 matches the per-map rock-shard minSize universally
 // (see MAP_POPULATION) so the asteroid-style shatter's MIN_SIZE
 // gate is consistent with the spawn population.
+// Glass shards: always 3 vertices.  Sharp, narrow-angled triangles
+// — high angle jitter pushes vertices off-axis and high radius
+// variance makes some sides long and others short, producing
+// elongated splinter shapes typical of broken glass.
 const GLASS_SHARD_SPAWN_SHAPE = {
   sizeMin: 20, sizeMax: 200,
-  polyVerticesMin: 4, polyVerticesMax: 6,    // blocky
-  angleJitter: 0.25, radiusMin: 0.60, radiusRange: 0.55,
+  polyVerticesMin: 3, polyVerticesMax: 3,
+  angleJitter: 0.5, radiusMin: 0.45, radiusRange: 0.75,
   sizeToMass: (d: number) => d,
 };
 
@@ -1397,10 +1401,14 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
   spawnsDropsOnDeath: true,
 };
 
+// Rock shards: always 5 vertices.  Moderate jitter + moderate
+// radius variance for an organic, irregular silhouette — reads as
+// stone without looking like cut glass (3 verts) or machined metal
+// (6 verts).
 const SHARD_SPAWN_SHAPE_ROCK = {
   sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
-  polyVerticesMin: 5, polyVerticesMax: 7,    // jagged
-  angleJitter: 0.8, radiusMin: 0.55, radiusRange: 0.70,
+  polyVerticesMin: 5, polyVerticesMax: 5,
+  angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
   sizeToMass: (d: number) => d,
 };
 
@@ -1415,25 +1423,24 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   sizeToMass: () => 0.01,
 };
 
-// Plastic shards — softer than rock, lighter mass.  Slightly smoother
-// vertex set (5–6 verts, lower jitter) so the silhouette reads as
-// extruded polymer rather than fractured stone.  Tile-detached shards
-// inherit the dented-tile polygon at break time, so these spawn-shape
-// numbers only matter for shatter children + any future free-spawn.
+// Plastic shards: always 4 vertices.  Near-square — low angle
+// jitter keeps vertices close to a regular quadrilateral and low
+// radius variance keeps side lengths similar, producing
+// ~70–90° angles consistent with stamped / extruded polymer.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
-  polyVerticesMin: 5, polyVerticesMax: 6,
-  angleJitter: 0.4, radiusMin: 0.65, radiusRange: 0.55,
+  polyVerticesMin: 4, polyVerticesMax: 4,
+  angleJitter: 0.15, radiusMin: 0.85, radiusRange: 0.20,
   sizeToMass: (d: number) => d * 0.7,
 };
 
-// Metal shards — denser than rock, sharper edges.  6–7 verts with
-// modest jitter for an angular gunmetal look; mass scales above
-// rock so striker impulse reads as "hitting steel."
+// Metal shards: always 6 vertices.  Low jitter + low radius
+// variance for a clean, hex-like silhouette — reads as machined
+// or stamped metal rather than fractured stone.
 const SHARD_SPAWN_SHAPE_METAL = {
   sizeMin: 20, sizeMax: 120,
-  polyVerticesMin: 6, polyVerticesMax: 7,
-  angleJitter: 0.5, radiusMin: 0.70, radiusRange: 0.55,
+  polyVerticesMin: 6, polyVerticesMax: 6,
+  angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
   sizeToMass: (d: number) => d * 1.3,
 };
 

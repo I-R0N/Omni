@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -125,20 +125,23 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
     ): GameEntity {
-    // Irregular convex-ish polygon: 9-12 points with varied radius and
-    // slight angular jitter.  Variation is capped at ±25 % of base radius
-    // so the shape stays approximately convex (safe for SAT collision).
-    // Points are generated in angular order and sorted to guarantee correct
-    // polygon winding regardless of jitter direction.
-    const numPoints = 9 + Math.floor(Math.random() * 4); // 9–12
-    const baseR    = (size / 2) * 0.82;
+    // Free-spawned rock-shards use the variant's spawn config so the
+    // free-floating rocks read the same as tile-detached rock-shards
+    // (always 5 verts, organic / irregular silhouette).  Vertex count,
+    // angle jitter, and radius variance all come from
+    // SHARD_VARIANTS['rock-shard'].spawn — see constants.ts.
+    const spawn = SHARD_VARIANTS['rock-shard'].spawn;
+    const numPoints = spawn.polyVerticesMin
+      + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
         const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.65;
+        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
+        const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
         rawPts.push({
             angle: baseAngle + angleJitter,
-            r:     baseR * (0.75 + Math.random() * 0.5), // 75 %–125 % of base
+            r:     baseR * radiusFrac,
         });
     }
     rawPts.sort((a, b) => a.angle - b.angle);

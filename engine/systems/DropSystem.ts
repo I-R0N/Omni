@@ -280,20 +280,11 @@ export class DropSystem {
         speed = 0.4 + Math.random() * 1.5;
       }
 
-      // Tile shard polygon — 4–6 vertices, low angular jitter, moderate
-      // radius variation.  More blocky/faceted than asteroid shards (which
-      // use 5–7 pts with higher jitter) to hint at their manufactured origin.
-      const numPoints = 4 + Math.floor(Math.random() * 3);
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPoints; j++) {
-        const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
+      // Glass-shard polygon comes from the variant's spawn config —
+      // always 3 vertices, sharp/narrow angles (see
+      // SHARD_SPAWN_SHAPE in constants.ts).
       const size = radius * 4; // diameter; slightly larger so physics feel solid
+      const pts: Vector2[] = this.generateMaterialShardPolygon('glass-shard', size);
       entities.push({
         id:            nextId('tile_shard'),
         type:           EntityType.STRUCTURE,
@@ -414,15 +405,12 @@ export class DropSystem {
       // diameter (= 2 × avgR), so heavier deformation produces
       // proportionally smaller shards while a barely-dented tile
       // produces shards near the nominal sizeFraction × original size.
-      // Polygon scale factor brings the dented polygon's max radius
-      // down to the target half-size, preserving the dent shape
-      // character at the smaller scale.
+      // Polygon shape is now generated from the variant's spawn config
+      // (fixed vertex count per material — plastic=4, metal=6, etc.)
+      // so detached shards have a consistent material silhouette
+      // instead of inheriting the dented tile's hex polygon.
       const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
-      const targetHalf = targetSize / 2;
-      const polyScale = targetHalf / dentedMaxR;
-      const scaledPts: Vector2[] | undefined = tile.polygonPoints
-        ? tile.polygonPoints.map(p => ({ x: p.x * polyScale, y: p.y * polyScale }))
-        : undefined;
+      const scaledPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
 
       const mass = variantDef.spawn.sizeToMass(targetSize);
 
@@ -440,7 +428,7 @@ export class DropSystem {
       // don't overlap at frame 0.  Larger shards move first, leaving
       // smaller ones nearer the centre — reads as "main chunk pops
       // off, splinter trails behind."
-      const offsetDist = breakShards.length > 1 ? targetHalf * 0.5 : 0;
+      const offsetDist = breakShards.length > 1 ? (targetSize / 2) * 0.5 : 0;
       const offsetX = Math.cos(shardAngle) * offsetDist;
       const offsetY = Math.sin(shardAngle) * offsetDist;
 
@@ -518,9 +506,8 @@ export class DropSystem {
     if (triangleLocalPts.length !== 3) return;
     const variantDef = SHARD_VARIANTS[childVariant];
 
-    // Triangle centroid in tile-local coords — used as both the
-    // spawn position (offset from tile.position) and the origin
-    // around which the shard's polygon is recentred.
+    // Triangle centroid in tile-local coords — used as the spawn
+    // position (offset from tile.position).
     let cx = 0, cy = 0;
     for (let i = 0; i < 3; i++) {
       cx += triangleLocalPts[i].x;
@@ -529,16 +516,32 @@ export class DropSystem {
     cx /= 3;
     cy /= 3;
 
-    // Recenter vertices around the centroid (origin in shard-local
-    // coords) so the shard polygon is balanced around (0, 0).
-    const shardPts: Vector2[] = [
-      { x: triangleLocalPts[0].x - cx, y: triangleLocalPts[0].y - cy },
-      { x: triangleLocalPts[1].x - cx, y: triangleLocalPts[1].y - cy },
-      { x: triangleLocalPts[2].x - cx, y: triangleLocalPts[2].y - cy },
-    ];
+    // Triangle area via the 2D cross product.  Used to derive a
+    // shard size whose effective area matches the deleted corner,
+    // so the freed piece visually fits the gap it came from.
+    const triArea = Math.abs(
+      (triangleLocalPts[1].x - triangleLocalPts[0].x)
+        * (triangleLocalPts[2].y - triangleLocalPts[0].y)
+      - (triangleLocalPts[2].x - triangleLocalPts[0].x)
+        * (triangleLocalPts[1].y - triangleLocalPts[0].y),
+    ) / 2;
+    // Solve area = k × r² for r, where k is the unit-circumradius
+    // area of a regular n-gon for the spawned variant.  For n=5
+    // (rock-shard default) k ≈ 2.378; for n=3 k ≈ 1.299, n=4 ≈ 2.0,
+    // n=6 ≈ 2.598.  Approximation is loose — we want "roughly the
+    // same size," not exact area match.
+    const spawn = variantDef.spawn;
+    const polyN = (spawn.polyVerticesMin + spawn.polyVerticesMax) / 2;
+    const kArea = (polyN / 2) * Math.sin(2 * Math.PI / polyN);
+    const targetR = Math.max(2, Math.sqrt(triArea / kArea));
+    const targetSize = targetR * 2;
+
+    // Shard polygon from the variant's spawn config (vertex count +
+    // shape per material — rock-shard is 5 verts irregular, etc.).
+    const shardPts = this.generateMaterialShardPolygon(childVariant, targetSize);
 
     let halfW = 0, halfH = 0;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < shardPts.length; i++) {
       const ax = Math.abs(shardPts[i].x);
       const ay = Math.abs(shardPts[i].y);
       if (ax > halfW) halfW = ax;
@@ -658,6 +661,38 @@ export class DropSystem {
    * size and should scale with the drop's value so larger-value drops are
    * physically bigger.
    */
+  /**
+   * Procedurally generate a polygon for a material shard, sized to
+   * `targetDiameter` and shaped per the variant's spawn config.
+   *
+   * Vertex count, angle jitter, and radius variance all come from
+   * SHARD_VARIANTS[variant].spawn — see constants.ts for the per-
+   * material settings:
+   *   glass-shard:   3 verts, sharp / narrow (sharp angles, high
+   *                  radius variance → elongated splinters)
+   *   plastic-shard: 4 verts, near-square (low jitter + variance)
+   *   rock-shard:    5 verts, organic / irregular
+   *   metal-shard:   6 verts, clean hex-like (low jitter + variance)
+   *
+   * Output is centred at (0, 0) and sorted by angle so the polygon
+   * is simple (non-self-intersecting).
+   */
+  public generateMaterialShardPolygon(variant: ShardVariantId, targetDiameter: number): Vector2[] {
+    const spawn = SHARD_VARIANTS[variant].spawn;
+    const numVerts = spawn.polyVerticesMin
+      + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const baseR = targetDiameter / 2;
+    const rawPts: { angle: number; r: number }[] = [];
+    for (let i = 0; i < numVerts; i++) {
+      const baseAngle = (i / numVerts) * Math.PI * 2;
+      const jitter = (Math.random() - 0.5) * (Math.PI / numVerts) * spawn.angleJitter * 2;
+      const radiusFrac = spawn.radiusMin + Math.random() * spawn.radiusRange;
+      rawPts.push({ angle: baseAngle + jitter, r: baseR * radiusFrac });
+    }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+  }
+
   public generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
     let numPoints: number;
     let radMin: number;
