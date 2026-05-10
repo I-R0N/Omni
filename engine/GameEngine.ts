@@ -1013,7 +1013,13 @@ export class GameEngine {
     // policy decision (delay / threshold / pull-range / etc.).
     if (this.currentMap) {
         this.shards.setMergeContext(this.activeDrops, this.currentMap.type);
-        this.shards.update(this.currentMap.entities, dt, this.physics);
+        // Pace the shard merge / cohesion passes to the same cadence
+        // as PhysicsSystem.resolveShardPairs (computed inside the
+        // physics.update call earlier this substep).  Without this,
+        // bond formation + cohesion run every frame while separation
+        // runs only every Nth, and dense clusters collapse to a
+        // single point on high-N ShPair settings.
+        this.shards.update(this.currentMap.entities, dt, this.physics, this.physics.lastRunShardPair);
     }
 
     // Tick down regenPopTimer on tiles

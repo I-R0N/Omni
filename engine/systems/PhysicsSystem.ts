@@ -90,6 +90,13 @@ export class PhysicsSystem {
   // render "auto/3" while the slider value stays at 0.  Mirrors
   // the manual value when not in AUTO mode.
   public lastEffectiveShardPairInterval: number = 1;
+  // Whether the most recent shouldRunShardPairsThisStep() call
+  // returned true.  Read by GameEngine.updateGameLogic to gate the
+  // ShardSystem merge / cohesion passes to the same cadence as the
+  // SAT pair pass — without this, bonds + cohesion run every frame
+  // while separation runs only every Nth, and dense clusters
+  // collapse to a single point.
+  public lastRunShardPair: boolean = true;
   // Internal counter, ticked once per handleEntityCollisions call.
   // Used as `counter % interval === 0` to gate shard-shard pairs.
   private shardPairTick: number = 0;
@@ -741,6 +748,7 @@ export class PhysicsSystem {
     this.lastEffectiveShardPairInterval = interval;
     const run = (this.shardPairTick % interval) === 0;
     this.shardPairTick++;
+    this.lastRunShardPair = run;
     return run;
   }
 

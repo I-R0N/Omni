@@ -186,12 +186,26 @@ export class ShardSystem {
    * candidates that were just merged this frame don't get double-
    * processed.
    */
-  public update(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+  public update(
+    entities: GameEntity[],
+    dt: number,
+    physics: PhysicsSystem,
+    runMergePass: boolean = true,
+  ): void {
     const t0 = performance.now();
     this.tickRegens(entities, dt, physics);
-    this.tickBonds(entities, dt, physics);
-    this.runMergeBroadphase(entities, dt, physics);
-    this.runLargeShardCollapse(entities);
+    // tickBonds always runs to advance bond timers, break bonds
+    // whose parties have separated, and resolve compose / absorb
+    // when timers mature.  The cohesion velocity-blend inside
+    // tickBonds is gated by runMergePass so it doesn't drag bonded
+    // shards together on frames when separation is skipped — that
+    // imbalance is what collapsed clusters to a single point on
+    // high-N ShPair settings.
+    this.tickBonds(entities, dt, physics, runMergePass);
+    if (runMergePass) {
+      this.runMergeBroadphase(entities, dt, physics);
+      this.runLargeShardCollapse(entities);
+    }
     this.lastUpdateMs = performance.now() - t0;
   }
 
@@ -693,7 +707,7 @@ export class ShardSystem {
    * GameEngine.handleEntitySticking.  The new-contacts-detection
    * half lives in `runMergeBroadphase` below.
    */
-  private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+  private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem, applyCohesion: boolean = true): void {
     if (this.bonds.length === 0) return;
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
@@ -724,14 +738,20 @@ export class ShardSystem {
       if (dist > contactDist * BREAK_FACTOR) continue; // bond broken
 
       // Velocity cohesion: nudge both toward shared momentum centre.
-      const totalMass = a.mass + b.mass;
-      const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
-      const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
-      const blend     = Math.min(1, COHESION * dt);
-      a.velocity.x   += (sharedVx - a.velocity.x) * blend;
-      a.velocity.y   += (sharedVy - a.velocity.y) * blend;
-      b.velocity.x   += (sharedVx - b.velocity.x) * blend;
-      b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+      // Gated by applyCohesion so the blend runs only on the same
+      // cadence as separation — without that pacing, cohesion locks
+      // bonded shards to a shared velocity / position while
+      // separation is skipped, and clusters collapse to a point.
+      if (applyCohesion) {
+        const totalMass = a.mass + b.mass;
+        const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+        const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+        const blend     = Math.min(1, COHESION * dt);
+        a.velocity.x   += (sharedVx - a.velocity.x) * blend;
+        a.velocity.y   += (sharedVy - a.velocity.y) * blend;
+        b.velocity.x   += (sharedVx - b.velocity.x) * blend;
+        b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+      }
 
       bond.timer += dt;
 
