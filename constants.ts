@@ -268,12 +268,14 @@ export const SHARD_PAIR_CONSTANTS = {
     { maxDensity: 28,  interval: 3 },
     { maxDensity: 999, interval: 4 },
   ] as const,
-  // Manual cycle order, including AUTO sentinel (0).  Spans 1..100
-  // so dense fields can pin a much higher interval for stress
-  // testing.  Powers-of-2 progression in the upper range keeps the
-  // cycle short while still giving 1-frame granularity at the low
-  // end where it matters most.
-  CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 100] as const,
+  // Manual cycle order, including AUTO sentinel (0).  Spans 1..1028
+  // so dense fields can pin a very high interval for stress testing.
+  // Powers-of-2 progression keeps the cycle short while still giving
+  // 1-frame granularity at the low end where it matters most.  At
+  // 1028 substeps (~17 s @ 60 Hz) shards effectively never resolve
+  // each other — useful for measuring the absolute floor of collision
+  // cost.
+  CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
 };
 
 export const TRAIL_CONSTANTS = {

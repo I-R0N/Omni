@@ -180,11 +180,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
 
               {/* Shard ↔ shard pair-resolution interval — cycle
-                  AUTO → 1 → 2 → 4 → 8 → 16 → 32 → 64 → 100.  AUTO
-                  scales N with the previous step's peak shard-cell
-                  density; manual values pin the interval.  Higher
-                  N = cheaper but shards may overlap visibly for
-                  longer before separating. */}
+                  AUTO → 1 → 2 → 4 → 8 → 16 → 32 → 64 → 128 → 256 →
+                  512 → 1028.  AUTO scales N with the previous step's
+                  peak shard-cell density; manual values pin the
+                  interval.  Higher N = cheaper but shards may
+                  overlap visibly for longer before separating. */}
               <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                 <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
                 <button

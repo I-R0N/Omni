@@ -309,11 +309,11 @@ export class GameEngine {
   /**
    * Cycle the shard ↔ shard pair-resolution interval through
    * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 4 → 8 → 16 →
-   * 32 → 64 → 100).  AUTO (= 0) lets PhysicsSystem pick N from the
-   * previous step's peak collision-cell density; numeric values pin
-   * the interval.  The effective N (whether AUTO or manual) is
-   * mirrored into EngineStats so the DBG panel can render
-   * `auto (3)` or `every 16` accordingly.
+   * 32 → 64 → 128 → 256 → 512 → 1028).  AUTO (= 0) lets
+   * PhysicsSystem pick N from the previous step's peak collision-
+   * cell density; numeric values pin the interval.  The effective
+   * N (whether AUTO or manual) is mirrored into EngineStats so the
+   * DBG panel can render `auto (3)` or `every 256` accordingly.
    */
   public cycleShardPairInterval() {
     const order = SHARD_PAIR_CONSTANTS.CYCLE_ORDER;
