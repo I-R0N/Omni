@@ -420,7 +420,11 @@ export const STRUCTURE_VARIANTS = {
     health: 4,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_PLASTIC,
+    // sprite left empty so RenderSystem's sprite branch falls through
+    // to the polygon-based material-tile branch — that's the only
+    // path that draws the dented polygonPoints.  ASSETS.HEX_STRUCTURE_PLASTIC
+    // is kept in the manifest for a future per-variant sprite.
+    sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
     borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
@@ -431,7 +435,8 @@ export const STRUCTURE_VARIANTS = {
     health: 8,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_METAL,
+    // sprite left empty so the polygon fallback fires — see plastic above.
+    sprite: '',
     color: COLORS.STRUCTURE_METAL,
     borderColor: COLORS.STRUCTURE_METAL_BORDER,
   },

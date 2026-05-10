@@ -1333,8 +1333,17 @@ export class PhysicsSystem {
               // else takes the full projectile damage.
               const isIndestructibleTile = target.type === EntityType.STRUCTURE
                   && target.shardVariant === 'indestructible-tile';
+              // Dent-policy tiles consume one HP per projectile regardless
+              // of the projectile's damage value — so "hits to break"
+              // tracks the player's mental model (each click is one hit,
+              // independent of weapon power).  A Cannon shot at damage=5
+              // costs the tile 1 HP and runs one dent step, not five.
+              // Plastic / metal hardness scales via STRUCTURE_VARIANTS.
+              // health alone.
+              const isDentTile = target.shardVariant !== undefined
+                  && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
               if (!isIndestructibleTile) {
-                  target.health -= projDmg;
+                  target.health -= isDentTile ? 1 : projDmg;
                   // Dent-policy tiles deform on every damage event, even
                   // the killing blow — the spawned mobile shard inherits
                   // the dented polygon at the post-deformation size.
