@@ -192,6 +192,16 @@ export class GameEngine {
   private perfCollisions     = new Float64Array(GameEngine.PERF_WINDOW);
   private perfFlowField      = new Float64Array(GameEngine.PERF_WINDOW);
   private perfDensity        = new Float64Array(GameEngine.PERF_WINDOW);
+  // Wall-clock timers for whole sim-phase calls — catches the work
+  // that lives outside the per-system sub-timers (entity compaction,
+  // flow-field nudge, weapon ticks, drop scan, ShardSystem, ...).
+  // The gap between simMs and the sum of sub-timers is the
+  // "untimed" budget per substep.
+  private perfShardSys       = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfUpdatePhysics  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfUpdateLogic    = new Float64Array(GameEngine.PERF_WINDOW);
+  private lastUpdatePhysicsMs: number = 0;
+  private lastUpdateGameLogicMs: number = 0;
   private perfSimIdx: number = 0;   // shared write index for every sim-side buffer
   private perfSimFilled: number = 0;
   // Render timings (one sample per rendered frame — may be written in menu
@@ -606,8 +616,16 @@ export class GameEngine {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
+        // Wall-clock the two top-level sim phases so the perf overlay
+        // can show the gap between summed sub-timers and total sim
+        // time.  Untimed work (entity compaction, flow-field nudge,
+        // weapon ticks, drop scan, etc.) shows up as the difference.
+        const tPhys0 = performance.now();
         try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
+        const tLogic0 = performance.now();
         try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
         // Push per-substep perf samples.  Every timed sub-phase was written
         // to instance fields on its owning system during the two calls above;
         // the recorder just reads and ring-buffers them in one shot.
@@ -2021,6 +2039,9 @@ export class GameEngine {
       this.perfCollisions[idx]    = this.physics.lastCollisionsMs;
       this.perfFlowField[idx]     = this.flowField.lastFlushMs;
       this.perfDensity[idx]       = this.physics.lastMaxCellDensity;
+      this.perfShardSys[idx]      = this.shards.lastUpdateMs;
+      this.perfUpdatePhysics[idx] = this.lastUpdatePhysicsMs;
+      this.perfUpdateLogic[idx]   = this.lastUpdateGameLogicMs;
       const next = idx + 1;
       this.perfSimIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfSimFilled < GameEngine.PERF_WINDOW) this.perfSimFilled++;
@@ -2073,6 +2094,9 @@ export class GameEngine {
           gravityMs:      GameEngine.ringAvg(this.perfGravity,      simN),
           localGravityMs: GameEngine.ringAvg(this.perfLocalGravity, simN),
           collisionsMs:   GameEngine.ringAvg(this.perfCollisions,   simN),
+          shardSysMs:     GameEngine.ringAvg(this.perfShardSys,     simN),
+          updatePhysicsMs: GameEngine.ringAvg(this.perfUpdatePhysics, simN),
+          updateLogicMs:  GameEngine.ringAvg(this.perfUpdateLogic,  simN),
           flowFieldMs:    GameEngine.ringAvg(this.perfFlowField,    simN),
           renderMs:       GameEngine.ringAvg(this.perfRender,       this.perfRenderFilled),
           nebulaMs:       GameEngine.ringAvg(this.perfNebula,       this.perfRenderFilled),

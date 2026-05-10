@@ -187,11 +187,21 @@ export class ShardSystem {
    * processed.
    */
   public update(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+    const t0 = performance.now();
     this.tickRegens(entities, dt, physics);
     this.tickBonds(entities, dt, physics);
     this.runMergeBroadphase(entities, dt, physics);
     this.runLargeShardCollapse(entities);
+    this.lastUpdateMs = performance.now() - t0;
   }
+
+  /**
+   * Wall time (ms) of the most recent update() call.  Read by
+   * GameEngine for the dev perf overlay so the cost of merge
+   * broadphase + bond ticks + density compaction is visible
+   * outside the main physics / collisions buckets.
+   */
+  public lastUpdateMs: number = 0;
 
   /**
    * Death-routing entry point.  Stage 1–2: returns false (existing

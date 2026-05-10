@@ -213,10 +213,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Broadphase</div>
                   <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
                   <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Timing (ms)</div>
-                  <div className="flex justify-between"><span>physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                  <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                  <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
                   <div className="flex justify-between"><span>ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
                   <div className="flex justify-between"><span>homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
                   <div className="flex justify-between"><span>lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>

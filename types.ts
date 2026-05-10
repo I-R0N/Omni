@@ -545,6 +545,16 @@ export interface PerfSnapshot {
   gravityMs: number;      // PhysicsSystem.applyGravity (attractor fields)
   localGravityMs: number; // PhysicsSystem.applyLocalGravity (player↔asteroid)
   collisionsMs: number;   // PhysicsSystem.handleEntityCollisions (broadphase + SAT)
+  // Wall time of ShardSystem.update — merge broadphase + bonds +
+  // density compaction.  Lives in updateGameLogic, NOT physicsMs.
+  shardSysMs: number;
+  // Wall time of the whole updatePhysics call (includes physicsMs +
+  // entity compaction + flow-field nudge + asteroid census).  Gap
+  // vs. summed sub-timers reveals untimed work.
+  updatePhysicsMs: number;
+  // Wall time of the whole updateGameLogic call (includes shardSysMs
+  // + drops + weapons + projectile lifetime + wave check + ...).
+  updateLogicMs: number;
   renderMs: number;
   // Sub-timer for the nebula tile/shard render pass.  Surfaced in the
   // debug overlay alongside renderMs so the contribution of the nebula
