@@ -1366,23 +1366,37 @@ export class PhysicsSystem {
               // else takes the full projectile damage.
               const isIndestructibleTile = target.type === EntityType.STRUCTURE
                   && target.shardVariant === 'indestructible-tile';
-              // Dent-policy tiles consume one HP per projectile regardless
-              // of the projectile's damage value — so "hits to break"
-              // tracks the player's mental model (each click is one hit,
-              // independent of weapon power).  A Cannon shot at damage=5
-              // costs the tile 1 HP and runs one dent step, not five.
-              // Plastic / metal hardness scales via STRUCTURE_VARIANTS.
-              // health alone.
-              const isDentTile = target.shardVariant !== undefined
+              // Dent-policy entities consume one HP per projectile
+              // regardless of the projectile's damage value — so "hits
+              // to break" tracks the player's mental model (each click
+              // is one hit, independent of weapon power).  Applies to
+              // both static dent tiles and mobile dent shards (plastic
+              // and metal share the policy).  A Cannon shot at damage=5
+              // costs the target 1 HP and runs one dent step, not five.
+              // Hardness scales via the entity's health alone.
+              const isDentEntity = target.shardVariant !== undefined
                   && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
               if (!isIndestructibleTile) {
-                  target.health -= isDentTile ? 1 : projDmg;
-                  // Dent-policy tiles deform on every damage event, even
-                  // the killing blow — the spawned mobile shard inherits
-                  // the dented polygon at the post-deformation size.
-                  // Impact position is the projectile's current world
-                  // position; applyDentStep finds the closest vertex.
+                  target.health -= isDentEntity ? 1 : projDmg;
+                  // Dent-policy entities deform on every damage event,
+                  // even the killing blow — the spawned mobile shard
+                  // inherits the dented polygon at the post-deformation
+                  // size.  Impact position is the projectile's current
+                  // world position; applyDentStep finds the closest
+                  // vertex.
                   PhysicsSystem.applyDentStep(target, proj.position);
+                  // Mobile dent shards (plastic-shard, metal-shard) get
+                  // a velocity kick from the projectile — they're free-
+                  // floating, so a hit should both deform AND push.
+                  // Push magnitude scales inversely with shard mass so
+                  // heavier metal shards take a smaller kick than the
+                  // lighter plastic.  Static tiles (mass = Infinity)
+                  // are filtered out by the finite-mass check.
+                  if (isDentEntity && target.mass !== Infinity && proj.velocity) {
+                      const pushFactor = 0.20 / Math.max(1, target.mass / 10);
+                      target.velocity.x += proj.velocity.x * pushFactor;
+                      target.velocity.y += proj.velocity.y * pushFactor;
+                  }
               }
               target.hitFlash = 0.1;
           }

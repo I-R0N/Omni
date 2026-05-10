@@ -1015,8 +1015,13 @@ export const DROP_CONFIG = {
   AMMO_PER_ENEMY_PRIMARY:   3,    // primary enemy ammo drop (paired with AMMO_DROP_CHANCE_ENEMY_PRIMARY)
   AMMO_PER_ENEMY_SECONDARY: 2,    // secondary enemy ammo drop (independent roll)
   AMMO_PER_ASTEROID:        4,    // ammo units per asteroid drop
+  // Dent-policy mobile shards (plastic-shard, metal-shard) take
+  // multiple hits to destroy, so their drop rate + payload run
+  // higher than a single-hit asteroid to reward the effort.
+  AMMO_PER_DENT_SHARD:      6,
   // Drop-spawn probabilities
   AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
+  AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
@@ -1648,14 +1653,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       ],
       defaultOutcome: 'compose',
     },
+    // Plastic shards are dent-driven: they deform per hit and are
+    // destroyed cleanly on health = 0 (no recursive sub-shards).
+    // Drops + particles fire via the mobile-shard path in
+    // DropSystem.spawnDrops.
     shatter: {
-      kind: 'powerlaw',
+      kind: 'none',
       style: 'asteroid',
-      countMin: 2, countMax: 4,
-      alphaMin: 0.4, alphaMax: 2.0,
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'plastic-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
-      scatterHalfCone: Math.PI * 0.55,
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
     },
     // Warm amber particle puff matches the matte-polymer body colour.
     onShatterParticles: { color: '#fbbf24', count: 5 },
@@ -1668,6 +1677,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       largeShardCollapseSize: 130,
       tintFloor: 0.60,                         // slightly higher floor — plastic stays warmer when dense
       shrinkFactor: 0.88,
+    },
+    // Free-floating plastic shards deform on hit just like plastic
+    // tiles — each impact pulls one vertex inward.  Slightly lower
+    // jitter than the tile (0.22 vs 0.25) since the shard is already
+    // smaller and we want a few hits' worth of cumulative warp before
+    // destruction.  breakShards is empty: when health hits 0 the
+    // shard is destroyed cleanly and drops fall via the mobile-shard
+    // path in DropSystem.spawnDrops.
+    dent: {
+      vertexJitter: 0.22,
+      breakShards: [],
     },
   },
   'metal-shard': {
@@ -1684,14 +1704,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       ],
       defaultOutcome: 'compose',
     },
+    // Metal shards are dent-driven: deform per hit, destroyed cleanly
+    // on health = 0 with drops + particles.  No recursive sub-shards.
     shatter: {
-      kind: 'powerlaw',
+      kind: 'none',
       style: 'asteroid',
-      countMin: 2, countMax: 4,
-      alphaMin: 0.4, alphaMax: 2.0,
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'metal-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
-      scatterHalfCone: Math.PI * 0.55,
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
     },
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
@@ -1704,6 +1726,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       largeShardCollapseSize: 130,
       tintFloor: 0.50,                         // metal goes darker when packed dense
       shrinkFactor: 0.88,
+    },
+    // Metal shards deform subtly per hit (vertexJitter 0.10 vs
+    // tile's 0.13) — the surface still reads as hard even after
+    // detaching from the grid.  Empty breakShards: clean destruction
+    // on health = 0.
+    dent: {
+      vertexJitter: 0.10,
+      breakShards: [],
     },
   },
   'nebula-shard': {

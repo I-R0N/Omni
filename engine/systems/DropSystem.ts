@@ -122,9 +122,22 @@ export class DropSystem {
           }
           // 'powerup' entries no longer spawn — powerup drops have been removed
         }
-      } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
-        // Generic shared-ammo drop — single rate for every asteroid
-        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
+      } else {
+        // Dent-policy shards take several hits to destroy, so their
+        // drop chance + payload runs higher than single-hit asteroids.
+        // Non-dent shards (rock-shard, glass-shard) keep the legacy
+        // asteroid drop rate.
+        const isDentShard = entity.shardVariant !== undefined
+          && SHARD_VARIANTS[entity.shardVariant].dent !== undefined;
+        const dropChance = isDentShard
+          ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
+          : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
+        const dropAmount = isDentShard
+          ? DROP_CONFIG.AMMO_PER_DENT_SHARD
+          : DROP_CONFIG.AMMO_PER_ASTEROID;
+        if (Math.random() < dropChance) {
+          this.spawnAmmoDrop(entities, activeDrops, pos, dropAmount, pv);
+        }
       }
     }
   }
@@ -437,6 +450,12 @@ export class DropSystem {
       const speedScale = 1 + (1 - spec.sizeFraction) * 0.5;
       const launchSpeed = baseSpeed * speedScale;
 
+      // Dent-policy shards take several projectile hits to destroy
+      // (deforming on each hit just like the tile did).  Non-dent
+      // variants fall back to single-hit destruction — matches
+      // today's rock-shard / glass-shard HP.
+      const shardHealth = variantDef.dent !== undefined ? 4 : 1;
+
       entities.push({
         id:            nextId('dent_shard'),
         type:          EntityType.STRUCTURE,
@@ -456,8 +475,8 @@ export class DropSystem {
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
         color:         tile.color,
         active:        true,
-        health:        1,
-        maxHealth:     1,
+        health:        shardHealth,
+        maxHealth:     shardHealth,
         mass,
         polygonPoints: scaledPts,
       });
