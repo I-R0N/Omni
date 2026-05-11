@@ -1922,6 +1922,18 @@ export class RenderSystem {
                             }
                         }
                     }
+
+                    // ── DEBUG: always-on orange outline on metal-tile
+                    // to confirm the render branch is reached.  Remove
+                    // once the proximity glow above is confirmed
+                    // working.
+                    if (entity.shardVariant === 'metal-tile') {
+                        buildPath();
+                        ctx.globalAlpha = 1.0;
+                        ctx.strokeStyle = '#ff00ff'; // magenta — impossible to miss
+                        ctx.lineWidth = 5.0;
+                        ctx.stroke();
+                    }
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
