@@ -9,6 +9,7 @@ import {
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
+import { NEBULA_IMAGES, ASSETS } from '../../assets';
 
 /**
  * DropSystem — owns collectible drops and breakage debris.
@@ -729,6 +730,15 @@ export class DropSystem {
     const shardPts = this.generateMaterialShardPolygon('nebula-shard', targetSize);
     const mass = variantDef.spawn.sizeToMass(targetSize);
 
+    // Pick a nebula sprite at random — required for the renderer's
+    // tinted-sprite path (cloud silhouette via getTintedSprite +
+    // _tintedSprites cache).  Without sprite the shard renders only
+    // its polygon outline (visible only in debug mode).  Falls back
+    // to the procedural puff marker if the manifest is empty.
+    const sprite = NEBULA_IMAGES.length > 0
+      ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+      : ASSETS.NEBULA_PUFF;
+
     const impactSpeed = inheritVelocity
       ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)
       : 0;
@@ -751,6 +761,7 @@ export class DropSystem {
       rotation:            Math.random() * Math.PI * 2,
       rotationSpeed:       (Math.random() - 0.5) * (1.2 / Math.max(1, targetSize / 30)),
       color,
+      sprite,
       active:              true,
       health:              1,
       maxHealth:           1,
