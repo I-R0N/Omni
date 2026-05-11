@@ -1490,11 +1490,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
-    // Heavy repel — 2× glass strength.  Reads as a real shove when
-    // the player approaches; the field is the warning.  Range matches
-    // glass so dense mixed clusters present a single coherent
-    // "stay-back" footprint rather than two nested shells.
-    repel: { range: 200, strength: 0.08 },
+    // Heavy repel — 1.5× glass strength.  Reads as a real shove
+    // when the player approaches; the field is the warning.  Range
+    // matches glass so dense mixed clusters present a single
+    // coherent "stay-back" footprint rather than two nested shells.
+    repel: { range: 200, strength: 0.06 },
     // Amber/orange accent against the cool steel base — reads as a
     // powered-up / energized barrier rather than ambient material
     // glow.  Same range as repel so the visual halo and the push

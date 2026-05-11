@@ -1748,6 +1748,31 @@ export class RenderSystem {
                     ctx.fillStyle = isFlash ? flashColor : entity.color;
                     ctx.fill();
 
+                    // Layer 1b — variant-driven additive glow.  Mirror
+                    // of the glass-family layer 2b: gated on
+                    // `entity.glowIntensity` and the variant's `glow`
+                    // config, drawn ON TOP of the opaque base fill so
+                    // the accent color reads against the matte / metal
+                    // body.  Composite mode 'lighter' so the glow
+                    // brightens the steel base instead of being
+                    // alpha-blended underneath (which would barely
+                    // shift a 1.0-alpha fill).  Short-circuits to a
+                    // single field check on non-glowing tiles.
+                    if (!isFlash
+                        && entity.glowIntensity !== undefined
+                        && entity.glowIntensity > 0
+                        && entity.shardVariant !== undefined) {
+                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+                        if (glow !== undefined) {
+                            const prevComp = ctx.globalCompositeOperation;
+                            ctx.globalCompositeOperation = 'lighter';
+                            ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            ctx.globalCompositeOperation = prevComp;
+                        }
+                    }
+
                     // Layer 2 — selective outline.  Skip edges that are
                     // both (a) at their original radius (no dent on either
                     // endpoint) and (b) butted against a neighbour tile.
