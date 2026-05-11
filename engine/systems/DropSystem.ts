@@ -438,11 +438,16 @@ export class DropSystem {
       const speedScale = 1 + (1 - spec.sizeFraction) * 0.5;
       const launchSpeed = baseSpeed * speedScale;
 
-      // Dent-policy shards take several projectile hits to destroy
-      // (deforming on each hit just like the tile did).  Non-dent
-      // variants fall back to single-hit destruction — matches
-      // today's rock-shard / glass-shard HP.
-      const shardHealth = variantDef.dent !== undefined ? 4 : 1;
+      // Dent-policy shards take exactly as many hits to destroy as
+      // the parent tile they came from — inherit tile.maxHealth so
+      // plastic-shards / metal-shards are as durable as their
+      // matching tile (currently 8 HP each).  Non-dent variants
+      // (rock-shard spawned from rock-tile's breakShards) keep
+      // single-hit destruction, matching today's rock-shard /
+      // glass-shard HP.
+      const shardHealth = variantDef.dent !== undefined
+        ? (tile.maxHealth || 1)
+        : 1;
 
       entities.push({
         id:            nextId('dent_shard'),
