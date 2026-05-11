@@ -1560,18 +1560,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       pullVertexCount: 3,
       deepVertexCount: 2,
       // Each hit also chips off a rock-shard at the impact location.
-      // sizeFraction 0.5 is linear relative to the deformed tile
-      // diameter (~44 at start), so the chip is ~22 wide on hit 1
-      // and shrinks as deformation accumulates — visibly chunky
-      // rather than the previous 0.25 (~11 wide) which read as
-      // barely-there debris.
-      perHitShard: { variant: 'rock-shard', sizeFraction: 0.5 },
-      // Final break: 3 roughly equal rock-shards whose areas sum to
-      // ~the deformed tile's area.  sqrt(1/3) ≈ 0.577 linear.
+      // sizeFraction 0.7 is linear relative to the deformed tile
+      // diameter (~44 at start), so the chip is ~31 wide on hit 1 —
+      // a chunky fragment that reads as a substantial chip flying
+      // off, not a sliver.
+      perHitShard: { variant: 'rock-shard', sizeFraction: 0.7 },
+      // Final break: 3 rock-shards at sizeFraction 0.75 each (linear
+      // fraction of deformed diameter).  Sum of squares = 1.69 so
+      // the freed material exceeds the deformed area — visually
+      // chunkier fragments at the cost of some "material creation,"
+      // which the user prefers over the previous area-conservative
+      // 3 × 0.577 split where each shard read as undersized.
       breakShards: [
-        { variant: 'rock-shard', sizeFraction: 0.577 },
-        { variant: 'rock-shard', sizeFraction: 0.577 },
-        { variant: 'rock-shard', sizeFraction: 0.577 },
+        { variant: 'rock-shard', sizeFraction: 0.75 },
+        { variant: 'rock-shard', sizeFraction: 0.75 },
+        { variant: 'rock-shard', sizeFraction: 0.75 },
       ],
     },
   },

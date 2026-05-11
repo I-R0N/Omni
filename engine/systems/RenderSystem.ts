@@ -1966,9 +1966,17 @@ export class RenderSystem {
 
                     ctx.globalAlpha = 1.0 * fadeAlpha;
                     this.renderCracks(ctx, entity, entity.size.x / 2);
-                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                    ctx.lineWidth   = 2;
-                    ctx.stroke();
+                    // Rock-tile renders without an outline — the brittle
+                    // dent silhouette reads cleaner against the slate
+                    // fill when there's no rim line tracing every
+                    // notch.  Rock-shards, plastic-shards, and metal-
+                    // shards keep theirs (matches the per-material
+                    // tile/shard parity we set earlier).
+                    if (entity.shardVariant !== 'rock-tile') {
+                        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                        ctx.lineWidth   = 2;
+                        ctx.stroke();
+                    }
                 }
             }
 
