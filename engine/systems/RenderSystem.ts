@@ -1757,43 +1757,10 @@ export class RenderSystem {
                     ctx.fillStyle = isFlash ? flashColor : entity.color;
                     ctx.fill();
 
-                    // Layer 1b — variant-driven additive glow.  Mirror
-                    // of the glass-family layer 2b: gated on
-                    // `entity.glowIntensity` and the variant's `glow`
-                    // config, drawn ON TOP of the opaque base fill so
-                    // the accent color reads against the matte / metal
-                    // body.  Composite mode 'lighter' so the glow
-                    // brightens the steel base instead of being
-                    // alpha-blended underneath (which would barely
-                    // shift a 1.0-alpha fill).  Short-circuits to a
-                    // single field check on non-glowing tiles.  We
-                    // ALSO paint a thick glow stroke so the halo reads
-                    // as a clear "lit edge" against the matte body —
-                    // a fill-only additive pass washes the polygon out
-                    // amber but doesn't read as "glowing"; the stroke
-                    // adds an unambiguous outline beacon.
-                    if (!isFlash
-                        && entity.glowIntensity !== undefined
-                        && entity.glowIntensity > 0
-                        && entity.shardVariant !== undefined) {
-                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                        if (glow !== undefined) {
-                            const prevComp = ctx.globalCompositeOperation;
-                            ctx.globalCompositeOperation = 'lighter';
-                            const a = glow.peakAlpha * entity.glowIntensity;
-                            ctx.globalAlpha = a;
-                            ctx.fillStyle = glow.color;
-                            ctx.fill();
-                            // Outline-halo: same polygon, thick stroke.
-                            // Sits on top of the fill in 'lighter', so
-                            // the silhouette reads as a clearly-lit rim
-                            // even when the inner fill is subtle.
-                            ctx.strokeStyle = glow.color;
-                            ctx.lineWidth = 3.0;
-                            ctx.stroke();
-                            ctx.globalCompositeOperation = prevComp;
-                        }
-                    }
+                    // Layer 1b moved to the bottom of the active branch
+                    // (after the outline + cracks) so the glow paints
+                    // LAST and can't be covered by subsequent strokes.
+                    // See the gated-glow block below.
 
                     // Layer 2 — selective outline.  Skip edges that are
                     // both (a) at their original radius (no dent on either
@@ -1895,6 +1862,44 @@ export class RenderSystem {
                         crackR = Math.sqrt(maxR2);
                     }
                     this.renderCracks(ctx, entity, crackR);
+
+                    // Variant-driven glow (mirrors glass-family layer
+                    // 2b).  Painted LAST so neither the dark outline
+                    // nor the crack overlay can cover it.  Plain
+                    // source-over alpha-blend (no 'lighter'): the
+                    // accent color dominates at peak intensity, which
+                    // reads unambiguously against the matte / steel
+                    // body.  A thick stroke of the same color wraps
+                    // the silhouette so the halo is visible even at
+                    // the range edge where the fill alpha is low.
+                    if (!isFlash
+                        && entity.glowIntensity !== undefined
+                        && entity.glowIntensity > 0
+                        && entity.shardVariant !== undefined) {
+                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+                        if (glow !== undefined) {
+                            // Rebuild the polygon path — the outline
+                            // loop above issued ctx.beginPath() and
+                            // walked individual edges, so the fill
+                            // path is no longer the closed polygon.
+                            buildPath();
+                            const intensity = entity.glowIntensity;
+                            ctx.globalAlpha = glow.peakAlpha * intensity;
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            // Outline halo — bright enough that even
+                            // the range edge (low intensity) reads as
+                            // a clearly lit rim.  Stroke alpha rides
+                            // on the intensity but never drops below
+                            // ~0.4 so the cluster boundary is always
+                            // visible while the player is in range.
+                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensity);
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 4.0;
+                            ctx.stroke();
+                            ctx.globalAlpha = 1.0;
+                        }
+                    }
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
