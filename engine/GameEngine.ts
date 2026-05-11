@@ -894,23 +894,59 @@ export class GameEngine {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
-          // Rock-shard death also releases a colour-matched nebula-shard
-          // (cloud-style fragment) alongside the solid shatter children.
-          // Only fires for mobile shards (mass !== Infinity) and only
-          // when the shard was big enough to produce shatter children
-          // — small chips (size < 24) destroy cleanly without a puff.
+          // Rock-shard death also releases 2 colour-matched nebula-
+          // shards (cloud-style fragments) alongside the solid shatter
+          // children.  Only fires for mobile shards (mass !==
+          // Infinity) and only when the shard was big enough to
+          // produce shatter children — small chips (size < 24)
+          // destroy cleanly without puffs.
           if (this.currentMap
               && variant === 'rock-shard'
               && entity.mass !== Infinity
               && Math.max(entity.size.x, entity.size.y) >= 24) {
-              this.drops.spawnColoredNebulaShard(
-                  this.currentMap.entities,
-                  entity.position,
-                  this.deformedDiameter(entity),
-                  entity.color,
-                  0.5,
-                  entity.lastImpactVelocity ?? entity.velocity,
-              );
+              const baseSize = this.deformedDiameter(entity);
+              for (let nb = 0; nb < 2; nb++) {
+                  const jitter = baseSize * 0.2;
+                  const puffPos = {
+                      x: entity.position.x + (Math.random() - 0.5) * jitter,
+                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                  };
+                  this.drops.spawnColoredNebulaShard(
+                      this.currentMap.entities,
+                      puffPos,
+                      baseSize,
+                      entity.color,
+                      0.45 + Math.random() * 0.2,
+                      entity.lastImpactVelocity ?? entity.velocity,
+                  );
+              }
+          }
+
+          // Rock-tile death burst — 4-6 colour-matched nebula-shards
+          // scattered around the tile centre, on top of the per-hit
+          // puffs that fired during deformation.  Sells the final
+          // collapse as a substantial dust cloud rather than just
+          // another small chip-off.
+          if (this.currentMap
+              && variant === 'rock-tile'
+              && entity.mass === Infinity) {
+              const baseSize = this.deformedDiameter(entity);
+              const count = 4 + Math.floor(Math.random() * 3);
+              for (let nb = 0; nb < count; nb++) {
+                  const jitter = baseSize * 0.4;
+                  const puffPos = {
+                      x: entity.position.x + (Math.random() - 0.5) * jitter,
+                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                  };
+                  this.drops.spawnColoredNebulaShard(
+                      this.currentMap.entities,
+                      puffPos,
+                      baseSize,
+                      entity.color,
+                      0.4 + Math.random() * 0.3,
+                      entity.lastImpactVelocity,
+                  );
+              }
           }
       }
 
@@ -1570,22 +1606,32 @@ export class GameEngine {
                   this.drops.spawnPerHitShard(
                       this.currentMap.entities, target, dent.perHitShard, impactWorldPos,
                   );
-                  // Rock-tile also releases a tinted nebula-shard
-                  // per hit — pairs the solid rock chip with a drifting
-                  // cloud puff in the same colour as the parent tile,
+                  // Rock-tile also releases tinted nebula-shards per
+                  // hit — pairs the solid rock chip with drifting
+                  // cloud puffs in the same colour as the parent tile,
                   // selling the brittle fracture as both shrapnel and
                   // dust.  Only rock today; other dent variants want
                   // the cleaner solid-shard-only readout.
                   if (target.shardVariant === 'rock-tile') {
                       const baseSize = this.deformedDiameter(target);
-                      this.drops.spawnColoredNebulaShard(
-                          this.currentMap.entities,
-                          impactWorldPos,
-                          baseSize,
-                          target.color,
-                          0.55,
-                          target.lastImpactVelocity,
-                      );
+                      // 2 puffs per hit at slightly varied sizes +
+                      // small jitter on spawn position so they don't
+                      // overlap exactly.
+                      for (let nb = 0; nb < 2; nb++) {
+                          const jitter = baseSize * 0.15;
+                          const puffPos = {
+                              x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
+                              y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                          };
+                          this.drops.spawnColoredNebulaShard(
+                              this.currentMap.entities,
+                              puffPos,
+                              baseSize,
+                              target.color,
+                              0.45 + Math.random() * 0.2,
+                              target.lastImpactVelocity,
+                          );
+                      }
                   }
               }
               // Intermediate dent-shard spawn (pull-kind variants):

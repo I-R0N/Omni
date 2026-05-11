@@ -323,12 +323,12 @@ export class DropSystem {
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
 
-    // Release 1-2 blue-toned nebula-shards alongside the glass debris
-    // so the shatter has a cloud-puff dimension to it (matches the
-    // rock-tile per-hit pattern).  Tone keys to the glass-tile blue
-    // (#b4e6fd) rather than the procedural nebula palette so the puff
-    // reads as "glass dust" rather than a random nebula fragment.
-    const nebulaCount = 1 + Math.floor(Math.random() * 2);
+    // Release 4-6 blue-toned nebula-shards alongside the glass debris
+    // so the shatter has a substantial cloud-puff dimension to it.
+    // Tone keys to the glass-tile blue (#b4e6fd) rather than the
+    // procedural nebula palette so the puff reads as "glass dust"
+    // rather than a random nebula fragment.
+    const nebulaCount = 4 + Math.floor(Math.random() * 3);
     const tileSize = Math.max(tile.size.x, tile.size.y);
     for (let i = 0; i < nebulaCount; i++) {
       const spawnPos = {
@@ -337,7 +337,7 @@ export class DropSystem {
       };
       this.spawnColoredNebulaShard(
         entities, spawnPos, tileSize,
-        '#b4e6fd', 0.55 + Math.random() * 0.2,
+        '#b4e6fd', 0.45 + Math.random() * 0.25,
         tile.lastImpactVelocity,
       );
     }
