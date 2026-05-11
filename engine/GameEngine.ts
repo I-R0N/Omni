@@ -726,6 +726,29 @@ export class GameEngine {
       }
   }
 
+  // Per-tile glow refresh callback handed to PhysicsSystem
+  // .forEachStaticNear during the post-physics glow pass.  Computes a
+  // quadratic falloff of the player's distance to `tile` against the
+  // tile variant's `glow.range`, writes it onto `glowIntensity`, and
+  // zeros stale values when the tile is now out of range so layer 2b
+  // in RenderSystem short-circuits.  Defined as a class field so the
+  // closure is allocated once at construction (no per-substep alloc).
+  private refreshTileGlow = (tile: GameEntity) => {
+      if (tile.shardVariant === undefined) return;
+      const glow = SHARD_VARIANTS[tile.shardVariant].glow;
+      if (glow === undefined) return;
+      const dx = wrapDeltaX(tile.position.x, this.player.position.x);
+      const dy = wrapDeltaY(tile.position.y, this.player.position.y);
+      const distSq = dx * dx + dy * dy;
+      const rangeSq = glow.range * glow.range;
+      if (distSq < rangeSq) {
+          const t = 1 - Math.sqrt(distSq) / glow.range;
+          tile.glowIntensity = t * t;
+      } else if (tile.glowIntensity !== undefined && tile.glowIntensity !== 0) {
+          tile.glowIntensity = 0;
+      }
+  }
+
   private updatePhysics(dt: number) {
       if (!this.currentMap) return;
 
@@ -748,6 +771,22 @@ export class GameEngine {
         this.handleEntityDeath,
         this.handleScreenShake,
         this.handleProjectileHit
+      );
+
+      // Per-substep glow refresh.  Walks the static-grid cells in a
+      // 5×5 neighbourhood of the player (≤ 2 × SPATIAL_GRID_SIZE,
+      // matching the repel scan footprint) and writes
+      // `glowIntensity` on every tile whose variant declares a
+      // `glow`.  Quadratic falloff keyed on player distance — same
+      // shape as PhysicsSystem's repel impulse, so the visible halo
+      // tracks the actual push.  Tiles whose previous step set a
+      // glow but now sit out of range are zeroed so layer 2b in
+      // RenderSystem short-circuits.  Allocation-free: the callback
+      // is bound once at construction.
+      this.physics.forEachStaticNear(
+        this.player.position.x,
+        this.player.position.y,
+        this.refreshTileGlow,
       );
 
       this.currentMap.entities.forEach(e => {

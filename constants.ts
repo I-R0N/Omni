@@ -1453,6 +1453,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Light hint-level repel — a soft outward nudge that reads as
+    // "the tile is alive" without actually blocking the player.
+    // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
+    // outer ring covers it.
+    repel: { range: 200, strength: 0.04 },
+    // Cyan-200 glow paired 1:1 with the repel field — same range,
+    // GameEngine writes glowIntensity each substep from the player's
+    // quadratic-falloff distance to the tile.
+    glow:  { color: '#a5f3fc', range: 200, peakAlpha: 0.85 },
   },
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1481,6 +1490,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Heavy repel — 2× glass strength.  Reads as a real shove when
+    // the player approaches; the field is the warning.  Range matches
+    // glass so dense mixed clusters present a single coherent
+    // "stay-back" footprint rather than two nested shells.
+    repel: { range: 200, strength: 0.08 },
+    // Amber/orange accent against the cool steel base — reads as a
+    // powered-up / energized barrier rather than ambient material
+    // glow.  Same range as repel so the visual halo and the push
+    // footprint align exactly.
+    glow:  { color: '#fbbf24', range: 200, peakAlpha: 0.85 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp
@@ -1681,6 +1700,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     onShatterParticles: 'inherit',
     passThrough: false,
+    // Glass shards are the same substance as their parent tile —
+    // they drift through the glass-tile repel field unimpeded.
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     // Density compaction: glass shards already render with a soft
     // translucent tint, so the floor stays at 0.55 (matches rock).
@@ -1730,6 +1752,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Warm amber particle puff matches the matte-polymer body colour.
     onShatterParticles: { color: '#fbbf24', count: 5 },
     passThrough: false,
+    // Plastic shards drift through the plastic-tile repel field.
+    // (Plastic-tiles don't emit a field today, but the immunity is
+    // declared symmetrically with glass / metal so adding one later
+    // is a one-line change.)
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
@@ -1779,6 +1806,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
     passThrough: false,
+    // Metal shards drift through the metal-tile repel field.
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,

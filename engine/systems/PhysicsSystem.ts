@@ -405,7 +405,7 @@ export class PhysicsSystem {
     // reports total collision cost (main + shard-pair).
     const tCol = performance.now();
     if (this.collisionsEnabled) {
-      this.handleEntityCollisions(entities, onDamage, onDeath, onShake, onHit);
+      this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
       if (this.shouldRunShardPairsThisStep()) {
         this.resolveShardPairs(asteroids);
       }
@@ -513,6 +513,7 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
+    timeScale: number,
     onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
@@ -553,6 +554,13 @@ export class PhysicsSystem {
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
 
+        // Reset per-substep repel-impulse accumulator before the
+        // broadphase pass writes into it.  Cheap on entities that
+        // already had it; the field stays defined so optional-chained
+        // reads (e.g. RenderSystem fade fx in the future) don't pay a
+        // tagged-shape miss.
+        if (e.repelImpulse !== 0) e.repelImpulse = 0;
+
         const key = cellKey(e.position.x, e.position.y);
 
         let cell = this.dynamicGrid.get(key);
@@ -576,14 +584,72 @@ export class PhysicsSystem {
     //    populated maps where shards dominate.
     for (let i = 0; i < dynamicEntities.length; i++) {
         const a = dynamicEntities[i];
-        // Mobile shards (STRUCTURE finite mass) are SKIPPED as
-        // outer-loop subjects — non-shard outer loops cover their
-        // pairs via 3x3 mutual scan, and shard ↔ shard runs in
-        // resolveShardPairs.
-        if (a.type === EntityType.STRUCTURE) continue;
 
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
         const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+        // ── Repel-field scan (static tiles only) ─────────────────────
+        // Hoisted: dynamic-side immunity — projectiles and particles
+        // bypass repel unconditionally, and mobile-shard variants
+        // marked `repelImmune` (today: glass-shard, plastic-shard,
+        // metal-shard — same substance as their parent tile) drift
+        // through unimpeded.  Computed once per scanner; static-side
+        // emitter check (variant.repel) still varies per pair.
+        //
+        // The walk runs for EVERY repellable scanner, including
+        // mobile shards (which the SAT outer loop below skips).  That
+        // way a rock-shard or nebula-shard inside a glass / metal
+        // field still gets pushed.  Per cell: a Map lookup + a
+        // variant-emitter check; per repel-emitting tile: a single
+        // distance compare and (when in range) one sqrt + one
+        // velocity nudge.  No allocations on the hot path.
+        const aRepellable =
+            a.type !== EntityType.PROJECTILE
+            && a.type !== EntityType.PARTICLE
+            && !(a.shardVariant !== undefined
+                 && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
+        if (aRepellable) {
+            for (let x = -2; x <= 2; x++) {
+                for (let y = -2; y <= 2; y++) {
+                    const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                    if (!cell) continue;
+                    for (let j = 0; j < cell.length; j++) {
+                        const b = cell[j];
+                        if (!b.active || b.shardVariant === undefined) continue;
+                        const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                        if (repel === undefined) continue;
+                        // Torus-correct delta so a tile near one
+                        // seam still pushes a player on the other.
+                        const dx = wrapDeltaX(b.position.x, a.position.x);
+                        const dy = wrapDeltaY(b.position.y, a.position.y);
+                        const distSq = dx * dx + dy * dy;
+                        const rangeSq = repel.range * repel.range;
+                        if (distSq > 1 && distSq < rangeSq) {
+                            const dist = Math.sqrt(distSq);
+                            // Quadratic falloff — peaks at centre,
+                            // zero at the range edge.  Steeper outer
+                            // ramp than linear (force ~0.25 at half-
+                            // range vs 0.5 linear) so the outer field
+                            // is a soft hint and most of the push
+                            // comes near the tile.
+                            const t = 1 - dist / repel.range;
+                            const accel = repel.strength * t * t * timeScale;
+                            const inv = 1 / dist;
+                            a.velocity.x += dx * inv * accel;
+                            a.velocity.y += dy * inv * accel;
+                            a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mobile shards (STRUCTURE finite mass) are SKIPPED as
+        // outer-loop subjects — non-shard outer loops cover their
+        // pairs via 3x3 mutual scan, and shard ↔ shard runs in
+        // resolveShardPairs.  The repel walk above already ran for
+        // them when applicable.
+        if (a.type === EntityType.STRUCTURE) continue;
 
         // Check 3x3 neighbor cells — cell coords wrap across the seam so
         // entities near the edge see their counterparts on the opposite
@@ -644,6 +710,37 @@ export class PhysicsSystem {
                 }
             }
         }
+    }
+  }
+
+  /**
+   * Iterate every active static entity within a 5×5 cell neighbourhood
+   * (≤ 2 × SPATIAL_GRID_SIZE radius) of the world position `(x, y)`.
+   * The caller owns distance / repel-range filtering — this just
+   * exposes the static-grid cells the broadphase already touches.
+   *
+   * Used by GameEngine to drive per-tile `glowIntensity` from the
+   * player's quadratic-falloff distance: the same neighbourhood the
+   * repel scan walks, so the visual halo and the push footprint
+   * stay aligned.  The callback is invoked synchronously with no
+   * allocation; bail out by returning early inside it.
+   */
+  public forEachStaticNear(
+    x: number,
+    y: number,
+    callback: (entity: GameEntity) => void,
+  ): void {
+    const cx = Math.floor(x / SPATIAL_GRID_SIZE);
+    const cy = Math.floor(y / SPATIAL_GRID_SIZE);
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+        if (!cell) continue;
+        for (let i = 0; i < cell.length; i++) {
+          const e = cell[i];
+          if (e.active) callback(e);
+        }
+      }
     }
   }
 

@@ -279,8 +279,10 @@ export interface ShardVariantDef {
    *  next frame.  `range` is informational metadata for trigger
    *  systems that compute a quadratic-falloff `glowIntensity`
    *  relative to a source position; the renderer itself does not
-   *  read it.  Unset on every variant today — (g2) populates it
-   *  for the variants that should glow. */
+   *  read it.  Today populated for glass-tile and metal-tile —
+   *  GameEngine writes `glowIntensity` from the player's quadratic-
+   *  falloff distance to the tile within `range`, so the same number
+   *  drives both the repel field (PhysicsSystem) and the glow. */
   glow?: {
     /** Glow color when fully lit, hex string. */
     color: string;
@@ -291,6 +293,21 @@ export interface ShardVariantDef {
      *  `entity.glowIntensity` to produce the rendered alpha. */
     peakAlpha: number;
   };
+  /** Outward repel field emitted by the variant's tiles.  Range MUST
+   *  stay ≤ 2 × SPATIAL_GRID_SIZE (240) so the static-grid 5×5 outer-
+   *  ring scan in PhysicsSystem.handleEntityCollisions reaches every
+   *  affected pair.  `strength` is the per-substep velocity delta at
+   *  the tile centre; falloff is quadratic to zero at `range` —
+   *  `accel = strength * (1 - dist/range)² * timeScale`.  Per
+   *  PhysicsSystem rules, projectiles and particles are exempt
+   *  unconditionally; mobile-shard variants whose `repelImmune` is
+   *  true also drift through the field unimpeded. */
+  repel?: { range: number; strength: number };
+  /** Variants whose tiles / shards should drift through any `repel`
+   *  field — i.e. the same substance as the emitter, so it doesn't
+   *  push itself.  Today: glass-shard, plastic-shard, metal-shard.
+   *  Projectiles and particles are exempt regardless of this flag. */
+  repelImmune?: boolean;
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
    *  vertices are pulled inward by a random fraction in

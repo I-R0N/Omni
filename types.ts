@@ -384,6 +384,14 @@ export interface GameEntity {
   // to produce the rendered alpha.  Undefined or 0 → layer skipped.
   glowIntensity?: number;
 
+  // Per-substep accumulator of repel-field impulse magnitudes from
+  // every static tile in range.  Reset to 0 at the start of each
+  // PhysicsSystem.handleEntityCollisions broadphase pass and added
+  // to inside the inner-3×3 + outer-5×5 repel scans.  Surfaced for
+  // future consumers (HUD opacity fade, debug overlays); the field
+  // exists today purely so the broadphase has a place to write.
+  repelImpulse?: number;
+
   // Lazily-baked original circumradius² for dent-policy tiles
   // (plastic-tile, metal-tile).  Computed in RenderSystem on first
   // material-tile render as max(polygonPoints[i].r²) × 0.98 (small
