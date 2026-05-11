@@ -733,9 +733,22 @@ export class PhysicsSystem {
               bestIdx = i;
           }
       }
-      const k = 1 - Math.random() * dent.vertexJitter;
-      pts[bestIdx].x *= k;
-      pts[bestIdx].y *= k;
+
+      // Pull N adjacent vertices symmetrically around the closest
+      // one (rock uses 3 to deform a wider region per hit; plastic /
+      // metal default to 1 for a single-vertex pinch).  Each pulled
+      // vertex draws its own random jitter so the indentation isn't
+      // uniform across the pulled set.
+      const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
+      const N = pts.length;
+      const half = Math.floor(pullCount / 2);
+      for (let i = 0; i < pullCount; i++) {
+          const offset = i - half;
+          const idx = ((bestIdx + offset) % N + N) % N;
+          const k = 1 - Math.random() * dent.vertexJitter;
+          pts[idx].x *= k;
+          pts[idx].y *= k;
+      }
   }
 
   // Returns true if world-space point (x, y) with radius r is clear of all

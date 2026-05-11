@@ -320,15 +320,24 @@ export interface ShardVariantDef {
      *  by plastic / metal / their shards): the vertex closest to
      *  the impact direction is pulled inward, polygon shrinks
      *  asymmetrically while the vertex count stays at 6.
-     *  'triangle-delete' (used by rock-tile): the closest vertex is
-     *  REMOVED from the polygon — the two adjacent vertices stay,
-     *  forming a new flat edge where the corner used to be — and a
-     *  triangle-shaped shard (the deleted corner) is released at
-     *  that location.  The polygon loses one vertex per hit, and
-     *  the released shard inherits the deleted triangle's exact
-     *  shape so the tile and the freed chunk read as fitting
-     *  together. */
+     *  'triangle-delete' (used historically by rock-tile): the
+     *  closest vertex is REMOVED from the polygon — the two adjacent
+     *  vertices stay, forming a new flat edge where the corner used
+     *  to be — and a triangle-shaped shard (the deleted corner) is
+     *  released at that location. */
     kind?: 'pull' | 'triangle-delete';
+    /** When kind === 'pull' (or unset), how many adjacent polygon
+     *  vertices to pull inward per damage event.  Default 1
+     *  (plastic / metal — pull the closest vertex only).  Rock uses
+     *  3 so each hit deforms a wider region (closest vertex + its
+     *  two immediate neighbours), creating multiple inverted angles
+     *  along one side of the polygon — reads as a fractured-stone
+     *  surface rather than a single dimple.  Indices are distributed
+     *  symmetrically around the closest vertex (for N=3:
+     *  bestIdx - 1, bestIdx, bestIdx + 1; wrapped modulo polygon
+     *  length).  Each pulled vertex gets its own random jitter so
+     *  the pulls aren't uniform. */
+    pullVertexCount?: number;
     /** Rotation in radians applied to the impact direction before
      *  searching for the vertex to deform.  0 (default) deforms the
      *  vertex closest to the impact; Math.PI/2 deforms the
