@@ -338,13 +338,25 @@ export interface ShardVariantDef {
      *  length).  Each pulled vertex gets its own random jitter so
      *  the pulls aren't uniform. */
     pullVertexCount?: number;
-    /** Multiplier on vertexJitter applied to the closest-to-impact
-     *  vertex specifically (the centre of the pulled set).  Default
-     *  1 (same jitter as neighbours).  Rock uses ~2 so the impact
-     *  vertex pulls dramatically while neighbours add subtle warp —
-     *  reads as a brittle / jagged fracture (one deep notch + softer
-     *  side warping) compared to plastic / metal's uniform pull. */
+    /** Multiplier on vertexJitter applied to vertices in the
+     *  "deep-pull" subset of the pulled set.  Default 1 (same
+     *  jitter as everyone).  Rock uses ~10 so deep-pull vertices
+     *  warp dramatically (effective jitter up to ~2.0, clamped by
+     *  the K_MIN floor inside applyDentStep) while non-deep
+     *  neighbours add softer side warp — reads as a brittle /
+     *  jagged fracture compared to plastic / metal's uniform pull.
+     *  Which vertices are "deep" is controlled by deepVertexCount
+     *  below; the closest-to-impact vertex is always one of them. */
     centerVertexJitterMul?: number;
+    /** How many of the pulled vertices receive the
+     *  centerVertexJitterMul boost.  Default 1 (just the closest-
+     *  to-impact vertex).  Rock uses 2 so each hit produces two
+     *  deep notches — the impact vertex plus one randomly-chosen
+     *  vertex from the rest of the pulled set — for a more chaotic
+     *  brittle fracture pattern.  Capped at pullVertexCount; when
+     *  deepVertexCount === pullVertexCount, every pulled vertex
+     *  gets the boost (uniform deep pull). */
+    deepVertexCount?: number;
     /** Optional shard released on every hit, IN ADDITION TO the
      *  on-death breakShards.  Sized like breakShards entries
      *  (linear sizeFraction × deformed diameter) but spawned at the

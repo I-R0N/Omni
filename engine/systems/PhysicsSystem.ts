@@ -736,13 +736,16 @@ export class PhysicsSystem {
 
       // Pull N adjacent vertices symmetrically around the closest
       // one (rock uses 3 to deform a wider region per hit; plastic /
-      // metal default to 1 for a single-vertex pinch).  The closest
-      // vertex (offset 0) draws its jitter from vertexJitter ×
-      // centerVertexJitterMul so it can pull dramatically more than
-      // its neighbours — rock uses ~10× so the impact vertex creates
-      // a deep brittle notch (effective jitter up to 2.0) while the
-      // neighbours add softer warp.  Each pulled vertex still draws
-      // its own random magnitude so pulls aren't uniform.
+      // metal default to 1 for a single-vertex pinch).  Of these
+      // pulled vertices, `deepCount` get the centerVertexJitterMul
+      // boost (rock uses 2 — the closest vertex plus one randomly-
+      // chosen neighbour — for a chaotic two-notch fracture).  The
+      // closest-to-impact vertex (offset 0, loop index `half`) is
+      // always one of the deep slots; remaining deep slots are
+      // sampled uniformly without replacement from the rest of the
+      // pulled set via the standard reservoir-style pass below.
+      // Each pulled vertex still draws its own random magnitude so
+      // pulls aren't uniform within either subset.
       //
       // The per-vertex multiplicative factor k is clamped to a small
       // positive floor (0.05) so high-jitter rolls don't pull a
@@ -752,13 +755,33 @@ export class PhysicsSystem {
       // of the vertex's current radius.
       const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
       const centerMul = dent.centerVertexJitterMul ?? 1;
+      const deepCount = Math.min(pullCount, Math.max(1, dent.deepVertexCount ?? 1));
       const N = pts.length;
       const half = Math.floor(pullCount / 2);
       const K_MIN = 0.05;
+
+      // Bitmask of loop indices marked as deep.  Closest vertex
+      // (offset 0, index `half`) is always deep; remaining slots
+      // chosen via a reservoir pass over the non-centre indices.
+      let deepMask = 1 << half;
+      if (deepCount > 1) {
+          let remaining = deepCount - 1;
+          let available = pullCount - 1;
+          for (let i = 0; i < pullCount && remaining > 0; i++) {
+              if (i === half) continue;
+              if (Math.random() * available < remaining) {
+                  deepMask |= 1 << i;
+                  remaining--;
+              }
+              available--;
+          }
+      }
+
       for (let i = 0; i < pullCount; i++) {
           const offset = i - half;
           const idx = ((bestIdx + offset) % N + N) % N;
-          const jitterMag = dent.vertexJitter * (offset === 0 ? centerMul : 1);
+          const isDeep = (deepMask & (1 << i)) !== 0;
+          const jitterMag = dent.vertexJitter * (isDeep ? centerMul : 1);
           const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;

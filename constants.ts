@@ -1545,18 +1545,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     dent: {
       // 3 adjacent vertices pulled per hit.  vertexJitter is the
-      // base per-vertex max pull for NEIGHBOURS (0.20 = up to 20 %
-      // inward each).  The CENTRE vertex (closest to impact) uses
-      // vertexJitter × centerVertexJitterMul = 0.20 × 10.0 = up to
-      // 2.0 nominal jitter — capped by applyDentStep's K_MIN floor
-      // so an "infinitely deep" roll bottoms out at 5 % of the
-      // vertex's current radius.  In practice every hit produces a
-      // dramatic centre-vertex pull (usually past 50 % inward) while
-      // neighbours add softer warp.  Reads as a brittle / jagged
-      // fracture with one deep notch + side ripples per strike.
+      // base per-vertex max pull (0.20 = up to 20 % inward).  Two
+      // of the three (the closest-to-impact vertex plus one
+      // randomly-chosen neighbour, via deepVertexCount = 2) draw
+      // jitter × centerVertexJitterMul = 0.20 × 10.0 = up to 2.0
+      // nominal jitter — capped by applyDentStep's K_MIN floor so
+      // an "infinitely deep" roll bottoms out at 5 % of the vertex's
+      // current radius.  Every hit produces two deep notches plus
+      // one softer side warp, reading as a chaotic brittle fracture
+      // (cracks branch unevenly rather than dimpling at a single
+      // point).
       vertexJitter: 0.20,
       centerVertexJitterMul: 10.0,
       pullVertexCount: 3,
+      deepVertexCount: 2,
       // Each hit also chips off a rock-shard at the impact location.
       // sizeFraction 0.5 is linear relative to the deformed tile
       // diameter (~44 at start), so the chip is ~22 wide on hit 1
