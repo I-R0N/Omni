@@ -893,6 +893,25 @@ export class GameEngine {
           if (this.currentMap && variant !== 'glass-tile' && !isDentVariant) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
+
+          // Rock-shard death also releases a colour-matched nebula-shard
+          // (cloud-style fragment) alongside the solid shatter children.
+          // Only fires for mobile shards (mass !== Infinity) and only
+          // when the shard was big enough to produce shatter children
+          // — small chips (size < 24) destroy cleanly without a puff.
+          if (this.currentMap
+              && variant === 'rock-shard'
+              && entity.mass !== Infinity
+              && Math.max(entity.size.x, entity.size.y) >= 24) {
+              this.drops.spawnColoredNebulaShard(
+                  this.currentMap.entities,
+                  entity.position,
+                  this.deformedDiameter(entity),
+                  entity.color,
+                  0.5,
+                  entity.lastImpactVelocity ?? entity.velocity,
+              );
+          }
       }
 
       if (isNebula && this.currentMap) {
@@ -1551,6 +1570,23 @@ export class GameEngine {
                   this.drops.spawnPerHitShard(
                       this.currentMap.entities, target, dent.perHitShard, impactWorldPos,
                   );
+                  // Rock-tile also releases a tinted nebula-shard
+                  // per hit — pairs the solid rock chip with a drifting
+                  // cloud puff in the same colour as the parent tile,
+                  // selling the brittle fracture as both shrapnel and
+                  // dust.  Only rock today; other dent variants want
+                  // the cleaner solid-shard-only readout.
+                  if (target.shardVariant === 'rock-tile') {
+                      const baseSize = this.deformedDiameter(target);
+                      this.drops.spawnColoredNebulaShard(
+                          this.currentMap.entities,
+                          impactWorldPos,
+                          baseSize,
+                          target.color,
+                          0.55,
+                          target.lastImpactVelocity,
+                      );
+                  }
               }
               // Intermediate dent-shard spawn (pull-kind variants):
               // when health / maxHealth crosses an entry's threshold,
@@ -1591,6 +1627,25 @@ export class GameEngine {
    * vertex (< 4 verts left) — the killing hit will trigger
    * breakShards via the normal on-death path.
    */
+  /**
+   * Effective diameter of a (possibly-deformed) polygon entity.  Same
+   * "average vertex radius × 2" proxy DropSystem.spawnDentShard uses
+   * to size shards — area ≈ k × r² for a regular polygon so avgR
+   * tracks the deformed area linearly.  Falls back to entity.size
+   * when the polygon is missing.
+   */
+  private deformedDiameter(entity: GameEntity): number {
+      const baseSize = Math.max(entity.size.x, entity.size.y);
+      if (!entity.polygonPoints || entity.polygonPoints.length === 0) return baseSize;
+      let sumR2 = 0;
+      for (let i = 0; i < entity.polygonPoints.length; i++) {
+          const p = entity.polygonPoints[i];
+          sumR2 += p.x * p.x + p.y * p.y;
+      }
+      const avgR = Math.sqrt(sumR2 / entity.polygonPoints.length);
+      return avgR * 2;
+  }
+
   private applyTriangleDelete(
       target: GameEntity,
       impactWorldPos: Vector2,

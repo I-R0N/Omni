@@ -5,6 +5,7 @@ import {
   AMMO_CONSTANTS,
   DROP_CONFIG,
   SHARD_VARIANTS,
+  NEBULA_CONSTANTS,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -320,6 +321,25 @@ export class DropSystem {
       lifetimeMin: 0.1, lifetimeMax: 0.25,
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
+
+    // Release 1-2 blue-toned nebula-shards alongside the glass debris
+    // so the shatter has a cloud-puff dimension to it (matches the
+    // rock-tile per-hit pattern).  Tone keys to the glass-tile blue
+    // (#b4e6fd) rather than the procedural nebula palette so the puff
+    // reads as "glass dust" rather than a random nebula fragment.
+    const nebulaCount = 1 + Math.floor(Math.random() * 2);
+    const tileSize = Math.max(tile.size.x, tile.size.y);
+    for (let i = 0; i < nebulaCount; i++) {
+      const spawnPos = {
+        x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
+        y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
+      };
+      this.spawnColoredNebulaShard(
+        entities, spawnPos, tileSize,
+        '#b4e6fd', 0.55 + Math.random() * 0.2,
+        tile.lastImpactVelocity,
+      );
+    }
   }
 
   /**
@@ -677,6 +697,77 @@ export class DropSystem {
       speedMin: 1.5, speedMax: 3.0, sizeMin: 1, sizeMax: 1.8,
       lifetimeMin: 0.12, lifetimeMax: 0.25,
       spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
+  /**
+   * Spawn a nebula-shard at a world position with a colour override.
+   * Used by destructible tiles / shards that want a cloud-style
+   * fragment to drift away alongside the regular solid debris — rock
+   * tiles release one per hit, glass tiles release 1-2 on shatter,
+   * etc.  The shard inherits the nebula damping + spawn fade-in so
+   * it reads as "cloud" visually, but its `color` is forced to the
+   * caller's hex (no palette composition) so it tints to the parent
+   * material rather than the default nebula palette.
+   *
+   * `baseSize` is the source entity's effective diameter (rock-tile,
+   * rock-shard, glass-tile size, etc.); shard size = baseSize ×
+   * sizeFraction.  Inherits `inheritVelocity` for the launch
+   * direction (typically the parent's lastImpactVelocity), falling
+   * back to a random direction.
+   */
+  public spawnColoredNebulaShard(
+    entities: GameEntity[],
+    spawnWorldPos: Vector2,
+    baseSize: number,
+    color: string,
+    sizeFraction: number = 0.5,
+    inheritVelocity?: Vector2,
+  ) {
+    const variantDef = SHARD_VARIANTS['nebula-shard'];
+    const targetSize = Math.max(4, baseSize * sizeFraction);
+    const shardPts = this.generateMaterialShardPolygon('nebula-shard', targetSize);
+    const mass = variantDef.spawn.sizeToMass(targetSize);
+
+    const impactSpeed = inheritVelocity
+      ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)
+      : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(inheritVelocity!.y, inheritVelocity!.x)
+      : Math.random() * Math.PI * 2;
+    const launchSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.6;
+
+    entities.push({
+      id:                  nextId('colored_nebula_shard'),
+      type:                EntityType.STRUCTURE,
+      shardVariant:        'nebula-shard',
+      position:            { x: spawnWorldPos.x, y: spawnWorldPos.y },
+      velocity:            {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:                { x: targetSize, y: targetSize },
+      rotation:            Math.random() * Math.PI * 2,
+      rotationSpeed:       (Math.random() - 0.5) * (1.2 / Math.max(1, targetSize / 30)),
+      color,
+      active:              true,
+      health:              1,
+      maxHealth:           1,
+      mass,
+      polygonPoints:       shardPts,
+      // Nebula damping so the shard drifts like a cloud and decelerates
+      // gradually instead of carrying full inertia.
+      linearDamping:       NEBULA_CONSTANTS.LINEAR_DAMPING,
+      angularDamping:      NEBULA_CONSTANTS.ANGULAR_DAMPING,
+      // Birth fade-in so the shard ramps in opacity instead of
+      // popping at full alpha.  Duration matches the standard nebula
+      // shatter spawn duration.
+      nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
+      nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
+      // Small area so the shard doesn't trigger the shard-to-tile
+      // transmutation path when it bumps into other nebula material.
+      nebulaTileArea:      targetSize * targetSize * 0.5,
     });
   }
 
