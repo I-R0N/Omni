@@ -1138,6 +1138,19 @@ export class RenderSystem {
       if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
+      // ── DEBUG: unconditional magenta marker on every metal-tile, drawn
+      // BEFORE any fast-path, in camera space at (rx, ry).  Confirms
+      // whether metal-tile entities reach renderEntities at all.
+      if (entity.shardVariant === 'metal-tile') {
+          ctx.save();
+          ctx.globalAlpha = 1.0;
+          ctx.fillStyle = '#ff00ff';
+          ctx.beginPath();
+          ctx.arc(rx, ry, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+      }
+
       // Particles are handled separately in renderParticles() — skip here
       if (entity.type === EntityType.PARTICLE) return;
 
