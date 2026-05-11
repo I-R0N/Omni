@@ -1160,10 +1160,22 @@ export class RenderSystem {
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
             || entity.shardVariant === 'indestructible-tile');
+      // Skip the fast path while the player is inside this tile's
+      // variant glow range so the slow path's layer 2b can paint.
+      // Cheap squared-distance check; no allocation.
+      let inGlowRange = false;
+      if (isGlassFamilyStaticTile && playerPos && entity.shardVariant !== undefined) {
+          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+          if (fpGlow !== undefined) {
+              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+          }
+      }
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
-          && !(entity.glowIntensity !== undefined && entity.glowIntensity > 0)) {
+          && !inGlowRange) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
@@ -1674,28 +1686,34 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
-                // Layer 2b — variant-driven additive glow.  Externally
-                // gated by `entity.glowIntensity` (0..1, written each
-                // frame by whatever system owns the trigger and reset
-                // next frame).  When unset / zero, or when the variant
-                // has no `glow` config, the layer short-circuits before
-                // any state mutation — the cheap field check keeps the
-                // hot path allocation-free for non-glowing tiles.
-                // Paint both a fill AND a thick stroke so the halo
-                // reads as a clear "lit edge" — fill alone washes the
-                // hex out cyan but doesn't pop as a beacon.
+                // Layer 2b — variant-driven additive glow.  Computes
+                // intensity inline from the player position (same
+                // pattern as the material-tile branch below) so the
+                // visualization is independent of any upstream system
+                // writing `entity.glowIntensity`.  Paints both a fill
+                // and a thick stroke so the halo reads as a clear
+                // "lit edge" — fill alone washes the hex out cyan but
+                // doesn't pop as a beacon.
                 if (!isFlash
-                    && entity.glowIntensity !== undefined
-                    && entity.glowIntensity > 0
+                    && playerPos
                     && entity.shardVariant !== undefined) {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
                     if (glow !== undefined) {
-                        ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
-                        ctx.fillStyle = glow.color;
-                        ctx.fill();
-                        ctx.strokeStyle = glow.color;
-                        ctx.lineWidth = 3.0;
-                        ctx.stroke();
+                        const pdxG = wrapDeltaX(entity.position.x, playerPos.x);
+                        const pdyG = wrapDeltaY(entity.position.y, playerPos.y);
+                        const pdistSqG = pdxG * pdxG + pdyG * pdyG;
+                        const rangeSqG = glow.range * glow.range;
+                        if (pdistSqG < rangeSqG) {
+                            const tG = 1 - Math.sqrt(pdistSqG) / glow.range;
+                            const intensityG = tG * tG;
+                            ctx.globalAlpha = glow.peakAlpha * intensityG;
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensityG);
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 3.0;
+                            ctx.stroke();
+                        }
                     }
                 }
 
@@ -1865,39 +1883,43 @@ export class RenderSystem {
 
                     // Variant-driven glow (mirrors glass-family layer
                     // 2b).  Painted LAST so neither the dark outline
-                    // nor the crack overlay can cover it.  Plain
-                    // source-over alpha-blend (no 'lighter'): the
-                    // accent color dominates at peak intensity, which
-                    // reads unambiguously against the matte / steel
-                    // body.  A thick stroke of the same color wraps
-                    // the silhouette so the halo is visible even at
-                    // the range edge where the fill alpha is low.
+                    // nor the crack overlay can cover it.  Computes
+                    // intensity inline from the player position — no
+                    // dependency on an upstream system writing
+                    // `entity.glowIntensity`, so the visualization is
+                    // immune to scheduling / iteration-order issues
+                    // in the simulation loop.  Plain source-over
+                    // alpha-blend so the accent color dominates at
+                    // peak intensity, which reads unambiguously
+                    // against the matte / steel body.
                     if (!isFlash
-                        && entity.glowIntensity !== undefined
-                        && entity.glowIntensity > 0
+                        && playerPos
                         && entity.shardVariant !== undefined) {
                         const glow = SHARD_VARIANTS[entity.shardVariant].glow;
                         if (glow !== undefined) {
-                            // Rebuild the polygon path — the outline
-                            // loop above issued ctx.beginPath() and
-                            // walked individual edges, so the fill
-                            // path is no longer the closed polygon.
-                            buildPath();
-                            const intensity = entity.glowIntensity;
-                            ctx.globalAlpha = glow.peakAlpha * intensity;
-                            ctx.fillStyle = glow.color;
-                            ctx.fill();
-                            // Outline halo — bright enough that even
-                            // the range edge (low intensity) reads as
-                            // a clearly lit rim.  Stroke alpha rides
-                            // on the intensity but never drops below
-                            // ~0.4 so the cluster boundary is always
-                            // visible while the player is in range.
-                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensity);
-                            ctx.strokeStyle = glow.color;
-                            ctx.lineWidth = 4.0;
-                            ctx.stroke();
-                            ctx.globalAlpha = 1.0;
+                            const pdx = wrapDeltaX(entity.position.x, playerPos.x);
+                            const pdy = wrapDeltaY(entity.position.y, playerPos.y);
+                            const pdistSq = pdx * pdx + pdy * pdy;
+                            const rangeSq = glow.range * glow.range;
+                            if (pdistSq < rangeSq) {
+                                const t = 1 - Math.sqrt(pdistSq) / glow.range;
+                                const intensity = t * t;
+                                // Rebuild the polygon path — the
+                                // outline loop walks individual edges
+                                // and leaves a non-closed sub-path.
+                                buildPath();
+                                ctx.globalAlpha = glow.peakAlpha * intensity;
+                                ctx.fillStyle = glow.color;
+                                ctx.fill();
+                                // Outline halo — stroke alpha floors
+                                // at 0.4 so the cluster boundary is
+                                // visible even at the range edge.
+                                ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensity);
+                                ctx.strokeStyle = glow.color;
+                                ctx.lineWidth = 4.0;
+                                ctx.stroke();
+                                ctx.globalAlpha = 1.0;
+                            }
                         }
                     }
                 }
