@@ -18,14 +18,16 @@ import { EntityType } from '../../types';
 export type ShardVariantId =
   // STRUCTURE-tile variants (static, hex-clustered, mass = ∞)
   | 'glass-tile'
-  | 'reinforced-tile'
-  | 'heavy-tile'
+  | 'plastic-tile'
+  | 'metal-tile'
   | 'indestructible-tile'
   | 'rock-tile'
   | 'nebula-tile'
   // Mobile shard variants (dynamic grid, finite mass)
   | 'rock-shard'
   | 'glass-shard'
+  | 'plastic-shard'
+  | 'metal-shard'
   | 'nebula-shard';
 
 // ── Carrier EntityType ──────────────────────────────────────────────
@@ -91,6 +93,13 @@ export interface ShardSpawnShape {
   sizeMax: number;
   polyVerticesMin: number;
   polyVerticesMax: number;
+  /** When set, overrides polyVerticesMin/Max with a discrete list of
+   *  allowed vertex counts (one is picked uniformly per spawn).  Used
+   *  for variants that should snap to specific counts rather than fill
+   *  a continuous range — today rock-shard uses [5, 7, 9] and
+   *  metal-shard uses [6, 8, 10] to keep the silhouettes distinct
+   *  from each other and from glass / plastic. */
+  polyVerticesOptions?: number[];
   /** Per-vertex angle jitter strength, fraction of (2π / verts). */
   angleJitter: number;
   /** Radial range for jitter, fraction of base radius. */
@@ -262,6 +271,138 @@ export interface ShardVariantDef {
    *  pipeline; legacy compose math continues to apply.  Today set
    *  on rock-shard, glass-shard, nebula-shard. */
   density?: ShardDensityPolicy;
+  /** Per-tile additive glow visual.  When set, RenderSystem's
+   *  static-tile draw loop (layer 2b) fills the polygon with `color`
+   *  at alpha = `peakAlpha * entity.glowIntensity`.  Activation is
+   *  externally driven — whatever system owns the trigger writes
+   *  `glowIntensity` (0..1) on the entity each frame and resets it
+   *  next frame.  `range` is informational metadata for trigger
+   *  systems that compute a quadratic-falloff `glowIntensity`
+   *  relative to a source position; the renderer itself does not
+   *  read it.  Unset on every variant today — (g2) populates it
+   *  for the variants that should glow. */
+  glow?: {
+    /** Glow color when fully lit, hex string. */
+    color: string;
+    /** Range over which the glow falls off, world units.  Used by
+     *  external trigger systems; not read by the renderer. */
+    range: number;
+    /** Quadratic-falloff peak alpha (0..1) — multiplied by
+     *  `entity.glowIntensity` to produce the rendered alpha. */
+    peakAlpha: number;
+  };
+  /** Dent-in-place policy.  When set, the variant deforms in its grid
+   *  cell on each damage event instead of shattering — polygon
+   *  vertices are pulled inward by a random fraction in
+   *  [0, vertexJitter] of their current radius (toward the polygon
+   *  centroid).  The tile's `entity.size` is deliberately NOT touched
+   *  so collision footprint stays stable while the visible silhouette
+   *  crumples asymmetrically.  When health hits 0 the tile detaches
+   *  and spawns the shards listed in `breakShards` (each at a fraction
+   *  of the tile's original size, all sharing the dented polygon
+   *  shape scaled to fit) and skips the variant's `shatter` policy
+   *  entirely.  Dent variants do NOT regen.  Today: plastic-tile and
+   *  metal-tile.
+   *
+   *  Hits-to-break is driven by the variant's STRUCTURE_VARIANTS
+   *  health value (a plain HP integer), so adjusting hardness is one
+   *  edit there.  Per-hit deformation magnitude differentiates the
+   *  materials visually — plastic uses higher vertexJitter than
+   *  metal even when their HP matches. */
+  dent?: {
+    /** Per-vertex inward pull magnitude as a fraction of current
+     *  radius.  Random magnitude in [0, vertexJitter] is drawn for
+     *  each vertex each hit; cumulative.  Plastic ~0.25 (visibly
+     *  warps each hit), metal ~0.13 (subtle per-hit change).  Only
+     *  used when `kind` is 'pull'. */
+    vertexJitter: number;
+    /** Strategy for the per-hit deformation.  Default 'pull' (used
+     *  by plastic / metal / their shards): the vertex closest to
+     *  the impact direction is pulled inward, polygon shrinks
+     *  asymmetrically while the vertex count stays at 6.
+     *  'triangle-delete' (used historically by rock-tile): the
+     *  closest vertex is REMOVED from the polygon — the two adjacent
+     *  vertices stay, forming a new flat edge where the corner used
+     *  to be — and a triangle-shaped shard (the deleted corner) is
+     *  released at that location. */
+    kind?: 'pull' | 'triangle-delete';
+    /** When kind === 'pull' (or unset), how many adjacent polygon
+     *  vertices to pull inward per damage event.  Default 1
+     *  (plastic / metal — pull the closest vertex only).  Rock uses
+     *  3 so each hit deforms a wider region (closest vertex + its
+     *  two immediate neighbours), creating multiple inverted angles
+     *  along one side of the polygon — reads as a fractured-stone
+     *  surface rather than a single dimple.  Indices are distributed
+     *  symmetrically around the closest vertex (for N=3:
+     *  bestIdx - 1, bestIdx, bestIdx + 1; wrapped modulo polygon
+     *  length).  Each pulled vertex gets its own random jitter so
+     *  the pulls aren't uniform. */
+    pullVertexCount?: number;
+    /** Multiplier on vertexJitter applied to vertices in the
+     *  "deep-pull" subset of the pulled set.  Default 1 (same
+     *  jitter as everyone).  Rock uses ~10 so deep-pull vertices
+     *  warp dramatically (effective jitter up to ~2.0, clamped by
+     *  the K_MIN floor inside applyDentStep) while non-deep
+     *  neighbours add softer side warp — reads as a brittle /
+     *  jagged fracture compared to plastic / metal's uniform pull.
+     *  Which vertices are "deep" is controlled by deepVertexCount
+     *  below; the closest-to-impact vertex is always one of them. */
+    centerVertexJitterMul?: number;
+    /** How many of the pulled vertices receive the
+     *  centerVertexJitterMul boost.  Default 1 (just the closest-
+     *  to-impact vertex).  Rock uses 2 so each hit produces two
+     *  deep notches — the impact vertex plus one randomly-chosen
+     *  vertex from the rest of the pulled set — for a more chaotic
+     *  brittle fracture pattern.  Capped at pullVertexCount; when
+     *  deepVertexCount === pullVertexCount, every pulled vertex
+     *  gets the boost (uniform deep pull). */
+    deepVertexCount?: number;
+    /** Optional shard released on every hit, IN ADDITION TO the
+     *  on-death breakShards.  Sized like breakShards entries
+     *  (linear sizeFraction × deformed diameter) but spawned at the
+     *  impact world position rather than the tile centre.  Today
+     *  rock uses this so each hit visibly chips a rock-shard off
+     *  the tile (the deformation makes room for it) without
+     *  removing any vertex from the polygon. */
+    perHitShard?: {
+      variant: ShardVariantId;
+      sizeFraction: number;
+    };
+    /** Rotation in radians applied to the impact direction before
+     *  searching for the vertex to deform.  0 (default) deforms the
+     *  vertex closest to the impact; Math.PI/2 deforms the
+     *  perpendicular side; Math.PI deforms the far side. */
+    dentVertexAngleOffset?: number;
+    /** Optional one-off shard releases that fire WHILE the tile is
+     *  still alive in the grid, triggered the first time `health /
+     *  maxHealth` falls below the entry's `healthFraction` threshold.
+     *  Sized like breakShards (linear sizeFraction × deformed
+     *  diameter). */
+    intermediateShards?: Array<{
+      healthFraction: number;
+      variant: ShardVariantId;
+      sizeFraction: number;
+    }>;
+    /** Mobile shards spawned when the tile detaches.  `sizeFraction`
+     *  is a LINEAR multiplier on the deformed tile's effective
+     *  diameter (2 × avgVertexRadius of the dented polygon).  At
+     *  sizeFraction = 1.0 the shard's diameter equals the deformed
+     *  tile's diameter, so its area matches the deformed tile.
+     *  For a two-shard split that should sum to the deformed area,
+     *  pick sizeFractions whose squares sum to 1.0 (e.g. sqrt(2/3)
+     *  and sqrt(1/3) → ~0.816 and ~0.577 for a 2:1 area split).
+     *
+     *  Each shard inherits the dented polygon scaled to its target
+     *  size so the dent character is preserved.  Spawned with a
+     *  small radial spread so multiple shards don't pile up at the
+     *  tile centre.  For 'triangle-delete' variants, the first
+     *  entry's `variant` is also used as the variant for per-hit
+     *  triangle shards. */
+    breakShards: Array<{
+      variant: ShardVariantId;
+      sizeFraction: number;
+    }>;
+  };
 }
 
 // ── Map population entry ────────────────────────────────────────────

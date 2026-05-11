@@ -2,7 +2,7 @@
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS } from '../../constants';
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, onMapDimensionsChanged } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
@@ -166,7 +166,7 @@ export class PhysicsSystem {
     player: GameEntity,
     mapType: MapType,
     dt: number,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -458,7 +458,7 @@ export class PhysicsSystem {
       }
   }
 
-  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void) {
+  private applyGravity(entities: GameEntity[], timeScale: number, onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void) {
     // Phase 2: use the attractors cache populated on map load instead of
     // re-scanning the full entity array every substep.  Individual dead
     // attractors are skipped at access time by the `active` check below so
@@ -513,7 +513,7 @@ export class PhysicsSystem {
 
   private handleEntityCollisions(
     entities: GameEntity[],
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -670,6 +670,124 @@ export class PhysicsSystem {
       }
   }
 
+  // Apply one dent step to a tile whose variant declares a `dent` policy.
+  // Called immediately after each damage event (projectile hit, player
+  // crash, asteroid crash) and short-circuits for variants without a
+  // dent policy.  Mutates only the single polygon vertex closest to
+  // the impactor's world position — pulled inward by a random fraction
+  // in [0, vertexJitter] of its current radius from the polygon
+  // centroid (entity-local origin).  Other vertices stay put so the
+  // edges shared with neighbouring tiles don't separate.  No
+  // allocation in the hot path.
+  //
+  // Deliberately does NOT touch entity.size: the collision footprint
+  // stays stable so AABB broadphase keeps working unchanged.  The
+  // visible silhouette crumples asymmetrically on the hit side as
+  // vertices accumulate inward pulls; the shard spawned at detach
+  // time reads its size from the dented polygon's bounding extent
+  // (see DropSystem.spawnDentShard).
+  public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
+      if (tile.shardVariant === undefined) return;
+      const dent = SHARD_VARIANTS[tile.shardVariant].dent;
+      if (dent === undefined) return;
+      // Triangle-delete variants do their polygon mutation + shard
+      // spawn in GameEngine.spawnDamageText (it needs entities-array
+      // access for the spawn).  Skip the in-place vertex pull here so
+      // the two paths don't fight over the same polygon.
+      if (dent.kind !== undefined && dent.kind !== 'pull') return;
+
+      const pts = tile.polygonPoints;
+      if (!pts || pts.length === 0) return;
+
+      // Impact in entity-local coords (centroid at origin), with
+      // toroidal wrap so impacts across the seam pick the right side.
+      // wrapDeltaX(from, to) returns (to - from), so pass tile first
+      // to get (impact - tile) — i.e. the impact's offset from the
+      // tile centre.
+      let dirX = wrapDeltaX(tile.position.x, impactWorldPos.x);
+      let dirY = wrapDeltaY(tile.position.y, impactWorldPos.y);
+
+      // Optional rotation of the impact direction before the closest-
+      // vertex search.  Rock uses Math.PI/2 so the dent appears on a
+      // side perpendicular to the impact — reads as "a chunk pinches
+      // off the side while the tile stays in the grid."  Plastic and
+      // metal leave this 0 (dent where hit).
+      const angleOffset = dent.dentVertexAngleOffset;
+      if (angleOffset !== undefined && angleOffset !== 0) {
+          const cosA = Math.cos(angleOffset);
+          const sinA = Math.sin(angleOffset);
+          const rx = dirX * cosA - dirY * sinA;
+          const ry = dirX * sinA + dirY * cosA;
+          dirX = rx;
+          dirY = ry;
+      }
+
+      let bestIdx = 0;
+      let bestD2 = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+          const dx = pts[i].x - dirX;
+          const dy = pts[i].y - dirY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+              bestD2 = d2;
+              bestIdx = i;
+          }
+      }
+
+      // Pull N adjacent vertices symmetrically around the closest
+      // one (rock uses 3 to deform a wider region per hit; plastic /
+      // metal default to 1 for a single-vertex pinch).  Of these
+      // pulled vertices, `deepCount` get the centerVertexJitterMul
+      // boost (rock uses 2 — the closest vertex plus one randomly-
+      // chosen neighbour — for a chaotic two-notch fracture).  The
+      // closest-to-impact vertex (offset 0, loop index `half`) is
+      // always one of the deep slots; remaining deep slots are
+      // sampled uniformly without replacement from the rest of the
+      // pulled set via the standard reservoir-style pass below.
+      // Each pulled vertex still draws its own random magnitude so
+      // pulls aren't uniform within either subset.
+      //
+      // The per-vertex multiplicative factor k is clamped to a small
+      // positive floor (0.05) so high-jitter rolls don't pull a
+      // vertex past the polygon centroid and flip it through the
+      // origin — that would invert winding and break SAT collision.
+      // With the clamp, an "infinitely deep" pull bottoms out at 5 %
+      // of the vertex's current radius.
+      const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
+      const centerMul = dent.centerVertexJitterMul ?? 1;
+      const deepCount = Math.min(pullCount, Math.max(1, dent.deepVertexCount ?? 1));
+      const N = pts.length;
+      const half = Math.floor(pullCount / 2);
+      const K_MIN = 0.05;
+
+      // Bitmask of loop indices marked as deep.  Closest vertex
+      // (offset 0, index `half`) is always deep; remaining slots
+      // chosen via a reservoir pass over the non-centre indices.
+      let deepMask = 1 << half;
+      if (deepCount > 1) {
+          let remaining = deepCount - 1;
+          let available = pullCount - 1;
+          for (let i = 0; i < pullCount && remaining > 0; i++) {
+              if (i === half) continue;
+              if (Math.random() * available < remaining) {
+                  deepMask |= 1 << i;
+                  remaining--;
+              }
+              available--;
+          }
+      }
+
+      for (let i = 0; i < pullCount; i++) {
+          const offset = i - half;
+          const idx = ((bestIdx + offset) % N + N) % N;
+          const isDeep = (deepMask & (1 << i)) !== 0;
+          const jitterMag = dent.vertexJitter * (isDeep ? centerMul : 1);
+          const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
+          pts[idx].x *= k;
+          pts[idx].y *= k;
+      }
+  }
+
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
   public isPositionClear(x: number, y: number, r: number): boolean {
@@ -694,6 +812,36 @@ export class PhysicsSystem {
           }
       }
       return true;
+  }
+
+  // Returns true if an active static tile's centre lies within `radius` of
+  // world-space point (x, y), ignoring the tile whose id matches `ignoreId`
+  // (so a tile can probe for its own neighbours without finding itself).
+  // Used by RenderSystem to suppress outline strokes on edges that are
+  // cleanly butted against a neighbour tile.  Wraps the probe coordinates
+  // so callers probing across the toroidal seam still find neighbours on
+  // the opposite side.
+  public hasStaticTileNear(x: number, y: number, radius: number, ignoreId?: string): boolean {
+      const wx = wrapX(x);
+      const wy = wrapY(y);
+      const cx = Math.floor(wx / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wy / SPATIAL_GRID_SIZE);
+      const rSq = radius * radius;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  if (ignoreId !== undefined && t.id === ignoreId) continue;
+                  const tdx = wrapDeltaX(t.position.x, wx);
+                  const tdy = wrapDeltaY(t.position.y, wy);
+                  if (tdx * tdx + tdy * tdy < rSq) return true;
+              }
+          }
+      }
+      return false;
   }
 
   /**
@@ -920,7 +1068,7 @@ export class PhysicsSystem {
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -1036,7 +1184,7 @@ export class PhysicsSystem {
     a: GameEntity,
     b: GameEntity,
     mtv: Vector2,
-    onDamage?: (pos: Vector2, amount: number, target?: GameEntity) => void,
+    onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
     onDeath?: (entity: GameEntity) => void,
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
@@ -1158,8 +1306,8 @@ export class PhysicsSystem {
           //
           // Stage 5: shard-family entities all share EntityType.STRUCTURE
           // now, so distinguishing static tiles vs glass-shards needs a
-          // variant check.  STRUCTURE-tile variants (glass / reinforced /
-          // heavy / indestructible) are mass=Infinity, so we can short-
+          // variant check.  STRUCTURE-tile variants (glass / plastic /
+          // metal / indestructible) are mass=Infinity, so we can short-
           // circuit on that for tile reflection.  Mobile shards then
           // need a per-variant check — only glass-shard reflects.
           if (proj.isBouncer) {
@@ -1288,8 +1436,47 @@ export class PhysicsSystem {
               // else takes the full projectile damage.
               const isIndestructibleTile = target.type === EntityType.STRUCTURE
                   && target.shardVariant === 'indestructible-tile';
+              // Dent-policy entities consume one HP per projectile
+              // regardless of the projectile's damage value — so "hits
+              // to break" tracks the player's mental model (each click
+              // is one hit, independent of weapon power).  Applies to
+              // both static dent tiles and mobile dent shards (plastic
+              // and metal share the policy).  A Cannon shot at damage=5
+              // costs the target 1 HP and runs one dent step, not five.
+              // Hardness scales via the entity's health alone.
+              const isDentEntity = target.shardVariant !== undefined
+                  && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
               if (!isIndestructibleTile) {
-                  target.health -= projDmg;
+                  target.health -= isDentEntity ? 1 : projDmg;
+                  // Dent-policy entities deform on every damage event,
+                  // even the killing blow — the spawned mobile shard
+                  // inherits the dented polygon at the post-deformation
+                  // size.  Impact position is the projectile's current
+                  // world position; applyDentStep finds the closest
+                  // vertex.
+                  PhysicsSystem.applyDentStep(target, proj.position);
+                  // Stamp lastImpactVelocity on every dent hit (not
+                  // only the killing blow) so intermediate shard
+                  // spawns at HP thresholds know which direction to
+                  // launch the freed chunk.  This was previously
+                  // only set inside the `target.health <= 0` block
+                  // below.
+                  if (isDentEntity && target.type === EntityType.STRUCTURE && proj.velocity) {
+                      target.lastImpactVelocity = { x: proj.velocity.x, y: proj.velocity.y };
+                      target.lastImpactDamage = proj.damage ?? 1;
+                  }
+                  // Mobile dent shards (plastic-shard, metal-shard) get
+                  // a velocity kick from the projectile — they're free-
+                  // floating, so a hit should both deform AND push.
+                  // Push magnitude scales inversely with shard mass so
+                  // heavier metal shards take a smaller kick than the
+                  // lighter plastic.  Static tiles (mass = Infinity)
+                  // are filtered out by the finite-mass check.
+                  if (isDentEntity && target.mass !== Infinity && proj.velocity) {
+                      const pushFactor = 0.20 / Math.max(1, target.mass / 10);
+                      target.velocity.x += proj.velocity.x * pushFactor;
+                      target.velocity.y += proj.velocity.y * pushFactor;
+                  }
               }
               target.hitFlash = 0.1;
           }
@@ -1302,7 +1489,7 @@ export class PhysicsSystem {
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1, target);
+          if (onDamage) onDamage(target.position, proj.damage || 1, target, proj.position);
 
           if (target.health <= 0) {
               // Stamp the impactor's velocity so shard spawning can scatter
@@ -1443,7 +1630,7 @@ export class PhysicsSystem {
       // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
       // The player loses half its velocity to the tile break.
       //
-      // Tiered tiles (reinforced/heavy) with maxHealth > 1 consume one
+      // Tiered tiles (plastic/metal) with maxHealth > 1 consume one
       // health tier per above-threshold crash rather than shattering in
       // one hit — the tile only onDeath's when health hits 0.
       //
@@ -1463,11 +1650,12 @@ export class PhysicsSystem {
               if (isIndestructible) {
                   // Permanent wall — signal the hit for SFX/shake but don't
                   // touch health or queue destruction.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }
               structure.health -= 1;
-              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+              PhysicsSystem.applyDentStep(structure, player.position);
+              if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
                   structure.health = 0;
                   structure.active = false;
@@ -1526,11 +1714,12 @@ export class PhysicsSystem {
               structure.hitFlash = 0.1;
               if (isIndestructible) {
                   // Asteroid bounces off a permanent wall — no damage.
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
                   structure.health -= 1;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  PhysicsSystem.applyDentStep(structure, asteroid.position);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;
@@ -1563,7 +1752,7 @@ export class PhysicsSystem {
                   structure.health -= 1;
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
-                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure);
+                  if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   if (structure.health <= 0) {
                       structure.health = 0;
                       structure.active = false;

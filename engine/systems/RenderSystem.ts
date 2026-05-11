@@ -1,11 +1,11 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
-import { HEX_AREA } from '../maps/TileGenerator';
+import { HEX_AREA, HEX_SIZE } from '../maps/TileGenerator';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
@@ -157,6 +157,14 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
+
+  // Optional PhysicsSystem reference for spatial queries — today only the
+  // material-tile branch uses it (to suppress edge strokes on edges that
+  // are cleanly butted against a neighbour tile).  Null is treated as "no
+  // neighbour data available" → fall back to drawing the full outline.
+  private physics: import('./PhysicsSystem').PhysicsSystem | null = null;
+  public setPhysics(p: import('./PhysicsSystem').PhysicsSystem) { this.physics = p; }
+
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -1140,16 +1148,15 @@ export class RenderSystem {
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
       // pop, regen ghost) fall back to the slow generic path.
-      // Only glass-family static tiles (glass / reinforced / heavy /
-      // indestructible) take the hex-sprite fast path.  Rock-tile and
-      // mobile shards fall through to the generic polygon/sprite
-      // render below — rock-tile renders with the asteroid solid-fill
-      // aesthetic via the slow-path else branch.
+      // Only glass-family static tiles (glass / indestructible) take the
+      // hex-sprite fast path.  Plastic / metal use the material-tile slow-
+      // path branch (variant color + per-vertex dent jitter).  Rock-tile
+      // and mobile shards also fall through to the polygon/sprite render
+      // below — rock-tile renders with the asteroid solid-fill aesthetic
+      // via the slow-path else branch.
       const isGlassFamilyStaticTile =
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
-            || entity.shardVariant === 'reinforced-tile'
-            || entity.shardVariant === 'heavy-tile'
             || entity.shardVariant === 'indestructible-tile');
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
@@ -1594,9 +1601,15 @@ export class RenderSystem {
             const isGlassFamilyTile =
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
               && (entity.shardVariant === 'glass-tile'
-                  || entity.shardVariant === 'reinforced-tile'
-                  || entity.shardVariant === 'heavy-tile'
                   || entity.shardVariant === 'indestructible-tile');
+            // Material tiles (plastic / metal) — solid-color polygon fill
+            // with per-variant alpha.  Distinct from glass-family because
+            // they will dent in place (vertex jitter + scale-down) instead
+            // of shattering.
+            const isMaterialTile =
+              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+              && (entity.shardVariant === 'plastic-tile'
+                  || entity.shardVariant === 'metal-tile');
             if (isGlassFamilyTile) {
                 // Glass-family static tiles render with the glass-tile
                 // aesthetic (translucent fill + edge stroke + specular
@@ -1658,6 +1671,25 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
+                // Layer 2b — variant-driven additive glow.  Externally
+                // gated by `entity.glowIntensity` (0..1, written each
+                // frame by whatever system owns the trigger and reset
+                // next frame).  When unset / zero, or when the variant
+                // has no `glow` config, the layer short-circuits before
+                // any state mutation — the cheap field check keeps the
+                // hot path allocation-free for non-glowing tiles.
+                if (!isFlash
+                    && entity.glowIntensity !== undefined
+                    && entity.glowIntensity > 0
+                    && entity.shardVariant !== undefined) {
+                    const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+                    if (glow !== undefined) {
+                        ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
+                        ctx.fillStyle = glow.color;
+                        ctx.fill();
+                    }
+                }
+
                 // Layer 3 — edge stroke (proximity-tinted)
                 ctx.globalAlpha = 1.0;
                 ctx.strokeStyle = edgeColor;
@@ -1671,13 +1703,152 @@ export class RenderSystem {
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
-                // Damage cracks for multi-HP variants (reinforced / heavy).
-                // renderCracks early-returns at ≥95 % health, so undamaged
-                // tiles pay only one property read — same pattern asteroids
-                // use for their damage visualisation.
+                // Damage cracks (no-op for single-HP glass-tile; included
+                // for parity with the historic multi-HP glass-family render
+                // path).  renderCracks early-returns at ≥95 % health.
                 this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
 
                 } // end else (glass tile — paired with regen ghost if/else above)
+
+            } else if (isMaterialTile) {
+                // ── Material tile (plastic / metal) ────────────────────────
+                // Solid-color polygon fill at variant-specific alpha.  No
+                // glass overlay, no specular dot, no proximity tint — these
+                // are matte / metallic surfaces, not translucent glass.  The
+                // polygon shape is whatever the dent system has perturbed
+                // entity.polygonPoints into; the renderer just draws it.
+                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+                const fillAlpha =
+                    entity.shardVariant === 'plastic-tile' ? 0.6 : 1.0;
+
+                // ── Regen ghost (parity with glass-family ghost outline) ──
+                if (!entity.active && entity.regenProgress !== undefined) {
+                    const delay = 12;
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    // Layer 1 — flat-color fill.  Metal sticks to the
+                    // gray palette even on hit flash; plastic keeps a
+                    // bright white flash since warm-orange + white reads
+                    // as polymer plastic, not metal.
+                    buildPath();
+                    ctx.globalAlpha = isFlash ? 0.95 : fillAlpha;
+                    const flashColor = entity.shardVariant === 'metal-tile'
+                        ? '#cbd5e1' // slate-300 — bright but still gray
+                        : '#ffffff';
+                    ctx.fillStyle = isFlash ? flashColor : entity.color;
+                    ctx.fill();
+
+                    // Layer 2 — selective outline.  Skip edges that are
+                    // both (a) at their original radius (no dent on either
+                    // endpoint) and (b) butted against a neighbour tile.
+                    // Draw deformed edges and cluster-boundary edges so
+                    // the silhouette reads as one continuous cluster
+                    // outline with internal dents visible.  Outline color
+                    // matches the corresponding shard's outline
+                    // (rocky-asteroid branch uses rgba(0,0,0,0.3)) so
+                    // detaching reads as continuous, not "tile in one
+                    // style, shard in another."
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                    ctx.lineWidth = isFlash ? 2.5 : 1.5;
+
+                    const pts = entity.polygonPoints;
+                    if (pts && pts.length > 0) {
+                        // Original circumradius — for un-touched vertices
+                        // this equals the spawn-time hex radius (HEX_SIZE
+                        // for our hex grid).  Lazy bake from the current
+                        // max vertex distance so we don't need a new
+                        // GameEntity field; dent only ever pulls inward,
+                        // so the max captures the original at first
+                        // render and stays accurate afterwards.
+                        let origR2 = entity.originalCircumradiusSq ?? 0;
+                        if (origR2 === 0) {
+                            for (let i = 0; i < pts.length; i++) {
+                                const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+                                if (r2 > origR2) origR2 = r2;
+                            }
+                            // 1 % tolerance so floating-point jitter from
+                            // entity-local math doesn't false-trigger
+                            // "deformed" on un-touched vertices.
+                            entity.originalCircumradiusSq = origR2 * 0.98;
+                        }
+                        const deformThresholdR2 = entity.originalCircumradiusSq;
+
+                        // Probe distance for neighbour lookup: the un-dented
+                        // edge midpoint sits at the hex inradius from the
+                        // tile centre; scaling it by 2.0 lands the probe at
+                        // 2× inradius = HEX_WIDTH — exactly where a
+                        // touching neighbour's centre sits.  Probe radius
+                        // ~HEX_SIZE × 0.5 catches the neighbour even if its
+                        // centre is jittered slightly.
+                        const probeFactor = 2.0;
+                        const probeRadius = HEX_SIZE * 0.5;
+
+                        ctx.beginPath();
+                        for (let i = 0; i < pts.length; i++) {
+                            const p1 = pts[i];
+                            const p2 = pts[(i + 1) % pts.length];
+
+                            const r1Sq = p1.x * p1.x + p1.y * p1.y;
+                            const r2Sq = p2.x * p2.x + p2.y * p2.y;
+                            const deformed = r1Sq < deformThresholdR2 || r2Sq < deformThresholdR2;
+
+                            let drawEdge = deformed;
+                            if (!deformed && this.physics) {
+                                // Probe outward from the edge midpoint to
+                                // see if a neighbour tile covers the
+                                // adjacent hex cell.  No neighbour →
+                                // cluster-boundary edge → draw.
+                                const midX = (p1.x + p2.x) * 0.5;
+                                const midY = (p1.y + p2.y) * 0.5;
+                                const probeWorldX = entity.position.x + midX * probeFactor;
+                                const probeWorldY = entity.position.y + midY * probeFactor;
+                                drawEdge = !this.physics.hasStaticTileNear(
+                                    probeWorldX, probeWorldY, probeRadius, entity.id,
+                                );
+                            } else if (!deformed && !this.physics) {
+                                // No physics ref wired — fall back to the
+                                // full outline so nothing renders worse
+                                // than before.
+                                drawEdge = true;
+                            }
+
+                            if (drawEdge) {
+                                ctx.moveTo(p1.x, p1.y);
+                                ctx.lineTo(p2.x, p2.y);
+                            }
+                        }
+                        ctx.stroke();
+                    }
+
+                    // Damage cracks for multi-HP variants — early-returns
+                    // at ≥95 % health so undamaged tiles cost nothing.
+                    // Sized to the dented polygon's max-radius (not
+                    // entity.size, which the dent system deliberately
+                    // doesn't shrink) so cracks stay inside the visible
+                    // silhouette as vertices crumple inward.
+                    let crackR = Math.max(entity.size.x, entity.size.y) / 2;
+                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
+                        let maxR2 = 0;
+                        for (let i = 0; i < entity.polygonPoints.length; i++) {
+                            const p = entity.polygonPoints[i];
+                            const r2 = p.x * p.x + p.y * p.y;
+                            if (r2 > maxR2) maxR2 = r2;
+                        }
+                        crackR = Math.sqrt(maxR2);
+                    }
+                    this.renderCracks(ctx, entity, crackR);
+                }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
                 // Non-glass-family static tile (today: rock-tile) that's
@@ -1750,11 +1921,25 @@ export class RenderSystem {
                     // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
                     // Density tier darkens the base colour; merge-fade alpha
                     // multiplies every layer so the dissolve is uniform.
+                    // Per-variant tweaks so dent shards look identical
+                    // to their parent tile:
+                    //  - plastic-shard renders at the same 0.6 alpha
+                    //    as plastic-tile (translucent polymer).
+                    //  - metal-shard stays on the gray palette even on
+                    //    hit flash (no white) to match metal-tile.
+                    //  - Other rocky shards (rock-shard, rock-tile)
+                    //    keep their fully-opaque default.
                     const densityHex = densityTintForRender(entity, entity.color);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
+                    const flashColor = entity.shardVariant === 'metal-shard'
+                        ? '#cbd5e1'
+                        : '#ffffff';
+                    const baseAlpha = entity.shardVariant === 'plastic-shard'
+                        ? 0.6
+                        : 1.0;
                     buildPath();
-                    ctx.globalAlpha = 1.0 * fadeAlpha;
-                    ctx.fillStyle   = isFlash ? '#ffffff' : densityHex;
+                    ctx.globalAlpha = (isFlash ? 0.95 : baseAlpha) * fadeAlpha;
+                    ctx.fillStyle   = isFlash ? flashColor : densityHex;
                     ctx.fill();
 
                     if (glowColor && !isFlash) {
@@ -1781,9 +1966,17 @@ export class RenderSystem {
 
                     ctx.globalAlpha = 1.0 * fadeAlpha;
                     this.renderCracks(ctx, entity, entity.size.x / 2);
-                    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-                    ctx.lineWidth   = 2;
-                    ctx.stroke();
+                    // Rock-tile renders without an outline — the brittle
+                    // dent silhouette reads cleaner against the slate
+                    // fill when there's no rim line tracing every
+                    // notch.  Rock-shards, plastic-shards, and metal-
+                    // shards keep theirs (matches the per-material
+                    // tile/shard parity we set earlier).
+                    if (entity.shardVariant !== 'rock-tile') {
+                        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                        ctx.lineWidth   = 2;
+                        ctx.stroke();
+                    }
                 }
             }
 

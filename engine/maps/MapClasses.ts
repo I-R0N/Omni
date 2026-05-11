@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -125,20 +125,26 @@ export abstract class BaseMapLayer {
       speedMultiplier: number = 1.0,
       allowedSprites: string[] = []
     ): GameEntity {
-    // Irregular convex-ish polygon: 9-12 points with varied radius and
-    // slight angular jitter.  Variation is capped at ±25 % of base radius
-    // so the shape stays approximately convex (safe for SAT collision).
-    // Points are generated in angular order and sorted to guarantee correct
-    // polygon winding regardless of jitter direction.
-    const numPoints = 9 + Math.floor(Math.random() * 4); // 9–12
-    const baseR    = (size / 2) * 0.82;
+    // Free-spawned rock-shards use the variant's spawn config so the
+    // free-floating rocks read the same as tile-detached rock-shards
+    // (5 / 7 / 9 verts, organic / irregular silhouette).  Vertex count,
+    // angle jitter, and radius variance all come from
+    // SHARD_VARIANTS['rock-shard'].spawn — see constants.ts.  Discrete
+    // polyVerticesOptions (when set) takes priority over Min/Max.
+    const spawn = SHARD_VARIANTS['rock-shard'].spawn;
+    const numPoints = spawn.polyVerticesOptions
+      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      : spawn.polyVerticesMin
+        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
         const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.65;
+        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
+        const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
         rawPts.push({
             angle: baseAngle + angleJitter,
-            r:     baseR * (0.75 + Math.random() * 0.5), // 75 %–125 % of base
+            r:     baseR * radiusFrac,
         });
     }
     rawPts.sort((a, b) => a.angle - b.angle);
@@ -264,28 +270,28 @@ export class UniverseMap extends BaseMapLayer {
 
     // Glass landmark clusters — uniform distribution across the 95 %
     // zone.  Most clusters are stock glass (single-hit) to preserve the
-    // original destructible feel; a smaller share rolls as reinforced or
-    // heavy tiles, plus a few rare indestructible landmarks that never
+    // original destructible feel; a smaller share rolls as plastic or
+    // metal tiles, plus a few rare indestructible landmarks that never
     // break or regenerate.  Cluster counts roughly split:
     //   glass       ~60 %
-    //   reinforced  ~22 %
-    //   heavy       ~12 %
+    //   plastic     ~22 %
+    //   metal       ~12 %
     //   indestructible ~6 %
     const GLASS_CLUSTERS          = Math.round(GLASS_COUNT * 0.60);
-    const REINFORCED_CLUSTERS     = Math.round(GLASS_COUNT * 0.22);
-    const HEAVY_CLUSTERS          = Math.round(GLASS_COUNT * 0.12);
-    const INDESTRUCTIBLE_CLUSTERS = GLASS_COUNT - GLASS_CLUSTERS - REINFORCED_CLUSTERS - HEAVY_CLUSTERS;
+    const PLASTIC_CLUSTERS        = Math.round(GLASS_COUNT * 0.22);
+    const METAL_CLUSTERS          = Math.round(GLASS_COUNT * 0.12);
+    const INDESTRUCTIBLE_CLUSTERS = GLASS_COUNT - GLASS_CLUSTERS - PLASTIC_CLUSTERS - METAL_CLUSTERS;
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
         GLASS_CLUSTERS, 10, 34, occupied, 'glass'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
-        REINFORCED_CLUSTERS, 8, 22, occupied, 'reinforced'
+        PLASTIC_CLUSTERS, 8, 22, occupied, 'plastic'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
-        HEAVY_CLUSTERS, 6, 14, occupied, 'heavy'
+        METAL_CLUSTERS, 6, 14, occupied, 'metal'
     ));
     // Indestructible landmarks are small (3-8 tiles) so they read as
     // permanent obstacles rather than large impassable walls.
@@ -412,15 +418,15 @@ export class SevenRingsMap extends BaseMapLayer {
     // Evenly-spaced radii from inner to outer.  Division by (COUNT - 1)
     // places the first and last rings exactly at the declared bounds.
     // Each ring rolls a variant based on index so the player can visually
-    // read difficulty: inner = glass, mid = reinforced, outer reinforced
-    // is punctuated by heavy rings, and the outermost is indestructible.
+    // read difficulty: inner = glass, mid = plastic, outer plastic
+    // is punctuated by metal rings, and the outermost is indestructible.
     const RING_VARIANTS: StructureVariant[] = [
         'glass',        // ring 0 — soft inner
         'glass',        // ring 1
-        'reinforced',   // ring 2
-        'reinforced',   // ring 3
-        'heavy',        // ring 4
-        'heavy',        // ring 5
+        'plastic',      // ring 2
+        'plastic',      // ring 3
+        'metal',        // ring 4
+        'metal',        // ring 5
         'indestructible', // ring 6 — outer wall
     ];
     const step = (SevenRingsMap.OUTER_RADIUS - SevenRingsMap.INNER_RADIUS) /
@@ -457,8 +463,8 @@ export class PocketMap extends BaseMapLayer {
   // puffs match `NEBULA_CLUSTERS` 1:1 via nebulaClusterCenters, so
   // bumping this also densifies the backdrop.
   private static readonly GLASS_CLUSTERS          = 8;
-  private static readonly REINFORCED_CLUSTERS     = 5;
-  private static readonly HEAVY_CLUSTERS          = 3;
+  private static readonly PLASTIC_CLUSTERS        = 5;
+  private static readonly METAL_CLUSTERS          = 3;
   private static readonly INDESTRUCTIBLE_CLUSTERS = 2;
   private static readonly NEBULA_CLUSTERS         = 12;
 
@@ -492,11 +498,11 @@ export class PocketMap extends BaseMapLayer {
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.REINFORCED_CLUSTERS, 5, 10, occupied, 'reinforced'
+        PocketMap.PLASTIC_CLUSTERS, 5, 10, occupied, 'plastic'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.HEAVY_CLUSTERS, 4, 8, occupied, 'heavy'
+        PocketMap.METAL_CLUSTERS, 4, 8, occupied, 'metal'
     ));
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
@@ -649,18 +655,38 @@ export class GlassFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Hard-damageable field — 5-HP heavy tiles spread across the map.  The
- * hardest destructible variant; every cluster requires sustained fire
- * (or a high-momentum asteroid crash) to break.
+ * Plastic-only field — 3-HP plastic tiles spread across the map.  The
+ * mid-tier destructible: harder than glass, softer than metal; useful
+ * for tuning damage feel and crack visuals against the matte polymer
+ * aesthetic in isolation.
  */
-export class HardTileFieldMap extends SingleVariantTileFieldMap {
-  protected readonly variant: StructureVariant = 'heavy';
+export class PlasticFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'plastic';
   protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
   protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
   protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
 
   constructor() {
-    super('hard_tile_field_01', 'Hard Tile Field', MapType.HARD_TILE_FIELD);
+    super('plastic_field_01', 'Plastic Field', MapType.PLASTIC_FIELD);
+    this.width  = SingleVariantTileFieldMap.WIDTH;
+    this.height = SingleVariantTileFieldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+}
+
+/**
+ * Metal-only field — 5-HP metal tiles spread across the map.  The
+ * hardest destructible variant; every cluster requires sustained fire
+ * (or a high-momentum asteroid crash) to break.
+ */
+export class MetalFieldMap extends SingleVariantTileFieldMap {
+  protected readonly variant: StructureVariant = 'metal';
+  protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
+  protected readonly minClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE;
+  protected readonly maxClusterSize = SINGLE_ELEMENT_CLUSTER_SIZE + 1;
+
+  constructor() {
+    super('metal_field_01', 'Metal Field', MapType.METAL_FIELD);
     this.width  = SingleVariantTileFieldMap.WIDTH;
     this.height = SingleVariantTileFieldMap.HEIGHT;
     this.playerSpawn = { x: 0, y: 0 };

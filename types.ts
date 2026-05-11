@@ -13,7 +13,7 @@ export enum MapType {
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
   // 1 000 × 1 000 sandbox containing every element (asteroids, glass /
-  // reinforced / heavy / indestructible tiles, nebula clusters).  Useful
+  // plastic / metal / indestructible tiles, nebula clusters).  Useful
   // for quickly validating interactions between systems without having
   // to fly across a full-size map to find them.
   POCKET      = 'POCKET',
@@ -23,7 +23,8 @@ export enum MapType {
   // isolation without cross-element interference.
   ASTEROID_FIELD       = 'ASTEROID_FIELD',
   GLASS_FIELD          = 'GLASS_FIELD',
-  HARD_TILE_FIELD      = 'HARD_TILE_FIELD',
+  PLASTIC_FIELD        = 'PLASTIC_FIELD',
+  METAL_FIELD          = 'METAL_FIELD',
   INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
   NEBULA_FIELD         = 'NEBULA_FIELD',
   // Rock-tile single-element showcase (Stage 7 of shard-system overhaul)
@@ -375,6 +376,23 @@ export interface GameEntity {
   // in the renderer.  Computed/blended in GameEngine when a power-up is
   // absorbed; undefined means no power-up content.
   powerupGlowColor?: string;
+
+  // Per-frame variant-glow activation (0..1).  Externally driven — the
+  // system that owns the trigger (e.g. proximity scan, damage pulse)
+  // writes this each frame and clears it the next frame.  Read by
+  // RenderSystem layer 2b alongside SHARD_VARIANTS[v].glow.peakAlpha
+  // to produce the rendered alpha.  Undefined or 0 → layer skipped.
+  glowIntensity?: number;
+
+  // Lazily-baked original circumradius² for dent-policy tiles
+  // (plastic-tile, metal-tile).  Computed in RenderSystem on first
+  // material-tile render as max(polygonPoints[i].r²) × 0.98 (small
+  // tolerance for FP jitter).  Used to detect whether a polygon
+  // vertex has been pulled inward — vertices below this threshold
+  // are "deformed", and their adjacent edges always draw regardless
+  // of neighbour presence.
+  originalCircumradiusSq?: number;
+
 
   // Composite asteroid — tracks every drop (including power-ups) stored
   // inside this asteroid; released as individual drops on destruction.

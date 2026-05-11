@@ -12,11 +12,12 @@ import { DropSystem } from './systems/DropSystem';
 import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
+import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, HardTileFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
+import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_VARIANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -358,6 +359,10 @@ export class GameEngine {
     this.input = new InputSystem();
     this.physics = new PhysicsSystem();
     this.renderer = new RenderSystem();
+    // Wire physics into the renderer so the material-tile branch can
+    // suppress edge strokes on edges that are cleanly butted against
+    // a neighbour tile (queried via hasStaticTileNear).
+    this.renderer.setPhysics(this.physics);
     this.ai = new AISystem();
     this.particles = new ParticleSystem();
     this.trails = new TrailSystem();
@@ -422,7 +427,8 @@ export class GameEngine {
       case MapType.POCKET:               return new PocketMap();
       case MapType.ASTEROID_FIELD:       return new AsteroidFieldMap();
       case MapType.GLASS_FIELD:          return new GlassFieldMap();
-      case MapType.HARD_TILE_FIELD:      return new HardTileFieldMap();
+      case MapType.PLASTIC_FIELD:        return new PlasticFieldMap();
+      case MapType.METAL_FIELD:          return new MetalFieldMap();
       case MapType.INDESTRUCTIBLE_FIELD: return new IndestructibleFieldMap();
       case MapType.NEBULA_FIELD:         return new NebulaFieldMap();
       case MapType.ROCK_FIELD:           return new RockFieldMap();
@@ -876,13 +882,71 @@ export class GameEngine {
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
-          // - rock-tile: spawns rock-shards (Stage 5+).
-          // - glass-tile / reinforced-tile / heavy-tile: today's
-          //   shatter is via DropSystem.spawnGlassShards (called
-          //   from spawnDrops); the variant config has shatter.kind=
-          //   'powerlaw' aspirationally for Stage 6 unification.
-          if (this.currentMap && variant !== 'glass-tile' && variant !== 'reinforced-tile' && variant !== 'heavy-tile') {
+          // - glass-tile: visual debris via DropSystem.spawnGlassShards
+          //   (called from spawnDrops); SHARD_VARIANTS shatter is
+          //   aspirational for Stage 6 unification.
+          // - dent variants (plastic-tile / metal-tile / rock-tile):
+          //   tile detaches via DropSystem.spawnDentShard reading
+          //   dent.breakShards — skip ShardSystem.shatter entirely so
+          //   the two paths don't double-spawn.
+          const isDentVariant = SHARD_VARIANTS[variant].dent !== undefined;
+          if (this.currentMap && variant !== 'glass-tile' && !isDentVariant) {
               this.shards.shatter(entity, this.currentMap.entities);
+          }
+
+          // Rock-shard death also releases 2 colour-matched nebula-
+          // shards (cloud-style fragments) alongside the solid shatter
+          // children.  Only fires for mobile shards (mass !==
+          // Infinity) and only when the shard was big enough to
+          // produce shatter children — small chips (size < 24)
+          // destroy cleanly without puffs.
+          if (this.currentMap
+              && variant === 'rock-shard'
+              && entity.mass !== Infinity
+              && Math.max(entity.size.x, entity.size.y) >= 24) {
+              const baseSize = this.deformedDiameter(entity);
+              for (let nb = 0; nb < 2; nb++) {
+                  const jitter = baseSize * 0.2;
+                  const puffPos = {
+                      x: entity.position.x + (Math.random() - 0.5) * jitter,
+                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                  };
+                  this.drops.spawnColoredNebulaShard(
+                      this.currentMap.entities,
+                      puffPos,
+                      baseSize,
+                      entity.color,
+                      0.45 + Math.random() * 0.2,
+                      entity.lastImpactVelocity ?? entity.velocity,
+                  );
+              }
+          }
+
+          // Rock-tile death burst — 4-6 colour-matched nebula-shards
+          // scattered around the tile centre, on top of the per-hit
+          // puffs that fired during deformation.  Sells the final
+          // collapse as a substantial dust cloud rather than just
+          // another small chip-off.
+          if (this.currentMap
+              && variant === 'rock-tile'
+              && entity.mass === Infinity) {
+              const baseSize = this.deformedDiameter(entity);
+              const count = 4 + Math.floor(Math.random() * 3);
+              for (let nb = 0; nb < count; nb++) {
+                  const jitter = baseSize * 0.4;
+                  const puffPos = {
+                      x: entity.position.x + (Math.random() - 0.5) * jitter,
+                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                  };
+                  this.drops.spawnColoredNebulaShard(
+                      this.currentMap.entities,
+                      puffPos,
+                      baseSize,
+                      entity.color,
+                      0.4 + Math.random() * 0.3,
+                      entity.lastImpactVelocity,
+                  );
+              }
           }
       }
 
@@ -1438,12 +1502,19 @@ export class GameEngine {
 
       case EntityType.STRUCTURE:
         // Stage 6: STRUCTURE covers both static tiles (mass=∞) and
-        // mobile shards (finite mass).  Mobile rock-shards get the
-        // gray rocky dust the legacy ASTEROID branch produced;
-        // mobile glass-shards keep the tile-spark layer.
-        if (target.mass !== Infinity && target.shardVariant === 'rock-shard') {
+        // mobile shards (finite mass).  Mobile rock / plastic / metal
+        // shards get a material-coloured dust puff; mobile glass-shards
+        // keep the tile-spark layer.
+        if (target.mass !== Infinity
+            && (target.shardVariant === 'rock-shard'
+                || target.shardVariant === 'plastic-shard'
+                || target.shardVariant === 'metal-shard')) {
           const dustCount = target.size.x > 50 ? 5 : 3;
-          this.spawnParticles(impactPos, dustCount, '#94a3b8', {
+          const dustColor =
+              target.shardVariant === 'plastic-shard' ? '#fbbf24'
+            : target.shardVariant === 'metal-shard'   ? '#cbd5e1'
+            :                                            '#94a3b8'; // rock-shard
+          this.spawnParticles(impactPos, dustCount, dustColor, {
             speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
             spreadAngle: impactAngle, spreadCone: Math.PI * 0.55,
             baseVelocity: { x: target.velocity.x * 0.3, y: target.velocity.y * 0.3 },
@@ -1482,7 +1553,7 @@ export class GameEngine {
     }
   };
 
-  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity) => {
+  private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
       // Player damage goes to the HUD list, not the world-space float
       if (target?.type === EntityType.PLAYER) {
           const isCrit = amount > 3;
@@ -1507,7 +1578,176 @@ export class GameEngine {
           color: isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR,
           active: true
       });
+
+      // Dent-policy post-damage hooks — fire only while the tile is
+      // still alive (target.health > 0).  Killing hits route through
+      // the normal breakShards path in DropSystem.spawnDrops.
+      if (target?.shardVariant && target.active && target.health > 0 && this.currentMap) {
+          const dent = SHARD_VARIANTS[target.shardVariant].dent;
+          if (dent) {
+              // 'triangle-delete' kind: each hit removes the closest
+              // vertex (+ angleOffset) and releases a triangle shard
+              // shaped like the deleted corner.  Polygon loses one
+              // vertex per hit; the dent kind on PhysicsSystem.
+              // applyDentStep early-returns so it doesn't fight us
+              // for the same polygon.  No current variant uses this
+              // kind — kept as a building block.
+              if (dent.kind === 'triangle-delete' && impactWorldPos) {
+                  this.applyTriangleDelete(target, impactWorldPos, dent);
+              }
+              // 'pull' kind perHitShard: releases one shard at the
+              // impact location every hit, sized to the deformed
+              // tile.  Rock uses this so brittle chips visibly fly
+              // off each hit while the polygon stays intact (vertex
+              // count preserved; deformation accumulates via
+              // applyDentStep's center-vertex pull).
+              if (dent.perHitShard && impactWorldPos
+                  && (dent.kind === undefined || dent.kind === 'pull')) {
+                  this.drops.spawnPerHitShard(
+                      this.currentMap.entities, target, dent.perHitShard, impactWorldPos,
+                  );
+                  // Rock-tile also releases tinted nebula-shards per
+                  // hit — pairs the solid rock chip with drifting
+                  // cloud puffs in the same colour as the parent tile,
+                  // selling the brittle fracture as both shrapnel and
+                  // dust.  Only rock today; other dent variants want
+                  // the cleaner solid-shard-only readout.
+                  if (target.shardVariant === 'rock-tile') {
+                      const baseSize = this.deformedDiameter(target);
+                      // 2 puffs per hit at slightly varied sizes +
+                      // small jitter on spawn position so they don't
+                      // overlap exactly.
+                      for (let nb = 0; nb < 2; nb++) {
+                          const jitter = baseSize * 0.15;
+                          const puffPos = {
+                              x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
+                              y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                          };
+                          this.drops.spawnColoredNebulaShard(
+                              this.currentMap.entities,
+                              puffPos,
+                              baseSize,
+                              target.color,
+                              0.45 + Math.random() * 0.2,
+                              target.lastImpactVelocity,
+                          );
+                      }
+                  }
+              }
+              // Intermediate dent-shard spawn (pull-kind variants):
+              // when health / maxHealth crosses an entry's threshold,
+              // spawn that shard once.  No current variant uses
+              // intermediateShards either — also a building block.
+              if (dent.intermediateShards && dent.intermediateShards.length > 0) {
+                  const maxH = target.maxHealth || 1;
+                  // Dent variants take 1 HP per hit (see PhysicsSystem
+                  // projectile damage path), regardless of `amount`.
+                  const preHealth = target.health + 1;
+                  const fractionBefore = preHealth / maxH;
+                  const fractionAfter  = target.health / maxH;
+                  for (let i = 0; i < dent.intermediateShards.length; i++) {
+                      const inter = dent.intermediateShards[i];
+                      if (fractionBefore > inter.healthFraction
+                          && fractionAfter <= inter.healthFraction) {
+                          this.drops.spawnDentShard(this.currentMap.entities, target, [
+                              { variant: inter.variant, sizeFraction: inter.sizeFraction },
+                          ]);
+                      }
+                  }
+              }
+          }
+      }
   };
+
+  /**
+   * Triangle-delete dent step.  Finds the polygon vertex closest to
+   * the impact direction (with optional dentVertexAngleOffset),
+   * removes it from the tile's polygon — the two adjacent vertices
+   * stay, forming a new flat edge where the corner used to be — and
+   * spawns a triangle-shaped shard at that corner via
+   * DropSystem.spawnTriangleShard.  The polygon stays convex (a
+   * convex polygon minus an extreme vertex is still convex), so SAT
+   * collision keeps working.
+   *
+   * Bails when the polygon is too small to safely remove another
+   * vertex (< 4 verts left) — the killing hit will trigger
+   * breakShards via the normal on-death path.
+   */
+  /**
+   * Effective diameter of a (possibly-deformed) polygon entity.  Same
+   * "average vertex radius × 2" proxy DropSystem.spawnDentShard uses
+   * to size shards — area ≈ k × r² for a regular polygon so avgR
+   * tracks the deformed area linearly.  Falls back to entity.size
+   * when the polygon is missing.
+   */
+  private deformedDiameter(entity: GameEntity): number {
+      const baseSize = Math.max(entity.size.x, entity.size.y);
+      if (!entity.polygonPoints || entity.polygonPoints.length === 0) return baseSize;
+      let sumR2 = 0;
+      for (let i = 0; i < entity.polygonPoints.length; i++) {
+          const p = entity.polygonPoints[i];
+          sumR2 += p.x * p.x + p.y * p.y;
+      }
+      const avgR = Math.sqrt(sumR2 / entity.polygonPoints.length);
+      return avgR * 2;
+  }
+
+  private applyTriangleDelete(
+      target: GameEntity,
+      impactWorldPos: Vector2,
+      dent: NonNullable<typeof SHARD_VARIANTS[keyof typeof SHARD_VARIANTS]['dent']>,
+  ) {
+      const pts = target.polygonPoints;
+      if (!pts || pts.length < 4) return;
+      if (!this.currentMap) return;
+
+      const N = pts.length;
+      const localX = wrapDeltaX(target.position.x, impactWorldPos.x);
+      const localY = wrapDeltaY(target.position.y, impactWorldPos.y);
+      let dirX = localX, dirY = localY;
+      const angleOffset = dent.dentVertexAngleOffset;
+      if (angleOffset !== undefined && angleOffset !== 0) {
+          const cosA = Math.cos(angleOffset);
+          const sinA = Math.sin(angleOffset);
+          dirX = localX * cosA - localY * sinA;
+          dirY = localX * sinA + localY * cosA;
+      }
+
+      let bestIdx = 0;
+      let bestD2 = Infinity;
+      for (let i = 0; i < N; i++) {
+          const dx = pts[i].x - dirX;
+          const dy = pts[i].y - dirY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+              bestD2 = d2;
+              bestIdx = i;
+          }
+      }
+      const prevIdx = (bestIdx - 1 + N) % N;
+      const nextIdx = (bestIdx + 1) % N;
+
+      // Snapshot the triangle BEFORE mutating the array.  Fresh
+      // copies of each Vector2 so the spawned shard owns its own
+      // vertex objects.
+      const trianglePts: Vector2[] = [
+          { x: pts[prevIdx].x, y: pts[prevIdx].y },
+          { x: pts[bestIdx].x, y: pts[bestIdx].y },
+          { x: pts[nextIdx].x, y: pts[nextIdx].y },
+      ];
+
+      pts.splice(bestIdx, 1);
+      // Renderer's lazy-bake of originalCircumradiusSq used the old
+      // vertex set; force a rebake on next render so deformation
+      // metrics stay accurate.
+      target.originalCircumradiusSq = undefined;
+
+      const childVariant: ShardVariantId =
+          dent.breakShards[0]?.variant ?? 'rock-shard';
+      this.drops.spawnTriangleShard(
+          this.currentMap.entities, target, trianglePts, childVariant,
+      );
+  }
 
   private startExplosion(entity: GameEntity) {
       if (entity.isExploding) return;

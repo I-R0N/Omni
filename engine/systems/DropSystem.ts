@@ -4,9 +4,12 @@ import {
   COLORS,
   AMMO_CONSTANTS,
   DROP_CONFIG,
+  SHARD_VARIANTS,
+  NEBULA_CONSTANTS,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
+import { NEBULA_IMAGES, ASSETS } from '../../assets';
 
 /**
  * DropSystem — owns collectible drops and breakage debris.
@@ -77,22 +80,36 @@ export class DropSystem {
     const pos = entity.position;
     const pv = entity.velocity;
 
-    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish
-    // glass-family static tile (glass / reinforced / heavy — produce
-    // glass-shard debris on death) from rock-tile (own ShardSystem
-    // shatter path produces rock-shards) and mobile shards (asteroid-
-    // like drop logic).
+    // Shard-family entities are all EntityType.STRUCTURE.  Distinguish:
+    //   - glass-tile death  → fan of glass-shard debris (legacy path)
+    //   - dent-policy tile  → single mobile material-shard at the
+    //                          tile's current dented size (plastic /
+    //                          metal — the tile deformed in place
+    //                          via PhysicsSystem.applyDentStep, and
+    //                          this is its detach moment)
+    //   - rock-tile         → own ShardSystem shatter path → rock-shards
+    //   - nebula-tile       → skips drops via spawnsDropsOnDeath = false
+    //   - mobile shards     → asteroid-like drop logic
     const isStaticTile  = entity.type === EntityType.STRUCTURE && entity.mass === Infinity;
+    const tileDent = entity.shardVariant !== undefined
+      ? SHARD_VARIANTS[entity.shardVariant].dent
+      : undefined;
+    const isDentTile   = isStaticTile && tileDent !== undefined;
     const isGlassFamilyTile = isStaticTile
-      && (entity.shardVariant === 'glass-tile'
-          || entity.shardVariant === 'reinforced-tile'
-          || entity.shardVariant === 'heavy-tile');
+      && entity.shardVariant === 'glass-tile';
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
-    if (isGlassFamilyTile) {
-      // Glass / reinforced / heavy tile death — visual debris.
-      // Indestructible tiles short-circuit upstream; rock-tile spawns
-      // its own rock-shards via ShardSystem.shatter; nebula-tile
-      // skips drops via variant.spawnsDropsOnDeath = false.
+    if (isDentTile) {
+      // Dented-out tile detaches as the shards in variant.dent.breakShards.
+      // Each shard's size is a fraction of the original tile (1/3 for
+      // plastic's single shard; 1/3 + 1/6 for metal's pair).  The
+      // impactor's velocity (lastImpactVelocity) seeds the fan-spread
+      // launch direction so a 2-shard break visibly diverges.
+      this.spawnDentShard(entities, entity, tileDent!.breakShards);
+    } else if (isGlassFamilyTile) {
+      // Glass tile death — visual debris.  Indestructible tiles
+      // short-circuit upstream; rock-tile spawns its own rock-shards
+      // via ShardSystem.shatter; nebula-tile skips drops via
+      // variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
     } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
       // Drop was destroyed by a player projectile — apply its reward immediately.
@@ -107,9 +124,22 @@ export class DropSystem {
           }
           // 'powerup' entries no longer spawn — powerup drops have been removed
         }
-      } else if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID) {
-        // Generic shared-ammo drop — single rate for every asteroid
-        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ASTEROID, pv);
+      } else {
+        // Dent-policy shards take several hits to destroy, so their
+        // drop chance + payload runs higher than single-hit asteroids.
+        // Non-dent shards (rock-shard, glass-shard) keep the legacy
+        // asteroid drop rate.
+        const isDentShard = entity.shardVariant !== undefined
+          && SHARD_VARIANTS[entity.shardVariant].dent !== undefined;
+        const dropChance = isDentShard
+          ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
+          : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
+        const dropAmount = isDentShard
+          ? DROP_CONFIG.AMMO_PER_DENT_SHARD
+          : DROP_CONFIG.AMMO_PER_ASTEROID;
+        if (Math.random() < dropChance) {
+          this.spawnAmmoDrop(entities, activeDrops, pos, dropAmount, pv);
+        }
       }
     }
   }
@@ -252,20 +282,11 @@ export class DropSystem {
         speed = 0.4 + Math.random() * 1.5;
       }
 
-      // Tile shard polygon — 4–6 vertices, low angular jitter, moderate
-      // radius variation.  More blocky/faceted than asteroid shards (which
-      // use 5–7 pts with higher jitter) to hint at their manufactured origin.
-      const numPoints = 4 + Math.floor(Math.random() * 3);
-      const rawPts: { angle: number; r: number }[] = [];
-      for (let j = 0; j < numPoints; j++) {
-        const baseAngle = (j / numPoints) * Math.PI * 2;
-        const jitter    = (Math.random() - 0.5) * (Math.PI / numPoints) * 0.25;
-        rawPts.push({ angle: baseAngle + jitter, r: radius * (0.6 + Math.random() * 0.55) });
-      }
-      rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
-
+      // Glass-shard polygon comes from the variant's spawn config —
+      // always 3 vertices, sharp/narrow angles (see
+      // SHARD_SPAWN_SHAPE in constants.ts).
       const size = radius * 4; // diameter; slightly larger so physics feel solid
+      const pts: Vector2[] = this.generateMaterialShardPolygon('glass-shard', size);
       entities.push({
         id:            nextId('tile_shard'),
         type:           EntityType.STRUCTURE,
@@ -300,6 +321,464 @@ export class DropSystem {
       speedMin: 5, speedMax: 12, sizeMin: 0.5, sizeMax: 1.5,
       lifetimeMin: 0.1, lifetimeMax: 0.25,
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
+    });
+
+    // Release 4-6 blue-toned nebula-shards alongside the glass debris
+    // so the shatter has a substantial cloud-puff dimension to it.
+    // Tone keys to the glass-tile blue (#b4e6fd) rather than the
+    // procedural nebula palette so the puff reads as "glass dust"
+    // rather than a random nebula fragment.
+    const nebulaCount = 4 + Math.floor(Math.random() * 3);
+    const tileSize = Math.max(tile.size.x, tile.size.y);
+    for (let i = 0; i < nebulaCount; i++) {
+      const spawnPos = {
+        x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
+        y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
+      };
+      this.spawnColoredNebulaShard(
+        entities, spawnPos, tileSize,
+        '#b4e6fd', 0.45 + Math.random() * 0.25,
+        tile.lastImpactVelocity,
+      );
+    }
+  }
+
+  /**
+   * Spawn a single mobile shard at the position of a dented-out tile.
+   * Inherits the tile's current dented polygon and size — both already
+   * mutated in place by PhysicsSystem.applyDentStep on each damage
+   * event — and each spawned shard reads as "the broken-loose piece
+   * of what was just there".  Each shard's size is a fraction of the
+   * tile's original max axis (entity.size), so plastic detaches as
+   * a single ~1/3-size piece while metal fragments into a 1/3 + 1/6
+   * pair.  The dented polygon is scaled to each shard's target size
+   * so the dent character is preserved at the smaller scale.
+   *
+   * Velocity comes from the impactor's last hit; mass from the
+   * variant's spawn.sizeToMass; rotation is independent per shard
+   * so multiple shards don't read as identical clones.  When more
+   * than one shard spawns, each gets a small radial offset so they
+   * don't pile up at the tile centre.
+   */
+  public spawnDentShard(
+    entities: GameEntity[],
+    tile: GameEntity,
+    breakShards: ReadonlyArray<{ variant: ShardVariantId; sizeFraction: number }>,
+  ) {
+    if (breakShards.length === 0) return;
+
+    // Base tile size — entity.size is never updated by applyDentStep,
+    // so this still equals the original tile footprint (the shrunken
+    // silhouette is in polygonPoints only).  Used as a fallback when
+    // the polygon is missing.
+    const baseSize = Math.max(tile.size.x, tile.size.y);
+
+    // Single pass over the dented polygon to compute two metrics:
+    //  - dentedMaxR: max vertex radius — used to scale the polygon so
+    //                it fits inside each shard's target AABB.
+    //  - avgR:       average vertex radius — proxy for the deformed
+    //                tile's effective area.  For a regular polygon
+    //                area ≈ k × r², so avgR scales linearly with
+    //                sqrt(area) and the constant k cancels in
+    //                relative comparisons.  Used to size shards: each
+    //                shard's diameter = 2 × avgR × sizeFraction, so a
+    //                tile that's been heavily dented produces
+    //                proportionally smaller shards while a barely-
+    //                dented tile produces shards close to the
+    //                nominal (sizeFraction × original_diameter)
+    //                sizing.  All math is cheap: one loop + two
+    //                sqrts, no per-frame work.
+    let dentedMaxR = baseSize / 2;
+    let avgR = dentedMaxR;
+    if (tile.polygonPoints && tile.polygonPoints.length > 0) {
+      let maxR2 = 0;
+      let sumR2 = 0;
+      for (let i = 0; i < tile.polygonPoints.length; i++) {
+        const p = tile.polygonPoints[i];
+        const r2 = p.x * p.x + p.y * p.y;
+        sumR2 += r2;
+        if (r2 > maxR2) maxR2 = r2;
+      }
+      dentedMaxR = Math.max(0.001, Math.sqrt(maxR2));
+      avgR = Math.sqrt(sumR2 / tile.polygonPoints.length);
+    }
+    const deformedDiameter = avgR * 2;
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x)
+      : Math.random() * Math.PI * 2;
+    // Damp the inherited speed so shards drift rather than rocket
+    // away — projectile speeds are typically 30–100, and we want a
+    // gentle pop-off, not a launch.
+    const baseSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+
+    // Last-shard angle used to seed the post-spawn particle puff so
+    // sparks spray along the dominant detach direction.
+    let lastShardAngle = baseAngle;
+
+    for (let i = 0; i < breakShards.length; i++) {
+      const spec = breakShards[i];
+      const variantDef = SHARD_VARIANTS[spec.variant];
+
+      // Target shard size = fraction of the deformed tile's effective
+      // diameter (= 2 × avgR), so heavier deformation produces
+      // proportionally smaller shards while a barely-dented tile
+      // produces shards near the nominal sizeFraction × original size.
+      // Polygon shape is now generated from the variant's spawn config
+      // (fixed vertex count per material — plastic=4, metal=6, etc.)
+      // so detached shards have a consistent material silhouette
+      // instead of inheriting the dented tile's hex polygon.
+      const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
+      const scaledPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
+
+      const mass = variantDef.spawn.sizeToMass(targetSize);
+
+      // Per-shard launch angle — fan-spread the shards around the
+      // impact direction so a 2-shard break visibly diverges.  For
+      // a single shard the spread is zero (centred on the impact
+      // direction).
+      const fan = breakShards.length > 1
+        ? ((i / (breakShards.length - 1)) - 0.5) * 0.9
+        : 0;
+      const shardAngle = baseAngle + fan + (Math.random() - 0.5) * 0.3;
+      lastShardAngle = shardAngle;
+
+      // Small radial offset from the tile centre so spawned shards
+      // don't overlap at frame 0.  Larger shards move first, leaving
+      // smaller ones nearer the centre — reads as "main chunk pops
+      // off, splinter trails behind."
+      const offsetDist = breakShards.length > 1 ? (targetSize / 2) * 0.5 : 0;
+      const offsetX = Math.cos(shardAngle) * offsetDist;
+      const offsetY = Math.sin(shardAngle) * offsetDist;
+
+      // Speed scales mildly with shard size — smaller fragments fly
+      // a bit faster (lighter, gets a stronger kick from the same
+      // impact).  Multiplier 1.0 at full size, 1.3 at 1/6 size.
+      const speedScale = 1 + (1 - spec.sizeFraction) * 0.5;
+      const launchSpeed = baseSpeed * speedScale;
+
+      // Dent-policy shards take exactly as many hits to destroy as
+      // the parent tile they came from — inherit tile.maxHealth so
+      // plastic-shards / metal-shards are as durable as their
+      // matching tile (currently 8 HP each).  Non-dent variants
+      // (rock-shard spawned from rock-tile's breakShards) keep
+      // single-hit destruction, matching today's rock-shard /
+      // glass-shard HP.
+      const shardHealth = variantDef.dent !== undefined
+        ? (tile.maxHealth || 1)
+        : 1;
+
+      entities.push({
+        id:            nextId('dent_shard'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  spec.variant,
+        position:      {
+          x: tile.position.x + offsetX,
+          y: tile.position.y + offsetY,
+        },
+        velocity:      {
+          x: Math.cos(shardAngle) * launchSpeed,
+          y: Math.sin(shardAngle) * launchSpeed,
+        },
+        size:          { x: targetSize, y: targetSize },
+        rotation:      Math.random() * Math.PI * 2,
+        // Smaller shards spin faster — same angular-momentum-from-
+        // impact logic as the speed scaling above.
+        rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
+        color:         tile.color,
+        active:        true,
+        health:        shardHealth,
+        maxHealth:     shardHealth,
+        mass,
+        polygonPoints: scaledPts,
+      });
+    }
+
+    // Single particle puff for the detach event, aimed along the
+    // last shard's launch direction.  Material colour comes from the
+    // first shard's variant (plastic / metal always agree across
+    // entries today).
+    const firstVariant = breakShards[0].variant;
+    const puffColor = firstVariant === 'plastic-shard' ? '#fbbf24' : '#cbd5e1';
+    this.particles.spawn(entities, tile.position, 5, puffColor, {
+      speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
+      lifetimeMin: 0.15, lifetimeMax: 0.35,
+      spreadAngle: lastShardAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
+  /**
+   * Spawn a single mobile shard whose polygon is the supplied triangle
+   * (3 vertices in tile-local coords).  Used by the triangle-delete
+   * dent variant (today: rock-tile): when a vertex is removed from the
+   * tile's polygon, this method takes the freshly-deleted corner
+   * (the closest vertex + its two adjacent vertices) and turns it into
+   * a mobile shard at the same world location with the same shape.
+   *
+   * Spawn position is the triangle's centroid in world coords; the
+   * shard's polygonPoints are the triangle re-centred around that
+   * centroid so the shard's origin sits inside its silhouette.  Mass
+   * scales with size via the variant's spawn.sizeToMass.  Launch
+   * direction inherits lastImpactVelocity with a small random scatter.
+   */
+  public spawnTriangleShard(
+    entities: GameEntity[],
+    tile: GameEntity,
+    triangleLocalPts: Vector2[],
+    childVariant: ShardVariantId,
+  ) {
+    if (triangleLocalPts.length !== 3) return;
+    const variantDef = SHARD_VARIANTS[childVariant];
+
+    // Triangle centroid in tile-local coords — used as the spawn
+    // position (offset from tile.position).
+    let cx = 0, cy = 0;
+    for (let i = 0; i < 3; i++) {
+      cx += triangleLocalPts[i].x;
+      cy += triangleLocalPts[i].y;
+    }
+    cx /= 3;
+    cy /= 3;
+
+    // Triangle area via the 2D cross product.  Used to derive a
+    // shard size whose effective area matches the deleted corner,
+    // so the freed piece visually fits the gap it came from.
+    const triArea = Math.abs(
+      (triangleLocalPts[1].x - triangleLocalPts[0].x)
+        * (triangleLocalPts[2].y - triangleLocalPts[0].y)
+      - (triangleLocalPts[2].x - triangleLocalPts[0].x)
+        * (triangleLocalPts[1].y - triangleLocalPts[0].y),
+    ) / 2;
+    // Solve area = k × r² for r, where k is the unit-circumradius
+    // area of a regular n-gon for the spawned variant.  For n=5
+    // (rock-shard default) k ≈ 2.378; for n=3 k ≈ 1.299, n=4 ≈ 2.0,
+    // n=6 ≈ 2.598.  Approximation is loose — we want "roughly the
+    // same size," not exact area match.
+    const spawn = variantDef.spawn;
+    const polyN = (spawn.polyVerticesMin + spawn.polyVerticesMax) / 2;
+    const kArea = (polyN / 2) * Math.sin(2 * Math.PI / polyN);
+    const targetR = Math.max(2, Math.sqrt(triArea / kArea));
+    const targetSize = targetR * 2;
+
+    // Shard polygon from the variant's spawn config (vertex count +
+    // shape per material — rock-shard is 5 verts irregular, etc.).
+    const shardPts = this.generateMaterialShardPolygon(childVariant, targetSize);
+
+    let halfW = 0, halfH = 0;
+    for (let i = 0; i < shardPts.length; i++) {
+      const ax = Math.abs(shardPts[i].x);
+      const ay = Math.abs(shardPts[i].y);
+      if (ax > halfW) halfW = ax;
+      if (ay > halfH) halfH = ay;
+    }
+    const sizeX = Math.max(2, halfW * 2);
+    const sizeY = Math.max(2, halfH * 2);
+    const size  = Math.max(sizeX, sizeY);
+    const mass  = variantDef.spawn.sizeToMass(size);
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x)
+      : Math.random() * Math.PI * 2;
+    // Mild speed inherited from the projectile so the freed triangle
+    // pops off rather than launches.
+    const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.3;
+
+    entities.push({
+      id:            nextId('triangle_shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  childVariant,
+      position:      {
+        x: tile.position.x + cx,
+        y: tile.position.y + cy,
+      },
+      velocity:      {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:          { x: sizeX, y: sizeY },
+      rotation:      Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, size / 30)),
+      color:         tile.color,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass,
+      polygonPoints: shardPts,
+    });
+
+    // Small puff at the spawn point so the detach reads as a discrete
+    // event rather than a tile silently losing a corner.
+    this.particles.spawn(entities, {
+      x: tile.position.x + cx,
+      y: tile.position.y + cy,
+    }, 4, tile.color, {
+      speedMin: 1.5, speedMax: 3.5, sizeMin: 1, sizeMax: 2,
+      lifetimeMin: 0.15, lifetimeMax: 0.3,
+      spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
+  /**
+   * Spawn one mobile shard at a specific world position (typically
+   * the impact point of a projectile / crash).  Used by dent
+   * variants whose policy includes a `perHitShard` entry so every
+   * hit releases a small chunk of material — today rock uses this
+   * for the brittle "chip-off" feel.
+   *
+   * Size matches the deformed tile's effective diameter × spec
+   * sizeFraction (same convention as spawnDentShard's breakShards
+   * sizing), so the per-hit shard scales down with deformation as
+   * the tile is worn away.  Polygon comes from
+   * generateMaterialShardPolygon — variant's vertex count + jitter
+   * profile (rock = 5/7/9 verts, organic).
+   */
+  public spawnPerHitShard(
+    entities: GameEntity[],
+    tile: GameEntity,
+    spec: { variant: ShardVariantId; sizeFraction: number },
+    spawnWorldPos: Vector2,
+  ) {
+    const variantDef = SHARD_VARIANTS[spec.variant];
+
+    // Deformed-diameter baseline — same proxy as spawnDentShard's
+    // avgVertexRadius math so the per-hit shard tracks the tile's
+    // current state of wear.  Falls back to entity.size when the
+    // polygon is missing.
+    const baseSize = Math.max(tile.size.x, tile.size.y);
+    let avgR = baseSize / 2;
+    if (tile.polygonPoints && tile.polygonPoints.length > 0) {
+      let sumR2 = 0;
+      for (let i = 0; i < tile.polygonPoints.length; i++) {
+        const p = tile.polygonPoints[i];
+        sumR2 += p.x * p.x + p.y * p.y;
+      }
+      avgR = Math.sqrt(sumR2 / tile.polygonPoints.length);
+    }
+    const deformedDiameter = avgR * 2;
+
+    const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
+    const shardPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
+    const mass = variantDef.spawn.sizeToMass(targetSize);
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x)
+      : Math.random() * Math.PI * 2;
+    const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.4;
+
+    entities.push({
+      id:            nextId('per_hit_shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  spec.variant,
+      position:      { x: spawnWorldPos.x, y: spawnWorldPos.y },
+      velocity:      {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:          { x: targetSize, y: targetSize },
+      rotation:      Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
+      color:         tile.color,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass,
+      polygonPoints: shardPts,
+    });
+
+    // Subtle puff at the chip-off point in the tile's colour.
+    this.particles.spawn(entities, spawnWorldPos, 3, tile.color, {
+      speedMin: 1.5, speedMax: 3.0, sizeMin: 1, sizeMax: 1.8,
+      lifetimeMin: 0.12, lifetimeMax: 0.25,
+      spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
+  /**
+   * Spawn a nebula-shard at a world position with a colour override.
+   * Used by destructible tiles / shards that want a cloud-style
+   * fragment to drift away alongside the regular solid debris — rock
+   * tiles release one per hit, glass tiles release 1-2 on shatter,
+   * etc.  The shard inherits the nebula damping + spawn fade-in so
+   * it reads as "cloud" visually, but its `color` is forced to the
+   * caller's hex (no palette composition) so it tints to the parent
+   * material rather than the default nebula palette.
+   *
+   * `baseSize` is the source entity's effective diameter (rock-tile,
+   * rock-shard, glass-tile size, etc.); shard size = baseSize ×
+   * sizeFraction.  Inherits `inheritVelocity` for the launch
+   * direction (typically the parent's lastImpactVelocity), falling
+   * back to a random direction.
+   */
+  public spawnColoredNebulaShard(
+    entities: GameEntity[],
+    spawnWorldPos: Vector2,
+    baseSize: number,
+    color: string,
+    sizeFraction: number = 0.5,
+    inheritVelocity?: Vector2,
+  ) {
+    const variantDef = SHARD_VARIANTS['nebula-shard'];
+    const targetSize = Math.max(4, baseSize * sizeFraction);
+    const shardPts = this.generateMaterialShardPolygon('nebula-shard', targetSize);
+    const mass = variantDef.spawn.sizeToMass(targetSize);
+
+    // Pick a nebula sprite at random — required for the renderer's
+    // tinted-sprite path (cloud silhouette via getTintedSprite +
+    // _tintedSprites cache).  Without sprite the shard renders only
+    // its polygon outline (visible only in debug mode).  Falls back
+    // to the procedural puff marker if the manifest is empty.
+    const sprite = NEBULA_IMAGES.length > 0
+      ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+      : ASSETS.NEBULA_PUFF;
+
+    const impactSpeed = inheritVelocity
+      ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)
+      : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(inheritVelocity!.y, inheritVelocity!.x)
+      : Math.random() * Math.PI * 2;
+    const launchSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.6;
+
+    entities.push({
+      id:                  nextId('colored_nebula_shard'),
+      type:                EntityType.STRUCTURE,
+      shardVariant:        'nebula-shard',
+      position:            { x: spawnWorldPos.x, y: spawnWorldPos.y },
+      velocity:            {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:                { x: targetSize, y: targetSize },
+      rotation:            Math.random() * Math.PI * 2,
+      rotationSpeed:       (Math.random() - 0.5) * (1.2 / Math.max(1, targetSize / 30)),
+      color,
+      sprite,
+      active:              true,
+      health:              1,
+      maxHealth:           1,
+      mass,
+      polygonPoints:       shardPts,
+      // Nebula damping so the shard drifts like a cloud and decelerates
+      // gradually instead of carrying full inertia.
+      linearDamping:       NEBULA_CONSTANTS.LINEAR_DAMPING,
+      angularDamping:      NEBULA_CONSTANTS.ANGULAR_DAMPING,
+      // Birth fade-in so the shard ramps in opacity instead of
+      // popping at full alpha.  Duration matches the standard nebula
+      // shatter spawn duration.
+      nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
+      nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
+      // Small area so the shard doesn't trigger the shard-to-tile
+      // transmutation path when it bumps into other nebula material.
+      nebulaTileArea:      targetSize * targetSize * 0.5,
     });
   }
 
@@ -367,6 +846,44 @@ export class DropSystem {
    * size and should scale with the drop's value so larger-value drops are
    * physically bigger.
    */
+  /**
+   * Procedurally generate a polygon for a material shard, sized to
+   * `targetDiameter` and shaped per the variant's spawn config.
+   *
+   * Vertex count, angle jitter, and radius variance all come from
+   * SHARD_VARIANTS[variant].spawn — see constants.ts for the per-
+   * material settings:
+   *   glass-shard:   3 verts, sharp / narrow (sharp angles, high
+   *                  radius variance → elongated splinters)
+   *   plastic-shard: 4 verts, near-square (low jitter + variance)
+   *   rock-shard:    5 verts, organic / irregular
+   *   metal-shard:   6 verts, clean hex-like (low jitter + variance)
+   *
+   * Output is centred at (0, 0) and sorted by angle so the polygon
+   * is simple (non-self-intersecting).
+   */
+  public generateMaterialShardPolygon(variant: ShardVariantId, targetDiameter: number): Vector2[] {
+    const spawn = SHARD_VARIANTS[variant].spawn;
+    // Discrete vertex-count list (polyVerticesOptions) takes priority
+    // over the continuous Min/Max range — used by rock-shard
+    // ([5, 7, 9]) and metal-shard ([6, 8, 10]) to keep their
+    // silhouettes snapped to specific counts.
+    const numVerts = spawn.polyVerticesOptions
+      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      : spawn.polyVerticesMin
+        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+    const baseR = targetDiameter / 2;
+    const rawPts: { angle: number; r: number }[] = [];
+    for (let i = 0; i < numVerts; i++) {
+      const baseAngle = (i / numVerts) * Math.PI * 2;
+      const jitter = (Math.random() - 0.5) * (Math.PI / numVerts) * spawn.angleJitter * 2;
+      const radiusFrac = spawn.radiusMin + Math.random() * spawn.radiusRange;
+      rawPts.push({ angle: baseAngle + jitter, r: baseR * radiusFrac });
+    }
+    rawPts.sort((a, b) => a.angle - b.angle);
+    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+  }
+
   public generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
     let numPoints: number;
     let radMin: number;

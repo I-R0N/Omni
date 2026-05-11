@@ -60,8 +60,9 @@ engine/
                           RingMap, SevenRingsMap, PocketMap) and the
                           single-element 6k showcase maps
                           (AsteroidFieldMap, GlassFieldMap,
-                          HardTileFieldMap, IndestructibleFieldMap,
-                          NebulaFieldMap) sharing the abstract
+                          PlasticFieldMap, MetalFieldMap,
+                          IndestructibleFieldMap, NebulaFieldMap)
+                          sharing the abstract
                           SingleVariantTileFieldMap base
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
@@ -149,8 +150,8 @@ physics has resolved deaths.
 
 ## 4. The GameEntity contract
 
-Everything on-screen — player, enemies, tiles (glass / reinforced /
-heavy / indestructible / nebula), mobile shards (rock / glass /
+Everything on-screen — player, enemies, tiles (glass / plastic /
+metal / indestructible / nebula), mobile shards (rock / glass /
 nebula), projectiles, particles, drops — is a `GameEntity` (see
 `types.ts`). Discriminated by `type: EntityType` plus optional role
 fields (`enemySubtype`, `shardVariant`, `dropType`, `isBouncer`,
@@ -194,7 +195,7 @@ Notable existing field categories on `GameEntity`:
   `dropComposition`. Note: `gold` exists on the player entity but is
   **not currently consumed** anywhere.
 - Shard family (tiles + shards): `shardVariant`
-  (`'glass-tile' | 'reinforced-tile' | 'heavy-tile' |
+  (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
   'glass-shard' | 'nebula-shard'`),
   `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
@@ -234,15 +235,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GLITTER_TRAIL_CONSTANTS`
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType), `ASTEROID_GENERATION_CONFIG`
   (per-MapType)
-- `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / reinforced /
-  heavy / indestructible — visual/health config; behavioural policy
+- `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
+  metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
   twinkle scheduling)
 - `SHARD_VARIANTS` — per-variant regen / merge / shatter /
   passThrough / renderCache policy.  Source of truth for the
   shard-family behaviour table.  9 variants today: glass-tile /
-  reinforced-tile / heavy-tile / indestructible-tile / rock-tile
+  plastic-tile / metal-tile / indestructible-tile / rock-tile
   (Stage 7 wires spawn) / nebula-tile / rock-shard / glass-shard /
   nebula-shard.  See `engine/systems/ShardSystem.types.ts` for the
   schema and `docs/SHARD_SYSTEM.md` for the design rationale.
@@ -298,12 +299,12 @@ of `BaseMapLayer`:
   asteroids, structures (multiple variants), and nebulae and are the
   ones a normal play session uses.
 - **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
-  (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`), `HardTileFieldMap`
-  (`HARD_TILE_FIELD`, uses the `'heavy'` STRUCTURE variant — note the
-  naming mismatch), `IndestructibleFieldMap` (`INDESTRUCTIBLE_FIELD`),
+  (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`),
+  `PlasticFieldMap` (`PLASTIC_FIELD`), `MetalFieldMap` (`METAL_FIELD`),
+  `IndestructibleFieldMap` (`INDESTRUCTIBLE_FIELD`),
   `NebulaFieldMap` (`NEBULA_FIELD`). Each populates the playfield with
   exactly one entity type so a single system (flow field, regen, nebula
-  shatter, etc.) can be stress-tested in isolation. The four tile-only
+  shatter, etc.) can be stress-tested in isolation. The five tile-only
   showcases share an abstract `SingleVariantTileFieldMap` base; entity
   counts are tuned to ≈1 200 per map so the debug HUD's render-time
   numbers compare apples-to-apples across showcases.

@@ -23,10 +23,16 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400
-  STRUCTURE_REINFORCED: '#8b5cf6',        // Violet 500
-  STRUCTURE_REINFORCED_BORDER: '#a78bfa', // Violet 400
-  STRUCTURE_HEAVY: '#f59e0b',             // Amber 500
-  STRUCTURE_HEAVY_BORDER: '#fbbf24',      // Amber 400
+  // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
+  // outline so the surface reads as soft injection-moulded plastic
+  // rather than the violet sheen of the prior reinforced tile.
+  STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
+  STRUCTURE_PLASTIC_BORDER: '#fbbf24',    // Amber 400 — gentle highlight, not specular
+  // Metal — cool steel-blue with a brighter edge, so silhouettes pop
+  // against the indigo glass tiles.  Higher outline contrast than
+  // plastic to read as a hard surface.
+  STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
+  STRUCTURE_METAL_BORDER: '#e2e8f0',      // Slate 200 — chrome edge highlight
   STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
   STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
 };
@@ -337,7 +343,12 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
-  [MapType.HARD_TILE_FIELD]: {
+  [MapType.PLASTIC_FIELD]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
+  [MapType.METAL_FIELD]: {
     maxSpeed: 140,
     acceleration: 0.077,
     friction: 0.998
@@ -392,7 +403,7 @@ export const STRUCTURE_CONSTANTS = {
 // sprite each, not a per-tier atlas.
 //
 // Glass (default) is single-hit to match the original behaviour.
-// Reinforced and heavy add intermediate HP.  Indestructible tiles never
+// Plastic and metal add intermediate HP.  Indestructible tiles never
 // take damage and never regenerate — they're permanent walls.
 export const STRUCTURE_VARIANTS = {
   glass: {
@@ -403,21 +414,33 @@ export const STRUCTURE_VARIANTS = {
     color: COLORS.STRUCTURE,
     borderColor: COLORS.STRUCTURE_BORDER,
   },
-  reinforced: {
-    health: 3,
+  plastic: {
+    // 8 HP — same hits-to-break as metal.  Differentiation is purely
+    // visual: plastic deforms more per hit (higher dent.vertexJitter)
+    // and detaches as a single ~1/3-size shard; metal warps subtly
+    // and breaks into a 1/3 + 1/6 pair.
+    health: 8,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_REINFORCED,
-    color: COLORS.STRUCTURE_REINFORCED,
-    borderColor: COLORS.STRUCTURE_REINFORCED_BORDER,
+    // sprite left empty so RenderSystem's sprite branch falls through
+    // to the polygon-based material-tile branch — that's the only
+    // path that draws the dented polygonPoints.  ASSETS.HEX_STRUCTURE_PLASTIC
+    // is kept in the manifest for a future per-variant sprite.
+    sprite: '',
+    color: COLORS.STRUCTURE_PLASTIC,
+    borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
-  heavy: {
-    health: 5,
+  metal: {
+    // 8 HP → 7 dent steps while alive, 8th detaches.  Same hit count
+    // as plastic but reads as harder via the subtle per-hit dent and
+    // the post-break fragmentation (two shards instead of one).
+    health: 8,
     mass: Infinity,
     indestructible: false,
-    sprite: ASSETS.HEX_STRUCTURE_HEAVY,
-    color: COLORS.STRUCTURE_HEAVY,
-    borderColor: COLORS.STRUCTURE_HEAVY_BORDER,
+    // sprite left empty so the polygon fallback fires — see plastic above.
+    sprite: '',
+    color: COLORS.STRUCTURE_METAL,
+    borderColor: COLORS.STRUCTURE_METAL_BORDER,
   },
   indestructible: {
     // Sentinel health — tile is never destroyed, but keep a finite positive
@@ -992,8 +1015,13 @@ export const DROP_CONFIG = {
   AMMO_PER_ENEMY_PRIMARY:   3,    // primary enemy ammo drop (paired with AMMO_DROP_CHANCE_ENEMY_PRIMARY)
   AMMO_PER_ENEMY_SECONDARY: 2,    // secondary enemy ammo drop (independent roll)
   AMMO_PER_ASTEROID:        4,    // ammo units per asteroid drop
+  // Dent-policy mobile shards (plastic-shard, metal-shard) take
+  // multiple hits to destroy, so their drop rate + payload run
+  // higher than a single-hit asteroid to reward the effort.
+  AMMO_PER_DENT_SHARD:      6,
   // Drop-spawn probabilities
   AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
+  AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
@@ -1324,14 +1352,19 @@ const TILE_REGEN_POP_BURST = {
 // sizeMin = 20 matches the per-map rock-shard minSize universally
 // (see MAP_POPULATION) so the asteroid-style shatter's MIN_SIZE
 // gate is consistent with the spawn population.
+// Glass shards: 3 or 4 vertices.  Sharp/narrow silhouettes from
+// high angle jitter and high radius variance — splinter-like.  When
+// 4 verts roll, the irregular jitter produces kite-like / asymmetric
+// quads that don't overlap with plastic-shard's near-square shape.
 const GLASS_SHARD_SPAWN_SHAPE = {
   sizeMin: 20, sizeMax: 200,
-  polyVerticesMin: 4, polyVerticesMax: 6,    // blocky
-  angleJitter: 0.25, radiusMin: 0.60, radiusRange: 0.55,
+  polyVerticesMin: 3, polyVerticesMax: 4,
+  polyVerticesOptions: [3, 4],
+  angleJitter: 0.5, radiusMin: 0.45, radiusRange: 0.75,
   sizeToMass: (d: number) => d,
 };
 
-// Base config shared by glass / reinforced / heavy STRUCTURE tiles.
+// Base config shared by glass / plastic / metal STRUCTURE tiles.
 // indestructible-tile and rock-tile override pieces of this.
 const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
   carrier: EntityType.STRUCTURE,
@@ -1369,10 +1402,16 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
   spawnsDropsOnDeath: true,
 };
 
+// Rock shards: 5, 7, or 9 vertices (odd counts only).  Organic /
+// irregular silhouette with moderate jitter and moderate radius
+// variance.  Discrete odd counts keep the visual distinct from
+// metal's even counts (6/8/10) so a player can tell rock from metal
+// at a glance.
 const SHARD_SPAWN_SHAPE_ROCK = {
   sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
-  polyVerticesMin: 5, polyVerticesMax: 7,    // jagged
-  angleJitter: 0.8, radiusMin: 0.55, radiusRange: 0.70,
+  polyVerticesMin: 5, polyVerticesMax: 9,
+  polyVerticesOptions: [5, 7, 9],
+  angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
   sizeToMass: (d: number) => d,
 };
 
@@ -1387,18 +1426,82 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   sizeToMass: () => 0.01,
 };
 
+// Plastic shards: always 4 vertices.  Near-square — low angle
+// jitter keeps vertices close to a regular quadrilateral and low
+// radius variance keeps side lengths similar, producing
+// ~70–90° angles consistent with stamped / extruded polymer.
+const SHARD_SPAWN_SHAPE_PLASTIC = {
+  sizeMin: 20, sizeMax: 120,
+  polyVerticesMin: 4, polyVerticesMax: 4,
+  angleJitter: 0.15, radiusMin: 0.85, radiusRange: 0.20,
+  sizeToMass: (d: number) => d * 0.7,
+};
+
+// Metal shards: 6, 8, or 10 vertices (even counts only).  Low
+// jitter + low radius variance for a clean, hex-like or polygon-
+// machined silhouette.  Discrete even counts pair with rock's odd
+// counts so the two materials read as visually distinct families.
+const SHARD_SPAWN_SHAPE_METAL = {
+  sizeMin: 20, sizeMax: 120,
+  polyVerticesMin: 6, polyVerticesMax: 10,
+  polyVerticesOptions: [6, 8, 10],
+  angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
+  sizeToMass: (d: number) => d * 1.3,
+};
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
   },
-  'reinforced-tile': {
+  'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
-    id: 'reinforced-tile',
+    id: 'plastic-tile',
+    // Plastic deforms heavily per hit — each closest-to-impact vertex
+    // pulled inward by up to 25 % of its current radius.  Same hit
+    // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
+    // visibly more dramatic per-hit warp.  Detaches into 3
+    // plastic-shards whose areas sum to the deformed tile's area.
+    regen: { kind: 'none' },
+    dent: {
+      vertexJitter: 0.25,
+      breakShards: [
+        // 3 equal-area shards — each carries 1/3 of the deformed
+        // tile's area.  Linear sizeFraction = sqrt(1/3) ≈ 0.577
+        // (relative to the deformed tile's diameter), so the three
+        // shards sum to a full-area split.  More fragments than
+        // metal's 2-shard break to play up plastic's lower
+        // structural integrity on the killing hit.
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        { variant: 'plastic-shard', sizeFraction: 0.577 },
+      ],
+    },
   },
-  'heavy-tile': {
+  'metal-tile': {
     ...STRUCTURE_TILE_BASE,
-    id: 'heavy-tile',
+    id: 'metal-tile',
+    // Metal deforms subtly — each closest-to-impact vertex pulled
+    // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
+    // but the surface reads as harder via the smaller per-hit warp
+    // and the post-break fragmentation: a 2-shard pair split 2:1 by
+    // area, summing to the deformed tile's area.
+    regen: { kind: 'none' },
+    dent: {
+      vertexJitter: 0.13,
+      breakShards: [
+        // Areas sum to the deformed tile's area (≈ half original
+        // area at break, per playtest).  Primary takes 2/3, secondary
+        // 1/3 — keeps the original "1/3 vs 1/6 of the tile" intent
+        // (those are fractions of the ORIGINAL tile area, and
+        // 1/3 + 1/6 = 1/2 = deformed area).
+        // Linear sizeFraction = sqrt(area fraction of deformed),
+        // so primary uses sqrt(2/3) ≈ 0.816, secondary sqrt(1/3)
+        // ≈ 0.577.
+        { variant: 'metal-shard', sizeFraction: 0.816 },
+        { variant: 'metal-shard', sizeFraction: 0.577 },
+      ],
+    },
   },
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1418,15 +1521,61 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Rock-tiles shatter into rock-shards (not glass-shards).
+    // Rock-tile uses the 'pull' dent kind (default) with
+    // pullVertexCount = 3: each hit pulls the closest vertex AND
+    // both immediate neighbours inward, each by its own random
+    // jitter.  The wider 3-vertex pull creates multiple inverted
+    // angles along one side of the polygon per hit, reading as
+    // fractured stone rather than a single dimple.  No per-hit
+    // shard release (unlike the previous triangle-delete approach);
+    // the freed material accumulates and is delivered on the
+    // killing hit via breakShards.  No regen.  Shatter stays
+    // kind='none' so ShardSystem.shatter doesn't double-spawn on
+    // top of dent's breakShards (GameEngine.handleEntityDeath skips
+    // shatter for any dent variant).
+    regen: { kind: 'none' },
     shatter: {
-      kind: 'powerlaw',
+      kind: 'none',
       style: 'asteroid',
-      countMin: 2, countMax: 5,
-      alphaMin: 0.4, alphaMax: 2.0,
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
       childVariant: 'rock-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
-      scatterHalfCone: Math.PI * 0.55,
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
+    },
+    dent: {
+      // 3 adjacent vertices pulled per hit.  vertexJitter is the
+      // base per-vertex max pull (0.20 = up to 20 % inward).  Two
+      // of the three (the closest-to-impact vertex plus one
+      // randomly-chosen neighbour, via deepVertexCount = 2) draw
+      // jitter × centerVertexJitterMul = 0.20 × 10.0 = up to 2.0
+      // nominal jitter — capped by applyDentStep's K_MIN floor so
+      // an "infinitely deep" roll bottoms out at 5 % of the vertex's
+      // current radius.  Every hit produces two deep notches plus
+      // one softer side warp, reading as a chaotic brittle fracture
+      // (cracks branch unevenly rather than dimpling at a single
+      // point).
+      vertexJitter: 0.20,
+      centerVertexJitterMul: 10.0,
+      pullVertexCount: 3,
+      deepVertexCount: 2,
+      // Each hit also chips off a rock-shard at the impact location.
+      // sizeFraction 0.7 is linear relative to the deformed tile
+      // diameter (~44 at start), so the chip is ~31 wide on hit 1 —
+      // a chunky fragment that reads as a substantial chip flying
+      // off, not a sliver.
+      perHitShard: { variant: 'rock-shard', sizeFraction: 0.7 },
+      // Final break: 3 rock-shards at sizeFraction 0.75 each (linear
+      // fraction of deformed diameter).  Sum of squares = 1.69 so
+      // the freed material exceeds the deformed area — visually
+      // chunkier fragments at the cost of some "material creation,"
+      // which the user prefers over the previous area-conservative
+      // 3 × 0.577 split where each shard read as undersized.
+      breakShards: [
+        { variant: 'rock-shard', sizeFraction: 0.75 },
+        { variant: 'rock-shard', sizeFraction: 0.75 },
+        { variant: 'rock-shard', sizeFraction: 0.75 },
+      ],
     },
   },
   'nebula-tile': {
@@ -1547,6 +1696,107 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       shrinkFactor: 0.88,
     },
   },
+  'plastic-shard': {
+    id: 'plastic-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_PLASTIC,
+    regen: { kind: 'none' },
+    // Self-bond only for now — plastic shards stick to other plastic
+    // shards via the standard rock-style cohesion.  No cross-material
+    // bonds with rock / glass / metal yet (kept narrow until we see
+    // how the dent system shakes out).
+    merge: {
+      attractedTo: 'none',
+      bondsWith: { include: ['plastic-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
+      defaultOutcome: 'compose',
+    },
+    // Plastic shards are dent-driven: they deform per hit and are
+    // destroyed cleanly on health = 0 (no recursive sub-shards).
+    // Drops + particles fire via the mobile-shard path in
+    // DropSystem.spawnDrops.
+    shatter: {
+      kind: 'none',
+      style: 'asteroid',
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'plastic-shard',
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
+    },
+    // Warm amber particle puff matches the matte-polymer body colour.
+    onShatterParticles: { color: '#fbbf24', count: 5 },
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.60,                         // slightly higher floor — plastic stays warmer when dense
+      shrinkFactor: 0.88,
+    },
+    // Free-floating plastic shards deform on hit just like plastic
+    // tiles — each impact pulls one vertex inward.  Slightly lower
+    // jitter than the tile (0.22 vs 0.25) since the shard is already
+    // smaller and we want a few hits' worth of cumulative warp before
+    // destruction.  breakShards is empty: when health hits 0 the
+    // shard is destroyed cleanly and drops fall via the mobile-shard
+    // path in DropSystem.spawnDrops.
+    dent: {
+      vertexJitter: 0.22,
+      breakShards: [],
+    },
+  },
+  'metal-shard': {
+    id: 'metal-shard',
+    carrier: EntityType.STRUCTURE,
+    spawn: SHARD_SPAWN_SHAPE_METAL,
+    regen: { kind: 'none' },
+    merge: {
+      attractedTo: 'none',
+      bondsWith: { include: ['metal-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
+      defaultOutcome: 'compose',
+    },
+    // Metal shards are dent-driven: deform per hit, destroyed cleanly
+    // on health = 0 with drops + particles.  No recursive sub-shards.
+    shatter: {
+      kind: 'none',
+      style: 'asteroid',
+      countMin: 0, countMax: 0,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'metal-shard',
+      forwardDrag: 0, perpScatter: 0,
+      scatterHalfCone: 0,
+    },
+    // Cool slate particle puff matches the gunmetal body colour.
+    onShatterParticles: { color: '#cbd5e1', count: 5 },
+    passThrough: false,
+    spawnsDropsOnDeath: true,
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.50,                         // metal goes darker when packed dense
+      shrinkFactor: 0.88,
+    },
+    // Metal shards deform subtly per hit (vertexJitter 0.10 vs
+    // tile's 0.13) — the surface still reads as hard even after
+    // detaching from the grid.  Empty breakShards: clean destruction
+    // on health = 0.
+    dent: {
+      vertexJitter: 0.10,
+      breakShards: [],
+    },
+  },
   'nebula-shard': {
     id: 'nebula-shard',
     carrier: EntityType.STRUCTURE,
@@ -1638,8 +1888,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
     // / OUTER_*); MAP_POPULATION is now the single source of truth.
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
-    'reinforced-tile':     { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
-    'heavy-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
+    'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
     'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
     'nebula-tile': {
       tileCluster: {
@@ -1663,8 +1913,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.POCKET]: {
     'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 800 } },
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
-    'reinforced-tile':     { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
-    'heavy-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
+    'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
+    'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
     'indestructible-tile': { tileCluster: { clusterCount: 2, minClusterSize: 3, maxClusterSize:  5 } },
     'nebula-tile': {
       tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
@@ -1676,8 +1926,11 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.GLASS_FIELD]: {
     'glass-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
-  [MapType.HARD_TILE_FIELD]: {
-    'heavy-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  [MapType.PLASTIC_FIELD]: {
+    'plastic-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
+  },
+  [MapType.METAL_FIELD]: {
+    'metal-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {
     'indestructible-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
