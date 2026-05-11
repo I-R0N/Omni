@@ -1147,7 +1147,9 @@ export class RenderSystem {
       // the generic save/translate/rotate/restore wrapper saves 4 canvas
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
-      // pop, regen ghost) fall back to the slow generic path.
+      // pop, regen ghost, active glow) fall back to the slow generic
+      // path so layer 2b (variant-driven additive glow) can paint —
+      // the fast path is a single drawImage and has no glow pass.
       // Only glass-family static tiles (glass / indestructible) take the
       // hex-sprite fast path.  Plastic / metal use the material-tile slow-
       // path branch (variant color + per-vertex dent jitter).  Rock-tile
@@ -1160,7 +1162,8 @@ export class RenderSystem {
             || entity.shardVariant === 'indestructible-tile');
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
-          && !entity.hitFlash && entity.regenPopTimer === undefined) {
+          && !entity.hitFlash && entity.regenPopTimer === undefined
+          && !(entity.glowIntensity !== undefined && entity.glowIntensity > 0)) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
@@ -1678,6 +1681,9 @@ export class RenderSystem {
                 // has no `glow` config, the layer short-circuits before
                 // any state mutation — the cheap field check keeps the
                 // hot path allocation-free for non-glowing tiles.
+                // Paint both a fill AND a thick stroke so the halo
+                // reads as a clear "lit edge" — fill alone washes the
+                // hex out cyan but doesn't pop as a beacon.
                 if (!isFlash
                     && entity.glowIntensity !== undefined
                     && entity.glowIntensity > 0
@@ -1687,6 +1693,9 @@ export class RenderSystem {
                         ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
                         ctx.fillStyle = glow.color;
                         ctx.fill();
+                        ctx.strokeStyle = glow.color;
+                        ctx.lineWidth = 3.0;
+                        ctx.stroke();
                     }
                 }
 
@@ -1757,7 +1766,12 @@ export class RenderSystem {
                     // brightens the steel base instead of being
                     // alpha-blended underneath (which would barely
                     // shift a 1.0-alpha fill).  Short-circuits to a
-                    // single field check on non-glowing tiles.
+                    // single field check on non-glowing tiles.  We
+                    // ALSO paint a thick glow stroke so the halo reads
+                    // as a clear "lit edge" against the matte body —
+                    // a fill-only additive pass washes the polygon out
+                    // amber but doesn't read as "glowing"; the stroke
+                    // adds an unambiguous outline beacon.
                     if (!isFlash
                         && entity.glowIntensity !== undefined
                         && entity.glowIntensity > 0
@@ -1766,9 +1780,17 @@ export class RenderSystem {
                         if (glow !== undefined) {
                             const prevComp = ctx.globalCompositeOperation;
                             ctx.globalCompositeOperation = 'lighter';
-                            ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
+                            const a = glow.peakAlpha * entity.glowIntensity;
+                            ctx.globalAlpha = a;
                             ctx.fillStyle = glow.color;
                             ctx.fill();
+                            // Outline-halo: same polygon, thick stroke.
+                            // Sits on top of the fill in 'lighter', so
+                            // the silhouette reads as a clearly-lit rim
+                            // even when the inner fill is subtle.
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 3.0;
+                            ctx.stroke();
                             ctx.globalCompositeOperation = prevComp;
                         }
                     }
