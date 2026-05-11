@@ -134,6 +134,15 @@ k. After N waves, spawn a portal to a new map.
      model, green-laser + purple-cannon proposals) — user approves
      before implementation. Own branch / PR. Must land before (h)
      since the boss roster references weapon types.
+10. **g1 over-delivery; g2 narrowed** — the (g1) session ended up
+    shipping most of (g2)'s original scope (dent/deform, break-loose
+    physics, plastic-shard / metal-shard variants) inside PR #52
+    alongside the rename + glow primitive. Revised (g2) is now
+    "repel field for glass (light) + metal (heavy) + wire the
+    layer-2b glow to repel intensity for both." Metal now also
+    carries a repel field — superseding decision #9's "metal =
+    damage-pulse" trigger plan.
+
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
    against `main`) bundles four independent changes under a
@@ -166,8 +175,8 @@ k. After N waves, spawn a portal to a new map.
 | e | Offscreen-only enemy wave spawns | shipped (PR #47, merged into plan branch) | `claude/offscreen-enemy-spawning-vYW3c` | First task. **Bundled with (d1)** in same session/branch/PR. |
 | d1 | Shared-ammo consolidation | shipped (PR #47, merged into plan branch) | (same as e) | Single shared ammo pool, per-shot costs tuned to preserve shots-per-pickup feel, dedicated HUD readout box, ammo-drop visual (black core / white rim / white glow). |
 | j | Graceful cleanup + density compaction | shipped (PR #50, merged into plan branch) | `claude/graceful-cleanup-density-Kscjl` | Offscreen-priority cleanup pacing, generic density compaction across rock/glass/nebula shards (`density` policy on `ShardVariantDef`), large-shard collapse, density-tier tint ramp. |
-| g1 | Plastic/metal rename + revisualize + glow primitive | pending | `claude/material-tiles-rename-<suffix>` | Rename `reinforced-tile` → `plastic-tile`, `heavy-tile` → `metal-tile`. Cosmetic only — colors, sprites, SHARD_VARIANTS keys, MAP_POPULATION keys, docs. **Plus** lift the canvas-layer-2b glow visual primitive from PR #45 (variant-driven, decoupled from any trigger; glow stays unwired so no variant glows yet). Behavior unchanged. |
-| g2 | Dent/deform + break-loose + repel field | pending | `claude/material-tiles-physics-<suffix>` | Progressive dent on hit → break loose as one durable shard per tile. Plug into (j)'s density system. New variants: `plastic-shard`, `metal-shard`. **Plus** the PR #45 glass-tile repel field (range / strength schema, broadphase 5×5 outer-ring scan, repelImmune opt-out, DBG strength slider) and the glow-trigger wiring: glass-tile glows on player proximity (mapped to repel intensity); metal-tile glows as a damage-pulse keyed to its dent state. |
+| g1 | Plastic/metal rename + revisualize + glow primitive + dent/break-loose physics | shipped (PR #52, merged into plan branch) | `claude/plastic-metal-rename-glow-YaUkr` | Over-delivered. Plastic/metal rename, glow primitive (`glow?` on `ShardVariantDef`, layer-2b in RenderSystem gated on `entity.glowIntensity`), AND most of (g2)'s original scope: dent/deform policy (`dent` field with vertexJitter, kind, breakShards), `plastic-shard` + `metal-shard` variants, per-material shard counts, HP parity. Plus rock-dent system and drop overhaul as bonus. |
+| g2 | Repel field (glass + metal) + glow trigger wiring | pending | `claude/material-tiles-repel-<suffix>` | **Narrowed scope.** Add `repel?: { range, strength }` + `repelImmune?` to `ShardVariantDef`. Glass-tile = light repel (low strength). Metal-tile = heavy repel (matches PR #45's `range: 200, strength: 0.08`). PhysicsSystem 5×5 outer-ring repel scan + per-entity `repelImpulse`. Wire `entity.glowIntensity` from the per-frame repel intensity for both variants so the existing glow primitive lights up on player proximity. Optional: DBG strength slider. Dent/break-loose already shipped under g1 — out of scope here. |
 | d2 | Weapon system overhaul | shipped (PRs #48 + #49, merged into plan branch) | `claude/weapon-system-overhaul-LLSqp` (+ `claude/charge-full-gate-7Hk2x`) | Charge model, per-shot ammo cost scaling, cannon shockwave, bouncer fan/nova, green-laser & purple-cannon redesigns. |
 
 ### Dependency chain
