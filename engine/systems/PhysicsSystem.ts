@@ -739,19 +739,27 @@ export class PhysicsSystem {
       // metal default to 1 for a single-vertex pinch).  The closest
       // vertex (offset 0) draws its jitter from vertexJitter ×
       // centerVertexJitterMul so it can pull dramatically more than
-      // its neighbours — rock uses ~2× so the impact vertex creates
-      // a deep brittle notch while the neighbours add softer warp.
-      // Each pulled vertex still draws its own random magnitude so
-      // pulls aren't uniform across the set.
+      // its neighbours — rock uses ~10× so the impact vertex creates
+      // a deep brittle notch (effective jitter up to 2.0) while the
+      // neighbours add softer warp.  Each pulled vertex still draws
+      // its own random magnitude so pulls aren't uniform.
+      //
+      // The per-vertex multiplicative factor k is clamped to a small
+      // positive floor (0.05) so high-jitter rolls don't pull a
+      // vertex past the polygon centroid and flip it through the
+      // origin — that would invert winding and break SAT collision.
+      // With the clamp, an "infinitely deep" pull bottoms out at 5 %
+      // of the vertex's current radius.
       const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
       const centerMul = dent.centerVertexJitterMul ?? 1;
       const N = pts.length;
       const half = Math.floor(pullCount / 2);
+      const K_MIN = 0.05;
       for (let i = 0; i < pullCount; i++) {
           const offset = i - half;
           const idx = ((bestIdx + offset) % N + N) % N;
           const jitterMag = dent.vertexJitter * (offset === 0 ? centerMul : 1);
-          const k = 1 - Math.random() * jitterMag;
+          const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
       }
