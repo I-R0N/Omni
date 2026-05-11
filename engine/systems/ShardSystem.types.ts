@@ -338,6 +338,24 @@ export interface ShardVariantDef {
      *  length).  Each pulled vertex gets its own random jitter so
      *  the pulls aren't uniform. */
     pullVertexCount?: number;
+    /** Multiplier on vertexJitter applied to the closest-to-impact
+     *  vertex specifically (the centre of the pulled set).  Default
+     *  1 (same jitter as neighbours).  Rock uses ~2 so the impact
+     *  vertex pulls dramatically while neighbours add subtle warp —
+     *  reads as a brittle / jagged fracture (one deep notch + softer
+     *  side warping) compared to plastic / metal's uniform pull. */
+    centerVertexJitterMul?: number;
+    /** Optional shard released on every hit, IN ADDITION TO the
+     *  on-death breakShards.  Sized like breakShards entries
+     *  (linear sizeFraction × deformed diameter) but spawned at the
+     *  impact world position rather than the tile centre.  Today
+     *  rock uses this so each hit visibly chips a rock-shard off
+     *  the tile (the deformation makes room for it) without
+     *  removing any vertex from the polygon. */
+    perHitShard?: {
+      variant: ShardVariantId;
+      sizeFraction: number;
+    };
     /** Rotation in radians applied to the impact direction before
      *  searching for the vertex to deform.  0 (default) deforms the
      *  vertex closest to the impact; Math.PI/2 deforms the

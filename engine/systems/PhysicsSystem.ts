@@ -736,16 +736,22 @@ export class PhysicsSystem {
 
       // Pull N adjacent vertices symmetrically around the closest
       // one (rock uses 3 to deform a wider region per hit; plastic /
-      // metal default to 1 for a single-vertex pinch).  Each pulled
-      // vertex draws its own random jitter so the indentation isn't
-      // uniform across the pulled set.
+      // metal default to 1 for a single-vertex pinch).  The closest
+      // vertex (offset 0) draws its jitter from vertexJitter ×
+      // centerVertexJitterMul so it can pull dramatically more than
+      // its neighbours — rock uses ~2× so the impact vertex creates
+      // a deep brittle notch while the neighbours add softer warp.
+      // Each pulled vertex still draws its own random magnitude so
+      // pulls aren't uniform across the set.
       const pullCount = Math.max(1, dent.pullVertexCount ?? 1);
+      const centerMul = dent.centerVertexJitterMul ?? 1;
       const N = pts.length;
       const half = Math.floor(pullCount / 2);
       for (let i = 0; i < pullCount; i++) {
           const offset = i - half;
           const idx = ((bestIdx + offset) % N + N) % N;
-          const k = 1 - Math.random() * dent.vertexJitter;
+          const jitterMag = dent.vertexJitter * (offset === 0 ? centerMul : 1);
+          const k = 1 - Math.random() * jitterMag;
           pts[idx].x *= k;
           pts[idx].y *= k;
       }

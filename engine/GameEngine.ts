@@ -1535,15 +1535,27 @@ export class GameEngine {
               // shaped like the deleted corner.  Polygon loses one
               // vertex per hit; the dent kind on PhysicsSystem.
               // applyDentStep early-returns so it doesn't fight us
-              // for the same polygon.
+              // for the same polygon.  No current variant uses this
+              // kind — kept as a building block.
               if (dent.kind === 'triangle-delete' && impactWorldPos) {
                   this.applyTriangleDelete(target, impactWorldPos, dent);
               }
+              // 'pull' kind perHitShard: releases one shard at the
+              // impact location every hit, sized to the deformed
+              // tile.  Rock uses this so brittle chips visibly fly
+              // off each hit while the polygon stays intact (vertex
+              // count preserved; deformation accumulates via
+              // applyDentStep's center-vertex pull).
+              if (dent.perHitShard && impactWorldPos
+                  && (dent.kind === undefined || dent.kind === 'pull')) {
+                  this.drops.spawnPerHitShard(
+                      this.currentMap.entities, target, dent.perHitShard, impactWorldPos,
+                  );
+              }
               // Intermediate dent-shard spawn (pull-kind variants):
               // when health / maxHealth crosses an entry's threshold,
-              // spawn that shard once.  Today no variant uses both
-              // triangle-delete and intermediateShards, but they're
-              // independent toggles.
+              // spawn that shard once.  No current variant uses
+              // intermediateShards either — also a building block.
               if (dent.intermediateShards && dent.intermediateShards.length > 0) {
                   const maxH = target.maxHealth || 1;
                   // Dent variants take 1 HP per hit (see PhysicsSystem

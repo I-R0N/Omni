@@ -602,6 +602,84 @@ export class DropSystem {
     });
   }
 
+  /**
+   * Spawn one mobile shard at a specific world position (typically
+   * the impact point of a projectile / crash).  Used by dent
+   * variants whose policy includes a `perHitShard` entry so every
+   * hit releases a small chunk of material — today rock uses this
+   * for the brittle "chip-off" feel.
+   *
+   * Size matches the deformed tile's effective diameter × spec
+   * sizeFraction (same convention as spawnDentShard's breakShards
+   * sizing), so the per-hit shard scales down with deformation as
+   * the tile is worn away.  Polygon comes from
+   * generateMaterialShardPolygon — variant's vertex count + jitter
+   * profile (rock = 5/7/9 verts, organic).
+   */
+  public spawnPerHitShard(
+    entities: GameEntity[],
+    tile: GameEntity,
+    spec: { variant: ShardVariantId; sizeFraction: number },
+    spawnWorldPos: Vector2,
+  ) {
+    const variantDef = SHARD_VARIANTS[spec.variant];
+
+    // Deformed-diameter baseline — same proxy as spawnDentShard's
+    // avgVertexRadius math so the per-hit shard tracks the tile's
+    // current state of wear.  Falls back to entity.size when the
+    // polygon is missing.
+    const baseSize = Math.max(tile.size.x, tile.size.y);
+    let avgR = baseSize / 2;
+    if (tile.polygonPoints && tile.polygonPoints.length > 0) {
+      let sumR2 = 0;
+      for (let i = 0; i < tile.polygonPoints.length; i++) {
+        const p = tile.polygonPoints[i];
+        sumR2 += p.x * p.x + p.y * p.y;
+      }
+      avgR = Math.sqrt(sumR2 / tile.polygonPoints.length);
+    }
+    const deformedDiameter = avgR * 2;
+
+    const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
+    const shardPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
+    const mass = variantDef.spawn.sizeToMass(targetSize);
+
+    const iv = tile.lastImpactVelocity;
+    const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+    const baseAngle = impactSpeed > 0.001
+      ? Math.atan2(iv!.y, iv!.x)
+      : Math.random() * Math.PI * 2;
+    const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
+    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.4;
+
+    entities.push({
+      id:            nextId('per_hit_shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  spec.variant,
+      position:      { x: spawnWorldPos.x, y: spawnWorldPos.y },
+      velocity:      {
+        x: Math.cos(launchAngle) * launchSpeed,
+        y: Math.sin(launchAngle) * launchSpeed,
+      },
+      size:          { x: targetSize, y: targetSize },
+      rotation:      Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
+      color:         tile.color,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass,
+      polygonPoints: shardPts,
+    });
+
+    // Subtle puff at the chip-off point in the tile's colour.
+    this.particles.spawn(entities, spawnWorldPos, 3, tile.color, {
+      speedMin: 1.5, speedMax: 3.0, sizeMin: 1, sizeMax: 1.8,
+      lifetimeMin: 0.12, lifetimeMax: 0.25,
+      spreadAngle: launchAngle, spreadCone: Math.PI * 0.6,
+    });
+  }
+
   // --- Collectible drop spawning ------------------------------------------
 
   /**

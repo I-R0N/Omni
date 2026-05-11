@@ -1545,12 +1545,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     dent: {
       // 3 adjacent vertices pulled per hit.  vertexJitter is the
-      // PER-VERTEX max pull (0.20 = up to 20 % inward each), so the
-      // effective deformation per hit is ~3 × that across the
-      // pulled side — comparable in magnitude to plastic's 0.25
-      // single-vertex pull but spread over a wider region.
+      // base per-vertex max pull for NEIGHBOURS (0.20 = up to 20 %
+      // inward each).  The CENTRE vertex (closest to impact) uses
+      // vertexJitter × centerVertexJitterMul = 0.20 × 2.0 = up to
+      // 40 % inward per hit, which is deeper than plastic's 0.25
+      // single-vertex pull — reads as a brittle / jagged fracture
+      // with one deep notch + softer side warp on each strike.
       vertexJitter: 0.20,
+      centerVertexJitterMul: 2.0,
       pullVertexCount: 3,
+      // Each hit also chips off a rock-shard at the impact location.
+      // sizeFraction 0.25 is linear relative to the deformed tile
+      // diameter (~44 at start), so the chip is ~11 wide on hit 1
+      // and shrinks as deformation accumulates.
+      perHitShard: { variant: 'rock-shard', sizeFraction: 0.25 },
       // Final break: 3 roughly equal rock-shards whose areas sum to
       // ~the deformed tile's area.  sqrt(1/3) ≈ 0.577 linear.
       breakShards: [
