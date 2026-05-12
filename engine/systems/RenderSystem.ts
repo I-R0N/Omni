@@ -1882,7 +1882,10 @@ export class RenderSystem {
                     // only warms its face: paint the polygon with the
                     // variant's glow color at quadratic-falloff alpha,
                     // no edge stroke.  Painted LAST so the dark outline
-                    // and crack overlay can't cover it.  Intensity is
+                    // and crack overlay can't cover it.  Composite mode
+                    // 'lighter' so the colour ADDS to the slate body —
+                    // reads as the face emitting orange light rather
+                    // than being repainted a flat orange.  Intensity is
                     // computed inline from the player position (same
                     // pattern as the glass branch) — no dependency on
                     // an upstream `glowIntensity` write.
@@ -1902,9 +1905,12 @@ export class RenderSystem {
                                 // loop walked individual edges and left
                                 // a non-closed sub-path behind.
                                 buildPath();
+                                const prevComp = ctx.globalCompositeOperation;
+                                ctx.globalCompositeOperation = 'lighter';
                                 ctx.globalAlpha = glow.peakAlpha * intensity;
                                 ctx.fillStyle = glow.color;
                                 ctx.fill();
+                                ctx.globalCompositeOperation = prevComp;
                                 ctx.globalAlpha = 1.0;
                             }
                         }
