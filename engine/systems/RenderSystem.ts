@@ -1876,28 +1876,34 @@ export class RenderSystem {
                     }
                     this.renderCracks(ctx, entity, crackR);
 
-                    // Material-tile proximity glow — FILL ONLY, two
-                    // layers (heat ramp).  Unlike the glass-family
-                    // layer 2b (which also strokes the edges so the
-                    // cluster outline lights up), metal only warms its
-                    // face.  Painted LAST so neither the dark outline
-                    // nor the crack overlay can cover it.  Plain
-                    // source-over (NOT additive 'lighter') so the face
-                    // takes on the actual hues — reads as "metal
-                    // getting hot" rather than washing toward yellow-
-                    // white.  Intensity is computed inline from the
-                    // player position (same pattern as the glass
-                    // branch) — no dependency on an upstream
-                    // `glowIntensity` write.
-                    //   Layer A: base `glow.color` (orange) at
-                    //            peakAlpha × intensity — fades in over
-                    //            the whole field.
-                    //   Layer B: `glow.hot.color` (red) painted ON TOP
-                    //            once `intensity` passes `hot.threshold`
-                    //            — its own intensity ramps linearly
-                    //            from 0 at the threshold to 1 at full
-                    //            base intensity, so the red only stains
-                    //            the inner, hottest part of the field.
+                    // Material-tile proximity glow — FILL ONLY, drawn
+                    // as a RADIAL BLOOM from the player-facing edge.
+                    // Unlike the glass-family layer 2b (which strokes
+                    // the edges so the cluster outline lights up), metal
+                    // only warms its face — and the heat grows from the
+                    // hex edge nearest the player inward toward the
+                    // centroid, rather than the whole face brightening
+                    // evenly.  Painted LAST (after outline + cracks) and
+                    // clipped to the hex so the bloom can't bleed past
+                    // the silhouette.  Plain source-over (NOT additive
+                    // 'lighter') so the face takes on the real hues —
+                    // reads as "metal getting hot" rather than washing
+                    // toward yellow-white.  Everything is computed
+                    // inline from the player position — no dependency
+                    // on an upstream `glowIntensity` write.
+                    //   Layer A: base `glow.color` (orange) radial
+                    //            gradient — radius grows with proximity
+                    //            from a small spot to ~1.35× the hex
+                    //            circumradius at peak (reaches the
+                    //            centroid and stains the far side a
+                    //            little); alpha = peakAlpha × intensity.
+                    //   Layer B: `glow.hot.color` (red) — a smaller
+                    //            radial core at the SAME edge point,
+                    //            fading in once `intensity` passes
+                    //            `hot.threshold`; radius and alpha both
+                    //            ramp with the hot fraction, so the red
+                    //            stays concentrated at the player-facing
+                    //            edge while the orange extends inward.
                     if (!isFlash
                         && playerPos
                         && entity.shardVariant !== undefined) {
@@ -1910,23 +1916,74 @@ export class RenderSystem {
                             if (pdistSq < rangeSq) {
                                 const t = 1 - Math.sqrt(pdistSq) / glow.range;
                                 const intensity = t * t;
-                                // Rebuild the polygon path — the outline
-                                // loop walked individual edges and left
-                                // a non-closed sub-path behind.
+
+                                // Closest point on the hex outline to the
+                                // player (entity-local coords; player is
+                                // at (pdx, pdy) relative to the tile
+                                // centroid).  Also grab the circumradius
+                                // (max vertex distance) for sizing the
+                                // bloom.  O(6) — six edge segments.
+                                const pts = entity.polygonPoints;
+                                let cgx = 0, cgy = 0;
+                                let tileR = Math.max(entity.size.x, entity.size.y) / 2;
+                                if (pts && pts.length >= 3) {
+                                    let bestD2 = Infinity;
+                                    let maxR2 = 0;
+                                    for (let i = 0; i < pts.length; i++) {
+                                        const aPt = pts[i];
+                                        const bPt = pts[(i + 1) % pts.length];
+                                        const r2 = aPt.x * aPt.x + aPt.y * aPt.y;
+                                        if (r2 > maxR2) maxR2 = r2;
+                                        const abx = bPt.x - aPt.x, aby = bPt.y - aPt.y;
+                                        const apx = pdx - aPt.x, apy = pdy - aPt.y;
+                                        const segLen2 = abx * abx + aby * aby;
+                                        let u = segLen2 > 0 ? (apx * abx + apy * aby) / segLen2 : 0;
+                                        if (u < 0) u = 0; else if (u > 1) u = 1;
+                                        const qx = aPt.x + abx * u, qy = aPt.y + aby * u;
+                                        const d2 = (pdx - qx) * (pdx - qx) + (pdy - qy) * (pdy - qy);
+                                        if (d2 < bestD2) { bestD2 = d2; cgx = qx; cgy = qy; }
+                                    }
+                                    if (maxR2 > 0) tileR = Math.sqrt(maxR2);
+                                }
+
+                                // The hex path itself confines each fill,
+                                // so no explicit clip is needed — beyond
+                                // the gradient's radius the fill is alpha
+                                // 0 (transparent), so the un-bloomed part
+                                // of the face stays untouched.
                                 buildPath();
-                                // Layer A — base (orange) warm-up.
+
+                                // Layer A — orange bloom from the edge.
+                                // Radius: small spot → 1.35× circumradius
+                                // at peak (reaches the centroid + a bit
+                                // past).  globalAlpha scales the
+                                // gradient's stop alphas; the inner stop
+                                // is the opaque hue, the outer stop is
+                                // the same hue at alpha 0.
+                                const ORANGE_MIN_FRAC = 0.30, ORANGE_MAX_FRAC = 1.35;
+                                const oR = Math.max(tileR * (ORANGE_MIN_FRAC + (ORANGE_MAX_FRAC - ORANGE_MIN_FRAC) * intensity), 1);
+                                const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
+                                og.addColorStop(0, glow.color);
+                                og.addColorStop(1, glow.color + '00');
                                 ctx.globalAlpha = glow.peakAlpha * intensity;
-                                ctx.fillStyle = glow.color;
+                                ctx.fillStyle = og;
                                 ctx.fill();
-                                // Layer B — hot core (red) over the
-                                // inner field.
+
+                                // Layer B — red hot core at the same
+                                // edge point, smaller radius.
                                 const hot = glow.hot;
                                 if (hot !== undefined && intensity > hot.threshold) {
                                     const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
+                                    const HOT_MIN_FRAC = 0.18, HOT_MAX_FRAC = 0.85;
+                                    const rR = Math.max(tileR * (HOT_MIN_FRAC + (HOT_MAX_FRAC - HOT_MIN_FRAC) * hotT), 1);
+                                    const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
+                                    rg.addColorStop(0, hot.color);
+                                    rg.addColorStop(1, hot.color + '00');
                                     ctx.globalAlpha = glow.peakAlpha * hotT;
-                                    ctx.fillStyle = hot.color;
+                                    ctx.fillStyle = rg;
                                     ctx.fill();
                                 }
+
                                 ctx.globalAlpha = 1.0;
                             }
                         }
