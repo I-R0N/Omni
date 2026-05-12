@@ -1497,13 +1497,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     repel: { range: 200, strength: 0.06 },
     // Heat-effect proximity glow — the tile FACE warms up as the
     // player approaches (orange), then a red "hot core" layer fades
-    // in over the inner ~45 % of the field once the orange intensity
-    // passes 0.55.  Fill only, no edge stroke (unlike glass).  Same
+    // in over the inner ~60 % of the field once the orange intensity
+    // passes 0.40.  Fill only, no edge stroke (unlike glass).  Same
     // range as repel so the visual halo and the push footprint
     // align.
     glow:  {
       color: '#fb923c', range: 200, peakAlpha: 0.95,
-      hot: { color: '#dc2626', threshold: 0.55 },
+      hot: { color: '#dc2626', threshold: 0.40 },
     },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
