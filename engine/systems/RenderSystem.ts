@@ -1775,11 +1775,6 @@ export class RenderSystem {
                     ctx.fillStyle = isFlash ? flashColor : entity.color;
                     ctx.fill();
 
-                    // Layer 1b moved to the bottom of the active branch
-                    // (after the outline + cracks) so the glow paints
-                    // LAST and can't be covered by subsequent strokes.
-                    // See the gated-glow block below.
-
                     // Layer 2 — selective outline.  Skip edges that are
                     // both (a) at their original radius (no dent on either
                     // endpoint) and (b) butted against a neighbour tile.
@@ -1880,48 +1875,9 @@ export class RenderSystem {
                         crackR = Math.sqrt(maxR2);
                     }
                     this.renderCracks(ctx, entity, crackR);
-
-                    // Variant-driven glow (mirrors glass-family layer
-                    // 2b).  Painted LAST so neither the dark outline
-                    // nor the crack overlay can cover it.  Computes
-                    // intensity inline from the player position — no
-                    // dependency on an upstream system writing
-                    // `entity.glowIntensity`, so the visualization is
-                    // immune to scheduling / iteration-order issues
-                    // in the simulation loop.  Plain source-over
-                    // alpha-blend so the accent color dominates at
-                    // peak intensity, which reads unambiguously
-                    // against the matte / steel body.
-                    if (!isFlash
-                        && playerPos
-                        && entity.shardVariant !== undefined) {
-                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                        if (glow !== undefined) {
-                            const pdx = wrapDeltaX(entity.position.x, playerPos.x);
-                            const pdy = wrapDeltaY(entity.position.y, playerPos.y);
-                            const pdistSq = pdx * pdx + pdy * pdy;
-                            const rangeSq = glow.range * glow.range;
-                            if (pdistSq < rangeSq) {
-                                const t = 1 - Math.sqrt(pdistSq) / glow.range;
-                                const intensity = t * t;
-                                // Rebuild the polygon path — the
-                                // outline loop walks individual edges
-                                // and leaves a non-closed sub-path.
-                                buildPath();
-                                ctx.globalAlpha = glow.peakAlpha * intensity;
-                                ctx.fillStyle = glow.color;
-                                ctx.fill();
-                                // Outline halo — stroke alpha floors
-                                // at 0.4 so the cluster boundary is
-                                // visible even at the range edge.
-                                ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensity);
-                                ctx.strokeStyle = glow.color;
-                                ctx.lineWidth = 4.0;
-                                ctx.stroke();
-                                ctx.globalAlpha = 1.0;
-                            }
-                        }
-                    }
+                    // Material tiles (plastic / metal) have no `glow`
+                    // config today — the proximity glow is glass-family
+                    // only (see the layer-2b block above).
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
