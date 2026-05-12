@@ -284,7 +284,8 @@ export interface ShardVariantDef {
    *  falloff distance to the tile within `range`, so the same number
    *  drives both the repel field (PhysicsSystem) and the glow. */
   glow?: {
-    /** Glow color when fully lit, hex string. */
+    /** Glow color when fully lit, hex string.  This is the base /
+     *  "warm-up" layer (e.g. orange for metal). */
     color: string;
     /** Range over which the glow falls off, world units.  Used by
      *  external trigger systems; not read by the renderer. */
@@ -292,6 +293,21 @@ export interface ShardVariantDef {
     /** Quadratic-falloff peak alpha (0..1) — multiplied by
      *  `entity.glowIntensity` to produce the rendered alpha. */
     peakAlpha: number;
+    /** Optional second "hot core" layer painted ON TOP of the base
+     *  layer once the base intensity (the quadratic falloff value,
+     *  0..1) climbs past `threshold` — mimics metal heating: orange
+     *  first, then red sneaking in over the hottest part of the
+     *  field.  The hot layer's own intensity ramps linearly from 0
+     *  at `threshold` to 1 at full base intensity, and is rendered
+     *  at `peakAlpha × hotIntensity`.  Today: metal-tile only. */
+    hot?: {
+      /** Hot-core color, hex string (e.g. red). */
+      color: string;
+      /** Base-intensity value (0..1) at which the hot layer starts
+       *  ramping in.  Typical ~0.55 — the red appears only over the
+       *  inner, hottest portion of the field. */
+      threshold: number;
+    };
   };
   /** Outward repel field emitted by the variant's tiles.  Range MUST
    *  stay ≤ 2 × SPATIAL_GRID_SIZE (240) so the static-grid 5×5 outer-

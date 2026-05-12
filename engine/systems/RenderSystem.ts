@@ -1876,20 +1876,28 @@ export class RenderSystem {
                     }
                     this.renderCracks(ctx, entity, crackR);
 
-                    // Material-tile proximity glow — FILL ONLY.  Unlike
-                    // the glass-family layer 2b (which also strokes the
-                    // edges to make the cluster outline light up), metal
-                    // only warms its face: paint the polygon with the
-                    // variant's glow color at quadratic-falloff alpha,
-                    // no edge stroke.  Painted LAST so the dark outline
-                    // and crack overlay can't cover it.  Plain source-
-                    // over (NOT additive 'lighter') so the face takes
-                    // on the actual dark-orange hue — reads as "metal
+                    // Material-tile proximity glow — FILL ONLY, two
+                    // layers (heat ramp).  Unlike the glass-family
+                    // layer 2b (which also strokes the edges so the
+                    // cluster outline lights up), metal only warms its
+                    // face.  Painted LAST so neither the dark outline
+                    // nor the crack overlay can cover it.  Plain
+                    // source-over (NOT additive 'lighter') so the face
+                    // takes on the actual hues — reads as "metal
                     // getting hot" rather than washing toward yellow-
                     // white.  Intensity is computed inline from the
                     // player position (same pattern as the glass
                     // branch) — no dependency on an upstream
                     // `glowIntensity` write.
+                    //   Layer A: base `glow.color` (orange) at
+                    //            peakAlpha × intensity — fades in over
+                    //            the whole field.
+                    //   Layer B: `glow.hot.color` (red) painted ON TOP
+                    //            once `intensity` passes `hot.threshold`
+                    //            — its own intensity ramps linearly
+                    //            from 0 at the threshold to 1 at full
+                    //            base intensity, so the red only stains
+                    //            the inner, hottest part of the field.
                     if (!isFlash
                         && playerPos
                         && entity.shardVariant !== undefined) {
@@ -1906,9 +1914,19 @@ export class RenderSystem {
                                 // loop walked individual edges and left
                                 // a non-closed sub-path behind.
                                 buildPath();
+                                // Layer A — base (orange) warm-up.
                                 ctx.globalAlpha = glow.peakAlpha * intensity;
                                 ctx.fillStyle = glow.color;
                                 ctx.fill();
+                                // Layer B — hot core (red) over the
+                                // inner field.
+                                const hot = glow.hot;
+                                if (hot !== undefined && intensity > hot.threshold) {
+                                    const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
+                                    ctx.globalAlpha = glow.peakAlpha * hotT;
+                                    ctx.fillStyle = hot.color;
+                                    ctx.fill();
+                                }
                                 ctx.globalAlpha = 1.0;
                             }
                         }
