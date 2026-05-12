@@ -1138,17 +1138,32 @@ export class RenderSystem {
       if (!entity.active && !isRegenGhost) return;
       if (!Number.isFinite(entity.position.x) || !Number.isFinite(entity.position.y)) return;
 
-      // ── DEBUG: unconditional magenta marker on every metal-tile, drawn
-      // BEFORE any fast-path, in camera space at (rx, ry).  Confirms
-      // whether metal-tile entities reach renderEntities at all.
-      if (entity.shardVariant === 'metal-tile') {
-          ctx.save();
-          ctx.globalAlpha = 1.0;
-          ctx.fillStyle = '#ff00ff';
-          ctx.beginPath();
-          ctx.arc(rx, ry, 18, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
+      // ── DEBUG: per-variant colored dot on every static structure
+      // tile, drawn BEFORE any fast-path, in camera space at (rx, ry).
+      //   glass-tile          → cyan
+      //   metal-tile          → magenta
+      //   plastic-tile        → orange
+      //   indestructible-tile → red
+      //   rock-tile           → lime
+      // Tells us exactly which tile variants are visible and where.
+      if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
+          let dbgColor: string | null = null;
+          switch (entity.shardVariant) {
+              case 'glass-tile':          dbgColor = '#00ffff'; break;
+              case 'metal-tile':          dbgColor = '#ff00ff'; break;
+              case 'plastic-tile':        dbgColor = '#ff9900'; break;
+              case 'indestructible-tile': dbgColor = '#ff0000'; break;
+              case 'rock-tile':           dbgColor = '#00ff00'; break;
+          }
+          if (dbgColor) {
+              ctx.save();
+              ctx.globalAlpha = 1.0;
+              ctx.fillStyle = dbgColor;
+              ctx.beginPath();
+              ctx.arc(rx, ry, 14, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+          }
       }
 
       // Particles are handled separately in renderParticles() — skip here
