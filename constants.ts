@@ -1494,9 +1494,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // when the player approaches; the field is the warning.  Range
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
-    // (Metal-tile has no `glow` config — the proximity glow is
-    // glass-tile-only for now; metal's repel field stands alone.)
     repel: { range: 200, strength: 0.06 },
+    // Hot-orange proximity glow — the tile FACE warms up as the
+    // player approaches, but (unlike glass) the per-edge outline
+    // does NOT light up: RenderSystem's material-tile branch paints
+    // only the fill, never a glow stroke.  Same range as repel so
+    // the visual halo and the push footprint align.
+    glow:  { color: '#fb923c', range: 200, peakAlpha: 0.95 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp

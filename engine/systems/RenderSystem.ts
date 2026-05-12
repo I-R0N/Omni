@@ -1875,9 +1875,40 @@ export class RenderSystem {
                         crackR = Math.sqrt(maxR2);
                     }
                     this.renderCracks(ctx, entity, crackR);
-                    // Material tiles (plastic / metal) have no `glow`
-                    // config today — the proximity glow is glass-family
-                    // only (see the layer-2b block above).
+
+                    // Material-tile proximity glow — FILL ONLY.  Unlike
+                    // the glass-family layer 2b (which also strokes the
+                    // edges to make the cluster outline light up), metal
+                    // only warms its face: paint the polygon with the
+                    // variant's glow color at quadratic-falloff alpha,
+                    // no edge stroke.  Painted LAST so the dark outline
+                    // and crack overlay can't cover it.  Intensity is
+                    // computed inline from the player position (same
+                    // pattern as the glass branch) — no dependency on
+                    // an upstream `glowIntensity` write.
+                    if (!isFlash
+                        && playerPos
+                        && entity.shardVariant !== undefined) {
+                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+                        if (glow !== undefined) {
+                            const pdx = wrapDeltaX(entity.position.x, playerPos.x);
+                            const pdy = wrapDeltaY(entity.position.y, playerPos.y);
+                            const pdistSq = pdx * pdx + pdy * pdy;
+                            const rangeSq = glow.range * glow.range;
+                            if (pdistSq < rangeSq) {
+                                const t = 1 - Math.sqrt(pdistSq) / glow.range;
+                                const intensity = t * t;
+                                // Rebuild the polygon path — the outline
+                                // loop walked individual edges and left
+                                // a non-closed sub-path behind.
+                                buildPath();
+                                ctx.globalAlpha = glow.peakAlpha * intensity;
+                                ctx.fillStyle = glow.color;
+                                ctx.fill();
+                                ctx.globalAlpha = 1.0;
+                            }
+                        }
+                    }
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
