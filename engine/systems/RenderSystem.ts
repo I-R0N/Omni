@@ -1913,10 +1913,21 @@ export class RenderSystem {
                             const pdy = wrapDeltaY(entity.position.y, playerPos.y);
                             const pdistSq = pdx * pdx + pdy * pdy;
                             const rangeSq = glow.range * glow.range;
-                            if (pdistSq < rangeSq) {
-                                const t = 1 - Math.sqrt(pdistSq) / glow.range;
-                                const intensity = t * t;
-
+                            // Approach-A interior gating: deeper tiles in a
+                            // cluster lag the bloom.  A tile at hex-graph
+                            // depth d needs the raw proximity intensity to
+                            // exceed d × DEPTH_DELAY before it lights at all,
+                            // and is always dimmer than a shallower tile —
+                            // so the heat soaks in front-first instead of
+                            // every tile within range glowing simultaneously.
+                            // `tileClusterDepth` is precomputed at map load
+                            // (0 for exposed tiles).
+                            const DEPTH_DELAY = 0.25;
+                            const depth = entity.tileClusterDepth ?? 0;
+                            const intensity = pdistSq < rangeSq
+                                ? Math.max(0, (1 - Math.sqrt(pdistSq) / glow.range) ** 2 - depth * DEPTH_DELAY)
+                                : 0;
+                            if (intensity > 0) {
                                 // Closest point on the hex outline to the
                                 // player (entity-local coords; player is
                                 // at (pdx, pdy) relative to the tile
