@@ -1954,13 +1954,14 @@ export class RenderSystem {
                                 buildPath();
 
                                 // Layer A — orange bloom from the edge.
-                                // Radius: small spot → 1.35× circumradius
-                                // at peak (reaches the centroid + a bit
-                                // past).  globalAlpha scales the
-                                // gradient's stop alphas; the inner stop
-                                // is the opaque hue, the outer stop is
-                                // the same hue at alpha 0.
-                                const ORANGE_MIN_FRAC = 0.30, ORANGE_MAX_FRAC = 1.35;
+                                // Radius: small spot → 3.375× circumradius
+                                // at peak (the 1.35× baseline scaled 2.5×).
+                                // globalAlpha scales the gradient's stop
+                                // alphas; the inner stop is the opaque
+                                // hue, the outer stop is the same hue at
+                                // alpha 0 — so a larger radius means a
+                                // gentler falloff across the visible face.
+                                const ORANGE_MIN_FRAC = 0.75, ORANGE_MAX_FRAC = 3.375;
                                 const oR = Math.max(tileR * (ORANGE_MIN_FRAC + (ORANGE_MAX_FRAC - ORANGE_MIN_FRAC) * intensity), 1);
                                 const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
                                 og.addColorStop(0, glow.color);
@@ -1970,11 +1971,12 @@ export class RenderSystem {
                                 ctx.fill();
 
                                 // Layer B — red hot core at the same
-                                // edge point, smaller radius.
+                                // edge point, smaller radius (0.85×
+                                // baseline scaled 2.5× → 2.125×).
                                 const hot = glow.hot;
                                 if (hot !== undefined && intensity > hot.threshold) {
                                     const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
-                                    const HOT_MIN_FRAC = 0.18, HOT_MAX_FRAC = 0.85;
+                                    const HOT_MIN_FRAC = 0.45, HOT_MAX_FRAC = 2.125;
                                     const rR = Math.max(tileR * (HOT_MIN_FRAC + (HOT_MAX_FRAC - HOT_MIN_FRAC) * hotT), 1);
                                     const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
                                     rg.addColorStop(0, hot.color);
