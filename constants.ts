@@ -1470,7 +1470,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
     // Same mechanism as metal's heat glow, minus the `hot` red core.
-    glow: { color: '#fef3c7', range: 400, peakAlpha: 0.75 },
+    glow: { color: '#fef3c7', range: 400, peakAlpha: 0.33 },
     // Plastic deforms heavily per hit — each closest-to-impact vertex
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
@@ -1556,7 +1556,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // rock face near the player.  Fill-only radial bloom, no edge
     // stroke; drawn from the asteroid/shard render branch, gated to
     // static tiles (mass=∞) so rock-shards are excluded.
-    glow: { color: '#ea580c', range: 400, peakAlpha: 0.75 },
+    glow: { color: '#ea580c', range: 400, peakAlpha: 0.33 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
