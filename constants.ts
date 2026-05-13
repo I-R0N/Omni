@@ -1552,12 +1552,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Proximity "lighting" — but a BLACK, low-alpha bloom: the slate
-    // face near the player darkens (a soft player-cast vignette) rather
-    // than brightening.  Fill-only radial bloom, no edge stroke; drawn
-    // from the asteroid/shard render branch, gated to static tiles
-    // (mass=∞) so rock-shards are excluded.
-    glow: { color: '#000000', range: 200, peakAlpha: 0.75 },
+    // Proximity lighting — a red/orange bloom that warms the light-gray
+    // rock face near the player.  Fill-only radial bloom, no edge
+    // stroke; drawn from the asteroid/shard render branch, gated to
+    // static tiles (mass=∞) so rock-shards are excluded.
+    glow: { color: '#ea580c', range: 200, peakAlpha: 0.75 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
