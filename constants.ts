@@ -1466,6 +1466,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // Warm-white proximity lighting — the tile FACE brightens as the
+    // player passes, drawn by RenderSystem.renderProximityBloom (fill-
+    // only radial bloom from the player-facing edge, no edge stroke).
+    // Same mechanism as metal's heat glow, minus the `hot` red core.
+    glow: { color: '#fef3c7', range: 200, peakAlpha: 0.4 },
     // Plastic deforms heavily per hit — each closest-to-impact vertex
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
@@ -1530,6 +1535,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    // Warm-white proximity lighting (fill-only radial bloom, no edge
+    // stroke).  Glass-tile uses its cyan layer-2b glow instead;
+    // indestructible takes the same neutral lighting as plastic / rock.
+    glow:    { color: '#fef3c7', range: 200, peakAlpha: 0.4 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
@@ -1545,6 +1554,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    // Warm-white proximity lighting — the slate face brightens as the
+    // player passes (fill-only radial bloom, no edge stroke).  Drawn
+    // from the asteroid/shard render branch, gated to static tiles
+    // (mass=∞) so rock-shards are excluded.
+    glow: { color: '#fef3c7', range: 200, peakAlpha: 0.4 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random

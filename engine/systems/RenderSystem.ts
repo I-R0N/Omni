@@ -1686,17 +1686,18 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
-                // Layer 2b — variant-driven additive glow.  Computes
-                // intensity inline from the player position (same
-                // pattern as the material-tile branch below) so the
+                // Layer 2b — glass-tile proximity glow.  Computes
+                // intensity inline from the player position so the
                 // visualization is independent of any upstream system
                 // writing `entity.glowIntensity`.  Paints both a fill
                 // and a thick stroke so the halo reads as a clear
                 // "lit edge" — fill alone washes the hex out cyan but
-                // doesn't pop as a beacon.
+                // doesn't pop as a beacon.  Glass-tile only: the
+                // indestructible-tile glow (warm-white lighting) is the
+                // fill-only radial bloom drawn after the cracks below.
                 if (!isFlash
                     && playerPos
-                    && entity.shardVariant !== undefined) {
+                    && entity.shardVariant === 'glass-tile') {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
                     if (glow !== undefined) {
                         const pdxG = wrapDeltaX(entity.position.x, playerPos.x);
@@ -1734,6 +1735,13 @@ export class RenderSystem {
                 // for parity with the historic multi-HP glass-family render
                 // path).  renderCracks early-returns at ≥95 % health.
                 this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
+
+                // Indestructible-tile lighting — the fill-only warm-white
+                // radial bloom (no edge stroke), painted last.  Glass-tile
+                // uses its own layer 2b above instead.
+                if (entity.shardVariant === 'indestructible-tile') {
+                    this.renderProximityBloom(ctx, entity, playerPos);
+                }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 
@@ -1876,131 +1884,12 @@ export class RenderSystem {
                     }
                     this.renderCracks(ctx, entity, crackR);
 
-                    // Material-tile proximity glow — FILL ONLY, drawn
-                    // as a RADIAL BLOOM from the player-facing edge.
-                    // Unlike the glass-family layer 2b (which strokes
-                    // the edges so the cluster outline lights up), metal
-                    // only warms its face — and the heat grows from the
-                    // hex edge nearest the player inward toward the
-                    // centroid, rather than the whole face brightening
-                    // evenly.  Painted LAST (after outline + cracks) and
-                    // clipped to the hex so the bloom can't bleed past
-                    // the silhouette.  Plain source-over (NOT additive
-                    // 'lighter') so the face takes on the real hues —
-                    // reads as "metal getting hot" rather than washing
-                    // toward yellow-white.  Everything is computed
-                    // inline from the player position — no dependency
-                    // on an upstream `glowIntensity` write.
-                    //   Layer A: base `glow.color` (orange) radial
-                    //            gradient — radius grows with proximity
-                    //            from a small spot to ~1.35× the hex
-                    //            circumradius at peak (reaches the
-                    //            centroid and stains the far side a
-                    //            little); alpha = peakAlpha × intensity.
-                    //   Layer B: `glow.hot.color` (red) — a smaller
-                    //            radial core at the SAME edge point,
-                    //            fading in once `intensity` passes
-                    //            `hot.threshold`; radius and alpha both
-                    //            ramp with the hot fraction, so the red
-                    //            stays concentrated at the player-facing
-                    //            edge while the orange extends inward.
-                    if (!isFlash
-                        && playerPos
-                        && entity.shardVariant !== undefined) {
-                        const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                        if (glow !== undefined) {
-                            const pdx = wrapDeltaX(entity.position.x, playerPos.x);
-                            const pdy = wrapDeltaY(entity.position.y, playerPos.y);
-                            const pdistSq = pdx * pdx + pdy * pdy;
-                            const rangeSq = glow.range * glow.range;
-                            // Approach-A interior gating: deeper tiles in a
-                            // cluster lag the bloom.  A tile at hex-graph
-                            // depth d needs the raw proximity intensity to
-                            // exceed d × DEPTH_DELAY before it lights at all,
-                            // and is always dimmer than a shallower tile —
-                            // so the heat soaks in front-first instead of
-                            // every tile within range glowing simultaneously.
-                            // `tileClusterDepth` is precomputed at map load
-                            // (0 for exposed tiles).
-                            const DEPTH_DELAY = 0.25;
-                            const depth = entity.tileClusterDepth ?? 0;
-                            const intensity = pdistSq < rangeSq
-                                ? Math.max(0, (1 - Math.sqrt(pdistSq) / glow.range) ** 2 - depth * DEPTH_DELAY)
-                                : 0;
-                            if (intensity > 0) {
-                                // Closest point on the hex outline to the
-                                // player (entity-local coords; player is
-                                // at (pdx, pdy) relative to the tile
-                                // centroid).  Also grab the circumradius
-                                // (max vertex distance) for sizing the
-                                // bloom.  O(6) — six edge segments.
-                                const pts = entity.polygonPoints;
-                                let cgx = 0, cgy = 0;
-                                let tileR = Math.max(entity.size.x, entity.size.y) / 2;
-                                if (pts && pts.length >= 3) {
-                                    let bestD2 = Infinity;
-                                    let maxR2 = 0;
-                                    for (let i = 0; i < pts.length; i++) {
-                                        const aPt = pts[i];
-                                        const bPt = pts[(i + 1) % pts.length];
-                                        const r2 = aPt.x * aPt.x + aPt.y * aPt.y;
-                                        if (r2 > maxR2) maxR2 = r2;
-                                        const abx = bPt.x - aPt.x, aby = bPt.y - aPt.y;
-                                        const apx = pdx - aPt.x, apy = pdy - aPt.y;
-                                        const segLen2 = abx * abx + aby * aby;
-                                        let u = segLen2 > 0 ? (apx * abx + apy * aby) / segLen2 : 0;
-                                        if (u < 0) u = 0; else if (u > 1) u = 1;
-                                        const qx = aPt.x + abx * u, qy = aPt.y + aby * u;
-                                        const d2 = (pdx - qx) * (pdx - qx) + (pdy - qy) * (pdy - qy);
-                                        if (d2 < bestD2) { bestD2 = d2; cgx = qx; cgy = qy; }
-                                    }
-                                    if (maxR2 > 0) tileR = Math.sqrt(maxR2);
-                                }
-
-                                // The hex path itself confines each fill,
-                                // so no explicit clip is needed — beyond
-                                // the gradient's radius the fill is alpha
-                                // 0 (transparent), so the un-bloomed part
-                                // of the face stays untouched.
-                                buildPath();
-
-                                // Layer A — orange bloom from the edge.
-                                // Radius: small spot → 3.375× circumradius
-                                // at peak (the 1.35× baseline scaled 2.5×).
-                                // globalAlpha scales the gradient's stop
-                                // alphas; the inner stop is the opaque
-                                // hue, the outer stop is the same hue at
-                                // alpha 0 — so a larger radius means a
-                                // gentler falloff across the visible face.
-                                const ORANGE_MIN_FRAC = 0.75, ORANGE_MAX_FRAC = 3.375;
-                                const oR = Math.max(tileR * (ORANGE_MIN_FRAC + (ORANGE_MAX_FRAC - ORANGE_MIN_FRAC) * intensity), 1);
-                                const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
-                                og.addColorStop(0, glow.color);
-                                og.addColorStop(1, glow.color + '00');
-                                ctx.globalAlpha = glow.peakAlpha * intensity;
-                                ctx.fillStyle = og;
-                                ctx.fill();
-
-                                // Layer B — red hot core at the same
-                                // edge point, smaller radius (0.85×
-                                // baseline scaled 2.5× → 2.125×).
-                                const hot = glow.hot;
-                                if (hot !== undefined && intensity > hot.threshold) {
-                                    const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
-                                    const HOT_MIN_FRAC = 0.45, HOT_MAX_FRAC = 2.125;
-                                    const rR = Math.max(tileR * (HOT_MIN_FRAC + (HOT_MAX_FRAC - HOT_MIN_FRAC) * hotT), 1);
-                                    const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
-                                    rg.addColorStop(0, hot.color);
-                                    rg.addColorStop(1, hot.color + '00');
-                                    ctx.globalAlpha = glow.peakAlpha * hotT;
-                                    ctx.fillStyle = rg;
-                                    ctx.fill();
-                                }
-
-                                ctx.globalAlpha = 1.0;
-                            }
-                        }
-                    }
+                    // Proximity bloom — metal's orange→red heat ramp, and
+                    // (once configured) any other material-tile variant's
+                    // glow.  Fill-only radial bloom from the player-facing
+                    // edge; see renderProximityBloom().  Painted LAST so
+                    // the outline / cracks can't cover it.
+                    this.renderProximityBloom(ctx, entity, playerPos);
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
@@ -2130,6 +2019,14 @@ export class RenderSystem {
                         ctx.lineWidth   = 2;
                         ctx.stroke();
                     }
+                }
+
+                // Proximity bloom for STATIC tiles in this branch
+                // (today: rock-tile's warm-white lighting).  Gated on
+                // mass=∞ so mobile shards — which share this branch —
+                // are excluded; shard lighting is deferred.
+                if (entity.mass === Infinity) {
+                    this.renderProximityBloom(ctx, entity, playerPos);
                 }
             }
 
@@ -2638,6 +2535,106 @@ export class RenderSystem {
           
           ctx.restore();
       });
+  }
+
+  // Proximity "bloom" glow for static tiles with a `glow` config —
+  // today metal-tile's heat effect (orange + a red `hot` core) and the
+  // warm-white tile-lighting on plastic / rock / indestructible.  Draws
+  // one or two radial gradients centred on the point of the entity's
+  // polygon outline nearest the player, growing inward as the player
+  // closes in.  FILL ONLY — never strokes the edges; the polygon fill
+  // path confines each gradient (beyond a gradient's radius the fill is
+  // alpha 0, so the un-bloomed part of the face stays untouched).
+  // No-op when the variant has no `glow`, the tile is mid hit-flash,
+  // the player is out of range, or the depth-attenuated intensity is 0.
+  // Assumes the canvas transform is already in the entity's local space
+  // (origin = centroid) — true in both the material-tile branch and the
+  // asteroid/shard branch.
+  private renderProximityBloom(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      playerPos: Vector2 | undefined,
+  ): void {
+      if (!playerPos || entity.shardVariant === undefined) return;
+      if (entity.hitFlash && entity.hitFlash > 0) return;
+      const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+      if (glow === undefined) return;
+      const pdx = wrapDeltaX(entity.position.x, playerPos.x);
+      const pdy = wrapDeltaY(entity.position.y, playerPos.y);
+      const pdistSq = pdx * pdx + pdy * pdy;
+      if (pdistSq >= glow.range * glow.range) return;
+      // Interior gating: deeper cluster tiles lag the bloom (metal heat
+      // only — `tileClusterDepth` is unset on other variants → 0 → no
+      // attenuation).  A tile at depth d needs the raw proximity
+      // intensity above d × DEPTH_DELAY before it lights at all.
+      const DEPTH_DELAY = 0.25;
+      const depth = entity.tileClusterDepth ?? 0;
+      const intensity = Math.max(0, (1 - Math.sqrt(pdistSq) / glow.range) ** 2 - depth * DEPTH_DELAY);
+      if (intensity <= 0) return;
+
+      // Closest point on the polygon outline to the player (entity-local
+      // coords; player is at (pdx, pdy) relative to the centroid), plus
+      // the circumradius (max vertex distance) for sizing the bloom.
+      // O(6) over the hex edges; slides smoothly along the perimeter as
+      // the player orbits the tile.
+      const pts = entity.polygonPoints;
+      let cgx = 0, cgy = 0;
+      let tileR = Math.max(entity.size.x, entity.size.y) / 2;
+      if (pts && pts.length >= 3) {
+          let bestD2 = Infinity, maxR2 = 0;
+          for (let i = 0; i < pts.length; i++) {
+              const aPt = pts[i], bPt = pts[(i + 1) % pts.length];
+              const r2 = aPt.x * aPt.x + aPt.y * aPt.y;
+              if (r2 > maxR2) maxR2 = r2;
+              const abx = bPt.x - aPt.x, aby = bPt.y - aPt.y;
+              const apx = pdx - aPt.x, apy = pdy - aPt.y;
+              const segLen2 = abx * abx + aby * aby;
+              let u = segLen2 > 0 ? (apx * abx + apy * aby) / segLen2 : 0;
+              if (u < 0) u = 0; else if (u > 1) u = 1;
+              const qx = aPt.x + abx * u, qy = aPt.y + aby * u;
+              const d2 = (pdx - qx) * (pdx - qx) + (pdy - qy) * (pdy - qy);
+              if (d2 < bestD2) { bestD2 = d2; cgx = qx; cgy = qy; }
+          }
+          if (maxR2 > 0) tileR = Math.sqrt(maxR2);
+      }
+
+      // Polygon fill path (entity-local coords) — confines both layers.
+      ctx.beginPath();
+      if (pts && pts.length > 0) {
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      } else {
+          ctx.arc(0, 0, tileR, 0, Math.PI * 2);
+      }
+      ctx.closePath();
+
+      // Layer A — base hue.  Radius small spot → 3.375× circumradius at
+      // peak; globalAlpha scales the gradient's stop alphas (inner stop
+      // = opaque hue, outer stop = same hue at alpha 0, so a larger
+      // radius means a gentler falloff across the visible face).
+      const oR = Math.max(tileR * (0.75 + 2.625 * intensity), 1);
+      const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
+      og.addColorStop(0, glow.color);
+      og.addColorStop(1, glow.color + '00');
+      ctx.globalAlpha = glow.peakAlpha * intensity;
+      ctx.fillStyle = og;
+      ctx.fill();
+
+      // Layer B — optional hot core (metal): a smaller radial gradient
+      // in `hot.color` at the same edge point, fading in once the base
+      // intensity passes `hot.threshold`.
+      const hot = glow.hot;
+      if (hot !== undefined && intensity > hot.threshold) {
+          const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
+          const rR = Math.max(tileR * (0.45 + 1.675 * hotT), 1);
+          const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
+          rg.addColorStop(0, hot.color);
+          rg.addColorStop(1, hot.color + '00');
+          ctx.globalAlpha = glow.peakAlpha * hotT;
+          ctx.fillStyle = rg;
+          ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
   }
 
   private renderCracks(ctx: CanvasRenderingContext2D, entity: GameEntity, radius: number) {
