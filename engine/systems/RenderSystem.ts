@@ -2021,13 +2021,14 @@ export class RenderSystem {
                     }
                 }
 
-                // Proximity bloom for STATIC tiles in this branch
-                // (today: rock-tile's warm-white lighting).  Gated on
-                // mass=∞ so mobile shards — which share this branch —
-                // are excluded; shard lighting is deferred.
-                if (entity.mass === Infinity) {
-                    this.renderProximityBloom(ctx, entity, playerPos);
-                }
+                // Proximity bloom for entities in this branch with a
+                // `glow` config — today: rock-tile (red/orange) plus the
+                // rock/plastic/metal shards that inherit the same
+                // lighting as their parent tiles.  Glass-shards and any
+                // future variant without a `glow` no-op inside the
+                // helper.  No mass gate: the helper's own glow-presence
+                // check is the gate.
+                this.renderProximityBloom(ctx, entity, playerPos);
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
@@ -2560,11 +2561,28 @@ export class RenderSystem {
       if (entity.hitFlash && entity.hitFlash > 0) return;
       const glow = SHARD_VARIANTS[entity.shardVariant].glow;
       if (glow === undefined) return;
-      const pdx = wrapDeltaX(entity.position.x, playerPos.x);
-      const pdy = wrapDeltaY(entity.position.y, playerPos.y);
-      const pdistSq = pdx * pdx + pdy * pdy;
+      const pdxWorld = wrapDeltaX(entity.position.x, playerPos.x);
+      const pdyWorld = wrapDeltaY(entity.position.y, playerPos.y);
+      const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
       if (pdistSq >= glow.range * glow.range) return;
       const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
+
+      // The polygon is stored in entity-local coords (pre-rotation); the
+      // canvas transform rotates the rendering by `entity.rotation` at
+      // draw time.  To find the closest point on the polygon to the
+      // player IN THE FRAME THE POLYGON IS DRAWN IN, derotate the world
+      // delta into entity-local coords.  Static tiles have rotation 0
+      // (cos=1, sin=0) so this collapses to the world delta — same as
+      // before for tiles.  Rotating shards need the proper transform so
+      // the bloom centre tracks the player instead of spinning with the
+      // shard.
+      let pdx = pdxWorld, pdy = pdyWorld;
+      if (entity.rotation !== 0) {
+          const cosR = Math.cos(-entity.rotation);
+          const sinR = Math.sin(-entity.rotation);
+          pdx = pdxWorld * cosR - pdyWorld * sinR;
+          pdy = pdxWorld * sinR + pdyWorld * cosR;
+      }
 
       // Closest point on the polygon outline to the player (entity-local
       // coords; player is at (pdx, pdy) relative to the centroid), plus
