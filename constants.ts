@@ -1557,7 +1557,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // than brightening.  Fill-only radial bloom, no edge stroke; drawn
     // from the asteroid/shard render branch, gated to static tiles
     // (mass=∞) so rock-shards are excluded.
-    glow: { color: '#000000', range: 200, peakAlpha: 0.2 },
+    glow: { color: '#000000', range: 200, peakAlpha: 0.5 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
