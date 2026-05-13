@@ -384,15 +384,6 @@ export interface GameEntity {
   // to produce the rendered alpha.  Undefined or 0 → layer skipped.
   glowIntensity?: number;
 
-  // Hex-graph distance from this metal-tile to the nearest "exposed"
-  // tile of its cluster (0 = an exposed/edge tile — at least one of its
-  // 6 hex-neighbour cells doesn't hold a metal-tile).  Precomputed at
-  // map load by GameEngine; read by RenderSystem's metal heat-glow to
-  // make interior tiles lag the bloom (deeper tiles need the player
-  // closer / the front hotter before they light).  Goes stale if a
-  // metal-tile breaks — cosmetic only.
-  tileClusterDepth?: number;
-
   // Per-substep accumulator of repel-field impulse magnitudes from
   // every static tile in range.  Reset to 0 at the start of each
   // PhysicsSystem.handleEntityCollisions broadphase pass and added

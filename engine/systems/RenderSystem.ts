@@ -2538,18 +2538,19 @@ export class RenderSystem {
   }
 
   // Proximity "bloom" glow for static tiles with a `glow` config —
-  // today metal-tile's heat effect (orange + a red `hot` core) and the
-  // warm-white tile-lighting on plastic / rock / indestructible.  Draws
-  // one or two radial gradients centred on the point of the entity's
-  // polygon outline nearest the player, growing inward as the player
-  // closes in.  FILL ONLY — never strokes the edges; the polygon fill
-  // path confines each gradient (beyond a gradient's radius the fill is
-  // alpha 0, so the un-bloomed part of the face stays untouched).
-  // No-op when the variant has no `glow`, the tile is mid hit-flash,
-  // the player is out of range, or the depth-attenuated intensity is 0.
-  // Assumes the canvas transform is already in the entity's local space
-  // (origin = centroid) — true in both the material-tile branch and the
-  // asteroid/shard branch.
+  // the warm-white tile-lighting on metal / plastic / rock /
+  // indestructible (and, if a variant sets `glow.hot`, an extra red
+  // hot-core layer — currently unused; reserved for the deferred metal
+  // heat treatment).  Draws one or two radial gradients centred on the
+  // point of the entity's polygon outline nearest the player, growing
+  // inward as the player closes in.  FILL ONLY — never strokes the
+  // edges; the polygon fill path confines each gradient (beyond a
+  // gradient's radius the fill is alpha 0, so the un-bloomed part of
+  // the face stays untouched).  No-op when the variant has no `glow`,
+  // the tile is mid hit-flash, or the player is out of range.  Assumes
+  // the canvas transform is already in the entity's local space
+  // (origin = centroid) — true in both the material-tile branch and
+  // the asteroid/shard branch.
   private renderProximityBloom(
       ctx: CanvasRenderingContext2D,
       entity: GameEntity,
@@ -2563,14 +2564,7 @@ export class RenderSystem {
       const pdy = wrapDeltaY(entity.position.y, playerPos.y);
       const pdistSq = pdx * pdx + pdy * pdy;
       if (pdistSq >= glow.range * glow.range) return;
-      // Interior gating: deeper cluster tiles lag the bloom (metal heat
-      // only — `tileClusterDepth` is unset on other variants → 0 → no
-      // attenuation).  A tile at depth d needs the raw proximity
-      // intensity above d × DEPTH_DELAY before it lights at all.
-      const DEPTH_DELAY = 0.25;
-      const depth = entity.tileClusterDepth ?? 0;
-      const intensity = Math.max(0, (1 - Math.sqrt(pdistSq) / glow.range) ** 2 - depth * DEPTH_DELAY);
-      if (intensity <= 0) return;
+      const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
 
       // Closest point on the polygon outline to the player (entity-local
       // coords; player is at (pdx, pdy) relative to the centroid), plus

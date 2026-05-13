@@ -20,7 +20,6 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_VARIANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
-import { HEX_WIDTH } from './maps/TileGenerator';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
 
 /** Average two 6-digit hex colours component-wise. */
@@ -2293,8 +2292,6 @@ export class GameEngine {
       this.currentMap = map;
       // Pre-calculate spatial grid for static tiles to avoid overhead in main loop
       this.physics.initializeStaticGrid(map.entities);
-      // Precompute metal-tile cluster depths (approach-A heat-glow gating).
-      this.computeMetalTileClusterDepths(map.entities);
       // Cache gravitational attractors once per map so applyGravity no
       // longer rescans the full entity array every substep.  Attractors
       // are effectively static geometry (stellar POIs), so a one-shot
@@ -2313,61 +2310,6 @@ export class GameEngine {
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
-  }
-
-  // Approach-A heat-glow gating: precompute each metal-tile's hex-graph
-  // distance to the nearest "exposed" tile of its cluster (a tile is
-  // exposed if at least one of its 6 hex-neighbour cells doesn't hold a
-  // metal-tile).  Stored on `entity.tileClusterDepth` (0 = exposed) so
-  // RenderSystem can make interior tiles lag the heat bloom.  One-shot at
-  // map load — depth goes stale if a metal-tile breaks (cosmetic: a
-  // newly-exposed tile keeps a higher depth and glows a touch later than
-  // it strictly should; metal takes 8 hits to break, so it rarely shows).
-  // O(N²) over the metal-tile count (≤ ~100 on any map) — fine one-shot.
-  private computeMetalTileClusterDepths(entities: GameEntity[]) {
-      const metal: GameEntity[] = [];
-      for (let i = 0; i < entities.length; i++) {
-          const e = entities[i];
-          if (e.type === EntityType.STRUCTURE && e.mass === Infinity && e.shardVariant === 'metal-tile') {
-              metal.push(e);
-              e.tileClusterDepth = 0;
-          }
-      }
-      if (metal.length === 0) return;
-      // Hex neighbours sit exactly HEX_WIDTH apart for all 6 directions
-      // in this odd-r layout; tolerance covers fp drift only (tile
-      // centres are exact grid positions, not jittered).
-      const tol  = HEX_WIDTH * 0.15;
-      const loSq = (HEX_WIDTH - tol) * (HEX_WIDTH - tol);
-      const hiSq = (HEX_WIDTH + tol) * (HEX_WIDTH + tol);
-      const adj: number[][] = metal.map(() => []);
-      for (let i = 0; i < metal.length; i++) {
-          for (let j = i + 1; j < metal.length; j++) {
-              const dx = wrapDeltaX(metal[i].position.x, metal[j].position.x);
-              const dy = wrapDeltaY(metal[i].position.y, metal[j].position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 >= loSq && d2 <= hiSq) { adj[i].push(j); adj[j].push(i); }
-          }
-      }
-      // BFS from every exposed tile (< 6 metal neighbours) at depth 0.
-      const depth = new Array<number>(metal.length).fill(-1);
-      const queue: number[] = [];
-      for (let i = 0; i < metal.length; i++) {
-          if (adj[i].length < 6) { depth[i] = 0; queue.push(i); }
-      }
-      // Pathological fully-enclosed component (no exposed tile): leave
-      // those at depth 0 so they still glow.
-      if (queue.length === 0) return;
-      let head = 0;
-      while (head < queue.length) {
-          const i = queue[head++];
-          const nbrs = adj[i];
-          for (let k = 0; k < nbrs.length; k++) {
-              const j = nbrs[k];
-              if (depth[j] === -1) { depth[j] = depth[i] + 1; queue.push(j); }
-          }
-      }
-      for (let i = 0; i < metal.length; i++) metal[i].tileClusterDepth = depth[i] < 0 ? 0 : depth[i];
   }
 
   private draw() {
