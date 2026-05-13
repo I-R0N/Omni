@@ -1500,16 +1500,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
     repel: { range: 200, strength: 0.06 },
-    // Heat-effect proximity glow — the tile FACE warms up as the
-    // player approaches (orange), then a red "hot core" layer fades
-    // in over the inner ~60 % of the field once the orange intensity
-    // passes 0.40.  Fill only, no edge stroke (unlike glass).  Same
-    // range as repel so the visual halo and the push footprint
-    // align.
-    glow:  {
-      color: '#fb923c', range: 200, peakAlpha: 0.95,
-      hot: { color: '#dc2626', threshold: 0.40 },
-    },
+    // Warm-white proximity lighting like plastic / rock / indestructible,
+    // but BRIGHTER — metal reads as a more reflective surface, so it
+    // catches the player's "light" harder.  Fill-only radial bloom from
+    // the player-facing edge, no edge stroke (RenderSystem.renderProximityBloom).
+    // (The orange→red "heat" treatment is deferred to a later pass — the
+    // `hot` schema field and the renderer's hot-core layer are still in
+    // place, just not configured here.)
+    glow:  { color: '#fef3c7', range: 200, peakAlpha: 0.7 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp
@@ -1554,11 +1552,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Warm-white proximity lighting — the slate face brightens as the
-    // player passes (fill-only radial bloom, no edge stroke).  Drawn
+    // Proximity "lighting" — but a BLACK, low-alpha bloom: the slate
+    // face near the player darkens (a soft player-cast vignette) rather
+    // than brightening.  Fill-only radial bloom, no edge stroke; drawn
     // from the asteroid/shard render branch, gated to static tiles
     // (mass=∞) so rock-shards are excluded.
-    glow: { color: '#fef3c7', range: 200, peakAlpha: 0.4 },
+    glow: { color: '#000000', range: 200, peakAlpha: 0.2 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
