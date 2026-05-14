@@ -420,11 +420,12 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_BORDER,
   },
   plastic: {
-    // 8 HP — same hits-to-break as metal.  Differentiation is purely
-    // visual: plastic deforms more per hit (higher dent.vertexJitter)
-    // and detaches as a single ~1/3-size shard; metal warps subtly
-    // and breaks into a 1/3 + 1/6 pair.
-    health: 8,
+    // 24 HP — 3× the original 8 to tighten the break-loose threshold.
+    // Same hits-to-break as metal.  Differentiation is purely visual:
+    // plastic deforms more per hit (higher dent.vertexJitter) and
+    // detaches as a single ~1/3-size shard; metal warps subtly and
+    // breaks into a 1/3 + 1/6 pair.
+    health: 24,
     mass: Infinity,
     indestructible: false,
     // sprite left empty so RenderSystem's sprite branch falls through
@@ -436,10 +437,11 @@ export const STRUCTURE_VARIANTS = {
     borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
   metal: {
-    // 8 HP → 7 dent steps while alive, 8th detaches.  Same hit count
-    // as plastic but reads as harder via the subtle per-hit dent and
-    // the post-break fragmentation (two shards instead of one).
-    health: 8,
+    // 24 HP — 3× the original 8 — so the player has to commit to
+    // breaking a tile free.  Same hit count as plastic but reads as
+    // harder via the subtle per-hit dent and the post-break
+    // fragmentation (two shards instead of one).
+    health: 24,
     mass: Infinity,
     indestructible: false,
     // sprite left empty so the polygon fallback fires — see plastic above.
