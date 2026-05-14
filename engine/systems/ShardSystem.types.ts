@@ -271,27 +271,24 @@ export interface ShardVariantDef {
    *  pipeline; legacy compose math continues to apply.  Today set
    *  on rock-shard, glass-shard, nebula-shard. */
   density?: ShardDensityPolicy;
-  /** Per-tile additive glow visual.  When set, RenderSystem's
-   *  static-tile draw loop (layer 2b) fills the polygon with `color`
-   *  at alpha = `peakAlpha * entity.glowIntensity`.  Activation is
-   *  externally driven — whatever system owns the trigger writes
-   *  `glowIntensity` (0..1) on the entity each frame and resets it
-   *  next frame.  `range` is informational metadata for trigger
-   *  systems that compute a quadratic-falloff `glowIntensity`
-   *  relative to a source position; the renderer itself does not
-   *  read it.  Today populated for glass-tile and metal-tile —
-   *  GameEngine writes `glowIntensity` from the player's quadratic-
-   *  falloff distance to the tile within `range`, so the same number
-   *  drives both the repel field (PhysicsSystem) and the glow. */
+  /** Per-tile proximity glow visual.  When set, RenderSystem draws a
+   *  fill (and, for glass-tile only, an edge stroke) on the static
+   *  tile at alpha = `peakAlpha × intensity`, where intensity is the
+   *  quadratic-falloff value `(1 − dist/range)²` of the player's
+   *  distance to the tile — computed inline by RenderSystem
+   *  (`renderProximityBloom` / glass-family layer 2b), not by an
+   *  upstream pass.  The same `range` drives the repel field's
+   *  falloff in PhysicsSystem when `repel` is also set, so the
+   *  visual halo and the push footprint align by construction. */
   glow?: {
     /** Glow color when fully lit, hex string.  This is the base /
      *  "warm-up" layer (e.g. orange for metal). */
     color: string;
-    /** Range over which the glow falls off, world units.  Used by
-     *  external trigger systems; not read by the renderer. */
+    /** Range over which the glow falls off, world units.  Player
+     *  distance ≥ `range` → no glow drawn. */
     range: number;
-    /** Quadratic-falloff peak alpha (0..1) — multiplied by
-     *  `entity.glowIntensity` to produce the rendered alpha. */
+    /** Quadratic-falloff peak alpha (0..1) — multiplied by the
+     *  per-tile intensity to produce the rendered alpha. */
     peakAlpha: number;
     /** Optional second "hot core" layer painted ON TOP of the base
      *  layer once the base intensity (the quadratic falloff value,

@@ -713,37 +713,6 @@ export class PhysicsSystem {
     }
   }
 
-  /**
-   * Iterate every active static entity within a 5×5 cell neighbourhood
-   * (≤ 2 × SPATIAL_GRID_SIZE radius) of the world position `(x, y)`.
-   * The caller owns distance / repel-range filtering — this just
-   * exposes the static-grid cells the broadphase already touches.
-   *
-   * Used by GameEngine to drive per-tile `glowIntensity` from the
-   * player's quadratic-falloff distance: the same neighbourhood the
-   * repel scan walks, so the visual halo and the push footprint
-   * stay aligned.  The callback is invoked synchronously with no
-   * allocation; bail out by returning early inside it.
-   */
-  public forEachStaticNear(
-    x: number,
-    y: number,
-    callback: (entity: GameEntity) => void,
-  ): void {
-    const cx = Math.floor(x / SPATIAL_GRID_SIZE);
-    const cy = Math.floor(y / SPATIAL_GRID_SIZE);
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
-        const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
-        if (!cell) continue;
-        for (let i = 0; i < cell.length; i++) {
-          const e = cell[i];
-          if (e.active) callback(e);
-        }
-      }
-    }
-  }
-
   public removeStaticEntity(entity: GameEntity) {
       const key = cellKey(entity.position.x, entity.position.y);
       const cell = this.staticGrid.get(key);

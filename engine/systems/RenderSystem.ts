@@ -1704,12 +1704,10 @@ export class RenderSystem {
                 }
 
                 // Layer 2b — glass-tile proximity glow.  Computes
-                // intensity inline from the player position so the
-                // visualization is independent of any upstream system
-                // writing `entity.glowIntensity`.  Paints both a fill
-                // and a thick stroke so the halo reads as a clear
-                // "lit edge" — fill alone washes the hex out cyan but
-                // doesn't pop as a beacon.  Glass-tile only: the
+                // intensity inline from the player position.  Paints
+                // both a fill AND a thick stroke so the halo reads as
+                // a clear "lit edge" — fill alone washes the hex out
+                // cyan but doesn't pop as a beacon.  Glass-tile only: the
                 // indestructible-tile glow (warm-white lighting) is the
                 // fill-only radial bloom drawn after the cracks below.
                 if (!isFlash

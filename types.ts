@@ -382,13 +382,6 @@ export interface GameEntity {
   // absorbed; undefined means no power-up content.
   powerupGlowColor?: string;
 
-  // Per-frame variant-glow activation (0..1).  Externally driven — the
-  // system that owns the trigger (e.g. proximity scan, damage pulse)
-  // writes this each frame and clears it the next frame.  Read by
-  // RenderSystem layer 2b alongside SHARD_VARIANTS[v].glow.peakAlpha
-  // to produce the rendered alpha.  Undefined or 0 → layer skipped.
-  glowIntensity?: number;
-
   // Per-substep accumulator of repel-field impulse magnitudes from
   // every static tile in range.  Reset to 0 at the start of each
   // PhysicsSystem.handleEntityCollisions broadphase pass and added

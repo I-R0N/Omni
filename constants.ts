@@ -22,19 +22,15 @@ export const COLORS = {
   PLANET: '#4ade80',      // Green 400
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
-  STRUCTURE_BORDER: '#818cf8', // Indigo 400
+  STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
   // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
   // outline so the surface reads as soft injection-moulded plastic
   // rather than the violet sheen of the prior reinforced tile.
   STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
-  STRUCTURE_PLASTIC_BORDER: '#fbbf24',    // Amber 400 — gentle highlight, not specular
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
-  // against the indigo glass tiles.  Higher outline contrast than
-  // plastic to read as a hard surface.
+  // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
-  STRUCTURE_METAL_BORDER: '#e2e8f0',      // Slate 200 — chrome edge highlight
-  STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
-  STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
+  STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
 
 // --- SYSTEM CONFIGURATIONS ---
@@ -417,7 +413,6 @@ export const STRUCTURE_VARIANTS = {
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE,
     color: COLORS.STRUCTURE,
-    borderColor: COLORS.STRUCTURE_BORDER,
   },
   plastic: {
     // 24 HP — 3× the original 8 to tighten the break-loose threshold.
@@ -434,7 +429,6 @@ export const STRUCTURE_VARIANTS = {
     // is kept in the manifest for a future per-variant sprite.
     sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
-    borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
   metal: {
     // 24 HP — 3× the original 8 — so the player has to commit to
@@ -447,7 +441,6 @@ export const STRUCTURE_VARIANTS = {
     // sprite left empty so the polygon fallback fires — see plastic above.
     sprite: '',
     color: COLORS.STRUCTURE_METAL,
-    borderColor: COLORS.STRUCTURE_METAL_BORDER,
   },
   indestructible: {
     // Sentinel health — tile is never destroyed, but keep a finite positive
@@ -457,7 +450,6 @@ export const STRUCTURE_VARIANTS = {
     indestructible: true,
     sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
-    borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
   },
   // Stage 7: rock-tile family — clusters of solid rock that shatter
   // into rock-shards on death (the unified "tile is the parent of
@@ -473,7 +465,6 @@ export const STRUCTURE_VARIANTS = {
     indestructible: false,
     sprite: '',
     color: COLORS.ASTEROID,
-    borderColor: '#cbd5e1', // slate-300 — slightly lighter for the edge tint
   },
 } as const;
 
@@ -1465,9 +1456,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
     // outer ring covers it.
     repel: { range: 200, strength: 0.04 },
-    // Cyan-200 glow paired 1:1 with the repel field — same range,
-    // GameEngine writes glowIntensity each substep from the player's
-    // quadratic-falloff distance to the tile.
+    // Cyan-200 face + edge-stroke glow paired 1:1 with the repel field
+    // — same range, intensity follows the player's quadratic-falloff
+    // distance to the tile (computed inline in RenderSystem layer 2b).
     glow:  { color: '#a5f3fc', range: 200, peakAlpha: 0.85 },
   },
   'plastic-tile': {
@@ -1542,7 +1533,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Warm-white proximity lighting (fill-only radial bloom, no edge
     // stroke).  Glass-tile uses its cyan layer-2b glow instead;
     // indestructible takes the same neutral lighting as plastic / rock.
-    glow:    { color: '#fef3c7', range: 200, peakAlpha: 0.4 },
+    glow:    { color: '#fef3c7', range: 400, peakAlpha: 0.75 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
