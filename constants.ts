@@ -1516,24 +1516,23 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // place, just not configured here.)
     glow:  { color: '#fffbeb', range: 400, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
-    // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
-    // but the surface reads as harder via the smaller per-hit warp
-    // and the post-break fragmentation: a 2-shard pair split 2:1 by
-    // area, summing to the deformed tile's area.
+    // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
+    // but the surface reads as harder via the smaller per-hit warp;
+    // on detach it releases a single shard matching the deformed
+    // tile's silhouette exactly (see breakShards below).
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
+      // Release ONE metal-shard that IS the deformed tile: sizeFraction
+      // 1.0 → shard diameter == deformed-tile diameter, and per
+      // ShardVariantDef.dent.breakShards the shard inherits the dented
+      // polygon scaled 1× — so the freed shard's silhouette matches
+      // the tile's broken outline exactly (no chunkier "polygon"
+      // fragments).  The generic SHARD_SPAWN_SHAPE_METAL polygon
+      // (6/8/10 vertices) is retained for metal-shards spawned outside
+      // the tile-detach path (e.g. free-spawn on future map variants).
       breakShards: [
-        // Areas sum to the deformed tile's area (≈ half original
-        // area at break, per playtest).  Primary takes 2/3, secondary
-        // 1/3 — keeps the original "1/3 vs 1/6 of the tile" intent
-        // (those are fractions of the ORIGINAL tile area, and
-        // 1/3 + 1/6 = 1/2 = deformed area).
-        // Linear sizeFraction = sqrt(area fraction of deformed),
-        // so primary uses sqrt(2/3) ≈ 0.816, secondary sqrt(1/3)
-        // ≈ 0.577.
-        { variant: 'metal-shard', sizeFraction: 0.816 },
-        { variant: 'metal-shard', sizeFraction: 0.577 },
+        { variant: 'metal-shard', sizeFraction: 1.0 },
       ],
     },
   },
