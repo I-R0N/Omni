@@ -509,7 +509,12 @@ export class DropSystem {
           y: Math.sin(shardAngle) * launchSpeed,
         },
         size:          { x: targetSize, y: targetSize },
-        rotation:      Math.random() * Math.PI * 2,
+        // Inherit the parent tile's rotation when the shard clones its
+        // polygon, so the freed silhouette draws at the exact angle the
+        // tile was just at (no instant pop-rotate).  For shards whose
+        // polygon is freshly generated, a random orientation reads more
+        // like fragmentation, so keep that path random.
+        rotation:      spec.inheritParentPolygon ? tile.rotation : Math.random() * Math.PI * 2,
         // Smaller shards spin faster — same angular-momentum-from-
         // impact logic as the speed scaling above.
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
