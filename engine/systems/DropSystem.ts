@@ -426,12 +426,38 @@ export class DropSystem {
       // diameter (= 2 × avgR), so heavier deformation produces
       // proportionally smaller shards while a barely-dented tile
       // produces shards near the nominal sizeFraction × original size.
-      // Polygon shape is now generated from the variant's spawn config
-      // (fixed vertex count per material — plastic=4, metal=6, etc.)
-      // so detached shards have a consistent material silhouette
-      // instead of inheriting the dented tile's hex polygon.
-      const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
-      const scaledPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
+      //
+      // Polygon shape: two paths.
+      //   Default — generate from the variant's spawn config (fixed
+      //   vertex count per material; plastic=4, metal=6, etc.) so
+      //   detached shards have a consistent material silhouette.
+      //   `inheritParentPolygon: true` — clone the parent tile's
+      //   dented polygon scaled by sizeFraction.  Used by metal-tile
+      //   so the freed shard's outline matches the broken tile
+      //   exactly (no instant "snap to 6/8/10-vertex polygon" pop).
+      //   `targetSize` in this branch is derived from the scaled
+      //   polygon's circumradius so entity.size matches the actual
+      //   silhouette extent.
+      let scaledPts: Vector2[];
+      let targetSize: number;
+      if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
+        const s = spec.sizeFraction;
+        scaledPts = new Array(tile.polygonPoints.length);
+        let maxR2 = 0;
+        for (let p = 0; p < tile.polygonPoints.length; p++) {
+          const src = tile.polygonPoints[p];
+          const sx = src.x * s, sy = src.y * s;
+          scaledPts[p] = { x: sx, y: sy };
+          const r2 = sx * sx + sy * sy;
+          if (r2 > maxR2) maxR2 = r2;
+        }
+        // entity.size is the AABB envelope; for a polygon centred on
+        // origin with max-radius R, diameter = 2R fits the bound.
+        targetSize = Math.max(2, 2 * Math.sqrt(maxR2));
+      } else {
+        targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
+        scaledPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
+      }
 
       const mass = variantDef.spawn.sizeToMass(targetSize);
 

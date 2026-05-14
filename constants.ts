@@ -1532,7 +1532,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // (6/8/10 vertices) is retained for metal-shards spawned outside
       // the tile-detach path (e.g. free-spawn on future map variants).
       breakShards: [
-        { variant: 'metal-shard', sizeFraction: 1.0 },
+        { variant: 'metal-shard', sizeFraction: 1.0, inheritParentPolygon: true },
       ],
     },
   },

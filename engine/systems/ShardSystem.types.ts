@@ -425,15 +425,24 @@ export interface ShardVariantDef {
      *  pick sizeFractions whose squares sum to 1.0 (e.g. sqrt(2/3)
      *  and sqrt(1/3) → ~0.816 and ~0.577 for a 2:1 area split).
      *
-     *  Each shard inherits the dented polygon scaled to its target
-     *  size so the dent character is preserved.  Spawned with a
-     *  small radial spread so multiple shards don't pile up at the
-     *  tile centre.  For 'triangle-delete' variants, the first
-     *  entry's `variant` is also used as the variant for per-hit
-     *  triangle shards. */
+     *  Each shard's polygon shape defaults to the variant's spawn
+     *  config (e.g. 4 vertices for plastic, 6/8/10 for metal) so
+     *  detached shards have a consistent material silhouette.  When
+     *  `inheritParentPolygon: true`, the shard instead clones the
+     *  parent tile's dented polygon scaled by `sizeFraction` — used
+     *  today by metal-tile so the freed shard's silhouette matches
+     *  the deformed tile exactly.  Spawned with a small radial
+     *  spread so multiple shards don't pile up at the tile centre.
+     *  For 'triangle-delete' variants, the first entry's `variant`
+     *  is also used as the variant for per-hit triangle shards. */
     breakShards: Array<{
       variant: ShardVariantId;
       sizeFraction: number;
+      /** When true, the spawned shard clones the parent tile's dented
+       *  polygon (scaled by sizeFraction) rather than generating a
+       *  fresh material-silhouette polygon from the variant's spawn
+       *  config.  Use for "the shard IS the broken tile" effects. */
+      inheritParentPolygon?: boolean;
     }>;
   };
 }
