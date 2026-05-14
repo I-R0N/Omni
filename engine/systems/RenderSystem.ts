@@ -154,6 +154,16 @@ export class RenderSystem {
   // entities that early-return for inactivity).
   public lastNebulaFastCount: number = 0;
   public lastNebulaSlowCount: number = 0;
+  // Wall time (ms) spent in renderProximityBloom calls for MOBILE
+  // shards this frame (rock-/plastic-/metal-shard).  Excludes the same
+  // helper's calls for static tiles (their cost rolls into the main
+  // renderMs).  Accumulated across the asteroid/shard render pass;
+  // reset at the start of render().  Surfaces in the dev overlay so
+  // shard lighting can be A/B'd on its own.
+  public lastShardLightingMs: number = 0;
+  // Count of shards that actually drew a bloom this frame (in range +
+  // has a glow config).  Context for interpreting lastShardLightingMs.
+  public lastShardLightingCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -599,6 +609,10 @@ export class RenderSystem {
     // renderEntities below as each nebula entity is dispatched.
     this.lastNebulaFastCount = 0;
     this.lastNebulaSlowCount = 0;
+    // Reset shard-lighting accumulator — populated in the asteroid/shard
+    // render branch when a mobile shard's bloom fires.
+    this.lastShardLightingMs = 0;
+    this.lastShardLightingCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -2028,7 +2042,24 @@ export class RenderSystem {
                 // future variant without a `glow` no-op inside the
                 // helper.  No mass gate: the helper's own glow-presence
                 // check is the gate.
-                this.renderProximityBloom(ctx, entity, playerPos);
+                //
+                // Time mobile-shard bloom calls separately (lastShardLightingMs)
+                // so the dev overlay can A/B shard lighting against everything
+                // else.  Static-tile bloom calls (mass=∞) roll into the main
+                // renderMs.  The performance.now() pair is cheap (~ns each).
+                if (entity.mass !== Infinity) {
+                    const tSL = performance.now();
+                    this.renderProximityBloom(ctx, entity, playerPos);
+                    const elapsed = performance.now() - tSL;
+                    this.lastShardLightingMs += elapsed;
+                    // Count only shards that actually drew (the helper bails
+                    // fast on out-of-range / no-glow entities).  ~1μs is the
+                    // rough threshold between "early-return" and "did real
+                    // work (gradient + fill)".
+                    if (elapsed > 0.001) this.lastShardLightingCount++;
+                } else {
+                    this.renderProximityBloom(ctx, entity, playerPos);
+                }
             }
 
           } else if (entity.type === EntityType.PROJECTILE) {
