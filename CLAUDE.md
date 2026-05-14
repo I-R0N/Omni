@@ -233,25 +233,28 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
-- `PLAYER_MOVEMENT_CONFIG` (per-MapType), `ASTEROID_GENERATION_CONFIG`
-  (per-MapType)
+- `PLAYER_MOVEMENT_CONFIG` (per-MapType)
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
   twinkle scheduling)
-- `SHARD_VARIANTS` — per-variant regen / merge / shatter /
-  passThrough / renderCache policy.  Source of truth for the
-  shard-family behaviour table.  9 variants today: glass-tile /
-  plastic-tile / metal-tile / indestructible-tile / rock-tile
-  (Stage 7 wires spawn) / nebula-tile / rock-shard / glass-shard /
-  nebula-shard.  See `engine/systems/ShardSystem.types.ts` for the
-  schema and `docs/SHARD_SYSTEM.md` for the design rationale.
+- `SHARD_VARIANTS` — per-variant regen / merge / shatter / dent /
+  repel / glow / passThrough / renderCache policy.  Source of truth
+  for the shard-family behaviour table.  11 variants today:
+  glass-tile / plastic-tile / metal-tile / indestructible-tile /
+  rock-tile / nebula-tile / rock-shard / glass-shard / plastic-shard
+  / metal-shard / nebula-shard.  See
+  `engine/systems/ShardSystem.types.ts` for the schema and
+  `docs/SHARD_SYSTEM.md` for the design rationale.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
-  count table.  Stage 1 lands the data; Stage 7 flips
-  MapClasses.populate() to read from it.  Today the legacy reads
-  (ASTEROID_GENERATION_CONFIG + per-map cluster literals in
-  MapClasses) are still authoritative.
+  count table.  Source of truth for rock-shard free-spawn counts
+  (read via `getRockShardFreeSpawn()`); per-map tile-cluster
+  entries are read by `MapClasses.populate()` for the nebula-cluster
+  sizing and the single-variant showcase maps.  Some natural maps
+  (UniverseMap, PocketMap, SevenRingsMap) still hardcode their own
+  tile-variant ratios; treat MAP_POPULATION as authoritative for
+  documentation but verify the relevant `MapClasses` subclass too.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
@@ -313,18 +316,18 @@ of `BaseMapLayer`:
   render no BG nebulae (no canvas-size-random fallback). Keep new maps
   honest by populating that list when, and only when, you spawn nebula
   tiles.
-- Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` and
-  `ASTEROID_GENERATION_CONFIG` in `constants.ts` — both are
-  `Record<MapType, …>`, so adding a new MapType requires entries in
-  both.  `MAP_POPULATION` (also per-MapType) is the eventual single
-  source of truth for entity counts; today it's data-only — Stage 7
-  flips MapClasses.populate() to read it.
+- Per-map gameplay knobs live in `PLAYER_MOVEMENT_CONFIG` (movement
+  feel) and `MAP_POPULATION` (entity counts) in `constants.ts` —
+  both are `Record<MapType, …>`, so adding a new MapType requires
+  entries in both.  Showcase maps (single-variant fields) read
+  cluster sizing directly from `MAP_POPULATION`; natural mixed maps
+  hardcode their per-variant ratios in their `MapClasses` subclass.
 
 Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add the subclass in `MapClasses.ts`, switch on it in
 `GameEngine.buildMap()`, add per-map config in `constants.ts`
-(`PLAYER_MOVEMENT_CONFIG`, `ASTEROID_GENERATION_CONFIG`,
-`MAP_POPULATION`), and add the menu button in `UIOverlay.tsx`.
+(`PLAYER_MOVEMENT_CONFIG`, `MAP_POPULATION`), and add the menu
+button in `UIOverlay.tsx`.
 
 ---
 

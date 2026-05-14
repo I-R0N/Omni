@@ -382,12 +382,15 @@ export interface GameEntity {
   // absorbed; undefined means no power-up content.
   powerupGlowColor?: string;
 
-  // Per-substep accumulator of repel-field impulse magnitudes from
-  // every static tile in range.  Reset to 0 at the start of each
-  // PhysicsSystem.handleEntityCollisions broadphase pass and added
-  // to inside the inner-3×3 + outer-5×5 repel scans.  Surfaced for
-  // future consumers (HUD opacity fade, debug overlays); the field
-  // exists today purely so the broadphase has a place to write.
+  // Per-substep accumulator of repel-field impulse magnitudes.  Reset
+  // to 0 at the start of each PhysicsSystem.handleEntityCollisions
+  // broadphase pass.  Written on BOTH sides of each repel pair: the
+  // scanner (mobile body being pushed) accumulates incoming impulse
+  // from every emitter in range, AND the emitter (static repel-tile)
+  // accumulates the same value from every scanner pushing on its
+  // field.  RenderSystem reads the emitter side to ramp glass-tile /
+  // metal-tile glow off any nearby repellable body, not just the
+  // player.
   repelImpulse?: number;
 
   // Lazily-baked original circumradius² for dent-policy tiles

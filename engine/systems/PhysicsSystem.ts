@@ -537,6 +537,13 @@ export class PhysicsSystem {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
 
+        // Reset per-substep repel-impulse accumulator BEFORE the
+        // static-grid skip — repel-emitting tiles (mass=∞) also
+        // accumulate on the emitter side so RenderSystem can drive
+        // glow off impulse and light up for any nearby repellable
+        // body, not just the player.
+        if (e.repelImpulse !== 0) e.repelImpulse = 0;
+
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
@@ -553,13 +560,6 @@ export class PhysicsSystem {
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
-
-        // Reset per-substep repel-impulse accumulator before the
-        // broadphase pass writes into it.  Cheap on entities that
-        // already had it; the field stays defined so optional-chained
-        // reads (e.g. RenderSystem fade fx in the future) don't pay a
-        // tagged-shape miss.
-        if (e.repelImpulse !== 0) e.repelImpulse = 0;
 
         const key = cellKey(e.position.x, e.position.y);
 
@@ -637,7 +637,12 @@ export class PhysicsSystem {
                             const inv = 1 / dist;
                             a.velocity.x += dx * inv * accel;
                             a.velocity.y += dy * inv * accel;
+                            // Accumulate on BOTH sides — scanner reads
+                            // it for fade fx; emitter (b, the static
+                            // tile) reads it in RenderSystem to drive
+                            // proximity glow off any repellable body.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                            b.repelImpulse = (b.repelImpulse ?? 0) + accel;
                         }
                     }
                 }

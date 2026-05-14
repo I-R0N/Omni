@@ -885,8 +885,8 @@ export class GameEngine {
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
           // - glass-tile: visual debris via DropSystem.spawnGlassShards
-          //   (called from spawnDrops); SHARD_VARIANTS shatter is
-          //   aspirational for Stage 6 unification.
+          //   (called from spawnDrops); the SHARD_VARIANTS shatter
+          //   policy is unused on this path.
           // - dent variants (plastic-tile / metal-tile / rock-tile):
           //   tile detaches via DropSystem.spawnDentShard reading
           //   dent.breakShards — skip ShardSystem.shatter entirely so

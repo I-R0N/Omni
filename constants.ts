@@ -1329,10 +1329,10 @@ export const CLEANUP_CONSTANTS = {
 
 // ── ShardSystem variant table ───────────────────────────────────────
 // See docs/SHARD_SYSTEM.md for the design rationale.  This table is
-// the source of truth for tile / shard regen, merge, shatter and
-// pass-through behaviour.  Stage 1 lands the table as data only;
-// the existing GameEngine / NebulaSystem code paths still drive
-// behaviour at runtime.  Subsequent stages migrate the read sites.
+// the source of truth for tile / shard regen, merge, shatter, dent,
+// repel, glow and pass-through behaviour — read at runtime by
+// ShardSystem, PhysicsSystem, RenderSystem, and the variant-aware
+// branches in GameEngine.
 //
 // All shard-family entities share `carrier: EntityType.STRUCTURE`;
 // static-vs-dynamic dispatch is by `mass` (Infinity → static grid,
@@ -1383,11 +1383,10 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
     defaultOutcome: 'compose',
   },
   shatter: {
-    // Today: STRUCTURE tile death does NOT spawn shards directly —
-    // the visual debris comes from DropSystem.spawnGlassShards.  Once
-    // Stage 3 migrates shatter into ShardSystem this becomes the
-    // canonical path; the policy below mirrors today's glass-shard
-    // population.
+    // Glass-tile death's visual debris comes from
+    // DropSystem.spawnGlassShards (called from spawnDrops); the
+    // policy below mirrors that glass-shard population so it stays
+    // a usable spec for any variant inheriting STRUCTURE_TILE_BASE.
     kind: 'powerlaw',
     style: 'asteroid',
     countMin: 4, countMax: 6,
@@ -1820,8 +1819,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
     passThrough: false,
-    // Metal shards drift through the metal-tile repel field.
-    repelImmune: true,
+    // Metal shards FEEL the metal-tile repel field — they drift in it
+    // and accumulate impulse just like the player or enemies do.
+    // (Glass-shard / plastic-shard stay repelImmune so each shard
+    // family only reacts to its own parent's field.)  This primes the
+    // g3 attraction work where metal-shards orbit metal clusters.
+    repelImmune: false,
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
@@ -1927,13 +1930,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
-    // STRUCTURE / NEBULA cluster counts.  Stage 7 inlines the
-    // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
-    // / OUTER_*); MAP_POPULATION is now the single source of truth.
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
     'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
     'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
-    'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
+    // indestructible-tile intentionally absent — per decision #6,
+    // reserved for deliberate border/structure placement, not random
+    // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
+    // still spawns it for stress testing.
     'nebula-tile': {
       tileCluster: {
         clusterCount:    65,    // halved for 7.5k map (was 130)
@@ -1958,7 +1961,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
     'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
     'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
-    'indestructible-tile': { tileCluster: { clusterCount: 2, minClusterSize: 3, maxClusterSize:  5 } },
+    // indestructible-tile intentionally absent — see UNIVERSE entry
+    // above for the decision-#6 rationale.
     'nebula-tile': {
       tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
     },

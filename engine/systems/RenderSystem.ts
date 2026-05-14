@@ -102,6 +102,17 @@ function shardMergeFadeAlpha(entity: GameEntity): number {
     return Math.max(0, Math.min(1, t / dur));
 }
 
+// Map a per-substep `repelImpulse` accumulator to a 0..N glow intensity
+// scalar.  Reference: glass-tile.repel.strength = 0.04 → a single body
+// at a tile's centre yields ~0.04 per substep, normalising to 1.0.  Not
+// clamped: metal's higher repel.strength (0.06) produces ~1.5 here, and
+// multi-body scenarios push higher still.  Callers are expected to clamp
+// the FINAL alpha (peakAlpha × intensity) so metal naturally reads
+// brighter than glass when the input is identical.
+function repelGlowIntensity(impulse: number): number {
+    return impulse / 0.04;
+}
+
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
 function roundRectPath(
@@ -1179,14 +1190,20 @@ export class RenderSystem {
             || entity.shardVariant === 'indestructible-tile');
       // Skip the fast path while the player is inside this tile's
       // variant glow range so the slow path's layer 2b can paint.
-      // Cheap squared-distance check; no allocation.
+      // Glass-tile reads `repelImpulse` (any nearby repellable body
+      // ramps the glow); indestructible-tile keeps player-distance
+      // because it has no repel field.
       let inGlowRange = false;
-      if (isGlassFamilyStaticTile && playerPos && entity.shardVariant !== undefined) {
-          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
-          if (fpGlow !== undefined) {
-              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
-              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
-              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {
+          if (entity.shardVariant === 'glass-tile') {
+              inGlowRange = (entity.repelImpulse ?? 0) > 0;
+          } else if (playerPos) {
+              const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+              if (fpGlow !== undefined) {
+                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+                  inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+              }
           }
       }
       if (isGlassFamilyStaticTile
@@ -1703,33 +1720,27 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
-                // Layer 2b — glass-tile proximity glow.  Computes
-                // intensity inline from the player position.  Paints
-                // both a fill AND a thick stroke so the halo reads as
-                // a clear "lit edge" — fill alone washes the hex out
-                // cyan but doesn't pop as a beacon.  Glass-tile only: the
-                // indestructible-tile glow (warm-white lighting) is the
-                // fill-only radial bloom drawn after the cracks below.
-                if (!isFlash
-                    && playerPos
-                    && entity.shardVariant === 'glass-tile') {
+                // Layer 2b — glass-tile proximity glow.  Intensity is
+                // driven by the per-substep `repelImpulse` accumulator
+                // PhysicsSystem writes into the tile, so the glow
+                // ramps up for ANY repellable body (player, enemy,
+                // mobile shards), not only the player.  Fill + thick
+                // stroke so the halo reads as a clear "lit edge" —
+                // fill alone washes the hex out but doesn't beacon.
+                // Indestructible-tile keeps the warm-white radial
+                // bloom drawn after the cracks below.
+                if (!isFlash && entity.shardVariant === 'glass-tile') {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                    if (glow !== undefined) {
-                        const pdxG = wrapDeltaX(entity.position.x, playerPos.x);
-                        const pdyG = wrapDeltaY(entity.position.y, playerPos.y);
-                        const pdistSqG = pdxG * pdxG + pdyG * pdyG;
-                        const rangeSqG = glow.range * glow.range;
-                        if (pdistSqG < rangeSqG) {
-                            const tG = 1 - Math.sqrt(pdistSqG) / glow.range;
-                            const intensityG = tG * tG;
-                            ctx.globalAlpha = glow.peakAlpha * intensityG;
-                            ctx.fillStyle = glow.color;
-                            ctx.fill();
-                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensityG);
-                            ctx.strokeStyle = glow.color;
-                            ctx.lineWidth = 3.0;
-                            ctx.stroke();
-                        }
+                    const impulse = entity.repelImpulse ?? 0;
+                    if (glow !== undefined && impulse > 0) {
+                        const intensityG = repelGlowIntensity(impulse);
+                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
+                        ctx.fillStyle = glow.color;
+                        ctx.fill();
+                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG));
+                        ctx.strokeStyle = glow.color;
+                        ctx.lineWidth = 3.0;
+                        ctx.stroke();
                     }
                 }
 
@@ -1899,12 +1910,33 @@ export class RenderSystem {
                     }
                     this.renderCracks(ctx, entity, crackR);
 
-                    // Proximity bloom for plastic/metal — fill-only radial
+                    // Proximity bloom for plastic — fill-only radial
                     // bloom from the player-facing edge; see
                     // renderProximityBloom().  Painted LAST so the outline
                     // / cracks can't cover it.  Timed via timedTileBloom
-                    // so the dev overlay can A/B tile glow.
-                    this.timedTileBloom(ctx, entity, playerPos);
+                    // so the dev overlay can A/B tile glow.  Metal-tile
+                    // takes the repel-driven layer 2b path below instead
+                    // — same accumulator-driven mechanism as glass-tile,
+                    // tuned visually heavier via metal's higher
+                    // repel.strength feeding repelGlowIntensity().
+                    if (entity.shardVariant === 'plastic-tile') {
+                        this.timedTileBloom(ctx, entity, playerPos);
+                    } else if (entity.shardVariant === 'metal-tile' && !isFlash) {
+                        const glow = SHARD_VARIANTS['metal-tile'].glow;
+                        const impulse = entity.repelImpulse ?? 0;
+                        if (glow !== undefined && impulse > 0) {
+                            const intensityM = repelGlowIntensity(impulse);
+                            buildPath();
+                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM);
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM));
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 3.0;
+                            ctx.stroke();
+                            ctx.globalAlpha = 1.0;
+                        }
+                    }
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {

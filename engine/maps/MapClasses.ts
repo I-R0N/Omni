@@ -271,16 +271,16 @@ export class UniverseMap extends BaseMapLayer {
     // Glass landmark clusters — uniform distribution across the 95 %
     // zone.  Most clusters are stock glass (single-hit) to preserve the
     // original destructible feel; a smaller share rolls as plastic or
-    // metal tiles, plus a few rare indestructible landmarks that never
-    // break or regenerate.  Cluster counts roughly split:
-    //   glass       ~60 %
-    //   plastic     ~22 %
-    //   metal       ~12 %
-    //   indestructible ~6 %
-    const GLASS_CLUSTERS          = Math.round(GLASS_COUNT * 0.60);
-    const PLASTIC_CLUSTERS        = Math.round(GLASS_COUNT * 0.22);
-    const METAL_CLUSTERS          = Math.round(GLASS_COUNT * 0.12);
-    const INDESTRUCTIBLE_CLUSTERS = GLASS_COUNT - GLASS_CLUSTERS - PLASTIC_CLUSTERS - METAL_CLUSTERS;
+    // metal tiles.  Per decision #6, indestructible-tile is reserved
+    // for deliberate border placement (e.g. SevenRingsMap's outer
+    // ring) and is not spawned in random clusters here — its share is
+    // redistributed across the destructible variants below.
+    //   glass       ~64 %
+    //   plastic     ~23 %
+    //   metal       ~13 %
+    const GLASS_CLUSTERS   = Math.round(GLASS_COUNT * 0.64);
+    const PLASTIC_CLUSTERS = Math.round(GLASS_COUNT * 0.23);
+    const METAL_CLUSTERS   = GLASS_COUNT - GLASS_CLUSTERS - PLASTIC_CLUSTERS;
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
         GLASS_CLUSTERS, 10, 34, occupied, 'glass'
@@ -292,12 +292,6 @@ export class UniverseMap extends BaseMapLayer {
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, 22,
         METAL_CLUSTERS, 6, 14, occupied, 'metal'
-    ));
-    // Indestructible landmarks are small (3-8 tiles) so they read as
-    // permanent obstacles rather than large impassable walls.
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, 22,
-        INDESTRUCTIBLE_CLUSTERS, 3, 8, occupied, 'indestructible'
     ));
 
     // Nebula cloud clusters — same 95 %-zone uniform distribution.
@@ -465,7 +459,6 @@ export class PocketMap extends BaseMapLayer {
   private static readonly GLASS_CLUSTERS          = 8;
   private static readonly PLASTIC_CLUSTERS        = 5;
   private static readonly METAL_CLUSTERS          = 3;
-  private static readonly INDESTRUCTIBLE_CLUSTERS = 2;
   private static readonly NEBULA_CLUSTERS         = 12;
 
   constructor() {
@@ -490,8 +483,10 @@ export class PocketMap extends BaseMapLayer {
     const CLUSTER_H = PocketMap.HEIGHT * 0.9;
     const occupied = new Set<string>();
 
-    // Tile variants — every flavour, in mid-sized clusters so each
-    // variant reads as a distinct landmark rather than a stray hex.
+    // Tile variants — destructible flavours, in mid-sized clusters so
+    // each variant reads as a distinct landmark rather than a stray
+    // hex.  Per decision #6, indestructible-tile is reserved for
+    // deliberate border placement and is not spawned here.
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
         PocketMap.GLASS_CLUSTERS, 6, 14, occupied, 'glass'
@@ -503,10 +498,6 @@ export class PocketMap extends BaseMapLayer {
     this.entities.push(...TileGenerator.generateClusteredMesh(
         CLUSTER_W, CLUSTER_H, HEX_SIZE,
         PocketMap.METAL_CLUSTERS, 4, 8, occupied, 'metal'
-    ));
-    this.entities.push(...TileGenerator.generateClusteredMesh(
-        CLUSTER_W, CLUSTER_H, HEX_SIZE,
-        PocketMap.INDESTRUCTIBLE_CLUSTERS, 3, 5, occupied, 'indestructible'
     ));
 
     // Nebula clusters — same shared occupancy so tiles and nebulae
