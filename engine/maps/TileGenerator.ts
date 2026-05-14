@@ -256,7 +256,10 @@ export class TileGenerator {
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 }, // Slight gap
         rotation: 0,
-        color: Math.random() > 0.8 ? cfg.borderColor : cfg.color,
+        // Constant per-variant body colour (no border/main-colour
+        // randomisation) — plastic = orange, metal = dark gray, rock =
+        // light gray; mobile shards inherit `tile.color` so they match.
+        color: cfg.color,
         active: true,
         health: cfg.health,
         maxHealth: cfg.health,

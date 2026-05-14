@@ -737,6 +737,67 @@ export class RockFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
+ * Tile-heavy stress map — dense clusters of every destructible /
+ * permanent tile variant packed across the 6 k × 6 k playfield.  Used
+ * for evaluating tile-glow render cost (`·tLit` in the F3 overlay)
+ * with a representative on-screen tile count.  No asteroid free-spawn
+ * and no nebulae so the scene is purely tiles.
+ */
+export class TileHeavyMap extends BaseMapLayer {
+  public static readonly WIDTH  = SINGLE_ELEMENT_MAP_SIZE;
+  public static readonly HEIGHT = SINGLE_ELEMENT_MAP_SIZE;
+
+  constructor() {
+    super('tile_heavy_01', 'Tile Heavy', MapType.TILE_HEAVY);
+    this.width  = TileHeavyMap.WIDTH;
+    this.height = TileHeavyMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: 0 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const CLUSTER_W = MAP_WIDTH  * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const CLUSTER_H = MAP_HEIGHT * SINGLE_ELEMENT_CLUSTER_FRAC;
+    const occupied = new Set<string>();
+
+    // ~5 × the single-variant showcase density: each destructible
+    // variant gets ~80 clusters × ~14 tiles = ~1 100 tiles, plus
+    // ~40 small indestructible clusters.  Total ≈ 4 700 tiles, which
+    // gives the player ~300-500 visible at default zoom — enough to
+    // exercise the per-frame tile-bloom loop under realistic load.
+    const PERVAR_CLUSTERS  = 80;
+    const PERVAR_MIN_SIZE  = 12;
+    const PERVAR_MAX_SIZE  = 16;
+    const INDESTR_CLUSTERS = 40;
+    const INDESTR_MIN_SIZE = 5;
+    const INDESTR_MAX_SIZE = 10;
+
+    for (const variant of ['glass', 'plastic', 'metal', 'rock'] as const) {
+        this.entities.push(...TileGenerator.generateClusteredMesh(
+            CLUSTER_W, CLUSTER_H, HEX_SIZE,
+            PERVAR_CLUSTERS, PERVAR_MIN_SIZE, PERVAR_MAX_SIZE,
+            occupied, variant
+        ));
+    }
+    this.entities.push(...TileGenerator.generateClusteredMesh(
+        CLUSTER_W, CLUSTER_H, HEX_SIZE,
+        INDESTR_CLUSTERS, INDESTR_MIN_SIZE, INDESTR_MAX_SIZE,
+        occupied, 'indestructible'
+    ));
+
+    // Keep the spawn point clear so the player doesn't materialise
+    // inside a wall (mirrors the SingleVariantTileFieldMap pattern).
+    const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
+    this.entities = this.entities.filter(e => {
+        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        return d2 > clearSq;
+    });
+  }
+}
+
+/**
  * Nebula-only field — pass-through nebula clusters spread across the
  * 6k map.  Each cluster center is recorded into `nebulaClusterCenters`
  * so the background layer renders puffs at the same positions as the

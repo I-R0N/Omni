@@ -154,6 +154,18 @@ export class RenderSystem {
   // entities that early-return for inactivity).
   public lastNebulaFastCount: number = 0;
   public lastNebulaSlowCount: number = 0;
+  // Wall time (ms) spent in renderProximityBloom calls for STATIC
+  // tiles this frame (mass = Infinity — glass / plastic / metal / rock /
+  // indestructible whose variant has a `glow`).  Excludes mobile-shard
+  // bloom calls (today there are none — shard `glow` configs are off).
+  // Accumulated across the material-tile branch, the asteroid/shard
+  // branch's rock-tile path, and the glass-family branch's
+  // indestructible path; reset at the start of render().  Surfaces in
+  // the dev overlay so tile lighting can be A/B'd on its own.
+  public lastTileLightingMs: number = 0;
+  // Count of tiles that actually drew a bloom this frame.  Context for
+  // interpreting lastTileLightingMs.
+  public lastTileLightingCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -599,6 +611,11 @@ export class RenderSystem {
     // renderEntities below as each nebula entity is dispatched.
     this.lastNebulaFastCount = 0;
     this.lastNebulaSlowCount = 0;
+    // Reset tile-lighting accumulator — populated at every static-tile
+    // bloom call site (material-tile branch, glass-family branch's
+    // indestructible path, asteroid/shard branch's rock-tile path).
+    this.lastTileLightingMs = 0;
+    this.lastTileLightingCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -1147,7 +1164,9 @@ export class RenderSystem {
       // the generic save/translate/rotate/restore wrapper saves 4 canvas
       // state ops per tile — multiplied by 200-400 visible tiles, that's
       // ~600-1600 fewer ops per frame.  Special states (hitFlash, regen
-      // pop, regen ghost) fall back to the slow generic path.
+      // pop, regen ghost, active glow) fall back to the slow generic
+      // path so layer 2b (variant-driven additive glow) can paint —
+      // the fast path is a single drawImage and has no glow pass.
       // Only glass-family static tiles (glass / indestructible) take the
       // hex-sprite fast path.  Plastic / metal use the material-tile slow-
       // path branch (variant color + per-vertex dent jitter).  Rock-tile
@@ -1158,9 +1177,22 @@ export class RenderSystem {
         entity.type === EntityType.STRUCTURE && entity.mass === Infinity
         && (entity.shardVariant === 'glass-tile'
             || entity.shardVariant === 'indestructible-tile');
+      // Skip the fast path while the player is inside this tile's
+      // variant glow range so the slow path's layer 2b can paint.
+      // Cheap squared-distance check; no allocation.
+      let inGlowRange = false;
+      if (isGlassFamilyStaticTile && playerPos && entity.shardVariant !== undefined) {
+          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+          if (fpGlow !== undefined) {
+              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+          }
+      }
       if (isGlassFamilyStaticTile
           && entity.active && hexReady
-          && !entity.hitFlash && entity.regenPopTimer === undefined) {
+          && !entity.hitFlash && entity.regenPopTimer === undefined
+          && !inGlowRange) {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
@@ -1671,22 +1703,33 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
-                // Layer 2b — variant-driven additive glow.  Externally
-                // gated by `entity.glowIntensity` (0..1, written each
-                // frame by whatever system owns the trigger and reset
-                // next frame).  When unset / zero, or when the variant
-                // has no `glow` config, the layer short-circuits before
-                // any state mutation — the cheap field check keeps the
-                // hot path allocation-free for non-glowing tiles.
+                // Layer 2b — glass-tile proximity glow.  Computes
+                // intensity inline from the player position.  Paints
+                // both a fill AND a thick stroke so the halo reads as
+                // a clear "lit edge" — fill alone washes the hex out
+                // cyan but doesn't pop as a beacon.  Glass-tile only: the
+                // indestructible-tile glow (warm-white lighting) is the
+                // fill-only radial bloom drawn after the cracks below.
                 if (!isFlash
-                    && entity.glowIntensity !== undefined
-                    && entity.glowIntensity > 0
-                    && entity.shardVariant !== undefined) {
+                    && playerPos
+                    && entity.shardVariant === 'glass-tile') {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
                     if (glow !== undefined) {
-                        ctx.globalAlpha = glow.peakAlpha * entity.glowIntensity;
-                        ctx.fillStyle = glow.color;
-                        ctx.fill();
+                        const pdxG = wrapDeltaX(entity.position.x, playerPos.x);
+                        const pdyG = wrapDeltaY(entity.position.y, playerPos.y);
+                        const pdistSqG = pdxG * pdxG + pdyG * pdyG;
+                        const rangeSqG = glow.range * glow.range;
+                        if (pdistSqG < rangeSqG) {
+                            const tG = 1 - Math.sqrt(pdistSqG) / glow.range;
+                            const intensityG = tG * tG;
+                            ctx.globalAlpha = glow.peakAlpha * intensityG;
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensityG);
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 3.0;
+                            ctx.stroke();
+                        }
                     }
                 }
 
@@ -1707,6 +1750,13 @@ export class RenderSystem {
                 // for parity with the historic multi-HP glass-family render
                 // path).  renderCracks early-returns at ≥95 % health.
                 this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
+
+                // Indestructible-tile lighting — the fill-only warm-white
+                // radial bloom (no edge stroke), painted last.  Glass-tile
+                // uses its own layer 2b above instead.
+                if (entity.shardVariant === 'indestructible-tile') {
+                    this.timedTileBloom(ctx, entity, playerPos);
+                }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
 
@@ -1848,6 +1898,13 @@ export class RenderSystem {
                         crackR = Math.sqrt(maxR2);
                     }
                     this.renderCracks(ctx, entity, crackR);
+
+                    // Proximity bloom for plastic/metal — fill-only radial
+                    // bloom from the player-facing edge; see
+                    // renderProximityBloom().  Painted LAST so the outline
+                    // / cracks can't cover it.  Timed via timedTileBloom
+                    // so the dev overlay can A/B tile glow.
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
@@ -1977,6 +2034,15 @@ export class RenderSystem {
                         ctx.lineWidth   = 2;
                         ctx.stroke();
                     }
+                }
+
+                // Proximity bloom for rock-tile (the only entity in this
+                // branch with a `glow` config today).  Mobile shards in
+                // this branch don't have glow configs, so we skip the
+                // call entirely rather than letting the helper no-op
+                // hundreds of times per frame.
+                if (entity.mass === Infinity) {
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
             }
 
@@ -2485,6 +2551,136 @@ export class RenderSystem {
           
           ctx.restore();
       });
+  }
+
+  // Proximity "bloom" glow for static tiles with a `glow` config —
+  // the warm-white tile-lighting on metal / plastic / rock /
+  // indestructible (and, if a variant sets `glow.hot`, an extra red
+  // hot-core layer — currently unused; reserved for the deferred metal
+  // heat treatment).  Draws one or two radial gradients centred on the
+  // point of the entity's polygon outline nearest the player, growing
+  // inward as the player closes in.  FILL ONLY — never strokes the
+  // edges; the polygon fill path confines each gradient (beyond a
+  // gradient's radius the fill is alpha 0, so the un-bloomed part of
+  // the face stays untouched).  No-op when the variant has no `glow`,
+  // the tile is mid hit-flash, or the player is out of range.  Assumes
+  // the canvas transform is already in the entity's local space
+  // (origin = centroid) — true in both the material-tile branch and
+  // the asteroid/shard branch.
+  // Thin perf wrapper around renderProximityBloom for static-tile call
+  // sites — brackets the helper with performance.now() and accumulates
+  // into lastTileLightingMs / lastTileLightingCount so the dev overlay
+  // can A/B tile glow on its own.  Called from the material-tile branch,
+  // the glass-family branch's indestructible path, and the asteroid/
+  // shard branch's rock-tile path.  ~1μs elapsed threshold filters
+  // entities that the helper bailed out of (out of range / no glow).
+  private timedTileBloom(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      playerPos: Vector2 | undefined,
+  ): void {
+      const t = performance.now();
+      this.renderProximityBloom(ctx, entity, playerPos);
+      const elapsed = performance.now() - t;
+      this.lastTileLightingMs += elapsed;
+      if (elapsed > 0.001) this.lastTileLightingCount++;
+  }
+
+  private renderProximityBloom(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      playerPos: Vector2 | undefined,
+  ): void {
+      if (!playerPos || entity.shardVariant === undefined) return;
+      if (entity.hitFlash && entity.hitFlash > 0) return;
+      const glow = SHARD_VARIANTS[entity.shardVariant].glow;
+      if (glow === undefined) return;
+      const pdxWorld = wrapDeltaX(entity.position.x, playerPos.x);
+      const pdyWorld = wrapDeltaY(entity.position.y, playerPos.y);
+      const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
+      if (pdistSq >= glow.range * glow.range) return;
+      const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
+
+      // The polygon is stored in entity-local coords (pre-rotation); the
+      // canvas transform rotates the rendering by `entity.rotation` at
+      // draw time.  To find the closest point on the polygon to the
+      // player IN THE FRAME THE POLYGON IS DRAWN IN, derotate the world
+      // delta into entity-local coords.  Static tiles have rotation 0
+      // (cos=1, sin=0) so this collapses to the world delta — same as
+      // before for tiles.  Rotating shards need the proper transform so
+      // the bloom centre tracks the player instead of spinning with the
+      // shard.
+      let pdx = pdxWorld, pdy = pdyWorld;
+      if (entity.rotation !== 0) {
+          const cosR = Math.cos(-entity.rotation);
+          const sinR = Math.sin(-entity.rotation);
+          pdx = pdxWorld * cosR - pdyWorld * sinR;
+          pdy = pdxWorld * sinR + pdyWorld * cosR;
+      }
+
+      // Closest point on the polygon outline to the player (entity-local
+      // coords; player is at (pdx, pdy) relative to the centroid), plus
+      // the circumradius (max vertex distance) for sizing the bloom.
+      // O(6) over the hex edges; slides smoothly along the perimeter as
+      // the player orbits the tile.
+      const pts = entity.polygonPoints;
+      let cgx = 0, cgy = 0;
+      let tileR = Math.max(entity.size.x, entity.size.y) / 2;
+      if (pts && pts.length >= 3) {
+          let bestD2 = Infinity, maxR2 = 0;
+          for (let i = 0; i < pts.length; i++) {
+              const aPt = pts[i], bPt = pts[(i + 1) % pts.length];
+              const r2 = aPt.x * aPt.x + aPt.y * aPt.y;
+              if (r2 > maxR2) maxR2 = r2;
+              const abx = bPt.x - aPt.x, aby = bPt.y - aPt.y;
+              const apx = pdx - aPt.x, apy = pdy - aPt.y;
+              const segLen2 = abx * abx + aby * aby;
+              let u = segLen2 > 0 ? (apx * abx + apy * aby) / segLen2 : 0;
+              if (u < 0) u = 0; else if (u > 1) u = 1;
+              const qx = aPt.x + abx * u, qy = aPt.y + aby * u;
+              const d2 = (pdx - qx) * (pdx - qx) + (pdy - qy) * (pdy - qy);
+              if (d2 < bestD2) { bestD2 = d2; cgx = qx; cgy = qy; }
+          }
+          if (maxR2 > 0) tileR = Math.sqrt(maxR2);
+      }
+
+      // Polygon fill path (entity-local coords) — confines both layers.
+      ctx.beginPath();
+      if (pts && pts.length > 0) {
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      } else {
+          ctx.arc(0, 0, tileR, 0, Math.PI * 2);
+      }
+      ctx.closePath();
+
+      // Layer A — base hue.  Radius small spot → 3.375× circumradius at
+      // peak; globalAlpha scales the gradient's stop alphas (inner stop
+      // = opaque hue, outer stop = same hue at alpha 0, so a larger
+      // radius means a gentler falloff across the visible face).
+      const oR = Math.max(tileR * (0.75 + 2.625 * intensity), 1);
+      const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
+      og.addColorStop(0, glow.color);
+      og.addColorStop(1, glow.color + '00');
+      ctx.globalAlpha = glow.peakAlpha * intensity;
+      ctx.fillStyle = og;
+      ctx.fill();
+
+      // Layer B — optional hot core (metal): a smaller radial gradient
+      // in `hot.color` at the same edge point, fading in once the base
+      // intensity passes `hot.threshold`.
+      const hot = glow.hot;
+      if (hot !== undefined && intensity > hot.threshold) {
+          const hotT = (intensity - hot.threshold) / (1 - hot.threshold);
+          const rR = Math.max(tileR * (0.45 + 1.675 * hotT), 1);
+          const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
+          rg.addColorStop(0, hot.color);
+          rg.addColorStop(1, hot.color + '00');
+          ctx.globalAlpha = glow.peakAlpha * hotT;
+          ctx.fillStyle = rg;
+          ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
   }
 
   private renderCracks(ctx: CanvasRenderingContext2D, entity: GameEntity, radius: number) {

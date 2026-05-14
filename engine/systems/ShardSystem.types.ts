@@ -271,26 +271,56 @@ export interface ShardVariantDef {
    *  pipeline; legacy compose math continues to apply.  Today set
    *  on rock-shard, glass-shard, nebula-shard. */
   density?: ShardDensityPolicy;
-  /** Per-tile additive glow visual.  When set, RenderSystem's
-   *  static-tile draw loop (layer 2b) fills the polygon with `color`
-   *  at alpha = `peakAlpha * entity.glowIntensity`.  Activation is
-   *  externally driven — whatever system owns the trigger writes
-   *  `glowIntensity` (0..1) on the entity each frame and resets it
-   *  next frame.  `range` is informational metadata for trigger
-   *  systems that compute a quadratic-falloff `glowIntensity`
-   *  relative to a source position; the renderer itself does not
-   *  read it.  Unset on every variant today — (g2) populates it
-   *  for the variants that should glow. */
+  /** Per-tile proximity glow visual.  When set, RenderSystem draws a
+   *  fill (and, for glass-tile only, an edge stroke) on the static
+   *  tile at alpha = `peakAlpha × intensity`, where intensity is the
+   *  quadratic-falloff value `(1 − dist/range)²` of the player's
+   *  distance to the tile — computed inline by RenderSystem
+   *  (`renderProximityBloom` / glass-family layer 2b), not by an
+   *  upstream pass.  The same `range` drives the repel field's
+   *  falloff in PhysicsSystem when `repel` is also set, so the
+   *  visual halo and the push footprint align by construction. */
   glow?: {
-    /** Glow color when fully lit, hex string. */
+    /** Glow color when fully lit, hex string.  This is the base /
+     *  "warm-up" layer (e.g. orange for metal). */
     color: string;
-    /** Range over which the glow falls off, world units.  Used by
-     *  external trigger systems; not read by the renderer. */
+    /** Range over which the glow falls off, world units.  Player
+     *  distance ≥ `range` → no glow drawn. */
     range: number;
-    /** Quadratic-falloff peak alpha (0..1) — multiplied by
-     *  `entity.glowIntensity` to produce the rendered alpha. */
+    /** Quadratic-falloff peak alpha (0..1) — multiplied by the
+     *  per-tile intensity to produce the rendered alpha. */
     peakAlpha: number;
+    /** Optional second "hot core" layer painted ON TOP of the base
+     *  layer once the base intensity (the quadratic falloff value,
+     *  0..1) climbs past `threshold` — mimics metal heating: orange
+     *  first, then red sneaking in over the hottest part of the
+     *  field.  The hot layer's own intensity ramps linearly from 0
+     *  at `threshold` to 1 at full base intensity, and is rendered
+     *  at `peakAlpha × hotIntensity`.  Today: metal-tile only. */
+    hot?: {
+      /** Hot-core color, hex string (e.g. red). */
+      color: string;
+      /** Base-intensity value (0..1) at which the hot layer starts
+       *  ramping in.  Typical ~0.55 — the red appears only over the
+       *  inner, hottest portion of the field. */
+      threshold: number;
+    };
   };
+  /** Outward repel field emitted by the variant's tiles.  Range MUST
+   *  stay ≤ 2 × SPATIAL_GRID_SIZE (240) so the static-grid 5×5 outer-
+   *  ring scan in PhysicsSystem.handleEntityCollisions reaches every
+   *  affected pair.  `strength` is the per-substep velocity delta at
+   *  the tile centre; falloff is quadratic to zero at `range` —
+   *  `accel = strength * (1 - dist/range)² * timeScale`.  Per
+   *  PhysicsSystem rules, projectiles and particles are exempt
+   *  unconditionally; mobile-shard variants whose `repelImmune` is
+   *  true also drift through the field unimpeded. */
+  repel?: { range: number; strength: number };
+  /** Variants whose tiles / shards should drift through any `repel`
+   *  field — i.e. the same substance as the emitter, so it doesn't
+   *  push itself.  Today: glass-shard, plastic-shard, metal-shard.
+   *  Projectiles and particles are exempt regardless of this flag. */
+  repelImmune?: boolean;
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
    *  vertices are pulled inward by a random fraction in
@@ -392,15 +422,24 @@ export interface ShardVariantDef {
      *  pick sizeFractions whose squares sum to 1.0 (e.g. sqrt(2/3)
      *  and sqrt(1/3) → ~0.816 and ~0.577 for a 2:1 area split).
      *
-     *  Each shard inherits the dented polygon scaled to its target
-     *  size so the dent character is preserved.  Spawned with a
-     *  small radial spread so multiple shards don't pile up at the
-     *  tile centre.  For 'triangle-delete' variants, the first
-     *  entry's `variant` is also used as the variant for per-hit
-     *  triangle shards. */
+     *  Each shard's polygon shape defaults to the variant's spawn
+     *  config (e.g. 4 vertices for plastic, 6/8/10 for metal) so
+     *  detached shards have a consistent material silhouette.  When
+     *  `inheritParentPolygon: true`, the shard instead clones the
+     *  parent tile's dented polygon scaled by `sizeFraction` — used
+     *  today by metal-tile so the freed shard's silhouette matches
+     *  the deformed tile exactly.  Spawned with a small radial
+     *  spread so multiple shards don't pile up at the tile centre.
+     *  For 'triangle-delete' variants, the first entry's `variant`
+     *  is also used as the variant for per-hit triangle shards. */
     breakShards: Array<{
       variant: ShardVariantId;
       sizeFraction: number;
+      /** When true, the spawned shard clones the parent tile's dented
+       *  polygon (scaled by sizeFraction) rather than generating a
+       *  fresh material-silhouette polygon from the variant's spawn
+       *  config.  Use for "the shard IS the broken tile" effects. */
+      inheritParentPolygon?: boolean;
     }>;
   };
 }

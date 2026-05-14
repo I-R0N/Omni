@@ -233,6 +233,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
                   <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·tLit</span><span className="text-white">{fmtMs(perf.tileLightingMs)}</span></div>
+                  <div className="flex justify-between"><span>&nbsp;·tLit-N</span><span className="text-white">{perf.tileLightingCount}</span></div>
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>
@@ -286,9 +288,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
         <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50">
-          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-8 tracking-tight drop-shadow-lg">
+          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
             OMNIVERSE
           </h1>
+          {/* Build version — short git SHA + UTC build time, baked in at
+              build time by vite.config.ts.  Lets you tell at a glance
+              whether a deployed preview is running the latest commit. */}
+          <div className="mb-8 font-mono text-[10px] tracking-widest text-slate-500">
+            build {__APP_VERSION__} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}Z
+          </div>
           <p className="text-slate-400 mb-12 max-w-md text-center leading-relaxed">
             Survive endless waves of escalating enemies across an infinite universe.
           </p>
@@ -325,6 +333,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
                 { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
                 { type: MapType.ROCK_FIELD,           label: 'Rock Field' },
+                { type: MapType.TILE_HEAVY,           label: 'Tile Heavy' },
               ].map(opt => (
                 <button
                   key={opt.type}

@@ -22,19 +22,15 @@ export const COLORS = {
   PLANET: '#4ade80',      // Green 400
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
-  STRUCTURE_BORDER: '#818cf8', // Indigo 400
+  STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
   // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
   // outline so the surface reads as soft injection-moulded plastic
   // rather than the violet sheen of the prior reinforced tile.
   STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
-  STRUCTURE_PLASTIC_BORDER: '#fbbf24',    // Amber 400 — gentle highlight, not specular
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
-  // against the indigo glass tiles.  Higher outline contrast than
-  // plastic to read as a hard surface.
+  // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
-  STRUCTURE_METAL_BORDER: '#e2e8f0',      // Slate 200 — chrome edge highlight
-  STRUCTURE_INDESTRUCTIBLE: '#475569',        // Slate 600 — dull steel
-  STRUCTURE_INDESTRUCTIBLE_BORDER: '#94a3b8', // Slate 400
+  STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
 
 // --- SYSTEM CONFIGURATIONS ---
@@ -368,6 +364,11 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.TILE_HEAVY]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const STRUCTURE_CONSTANTS = {
@@ -412,14 +413,14 @@ export const STRUCTURE_VARIANTS = {
     indestructible: false,
     sprite: ASSETS.HEX_STRUCTURE,
     color: COLORS.STRUCTURE,
-    borderColor: COLORS.STRUCTURE_BORDER,
   },
   plastic: {
-    // 8 HP — same hits-to-break as metal.  Differentiation is purely
-    // visual: plastic deforms more per hit (higher dent.vertexJitter)
-    // and detaches as a single ~1/3-size shard; metal warps subtly
-    // and breaks into a 1/3 + 1/6 pair.
-    health: 8,
+    // 24 HP — 3× the original 8 to tighten the break-loose threshold.
+    // Same hits-to-break as metal.  Differentiation is purely visual:
+    // plastic deforms more per hit (higher dent.vertexJitter) and
+    // detaches as a single ~1/3-size shard; metal warps subtly and
+    // breaks into a 1/3 + 1/6 pair.
+    health: 24,
     mass: Infinity,
     indestructible: false,
     // sprite left empty so RenderSystem's sprite branch falls through
@@ -428,19 +429,18 @@ export const STRUCTURE_VARIANTS = {
     // is kept in the manifest for a future per-variant sprite.
     sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
-    borderColor: COLORS.STRUCTURE_PLASTIC_BORDER,
   },
   metal: {
-    // 8 HP → 7 dent steps while alive, 8th detaches.  Same hit count
-    // as plastic but reads as harder via the subtle per-hit dent and
-    // the post-break fragmentation (two shards instead of one).
-    health: 8,
+    // 24 HP — 3× the original 8 — so the player has to commit to
+    // breaking a tile free.  Same hit count as plastic but reads as
+    // harder via the subtle per-hit dent and the post-break
+    // fragmentation (two shards instead of one).
+    health: 24,
     mass: Infinity,
     indestructible: false,
     // sprite left empty so the polygon fallback fires — see plastic above.
     sprite: '',
     color: COLORS.STRUCTURE_METAL,
-    borderColor: COLORS.STRUCTURE_METAL_BORDER,
   },
   indestructible: {
     // Sentinel health — tile is never destroyed, but keep a finite positive
@@ -450,7 +450,6 @@ export const STRUCTURE_VARIANTS = {
     indestructible: true,
     sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
-    borderColor: COLORS.STRUCTURE_INDESTRUCTIBLE_BORDER,
   },
   // Stage 7: rock-tile family — clusters of solid rock that shatter
   // into rock-shards on death (the unified "tile is the parent of
@@ -466,7 +465,6 @@ export const STRUCTURE_VARIANTS = {
     indestructible: false,
     sprite: '',
     color: COLORS.ASTEROID,
-    borderColor: '#cbd5e1', // slate-300 — slightly lighter for the edge tint
   },
 } as const;
 
@@ -1453,10 +1451,24 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Light hint-level repel — a soft outward nudge that reads as
+    // "the tile is alive" without actually blocking the player.
+    // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
+    // outer ring covers it.
+    repel: { range: 200, strength: 0.04 },
+    // Cyan-200 face + edge-stroke glow paired 1:1 with the repel field
+    // — same range, intensity follows the player's quadratic-falloff
+    // distance to the tile (computed inline in RenderSystem layer 2b).
+    glow:  { color: '#a5f3fc', range: 200, peakAlpha: 0.85 },
   },
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    // Warm-white proximity lighting — the tile FACE brightens as the
+    // player passes, drawn by RenderSystem.renderProximityBloom (fill-
+    // only radial bloom from the player-facing edge, no edge stroke).
+    // Same mechanism as metal's heat glow, minus the `hot` red core.
+    glow: { color: '#fef3c7', range: 400, peakAlpha: 0.33 },
     // Plastic deforms heavily per hit — each closest-to-impact vertex
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
@@ -1481,31 +1493,47 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Heavy repel — 1.5× glass strength.  Reads as a real shove
+    // when the player approaches; the field is the warning.  Range
+    // matches glass so dense mixed clusters present a single
+    // coherent "stay-back" footprint rather than two nested shells.
+    repel: { range: 200, strength: 0.06 },
+    // Warm-white proximity lighting like plastic / rock / indestructible,
+    // but BRIGHTER — metal reads as a more reflective surface, so it
+    // catches the player's "light" harder.  Fill-only radial bloom from
+    // the player-facing edge, no edge stroke (RenderSystem.renderProximityBloom).
+    // (The orange→red "heat" treatment is deferred to a later pass — the
+    // `hot` schema field and the renderer's hot-core layer are still in
+    // place, just not configured here.)
+    glow:  { color: '#fffbeb', range: 400, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
-    // inward by up to 13 % per hit.  Same 8-hit lifetime as plastic
-    // but the surface reads as harder via the smaller per-hit warp
-    // and the post-break fragmentation: a 2-shard pair split 2:1 by
-    // area, summing to the deformed tile's area.
+    // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
+    // but the surface reads as harder via the smaller per-hit warp;
+    // on detach it releases a single shard matching the deformed
+    // tile's silhouette exactly (see breakShards below).
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
+      // Release ONE metal-shard that IS the deformed tile: sizeFraction
+      // 1.0 → shard diameter == deformed-tile diameter, and per
+      // ShardVariantDef.dent.breakShards the shard inherits the dented
+      // polygon scaled 1× — so the freed shard's silhouette matches
+      // the tile's broken outline exactly (no chunkier "polygon"
+      // fragments).  The generic SHARD_SPAWN_SHAPE_METAL polygon
+      // (6/8/10 vertices) is retained for metal-shards spawned outside
+      // the tile-detach path (e.g. free-spawn on future map variants).
       breakShards: [
-        // Areas sum to the deformed tile's area (≈ half original
-        // area at break, per playtest).  Primary takes 2/3, secondary
-        // 1/3 — keeps the original "1/3 vs 1/6 of the tile" intent
-        // (those are fractions of the ORIGINAL tile area, and
-        // 1/3 + 1/6 = 1/2 = deformed area).
-        // Linear sizeFraction = sqrt(area fraction of deformed),
-        // so primary uses sqrt(2/3) ≈ 0.816, secondary sqrt(1/3)
-        // ≈ 0.577.
-        { variant: 'metal-shard', sizeFraction: 0.816 },
-        { variant: 'metal-shard', sizeFraction: 0.577 },
+        { variant: 'metal-shard', sizeFraction: 1.0, inheritParentPolygon: true },
       ],
     },
   },
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    // Warm-white proximity lighting (fill-only radial bloom, no edge
+    // stroke).  Glass-tile uses its cyan layer-2b glow instead;
+    // indestructible takes the same neutral lighting as plastic / rock.
+    glow:    { color: '#fef3c7', range: 400, peakAlpha: 0.75 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
@@ -1521,6 +1549,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    // Proximity lighting — a red/orange bloom that warms the light-gray
+    // rock face near the player.  Fill-only radial bloom, no edge
+    // stroke; drawn from the asteroid/shard render branch, gated to
+    // static tiles (mass=∞) so rock-shards are excluded.
+    glow: { color: '#ea580c', range: 400, peakAlpha: 0.33 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
@@ -1681,6 +1714,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     onShatterParticles: 'inherit',
     passThrough: false,
+    // Glass shards are the same substance as their parent tile —
+    // they drift through the glass-tile repel field unimpeded.
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     // Density compaction: glass shards already render with a soft
     // translucent tint, so the floor stays at 0.55 (matches rock).
@@ -1730,6 +1766,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Warm amber particle puff matches the matte-polymer body colour.
     onShatterParticles: { color: '#fbbf24', count: 5 },
     passThrough: false,
+    // Plastic shards drift through the plastic-tile repel field.
+    // (Plastic-tiles don't emit a field today, but the immunity is
+    // declared symmetrically with glass / metal so adding one later
+    // is a one-line change.)
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
@@ -1779,6 +1820,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
     passThrough: false,
+    // Metal shards drift through the metal-tile repel field.
+    repelImmune: true,
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
@@ -1943,6 +1986,10 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.ROCK_FIELD]: {
     'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
+  // Tile-heavy stress map — `TileHeavyMap.init()` populates the map
+  // directly with hardcoded counts (it doesn't read MAP_POPULATION),
+  // so this entry only exists to satisfy the Record<MapType, …> shape.
+  [MapType.TILE_HEAVY]: {},
 };
 
 /**

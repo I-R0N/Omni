@@ -31,6 +31,11 @@ export enum MapType {
   // — exercises the new tile→shard lineage where a rock-tile cluster
   // shatters into rock-shards that drift / merge / accrete.
   ROCK_FIELD           = 'ROCK_FIELD',
+  // Tile-heavy stress map — dense clusters of every destructible /
+  // permanent tile variant packed across a 6 k × 6 k playfield.  Used
+  // for evaluating tile-glow render cost (the F3 overlay's `·tLit`
+  // row) with a representative on-screen tile count.
+  TILE_HEAVY           = 'TILE_HEAVY',
 }
 
 export enum GameState {
@@ -377,12 +382,13 @@ export interface GameEntity {
   // absorbed; undefined means no power-up content.
   powerupGlowColor?: string;
 
-  // Per-frame variant-glow activation (0..1).  Externally driven — the
-  // system that owns the trigger (e.g. proximity scan, damage pulse)
-  // writes this each frame and clears it the next frame.  Read by
-  // RenderSystem layer 2b alongside SHARD_VARIANTS[v].glow.peakAlpha
-  // to produce the rendered alpha.  Undefined or 0 → layer skipped.
-  glowIntensity?: number;
+  // Per-substep accumulator of repel-field impulse magnitudes from
+  // every static tile in range.  Reset to 0 at the start of each
+  // PhysicsSystem.handleEntityCollisions broadphase pass and added
+  // to inside the inner-3×3 + outer-5×5 repel scans.  Surfaced for
+  // future consumers (HUD opacity fade, debug overlays); the field
+  // exists today purely so the broadphase has a place to write.
+  repelImpulse?: number;
 
   // Lazily-baked original circumradius² for dent-policy tiles
   // (plastic-tile, metal-tile).  Computed in RenderSystem on first
@@ -596,6 +602,16 @@ export interface PerfSnapshot {
   // window is ~18 % of a 6 k map, so a 1 200-tile NebulaFieldMap
   // surfaces ~210 tiles per frame.
   nebulaVisible: number;
+  // Wall time (ms) accumulated across this frame's renderProximityBloom
+  // calls for STATIC tiles (mass = Infinity, with a `glow` config).
+  // Excludes mobile-shard bloom calls (today there are none — shard
+  // glow configs are off).  Lets the dev overlay A/B tile lighting on
+  // its own.
+  tileLightingMs: number;
+  // Number of tiles that actually drew a bloom this frame (helper got
+  // past the range / no-glow early-returns).  Latest frame, not
+  // averaged — context for interpreting tileLightingMs.
+  tileLightingCount: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the
