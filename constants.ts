@@ -1459,7 +1459,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cyan-200 face + edge-stroke glow paired 1:1 with the repel field
     // — same range, intensity follows the player's quadratic-falloff
     // distance to the tile (computed inline in RenderSystem layer 2b).
-    glow:  { color: '#a5f3fc', range: 200, peakAlpha: 0.85 },
+    glow:  { color: '#a5f3fc', range: 250, peakAlpha: 0.85 },
   },
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -1468,7 +1468,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
     // Same mechanism as metal's heat glow, minus the `hot` red core.
-    glow: { color: '#fef3c7', range: 400, peakAlpha: 0.33 },
+    glow: { color: '#fef3c7', range: 250, peakAlpha: 0.33 },
     // Plastic deforms heavily per hit — each closest-to-impact vertex
     // pulled inward by up to 25 % of its current radius.  Same hit
     // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
@@ -1505,7 +1505,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // (The orange→red "heat" treatment is deferred to a later pass — the
     // `hot` schema field and the renderer's hot-core layer are still in
     // place, just not configured here.)
-    glow:  { color: '#fffbeb', range: 400, peakAlpha: 0.75 },
+    glow:  { color: '#fffbeb', range: 250, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp;
@@ -1533,7 +1533,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Warm-white proximity lighting (fill-only radial bloom, no edge
     // stroke).  Glass-tile uses its cyan layer-2b glow instead;
     // indestructible takes the same neutral lighting as plastic / rock.
-    glow:    { color: '#fef3c7', range: 400, peakAlpha: 0.75 },
+    glow:    { color: '#fef3c7', range: 250, peakAlpha: 0.75 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
@@ -1553,7 +1553,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // rock face near the player.  Fill-only radial bloom, no edge
     // stroke; drawn from the asteroid/shard render branch, gated to
     // static tiles (mass=∞) so rock-shards are excluded.
-    glow: { color: '#ea580c', range: 400, peakAlpha: 0.33 },
+    glow: { color: '#ea580c', range: 250, peakAlpha: 0.33 },
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random
