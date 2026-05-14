@@ -31,6 +31,11 @@ export enum MapType {
   // — exercises the new tile→shard lineage where a rock-tile cluster
   // shatters into rock-shards that drift / merge / accrete.
   ROCK_FIELD           = 'ROCK_FIELD',
+  // Tile-heavy stress map — dense clusters of every destructible /
+  // permanent tile variant packed across a 6 k × 6 k playfield.  Used
+  // for evaluating tile-glow render cost (the F3 overlay's `·tLit`
+  // row) with a representative on-screen tile count.
+  TILE_HEAVY           = 'TILE_HEAVY',
 }
 
 export enum GameState {

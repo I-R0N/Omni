@@ -368,6 +368,11 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
     acceleration: 0.077,
     friction: 0.998
   },
+  [MapType.TILE_HEAVY]: {
+    maxSpeed: 140,
+    acceleration: 0.077,
+    friction: 0.998
+  },
 };
 
 export const STRUCTURE_CONSTANTS = {
@@ -1989,6 +1994,10 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
   [MapType.ROCK_FIELD]: {
     'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
   },
+  // Tile-heavy stress map — `TileHeavyMap.init()` populates the map
+  // directly with hardcoded counts (it doesn't read MAP_POPULATION),
+  // so this entry only exists to satisfy the Record<MapType, …> shape.
+  [MapType.TILE_HEAVY]: {},
 };
 
 /**
