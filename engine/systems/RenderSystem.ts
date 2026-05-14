@@ -154,16 +154,18 @@ export class RenderSystem {
   // entities that early-return for inactivity).
   public lastNebulaFastCount: number = 0;
   public lastNebulaSlowCount: number = 0;
-  // Wall time (ms) spent in renderProximityBloom calls for MOBILE
-  // shards this frame (rock-/plastic-/metal-shard).  Excludes the same
-  // helper's calls for static tiles (their cost rolls into the main
-  // renderMs).  Accumulated across the asteroid/shard render pass;
-  // reset at the start of render().  Surfaces in the dev overlay so
-  // shard lighting can be A/B'd on its own.
-  public lastShardLightingMs: number = 0;
-  // Count of shards that actually drew a bloom this frame (in range +
-  // has a glow config).  Context for interpreting lastShardLightingMs.
-  public lastShardLightingCount: number = 0;
+  // Wall time (ms) spent in renderProximityBloom calls for STATIC
+  // tiles this frame (mass = Infinity — glass / plastic / metal / rock /
+  // indestructible whose variant has a `glow`).  Excludes mobile-shard
+  // bloom calls (today there are none — shard `glow` configs are off).
+  // Accumulated across the material-tile branch, the asteroid/shard
+  // branch's rock-tile path, and the glass-family branch's
+  // indestructible path; reset at the start of render().  Surfaces in
+  // the dev overlay so tile lighting can be A/B'd on its own.
+  public lastTileLightingMs: number = 0;
+  // Count of tiles that actually drew a bloom this frame.  Context for
+  // interpreting lastTileLightingMs.
+  public lastTileLightingCount: number = 0;
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
@@ -609,10 +611,11 @@ export class RenderSystem {
     // renderEntities below as each nebula entity is dispatched.
     this.lastNebulaFastCount = 0;
     this.lastNebulaSlowCount = 0;
-    // Reset shard-lighting accumulator — populated in the asteroid/shard
-    // render branch when a mobile shard's bloom fires.
-    this.lastShardLightingMs = 0;
-    this.lastShardLightingCount = 0;
+    // Reset tile-lighting accumulator — populated at every static-tile
+    // bloom call site (material-tile branch, glass-family branch's
+    // indestructible path, asteroid/shard branch's rock-tile path).
+    this.lastTileLightingMs = 0;
+    this.lastTileLightingCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -1754,7 +1757,7 @@ export class RenderSystem {
                 // radial bloom (no edge stroke), painted last.  Glass-tile
                 // uses its own layer 2b above instead.
                 if (entity.shardVariant === 'indestructible-tile') {
-                    this.renderProximityBloom(ctx, entity, playerPos);
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
@@ -1898,12 +1901,12 @@ export class RenderSystem {
                     }
                     this.renderCracks(ctx, entity, crackR);
 
-                    // Proximity bloom — metal's orange→red heat ramp, and
-                    // (once configured) any other material-tile variant's
-                    // glow.  Fill-only radial bloom from the player-facing
-                    // edge; see renderProximityBloom().  Painted LAST so
-                    // the outline / cracks can't cover it.
-                    this.renderProximityBloom(ctx, entity, playerPos);
+                    // Proximity bloom for plastic/metal — fill-only radial
+                    // bloom from the player-facing edge; see
+                    // renderProximityBloom().  Painted LAST so the outline
+                    // / cracks can't cover it.  Timed via timedTileBloom
+                    // so the dev overlay can A/B tile glow.
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
@@ -2035,30 +2038,13 @@ export class RenderSystem {
                     }
                 }
 
-                // Proximity bloom for entities in this branch with a
-                // `glow` config — today: rock-tile (red/orange) plus the
-                // rock/plastic/metal shards that inherit the same
-                // lighting as their parent tiles.  Glass-shards and any
-                // future variant without a `glow` no-op inside the
-                // helper.  No mass gate: the helper's own glow-presence
-                // check is the gate.
-                //
-                // Time mobile-shard bloom calls separately (lastShardLightingMs)
-                // so the dev overlay can A/B shard lighting against everything
-                // else.  Static-tile bloom calls (mass=∞) roll into the main
-                // renderMs.  The performance.now() pair is cheap (~ns each).
-                if (entity.mass !== Infinity) {
-                    const tSL = performance.now();
-                    this.renderProximityBloom(ctx, entity, playerPos);
-                    const elapsed = performance.now() - tSL;
-                    this.lastShardLightingMs += elapsed;
-                    // Count only shards that actually drew (the helper bails
-                    // fast on out-of-range / no-glow entities).  ~1μs is the
-                    // rough threshold between "early-return" and "did real
-                    // work (gradient + fill)".
-                    if (elapsed > 0.001) this.lastShardLightingCount++;
-                } else {
-                    this.renderProximityBloom(ctx, entity, playerPos);
+                // Proximity bloom for rock-tile (the only entity in this
+                // branch with a `glow` config today).  Mobile shards in
+                // this branch don't have glow configs, so we skip the
+                // call entirely rather than letting the helper no-op
+                // hundreds of times per frame.
+                if (entity.mass === Infinity) {
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
             }
 
@@ -2583,6 +2569,25 @@ export class RenderSystem {
   // the canvas transform is already in the entity's local space
   // (origin = centroid) — true in both the material-tile branch and
   // the asteroid/shard branch.
+  // Thin perf wrapper around renderProximityBloom for static-tile call
+  // sites — brackets the helper with performance.now() and accumulates
+  // into lastTileLightingMs / lastTileLightingCount so the dev overlay
+  // can A/B tile glow on its own.  Called from the material-tile branch,
+  // the glass-family branch's indestructible path, and the asteroid/
+  // shard branch's rock-tile path.  ~1μs elapsed threshold filters
+  // entities that the helper bailed out of (out of range / no glow).
+  private timedTileBloom(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      playerPos: Vector2 | undefined,
+  ): void {
+      const t = performance.now();
+      this.renderProximityBloom(ctx, entity, playerPos);
+      const elapsed = performance.now() - t;
+      this.lastTileLightingMs += elapsed;
+      if (elapsed > 0.001) this.lastTileLightingCount++;
+  }
+
   private renderProximityBloom(
       ctx: CanvasRenderingContext2D,
       entity: GameEntity,

@@ -605,14 +605,15 @@ export interface PerfSnapshot {
   // surfaces ~210 tiles per frame.
   nebulaVisible: number;
   // Wall time (ms) accumulated across this frame's renderProximityBloom
-  // calls for MOBILE shards (rock-/plastic-/metal-shard).  Excludes
-  // static-tile bloom calls (those roll into renderMs).  Lets the dev
-  // overlay A/B shard lighting on its own.
-  shardLightingMs: number;
-  // Number of shards that actually drew a bloom this frame (helper
-  // got past the range / no-glow early-returns).  Latest frame, not
-  // averaged — context for interpreting shardLightingMs.
-  shardLightingCount: number;
+  // calls for STATIC tiles (mass = Infinity, with a `glow` config).
+  // Excludes mobile-shard bloom calls (today there are none — shard
+  // glow configs are off).  Lets the dev overlay A/B tile lighting on
+  // its own.
+  tileLightingMs: number;
+  // Number of tiles that actually drew a bloom this frame (helper got
+  // past the range / no-glow early-returns).  Latest frame, not
+  // averaged — context for interpreting tileLightingMs.
+  tileLightingCount: number;
   // Per-frame split of nebula entities that took the fast path (cached
   // sprite, single drawImage) vs. the slow path (full ctx.save +
   // tint compute + …).  Sum equals nebulaVisible.  Surfaces in the

@@ -223,7 +223,7 @@ export class GameEngine {
   // and paused states as well, so this is tracked on its own cursor)
   private perfRender         = new Float64Array(GameEngine.PERF_WINDOW);
   private perfNebula         = new Float64Array(GameEngine.PERF_WINDOW);
-  private perfShardLighting  = new Float64Array(GameEngine.PERF_WINDOW);
+  private perfTileLighting  = new Float64Array(GameEngine.PERF_WINDOW);
   private perfRenderIdx: number = 0;
   private perfRenderFilled: number = 0;
   // Latest count snapshot from the most recent prepareFrameEntities() pass.
@@ -2377,7 +2377,7 @@ export class GameEngine {
   private recordRenderPerf() {
       this.perfRender[this.perfRenderIdx]        = this.renderer.lastRenderMs;
       this.perfNebula[this.perfRenderIdx]        = this.renderer.lastNebulaMs;
-      this.perfShardLighting[this.perfRenderIdx] = this.renderer.lastShardLightingMs;
+      this.perfTileLighting[this.perfRenderIdx] = this.renderer.lastTileLightingMs;
       const next = this.perfRenderIdx + 1;
       this.perfRenderIdx = next >= GameEngine.PERF_WINDOW ? 0 : next;
       if (this.perfRenderFilled < GameEngine.PERF_WINDOW) this.perfRenderFilled++;
@@ -2433,8 +2433,8 @@ export class GameEngine {
           nebulaVisible:  this.renderer.lastNebulaVisible,
           nebulaFast:     this.renderer.lastNebulaFastCount,
           nebulaSlow:     this.renderer.lastNebulaSlowCount,
-          shardLightingMs:    GameEngine.ringAvg(this.perfShardLighting, this.perfRenderFilled),
-          shardLightingCount: this.renderer.lastShardLightingCount,
+          tileLightingMs:    GameEngine.ringAvg(this.perfTileLighting, this.perfRenderFilled),
+          tileLightingCount: this.renderer.lastTileLightingCount,
           // Cell density peaks on single-frame spikes — report the window
           // max so the overlay surfaces transient clusters, not just the mean.
           maxCellDensity: GameEngine.ringPeak(this.perfDensity,     simN),

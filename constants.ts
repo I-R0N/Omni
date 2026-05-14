@@ -1655,9 +1655,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_ROCK,
     regen: { kind: 'none' },
-    // Inherits the rock-tile lighting: red/orange bloom that warms the
-    // light-gray shard face near the player (RenderSystem.renderProximityBloom).
-    glow: { color: '#ea580c', range: 400, peakAlpha: 0.33 },
     merge: {
       attractedTo: 'none',                      // contact-stick only
       bondsWith: { include: ['rock-shard', 'glass-shard'] },
@@ -1743,8 +1740,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Inherits the plastic-tile lighting: warm cream bloom near the player.
-    glow: { color: '#fef3c7', range: 400, peakAlpha: 0.33 },
     // Self-bond only for now — plastic shards stick to other plastic
     // shards via the standard rock-style cohesion.  No cross-material
     // bonds with rock / glass / metal yet (kept narrow until we see
@@ -1805,9 +1800,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
-    // Inherits the metal-tile lighting: bright near-white bloom — metal
-    // shards catch the player's light hardest, matching their parent tile.
-    glow: { color: '#fffbeb', range: 400, peakAlpha: 0.75 },
     merge: {
       attractedTo: 'none',
       bondsWith: { include: ['metal-shard'] },
