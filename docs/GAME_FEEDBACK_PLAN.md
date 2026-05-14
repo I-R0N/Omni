@@ -143,6 +143,33 @@ k. After N waves, spawn a portal to a new map.
     carries a repel field — superseding decision #9's "metal =
     damage-pulse" trigger plan.
 
+11. **g2 design deviations (PR #53)** — three places where what
+    shipped diverged from decision #10's spec:
+    a. **`repelImpulse` is accumulated but unread.**
+       `PhysicsSystem` populates `entity.repelImpulse` per-substep,
+       but RenderSystem computes glow proximity inline from the
+       player position instead (commit `81c33e0` — "drop
+       glowIntensity dep"). The accumulator is currently vestigial.
+       Resolution deferred to g2-housekeeping: rip out OR wire to
+       glass-tile glow per original spec.
+    b. **Metal-tile glow uses a separate heat-bloom / warm-lighting
+       model**, not proximity-to-repel as planned. Keeps the look
+       distinct from glass; not coupled to repel intensity.
+       Accepted as-shipped — visual works.
+    c. **Metal-shard `repelImmune` amendment did not land.** The
+       in-flight amendment (flip metal-shard off `repelImmune` so
+       metal-shards feel the metal-tile repel field, priming g3
+       attraction bonds) was not folded into PR #53. Carried into
+       g2-housekeeping.
+12. **(g3) Material interactions** — queued as a Phase 1 follow-up
+    (not a renumbering of original feedback letters). Two pieces:
+    metal-shard ↔ metal-shard attraction via the existing gravity
+    primitive + new `gravityTargetVariant` filter + runtime
+    attractor registration (see CLAUDE.md §8 / `PhysicsSystem
+    .applyGravity`); metal-shard damages glass-tile on contact
+    (damage model deferred to g3's design phase). Does NOT block
+    Phase 2.
+
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
    against `main`) bundles four independent changes under a
@@ -176,7 +203,7 @@ k. After N waves, spawn a portal to a new map.
 | d1 | Shared-ammo consolidation | shipped (PR #47, merged into plan branch) | (same as e) | Single shared ammo pool, per-shot costs tuned to preserve shots-per-pickup feel, dedicated HUD readout box, ammo-drop visual (black core / white rim / white glow). |
 | j | Graceful cleanup + density compaction | shipped (PR #50, merged into plan branch) | `claude/graceful-cleanup-density-Kscjl` | Offscreen-priority cleanup pacing, generic density compaction across rock/glass/nebula shards (`density` policy on `ShardVariantDef`), large-shard collapse, density-tier tint ramp. |
 | g1 | Plastic/metal rename + revisualize + glow primitive + dent/break-loose physics | shipped (PR #52, merged into plan branch) | `claude/plastic-metal-rename-glow-YaUkr` | Over-delivered. Plastic/metal rename, glow primitive (`glow?` on `ShardVariantDef`, layer-2b in RenderSystem gated on `entity.glowIntensity`), AND most of (g2)'s original scope: dent/deform policy (`dent` field with vertexJitter, kind, breakShards), `plastic-shard` + `metal-shard` variants, per-material shard counts, HP parity. Plus rock-dent system and drop overhaul as bonus. |
-| g2 | Repel field (glass + metal) + glow trigger wiring | pending | `claude/material-tiles-repel-<suffix>` | **Narrowed scope.** Add `repel?: { range, strength }` + `repelImmune?` to `ShardVariantDef`. Glass-tile = light repel (low strength). Metal-tile = heavy repel (matches PR #45's `range: 200, strength: 0.08`). PhysicsSystem 5×5 outer-ring repel scan + per-entity `repelImpulse`. Wire `entity.glowIntensity` from the per-frame repel intensity for both variants so the existing glow primitive lights up on player proximity. Optional: DBG strength slider. Dent/break-loose already shipped under g1 — out of scope here. |
+| g2 | Repel field (glass + metal) + glow trigger wiring | shipped (PR #53, merged into plan branch) | `claude/material-tiles-repel-boxIU` | Repel schema + glass/metal tile fields shipped. Three design deviations (see decision #11). Over-delivered with per-variant warm-lighting on rock/plastic/indestructible, TILE_HEAVY stress map, title-screen build-version display, plastic+metal HP 8→24, metal break-shard inherits dented polygon, dev-overlay perf timer split. |
 | d2 | Weapon system overhaul | shipped (PRs #48 + #49, merged into plan branch) | `claude/weapon-system-overhaul-LLSqp` (+ `claude/charge-full-gate-7Hk2x`) | Charge model, per-shot ammo cost scaling, cannon shockwave, bouncer fan/nova, green-laser & purple-cannon redesigns. |
 
 ### Dependency chain
@@ -187,6 +214,18 @@ e ──► d1 ──┬──► j ──► g1 ──► g2
 ```
 
 Each task pulls the merged state of its predecessor(s) before branching.
+
+---
+
+## Phase 1 follow-ups
+
+Small bundled work that fell out of Phase 1 but doesn't gate Phase 2.
+Run when convenient; can run in parallel with Phase 2.
+
+| ID | Task | Status | Branch | Notes |
+|----|------|--------|--------|-------|
+| g2-housekeeping | Resolve g2 deviations | pending | `claude/g2-housekeeping-<suffix>` | (1) Decide `repelImpulse` fate — rip out OR wire to glass-tile glow per decision #10. (2) Flip `metal-shard` off `repelImmune` (one-liner). (3) Optional: fold side-cleanup punch-list items in this PR. Tiny scope. |
+| g3 | Material interactions | pending | `claude/material-interactions-<suffix>` | Metal-shard ↔ metal-shard attraction via gravity primitive + `gravityTargetVariant` filter + runtime attractor registration; metal-shard damages glass-tile on contact (damage model designed in g3's `AskUserQuestion` phase). Depends on g2-housekeeping landing first (needs `metal-shard.repelImmune = false` to feel right). |
 
 ---
 
