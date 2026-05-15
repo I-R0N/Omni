@@ -262,14 +262,18 @@ export const SHARD_PAIR_CONSTANTS = {
   // pressure).  Steps are deliberately coarse so the active interval
   // doesn't hop every frame as density fluctuates by 1-2.  Light
   // fields (a few drifting shards) keep N=1 so impact response
-  // feels crisp; dense piles (cannon spam) climb to N=4 so settled
-  // clusters don't dominate the frame budget.  First entry whose
-  // `maxDensity` ≥ observed wins.
+  // feels crisp; heavy piles climb through powers-of-2 to N=16/32
+  // so settled clusters stop dominating the frame budget — at those
+  // densities pairs are visually settled and the human eye won't
+  // notice a 1/4-sec separation lag.  First entry whose `maxDensity`
+  // ≥ observed wins.
   AUTO_THRESHOLDS: [
-    { maxDensity: 8,   interval: 1 },
-    { maxDensity: 16,  interval: 2 },
-    { maxDensity: 28,  interval: 3 },
-    { maxDensity: 999, interval: 4 },
+    { maxDensity: 8,    interval: 1 },
+    { maxDensity: 16,   interval: 2 },
+    { maxDensity: 32,   interval: 4 },
+    { maxDensity: 64,   interval: 8 },
+    { maxDensity: 128,  interval: 16 },
+    { maxDensity: 9999, interval: 32 },
   ] as const,
   // Manual cycle order, including AUTO sentinel (0).  Spans 1..1028
   // so dense fields can pin a very high interval for stress testing.
@@ -295,10 +299,12 @@ export const SHARD_TILE_PAIR_CONSTANTS = {
   // off so the scan doesn't dominate `coll` ms.
   FRAME_INTERVAL: 0,
   AUTO_THRESHOLDS: [
-    { maxDensity: 8,   interval: 1 },
-    { maxDensity: 16,  interval: 2 },
-    { maxDensity: 28,  interval: 3 },
-    { maxDensity: 999, interval: 4 },
+    { maxDensity: 8,    interval: 1 },
+    { maxDensity: 16,   interval: 2 },
+    { maxDensity: 32,   interval: 4 },
+    { maxDensity: 64,   interval: 8 },
+    { maxDensity: 128,  interval: 16 },
+    { maxDensity: 9999, interval: 32 },
   ] as const,
   CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
 };
