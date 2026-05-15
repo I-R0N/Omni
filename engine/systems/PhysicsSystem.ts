@@ -1745,9 +1745,23 @@ export class PhysicsSystem {
               }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
-              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
-              player.health -= envDmg;
-              player.hitFlash = 0.1;
+              // Light bump — tile doesn't break, but the player takes
+              // environmental damage proportional to the impact speed.
+              // Route through shield first (same model as enemy-ram
+              // damage above): absorb up to the current shield value,
+              // then bleed the remainder into health.
+              let envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              if ((player.shield ?? 0) > 0) {
+                  const absorbed = Math.min(player.shield!, envDmg);
+                  player.shield! -= absorbed;
+                  envDmg -= absorbed;
+                  player.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  player.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+              }
+              if (envDmg > 0) {
+                  player.health -= envDmg;
+                  player.hitFlash = 0.1;
+              }
           }
       }
 
