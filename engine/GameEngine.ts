@@ -129,6 +129,13 @@ export class GameEngine {
   // cost in the perf overlay.  Defaults to ON.
   private collisionsEnabled: boolean = true;
 
+  // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
+  // collision scan in PhysicsSystem.  Defaults to OFF: today's
+  // broadphase doesn't pair these (shards skip the outer loop), so
+  // mobile shards drift through tiles' geometry; flipping ON adds
+  // the missing scan and the asteroid-crash branch starts firing.
+  private shardTileCollisionsEnabled: boolean = false;
+
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
   // call sites that still read/write them directly.
@@ -333,6 +340,19 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the dedicated mobile-shard ↔ static-tile collision pass.
+   * Default OFF — the main broadphase skips this pair (shards drift
+   * through tile geometry, only the repel field pushes them away).
+   * Flip ON to add hard collisions: the asteroid-crash branch in
+   * resolveCollision fires (pressure damage to the tile + elastic
+   * bounce off the face).
+   */
+  public toggleShardTileCollisions() {
+    this.shardTileCollisionsEnabled = !this.shardTileCollisionsEnabled;
+    this.physics.shardTileCollisionsEnabled = this.shardTileCollisionsEnabled;
+  }
+
+  /**
    * Cycle the shard ↔ shard pair-resolution interval through
    * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 4 → 8 → 16 →
    * 32 → 64 → 128 → 256 → 512 → 1028).  AUTO (= 0) lets
@@ -502,6 +522,7 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardTileCollisionsEnabled: this.shardTileCollisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,
@@ -605,6 +626,7 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardTileCollisionsEnabled: this.shardTileCollisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       weaponCount: this.currentWeaponIndex + 1,

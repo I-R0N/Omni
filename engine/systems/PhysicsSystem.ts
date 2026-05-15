@@ -81,6 +81,15 @@ export class PhysicsSystem {
   // the entire broadphase + SAT pass is skipped (game-breaking;
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
+  // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
+  // collision scan (resolveShardTilePairs).  Default OFF: the main
+  // broadphase already skips this pair (shards are excluded from
+  // the outer loop), so today's behaviour is "shards drift through
+  // tiles' geometry, only the repel field pushes them away."  Flip
+  // ON to add the missing scan — bringing back the dead asteroid-
+  // crash branch in resolveCollision (asteroid-pressure damage +
+  // elastic bounce off the tile face).
+  public shardTileCollisionsEnabled: boolean = false;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -408,6 +417,9 @@ export class PhysicsSystem {
       this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
       if (this.shouldRunShardPairsThisStep()) {
         this.resolveShardPairs(asteroids);
+      }
+      if (this.shardTileCollisionsEnabled) {
+        this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
       }
     }
     this.lastCollisionsMs = performance.now() - tCol;
@@ -1039,6 +1051,49 @@ export class PhysicsSystem {
             }
         }
     }
+  }
+
+  /**
+   * Mobile-shard ↔ static-tile collision pass — debug-gated by
+   * `shardTileCollisionsEnabled`.  The main broadphase skips
+   * STRUCTURE entities as outer-loop subjects (commit cf69102),
+   * which leaves shard-vs-tile pairs un-iterated.  This pass closes
+   * that gap when the toggle is on: each mobile shard does a 3×3
+   * staticGrid lookup and routes any overlapping tile through
+   * checkAndResolveCollision — the same SAT + resolveCollision
+   * path projectiles / players use.  Re-activates the dead
+   * `aIsMobileShard && bIsStaticTile` branch in resolveCollision
+   * (asteroid-pressure crash + indestructible bounce + elastic
+   * impulse).
+   */
+  private resolveShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (!a.active || a.isExploding) continue;
+          if (a.nebulaFadeTimer !== undefined) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
   }
 
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {

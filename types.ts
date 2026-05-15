@@ -657,6 +657,10 @@ export interface EngineStats {
   localGravityEnabled?: boolean;
   attractorGravityEnabled?: boolean;
   collisionsEnabled?: boolean;
+  // Mobile-shard ↔ static-tile collision pass.  Default false (no
+  // pairing — shards drift through tile geometry; only the repel
+  // field pushes them).  Toggled via the DBG panel.
+  shardTileCollisionsEnabled?: boolean;
   // Shard-shard pair resolution interval.  The manual setting (0 =
   // AUTO; ≥1 = manual override).  Cycled via the DBG panel's
   // "ShPair" button.

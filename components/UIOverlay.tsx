@@ -16,6 +16,7 @@ interface UIOverlayProps {
   onToggleLocalGravity?: () => void;
   onToggleAttractorGravity?: () => void;
   onToggleCollisions?: () => void;
+  onToggleShardTileCollisions?: () => void;
   onCycleShardPairInterval?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
@@ -38,6 +39,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleLocalGravity,
   onToggleAttractorGravity,
   onToggleCollisions,
+  onToggleShardTileCollisions,
   onCycleShardPairInterval,
   onSkipWave,
   difficulty = 3,
@@ -176,6 +178,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
                 >
                   {stats.collisionsEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+
+              {/* Mobile-shard ↔ static-tile collision pass.  Default OFF —
+                  the main broadphase doesn't pair shards with tiles
+                  (shards skip the outer loop), so today's behaviour is
+                  pass-through (only the repel field pushes them away).
+                  Flip ON to enable hard collisions: asteroid-pressure
+                  damage to the tile + elastic bounce off the face. */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl</span>
+                <button
+                  onClick={onToggleShardTileCollisions}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Toggle mobile-shard ↔ static-tile collision pass.  Default OFF (shards drift through tiles, only the repel field pushes); ON adds hard collisions and the asteroid-crash branch."
+                >
+                  {stats.shardTileCollisionsEnabled === true ? 'On' : 'Off'}
                 </button>
               </div>
 
