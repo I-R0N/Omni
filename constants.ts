@@ -1555,10 +1555,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
-    // Warm-white proximity lighting (fill-only radial bloom, no edge
-    // stroke).  Glass-tile uses its cyan layer-2b glow instead;
-    // indestructible takes the same neutral lighting as plastic / rock.
-    glow:    { color: '#fef3c7', range: 250, peakAlpha: 0.75 },
+    // Deep-purple proximity lighting (fill-only radial bloom, no edge
+    // stroke).  Reads as the "void" tile — the unbreakable face of
+    // the map — distinct from glass's cyan and rock's orange.
+    glow:    { color: '#4c1d95', range: 250, peakAlpha: 0.75 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
