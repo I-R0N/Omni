@@ -281,6 +281,28 @@ export const SHARD_PAIR_CONSTANTS = {
   CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// Shard ↔ static-tile pair resolution.
+// Mirrors SHARD_PAIR_CONSTANTS for the dedicated shard-vs-tile scan
+// (`PhysicsSystem.resolveShardTilePairs`).  That pass is opt-in via
+// the DBG `Sh↔Tl` toggle; when it is on, this interval gates how
+// often it actually fires per physics substep.  Same density signal
+// as SHARD_PAIR (lastMaxCellDensity proxies the outer-loop size —
+// the shard count drives the cost).
+export const SHARD_TILE_PAIR_CONSTANTS = {
+  // Default AUTO so behaviour matches the shard-pair UX: light
+  // fields resolve every frame for crisp impacts, dense fields back
+  // off so the scan doesn't dominate `coll` ms.
+  FRAME_INTERVAL: 0,
+  AUTO_THRESHOLDS: [
+    { maxDensity: 8,   interval: 1 },
+    { maxDensity: 16,  interval: 2 },
+    { maxDensity: 28,  interval: 3 },
+    { maxDensity: 999, interval: 4 },
+  ] as const,
+  CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
+};
+
 export const TRAIL_CONSTANTS = {
   LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point

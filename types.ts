@@ -669,6 +669,12 @@ export interface EngineStats {
   // shardPairInterval when the manual value is ≥1; in AUTO mode this
   // tracks the density-scaled value selected by PhysicsSystem.
   shardPairEffectiveInterval?: number;
+  // Shard ↔ static-tile pair resolution interval — mirrors the
+  // shard-pair pair above for the dedicated tile scan.  Only
+  // meaningful when shardTileCollisionsEnabled is true.  Cycled via
+  // the DBG "Sh↔Tl int" button.
+  shardTilePairInterval?: number;
+  shardTilePairEffectiveInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

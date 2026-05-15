@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS } from '../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -109,6 +109,14 @@ export class PhysicsSystem {
   // Internal counter, ticked once per handleEntityCollisions call.
   // Used as `counter % interval === 0` to gate shard-shard pairs.
   private shardPairTick: number = 0;
+  // Shard ↔ static-tile pair resolution interval.  Mirrors the
+  // shard-pair knobs above but gates resolveShardTilePairs.  Only
+  // meaningful when shardTileCollisionsEnabled is true; cycled via
+  // the DBG `Sh↔Tl int` button.
+  public shardTilePairFrameInterval: number = SHARD_TILE_PAIR_CONSTANTS.FRAME_INTERVAL;
+  public lastEffectiveShardTilePairInterval: number = 1;
+  public lastRunShardTilePair: boolean = true;
+  private shardTilePairTick: number = 0;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -418,7 +426,7 @@ export class PhysicsSystem {
       if (this.shouldRunShardPairsThisStep()) {
         this.resolveShardPairs(asteroids);
       }
-      if (this.shardTileCollisionsEnabled) {
+      if (this.shardTileCollisionsEnabled && this.shouldRunShardTilePairsThisStep()) {
         this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
       }
     }
@@ -989,6 +997,34 @@ export class PhysicsSystem {
     const run = (this.shardPairTick % interval) === 0;
     this.shardPairTick++;
     this.lastRunShardPair = run;
+    return run;
+  }
+
+  /**
+   * Symmetric gate for resolveShardTilePairs — same shape as
+   * shouldRunShardPairsThisStep but with its own counter, interval,
+   * and AUTO threshold table.  Both passes share the same density
+   * signal (lastMaxCellDensity is a proxy for shard count, which
+   * sets the outer-loop size for either scan).  Counter ticks only
+   * when the parent toggle is on, so flipping the toggle doesn't
+   * leave a half-cycled phase that desyncs the first post-enable
+   * frame.
+   */
+  public shouldRunShardTilePairsThisStep(): boolean {
+    let interval = this.shardTilePairFrameInterval | 0;
+    if (interval <= 0) {
+        const density = this.lastMaxCellDensity;
+        const table = SHARD_TILE_PAIR_CONSTANTS.AUTO_THRESHOLDS;
+        let auto = table[table.length - 1].interval;
+        for (let i = 0; i < table.length; i++) {
+            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
+        }
+        interval = auto;
+    }
+    this.lastEffectiveShardTilePairInterval = interval;
+    const run = (this.shardTilePairTick % interval) === 0;
+    this.shardTilePairTick++;
+    this.lastRunShardTilePair = run;
     return run;
   }
 

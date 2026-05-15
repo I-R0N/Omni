@@ -141,6 +141,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleShardPairInterval();
   };
 
+  const handleCycleShardTilePairInterval = () => {
+      if (engineRef.current) engineRef.current.cycleShardTilePairInterval();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -167,6 +171,7 @@ const App: React.FC = () => {
         onToggleCollisions={handleToggleCollisions}
         onToggleShardTileCollisions={handleToggleShardTileCollisions}
         onCycleShardPairInterval={handleCycleShardPairInterval}
+        onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

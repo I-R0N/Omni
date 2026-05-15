@@ -18,6 +18,7 @@ interface UIOverlayProps {
   onToggleCollisions?: () => void;
   onToggleShardTileCollisions?: () => void;
   onCycleShardPairInterval?: () => void;
+  onCycleShardTilePairInterval?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -41,6 +42,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleCollisions,
   onToggleShardTileCollisions,
   onCycleShardPairInterval,
+  onCycleShardTilePairInterval,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -214,6 +216,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {stats.shardPairInterval === 0
                     ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
                     : `every ${stats.shardPairInterval ?? 1}`}
+                </button>
+              </div>
+
+              {/* Shard ↔ static-tile pair-resolution interval — same
+                  cycle and AUTO semantics as ShPair, but gates the
+                  resolveShardTilePairs scan (only meaningful when
+                  the Sh↔Tl toggle above is ON). */}
+              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl int</span>
+                <button
+                  onClick={onCycleShardTilePairInterval}
+                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                  title="Cycle shard ↔ static-tile resolution interval.  AUTO scales N with shard-cell density; manual pins it.  Only fires when the Sh↔Tl toggle is ON."
+                >
+                  {stats.shardTilePairInterval === 0
+                    ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
+                    : `every ${stats.shardTilePairInterval ?? 1}`}
                 </button>
               </div>
 
