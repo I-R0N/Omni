@@ -591,10 +591,13 @@ export class PhysicsSystem {
         // ── Repel-field scan (static tiles only) ─────────────────────
         // Hoisted: dynamic-side immunity — projectiles and particles
         // bypass repel unconditionally, and mobile-shard variants
-        // marked `repelImmune` (today: glass-shard, plastic-shard,
-        // metal-shard — same substance as their parent tile) drift
-        // through unimpeded.  Computed once per scanner; static-side
-        // emitter check (variant.repel) still varies per pair.
+        // marked `repelImmune` (today: glass-shard, plastic-shard —
+        // same substance as their parent tile) drift through every
+        // field unimpeded.  Per-emitter immunity via
+        // `repelImmuneFrom` checked inside the inner loop (today
+        // metal-shard ignores glass-tile only).  Computed once per
+        // scanner; static-side emitter check (variant.repel) still
+        // varies per pair.
         //
         // The walk runs for EVERY repellable scanner, including
         // mobile shards (which the SAT outer loop below skips).  That
@@ -603,11 +606,15 @@ export class PhysicsSystem {
         // variant-emitter check; per repel-emitting tile: a single
         // distance compare and (when in range) one sqrt + one
         // velocity nudge.  No allocations on the hot path.
+        const aVariantDef = a.shardVariant !== undefined ? SHARD_VARIANTS[a.shardVariant] : undefined;
         const aRepellable =
             a.type !== EntityType.PROJECTILE
             && a.type !== EntityType.PARTICLE
-            && !(a.shardVariant !== undefined
-                 && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
+            && aVariantDef?.repelImmune !== true;
+        // Hoisted per-emitter immunity list — metal-shard ignores
+        // glass-tile repel but feels every other field.  Undefined
+        // for the common case (no per-emitter filtering).
+        const aImmuneFrom = aVariantDef?.repelImmuneFrom;
         if (aRepellable) {
             for (let x = -2; x <= 2; x++) {
                 for (let y = -2; y <= 2; y++) {
@@ -616,6 +623,7 @@ export class PhysicsSystem {
                     for (let j = 0; j < cell.length; j++) {
                         const b = cell[j];
                         if (!b.active || b.shardVariant === undefined) continue;
+                        if (aImmuneFrom !== undefined && aImmuneFrom.indexOf(b.shardVariant) !== -1) continue;
                         const repel = SHARD_VARIANTS[b.shardVariant].repel;
                         if (repel === undefined) continue;
                         // Torus-correct delta so a tile near one

@@ -1817,12 +1817,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
     passThrough: false,
-    // Metal shards FEEL the metal-tile repel field — they drift in it
-    // and accumulate impulse just like the player or enemies do.
-    // (Glass-shard / plastic-shard stay repelImmune so each shard
-    // family only reacts to its own parent's field.)  This primes the
-    // g3 attraction work where metal-shards orbit metal clusters.
-    repelImmune: false,
+    // Metal shards feel the metal-tile repel field (priming g3
+    // attraction work where metal-shards orbit metal clusters) but
+    // ignore glass-tile fields — metal "wins" against glass, see
+    // the g3 material-interactions design where metal-tiles will
+    // shatter glass-tiles on contact.  Glass-shard / plastic-shard
+    // stay fully `repelImmune` (their own family is the only field
+    // they'd care about, and they pass through it).
+    repelImmuneFrom: ['glass-tile'],
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
