@@ -1930,9 +1930,12 @@ export class RenderSystem {
                             ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM);
                             ctx.fillStyle = glow.color;
                             ctx.fill();
+                            // Thinner outline than glass (1.5 vs 3.0)
+                            // — metal reads as a precise mechanical
+                            // edge rather than glass's diffuse halo.
                             ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM));
                             ctx.strokeStyle = glow.color;
-                            ctx.lineWidth = 3.0;
+                            ctx.lineWidth = 1.5;
                             ctx.stroke();
                             ctx.globalAlpha = 1.0;
                         }

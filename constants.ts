@@ -1497,14 +1497,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
     repel: { range: 200, strength: 0.06 },
-    // Warm-white proximity lighting like plastic / rock / indestructible,
-    // but BRIGHTER — metal reads as a more reflective surface, so it
-    // catches the player's "light" harder.  Fill-only radial bloom from
-    // the player-facing edge, no edge stroke (RenderSystem.renderProximityBloom).
-    // (The orange→red "heat" treatment is deferred to a later pass — the
-    // `hot` schema field and the renderer's hot-core layer are still in
-    // place, just not configured here.)
-    glow:  { color: '#fffbeb', range: 250, peakAlpha: 0.75 },
+    // Saturated blue glow that reads as a cold "live field" against
+    // the slate-gray metal face — distinct from glass-tile's pale
+    // cyan (`#a5f3fc`) so the two materials never confuse at a
+    // glance.  Renders as a fill + thin edge stroke driven by
+    // `entity.repelImpulse` (RenderSystem material-tile branch).
+    glow:  { color: '#60a5fa', range: 250, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp;
