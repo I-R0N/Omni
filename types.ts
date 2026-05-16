@@ -675,6 +675,10 @@ export interface EngineStats {
   // the DBG "Sh↔Tl int" button.
   shardTilePairInterval?: number;
   shardTilePairEffectiveInterval?: number;
+  // Shard ↔ shard gravity pull (attractedTo pass).  DBG-toggleable.
+  shardGravityEnabled?: boolean;
+  // Shard ↔ shard bond formation + cohesion.  DBG-toggleable.
+  shardBondingEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

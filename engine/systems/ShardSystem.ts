@@ -107,6 +107,22 @@ export class ShardSystem {
   private pending: RegenEntry[] = [];
 
   /**
+   * DBG toggle — gates the gravity-pull pass inside
+   * runMergeBroadphase.  When false, no shard accelerates toward
+   * another shard regardless of `attractedTo`.  Only nebula-shard
+   * has non-'none' attractedTo today, so flipping this off mainly
+   * stops nebula self-coalesce gravity and any cross-variant pull.
+   */
+  public shardGravityEnabled: boolean = true;
+  /**
+   * DBG toggle — gates bond formation in runMergeBroadphase AND
+   * drops all existing bonds at the top of update().  When false,
+   * shards never stick on contact; nebula self-compose (which fires
+   * via the zero-time bond) and any cross-variant absorb stop too.
+   */
+  public shardBondingEnabled: boolean = true;
+
+  /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
    * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
@@ -193,6 +209,12 @@ export class ShardSystem {
     runMergePass: boolean = true,
   ): void {
     const t0 = performance.now();
+    // DBG bonding toggle is destructive — when off, any bonds left
+    // over from the previous frame are dropped here so cohesion
+    // stops dragging shards together as soon as the user flips it.
+    if (!this.shardBondingEnabled && this.bonds.length > 0) {
+      this.bonds.length = 0;
+    }
     this.tickRegens(entities, dt, physics);
     // tickBonds always runs to advance bond timers, break bonds
     // whose parties have separated, and resolve compose / absorb
@@ -927,7 +949,9 @@ export class ShardSystem {
       // both sides eventually share via cohesion, accelerating the
       // pair indefinitely.  Asteroid stick-bonds today have no
       // gravity at all, so this matches their behaviour.
-      const wantsPull = aVariant && aVariant.merge.attractedTo !== 'none' && !aBondedAlready;
+      const wantsPull = this.shardGravityEnabled
+                     && aVariant && aVariant.merge.attractedTo !== 'none'
+                     && !aBondedAlready;
 
       for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
         for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
@@ -969,6 +993,9 @@ export class ShardSystem {
 
             // Bond formation: only consider each unordered pair once
             // (j > i), and skip if either party is already bonded.
+            // DBG-gated — when shardBondingEnabled is false, skip
+            // the entire formation block.
+            if (!this.shardBondingEnabled) continue;
             if (j <= i) continue;
             if (aBondedAlready) continue;
             if (bonded.has(b) || bondedThisFrame.has(b)) continue;

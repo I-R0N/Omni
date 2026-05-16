@@ -387,6 +387,26 @@ export class GameEngine {
     this.physics.shardTilePairFrameInterval = next;
   }
 
+  /**
+   * Toggle shard ↔ shard gravity pull (the attractedTo pass in
+   * ShardSystem.runMergeBroadphase).  Today only nebula-shard has
+   * non-'none' attractedTo, so this primarily flips nebula self-
+   * coalesce gravity and any cross-variant pull on/off.
+   */
+  public toggleShardGravity() {
+    this.shards.shardGravityEnabled = !this.shards.shardGravityEnabled;
+  }
+
+  /**
+   * Toggle shard ↔ shard bond formation + cohesion.  When off, any
+   * existing bonds drop on the next ShardSystem.update() tick and
+   * no new bonds form.  Nebula self-compose (which fires via the
+   * zero-time bond path) and cross-variant absorb both stop too.
+   */
+  public toggleShardBonding() {
+    this.shards.shardBondingEnabled = !this.shards.shardBondingEnabled;
+  }
+
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
@@ -545,6 +565,8 @@ export class GameEngine {
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       shardTilePairInterval: this.physics.shardTilePairFrameInterval,
       shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
+      shardGravityEnabled: this.shards.shardGravityEnabled,
+      shardBondingEnabled: this.shards.shardBondingEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -651,6 +673,8 @@ export class GameEngine {
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
       shardTilePairInterval: this.physics.shardTilePairFrameInterval,
       shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
+      shardGravityEnabled: this.shards.shardGravityEnabled,
+      shardBondingEnabled: this.shards.shardBondingEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
