@@ -81,6 +81,15 @@ export class NebulaSystem {
     public tileBlendAlpha: number = NEBULA_CONSTANTS.BLEND_TILE_ALPHA;
     public shardBlendAlpha: number = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA;
 
+    // Frame-skip cadence for the color-equilibration pass.  Same
+    // shape as PhysicsSystem.shardPairFrameInterval: cycled through
+    // NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE via the DBG
+    // ColorBlend int button.  Counter ticks once per equilibrate
+    // call regardless of whether the pass actually fires, so the
+    // phase is stable across cadence changes.
+    public colorBlendFrameInterval: number = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL;
+    private colorBlendTick: number = 0;
+
     constructor(
         private particles: ParticleSystem,
         private drops: DropSystem,
@@ -176,14 +185,30 @@ export class NebulaSystem {
         }
 
         // Continuous color equilibration — DBG-gated by per-alpha
-        // sliders, fully no-op when both are 0.  Tiles drift toward
+        // sliders (fully no-op when both are 0) and by the cadence
+        // interval (counter % interval === 0).  Tiles drift toward
         // their 6-hex-neighbour weighted average; shards drift
         // toward the nearest tile.  Tiles are anchors (shards have
         // no influence on tiles), so the cluster's structural hue
         // stays stable while transient shards visually catch up.
-        if (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0) {
+        if ((this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)
+            && this.shouldRunColorBlendThisStep()) {
             this.equilibrateColors(entities);
         }
+    }
+
+    /**
+     * Cadence gate for the color-equilibration pass.  Mirrors
+     * PhysicsSystem.shouldRunShardPairsThisStep: ticks an internal
+     * counter once per call, returns true when (counter % interval
+     * === 0).  Counter ticks even on skip frames so changing the
+     * interval doesn't desync phase.
+     */
+    private shouldRunColorBlendThisStep(): boolean {
+        const interval = Math.max(1, this.colorBlendFrameInterval | 0);
+        const run = (this.colorBlendTick % interval) === 0;
+        this.colorBlendTick++;
+        return run;
     }
 
     /**

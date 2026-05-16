@@ -21,6 +21,7 @@ interface UIOverlayProps {
   onToggleNebulaShardCollisions?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
+  onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
   onSkipWave?: () => void;
@@ -49,6 +50,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaShardCollisions,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
+  onCycleColorBlendInterval,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
   onSkipWave,
@@ -286,6 +288,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle nebula shard→nearest-tile color blend.  Shards drift toward the nearest tile's hue each frame.  Off / Slow / Med / Fast."
                   >
                     {blendLabel(stats.shardBlendAlpha)}
+                  </button>
+                </div>
+                {/* Cadence interval for the color-equilibration pass.
+                    Trades smoothness for perf — higher = fires less
+                    often.  Only meaningful when TileBlend or
+                    ShardBlend is non-Off. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ColorBlend int</span>
+                  <button
+                    onClick={onCycleColorBlendInterval}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the color-equilibration cadence.  every 1 = run each frame; higher = skip frames between passes (lower perf cost, slower visual blend)."
+                  >
+                    every {stats.colorBlendFrameInterval ?? 1}
                   </button>
                 </div>
               </>)}

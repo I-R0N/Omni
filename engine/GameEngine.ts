@@ -446,6 +446,20 @@ export class GameEngine {
     this.nebulas.shardBlendAlpha = next;
   }
 
+  /**
+   * Cycle the cadence interval for the nebula color-equilibration
+   * pass through NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE.
+   * Higher values trade smoothness for perf — the per-call work
+   * stays the same but fires less often.
+   */
+  public cycleColorBlendInterval() {
+    const order = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE;
+    const cur = this.nebulas.colorBlendFrameInterval;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.nebulas.colorBlendFrameInterval = next;
+  }
+
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
@@ -609,6 +623,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
+      colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -720,6 +735,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
+      colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

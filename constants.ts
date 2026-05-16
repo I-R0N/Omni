@@ -686,6 +686,14 @@ export const NEBULA_CONSTANTS = {
   BLEND_SHARD_ALPHA: 0,
   BLEND_TILE_ALPHA_CYCLE: [0, 0.005, 0.02, 0.08] as const,
   BLEND_SHARD_ALPHA_CYCLE: [0, 0.02, 0.08, 0.25] as const,
+  // Physics substeps between color-equilibration passes.  Same
+  // skip pattern as SHARD_PAIR_CONSTANTS.FRAME_INTERVAL: lets the
+  // user trade smoothness for perf when nebula entity counts are
+  // high.  Smoothing rate is set by the alpha cycles above and is
+  // independent of this — bumping the interval slows the visual
+  // equilibration proportionally (interval × alpha = total rate).
+  BLEND_FRAME_INTERVAL: 1,
+  BLEND_FRAME_INTERVAL_CYCLE: [1, 2, 4, 8, 16, 32, 64] as const,
 };
 
 /**

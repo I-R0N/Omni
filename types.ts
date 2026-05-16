@@ -674,6 +674,10 @@ export interface EngineStats {
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.
   tileBlendAlpha?: number;
   shardBlendAlpha?: number;
+  // Cadence (physics substeps) between color-equilibration passes.
+  // 1 = every frame; higher values trade smoothness for perf.
+  // Cycled via DBG ColorBlend int button.
+  colorBlendFrameInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;
