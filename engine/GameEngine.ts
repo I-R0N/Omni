@@ -890,6 +890,16 @@ export class GameEngine {
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
       const applyFlow = (e: GameEntity) => {
+          // Nebula shards anchor in place — flow correction is
+          // skipped so the field can't drag them around the map.
+          // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
+          // shard's velocity decays to zero after any kick (shatter,
+          // gravity pull, impact) and stays there.  Rotation still
+          // integrates so spinning shards keep tumbling visually.
+          if (e.shardVariant === 'nebula-shard') {
+              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+              return;
+          }
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;

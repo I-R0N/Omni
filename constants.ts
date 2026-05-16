@@ -550,11 +550,12 @@ export const NEBULA_CONSTANTS = {
   // Per-frame damping (60Hz reference).  Applied as
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
-  // damping = shards drift longer.  LINEAR at 0.97 → velocity halves
-  // in ~23 frames (~0.38 s), heavier than angular so shards translate
-  // less freely (counterweights the stronger GRAVITY_STRENGTH above)
-  // while keeping the softer tumble on spin.
-  LINEAR_DAMPING: 0.97,
+  // damping = shards drift longer.  LINEAR at 0.85 → velocity halves
+  // in ~4 frames (~0.07 s).  Set heavy on purpose: shards skip flow
+  // correction (see GameEngine.applyFlow) so they must decay to a
+  // dead stop quickly after any kick (shatter, gravity pull, impact)
+  // — otherwise gravity-pulled clusters never settle.
+  LINEAR_DAMPING: 0.85,
   ANGULAR_DAMPING: 0.98,
   // Speed-based opacity falloff for shards — fast shards read slightly
   // translucent, settled shards are fully opaque.  Applied as

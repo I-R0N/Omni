@@ -430,6 +430,15 @@ export class PhysicsSystem {
       if (this.shardTileCollisionsEnabled && this.shouldRunShardTilePairsThisStep()) {
         this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
       }
+      // Unconditional nebula-shard ↔ nebula-tile pass.  The main
+      // broadphase skips STRUCTURE outers entirely and the wider
+      // Sh↔Tl scan is opt-in via toggle — without this dedicated
+      // pass nebula shards drift through nebula tiles' geometry.
+      // Cheap: only iterates nebula-shards (a small fraction of
+      // the asteroid list on most maps) and short-circuits inside
+      // checkAndResolveCollision when the inner cell holds no
+      // nebula-tile.
+      this.resolveNebulaShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
     this.lastCollisionsMs = performance.now() - tCol;
 
@@ -1130,6 +1139,46 @@ export class PhysicsSystem {
       }
   }
 
+  /**
+   * Nebula-shard ↔ nebula-tile collision pass.  Runs every frame
+   * regardless of the Sh↔Tl toggle.  Mirrors resolveShardTilePairs
+   * but filtered to nebula variants — nebula shards should bounce
+   * off cloud tiles even though the wider shard-tile pass is opt-
+   * in.  The passThrough bypass in resolveCollision handles the
+   * actual impulse path; this method just gets the pair in front
+   * of it.
+   */
+  private resolveNebulaShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (a.shardVariant !== 'nebula-shard') continue;
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (b.shardVariant !== 'nebula-tile') continue;
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
       // Cheapest possible early-outs first — most pair calls discard
       // here before paying any further work.
@@ -1379,9 +1428,23 @@ export class PhysicsSystem {
       // shoved aside" feel without a per-EntityType skip.
       // DBG override mirrors the fast-path gate above — nebula-pair
       // hard collisions when the toggle is on.
-      const nebPairCollides = this.nebulaShardCollisionsEnabled
-        && a.shardVariant === 'nebula-shard'
-        && b.shardVariant === 'nebula-shard';
+      // nebula-pair hard collisions.  Two cases skip the passThrough
+      // gate so the standard SAT impulse runs:
+      //   - nebula-shard ↔ nebula-shard, DBG-toggled by
+      //     nebulaShardCollisionsEnabled (A/B-test for the gather-
+      //     pile fix).
+      //   - nebula-shard ↔ nebula-tile, unconditional — shards
+      //     should bounce off cloud tiles instead of drifting
+      //     through them.  Strikers (player/enemy/projectile) still
+      //     pass through because they don't have shardVariant set,
+      //     so the conditions below evaluate false for them.
+      const aIsNebShard = a.shardVariant === 'nebula-shard';
+      const bIsNebShard = b.shardVariant === 'nebula-shard';
+      const aIsNebTile  = a.shardVariant === 'nebula-tile';
+      const bIsNebTile  = b.shardVariant === 'nebula-tile';
+      const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
+      const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
+      const nebPairCollides = nebShardPair || nebShardTilePair;
       const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
       const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       // Shatter trigger is independent of pass-through — a nebula
