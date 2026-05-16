@@ -59,7 +59,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
-  const SectionHeader: React.FC<{ name: string; label: string }> = ({ name, label }) => (
+  // Plain JSX helper, NOT a sub-component — keeping it as a function
+  // means React inlines the returned button into the parent tree
+  // instead of seeing a freshly-identitied component type on every
+  // render.  Avoiding the unmount/remount churn here was load-bearing
+  // for touch responsiveness (UIOverlay re-renders at ~60 Hz with the
+  // stats stream).
+  const renderSectionHeader = (name: string, label: string) => (
     <button
       onClick={() => toggleSection(name)}
       className="pointer-events-auto mt-1 w-full flex items-center justify-between text-slate-400/80 hover:text-amber-300 uppercase tracking-wider text-[8px] transition-colors"
@@ -106,7 +112,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
 
               {/* ── Visual ─────────────────────────────────────────── */}
-              <SectionHeader name="visual" label="Visual" />
+              {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                   <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Trail</span>
@@ -137,7 +143,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </>)}
 
               {/* ── Physics ────────────────────────────────────────── */}
-              <SectionHeader name="physics" label="Physics" />
+              {renderSectionHeader('physics', 'Physics')}
               {!collapsed.physics && (<>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                   <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
@@ -172,7 +178,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </>)}
 
               {/* ── Shards ─────────────────────────────────────────── */}
-              <SectionHeader name="shards" label="Shards" />
+              {renderSectionHeader('shards', 'Shards')}
               {!collapsed.shards && (<>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                   <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShGrav</span>
@@ -237,7 +243,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
               {perf ? (
                 <>
-                  <SectionHeader name="entities" label="Entities" />
+                  {renderSectionHeader('entities', 'Entities')}
                   {!collapsed.entities && (<>
                     <div className="flex justify-between"><span>total</span><span className="text-white">{perf.totalEntities}</span></div>
                     <div className="flex justify-between"><span>enemies</span><span className="text-white">{perf.enemyCount}</span></div>
@@ -247,12 +253,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <div className="flex justify-between"><span>drops/POI</span><span className="text-white">{perf.interactableCount}</span></div>
                   </>)}
 
-                  <SectionHeader name="broadphase" label="Broadphase" />
+                  {renderSectionHeader('broadphase', 'Broadphase')}
                   {!collapsed.broadphase && (
                     <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
                   )}
 
-                  <SectionHeader name="timing" label="Timing (ms)" />
+                  {renderSectionHeader('timing', 'Timing (ms)')}
                   {!collapsed.timing && (<>
                     <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
                     <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
