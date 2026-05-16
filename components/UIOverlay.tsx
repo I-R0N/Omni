@@ -299,9 +299,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     onClick={onCycleColorBlendInterval}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the color-equilibration cadence.  every 1 = run each frame; higher = skip frames between passes (lower perf cost, slower visual blend)."
+                    title="Cycle the color-equilibration cadence.  AUTO scales with active-nebula count; manual values pin the interval.  Higher = cheaper but slower visual blend."
                   >
-                    every {stats.colorBlendFrameInterval ?? 1}
+                    {stats.colorBlendFrameInterval === 0
+                      ? `auto (${stats.colorBlendEffectiveInterval ?? 1})`
+                      : `every ${stats.colorBlendFrameInterval ?? 1}`}
                   </button>
                 </div>
               </>)}

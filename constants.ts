@@ -692,8 +692,22 @@ export const NEBULA_CONSTANTS = {
   // high.  Smoothing rate is set by the alpha cycles above and is
   // independent of this — bumping the interval slows the visual
   // equilibration proportionally (interval × alpha = total rate).
-  BLEND_FRAME_INTERVAL: 1,
-  BLEND_FRAME_INTERVAL_CYCLE: [1, 2, 4, 8, 16, 32, 64] as const,
+  // 0 = AUTO (selects interval from the previous run's active
+  // nebula entity count); ≥1 = manual override.
+  BLEND_FRAME_INTERVAL: 0,
+  BLEND_FRAME_INTERVAL_CYCLE: [0, 1, 2, 4, 8, 16, 32, 64] as const,
+  // AUTO-mode active-nebula-count → interval mapping.  Walked at
+  // each run-frame (cheap O(N) count, never on skip frames).
+  // First entry whose maxCount ≥ observed wins.  Light clusters
+  // run every frame for crisp visual blend; heavy clusters back
+  // off so the per-pass cost doesn't dominate `neb` ms.
+  BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS: [
+    { maxCount: 100,  interval: 1 },
+    { maxCount: 300,  interval: 2 },
+    { maxCount: 600,  interval: 4 },
+    { maxCount: 1200, interval: 8 },
+    { maxCount: 9999, interval: 16 },
+  ] as const,
 };
 
 /**

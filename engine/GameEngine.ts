@@ -624,6 +624,7 @@ export class GameEngine {
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
+      colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -736,6 +737,7 @@ export class GameEngine {
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
+      colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

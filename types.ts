@@ -675,9 +675,13 @@ export interface EngineStats {
   tileBlendAlpha?: number;
   shardBlendAlpha?: number;
   // Cadence (physics substeps) between color-equilibration passes.
-  // 1 = every frame; higher values trade smoothness for perf.
+  // 0 = AUTO (active-count thresholds); ≥1 = manual override.
   // Cycled via DBG ColorBlend int button.
   colorBlendFrameInterval?: number;
+  // Effective interval used by the most recent pass.  Mirrors
+  // colorBlendFrameInterval in manual mode; tracks the density-
+  // selected value in AUTO mode.
+  colorBlendEffectiveInterval?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

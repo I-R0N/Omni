@@ -84,10 +84,12 @@ export class NebulaSystem {
     // Frame-skip cadence for the color-equilibration pass.  Same
     // shape as PhysicsSystem.shardPairFrameInterval: cycled through
     // NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE via the DBG
-    // ColorBlend int button.  Counter ticks once per equilibrate
-    // call regardless of whether the pass actually fires, so the
-    // phase is stable across cadence changes.
+    // ColorBlend int button.  0 = AUTO (selects from active-count
+    // thresholds).  Counter ticks once per equilibrate call
+    // regardless of whether the pass actually fires, so the phase
+    // is stable across cadence changes.
     public colorBlendFrameInterval: number = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL;
+    public lastEffectiveColorBlendInterval: number = 1;
     private colorBlendTick: number = 0;
 
     constructor(
@@ -192,22 +194,53 @@ export class NebulaSystem {
         // no influence on tiles), so the cluster's structural hue
         // stays stable while transient shards visually catch up.
         if ((this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)
-            && this.shouldRunColorBlendThisStep()) {
+            && this.shouldRunColorBlendThisStep(entities)) {
             this.equilibrateColors(entities);
         }
     }
 
     /**
      * Cadence gate for the color-equilibration pass.  Mirrors
-     * PhysicsSystem.shouldRunShardPairsThisStep: ticks an internal
-     * counter once per call, returns true when (counter % interval
-     * === 0).  Counter ticks even on skip frames so changing the
-     * interval doesn't desync phase.
+     * PhysicsSystem.shouldRunShardPairsThisStep:
+     *   - Manual interval (≥1): use as-is.
+     *   - AUTO (0): re-select interval from the previous run's
+     *     entity count using BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS.
+     * Counter ticks even on skip frames so changing the interval
+     * doesn't desync phase.  AUTO recompute is lazy — only walks
+     * the entity list on actual run-frames, so skip frames stay
+     * O(1).
      */
-    private shouldRunColorBlendThisStep(): boolean {
-        const interval = Math.max(1, this.colorBlendFrameInterval | 0);
+    private shouldRunColorBlendThisStep(entities: GameEntity[]): boolean {
+        // Resolve effective interval up-front so AUTO uses the
+        // freshest value (recomputed at the end of each run-frame).
+        if (this.colorBlendFrameInterval > 0) {
+            this.lastEffectiveColorBlendInterval = this.colorBlendFrameInterval;
+        }
+        const interval = Math.max(1, this.lastEffectiveColorBlendInterval | 0);
         const run = (this.colorBlendTick % interval) === 0;
         this.colorBlendTick++;
+
+        if (run && this.colorBlendFrameInterval === 0) {
+            // AUTO: refresh count from the entity list (cheap O(N)),
+            // pick the next effective interval from the threshold
+            // table.  Picked here rather than every frame so skip
+            // frames stay pure tick checks.
+            let count = 0;
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if ((e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard')
+                    && e.active
+                    && e.mergeFadeTimer === undefined) {
+                    count++;
+                }
+            }
+            const table = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS;
+            let auto: number = table[table.length - 1].interval;
+            for (let i = 0; i < table.length; i++) {
+                if (count <= table[i].maxCount) { auto = table[i].interval; break; }
+            }
+            this.lastEffectiveColorBlendInterval = auto;
+        }
         return run;
     }
 
