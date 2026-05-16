@@ -121,13 +121,23 @@ export class ShardSystem {
    * via the zero-time bond) and any cross-variant absorb stop too.
    */
   public shardBondingEnabled: boolean = true;
-
   /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
    * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
    */
   private bonds: BondEntry[] = [];
+
+  /**
+   * Pending nebula coalesce timers.  Lives on its own list (not
+   * `bonds`) because the dedicated nebula path bypasses the
+   * bondsWith pipeline — see runMergeBroadphase + tickNebulaCoalesce.
+   * Each entry: { a, b, timer }.  Timer accumulates while the pair
+   * stays in contact; at NEBULA_CONSTANTS.COALESCE_TIME_SECONDS the
+   * pair composes.  Pairs that drift past contactDist × BREAK_FACTOR
+   * before firing are dropped silently.
+   */
+  private nebulaCoalesceTimers: { a: GameEntity; b: GameEntity; timer: number }[] = [];
 
   /**
    * Optional adapter providing variant-specific completion hooks.
@@ -224,6 +234,10 @@ export class ShardSystem {
     // imbalance is what collapsed clusters to a single point on
     // high-N ShPair settings.
     this.tickBonds(entities, dt, physics, runMergePass);
+    // Nebula coalesce timers run every frame, ungated by ShBond /
+    // runMergePass — they're a world-population mechanic, not
+    // shard-stick state.  See tickNebulaCoalesce comment.
+    this.tickNebulaCoalesce(entities, dt, physics);
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
       this.runLargeShardCollapse(entities);
@@ -255,6 +269,7 @@ export class ShardSystem {
   public reset(): void {
     this.pending.length = 0;
     this.bonds.length = 0;
+    this.nebulaCoalesceTimers.length = 0;
   }
 
   // ── Regen queue ───────────────────────────────────────────────────
@@ -825,6 +840,63 @@ export class ShardSystem {
   }
 
   /**
+   * Advance pending nebula coalesce timers, applying cohesion to
+   * keep paired shards from drifting apart while the timer
+   * accumulates.  When a pair's timer reaches
+   * NEBULA_CONSTANTS.COALESCE_TIME_SECONDS it composes via the same
+   * composeEntities call the bond pipeline uses.
+   *
+   * Runs unconditionally from update() — NOT gated by
+   * shardBondingEnabled or runMergePass.  Nebula tile formation is
+   * a world-population mechanic and shouldn't be subject to the
+   * shard-stick DBG knobs.
+   */
+  private tickNebulaCoalesce(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
+    if (this.nebulaCoalesceTimers.length === 0) return;
+
+    const COHESION     = 4.0;
+    const BREAK_FACTOR = 1.5;
+    const THRESHOLD    = NEBULA_CONSTANTS.COALESCE_TIME_SECONDS;
+
+    let writeIdx = 0;
+    for (let i = 0; i < this.nebulaCoalesceTimers.length; i++) {
+      const e = this.nebulaCoalesceTimers[i];
+      const { a, b } = e;
+
+      if (!a.active || !b.active) continue;
+      // Either side already retiring (faded by a prior compose, or
+      // mid-shatter) — drop the pending pair.
+      if (a.nebulaFadeTimer !== undefined || b.nebulaFadeTimer !== undefined) continue;
+      if (a.mergeFadeTimer  !== undefined || b.mergeFadeTimer  !== undefined) continue;
+
+      const dx = wrapDeltaX(a.position.x, b.position.x);
+      const dy = wrapDeltaY(a.position.y, b.position.y);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const contactDist = (a.size.x + b.size.x) * 0.5;
+      if (dist > contactDist * BREAK_FACTOR) continue; // separated
+
+      // Mass-weighted velocity blend so the pair stays together
+      // visually while the timer ticks.  Mirrors tickBonds cohesion.
+      const totalMass = a.mass + b.mass;
+      const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+      const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+      const blend     = Math.min(1, COHESION * dt);
+      a.velocity.x   += (sharedVx - a.velocity.x) * blend;
+      a.velocity.y   += (sharedVy - a.velocity.y) * blend;
+      b.velocity.x   += (sharedVx - b.velocity.x) * blend;
+      b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+
+      e.timer += dt;
+      if (e.timer >= THRESHOLD) {
+        this.composeEntities(a, b, entities, physics, 'compose');
+        continue; // resolved
+      }
+      this.nebulaCoalesceTimers[writeIdx++] = e;
+    }
+    this.nebulaCoalesceTimers.length = writeIdx;
+  }
+
+  /**
    * Single-pass merge broadphase: build a shared spatial hash over
    * mobile shard candidates + eligible drops, walk it once, and for
    * each pair perform two orthogonal jobs:
@@ -857,6 +929,16 @@ export class ShardSystem {
     for (let i = 0; i < this.bonds.length; i++) {
       bonded.add(this.bonds[i].a);
       bonded.add(this.bonds[i].b);
+    }
+
+    // Same idea for the dedicated nebula coalesce queue — prevents
+    // a single nebula from queueing multiple pending merges in one
+    // frame, and skips contacts whose pair is already timing in
+    // tickNebulaCoalesce.
+    const coalescePending = new Set<GameEntity>();
+    for (let i = 0; i < this.nebulaCoalesceTimers.length; i++) {
+      coalescePending.add(this.nebulaCoalesceTimers[i].a);
+      coalescePending.add(this.nebulaCoalesceTimers[i].b);
     }
 
     // Candidate set: every mobile shard-family entity + eligible drops.
@@ -993,19 +1075,24 @@ export class ShardSystem {
 
             // Dedicated nebula self-coalesce path — runs INDEPENDENT
             // of the bondsWith pipeline so the DBG ShBond toggle can
-            // be off without killing nebula tile formation.  Fires
-            // composeEntities directly on contact for nebula-shard
-            // ↔ nebula-shard pairs; cooldowns honoured on both
-            // sides.  Dedupe via (j > i) so each pair is handled
-            // exactly once.
+            // be off without killing nebula tile formation.  On
+            // first contact we enqueue a coalesce timer; the actual
+            // compose fires from tickNebulaCoalesce after the pair
+            // has held contact for COALESCE_TIME_SECONDS.  Dedupe
+            // via the `coalescePending` set built once at broadphase
+            // start.  Cooldowns honoured on both sides.
             if (j > i
                 && aVariantId === 'nebula-shard'
                 && bVariantId === 'nebula-shard'
                 && (a.nebulaMergeCooldown ?? 0) <= 0
-                && (b.nebulaMergeCooldown ?? 0) <= 0) {
+                && (b.nebulaMergeCooldown ?? 0) <= 0
+                && !coalescePending.has(a)
+                && !coalescePending.has(b)) {
               const ncContact = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
               if (distSq <= ncContact * ncContact) {
-                this.composeEntities(a, b, entities, _physics, 'compose');
+                this.nebulaCoalesceTimers.push({ a, b, timer: 0 });
+                coalescePending.add(a);
+                coalescePending.add(b);
                 continue;
               }
             }

@@ -611,6 +611,15 @@ export const NEBULA_CONSTANTS = {
   // cooldown is ticked each substep by PhysicsSystem and consulted by
   // NebulaSystem.updateDynamics before considering any merge pair.
   MERGE_COOLDOWN: 1.8,
+  // Nebula self-coalesce contact time.  Two nebula shards in contact
+  // must remain in contact for this many seconds before composing.
+  // Replaces the previous instant-merge behaviour (bondTimeSeconds:0
+  // on the bondsWith pipeline) — the dedicated nebula coalesce path
+  // tracks per-pair contact timers in ShardSystem.tickNebulaCoalesce,
+  // applies cohesion to keep them held together while the timer
+  // accumulates, and drops the pair if they drift past
+  // contactDist × BREAK_FACTOR before firing.
+  COALESCE_TIME_SECONDS: 2.0,
   // Tile regeneration toggle.  When false, shattered tiles are gone
   // forever (no respawn at their original grid cell) and the ONLY way
   // new tiles appear is via shard → tile transmutation.  Combined with
