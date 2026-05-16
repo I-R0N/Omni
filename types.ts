@@ -479,6 +479,13 @@ export interface GameEntity {
   // Cached polygon area (used as merge target for shards).  Shards inherit
   // this from their parent tile so they know the reassembly threshold.
   nebulaTileArea?: number;
+  // Glass-shard equivalent of nebulaTileArea — accumulated tile-
+  // equivalent mass.  Initialized at glass-tile shatter
+  // (HEX_AREA / count), summed across glass-shard self-merges, and
+  // when it crosses HEX_AREA the shard transmutes back to a glass-
+  // tile at the nearest free hex cell.  See ShardSystem
+  // (tryTransmuteGlassShardToTile).
+  glassTileArea?: number;
   // Hex grid coordinate (odd-r offset) of the source tile — preserved on
   // shards so coalescence can snap back to the same column/row layout.
   nebulaGridCol?: number;

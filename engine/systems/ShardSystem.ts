@@ -25,7 +25,7 @@ import {
   nebulaFadeRateScale,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
-import { HEX_AREA } from '../maps/TileGenerator';
+import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition,
   MAP_WIDTH, MAP_HEIGHT,
@@ -465,6 +465,19 @@ export class ShardSystem {
       .filter(s => s >= MIN_SIZE);
     if (sizes.length < 2) return;
 
+    // Glass tile-area carry-over.  A glass-tile carries one HEX_AREA
+    // of mass; a cascading glass-shard passes along its already-
+    // accumulated area.  Distributed equally across surviving
+    // children — when they later merge back together via the
+    // shard-bonding pipeline, the total reassembles to one tile's
+    // worth and tryTransmuteGlassShardToTile can fire.  Children
+    // of non-glass parents leave the field unset.
+    const parentIsGlass = parentVariant.id === 'glass-tile' || parentVariant.id === 'glass-shard';
+    const childIsGlass  = childVariant.id  === 'glass-shard';
+    const glassAreaPerChild = (parentIsGlass && childIsGlass)
+      ? (parentVariant.id === 'glass-tile' ? HEX_AREA : (parent.glassTileArea ?? 0)) / sizes.length
+      : 0;
+
     // Resolve impact direction.
     const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -527,6 +540,7 @@ export class ShardSystem {
         polygonPoints: points,
         mass:          childSpawn.sizeToMass(newSize),
         sprite:        parent.sprite,
+        glassTileArea: glassAreaPerChild > 0 ? glassAreaPerChild : undefined,
       });
     }
 
@@ -1359,6 +1373,80 @@ export class ShardSystem {
    *  merges (today's behaviour).  Nebula-shard merges use the
    *  existing glimmer burst inside composeNebulaShards.
    */
+
+  /**
+   * Glass-shard variant of the nebula shard→tile transmute.  Once a
+   * glass-shard's `glassTileArea` accumulator reaches HEX_AREA, snap
+   * it to the nearest free hex cell and replace it with a fresh
+   * glass-tile.  Candidate cells are the shard's current hex + 6
+   * neighbours, sorted by distance.  If every candidate is occupied
+   * (by another tile or static collision geometry), the shard stays
+   * a shard and a later merge will retry.
+   *
+   * Unlike the nebula path, no system-level bookkeeping needs
+   * dirtying (neighbour-counts, transmutation hooks) — glass tiles
+   * don't drive a regeneration heuristic.  Just push the tile,
+   * register it with PhysicsSystem's static grid, and fade out the
+   * source shard.
+   */
+  private tryTransmuteGlassShardToTile(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    if (shard.shardVariant !== 'glass-shard') return false;
+    if ((shard.glassTileArea ?? 0) < HEX_AREA) return false;
+
+    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+      const p = hexCoordToPixel(c, r);
+      const dx = wrapDeltaX(shard.position.x, p.x);
+      const dy = wrapDeltaY(shard.position.y, p.y);
+      candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+      pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+      const p = hexCoordToPixel(cand.c, cand.r);
+      // Block on any nearby static geometry (existing tiles incl.
+      // nebula-tiles in the same cell, glass tiles, etc.).  Radius
+      // slightly under HEX_SIZE so touching neighbours don't
+      // register as overlap.
+      if (!physics.isPositionClear(p.x, p.y, HEX_SIZE * 0.5)) continue;
+      chosen = cand;
+      break;
+    }
+    if (!chosen) return false;
+
+    const p = hexCoordToPixel(chosen.c, chosen.r);
+    // Hex dimensions match TileGenerator's tile build.  Width is
+    // sqrt(3)*HEX_SIZE; height is 2*HEX_SIZE.
+    const w = Math.sqrt(3) * HEX_SIZE;
+    const h = 2 * HEX_SIZE;
+    const pts: Vector2[] = [
+      { x:  0,    y: -h / 2 },
+      { x:  w / 2, y: -h / 4 },
+      { x:  w / 2, y:  h / 4 },
+      { x:  0,    y:  h / 2 },
+      { x: -w / 2, y:  h / 4 },
+      { x: -w / 2, y: -h / 4 },
+    ];
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, 'glass');
+    entities.push(tile);
+    physics.addStaticEntity(tile);
+
+    // Source shard fades out the same way as nebula transmute — the
+    // tile materialises while the shard dissolves on top of it.
+    this.startMergeFadeOut(shard);
+    return true;
+  }
+
   private composeEntities(
     a: GameEntity,
     b: GameEntity,
@@ -1498,12 +1586,29 @@ export class ShardSystem {
         a.densityTier = newTier;
         a.densityCachedTint = undefined;
       }
+      // Glass tile-area carry-over: when both parties are glass-
+      // shards, sum their accumulated tile-area onto the surviving
+      // shard.  If the total crosses HEX_AREA, transmute back to a
+      // glass-tile at the nearest free hex.  Mirrors the nebula
+      // shard→tile mechanic but lives entirely in ShardSystem (no
+      // adapter hook needed — no per-system bookkeeping like
+      // neighbour-counts to dirty).
+      if (a.shardVariant === 'glass-shard' && b.shardVariant === 'glass-shard') {
+        a.glassTileArea = (a.glassTileArea ?? 0) + (b.glassTileArea ?? 0);
+      }
+
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
       // each substep and flips active=false on completion;
       // RenderSystem multiplies alpha by the fraction remaining so
       // the dissolve reads visibly across the field.
       this.startMergeFadeOut(b);
+
+      // Threshold check — try transmute *after* fade is armed so
+      // the b-side cleanup is consistent regardless of success.
+      if (a.shardVariant === 'glass-shard' && (a.glassTileArea ?? 0) >= HEX_AREA) {
+        this.tryTransmuteGlassShardToTile(a, entities, physics);
+      }
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
       if (a.dropType === b.dropType) {
