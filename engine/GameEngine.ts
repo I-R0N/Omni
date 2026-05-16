@@ -407,6 +407,17 @@ export class GameEngine {
     this.shards.shardBondingEnabled = !this.shards.shardBondingEnabled;
   }
 
+  /**
+   * Toggle hard collisions between nebula-shard ↔ nebula-shard
+   * pairs.  When on, the per-variant passThrough flag is ignored
+   * for that specific pair and the SAT impulse path runs as
+   * normal.  Default OFF — used to A/B-test whether forcing
+   * nebula-pair separation breaks up the "one big pile" symptom.
+   */
+  public toggleNebulaShardCollisions() {
+    this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
+  }
+
   private onStatsUpdate: (stats: EngineStats) => void;
 
   constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
@@ -567,6 +578,7 @@ export class GameEngine {
       shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
+      nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -675,6 +687,7 @@ export class GameEngine {
       shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
+      nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,

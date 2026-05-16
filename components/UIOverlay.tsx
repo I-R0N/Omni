@@ -18,6 +18,7 @@ interface UIOverlayProps {
   onToggleShardTileCollisions?: () => void;
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
+  onToggleNebulaShardCollisions?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
   onSkipWave?: () => void;
@@ -43,6 +44,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardTileCollisions,
   onToggleShardGravity,
   onToggleShardBonding,
+  onToggleNebulaShardCollisions,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
   onSkipWave,
@@ -198,6 +200,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle shard ↔ shard bond formation + cohesion.  OFF drops existing bonds and prevents new ones — nebula self-compose and cross-variant absorb stop."
                   >
                     {stats.shardBondingEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Neb↔Neb</span>
+                  <button
+                    onClick={onToggleNebulaShardCollisions}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
+                  >
+                    {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

@@ -149,6 +149,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleShardBonding();
   };
 
+  const handleToggleNebulaShardCollisions = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -177,6 +181,7 @@ const App: React.FC = () => {
         onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
+        onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

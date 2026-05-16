@@ -679,6 +679,9 @@ export interface EngineStats {
   shardGravityEnabled?: boolean;
   // Shard ↔ shard bond formation + cohesion.  DBG-toggleable.
   shardBondingEnabled?: boolean;
+  // Hard collisions between nebula-shard pairs (ignores their
+  // passThrough flag).  DBG-toggleable; default OFF.
+  nebulaShardCollisionsEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

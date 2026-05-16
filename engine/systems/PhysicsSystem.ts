@@ -90,6 +90,16 @@ export class PhysicsSystem {
   // crash branch in resolveCollision (asteroid-pressure damage +
   // elastic bounce off the tile face).
   public shardTileCollisionsEnabled: boolean = false;
+  // Debug toggle — when true, nebula-shard ↔ nebula-shard pairs
+  // ignore the per-variant passThrough flag and take a normal
+  // elastic collision impulse.  Default OFF preserves today's
+  // behaviour (nebula shards intentionally pass through each
+  // other so the cloud reads continuous).  Flip ON to A/B-test
+  // whether hard collisions break up the "one big pile" symptom
+  // when many nebula shards converge.  Scope is intentionally
+  // narrow: nebula-vs-striker and nebula-vs-tile still honour
+  // passThrough — only the same-variant pair is affected.
+  public nebulaShardCollisionsEnabled: boolean = false;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -1175,8 +1185,17 @@ export class PhysicsSystem {
       // path needs the same gate.  Moved past the early-outs above
       // so most pair calls (no overlap, or settled) skip the dict
       // lookup entirely.
-      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
-      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      //
+      // DBG override: when `nebulaShardCollisionsEnabled` is on AND
+      // both sides are nebula-shards, the passThrough gate is
+      // bypassed and the pair takes the standard elastic bounce.
+      const nebPairCollidesFast = this.nebulaShardCollisionsEnabled
+        && a.shardVariant === 'nebula-shard'
+        && b.shardVariant === 'nebula-shard';
+      if (!nebPairCollidesFast) {
+        if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+        if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      }
 
       let nx: number;
       let ny: number;
@@ -1370,8 +1389,13 @@ export class PhysicsSystem {
       // shard itself takes a strong kick that the existing
       // linearDamping = 0.97 bleeds off in <1s — the same "cloud
       // shoved aside" feel without a per-EntityType skip.
-      const aPassThrough = a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
-      const bPassThrough = b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
+      // DBG override mirrors the fast-path gate above — nebula-pair
+      // hard collisions when the toggle is on.
+      const nebPairCollides = this.nebulaShardCollisionsEnabled
+        && a.shardVariant === 'nebula-shard'
+        && b.shardVariant === 'nebula-shard';
+      const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
+      const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       // Shatter trigger is independent of pass-through — a nebula
       // tile shatters on PLAYER/ENEMY contact regardless.
       const aIsNebulaTile = a.shardVariant === 'nebula-tile';
