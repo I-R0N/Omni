@@ -80,6 +80,12 @@ interface RegenEntry {
   variantId: ShardVariantId;
 }
 
+// Tile-equivalent diameter — the size at which a glass-shard is
+// considered "tile-sized" and triggers the tier-transition roll
+// (glass-tile vs. smaller rock-shard).  Matches the diameter of a
+// circle whose area equals one hex tile.
+const GLASS_TIER_DIAMETER = Math.sqrt(HEX_AREA);
+
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
  * `timer` accumulates contact dt; when it reaches `threshold` AND
@@ -465,19 +471,6 @@ export class ShardSystem {
       .filter(s => s >= MIN_SIZE);
     if (sizes.length < 2) return;
 
-    // Glass tile-area carry-over.  A glass-tile carries one HEX_AREA
-    // of mass; a cascading glass-shard passes along its already-
-    // accumulated area.  Distributed equally across surviving
-    // children — when they later merge back together via the
-    // shard-bonding pipeline, the total reassembles to one tile's
-    // worth and tryTransmuteGlassShardToTile can fire.  Children
-    // of non-glass parents leave the field unset.
-    const parentIsGlass = parentVariant.id === 'glass-tile' || parentVariant.id === 'glass-shard';
-    const childIsGlass  = childVariant.id  === 'glass-shard';
-    const glassAreaPerChild = (parentIsGlass && childIsGlass)
-      ? (parentVariant.id === 'glass-tile' ? HEX_AREA : (parent.glassTileArea ?? 0)) / sizes.length
-      : 0;
-
     // Resolve impact direction.
     const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -540,7 +533,6 @@ export class ShardSystem {
         polygonPoints: points,
         mass:          childSpawn.sizeToMass(newSize),
         sprite:        parent.sprite,
-        glassTileArea: glassAreaPerChild > 0 ? glassAreaPerChild : undefined,
       });
     }
 
@@ -1375,13 +1367,76 @@ export class ShardSystem {
    */
 
   /**
-   * Glass-shard variant of the nebula shard→tile transmute.  Once a
-   * glass-shard's `glassTileArea` accumulator reaches HEX_AREA, snap
-   * it to the nearest free hex cell and replace it with a fresh
-   * glass-tile.  Candidate cells are the shard's current hex + 6
-   * neighbours, sorted by distance.  If every candidate is occupied
-   * (by another tile or static collision geometry), the shard stays
-   * a shard and a later merge will retry.
+   * Tier-transition router for a glass-shard that has grown to
+   * tile-equivalent diameter via the merge pipeline.  Rolls 50/50
+   * between:
+   *   - glass-tile:  condense at the nearest free hex cell.
+   *   - rock-shard:  downgrade in-place to a smaller, denser rock-
+   *                  shard (first leg of the planned material tier
+   *                  chain: nebula → glass → rock → metal → plastic).
+   *
+   * Glass-tile path can still fail if every candidate hex is
+   * occupied — in that case the shard stays a glass-shard and a
+   * later merge will retry.
+   */
+  private tryConvertOversizedGlassShard(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): void {
+    if (shard.shardVariant !== 'glass-shard') return;
+    if (shard.size.x < GLASS_TIER_DIAMETER) return;
+    if (Math.random() < 0.5) {
+      this.tryTransmuteGlassShardToTile(shard, entities, physics);
+    } else {
+      this.convertGlassShardToRockShard(shard);
+    }
+  }
+
+  /**
+   * In-place transition from glass-shard to a smaller rock-shard.
+   * Size shrinks by the rock-shard density shrinkFactor (≈0.88)
+   * applied to GLASS_TIER_DIAMETER, polygon is regenerated with
+   * rock-shard's irregular spawn config, mass is recomputed via
+   * the rock variant's sizeToMass.  No new entity allocated —
+   * mutates the host in place so the entity-id pipeline / spatial
+   * grids stay stable across the swap.
+   */
+  private convertGlassShardToRockShard(shard: GameEntity): void {
+    const rockVariant = SHARD_VARIANTS['rock-shard'];
+    const rockSpawn = rockVariant.spawn;
+    const newSize = GLASS_TIER_DIAMETER * (rockVariant.density?.shrinkFactor ?? 0.88);
+
+    shard.shardVariant = 'rock-shard';
+    shard.size.x = newSize;
+    shard.size.y = newSize;
+    shard.mass = rockSpawn.sizeToMass(newSize);
+    shard.color = COLORS.ASTEROID;
+    shard.sprite = undefined;
+    // Density tier reset — the new rock-shard starts at base tier;
+    // its own future merges will compact normally.
+    shard.densityTier = undefined;
+    shard.densityCachedTint = undefined;
+
+    const baseR = (newSize / 2) * 0.82;
+    shard.polygonPoints = this.generateShardPolygon(
+      baseR,
+      rockSpawn.polyVerticesMin,
+      rockSpawn.polyVerticesMax,
+      rockSpawn.angleJitter,
+      rockSpawn.radiusMin,
+      rockSpawn.radiusRange,
+      rockSpawn.polyVerticesOptions,
+    );
+  }
+
+  /**
+   * Glass-shard counterpart of the nebula shard→tile transmute.
+   * Snap the shard to the nearest free hex cell and replace it with
+   * a fresh glass-tile.  Candidate cells are the shard's current
+   * hex + 6 neighbours, sorted by distance.  If every candidate is
+   * occupied (by another tile or static collision geometry), the
+   * shard stays a shard and the caller can retry next merge.
    *
    * Unlike the nebula path, no system-level bookkeeping needs
    * dirtying (neighbour-counts, transmutation hooks) — glass tiles
@@ -1395,7 +1450,6 @@ export class ShardSystem {
     physics: PhysicsSystem,
   ): boolean {
     if (shard.shardVariant !== 'glass-shard') return false;
-    if ((shard.glassTileArea ?? 0) < HEX_AREA) return false;
 
     const origin = pixelToHexCoord(shard.position.x, shard.position.y);
     const candidates: { c: number; r: number; distSq: number }[] = [];
@@ -1530,7 +1584,14 @@ export class ShardSystem {
       let newDiam: number;
       let newMass: number;
       let newTier: number | undefined = undefined;
-      if (density?.enabled) {
+      // Glass-shard self-merges bypass density compaction — the
+      // tier-transition mechanic (glass→tile / smaller rock-shard)
+      // wants the shards to *grow* visibly until they hit
+      // GLASS_TIER_DIAMETER.  Density's shrinkFactor would have
+      // them shrinking instead.  Other pairs (rock-self, cross-
+      // variant) keep the density path.
+      const isGlassSelfMerge = a.shardVariant === 'glass-shard' && b.shardVariant === 'glass-shard';
+      if (density?.enabled && !isGlassSelfMerge) {
         const tierA = a.densityTier ?? 0;
         const tierB = b.densityTier ?? 0;
         const proposedTier = Math.max(tierA, tierB) + 1;
@@ -1586,17 +1647,6 @@ export class ShardSystem {
         a.densityTier = newTier;
         a.densityCachedTint = undefined;
       }
-      // Glass tile-area carry-over: when both parties are glass-
-      // shards, sum their accumulated tile-area onto the surviving
-      // shard.  If the total crosses HEX_AREA, transmute back to a
-      // glass-tile at the nearest free hex.  Mirrors the nebula
-      // shard→tile mechanic but lives entirely in ShardSystem (no
-      // adapter hook needed — no per-system bookkeeping like
-      // neighbour-counts to dirty).
-      if (a.shardVariant === 'glass-shard' && b.shardVariant === 'glass-shard') {
-        a.glassTileArea = (a.glassTileArea ?? 0) + (b.glassTileArea ?? 0);
-      }
-
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
       // each substep and flips active=false on completion;
@@ -1604,10 +1654,14 @@ export class ShardSystem {
       // the dissolve reads visibly across the field.
       this.startMergeFadeOut(b);
 
-      // Threshold check — try transmute *after* fade is armed so
-      // the b-side cleanup is consistent regardless of success.
-      if (a.shardVariant === 'glass-shard' && (a.glassTileArea ?? 0) >= HEX_AREA) {
-        this.tryTransmuteGlassShardToTile(a, entities, physics);
+      // Glass-shard tier transition.  When the survivor is a glass-
+      // shard that has grown to tile-equivalent diameter
+      // (sqrt(HEX_AREA)), roll 50/50: condense into a glass-tile at
+      // the nearest free hex, or downgrade to a smaller (denser)
+      // rock-shard — the first leg of the planned material tier
+      // chain (nebula→glass→rock→metal→plastic).
+      if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
+        this.tryConvertOversizedGlassShard(a, entities, physics);
       }
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
