@@ -1886,18 +1886,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      // Stick-bonds with self → compose (existing coalesce / transmute);
-      // with glass-shard → absorb after long contact, gated on partner
-      // reaching its variant sizeMax (rare, "unique event").
-      // bondTimeSeconds: 0 fires self-compose instantly on contact
-      // (matches today's nebula proximity-merge); glass-shard absorb
-      // uses thresholdScale to scale to ~5× the self-compose time.
-      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
+      // Stick-bonds: only cross-variant absorb stays on the bond
+      // pipeline today (glass absorb, gated on partner-size).  Self-
+      // coalesce was moved off bondsWith and now fires from a
+      // dedicated nebula-only pass in ShardSystem.runMergeBroadphase
+      // so it survives the DBG ShBond toggle being off — nebula tile
+      // formation is a world-population mechanic, not a generic
+      // shard-stick mechanic.
+      bondsWith: { include: ['glass-shard'] },
       bondTimeSeconds: 0,
       bondTimeSizeRef: 20,
       bondTimeSizePower: 1.5,
       rules: [
-        { partner: 'self', outcome: 'compose' },
+        // Self-coalesce is no longer a bond rule — fires from the
+        // dedicated nebula coalesce pass in ShardSystem.
         {
           partner: 'glass-shard',
           outcome: 'absorb',

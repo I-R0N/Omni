@@ -991,6 +991,25 @@ export class ShardSystem {
               }
             }
 
+            // Dedicated nebula self-coalesce path — runs INDEPENDENT
+            // of the bondsWith pipeline so the DBG ShBond toggle can
+            // be off without killing nebula tile formation.  Fires
+            // composeEntities directly on contact for nebula-shard
+            // ↔ nebula-shard pairs; cooldowns honoured on both
+            // sides.  Dedupe via (j > i) so each pair is handled
+            // exactly once.
+            if (j > i
+                && aVariantId === 'nebula-shard'
+                && bVariantId === 'nebula-shard'
+                && (a.nebulaMergeCooldown ?? 0) <= 0
+                && (b.nebulaMergeCooldown ?? 0) <= 0) {
+              const ncContact = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
+              if (distSq <= ncContact * ncContact) {
+                this.composeEntities(a, b, entities, _physics, 'compose');
+                continue;
+              }
+            }
+
             // Bond formation: only consider each unordered pair once
             // (j > i), and skip if either party is already bonded.
             // DBG-gated — when shardBondingEnabled is false, skip

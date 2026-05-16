@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -223,6 +223,21 @@ export class NebulaSystem {
      * neighbours are occupied), the transmutation aborts and the shard
      * stays as a shard — a later frame may find a clear cell as it drifts.
      */
+    /**
+     * Once a nebula shard has accumulated HEX_AREA of effective
+     * mass (via the dedicated coalesce pass), roll a uniform 1/3
+     * outcome among:
+     *   - nebula-tile  — original behaviour: snap to a free hex
+     *                    cell and condense to a tile.
+     *   - glass-shard  — spawn a single mobile glass-shard at the
+     *                    nebula's current position.
+     *   - rock-shard   — same, but rock-shard.
+     *
+     * The two shard outcomes don't depend on a free hex cell, so
+     * they always succeed.  The tile path can still fail if every
+     * candidate cell is occupied; in that case we leave the nebula
+     * untouched and a later frame will retry the roll.
+     */
     private tryTransmuteShardToTile(
         entities: GameEntity[],
         shard: GameEntity,
@@ -240,6 +255,29 @@ export class NebulaSystem {
         const effectiveArea = shard.nebulaTileArea ?? 0;
         if (effectiveArea < HEX_AREA) return false;
 
+        // 1/3 outcome roll.  Drawn ONCE per threshold-crossing so the
+        // resulting world feature is stable for the rest of the frame.
+        const roll = Math.random();
+        if (roll < 1 / 3) {
+            return this.transmuteToTile(entities, shard, physics);
+        }
+        if (roll < 2 / 3) {
+            this.transmuteToShard(entities, shard, 'glass-shard');
+            return true;
+        }
+        this.transmuteToShard(entities, shard, 'rock-shard');
+        return true;
+    }
+
+    /**
+     * Original tile-creation path, factored out so the outcome
+     * router above can dispatch to it.  Behaviour unchanged.
+     */
+    private transmuteToTile(
+        entities: GameEntity[],
+        shard: GameEntity,
+        physics: PhysicsSystem,
+    ): boolean {
         // Candidate cells: the shard's current hex cell + 6 neighbours,
         // sorted by distance so we snap to the nearest free slot.
         const origin = pixelToHexCoord(shard.position.x, shard.position.y);
@@ -292,6 +330,69 @@ export class NebulaSystem {
         shard.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
         shard.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
         return true;
+    }
+
+    /**
+     * Alternate transmutation outcome: replace the host nebula-shard
+     * with a single mobile shard of `variantId` ('glass-shard' or
+     * 'rock-shard').  Target size is sqrt(HEX_AREA) so the new shard
+     * carries roughly one tile's worth of area — matching what the
+     * tile-outcome path would have produced visually.  Polygon is
+     * generated from the target variant's spawn config so the
+     * silhouette reads as that variant, not a nebula carry-over.
+     */
+    private transmuteToShard(
+        entities: GameEntity[],
+        host: GameEntity,
+        variantId: 'glass-shard' | 'rock-shard',
+    ): void {
+        const variant = SHARD_VARIANTS[variantId];
+        const spawn = variant.spawn;
+        const targetSize = Math.sqrt(HEX_AREA);
+
+        // Polygon via the variant's spawn config (radius / vertex
+        // count / jitter).  Mirrors what ShardSystem.shatter does
+        // for child shards.
+        const baseR = (targetSize / 2) * 0.8;
+        const verts = spawn.polyVerticesOptions
+            ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+            : spawn.polyVerticesMin + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+        const raw: { angle: number; r: number }[] = [];
+        for (let i = 0; i < verts; i++) {
+            const baseAngle   = (i / verts) * Math.PI * 2;
+            const angleJitter = (Math.random() - 0.5) * (Math.PI / verts) * spawn.angleJitter * 2;
+            const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
+            raw.push({ angle: baseAngle + angleJitter, r: baseR * radiusFrac });
+        }
+        raw.sort((a, b) => a.angle - b.angle);
+        const polygonPoints = raw.map(p => ({
+            x: Math.cos(p.angle) * p.r,
+            y: Math.sin(p.angle) * p.r,
+        }));
+
+        const hp = targetSize > 30 ? 2 : 1;
+        entities.push({
+            id:            nextId('shard'),
+            type:          EntityType.STRUCTURE,
+            shardVariant:  variantId,
+            position:     { x: host.position.x, y: host.position.y },
+            velocity:     { x: host.velocity.x, y: host.velocity.y },
+            size:         { x: targetSize, y: targetSize },
+            rotation:      Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 1.0,
+            color:         COLORS.ASTEROID,
+            active:        true,
+            health:        hp,
+            maxHealth:     hp,
+            polygonPoints,
+            mass:          spawn.sizeToMass(targetSize),
+        });
+
+        // Fade the host nebula-shard out the same way the tile path
+        // does — eye reads "nebula dissolved, new shard appeared"
+        // rather than a hard swap.
+        host.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
+        host.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
     }
 
     /**
