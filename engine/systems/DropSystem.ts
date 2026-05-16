@@ -807,9 +807,6 @@ export class DropSystem {
       // shatter spawn duration.
       nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
       nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
-      // Small area so the shard doesn't trigger the shard-to-tile
-      // transmutation path when it bumps into other nebula material.
-      nebulaTileArea:      targetSize * targetSize * 0.5,
     });
   }
 

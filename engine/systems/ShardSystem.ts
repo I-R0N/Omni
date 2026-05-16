@@ -135,17 +135,6 @@ export class ShardSystem {
   private bonds: BondEntry[] = [];
 
   /**
-   * Pending nebula coalesce timers.  Lives on its own list (not
-   * `bonds`) because the dedicated nebula path bypasses the
-   * bondsWith pipeline — see runMergeBroadphase + tickNebulaCoalesce.
-   * Each entry: { a, b, timer }.  Timer accumulates while the pair
-   * stays in contact; at NEBULA_CONSTANTS.COALESCE_TIME_SECONDS the
-   * pair composes.  Pairs that drift past contactDist × BREAK_FACTOR
-   * before firing are dropped silently.
-   */
-  private nebulaCoalesceTimers: { a: GameEntity; b: GameEntity; timer: number }[] = [];
-
-  /**
    * Optional adapter providing variant-specific completion hooks.
    * Stage 2: nebula composition rewrite at regen completion.
    * Stage 4: nebula shard→tile transmutation after self-compose.
@@ -240,10 +229,6 @@ export class ShardSystem {
     // imbalance is what collapsed clusters to a single point on
     // high-N ShPair settings.
     this.tickBonds(entities, dt, physics, runMergePass);
-    // Nebula coalesce timers run every frame, ungated by ShBond /
-    // runMergePass — they're a world-population mechanic, not
-    // shard-stick state.  See tickNebulaCoalesce comment.
-    this.tickNebulaCoalesce(entities, dt, physics);
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
       this.runLargeShardCollapse(entities);
@@ -275,7 +260,6 @@ export class ShardSystem {
   public reset(): void {
     this.pending.length = 0;
     this.bonds.length = 0;
-    this.nebulaCoalesceTimers.length = 0;
   }
 
   // ── Regen queue ───────────────────────────────────────────────────
@@ -671,8 +655,6 @@ export class ShardSystem {
       const velX = fx * parallelSpeed + perpX;
       const velY = fy * parallelSpeed + perpY;
 
-      const effectiveAreaPerShard = HEX_AREA / shardCount;
-
       entities.push({
         id:              nextId('nebula_shard'),
         // Stage 5: unified carrier with mass-based dispatch.  Mass
@@ -694,7 +676,6 @@ export class ShardSystem {
         polygonPoints:   points,
         sprite:          parent.sprite,
         nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-        nebulaTileArea:  effectiveAreaPerShard,
         nebulaGridCol:   parent.nebulaGridCol,
         nebulaGridRow:   parent.nebulaGridRow,
         linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
@@ -846,63 +827,6 @@ export class ShardSystem {
   }
 
   /**
-   * Advance pending nebula coalesce timers, applying cohesion to
-   * keep paired shards from drifting apart while the timer
-   * accumulates.  When a pair's timer reaches
-   * NEBULA_CONSTANTS.COALESCE_TIME_SECONDS it composes via the same
-   * composeEntities call the bond pipeline uses.
-   *
-   * Runs unconditionally from update() — NOT gated by
-   * shardBondingEnabled or runMergePass.  Nebula tile formation is
-   * a world-population mechanic and shouldn't be subject to the
-   * shard-stick DBG knobs.
-   */
-  private tickNebulaCoalesce(entities: GameEntity[], dt: number, physics: PhysicsSystem): void {
-    if (this.nebulaCoalesceTimers.length === 0) return;
-
-    const COHESION     = 4.0;
-    const BREAK_FACTOR = 1.5;
-    const THRESHOLD    = NEBULA_CONSTANTS.COALESCE_TIME_SECONDS;
-
-    let writeIdx = 0;
-    for (let i = 0; i < this.nebulaCoalesceTimers.length; i++) {
-      const e = this.nebulaCoalesceTimers[i];
-      const { a, b } = e;
-
-      if (!a.active || !b.active) continue;
-      // Either side already retiring (faded by a prior compose, or
-      // mid-shatter) — drop the pending pair.
-      if (a.nebulaFadeTimer !== undefined || b.nebulaFadeTimer !== undefined) continue;
-      if (a.mergeFadeTimer  !== undefined || b.mergeFadeTimer  !== undefined) continue;
-
-      const dx = wrapDeltaX(a.position.x, b.position.x);
-      const dy = wrapDeltaY(a.position.y, b.position.y);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const contactDist = (a.size.x + b.size.x) * 0.5;
-      if (dist > contactDist * BREAK_FACTOR) continue; // separated
-
-      // Mass-weighted velocity blend so the pair stays together
-      // visually while the timer ticks.  Mirrors tickBonds cohesion.
-      const totalMass = a.mass + b.mass;
-      const sharedVx  = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
-      const sharedVy  = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
-      const blend     = Math.min(1, COHESION * dt);
-      a.velocity.x   += (sharedVx - a.velocity.x) * blend;
-      a.velocity.y   += (sharedVy - a.velocity.y) * blend;
-      b.velocity.x   += (sharedVx - b.velocity.x) * blend;
-      b.velocity.y   += (sharedVy - b.velocity.y) * blend;
-
-      e.timer += dt;
-      if (e.timer >= THRESHOLD) {
-        this.composeEntities(a, b, entities, physics, 'compose');
-        continue; // resolved
-      }
-      this.nebulaCoalesceTimers[writeIdx++] = e;
-    }
-    this.nebulaCoalesceTimers.length = writeIdx;
-  }
-
-  /**
    * Single-pass merge broadphase: build a shared spatial hash over
    * mobile shard candidates + eligible drops, walk it once, and for
    * each pair perform two orthogonal jobs:
@@ -937,15 +861,6 @@ export class ShardSystem {
       bonded.add(this.bonds[i].b);
     }
 
-    // Same idea for the dedicated nebula coalesce queue — prevents
-    // a single nebula from queueing multiple pending merges in one
-    // frame, and skips contacts whose pair is already timing in
-    // tickNebulaCoalesce.
-    const coalescePending = new Set<GameEntity>();
-    for (let i = 0; i < this.nebulaCoalesceTimers.length; i++) {
-      coalescePending.add(this.nebulaCoalesceTimers[i].a);
-      coalescePending.add(this.nebulaCoalesceTimers[i].b);
-    }
 
     // Candidate set: every mobile shard-family entity + eligible drops.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
@@ -1076,30 +991,6 @@ export class ShardSystem {
                   && distSq <= pullRangeSq && distSq < bestPullDistSq) {
                 bestPullDistSq = distSq;
                 bestPullTarget = b;
-              }
-            }
-
-            // Dedicated nebula self-coalesce path — runs INDEPENDENT
-            // of the bondsWith pipeline so the DBG ShBond toggle can
-            // be off without killing nebula tile formation.  On
-            // first contact we enqueue a coalesce timer; the actual
-            // compose fires from tickNebulaCoalesce after the pair
-            // has held contact for COALESCE_TIME_SECONDS.  Dedupe
-            // via the `coalescePending` set built once at broadphase
-            // start.  Cooldowns honoured on both sides.
-            if (j > i
-                && aVariantId === 'nebula-shard'
-                && bVariantId === 'nebula-shard'
-                && (a.nebulaMergeCooldown ?? 0) <= 0
-                && (b.nebulaMergeCooldown ?? 0) <= 0
-                && !coalescePending.has(a)
-                && !coalescePending.has(b)) {
-              const ncContact = (a.size.x + b.size.x) * 0.5 + CONTACT_BUFFER;
-              if (distSq <= ncContact * ncContact) {
-                this.nebulaCoalesceTimers.push({ a, b, timer: 0 });
-                coalescePending.add(a);
-                coalescePending.add(b);
-                continue;
               }
             }
 
@@ -1776,114 +1667,69 @@ export class ShardSystem {
   }
 
   private composeNebulaShards(
-    larger: GameEntity,
-    smaller: GameEntity,
+    a: GameEntity,
+    b: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    const largeR = Math.max(larger.size.x, larger.size.y) / 2;
-    const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
-    const largeArea = Math.PI * largeR * largeR;
-    const smallArea = Math.PI * smallR * smallR;
+    // Pair-consuming transmute — both source shards retire and a
+    // single tile-equivalent output materialises (50/50 nebula-tile
+    // vs glass-shard, routed inside the adapter).  No area-
+    // accumulator any more: every successful nebula self-bond
+    // triggers a transmute attempt.
+    const aR = Math.max(a.size.x, a.size.y) / 2;
+    const bR = Math.max(b.size.x, b.size.y) / 2;
+    const aArea = Math.PI * aR * aR;
+    const bArea = Math.PI * bR * bR;
 
-    // Density-aware sizing.  When nebula-shard's density.enabled is set
-    // (today: yes), the merged shard is intentionally smaller than the
-    // larger input to read as compaction; mass = sum of inputs.  The
-    // existing nebulaTileArea accumulation (driving shard→tile
-    // transmutation) is independent of this, so the cycle still fires
-    // at HEX_AREA regardless of physical size.
-    const density = SHARD_VARIANTS['nebula-shard'].density;
-    let newDiameter: number;
-    let newMass: number;
-    let newTier: number | undefined = undefined;
-    if (density?.enabled) {
-      const tierA = larger.densityTier ?? 0;
-      const tierB = smaller.densityTier ?? 0;
-      const proposed = Math.max(tierA, tierB) + 1;
-      if (proposed > density.maxSteps) {
-        // Capped — fall back to legacy area-conserving accretion so
-        // shards continue to grow toward transmutation rather than
-        // refusing to merge.  Tier stays at maxSteps.
-        const newArea = largeArea + smallArea;
-        newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-        newMass = newDiameter;
-      } else {
-        newTier = proposed;
-        newDiameter = larger.size.x * density.shrinkFactor;
-        newMass = larger.mass + smaller.mass;
-      }
-    } else {
-      const newArea = largeArea + smallArea;
-      newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-      newMass = newDiameter;
-    }
-
-    larger.size.x = newDiameter;
-    larger.size.y = newDiameter;
-    larger.mass   = newMass;
-    if (newTier !== undefined) {
-      larger.densityTier = newTier;
-      // Tier change invalidates BOTH the generic density tint cache
-      // AND the nebula fast-path cache — both are functions of the
-      // resolved render colour which now darkens.  Matches the
-      // existing pattern in the regen / merge invalidation sites
-      // (NebulaSystem.recomputeNeighborCounts:188).
-      larger.densityCachedTint = undefined;
-    }
-
-    // Accumulate effective area carried by both shards onto the
-    // larger.  Decoupled from physical disc area so shards can stay
-    // glass-style small while still transmuting back to tiles at a
-    // 1-tile-in → 1-tile-out rate.
-    larger.nebulaTileArea = (larger.nebulaTileArea ?? 0) + (smaller.nebulaTileArea ?? 0);
-
-    // Arm a fresh merge cooldown on the grown shard so it doesn't
-    // immediately chain-merge with another neighbour the same frame.
-    larger.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
-
-    // Regenerate polygon at the new size — uses the same 4–6 vertex
-    // power-law math as nebula-shard spawn.
-    const polyRadius = newDiameter / 2 * 0.5;
-    larger.polygonPoints = this.generateShardPolygon(polyRadius, 4, 6, 0.25, 0.6, 0.55);
-
-    // Blend colour compositions weighted by area; larger dominates.
-    larger.nebulaColorComposition = blendCompositions(
-      larger.nebulaColorComposition, largeArea,
-      smaller.nebulaColorComposition, smallArea,
+    // Area-weighted color blend so the output inherits the pair's
+    // combined palette rather than picking one side arbitrarily.
+    const composition = blendCompositions(
+      a.nebulaColorComposition, aArea,
+      b.nebulaColorComposition, bArea,
     );
-    larger.color = blendCompositionToHex(larger.nebulaColorComposition);
-    larger.nebulaBlendedHex = larger.color;
-    larger.nebulaTintedKey = undefined;
-    larger.nebulaCachedTinted = undefined;
 
-    // Glittery glimmer burst scattered within a radius matching the
-    // smaller shard — the subtle merge feedback (white motes + tinted).
-    const tint = larger.color;
-    const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-    this.particles.spawn(entities, smaller.position, 3, '#ffffff', {
+    // Mass-weighted midpoint position — wrap-aware so a torus-
+    // crossing pair doesn't transmute on the wrong side of the
+    // seam.  Nebula shards share the same low mass; this is
+    // effectively the geometric midpoint.
+    const totalMass = a.mass + b.mass;
+    const bShiftX = a.position.x + wrapDeltaX(a.position.x, b.position.x);
+    const bShiftY = a.position.y + wrapDeltaY(a.position.y, b.position.y);
+    let mx = (a.position.x * a.mass + bShiftX * b.mass) / totalMass;
+    let my = (a.position.y * a.mass + bShiftY * b.mass) / totalMass;
+    { const p = { x: mx, y: my }; wrapPosition(p); mx = p.x; my = p.y; }
+
+    const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+    const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+
+    // Glittery glimmer burst at the merge point — same visual
+    // feedback the old grow-larger path had.
+    const tint = blendCompositionToHex(composition);
+    const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
+    const midpoint: Vector2 = { x: mx, y: my };
+    this.particles.spawn(entities, midpoint, 3, '#ffffff', {
       speedMin: 0.1, speedMax: 0.5,
       sizeMin: 0.3, sizeMax: 0.9,
       lifetimeMin: 0.4, lifetimeMax: 0.8,
       positionJitter: glimmerR,
     });
-    this.particles.spawn(entities, smaller.position, 4, tint, {
+    this.particles.spawn(entities, midpoint, 4, tint, {
       speedMin: 0.1, speedMax: 0.4,
       sizeMin: 0.4, sizeMax: 1.1,
       lifetimeMin: 0.5, lifetimeMax: 1.0,
       positionJitter: glimmerR * 1.2,
     });
 
-    // Smaller fades out over top of the already-grown larger — the
-    // eye reads the smaller dissolving INTO the new combined shard
-    // rather than popping out with the result flashing in from
-    // alpha 0.  Compaction removes it once the fade completes.
-    smaller.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-    smaller.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+    // Both source shards retire — the adapter spawns the output
+    // (tile or glass-shard) as a brand-new entity.
+    this.startMergeFadeOut(a);
+    this.startMergeFadeOut(b);
 
-    // Adapter hook: if the grown shard now carries enough effective
-    // area, transmute to a fresh tile.  NebulaSystem implements this
-    // (depends on hex coords + tile creation + static grid).
-    this.adapter?.onComposeNebulaShard(larger, entities, physics);
+    // Adapter hook routes the 50/50 outcome.  Position is the
+    // pair's midpoint; velocity is the mass-weighted average so a
+    // resulting glass-shard inherits the cloud's drift.
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics);
   }
 
   /**

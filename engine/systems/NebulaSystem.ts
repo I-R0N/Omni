@@ -224,64 +224,27 @@ export class NebulaSystem {
      * stays as a shard — a later frame may find a clear cell as it drifts.
      */
     /**
-     * Once a nebula shard has accumulated HEX_AREA of effective
-     * mass (via the dedicated coalesce pass), roll 50/50 between:
-     *   - nebula-tile  — snap to a free hex cell and condense to
-     *                    a tile.
-     *   - glass-shard  — spawn a single mobile glass-shard at the
-     *                    nebula's current position (next rung up
-     *                    the material tier chain — glass shards
-     *                    then continue their own merge cycle).
-     *
-     * The shard outcome doesn't depend on a free hex cell, so it
-     * always succeeds.  The tile path can still fail if every
-     * candidate cell is occupied; in that case we leave the nebula
-     * untouched and a later frame will retry the roll.
+     * Tile-outcome of the nebula pair-transmute.  Looks for the
+     * nearest free hex cell starting from `position` (the pair's
+     * midpoint) — origin cell + 6 neighbours, sorted by distance.
+     * If every candidate is occupied the call no-ops: the two
+     * source shards have already faded, so net effect is "the pair
+     * dissolved without producing anything" — acceptable fallback
+     * for a 50/50 roll where the shard side always succeeds.
      */
-    private tryTransmuteShardToTile(
+    private transmuteToTileAt(
         entities: GameEntity[],
-        shard: GameEntity,
+        position: Vector2,
+        composition: NebulaColorStop[] | undefined,
+        fallbackColor: string,
         physics: PhysicsSystem,
     ): boolean {
-        if (shard.shardVariant !== 'nebula-shard') return false;
-
-        // Effective-area threshold.  Each shard carries a
-        // `nebulaTileArea` set at spawn (= HEX_AREA / shardCount) that
-        // accumulates through merges.  Transmutation fires when a
-        // shard's accumulated effective area reaches HEX_AREA — i.e.
-        // one full tile's worth of shatter mass has coalesced back
-        // together.  Decoupled from physical disc area so shards can
-        // stay small and glass-style without blocking the cycle.
-        const effectiveArea = shard.nebulaTileArea ?? 0;
-        if (effectiveArea < HEX_AREA) return false;
-
-        // 50/50 outcome roll.  Drawn ONCE per threshold-crossing so
-        // the resulting world feature is stable for the rest of the
-        // frame.
-        if (Math.random() < 0.5) {
-            return this.transmuteToTile(entities, shard, physics);
-        }
-        this.transmuteToShard(entities, shard, 'glass-shard');
-        return true;
-    }
-
-    /**
-     * Original tile-creation path, factored out so the outcome
-     * router above can dispatch to it.  Behaviour unchanged.
-     */
-    private transmuteToTile(
-        entities: GameEntity[],
-        shard: GameEntity,
-        physics: PhysicsSystem,
-    ): boolean {
-        // Candidate cells: the shard's current hex cell + 6 neighbours,
-        // sorted by distance so we snap to the nearest free slot.
-        const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+        const origin = pixelToHexCoord(position.x, position.y);
         const candidates: { c: number; r: number; distSq: number }[] = [];
         const pushCandidate = (c: number, r: number) => {
             const p = hexCoordToPixel(c, r);
-            const dx = wrapDeltaX(shard.position.x, p.x);
-            const dy = wrapDeltaY(shard.position.y, p.y);
+            const dx = wrapDeltaX(position.x, p.x);
+            const dy = wrapDeltaY(position.y, p.y);
             candidates.push({ c, r, distSq: dx * dx + dy * dy });
         };
         pushCandidate(origin.c, origin.r);
@@ -299,59 +262,39 @@ export class NebulaSystem {
         }
         if (!chosen) return false;
 
-        // Create the new tile at the chosen grid cell, carrying over
-        // the shard's colour composition as the tile's palette.
-        const composition = shard.nebulaColorComposition
-            ? cloneComposition(shard.nebulaColorComposition)
-            : undefined;
+        const paletteComp = composition
+            ? cloneComposition(composition)
+            : [{ hex: fallbackColor, weight: 1 }];
         const tile = TileGenerator.createNebulaTileEntity(
-            chosen.c,
-            chosen.r,
-            composition ?? [{ hex: shard.color || NEBULA_CONSTANTS.DEFAULT_HEX, weight: 1 }],
-            HEX_AREA,
+            chosen.c, chosen.r, paletteComp, HEX_AREA,
         );
-
         entities.push(tile);
         physics.addStaticEntity(tile);
-
-        // A newly-transmuted tile adds itself to its neighbours' counts.
         this.neighborCountsDirty = true;
-
-        // New tile appears immediately at full opacity — the parent
-        // shard fades out over top of it, so the eye reads the shard
-        // dissolving INTO an already-present tile rather than a flash
-        // where both source and destination cross through zero alpha.
-        // Shard collapses into the new tile — fade it out instead of
-        // instant-deactivating so the hand-off is a smooth dissolve.
-        shard.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-        shard.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
         return true;
     }
 
     /**
-     * Alternate transmutation outcome: replace the host nebula-shard
-     * with a single mobile glass-shard.  Target size is sqrt(HEX_AREA)
-     * so the new shard carries roughly one tile's worth of area —
-     * matching what the tile-outcome path would have produced
-     * visually.  Polygon is generated from glass-shard's spawn
-     * config so the silhouette reads as glass, not a nebula
-     * carry-over.  The glass-shard then enters the ShardSystem
-     * merge cycle and may itself transmute up to a glass-tile (or
-     * downgrade to a rock-shard) once it reaches
-     * GLASS_TIER_DIAMETER.
+     * Glass-shard outcome of the nebula pair-transmute.  Spawns a
+     * brand-new mobile glass-shard at the supplied midpoint, sized
+     * to sqrt(HEX_AREA) so the visible mass roughly matches what
+     * the tile outcome would have produced.  The new glass-shard
+     * enters the ShardSystem merge cycle and may itself transmute
+     * to a glass-tile (or downgrade to a rock-shard) once it
+     * reaches GLASS_TIER_DIAMETER.  Both source nebula-shards are
+     * already fading by the time we get here (ShardSystem armed
+     * their mergeFadeTimers in composeNebulaShards).
      */
-    private transmuteToShard(
+    private spawnGlassShardAt(
         entities: GameEntity[],
-        host: GameEntity,
-        variantId: 'glass-shard',
+        position: Vector2,
+        velocity: Vector2,
+        _color: string,
     ): void {
-        const variant = SHARD_VARIANTS[variantId];
+        const variant = SHARD_VARIANTS['glass-shard'];
         const spawn = variant.spawn;
         const targetSize = Math.sqrt(HEX_AREA);
 
-        // Polygon via the variant's spawn config (radius / vertex
-        // count / jitter).  Mirrors what ShardSystem.shatter does
-        // for child shards.
         const baseR = (targetSize / 2) * 0.8;
         const verts = spawn.polyVerticesOptions
             ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
@@ -373,9 +316,9 @@ export class NebulaSystem {
         entities.push({
             id:            nextId('shard'),
             type:          EntityType.STRUCTURE,
-            shardVariant:  variantId,
-            position:     { x: host.position.x, y: host.position.y },
-            velocity:     { x: host.velocity.x, y: host.velocity.y },
+            shardVariant:  'glass-shard',
+            position:     { x: position.x, y: position.y },
+            velocity:     { x: velocity.x, y: velocity.y },
             size:         { x: targetSize, y: targetSize },
             rotation:      Math.random() * Math.PI * 2,
             rotationSpeed: (Math.random() - 0.5) * 1.0,
@@ -386,12 +329,6 @@ export class NebulaSystem {
             polygonPoints,
             mass:          spawn.sizeToMass(targetSize),
         });
-
-        // Fade the host nebula-shard out the same way the tile path
-        // does — eye reads "nebula dissolved, new shard appeared"
-        // rather than a hard swap.
-        host.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-        host.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
     }
 
     /**
@@ -513,18 +450,32 @@ export class NebulaSystem {
      *   - Flag neighbour-counts dirty for the next update() pass
      */
     /**
-     * ShardAdapter hook (Stage 4).  Called after a nebula-shard
-     * self-compose merge fires inside ShardSystem.composeEntities.
-     * Delegates straight to the existing transmutation logic; the
-     * compose math itself (area accumulate, composition blend,
-     * polygon regen, fade smaller) lives in ShardSystem.
+     * ShardAdapter pair-transmute hook.  Called after a nebula-shard
+     * ↔ nebula-shard bond resolves and ShardSystem has already
+     * faded both sources.  Rolls 50/50 between:
+     *   - nebula-tile  at the nearest free hex cell (may no-op if
+     *                  every candidate is occupied).
+     *   - glass-shard  at the supplied midpoint position with the
+     *                  pair's averaged velocity.
      */
-    public onComposeNebulaShard(
-        host: GameEntity,
+    public onComposeNebulaShardPair(
+        composition: NebulaColorStop[] | undefined,
+        position: Vector2,
+        velocity: Vector2,
         entities: GameEntity[],
         physics: PhysicsSystem,
     ): void {
-        this.tryTransmuteShardToTile(entities, host, physics);
+        const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
+        if (Math.random() < 0.5) {
+            // Tile path may fail if every candidate hex is occupied;
+            // in that case the pair-transmute resolves to nothing
+            // (both source shards are already fading).  Acceptable —
+            // matches the previous behaviour of the area-accumulator
+            // path when its tile attempt failed.
+            this.transmuteToTileAt(entities, position, composition, blendHex, physics);
+        } else {
+            this.spawnGlassShardAt(entities, position, velocity, blendHex);
+        }
     }
 
     public onNeighborhoodBlendRegen(entity: GameEntity, entities: GameEntity[]): void {

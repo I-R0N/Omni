@@ -611,15 +611,6 @@ export const NEBULA_CONSTANTS = {
   // cooldown is ticked each substep by PhysicsSystem and consulted by
   // NebulaSystem.updateDynamics before considering any merge pair.
   MERGE_COOLDOWN: 1.8,
-  // Nebula self-coalesce contact time.  Two nebula shards in contact
-  // must remain in contact for this many seconds before composing.
-  // Replaces the previous instant-merge behaviour (bondTimeSeconds:0
-  // on the bondsWith pipeline) — the dedicated nebula coalesce path
-  // tracks per-pair contact timers in ShardSystem.tickNebulaCoalesce,
-  // applies cohesion to keep them held together while the timer
-  // accumulates, and drops the pair if they drift past
-  // contactDist × BREAK_FACTOR before firing.
-  COALESCE_TIME_SECONDS: 2.0,
   // Tile regeneration toggle.  When false, shattered tiles are gone
   // forever (no respawn at their original grid cell) and the ONLY way
   // new tiles appear is via shard → tile transmutation.  Combined with
@@ -1903,31 +1894,34 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      // Stick-bonds: only cross-variant absorb stays on the bond
-      // pipeline today (glass absorb, gated on partner-size).  Self-
-      // coalesce was moved off bondsWith and now fires from a
-      // dedicated nebula-only pass in ShardSystem.runMergeBroadphase
-      // so it survives the DBG ShBond toggle being off — nebula tile
-      // formation is a world-population mechanic, not a generic
-      // shard-stick mechanic.
-      bondsWith: { include: ['glass-shard'] },
-      bondTimeSeconds: 0,
+      // Stick-bonds: nebula self-coalesce runs on the standard
+      // bondsWith pipeline (5 s contact timer; per-pair, pair-
+      // consuming).  Cross-variant glass-absorb still piggy-backs on
+      // bondsWith too — its threshold scale dominates via
+      // requirePartnerSizeFraction so it only fires at sizeMax.
+      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
+      // Base bond time — multiplied by (avgSize / bondTimeSizeRef)
+      // ^bondTimeSizePower per the resolver.  At ref-size shards
+      // (≈20 diameter) the effective threshold ≈ 5 s; larger pairs
+      // wait proportionally longer.
+      bondTimeSeconds: 5,
       bondTimeSizeRef: 20,
       bondTimeSizePower: 1.5,
       rules: [
-        // Self-coalesce is no longer a bond rule — fires from the
-        // dedicated nebula coalesce pass in ShardSystem.
+        // Self-bond fires the dedicated pair-transmute path in
+        // ShardSystem.composeNebulaShards (50/50 nebula-tile vs
+        // glass-shard at the pair's midpoint).  Listed as 'compose'
+        // because that's the dispatch keyword the bond resolver
+        // uses; the actual outcome is variant-routed inside
+        // composeEntities.
+        { partner: 'self', outcome: 'compose' },
         {
           partner: 'glass-shard',
           outcome: 'absorb',
-          // bondTimeSeconds=0 + thresholdScale would still be 0.  We
-          // use NEBULA_CONSTANTS.MERGE_COOLDOWN × 5 as the absorb
-          // threshold base by setting thresholdScale to a value the
-          // resolver multiplies AGAINST a stand-in baseTime — handled
-          // inside ShardSystem (see tickBonds gate).  In practice the
-          // partner-size gate dominates: bonds persist (cohesion) and
-          // never fire the absorb until the glass-shard reaches
-          // sizeMax, which is a rare event regardless of timer.
+          // The partner-size gate dominates: bonds persist
+          // (cohesion) and never fire the absorb until the glass-
+          // shard reaches sizeMax — a rare event regardless of
+          // timer.
           thresholdScale: 5.0,
           requirePartnerSizeFraction: 1.0,
         },
