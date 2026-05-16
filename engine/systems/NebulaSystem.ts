@@ -72,6 +72,15 @@ export class NebulaSystem {
      */
     private neighborCountsDirty: boolean = true;
 
+    // DBG-toggleable per-frame lerp alphas for the continuous color
+    // equilibration pass.  Tiles drift toward their 6-hex-neighbour
+    // weighted average (anchor role); shards drift toward the
+    // nearest nebula-tile (catch-up role).  Both default 0 (off);
+    // cycled via the DBG TileBlend / ShardBlend buttons through
+    // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE.
+    public tileBlendAlpha: number = NEBULA_CONSTANTS.BLEND_TILE_ALPHA;
+    public shardBlendAlpha: number = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA;
+
     constructor(
         private particles: ParticleSystem,
         private drops: DropSystem,
@@ -165,6 +174,16 @@ export class NebulaSystem {
                 this.neighborCountsDirty = false;
             }
         }
+
+        // Continuous color equilibration — DBG-gated by per-alpha
+        // sliders, fully no-op when both are 0.  Tiles drift toward
+        // their 6-hex-neighbour weighted average; shards drift
+        // toward the nearest tile.  Tiles are anchors (shards have
+        // no influence on tiles), so the cluster's structural hue
+        // stays stable while transient shards visually catch up.
+        if (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0) {
+            this.equilibrateColors(entities);
+        }
     }
 
     /**
@@ -204,6 +223,132 @@ export class NebulaSystem {
             }
         }
         return tilesProcessed;
+    }
+
+    /**
+     * Continuous color equilibration pass.  Called from update() at
+     * the fixed-step sim cadence whenever either alpha is non-zero.
+     *
+     * Tile path (anchor):
+     *   - For each active nebula-tile, gather 6-hex-neighbour
+     *     tile hues weighted by disc area.
+     *   - Circular-lerp the tile's own hue toward the neighbour
+     *     average by tileBlendAlpha.
+     *   - Reuses circularHueAverage / circularLerpHue — same
+     *     primitives as computeRegeneratedComposition.
+     *
+     * Shard path (catch-up toward anchors):
+     *   - For each active nebula-shard, find the nearest active
+     *     nebula-tile in the 6-hex neighbourhood of its current
+     *     position (origin cell + neighbours).
+     *   - Circular-lerp the shard's hue toward that tile's hue by
+     *     shardBlendAlpha.  Skip if no tile is nearby.
+     *
+     * Shards do NOT influence tiles — anchors stay stable.  Single-
+     * stop compositions are produced (matching today's regen
+     * behaviour); the renderer's cached blends are invalidated only
+     * when the hue actually changes by more than QUANTIZE_EPSILON.
+     */
+    private equilibrateColors(entities: GameEntity[]): void {
+        // Ensure the hex-keyed tile index is built — `update()`
+        // resets it to null at the top of the frame; if neighbour-
+        // counts didn't run (nothing dirty) we build it ourselves.
+        if (!this.nebulaGridIndex) {
+            this.nebulaGridIndex = this.buildNebulaGridIndex(entities);
+        }
+        const index = this.nebulaGridIndex;
+
+        // Quantization gate — hue changes below ~0.1° are imperceptible
+        // and not worth the string format + cache invalidation.
+        const QUANTIZE_EPSILON = 0.1;
+
+        // ── Tile → tile ─────────────────────────────────────────────
+        if (this.tileBlendAlpha > 0) {
+            const alpha = this.tileBlendAlpha;
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'nebula-tile') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
+                if (!e.nebulaColorComposition || !e.nebulaColorComposition[0]) continue;
+
+                const oldHue = clampHueToPalette(hexToHueDeg(e.nebulaColorComposition[0].hex));
+
+                // Gather neighbour hues with area weights.
+                const neighborEntries: Array<{ hue: number; weight: number }> = [];
+                const neighbors = TileGenerator.getHexNeighbors(e.nebulaGridCol, e.nebulaGridRow);
+                for (const n of neighbors) {
+                    const key = (n.c << 16) | (n.r & 0xFFFF);
+                    const nTile = index.get(key);
+                    if (!nTile || !nTile.active || nTile.mergeFadeTimer !== undefined) continue;
+                    if (!nTile.nebulaColorComposition || !nTile.nebulaColorComposition[0]) continue;
+                    const nHue = clampHueToPalette(hexToHueDeg(nTile.nebulaColorComposition[0].hex));
+                    const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+                    neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
+                }
+                if (neighborEntries.length === 0) continue; // isolated tile keeps its hue
+
+                const avgHue = circularHueAverage(neighborEntries);
+                if (avgHue === null) continue;
+
+                const newHue = circularLerpHue(oldHue, 1 - alpha, avgHue, alpha);
+                if (circularHueDistance(newHue, oldHue) < QUANTIZE_EPSILON) continue;
+
+                const newHex = paletteHueToHex(newHue);
+                e.nebulaColorComposition = [{ hex: newHex, weight: 1 }];
+                e.color = newHex;
+                e.nebulaBlendedHex = newHex;
+                e.nebulaTintedKey = undefined;
+                e.nebulaCachedTinted = undefined;
+            }
+        }
+
+        // ── Shard → nearest tile ────────────────────────────────────
+        if (this.shardBlendAlpha > 0) {
+            const alpha = this.shardBlendAlpha;
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'nebula-shard') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                if (!e.nebulaColorComposition || !e.nebulaColorComposition[0]) continue;
+
+                // Probe origin cell + 6 neighbours for the nearest active tile.
+                const origin = pixelToHexCoord(e.position.x, e.position.y);
+                let bestTile: GameEntity | null = null;
+                let bestDistSq = Infinity;
+
+                const probeCell = (c: number, r: number) => {
+                    const key = (c << 16) | (r & 0xFFFF);
+                    const t = index.get(key);
+                    if (!t || !t.active || t.mergeFadeTimer !== undefined) return;
+                    if (!t.nebulaColorComposition || !t.nebulaColorComposition[0]) return;
+                    const dx = wrapDeltaX(e.position.x, t.position.x);
+                    const dy = wrapDeltaY(e.position.y, t.position.y);
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < bestDistSq) { bestDistSq = d2; bestTile = t; }
+                };
+                probeCell(origin.c, origin.r);
+                for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+                    probeCell(n.c, n.r);
+                }
+                if (!bestTile) continue;
+
+                const oldHue = clampHueToPalette(hexToHueDeg(e.nebulaColorComposition[0].hex));
+                const targetHue = clampHueToPalette(hexToHueDeg(bestTile!.nebulaColorComposition![0].hex));
+
+                const newHue = circularLerpHue(oldHue, 1 - alpha, targetHue, alpha);
+                if (circularHueDistance(newHue, oldHue) < QUANTIZE_EPSILON) continue;
+
+                const newHex = paletteHueToHex(newHue);
+                e.nebulaColorComposition = [{ hex: newHex, weight: 1 }];
+                e.color = newHex;
+                e.nebulaBlendedHex = newHex;
+                e.nebulaTintedKey = undefined;
+                e.nebulaCachedTinted = undefined;
+            }
+        }
     }
 
     // spawnShards moved to ShardSystem.shatter (Stage 3 of shard-system

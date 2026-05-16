@@ -153,6 +153,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
   };
 
+  const handleCycleTileBlendAlpha = () => {
+      if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
+  };
+
+  const handleCycleShardBlendAlpha = () => {
+      if (engineRef.current) engineRef.current.cycleShardBlendAlpha();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -182,6 +190,8 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
+        onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
+        onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

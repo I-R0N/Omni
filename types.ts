@@ -669,6 +669,11 @@ export interface EngineStats {
   // Hard collisions between nebula-shard pairs (ignores their
   // passThrough flag).  DBG-toggleable; default OFF.
   nebulaShardCollisionsEnabled?: boolean;
+  // Nebula color-equilibration alphas (per-frame circular-hue lerp).
+  // Tiles drift toward neighbour average; shards drift toward
+  // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.
+  tileBlendAlpha?: number;
+  shardBlendAlpha?: number;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

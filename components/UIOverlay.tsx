@@ -19,6 +19,8 @@ interface UIOverlayProps {
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
+  onCycleTileBlendAlpha?: () => void;
+  onCycleShardBlendAlpha?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
   onSkipWave?: () => void;
@@ -45,6 +47,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardGravity,
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
+  onCycleTileBlendAlpha,
+  onCycleShardBlendAlpha,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
   onSkipWave,
@@ -61,6 +65,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
+  // Human label for the cycling blend-alpha buttons.  Mirrors the
+  // four-step cycle Off / Slow / Med / Fast across both Tile and
+  // Shard blend knobs; the underlying values differ per cycle (see
+  // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE) but the label is shared.
+  const blendLabel = (alpha: number | undefined): string => {
+    if (!alpha) return 'Off';
+    if (alpha < 0.01) return 'Slow';
+    if (alpha < 0.10) return 'Med';
+    return 'Fast';
+  };
   // Plain JSX helper, NOT a sub-component — keeping it as a function
   // means React inlines the returned button into the parent tree
   // instead of seeing a freshly-identitied component type on every
@@ -244,6 +258,34 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.shardTilePairInterval === 0
                       ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
                       : `every ${stats.shardTilePairInterval ?? 1}`}
+                  </button>
+                </div>
+                {/* Nebula color equilibration — tiles drift toward
+                    their 6-hex-neighbour weighted average.  Cycle
+                    Off → Slow → Med → Fast (per-frame alpha 0 →
+                    0.005 → 0.02 → 0.08).  Tiles are anchors; shards
+                    have no influence on tiles. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">TileBlend</span>
+                  <button
+                    onClick={onCycleTileBlendAlpha}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle nebula tile→tile color blend.  Tiles drift toward neighbour-hex weighted hue average each frame.  Off / Slow / Med / Fast."
+                  >
+                    {blendLabel(stats.tileBlendAlpha)}
+                  </button>
+                </div>
+                {/* Shard → nearest-tile color blend.  Catch-up alpha
+                    is set higher than tile→tile because shards are
+                    transient and should integrate visibly. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShardBlend</span>
+                  <button
+                    onClick={onCycleShardBlendAlpha}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle nebula shard→nearest-tile color blend.  Shards drift toward the nearest tile's hue each frame.  Off / Slow / Med / Fast."
+                  >
+                    {blendLabel(stats.shardBlendAlpha)}
                   </button>
                 </div>
               </>)}

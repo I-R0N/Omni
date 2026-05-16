@@ -673,6 +673,19 @@ export const NEBULA_CONSTANTS = {
   // shared currency, so there is no per-weapon variant here.
   AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
   AMMO_PER_NEBULA: 3,     // shared-pool ammo units per nebula drop
+
+  // ── Color equilibration ───────────────────────────────────────
+  // Per-frame circular-hue lerp alphas for NebulaSystem's
+  // continuous color-equilibration pass.  Tiles drift toward their
+  // 6-hex-neighbour weighted average; shards drift toward the
+  // nearest tile.  Tiles are anchors (no influence from shards).
+  // Cycled via DBG TileBlend / ShardBlend buttons.  0 = off; small
+  // values equilibrate over seconds, larger ones in fractions of
+  // a second.  At 60 Hz, alpha 0.02 ≈ 95 % blend in ~2.5 s.
+  BLEND_TILE_ALPHA: 0,
+  BLEND_SHARD_ALPHA: 0,
+  BLEND_TILE_ALPHA_CYCLE: [0, 0.005, 0.02, 0.08] as const,
+  BLEND_SHARD_ALPHA_CYCLE: [0, 0.02, 0.08, 0.25] as const,
 };
 
 /**
