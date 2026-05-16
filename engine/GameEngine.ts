@@ -21,6 +21,7 @@ import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLA
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
+import { randomRockNebulaComposition } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -1054,13 +1055,15 @@ export class GameEngine {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
                       y: entity.position.y + (Math.random() - 0.5) * jitter,
                   };
+                  const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
                       puffPos,
                       baseSize,
-                      entity.color,
+                      comp[0].hex,
                       0.45 + Math.random() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
+                      comp,
                   );
               }
           }
@@ -1081,13 +1084,15 @@ export class GameEngine {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
                       y: entity.position.y + (Math.random() - 0.5) * jitter,
                   };
+                  const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
                       puffPos,
                       baseSize,
-                      entity.color,
+                      comp[0].hex,
                       0.4 + Math.random() * 0.3,
                       entity.lastImpactVelocity,
+                      comp,
                   );
               }
           }
@@ -1766,13 +1771,15 @@ export class GameEngine {
                               x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
                               y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
                           };
+                          const comp = randomRockNebulaComposition();
                           this.drops.spawnColoredNebulaShard(
                               this.currentMap.entities,
                               puffPos,
                               baseSize,
-                              target.color,
+                              comp[0].hex,
                               0.45 + Math.random() * 0.2,
                               target.lastImpactVelocity,
+                              comp,
                           );
                       }
                   }
