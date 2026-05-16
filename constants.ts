@@ -1487,6 +1487,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Glass tiles do not respawn at their original hex once
+    // shattered.  Fresh glass-tiles only appear via the
+    // glass-shard → glass-tile transmute path
+    // (ShardSystem.tryTransmuteGlassShardToTile), which is the new
+    // canonical glass-tile spawn source after the tier-transition
+    // mechanic landed.  Matches plastic / metal / rock / nebula —
+    // glass was the last variant on the timer-regen path.
+    regen: { kind: 'none' },
     // Light hint-level repel — a soft outward nudge that reads as
     // "the tile is alive" without actually blocking the player.
     // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
