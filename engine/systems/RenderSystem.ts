@@ -1241,7 +1241,7 @@ export class RenderSystem {
       if (entity.shardVariant === 'nebula-tile'
           && entity.active
           && !entity.hitFlash
-          && entity.nebulaFadeTimer === undefined
+          && entity.mergeFadeTimer === undefined
           && entity.nebulaSpawnTimer === undefined
           && entity.regenPopTimer === undefined
           && entity.nebulaCachedTinted !== undefined
@@ -1356,9 +1356,9 @@ export class RenderSystem {
           // shatters use a shorter, snappier fade than slow drift-through
           // collisions.  Falls back to the base constant for legacy tiles
           // without the per-entity duration field set.
-          const fadeDuration = entity.nebulaFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
-          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0 && fadeDuration > 0
-              ? Math.max(0, entity.nebulaFadeTimer / fadeDuration)
+          const fadeDuration = entity.mergeFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
+          const fadeMul = entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0 && fadeDuration > 0
+              ? Math.max(0, entity.mergeFadeTimer / fadeDuration)
               : 1.0;
           // Fade-in multiplier — same per-entity duration treatment so
           // child shards from a fast collision fade in fast, matching

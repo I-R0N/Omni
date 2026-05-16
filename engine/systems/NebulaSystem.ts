@@ -42,7 +42,7 @@ import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../
  *   - `neighborCountsDirty` flag for the interior-darken render rule
  *
  * State that stays on the entity itself (ticked by PhysicsSystem):
- *   - `nebulaFadeTimer`, `nebulaSpawnTimer`, `nebulaImpactCooldown`,
+ *   - `mergeFadeTimer`, `nebulaSpawnTimer`, `nebulaImpactCooldown`,
  *     `linearDamping`, `angularDamping` — per-entity fields.  PhysicsSystem
  *     still handles the per-tick decrement + damping pass for these,
  *     because they live alongside the standard velocity integration.
@@ -561,7 +561,7 @@ export class NebulaSystem {
             const e = entities[k];
             if (e.shardVariant !== 'nebula-tile') continue;
             if (!e.active) continue;
-            if (e.nebulaFadeTimer !== undefined) continue;
+            if (e.mergeFadeTimer !== undefined) continue;
             if (e.nebulaGridCol === undefined || e.nebulaGridRow === undefined) continue;
             const key = (e.nebulaGridCol << 16) | (e.nebulaGridRow & 0xFFFF);
             index.set(key, e);

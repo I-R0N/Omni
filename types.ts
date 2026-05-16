@@ -364,16 +364,13 @@ export interface GameEntity {
   // per-frame RGB multiply when the tier hasn't changed.
   densityCachedTint?: string;
 
-  // Generic merge fade-out timer.  Set on the smaller party of a
-  // density-compaction merge so it dissolves over a short window
-  // instead of vanishing instantly.  Unlike `nebulaFadeTimer` (which
-  // gates re-entry into the static grid + nebula-specific render alpha),
-  // this is a uniform fade visible on rock / glass / nebula shards
-  // alike.  PhysicsSystem ticks it down each substep; on reaching 0
-  // the entity goes inactive.  RenderSystem multiplies alpha by the
-  // remaining-fraction during the window.  `mergeFadeDuration` records
-  // the value the timer started at so the renderer can compute the
-  // alpha curve without keeping a separate constant lookup.
+  // Unified fade-out timer for the whole shard family — nebula
+  // tiles / shards AND rock / glass / plastic / metal shards all
+  // ride this field.  Duration differs by source (nebula uses
+  // NEBULA_CONSTANTS.FADE_DURATION, others
+  // CLEANUP_CONSTANTS.MERGE_FADE_DURATION), but the lifecycle is
+  // identical: PhysicsSystem ticks it down, RenderSystem scales
+  // alpha by timer / duration, hitting 0 flips active = false.
   mergeFadeTimer?: number;
   mergeFadeDuration?: number;
 
@@ -521,22 +518,12 @@ export interface GameEntity {
   // where either party has a positive cooldown, so fresh shards stay
   // visible as distinct polygons for ~1.8 s before they can coalesce.
   nebulaMergeCooldown?: number;
-  // Post-shatter fade timer on NEBULA tiles and shards.  While > 0 the
-  // entity stays rendered but with alpha scaled by timer / nebulaFadeDuration.
-  // On reaching 0, tiles become inactive and enter the regen wait;
-  // shards are compacted out.
-  nebulaFadeTimer?: number;
-  // Effective duration for this particular fade-out (i.e., the value
-  // nebulaFadeTimer starts at).  Stored per-entity so fast-collision
-  // shatters can use a shorter duration than the base constant while
-  // still letting the renderer compute alpha = timer / duration.
-  nebulaFadeDuration?: number;
   // Birth fade-in timer on NEBULA tiles and shards.  While > 0 the
   // entity renders with alpha scaled by 1 − (timer / nebulaSpawnDuration),
   // so newly-created entities fade into existence slowly instead of
   // appearing instantly.  Ticked in PhysicsSystem.update.
   nebulaSpawnTimer?: number;
-  // Effective duration for this particular fade-in (see nebulaFadeDuration).
+  // Effective duration for this particular fade-in (see mergeFadeDuration).
   nebulaSpawnDuration?: number;
   // Twinkle scheduling — each nebula tile and shard hosts an occasional
   // fading-in/out star at a random in-sprite position.  The renderer

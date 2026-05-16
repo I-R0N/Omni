@@ -873,12 +873,10 @@ export class ShardSystem {
       const e = entities[i];
       if (!e.active) continue;
       if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
-      if (e.nebulaFadeTimer !== undefined) continue;
-      // Density-compaction fade-out — same exclusion as nebula's
-      // existing `nebulaFadeTimer` skip.  Once a shard is in its
-      // graceful retire window it must not pull, bond, or get
-      // pulled.  Otherwise its velocity blends with surviving
-      // partners and the dissolve looks chaotic.
+      // Once a shard is in its graceful retire window (merge fade-
+      // out) it must not pull, bond, or get pulled.  Otherwise its
+      // velocity blends with surviving partners and the dissolve
+      // looks chaotic.
       if (e.mergeFadeTimer !== undefined) continue;
       candidates.push(e);
     }
@@ -1111,29 +1109,23 @@ export class ShardSystem {
    * goes inactive and the in-place compaction in
    * GameEngine.updatePhysics drops it from the master list.
    *
-   * For nebula entities, today's `nebulaFadeTimer` already covers
-   * the same purpose with a tuned fade-rate-vs-impact-speed
-   * scaling — leave it alone.  For other shard families, fall
-   * through to the generic `mergeFadeTimer` path.
+   * For nebula entities the same field covers impact-driven
+   * fade (PhysicsSystem scales the duration by impact speed) and
+   * non-impact retires (here).  Nebula uses a longer base
+   * duration to read as "dissolving into the cloud"; non-nebula
+   * shards use the crisper CLEANUP_CONSTANTS.MERGE_FADE_DURATION.
    */
   private startMergeFadeOut(entity: GameEntity): void {
     // Skip if entity is already fading out (avoid retriggering the
     // timer mid-fade, which would extend the dissolve).
     if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) return;
-    if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) return;
 
     const variantId = shardVariantOf(entity);
-    if (variantId === 'nebula-shard' || variantId === 'nebula-tile') {
-      // Nebula uses its own fade pipeline (tied to fade-rate scaling
-      // off impact speed).  Use the matching tuning so a non-impact-
-      // driven retire still feels nebula-paced.
-      entity.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-      entity.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
-      return;
-    }
-
-    entity.mergeFadeTimer    = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
-    entity.mergeFadeDuration = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    const duration = (variantId === 'nebula-shard' || variantId === 'nebula-tile')
+      ? NEBULA_CONSTANTS.FADE_DURATION
+      : CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    entity.mergeFadeTimer    = duration;
+    entity.mergeFadeDuration = duration;
   }
 
   // ── Large-shard collapse ──────────────────────────────────────────
@@ -1163,7 +1155,6 @@ export class ShardSystem {
         if (!e.active) continue;
         if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
         if (e.mergeFadeTimer !== undefined) continue;
-        if (e.nebulaFadeTimer !== undefined) continue;
         if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
 
         const variantId = shardVariantOf(e);

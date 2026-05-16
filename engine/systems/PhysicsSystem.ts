@@ -248,10 +248,11 @@ export class PhysicsSystem {
           if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
               entity.nebulaImpactCooldown -= dt;
           }
-          if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-              entity.nebulaFadeTimer -= dt;
-              if (entity.nebulaFadeTimer <= 0) {
-                  entity.nebulaFadeTimer = undefined;
+          if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
+              entity.mergeFadeTimer -= dt;
+              if (entity.mergeFadeTimer <= 0) {
+                  entity.mergeFadeTimer = undefined;
+                  entity.mergeFadeDuration = undefined;
                   entity.active = false;
               }
           }
@@ -297,23 +298,13 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
-      // Nebula shard fade — shattered shards stay active+rendered while
-      // this counts down, then deactivate and get compacted out.  Tiles
-      // already had their fade ticked above inside the mass=Infinity
-      // branch, so this path only fires for dynamic (shard) entities.
-      if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-          entity.nebulaFadeTimer -= dt;
-          if (entity.nebulaFadeTimer <= 0) {
-              entity.nebulaFadeTimer = undefined;
-              entity.active = false;
-          }
-      }
-      // Generic merge fade-out — same lifecycle as the nebula timer
-      // but applies across non-nebula shard families (rock / glass).
-      // The smaller party of a density-compaction merge stays active
-      // and rendered (with multiplied alpha) while this counts down,
-      // then flips inactive so the in-place compaction in
-      // GameEngine.updatePhysics drops it.
+      // Merge fade-out — both nebula AND non-nebula shard families
+      // ride the same `mergeFadeTimer` field; the value differs by
+      // variant (nebula longer, ~1 s; others crisp, ~0.5 s).  The
+      // entity stays active+rendered with multiplied alpha while
+      // the timer counts down, then flips inactive so the in-place
+      // compaction in GameEngine.updatePhysics drops it.  Tiles
+      // share this tick — see the mass=Infinity branch above.
       if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
           entity.mergeFadeTimer -= dt;
           if (entity.mergeFadeTimer <= 0) {
@@ -583,7 +574,7 @@ export class PhysicsSystem {
         // Fading nebulas (tiles and shards alike) are in their death
         // animation — drop them out of broadphase so they can't be
         // re-shattered mid-fade even after the striker's cooldown expires.
-        if (e.nebulaFadeTimer !== undefined) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
 
         // Nebula shards re-enter the dynamic grid so player/enemy contact
         // can trigger a shatter.  The nebula branch in resolveCollision is
@@ -1048,9 +1039,9 @@ export class PhysicsSystem {
    * Called from physics.update gated by `shouldRunShardPairsThisStep()`,
    * so on skip-frames the entire build + walk are bypassed (this is
    * the savings the inline branch in handleEntityCollisions was
-   * missing).  Fading shards (nebulaFadeTimer / mergeFadeTimer set)
-   * are filtered out — they shouldn't pull or push other shards
-   * during their death animation.
+   * missing).  Fading shards (mergeFadeTimer set) are filtered
+   * out — they shouldn't pull or push other shards during their
+   * death animation.
    */
   private resolveShardPairs(shards: GameEntity[]): void {
     if (shards.length < 2) return;
@@ -1062,7 +1053,6 @@ export class PhysicsSystem {
     for (let i = 0; i < shards.length; i++) {
         const e = shards[i];
         if (!e.active || e.isExploding) continue;
-        if (e.nebulaFadeTimer !== undefined) continue;
         if (e.mergeFadeTimer !== undefined) continue;
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
@@ -1078,7 +1068,6 @@ export class PhysicsSystem {
     for (let i = 0; i < shards.length; i++) {
         const a = shards[i];
         if (!a.active || a.isExploding) continue;
-        if (a.nebulaFadeTimer !== undefined) continue;
         if (a.mergeFadeTimer !== undefined) continue;
 
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
@@ -1122,7 +1111,6 @@ export class PhysicsSystem {
       for (let i = 0; i < shards.length; i++) {
           const a = shards[i];
           if (!a.active || a.isExploding) continue;
-          if (a.nebulaFadeTimer !== undefined) continue;
           if (a.mergeFadeTimer !== undefined) continue;
 
           const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
@@ -1435,8 +1423,8 @@ export class PhysicsSystem {
                       : 0;
                   const rateScale = nebulaFadeRateScale(impactSpeed);
                   const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
-                  nebula.nebulaFadeTimer = scaledFadeDuration;
-                  nebula.nebulaFadeDuration = scaledFadeDuration;
+                  nebula.mergeFadeTimer = scaledFadeDuration;
+                  nebula.mergeFadeDuration = scaledFadeDuration;
                   if (nebula.shardVariant === 'nebula-tile') {
                       // Tiles live in the static grid — pull them out so
                       // the player can drift through the fading cell.
@@ -1444,7 +1432,7 @@ export class PhysicsSystem {
                   }
                   // Shards live in the dynamic grid which is rebuilt
                   // each frame; the populate loop below skips entities
-                  // with nebulaFadeTimer set, so fading shards drop out
+                  // with mergeFadeTimer set, so fading shards drop out
                   // of broadphase automatically on the next frame.
                   //
                   // Arm the striker's post-shatter cooldown.

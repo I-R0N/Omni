@@ -1088,7 +1088,7 @@ export class GameEngine {
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
       } else if (isNebula) {
-          // Nebulae fade out gracefully via nebulaFadeTimer in the
+          // Nebulae fade out gracefully via mergeFadeTimer in the
           // renderer — no spark burst on destruction.  Merge/transmute
           // events emit a subtle glimmer instead (see NebulaSystem).
       } else {
