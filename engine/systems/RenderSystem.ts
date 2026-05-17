@@ -1813,17 +1813,19 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    // Tile texture diameter = 4.0 × collision diameter
-                    // (bumped from 3.0× per "more opaque" follow-up —
-                    // bigger radius means more overlap with neighbour
-                    // tiles and the shard burst, so the cluster reads
-                    // as a denser solid mass).  Solid-circle fill in
-                    // entity.color (no gradient, no cached bitmap) —
-                    // cheapest possible render path.  entity.size.x is
-                    // the AABB envelope (≈ hex flat-to-flat).
+                    // Tile texture diameter = 1.2 × collision diameter
+                    // (tight render, matching the previous gradient
+                    // size from the early softbody-retrofit playtests
+                    // before the v4 expansion).  Opacity 0.75 lets a
+                    // hint of background bleed through so the cluster
+                    // doesn't read as a hard black silhouette against
+                    // the starfield.  Solid-circle fill in entity.
+                    // color (per-instance amber shade picked at
+                    // spawn — see TileGenerator.buildStructureTile
+                    // + PLASTIC_AMBER_SHADES in constants.ts).
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 4.0;
-                    ctx.globalAlpha = 1.0;
+                    const renderR    = collisionR * 1.2;
+                    ctx.globalAlpha = 0.75;
                     ctx.fillStyle   = entity.color;
                     ctx.beginPath();
                     ctx.arc(0, 0, renderR, 0, Math.PI * 2);
@@ -2031,29 +2033,29 @@ export class RenderSystem {
 
                 if (isPlasticShard) {
                     // ── Plastic shard — solid-circle fill ─────────────────
-                    // Plastic-softbody retrofit, v4: no gradient, no
-                    // cached bitmap — just a solid circle in entity.
-                    // color drawn at 4.8× collision radius (bumped
-                    // from 3.6× per "more opaque" follow-up — bigger
-                    // radius means more overlap between adjacent
-                    // shards in a cluster, so the burst reads as a
-                    // denser solid mass).  Solid fills are essentially
-                    // free on the GPU.  The 16-gon polygon is still
-                    // used for SAT collisions (see SHARD_SPAWN_SHAPE_
-                    // PLASTIC); the renderer just ignores it.
+                    // Solid circle at 1.2× the collision diameter and
+                    // 0.75 opacity.  Tight render lets each shard
+                    // read as a distinct amber blob inside the burst
+                    // rather than overlapping into one mass; 0.75
+                    // alpha softens the silhouette so the cluster
+                    // doesn't read as hard black against the
+                    // starfield.  Per-instance amber shade comes
+                    // from entity.color (set at spawn via random
+                    // PlasticShade — see DropSystem.spawnDentShard +
+                    // PLASTIC_AMBER_SHADES in constants.ts).
                     //
-                    // Density-tier tinting still applies via densityTint
-                    // ForRender — v4 plastic disables density tiering
-                    // (density.enabled = false on the variant) so this
-                    // is a no-op, but the call is left in so a future
-                    // re-enable wouldn't need a render-path change.
-                    // mergeFadeAlpha multiplies globalAlpha for the
-                    // graceful retire window.
+                    // The 16-gon polygon is still used for SAT
+                    // collisions (see SHARD_SPAWN_SHAPE_PLASTIC); the
+                    // renderer just ignores it.  Density-tier tinting
+                    // via densityTintForRender is a no-op while
+                    // density.enabled is false on the variant.
+                    // mergeFadeAlpha multiplies through globalAlpha
+                    // for the graceful retire window.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 4.8;
-                    ctx.globalAlpha = fadeAlpha;
+                    const renderR    = collisionR * 1.2;
+                    ctx.globalAlpha = 0.75 * fadeAlpha;
                     ctx.fillStyle   = baseHex;
                     ctx.beginPath();
                     ctx.arc(0, 0, renderR, 0, Math.PI * 2);
