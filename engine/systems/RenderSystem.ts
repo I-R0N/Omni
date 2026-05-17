@@ -1845,13 +1845,9 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    // Tile texture diameter = 2.4 × collision diameter
-                    // (1.2× base × 2 per follow-up playtest — the
-                    // earlier 1.2× barely overlapped neighbours and
-                    // the cluster read as a row of separate blobs
-                    // instead of a continuous polymer sheet).
-                    // entity.size.x is the AABB envelope (≈ hex
-                    // flat-to-flat).
+                    // Tile texture diameter = 3.0 × collision diameter
+                    // (bumped from 2.4× per playtest).  entity.size.x
+                    // is the AABB envelope (≈ hex flat-to-flat).
                     //
                     // Render uses a cached gradient bitmap (see
                     // getSoftGradientBitmap) — drawImage from a
@@ -1860,7 +1856,7 @@ export class RenderSystem {
                     // rasterisation cost that wasn't showing up in
                     // JS perf timing.
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 2.4;
+                    const renderR    = collisionR * 3.0;
                     const bitmap     = this.getSoftGradientBitmap(entity.color);
                     ctx.globalAlpha = 1.0;
                     ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
@@ -2069,24 +2065,26 @@ export class RenderSystem {
                     // ── Plastic shard — soft-edged radial gradient ───────────
                     // Plastic-softbody retrofit (decision #15b): no hard
                     // polygon outline.  Pre-rendered gradient bitmap
-                    // (getSoftGradientBitmap) drawn at 3.0× collision
-                    // radius — bonded clusters read as one continuous
-                    // sheet of overlapping polymer blobs.  The 16-gon
-                    // polygon is still used for SAT collisions (see
-                    // SHARD_SPAWN_SHAPE_PLASTIC); the renderer just
-                    // ignores it.
+                    // (getSoftGradientBitmap) drawn at 3.6× collision
+                    // radius (bumped from 3.0× per playtest) — bonded
+                    // clusters read as one continuous sheet of
+                    // overlapping polymer blobs.  The 16-gon polygon
+                    // is still used for SAT collisions (see SHARD_
+                    // SPAWN_SHAPE_PLASTIC); the renderer just ignores
+                    // it.
                     //
-                    // Bitmap cache by hex so density-tinted variants
-                    // (tier 0-4) each get their own pre-baked
-                    // gradient — avoids the hidden GPU-rasterisation
-                    // cost of per-frame ctx.createRadialGradient
-                    // calls.  Hit-flash dropped: soft polymer doesn't
-                    // need a hard white flash, and the cached-bitmap
-                    // path doesn't support per-instance colour swap.
+                    // Cache by base hex.  v3 plastic disables density
+                    // tiering so only one bitmap is ever requested,
+                    // but keeping the cache key as the resolved hex
+                    // means future tier work would land naturally
+                    // without a render-path change.  Hit-flash dropped
+                    // — soft polymer doesn't need a hard white flash,
+                    // and the cached-bitmap path doesn't support
+                    // per-instance colour swap.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 3.0;
+                    const renderR    = collisionR * 3.6;
                     const bitmap     = this.getSoftGradientBitmap(baseHex);
                     ctx.globalAlpha = fadeAlpha;
                     ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);

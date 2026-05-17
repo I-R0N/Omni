@@ -1578,12 +1578,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // spawn shape, not the hex outline.  countMin/countMax expand
     // a single template into a random burst at spawn time.
     //
-    // sizeFraction range 0.22-0.32: smaller bursts than the
-    // previous 3×0.577 split — more like a sheet bursting into
-    // confetti than three big chunks splitting off.  The lower
-    // end (0.22) keeps small chips at 25+ diameter; the upper
-    // end (0.32) keeps the chunkiest shards around 38 diameter so
-    // they still read as substantial pieces.
+    // sizeFraction range 0.44-0.64: chunky shards (2× larger than
+    // the earlier 0.22-0.32 burst per playtest feedback).  At a
+    // ~120-diameter hex tile the burst spawns 8-12 shards in the
+    // 53-77 diameter range — they overlap each other and the tile
+    // footprint, which reads as the polymer sheet breaking into
+    // big visible chunks rather than confetti.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0,
@@ -1591,9 +1591,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       breakShards: [
         {
           variant: 'plastic-shard',
-          sizeFraction: 0.27,                   // fallback when range fields unset
-          sizeFractionMin: 0.22,
-          sizeFractionMax: 0.32,
+          sizeFraction: 0.54,                   // fallback when range fields unset
+          sizeFractionMin: 0.44,
+          sizeFractionMax: 0.64,
           countMin: 8,
           countMax: 12,
         },
@@ -1845,23 +1845,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit, v2 (post-playtest pivot): the
-    // elastic-bond network was too perf-hungry (every bond
-    // integrating every substep) and visibly vibrated even at
-    // critical damping.  Switched to the standard bondsWith
-    // pair-consume + cohesion pipeline (same path glass-shard
-    // and rock-shard use) and leaned on heavy linearDamping
-    // (set in SHARD_SPAWN_SHAPE_PLASTIC, matches nebula-shard's
-    // 0.97) to make standalone shards drift slowly and feel
-    // sticky.  Self-bonding only — plastic clusters cohere when
-    // shards touch each other, drift together via the cohesion
-    // velocity blend, and slowly compose into bigger plastic-
-    // shards over ~18 s of contact (same timing as rock-shard /
-    // glass-shard).
+    // Plastic-softbody retrofit, v3 (cohesion only, no merge):
+    // bondsWith forms persistent self-bonds for the cohesion
+    // velocity blend (shards in contact drift as a unit) but
+    // bondTimeSeconds is Infinity so compose never fires —
+    // plastic clusters keep their constituent shards visible
+    // indefinitely.  Heavy linearDamping (0.97, set in SHARD_
+    // SPAWN_SHAPE_PLASTIC) handles the "sticky" feel; bonds
+    // break naturally when shards drift past 1.5× contact dist
+    // (BREAK_FACTOR in tickBonds), so the bond list stays
+    // bounded by the size of touching clusters.
     merge: {
       attractedTo: 'none',
       bondsWith: { include: ['plastic-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      bondTimeSeconds: Number.POSITIVE_INFINITY,
+      bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
       rules: [
         { partner: 'self', outcome: 'compose' },
       ],
@@ -1893,20 +1891,19 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // is a one-line change.)
     repelImmune: true,
     spawnsDropsOnDeath: true,
-    // Density compaction — same enabled / 4-tier / 0.88 shrink
-    // profile as glass-shard and rock-shard so the cluster slowly
-    // condenses into denser fragments as bonded pairs compose.
-    // Matches the user's "glass shard like" direction for the v2
-    // plastic behaviour.  tintFloor 0.60 (slightly higher than
-    // glass/rock 0.55) — plastic stays warmer when dense so the
-    // magenta hue is still readable at max tier.
+    // Density compaction disabled — v3 plastic keeps every shard
+    // visible as an individual blob (no merging of any kind, see
+    // bondsWith.bondTimeSeconds = Infinity above).  Per-frame
+    // density-tinting work and large-shard-collapse passes are
+    // skipped, which also drops the bitmap-cache footprint to one
+    // colour (no tier-darkened variants).
     density: {
-      enabled: true,
-      maxSteps: 4,
-      areaThreshold: 32 * 32,
-      largeShardCollapseSize: 130,
-      tintFloor: 0.60,
-      shrinkFactor: 0.88,
+      enabled: false,
+      maxSteps: 0,
+      areaThreshold: 0,
+      largeShardCollapseSize: 99999,
+      tintFloor: 1.0,
+      shrinkFactor: 1.0,
     },
     // Plastic-softbody retrofit: per-shard dent (vertexJitter /
     // per-hit polygon pull) stays dropped — circular shape is the
