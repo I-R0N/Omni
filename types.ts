@@ -812,6 +812,26 @@ export interface EngineStats {
   // CYCLE).  Smaller core / larger blend = deeper inter-shard blend.
   plasticCoreRadiusName?: string;
   plasticBlendRadiusName?: string;
+  // ── Asteroid/shard flow-field DBG state ───────────────────────
+  // Enables the per-asteroid / per-ammo-drop velocity nudge toward
+  // the baked asteroid-flow vector.  Default true (production);
+  // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
+  // (asteroids decay toward zero velocity over a few seconds; only
+  // collisions / gravity move them after that).
+  asteroidFlowEnabled?: boolean;
+  // Overlay toggles — all DBG-only renderer gating.  Default false.
+  // FF Vectors: per-cell arrows colored by magnitude.
+  // FF Cells:   faint cell-grid outlines.
+  // FF Obs:     tint over cells flagged as obstacles.
+  // FF Rebuilds: flash cells briefly when re-baked by onTileDestroyed.
+  ffOverlayVectors?: boolean;
+  ffOverlayCells?: boolean;
+  ffOverlayObstacles?: boolean;
+  ffOverlayRebuilds?: boolean;
+  // Sampling stride for the vector overlay — 1, 2, 4, 8, or 16.
+  // Cycled via the DBG "FF SampleN" button.  The cells/obstacles/
+  // rebuilds overlays always render every cell.
+  ffOverlaySampleN?: number;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

@@ -41,6 +41,12 @@ interface UIOverlayProps {
   onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
+  onToggleAsteroidFlow?: () => void;
+  onToggleFFOverlayVectors?: () => void;
+  onToggleFFOverlayCells?: () => void;
+  onToggleFFOverlayObstacles?: () => void;
+  onToggleFFOverlayRebuilds?: () => void;
+  onCycleFFOverlaySampleN?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -87,6 +93,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleColorBlendInterval,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
+  onToggleAsteroidFlow,
+  onToggleFFOverlayVectors,
+  onToggleFFOverlayCells,
+  onToggleFFOverlayObstacles,
+  onToggleFFOverlayRebuilds,
+  onCycleFFOverlaySampleN,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -560,6 +572,87 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.colorBlendFrameInterval === 0
                       ? `auto (${stats.colorBlendEffectiveInterval ?? 1})`
                       : `every ${stats.colorBlendFrameInterval ?? 1}`}
+                  </button>
+                </div>
+              </>)}
+
+              {/* ── FlowField (asteroid/shard FF — DBG only) ───────── */}
+              {renderSectionHeader('flowfield', 'FlowField')}
+              {!collapsed.flowfield && (<>
+                {/* Asteroid FF behaviour toggle.  OFF skips the per-
+                    asteroid / per-ammo-drop velocity nudge entirely;
+                    asteroids decay toward zero velocity over a few
+                    seconds and from then on move only via collisions
+                    or gravity.  Rotation still integrates. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">AstFF</span>
+                  <button
+                    onClick={onToggleAsteroidFlow}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle the asteroid/shard flow-field velocity nudge.  OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity."
+                  >
+                    {stats.asteroidFlowEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Vec</span>
+                  <button
+                    onClick={onToggleFFOverlayVectors}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle asteroid/shard FF vector arrows.  Per-cell unit vector, sampled at stride N (see FF SampleN).  Pursuit field is intentionally not drawn."
+                  >
+                    {stats.ffOverlayVectors === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Sample stride for the vector overlay only.  Cells /
+                    obstacles / rebuilds overlays always render every
+                    cell — only the vector arrows downsample. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF SampleN</span>
+                  <button
+                    onClick={onCycleFFOverlaySampleN}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the vector-overlay sample stride 1 → 2 → 4 → 8 → 16.  Stride 1 draws every cell."
+                  >
+                    every {stats.ffOverlaySampleN ?? 1}
+                  </button>
+                </div>
+                {/* Cell grid outlines — every cell, no downsampling. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Cells</span>
+                  <button
+                    onClick={onToggleFFOverlayCells}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle asteroid/shard FF cell outlines.  Draws every cell so the grid resolution and seam are visible."
+                  >
+                    {stats.ffOverlayCells === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Obstacle tint — verifies the PR #54 obstacle filter
+                    (mass === Infinity && shardVariant !== 'nebula-tile')
+                    in practice.  Nebula tiles SHOULD NOT show as blocked. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Obs</span>
+                  <button
+                    onClick={onToggleFFOverlayObstacles}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle asteroid/shard FF obstacle bitmap tint.  Red cells are blocked.  Nebula tiles should NOT appear as obstacles (PR #54 filter)."
+                  >
+                    {stats.ffOverlayObstacles === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Rebuild flash — cells light up amber when re-baked
+                    by onTileDestroyed (the destroyed cell + 4 cardinal
+                    neighbours).  Fades over ~0.6 s. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Reb</span>
+                  <button
+                    onClick={onToggleFFOverlayRebuilds}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle FF Rebuilds overlay.  Cells flash amber when re-baked by onTileDestroyed (destroyed cell + 4 cardinal neighbours).  Fades over ~0.6 s."
+                  >
+                    {stats.ffOverlayRebuilds === true ? 'On' : 'Off'}
                   </button>
                 </div>
               </>)}

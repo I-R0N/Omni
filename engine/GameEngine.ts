@@ -156,6 +156,26 @@ export class GameEngine {
   // the camera stays anchored regardless of impact magnitude.
   private screenShakeEnabled: boolean = false;
 
+  // ── Asteroid/shard flow-field DBG state ──────────────────────────────
+  // When `asteroidFlowEnabled` is false, the per-asteroid / per-ammo-drop
+  // velocity nudge in updatePhysics is skipped entirely.  Asteroids that
+  // were moving keep their current velocity but receive no further
+  // streamline correction; combined with `linearDamping` they decay
+  // toward zero velocity over a few seconds and then only move when
+  // collided with or pulled by gravity.  Default true.
+  private asteroidFlowEnabled: boolean = true;
+  // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
+  // pass on/off independently.  All default OFF; debug-only.
+  private ffOverlayVectors:   boolean = false;
+  private ffOverlayCells:     boolean = false;
+  private ffOverlayObstacles: boolean = false;
+  private ffOverlayRebuilds:  boolean = false;
+  // Vector overlay stride — cycles through SAMPLE_N_CYCLE so a coarser
+  // sweep doesn't bury detail on dense maps.  Cells/obstacles/rebuild
+  // overlays always render every cell.
+  private static readonly FF_SAMPLE_N_CYCLE: readonly number[] = [1, 2, 4, 8, 16] as const;
+  private ffOverlaySampleN: number = 1;
+
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
   // `this.shards.queueRegen(entity)` for every shard-family death;
@@ -628,6 +648,48 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the per-asteroid / per-ammo-drop flow-field velocity nudge
+   * in updatePhysics.  When OFF, the `applyFlow` step early-exits after
+   * the rotation update — asteroids retain whatever velocity they had
+   * but receive no streamline correction.  Combined with linearDamping
+   * they decay toward zero velocity over a few seconds; from then on
+   * they only move when collided with or pulled by gravity.  Surfaced
+   * in the DBG panel for A/B-testing the contribution of the flow nudge
+   * to the asteroid-field "feel".
+   */
+  public toggleAsteroidFlow() {
+    this.asteroidFlowEnabled = !this.asteroidFlowEnabled;
+  }
+
+  /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
+  public toggleFFOverlayVectors() {
+    this.ffOverlayVectors = !this.ffOverlayVectors;
+  }
+  /** Toggle the FF Cells overlay (per-cell grid outlines). */
+  public toggleFFOverlayCells() {
+    this.ffOverlayCells = !this.ffOverlayCells;
+  }
+  /** Toggle the FF Obstacles overlay (blocked-cell tint). */
+  public toggleFFOverlayObstacles() {
+    this.ffOverlayObstacles = !this.ffOverlayObstacles;
+  }
+  /** Toggle the FF Rebuilds overlay (flash recently-rebaked cells). */
+  public toggleFFOverlayRebuilds() {
+    this.ffOverlayRebuilds = !this.ffOverlayRebuilds;
+  }
+  /**
+   * Cycle the vector-overlay sample stride through 1 → 2 → 4 → 8 → 16.
+   * Coarser strides reduce arrow density on whichever map is loaded;
+   * stride 1 draws every cell.  Cells / obstacles / rebuilds overlays
+   * always render every cell — only the vector overlay uses this.
+   */
+  public cycleFFOverlaySampleN() {
+    const order = GameEngine.FF_SAMPLE_N_CYCLE;
+    const idx = order.indexOf(this.ffOverlaySampleN);
+    this.ffOverlaySampleN = order[(idx + 1) % order.length];
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -702,6 +764,11 @@ export class GameEngine {
     // pop a shard out of existence in the player's view).
     this.shards.setEntityIndex(this.entityIndex);
     this.flowField = new FlowFieldGrid();
+    // Hand the renderer a reference to the flow field so the DBG
+    // asteroid/shard FF overlays (vectors / cells / obstacles /
+    // rebuilds) can read per-cell state directly without going
+    // through allocation-heavy `sampleAsteroidFlow()` calls.
+    this.renderer.setFlowField(this.flowField);
 
     this.player = {
       id: 'player',
@@ -847,6 +914,12 @@ export class GameEngine {
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
+      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      ffOverlayVectors:   this.ffOverlayVectors,
+      ffOverlayCells:     this.ffOverlayCells,
+      ffOverlayObstacles: this.ffOverlayObstacles,
+      ffOverlayRebuilds:  this.ffOverlayRebuilds,
+      ffOverlaySampleN:   this.ffOverlaySampleN,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -977,6 +1050,12 @@ export class GameEngine {
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
+      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      ffOverlayVectors:   this.ffOverlayVectors,
+      ffOverlayCells:     this.ffOverlayCells,
+      ffOverlayObstacles: this.ffOverlayObstacles,
+      ffOverlayRebuilds:  this.ffOverlayRebuilds,
+      ffOverlaySampleN:   this.ffOverlaySampleN,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1183,6 +1262,7 @@ export class GameEngine {
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
+      const flowEnabled = this.asteroidFlowEnabled;
       const applyFlow = (e: GameEntity) => {
           // Nebula shards anchor in place — flow correction is
           // skipped so the field can't drag them around the map.
@@ -1191,6 +1271,14 @@ export class GameEngine {
           // gravity pull, impact) and stays there.  Rotation still
           // integrates so spinning shards keep tumbling visually.
           if (e.shardVariant === 'nebula-shard') {
+              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+              return;
+          }
+          // DBG: when the asteroid-flow toggle is OFF, skip the
+          // velocity nudge entirely.  Rotation still integrates so
+          // existing tumble is preserved; existing velocity is left
+          // untouched (only damping + collisions modify it).
+          if (!flowEnabled) {
               if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
               return;
           }
@@ -2735,7 +2823,14 @@ export class GameEngine {
           this.player.position,
           this.playerMessages,
           this.player,
-          this.waveAnnouncements
+          this.waveAnnouncements,
+          {
+              vectors:   this.ffOverlayVectors,
+              cells:     this.ffOverlayCells,
+              obstacles: this.ffOverlayObstacles,
+              rebuilds:  this.ffOverlayRebuilds,
+              sampleN:   this.ffOverlaySampleN,
+          },
       );
   }
 

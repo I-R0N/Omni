@@ -1,19 +1,22 @@
 /**
  * FlowFieldGrid — tile-aware, incrementally-updated dual flow field.
  *
- * Two separate BFS distance fields share a single obstacle bitmap:
+ * Two fields share a single obstacle bitmap but use different algorithms:
  *
- *   • Asteroid streaming field
- *       Goals: 4 fixed anchor positions (mirrors the old vortex centres).
- *       Sampled every frame to steer asteroids through open corridors.
+ *   • Asteroid streaming field (vortex-based, no BFS)
+ *       Each cell samples the active map's `sampleFlow()` to get a base
+ *       direction, then deflects away from any blocked cardinal neighbours
+ *       (`WALL_REPULSE`).  Sampled every frame to steer asteroids through
+ *       open corridors.  Recomputed for a 5-cell neighbourhood whenever a
+ *       tile is destroyed.
  *
- *   • Enemy pursuit field
+ *   • Enemy pursuit field (BFS distance, gradient-of-distance flow)
  *       Goal: player's current grid cell.
  *       Rebuilt lazily (only when the player changes cells) with a range cap
- *       so the BFS only fans out ~18 cells (~4600 units) from the player,
+ *       so the BFS only fans out ~11 cells (~2800 units) from the player,
  *       keeping each rebuild under ~0.2 ms.
  *
- * Incremental tile destruction
+ * Incremental tile destruction (enemy field only)
  *   When a tile is destroyed the cell becomes unblocked.  Removing an
  *   obstacle can only SHORTEN paths, so a forward-BFS patch starting from
  *   the cleared cell propagates improvements outward and stops the moment
@@ -132,6 +135,15 @@ export class FlowFieldGrid {
   // rebuild thrash (e.g. player oscillating across a cell boundary).
   public lastFlushMs: number = 0;
 
+  // Per-cell timestamp of the most recent asteroid-field recompute (ms,
+  // performance.now() domain).  Written by `_computeAsteroidCell` for
+  // every cell it touches: every cell at `buildAsteroidField` (map load)
+  // and 5 cells at each `onTileDestroyed`.  Consumed only by the DBG
+  // "FF Rebuilds" overlay — it flashes any cell whose timestamp is
+  // within FLASH_DURATION_MS of now().  Allocation matches the typed-
+  // array group above so it grows the same way in `_ensureCapacity`.
+  private astRebuildTs = new Float64Array(TOTAL);
+
   // ─── coordinate helpers ──────────────────────────────────────────────────
 
   worldToCell(wx: number, wy: number): number {
@@ -164,6 +176,7 @@ export class FlowFieldGrid {
     this.eneFlowY = new Float32Array(TOTAL);
     this.fullQ    = new Int32Array(TOTAL + 4);
     this.inFullQ  = new Uint8Array(TOTAL);
+    this.astRebuildTs = new Float64Array(TOTAL);
     this._allocTotal = TOTAL;
   }
 
@@ -213,6 +226,10 @@ export class FlowFieldGrid {
 
   /** Recompute the asteroid flow vector for a single cell. */
   private _computeAsteroidCell(idx: number): void {
+    // Stamp the recompute time for the DBG "FF Rebuilds" overlay
+    // regardless of blocked-vs-open outcome — every recompute is a
+    // rebuild event worth surfacing.
+    this.astRebuildTs[idx] = performance.now();
     if (this.blocked[idx]) {
       this.astFlowX[idx] = 0; this.astFlowY[idx] = 0; return;
     }
@@ -509,4 +526,31 @@ export class FlowFieldGrid {
     flowX[idx] = mag > 0 ? bx / mag : 0;
     flowY[idx] = mag > 0 ? by / mag : 0;
   }
+
+  // ─── overlay accessors (DBG / dev-only) ──────────────────────────────────
+  //
+  // Read-only views of the grid's internal buffers so the renderer's
+  // asteroid/shard FF overlays can draw cell outlines, vectors, the
+  // obstacle bitmap, and per-cell rebuild flashes without going through
+  // an allocation-heavy `sampleAsteroidFlow()` loop.  Returned arrays
+  // are LIVE — callers must not mutate them.
+
+  /** Cell edge length in world units. */
+  get cellSize(): number { return CELL_SIZE; }
+  /** Current grid column count.  May change after a map-dimension swap. */
+  get cols(): number { return FF_COLS; }
+  /** Current grid row count.  May change after a map-dimension swap. */
+  get rows(): number { return FF_ROWS; }
+  /** World-space x-coordinate of the left edge of column 0. */
+  get minX(): number { return MAP_MIN_X; }
+  /** World-space y-coordinate of the top edge of row 0. */
+  get minY(): number { return MAP_MIN_Y; }
+  /** Live obstacle bitmap (1 = blocked).  Read-only — do not mutate. */
+  get blockedView(): Uint8Array { return this.blocked; }
+  /** Live asteroid-flow x-components per cell.  Read-only. */
+  get astFlowXView(): Float32Array { return this.astFlowX; }
+  /** Live asteroid-flow y-components per cell.  Read-only. */
+  get astFlowYView(): Float32Array { return this.astFlowY; }
+  /** Live per-cell rebuild timestamps (performance.now ms).  Read-only. */
+  get astRebuildTsView(): Float64Array { return this.astRebuildTs; }
 }

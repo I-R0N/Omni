@@ -233,6 +233,30 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleColorBlendInterval();
   };
 
+  const handleToggleAsteroidFlow = () => {
+      if (engineRef.current) engineRef.current.toggleAsteroidFlow();
+  };
+
+  const handleToggleFFOverlayVectors = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
+  };
+
+  const handleToggleFFOverlayCells = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayCells();
+  };
+
+  const handleToggleFFOverlayObstacles = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayObstacles();
+  };
+
+  const handleToggleFFOverlayRebuilds = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayRebuilds();
+  };
+
+  const handleCycleFFOverlaySampleN = () => {
+      if (engineRef.current) engineRef.current.cycleFFOverlaySampleN();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -282,6 +306,12 @@ const App: React.FC = () => {
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
+        onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
+        onToggleFFOverlayCells={handleToggleFFOverlayCells}
+        onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
+        onToggleFFOverlayRebuilds={handleToggleFFOverlayRebuilds}
+        onCycleFFOverlaySampleN={handleCycleFFOverlaySampleN}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
