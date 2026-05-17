@@ -25,6 +25,7 @@ import {
   nebulaFadeRateScale,
   randomPlasticShade,
   colorToWigglePhase,
+  PLASTIC_CHAIN_CONSTANTS,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -233,6 +234,7 @@ export class ShardSystem {
     this.tickBonds(entities, dt, physics, runMergePass);
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
+      this.runPlasticChainBonds(entities, dt);
       this.runLargeShardCollapse(entities);
     }
     this.lastUpdateMs = performance.now() - t0;
@@ -262,6 +264,10 @@ export class ShardSystem {
   public reset(): void {
     this.pending.length = 0;
     this.bonds.length = 0;
+    // Chain bonds live on individual entities (entity.chainBonds[]).
+    // Reset doesn't need to walk them — the master entity list is
+    // rebuilt at map-load and stale entities go inactive, which
+    // the chain-bond tick drops lazily.  No global list to clear.
   }
 
   // ── Regen queue ───────────────────────────────────────────────────
@@ -1205,6 +1211,170 @@ export class ShardSystem {
 
         this.collapseLargeShard(e, density, variantId);
         budget--;
+      }
+    }
+  }
+
+  // ── Plastic chain-bond pipeline ───────────────────────────────────
+  // Polymer-chain behaviour for plastic-shards: unbonded shards seek
+  // nearest partner via gravity pull, bonded shards drift freely.
+  // Bond strength is rank-based — bonds 1-2 strong, bonds 3+ fragile
+  // — so shards naturally settle into chain topology.  Cheaper than
+  // a spring network: no per-substep force pass, just a merge-cadence
+  // sweep over the plastic-shard population for bond maintenance +
+  // seek pull.  See PLASTIC_CHAIN_CONSTANTS for tuning.
+
+  /**
+   * Per-merge-frame chain-bond pass.  Three jobs per call:
+   *
+   *   1. Bond maintenance — walk each plastic-shard's chainBonds list,
+   *      drop bonds whose partner went inactive AND bonds whose pair
+   *      distance exceeded the rank-dependent break threshold.
+   *      Removal shifts higher-rank bonds up (rank 3 → 2, etc.), so
+   *      after a weak break-off the remaining bonds re-strengthen.
+   *
+   *   2. Seek pull — for shards with empty bond lists, find nearest
+   *      plastic-shard within SEEK_RANGE and apply gravity-style
+   *      acceleration toward it.  Bonded shards skip this — they
+   *      already have a partner.
+   *
+   *   3. Bond formation — for any pair of plastic-shards in contact
+   *      that aren't already bonded, append each to the other's list.
+   *      No bond-count cap: new contact always forms a bond, but
+   *      bonds beyond rank STRONG_BOND_COUNT are fragile by definition
+   *      so they decay quickly on any movement.
+   */
+  private runPlasticChainBonds(entities: GameEntity[], dt: number): void {
+    // Build the plastic-shard candidate set.  Bail early when none
+    // are active so non-plastic maps pay zero cost.
+    const candidates: GameEntity[] = [];
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active) continue;
+      if (e.shardVariant !== 'plastic-shard') continue;
+      if (e.mergeFadeTimer !== undefined) continue;
+      candidates.push(e);
+    }
+    if (candidates.length === 0) return;
+
+    // Pass 1: bond maintenance.  Walk each candidate's list; drop
+    // inactive partners and pairs that drifted past the rank-
+    // dependent break threshold.  Compaction is the standard
+    // write-index pattern.
+    const strongCount = PLASTIC_CHAIN_CONSTANTS.STRONG_BOND_COUNT;
+    const strongFactor = PLASTIC_CHAIN_CONSTANTS.STRONG_BREAK_FACTOR;
+    const weakFactor   = PLASTIC_CHAIN_CONSTANTS.WEAK_BREAK_FACTOR;
+    for (let i = 0; i < candidates.length; i++) {
+      const a = candidates[i];
+      const bonds = a.chainBonds;
+      if (bonds === undefined || bonds.length === 0) continue;
+
+      let writeIdx = 0;
+      for (let bi = 0; bi < bonds.length; bi++) {
+        const b = bonds[bi];
+        if (!b.active) continue;
+        // Rank is the WRITE index — what this bond's rank WILL be
+        // after compaction.  Rank 0/1 are strong; 2+ are weak.
+        const isStrong = writeIdx < strongCount;
+        const factor   = isStrong ? strongFactor : weakFactor;
+        const contactDist = (a.size.x + b.size.x) * 0.5;
+        const breakDist   = contactDist * factor;
+        const dx = wrapDeltaX(a.position.x, b.position.x);
+        const dy = wrapDeltaY(a.position.y, b.position.y);
+        const distSq = dx * dx + dy * dy;
+        if (distSq > breakDist * breakDist) continue; // bond snapped
+        bonds[writeIdx++] = b;
+      }
+      bonds.length = writeIdx;
+    }
+
+    // Pass 2 + 3: seek pull + bond formation.  Build a small
+    // spatial hash (3×3 scan at SPATIAL_GRID_SIZE-sized cells) so
+    // both passes share the same neighbour lookup.
+    const CELL = 120; // SPATIAL_GRID_SIZE
+    const COLS = Math.ceil(MAP_WIDTH  / CELL);
+    const ROWS = Math.ceil(MAP_HEIGHT / CELL);
+    const keyFor = (cx: number, cy: number) => {
+      const wx = ((cx % COLS) + COLS) % COLS;
+      const wy = ((cy % ROWS) + ROWS) % ROWS;
+      return (wx << 16) | (wy & 0xFFFF);
+    };
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      const cx = Math.floor(c.position.x / CELL);
+      const cy = Math.floor(c.position.y / CELL);
+      const key = keyFor(cx, cy);
+      let cell = grid.get(key);
+      if (!cell) { cell = []; grid.set(key, cell); }
+      cell.push(i);
+    }
+
+    const seekRangeSq    = PLASTIC_CHAIN_CONSTANTS.SEEK_RANGE * PLASTIC_CHAIN_CONSTANTS.SEEK_RANGE;
+    const seekStrength   = PLASTIC_CHAIN_CONSTANTS.SEEK_STRENGTH;
+    const seekMinDist    = PLASTIC_CHAIN_CONSTANTS.SEEK_MIN_DIST;
+    const contactBuffer  = PLASTIC_CHAIN_CONSTANTS.CONTACT_BUFFER;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const a = candidates[i];
+      const aBondCount = a.chainBonds ? a.chainBonds.length : 0;
+      const seekActive = aBondCount === 0;
+
+      let bestSeekDistSq = Infinity;
+      let bestSeekDx = 0, bestSeekDy = 0, bestSeekDist = 0;
+
+      const acx = Math.floor(a.position.x / CELL);
+      const acy = Math.floor(a.position.y / CELL);
+
+      for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+        for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+          const cell = grid.get(keyFor(ncx, ncy));
+          if (!cell) continue;
+          for (let k = 0; k < cell.length; k++) {
+            const j = cell[k];
+            if (j === i) continue;
+            const b = candidates[j];
+            // Torus-correct delta.
+            const dx = wrapDeltaX(a.position.x, b.position.x);
+            const dy = wrapDeltaY(a.position.y, b.position.y);
+            const distSq = dx * dx + dy * dy;
+
+            // Pass 2: seek — track the nearest partner for this
+            // shard's pull.  Only the shard itself applies the
+            // force (unilateral), so we don't dedupe pairs here.
+            if (seekActive && distSq < seekRangeSq && distSq < bestSeekDistSq) {
+              bestSeekDistSq = distSq;
+              bestSeekDx = dx;
+              bestSeekDy = dy;
+              bestSeekDist = Math.sqrt(distSq);
+            }
+
+            // Pass 3: formation — process each unordered pair once
+            // via j > i, skip if already bonded.
+            if (j <= i) continue;
+            const aBonds = a.chainBonds;
+            if (aBonds !== undefined && aBonds.indexOf(b) !== -1) continue;
+            const contactDist = (a.size.x + b.size.x) * 0.5 + contactBuffer;
+            if (distSq > contactDist * contactDist) continue;
+            // In contact + not already bonded — append to both
+            // sides.  Bonds are appended; rank reflects formation
+            // order via list index.
+            if (a.chainBonds === undefined) a.chainBonds = [];
+            if (b.chainBonds === undefined) b.chainBonds = [];
+            a.chainBonds.push(b);
+            b.chainBonds.push(a);
+          }
+        }
+      }
+
+      // Apply seek pull (unilateral — only `a` accelerates).  Mirror
+      // of the nebula gravity pattern: accel = strength * dt / dist.
+      if (seekActive && bestSeekDist > 0.0001) {
+        const effDist = Math.max(bestSeekDist, seekMinDist);
+        const accel = (seekStrength * dt) / effDist;
+        const invDist = 1 / bestSeekDist;
+        a.velocity.x += bestSeekDx * invDist * accel;
+        a.velocity.y += bestSeekDy * invDist * accel;
       }
     }
   }

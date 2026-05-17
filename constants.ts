@@ -1558,31 +1558,77 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // shard branch) draws a solid-circle fill in the entity colour,
 // so the 16-gon is collision-only.
 //
-// Damping tuning (v4, "increase damping"): linearDamping = 0.92
-// is heavier than nebula-shard (NEBULA_CONSTANTS.LINEAR_DAMPING =
-// 0.97).  At 0.92 a shard kicked at v=4 retains ~0.7 % of its
-// velocity after 1 s (vs ~16 % at 0.97) — basically stops within
-// a half-second.  angularDamping matches so spin and translation
-// settle together.
+// Damping tuning (v5, chain-bond mode): linearDamping 0.97 +
+// restSpeed 0.05 lets shards drift freely so the chain-bond
+// pipeline (PLASTIC_CHAIN_CONSTANTS below) can pull unbonded
+// shards toward partners and form string-like chains.  Shards
+// still settle to rest eventually but they're free to move when
+// kicked or pulled.
 //
-// Sleep thresholds (v5, "no movement without external force"):
-// restSpeed 0.15 / restSpin 0.15 raise the snap-to-zero floor
-// from nebula's tiny 0.005 / 0.01 so any residual drift from a
-// distant repel field / gravity / accumulated rounding gets
-// snapped to exactly zero.  A projectile impact (typical kick
-// v=2-5) clearly clears the threshold; once damping brings the
-// kicked velocity below 0.15 the shard freezes until the next
-// external event.
+// PRESERVED — prior "sleep-state" config (v4) for future use on
+// a different material variant if needed:
+//   linearDamping:  0.92    // ~99 % velocity bleed per second
+//   angularDamping: 0.92
+//   restSpeed:      0.15    // hard sleep threshold
+//   restSpin:       0.15
+// That profile gives heavy "sticky" feel — shards barely move
+// after a kick and freeze at the slightest pause.  The directional
+// wiggle + 3× projectile bounciness on plastic-shard work with
+// either profile.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
   polyVerticesMin: 16, polyVerticesMax: 16,
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
-  linearDamping:  0.92,
-  angularDamping: 0.92,
-  restSpeed: 0.15,
-  restSpin:  0.15,
+  linearDamping:  0.97,
+  angularDamping: 0.97,
+  restSpeed: 0.05,
+  restSpin:  0.05,
 };
+
+/** Chain-bond constants for plastic-shards.  Drives the polymer-
+ *  chain behaviour: unbonded shards seek nearest plastic-shard
+ *  via gravity pull, bonded shards stop seeking.  Bond strength
+ *  is rank-based — first STRONG_BOND_COUNT bonds use the large
+ *  break distance (durable, won't snap from normal jostling),
+ *  bonds at higher ranks use the small break distance (fragile,
+ *  collapse on the slightest separation).  Shards naturally
+ *  settle into chain topology since each holds at most 2 strong
+ *  bonds; extras break away leaving a chain.
+ *
+ *  Pipeline lives in ShardSystem.runPlasticChainBonds, called at
+ *  merge-pass cadence (not every substep) so cost scales with
+ *  the active plastic-shard count, not the substep rate. */
+export const PLASTIC_CHAIN_CONSTANTS = {
+  /** Number of "strong" bonds per shard — these resist breaking
+   *  with the large break-distance threshold. */
+  STRONG_BOND_COUNT: 2,
+  /** Break-distance multiplier on (sizeA + sizeB) × 0.5 for
+   *  strong bonds (rank 1 and 2).  4× contact means the pair has
+   *  to drift roughly 3 shard-widths apart before the bond snaps
+   *  — durable. */
+  STRONG_BREAK_FACTOR: 4.0,
+  /** Break-distance multiplier on contact distance for weak bonds
+   *  (rank 3+).  1.2× contact means the bond breaks the instant
+   *  the pair separates beyond touching. */
+  WEAK_BREAK_FACTOR:   1.2,
+  /** Distance within which an unbonded shard seeks a partner.
+   *  3× SPATIAL_GRID_SIZE (360) — fits the 3×3 cell scan. */
+  SEEK_RANGE:    360,
+  /** Acceleration applied to an unbonded shard per substep,
+   *  scaled by 1/distance so the pull is stronger when closer.
+   *  Same form as nebula-shard gravity (pullStrength × dt / dist
+   *  → velocity delta).  Tuned alongside the lighter damping so
+   *  orphans visibly drift toward partners. */
+  SEEK_STRENGTH: 30,
+  /** Minimum distance used in the seek division to avoid blowups
+   *  when shards almost overlap. */
+  SEEK_MIN_DIST: 10,
+  /** Contact buffer added to (sizeA + sizeB) × 0.5 when deciding
+   *  whether a pair is "in contact" for bond formation.  Same
+   *  4-unit buffer as the merge broadphase. */
+  CONTACT_BUFFER: 4,
+} as const;
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
 // jitter + low radius variance for a clean, hex-like or polygon-
