@@ -1904,25 +1904,31 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     //                     bond slack for both compression and stretch.
     //   breakFactor 3.0 — cluster takes a few hits / noticeable
     //                     stretch before pieces snap off.
-    //   stiffness 8    — soft "polymer skin" pull.  At a 20-unit
-    //                     stretch the per-substep dv is 8×20/120 ≈
-    //                     1.3 vel units — gentle enough that a
-    //                     projectile impact (typical impulse 2-5
-    //                     vel units) overpowers the spring briefly,
-    //                     producing the visible stretch + bond-
-    //                     drag effect.
-    //   damping 1.5    — very light along-bond damping; lets the
-    //                     impulse propagate through the cluster
-    //                     before the spring fully restores.  ω ≈
-    //                     √8 ≈ 2.8 rad/s, critical damping c ≈ 5.6;
-    //                     ζ ≈ 0.27 so the cluster jiggles briefly
-    //                     after a big hit, then settles.
+    //   stiffness 0.8  — extra-soft "polymer skin" pull (reduced
+    //                     10× from the previous round of tuning).
+    //                     Earlier value of 8 still felt rigid in
+    //                     playtest — projectile impacts barely
+    //                     stretched the cluster before the spring
+    //                     yanked the hit shard back.  At a 20-unit
+    //                     stretch the per-substep dv is now
+    //                     0.8×20/120 ≈ 0.13 vel units — a typical
+    //                     projectile impact (impulse ~2-5) easily
+    //                     overpowers the spring and the cluster
+    //                     visibly distorts before pulling back over
+    //                     ~3 s.
+    //   damping 0.15   — matched 10× cut so the bond's critical-
+    //                     damping ratio stays roughly constant
+    //                     (ω ∝ √k → ω ≈ 0.89 rad/s; critical
+    //                     damping c ≈ 1.78; ζ ≈ 0.084 — still
+    //                     underdamped, but the lower ω means the
+    //                     bounce-back oscillation is slow and
+    //                     reads as soft, not springy.
     elasticBond: {
       partners: ['plastic-shard', 'plastic-tile'],
-      stiffness: 8,
+      stiffness: 0.8,
       restFactor:  1.15,
       breakFactor: 3.0,
-      damping:     1.5,
+      damping:     0.15,
     },
     // Plastic-softbody retrofit: per-shard dent (vertexJitter / per-
     // hit polygon pull) is dropped — softbody cluster deformation
