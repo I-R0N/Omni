@@ -102,6 +102,17 @@ function shardMergeFadeAlpha(entity: GameEntity): number {
     return Math.max(0, Math.min(1, t / dur));
 }
 
+// Map a per-substep `repelImpulse` accumulator to a 0..N glow intensity
+// scalar.  Reference: glass-tile.repel.strength = 0.04 → a single body
+// at a tile's centre yields ~0.04 per substep, normalising to 1.0.  Not
+// clamped: metal's higher repel.strength (0.06) produces ~1.5 here, and
+// multi-body scenarios push higher still.  Callers are expected to clamp
+// the FINAL alpha (peakAlpha × intensity) so metal naturally reads
+// brighter than glass when the input is identical.
+function repelGlowIntensity(impulse: number): number {
+    return impulse / 0.04;
+}
+
 // Canvas 2D roundRect polyfill — available since Chrome 99 / Firefox 112.
 // Provide a fallback so older preview engines don't throw on drop rendering.
 function roundRectPath(
@@ -1179,14 +1190,20 @@ export class RenderSystem {
             || entity.shardVariant === 'indestructible-tile');
       // Skip the fast path while the player is inside this tile's
       // variant glow range so the slow path's layer 2b can paint.
-      // Cheap squared-distance check; no allocation.
+      // Glass-tile reads `repelImpulse` (any nearby repellable body
+      // ramps the glow); indestructible-tile keeps player-distance
+      // because it has no repel field.
       let inGlowRange = false;
-      if (isGlassFamilyStaticTile && playerPos && entity.shardVariant !== undefined) {
-          const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
-          if (fpGlow !== undefined) {
-              const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
-              const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
-              inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+      if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {
+          if (entity.shardVariant === 'glass-tile') {
+              inGlowRange = (entity.repelImpulse ?? 0) > 0;
+          } else if (playerPos) {
+              const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
+              if (fpGlow !== undefined) {
+                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+                  inGlowRange = fpdx * fpdx + fpdy * fpdy < fpGlow.range * fpGlow.range;
+              }
           }
       }
       if (isGlassFamilyStaticTile
@@ -1224,7 +1241,7 @@ export class RenderSystem {
       if (entity.shardVariant === 'nebula-tile'
           && entity.active
           && !entity.hitFlash
-          && entity.nebulaFadeTimer === undefined
+          && entity.mergeFadeTimer === undefined
           && entity.nebulaSpawnTimer === undefined
           && entity.regenPopTimer === undefined
           && entity.nebulaCachedTinted !== undefined
@@ -1339,9 +1356,9 @@ export class RenderSystem {
           // shatters use a shorter, snappier fade than slow drift-through
           // collisions.  Falls back to the base constant for legacy tiles
           // without the per-entity duration field set.
-          const fadeDuration = entity.nebulaFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
-          const fadeMul = entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0 && fadeDuration > 0
-              ? Math.max(0, entity.nebulaFadeTimer / fadeDuration)
+          const fadeDuration = entity.mergeFadeDuration ?? NEBULA_CONSTANTS.FADE_DURATION;
+          const fadeMul = entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0 && fadeDuration > 0
+              ? Math.max(0, entity.mergeFadeTimer / fadeDuration)
               : 1.0;
           // Fade-in multiplier — same per-entity duration treatment so
           // child shards from a fast collision fade in fast, matching
@@ -1570,12 +1587,6 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
-                  // Crack overlay for multi-HP mobile shards (the same
-                  // visual asteroids had on the legacy ASTEROID render).
-                  if (entity.maxHealth > 1
-                      && entity.type === EntityType.STRUCTURE && entity.mass !== Infinity) {
-                      this.renderCracks(ctx, entity, drawSize/2);
-                  }
 
                   // Draw Label for interactables
                   if (entity.type === EntityType.INTERACTABLE && entity.name) {
@@ -1674,7 +1685,10 @@ export class RenderSystem {
                 } else {
 
                 // ── Glass tile ──────────────────────────────────────────────
-                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+                // Hit-flash is suppressed on tiles per design — the
+                // proximity tint already telegraphs activity without
+                // a white-flash overlay on every impact.
+                const isFlash = false;
 
                 // Proximity tint: edge shifts from cool blue-white → bright cyan.
                 // Toroidal delta so tiles across a seam reveal the same tint
@@ -1703,33 +1717,27 @@ export class RenderSystem {
                     ctx.fill();
                 }
 
-                // Layer 2b — glass-tile proximity glow.  Computes
-                // intensity inline from the player position.  Paints
-                // both a fill AND a thick stroke so the halo reads as
-                // a clear "lit edge" — fill alone washes the hex out
-                // cyan but doesn't pop as a beacon.  Glass-tile only: the
-                // indestructible-tile glow (warm-white lighting) is the
-                // fill-only radial bloom drawn after the cracks below.
-                if (!isFlash
-                    && playerPos
-                    && entity.shardVariant === 'glass-tile') {
+                // Layer 2b — glass-tile proximity glow.  Intensity is
+                // driven by the per-substep `repelImpulse` accumulator
+                // PhysicsSystem writes into the tile, so the glow
+                // ramps up for ANY repellable body (player, enemy,
+                // mobile shards), not only the player.  Fill + thick
+                // stroke so the halo reads as a clear "lit edge" —
+                // fill alone washes the hex out but doesn't beacon.
+                // Indestructible-tile keeps the warm-white radial
+                // bloom drawn after the cracks below.
+                if (!isFlash && entity.shardVariant === 'glass-tile') {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                    if (glow !== undefined) {
-                        const pdxG = wrapDeltaX(entity.position.x, playerPos.x);
-                        const pdyG = wrapDeltaY(entity.position.y, playerPos.y);
-                        const pdistSqG = pdxG * pdxG + pdyG * pdyG;
-                        const rangeSqG = glow.range * glow.range;
-                        if (pdistSqG < rangeSqG) {
-                            const tG = 1 - Math.sqrt(pdistSqG) / glow.range;
-                            const intensityG = tG * tG;
-                            ctx.globalAlpha = glow.peakAlpha * intensityG;
-                            ctx.fillStyle = glow.color;
-                            ctx.fill();
-                            ctx.globalAlpha = Math.max(0.4, glow.peakAlpha * intensityG);
-                            ctx.strokeStyle = glow.color;
-                            ctx.lineWidth = 3.0;
-                            ctx.stroke();
-                        }
+                    const impulse = entity.repelImpulse ?? 0;
+                    if (glow !== undefined && impulse > 0) {
+                        const intensityG = repelGlowIntensity(impulse);
+                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
+                        ctx.fillStyle = glow.color;
+                        ctx.fill();
+                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG));
+                        ctx.strokeStyle = glow.color;
+                        ctx.lineWidth = 3.0;
+                        ctx.stroke();
                     }
                 }
 
@@ -1745,11 +1753,6 @@ export class RenderSystem {
                     ctx.globalAlpha = 0.28 + prox * 0.18;
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
-
-                // Damage cracks (no-op for single-HP glass-tile; included
-                // for parity with the historic multi-HP glass-family render
-                // path).  renderCracks early-returns at ≥95 % health.
-                this.renderCracks(ctx, entity, Math.max(entity.size.x, entity.size.y) / 2);
 
                 // Indestructible-tile lighting — the fill-only warm-white
                 // radial bloom (no edge stroke), painted last.  Glass-tile
@@ -1767,7 +1770,8 @@ export class RenderSystem {
                 // are matte / metallic surfaces, not translucent glass.  The
                 // polygon shape is whatever the dent system has perturbed
                 // entity.polygonPoints into; the renderer just draws it.
-                const isFlash = entity.hitFlash && entity.hitFlash > 0;
+                // Hit-flash suppressed on tiles (see glass-tile branch).
+                const isFlash = false;
                 const fillAlpha =
                     entity.shardVariant === 'plastic-tile' ? 0.6 : 1.0;
 
@@ -1881,30 +1885,36 @@ export class RenderSystem {
                         ctx.stroke();
                     }
 
-                    // Damage cracks for multi-HP variants — early-returns
-                    // at ≥95 % health so undamaged tiles cost nothing.
-                    // Sized to the dented polygon's max-radius (not
-                    // entity.size, which the dent system deliberately
-                    // doesn't shrink) so cracks stay inside the visible
-                    // silhouette as vertices crumple inward.
-                    let crackR = Math.max(entity.size.x, entity.size.y) / 2;
-                    if (entity.polygonPoints && entity.polygonPoints.length > 0) {
-                        let maxR2 = 0;
-                        for (let i = 0; i < entity.polygonPoints.length; i++) {
-                            const p = entity.polygonPoints[i];
-                            const r2 = p.x * p.x + p.y * p.y;
-                            if (r2 > maxR2) maxR2 = r2;
-                        }
-                        crackR = Math.sqrt(maxR2);
-                    }
-                    this.renderCracks(ctx, entity, crackR);
-
-                    // Proximity bloom for plastic/metal — fill-only radial
+                    // Proximity bloom for plastic — fill-only radial
                     // bloom from the player-facing edge; see
                     // renderProximityBloom().  Painted LAST so the outline
                     // / cracks can't cover it.  Timed via timedTileBloom
-                    // so the dev overlay can A/B tile glow.
-                    this.timedTileBloom(ctx, entity, playerPos);
+                    // so the dev overlay can A/B tile glow.  Metal-tile
+                    // takes the repel-driven layer 2b path below instead
+                    // — same accumulator-driven mechanism as glass-tile,
+                    // tuned visually heavier via metal's higher
+                    // repel.strength feeding repelGlowIntensity().
+                    if (entity.shardVariant === 'plastic-tile') {
+                        this.timedTileBloom(ctx, entity, playerPos);
+                    } else if (entity.shardVariant === 'metal-tile' && !isFlash) {
+                        const glow = SHARD_VARIANTS['metal-tile'].glow;
+                        const impulse = entity.repelImpulse ?? 0;
+                        if (glow !== undefined && impulse > 0) {
+                            const intensityM = repelGlowIntensity(impulse);
+                            buildPath();
+                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM);
+                            ctx.fillStyle = glow.color;
+                            ctx.fill();
+                            // Thinner outline than glass (1.5 vs 3.0)
+                            // — metal reads as a precise mechanical
+                            // edge rather than glass's diffuse halo.
+                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM));
+                            ctx.strokeStyle = glow.color;
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                            ctx.globalAlpha = 1.0;
+                        }
+                    }
                 }
 
             } else if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity && !entity.active) {
@@ -1931,7 +1941,12 @@ export class RenderSystem {
 
             } else {
                 // ── Asteroid / Tile shard ─────────────────────────────────────
-                const isFlash   = entity.hitFlash && entity.hitFlash > 0;
+                // Hit-flash is kept for mobile shards (gives heavy
+                // collisions visual punch) but suppressed for rock-
+                // tile so all tile variants share the no-flash
+                // policy.  Dispatch by mass: static (Infinity) →
+                // tile, finite → mobile shard.
+                const isFlash   = entity.mass !== Infinity && !!entity.hitFlash && entity.hitFlash > 0;
                 const isTileShard = entity.shardVariant === 'glass-shard';
                 const glowColor = entity.powerupGlowColor;
 
@@ -2022,7 +2037,6 @@ export class RenderSystem {
                     }
 
                     ctx.globalAlpha = 1.0 * fadeAlpha;
-                    this.renderCracks(ctx, entity, entity.size.x / 2);
                     // Rock-tile renders without an outline — the brittle
                     // dent silhouette reads cleaner against the slate
                     // fill when there's no rim line tracing every
@@ -2683,39 +2697,6 @@ export class RenderSystem {
       ctx.globalAlpha = 1.0;
   }
 
-  private renderCracks(ctx: CanvasRenderingContext2D, entity: GameEntity, radius: number) {
-      if (entity.maxHealth > 1 && !entity.hitFlash) {
-             const healthRatio = Math.max(0, entity.health / entity.maxHealth);
-             if (healthRatio < 0.95) {
-                 ctx.strokeStyle = 'rgba(15, 23, 42, 0.6)';
-                 ctx.lineWidth = 2;
-                 ctx.beginPath();
-                 
-                 const numPoints = entity.polygonPoints?.length || 8;
-                 const damageFactor = 1.0 - healthRatio;
-                 const totalCracks = Math.ceil(numPoints * damageFactor); 
-
-                 for(let i=0; i<totalCracks; i++) {
-                     const idx = (i * 2) % numPoints; 
-                     
-                     let startX, startY;
-
-                     if (entity.polygonPoints && entity.polygonPoints[idx]) {
-                        startX = entity.polygonPoints[idx].x;
-                        startY = entity.polygonPoints[idx].y;
-                     } else {
-                        const angle = (idx / numPoints) * Math.PI * 2;
-                        startX = Math.cos(angle) * radius;
-                        startY = Math.sin(angle) * radius;
-                     }
-
-                     ctx.moveTo(startX, startY);
-                     ctx.lineTo(startX * 0.4, startY * 0.4);
-                 }
-                 ctx.stroke();
-             }
-        }
-  }
 
   private renderIndicators(
     ctx: CanvasRenderingContext2D, 

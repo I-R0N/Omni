@@ -17,10 +17,11 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_VARIANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
+import { randomRockNebulaComposition } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -129,6 +130,13 @@ export class GameEngine {
   // cost in the perf overlay.  Defaults to ON.
   private collisionsEnabled: boolean = true;
 
+  // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
+  // collision scan in PhysicsSystem.  Defaults to OFF: today's
+  // broadphase doesn't pair these (shards skip the outer loop), so
+  // mobile shards drift through tiles' geometry; flipping ON adds
+  // the missing scan and the asteroid-crash branch starts firing.
+  private shardTileCollisionsEnabled: boolean = false;
+
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
   // call sites that still read/write them directly.
@@ -144,6 +152,9 @@ export class GameEngine {
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
+  // DBG toggle — when false, handleScreenShake early-returns and
+  // the camera stays anchored regardless of impact magnitude.
+  private screenShakeEnabled: boolean = true;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -333,6 +344,19 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the dedicated mobile-shard ↔ static-tile collision pass.
+   * Default OFF — the main broadphase skips this pair (shards drift
+   * through tile geometry, only the repel field pushes them away).
+   * Flip ON to add hard collisions: the asteroid-crash branch in
+   * resolveCollision fires (pressure damage to the tile + elastic
+   * bounce off the face).
+   */
+  public toggleShardTileCollisions() {
+    this.shardTileCollisionsEnabled = !this.shardTileCollisionsEnabled;
+    this.physics.shardTileCollisionsEnabled = this.shardTileCollisionsEnabled;
+  }
+
+  /**
    * Cycle the shard ↔ shard pair-resolution interval through
    * SHARD_PAIR_CONSTANTS.CYCLE_ORDER (AUTO → 1 → 2 → 4 → 8 → 16 →
    * 32 → 64 → 128 → 256 → 512 → 1028).  AUTO (= 0) lets
@@ -347,6 +371,114 @@ export class GameEngine {
     const idx = order.indexOf(cur as (typeof order)[number]);
     const next = order[(idx + 1) % order.length];
     this.physics.shardPairFrameInterval = next;
+  }
+
+  /**
+   * Cycle the shard ↔ static-tile pair-resolution interval through
+   * SHARD_TILE_PAIR_CONSTANTS.CYCLE_ORDER.  Mirrors
+   * `cycleShardPairInterval` exactly — same order, same AUTO
+   * semantics — but gates `resolveShardTilePairs` instead of
+   * `resolveShardPairs`.  Only meaningful when the parent
+   * `shardTileCollisionsEnabled` toggle is on; cycling while OFF
+   * still updates the stored value so the panel reflects it when
+   * the user flips back on.
+   */
+  public cycleShardTilePairInterval() {
+    const order = SHARD_TILE_PAIR_CONSTANTS.CYCLE_ORDER;
+    const cur = this.physics.shardTilePairFrameInterval;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.physics.shardTilePairFrameInterval = next;
+  }
+
+  /**
+   * Toggle shard ↔ shard gravity pull (the attractedTo pass in
+   * ShardSystem.runMergeBroadphase).  Today only nebula-shard has
+   * non-'none' attractedTo, so this primarily flips nebula self-
+   * coalesce gravity and any cross-variant pull on/off.
+   */
+  public toggleShardGravity() {
+    this.shards.shardGravityEnabled = !this.shards.shardGravityEnabled;
+  }
+
+  /**
+   * Toggle shard ↔ shard bond formation + cohesion.  When off, any
+   * existing bonds drop on the next ShardSystem.update() tick and
+   * no new bonds form.  Nebula self-compose (which fires via the
+   * zero-time bond path) and cross-variant absorb both stop too.
+   */
+  public toggleShardBonding() {
+    this.shards.shardBondingEnabled = !this.shards.shardBondingEnabled;
+  }
+
+  /**
+   * Toggle hard collisions between nebula-shard ↔ nebula-shard
+   * pairs.  When on, the per-variant passThrough flag is ignored
+   * for that specific pair and the SAT impulse path runs as
+   * normal.  Default OFF — used to A/B-test whether forcing
+   * nebula-pair separation breaks up the "one big pile" symptom.
+   */
+  public toggleNebulaShardCollisions() {
+    this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
+  }
+
+  /**
+   * Toggle the camera screen-shake effect on/off.  When off,
+   * handleScreenShake early-returns and any in-flight shake decays
+   * to zero on the next sim step (the existing decay logic clears
+   * shakeOffset once shakeTimer hits 0).
+   */
+  public toggleScreenShake() {
+    this.screenShakeEnabled = !this.screenShakeEnabled;
+    if (!this.screenShakeEnabled) {
+      // Cancel any in-flight shake immediately so the camera
+      // returns to centered on the next frame.
+      this.shakeTimer = 0;
+      this.shakeIntensity = 0;
+      this.camera.shakeOffset = { x: 0, y: 0 };
+    }
+  }
+
+  /**
+   * Cycle the nebula tile→tile color-equilibration alpha through
+   * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
+   * Fast).  Anchors the cluster's structural hue — tiles drift
+   * toward their 6-hex-neighbour weighted average each frame at
+   * this alpha.
+   */
+  public cycleTileBlendAlpha() {
+    const order = NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE;
+    const cur = this.nebulas.tileBlendAlpha;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.nebulas.tileBlendAlpha = next;
+  }
+
+  /**
+   * Cycle the nebula shard→nearest-tile color-equilibration alpha
+   * through NEBULA_CONSTANTS.BLEND_SHARD_ALPHA_CYCLE.  Catch-up
+   * blend for shards (anchors don't move).
+   */
+  public cycleShardBlendAlpha() {
+    const order = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA_CYCLE;
+    const cur = this.nebulas.shardBlendAlpha;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.nebulas.shardBlendAlpha = next;
+  }
+
+  /**
+   * Cycle the cadence interval for the nebula color-equilibration
+   * pass through NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE.
+   * Higher values trade smoothness for perf — the per-call work
+   * stays the same but fires less often.
+   */
+  public cycleColorBlendInterval() {
+    const order = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_CYCLE;
+    const cur = this.nebulas.colorBlendFrameInterval;
+    const idx = order.indexOf(cur as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    this.nebulas.colorBlendFrameInterval = next;
   }
 
   private onStatsUpdate: (stats: EngineStats) => void;
@@ -502,8 +634,19 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardTileCollisionsEnabled: this.shardTileCollisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
+      shardTilePairInterval: this.physics.shardTilePairFrameInterval,
+      shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
+      shardGravityEnabled: this.shards.shardGravityEnabled,
+      shardBondingEnabled: this.shards.shardBondingEnabled,
+      nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      screenShakeEnabled: this.screenShakeEnabled,
+      tileBlendAlpha: this.nebulas.tileBlendAlpha,
+      shardBlendAlpha: this.nebulas.shardBlendAlpha,
+      colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
+      colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -605,8 +748,19 @@ export class GameEngine {
       localGravityEnabled: this.localGravityEnabled,
       attractorGravityEnabled: this.attractorGravityEnabled,
       collisionsEnabled: this.collisionsEnabled,
+      shardTileCollisionsEnabled: this.shardTileCollisionsEnabled,
       shardPairInterval: this.physics.shardPairFrameInterval,
       shardPairEffectiveInterval: this.physics.lastEffectiveShardPairInterval,
+      shardTilePairInterval: this.physics.shardTilePairFrameInterval,
+      shardTilePairEffectiveInterval: this.physics.lastEffectiveShardTilePairInterval,
+      shardGravityEnabled: this.shards.shardGravityEnabled,
+      shardBondingEnabled: this.shards.shardBondingEnabled,
+      nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      screenShakeEnabled: this.screenShakeEnabled,
+      tileBlendAlpha: this.nebulas.tileBlendAlpha,
+      shardBlendAlpha: this.nebulas.shardBlendAlpha,
+      colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
+      colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -721,6 +875,7 @@ export class GameEngine {
   }
 
   private handleScreenShake = (amount: number) => {
+      if (!this.screenShakeEnabled) return;
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
           this.shakeIntensity = amount;
@@ -809,6 +964,16 @@ export class GameEngine {
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
       const applyFlow = (e: GameEntity) => {
+          // Nebula shards anchor in place — flow correction is
+          // skipped so the field can't drag them around the map.
+          // Combined with NEBULA_CONSTANTS.LINEAR_DAMPING the
+          // shard's velocity decays to zero after any kick (shatter,
+          // gravity pull, impact) and stays there.  Rotation still
+          // integrates so spinning shards keep tumbling visually.
+          if (e.shardVariant === 'nebula-shard') {
+              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+              return;
+          }
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
           const tx = flow.x * FLOW_TARGET_SPEED;
           const ty = flow.y * FLOW_TARGET_SPEED;
@@ -885,8 +1050,8 @@ export class GameEngine {
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
           // - glass-tile: visual debris via DropSystem.spawnGlassShards
-          //   (called from spawnDrops); SHARD_VARIANTS shatter is
-          //   aspirational for Stage 6 unification.
+          //   (called from spawnDrops); the SHARD_VARIANTS shatter
+          //   policy is unused on this path.
           // - dent variants (plastic-tile / metal-tile / rock-tile):
           //   tile detaches via DropSystem.spawnDentShard reading
           //   dent.breakShards — skip ShardSystem.shatter entirely so
@@ -913,13 +1078,15 @@ export class GameEngine {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
                       y: entity.position.y + (Math.random() - 0.5) * jitter,
                   };
+                  const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
                       puffPos,
                       baseSize,
-                      entity.color,
+                      comp[0].hex,
                       0.45 + Math.random() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
+                      comp,
                   );
               }
           }
@@ -940,13 +1107,15 @@ export class GameEngine {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
                       y: entity.position.y + (Math.random() - 0.5) * jitter,
                   };
+                  const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
                       puffPos,
                       baseSize,
-                      entity.color,
+                      comp[0].hex,
                       0.4 + Math.random() * 0.3,
                       entity.lastImpactVelocity,
+                      comp,
                   );
               }
           }
@@ -1007,7 +1176,7 @@ export class GameEngine {
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
       } else if (isNebula) {
-          // Nebulae fade out gracefully via nebulaFadeTimer in the
+          // Nebulae fade out gracefully via mergeFadeTimer in the
           // renderer — no spark burst on destruction.  Merge/transmute
           // events emit a subtle glimmer instead (see NebulaSystem).
       } else {
@@ -1625,13 +1794,15 @@ export class GameEngine {
                               x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
                               y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
                           };
+                          const comp = randomRockNebulaComposition();
                           this.drops.spawnColoredNebulaShard(
                               this.currentMap.entities,
                               puffPos,
                               baseSize,
-                              target.color,
+                              comp[0].hex,
                               0.45 + Math.random() * 0.2,
                               target.lastImpactVelocity,
+                              comp,
                           );
                       }
                   }

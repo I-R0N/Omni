@@ -1,4 +1,4 @@
-import { GameEntity, EntityType, Vector2 } from '../../types';
+import { GameEntity, EntityType, Vector2, NebulaColorStop } from '../../types';
 import { ShardVariantId } from './ShardSystem.types';
 import {
   COLORS,
@@ -10,6 +10,12 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
 import { NEBULA_IMAGES, ASSETS } from '../../assets';
+import {
+  blendCompositionToHex,
+  cloneComposition,
+  randomGlassNebulaComposition,
+  randomRockNebulaComposition,
+} from '../NebulaColor';
 
 /**
  * DropSystem — owns collectible drops and breakage debris.
@@ -323,11 +329,12 @@ export class DropSystem {
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
 
-    // Release 4-6 blue-toned nebula-shards alongside the glass debris
-    // so the shatter has a substantial cloud-puff dimension to it.
-    // Tone keys to the glass-tile blue (#b4e6fd) rather than the
-    // procedural nebula palette so the puff reads as "glass dust"
-    // rather than a random nebula fragment.
+    // Release 4-6 glass-palette nebula-shards alongside the glass
+    // debris so the shatter has a substantial cloud-puff dimension.
+    // Each puff samples a hue from the cool half of the nebula arc
+    // (cyan → indigo) — sets a per-shard composition so each puff
+    // participates in the color-equilibration pass and blends
+    // smoothly into any surrounding nebula cluster.
     const nebulaCount = 4 + Math.floor(Math.random() * 3);
     const tileSize = Math.max(tile.size.x, tile.size.y);
     for (let i = 0; i < nebulaCount; i++) {
@@ -335,10 +342,12 @@ export class DropSystem {
         x: tile.position.x + (Math.random() - 0.5) * scatter * 2,
         y: tile.position.y + (Math.random() - 0.5) * scatter * 2,
       };
+      const comp = randomGlassNebulaComposition();
       this.spawnColoredNebulaShard(
         entities, spawnPos, tileSize,
-        '#b4e6fd', 0.45 + Math.random() * 0.25,
+        comp[0].hex, 0.45 + Math.random() * 0.25,
         tile.lastImpactVelocity,
+        comp,
       );
     }
   }
@@ -755,11 +764,23 @@ export class DropSystem {
     color: string,
     sizeFraction: number = 0.5,
     inheritVelocity?: Vector2,
+    composition?: NebulaColorStop[],
   ) {
     const variantDef = SHARD_VARIANTS['nebula-shard'];
     const targetSize = Math.max(4, baseSize * sizeFraction);
     const shardPts = this.generateMaterialShardPolygon('nebula-shard', targetSize);
     const mass = variantDef.spawn.sizeToMass(targetSize);
+
+    // Resolve the entity's palette state.  Callers either pass a
+    // composition (preferred — material-specific palette stops drive
+    // both the initial render colour AND the color-equilibration
+    // pass) or a single hex (legacy — wrapped into a single-stop
+    // composition so the shard still participates in equilibration
+    // instead of staying frozen at its spawn colour).
+    const resolvedComposition: NebulaColorStop[] = composition
+      ? cloneComposition(composition)
+      : [{ hex: color, weight: 1 }];
+    const resolvedColor = composition ? blendCompositionToHex(resolvedComposition) : color;
 
     // Pick a nebula sprite at random — required for the renderer's
     // tinted-sprite path (cloud silhouette via getTintedSprite +
@@ -791,7 +812,8 @@ export class DropSystem {
       size:                { x: targetSize, y: targetSize },
       rotation:            Math.random() * Math.PI * 2,
       rotationSpeed:       (Math.random() - 0.5) * (1.2 / Math.max(1, targetSize / 30)),
-      color,
+      color:               resolvedColor,
+      nebulaColorComposition: resolvedComposition,
       sprite,
       active:              true,
       health:              1,
@@ -807,9 +829,6 @@ export class DropSystem {
       // shatter spawn duration.
       nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
       nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
-      // Small area so the shard doesn't trigger the shard-to-tile
-      // transmutation path when it bumps into other nebula material.
-      nebulaTileArea:      targetSize * targetSize * 0.5,
     });
   }
 

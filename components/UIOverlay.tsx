@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
 
 interface UIOverlayProps {
@@ -10,13 +10,21 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onToggleDebug?: () => void;
-  onToggleNebulaSet?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
   onToggleLocalGravity?: () => void;
   onToggleAttractorGravity?: () => void;
   onToggleCollisions?: () => void;
+  onToggleShardTileCollisions?: () => void;
+  onToggleShardGravity?: () => void;
+  onToggleShardBonding?: () => void;
+  onToggleNebulaShardCollisions?: () => void;
+  onToggleScreenShake?: () => void;
+  onCycleTileBlendAlpha?: () => void;
+  onCycleShardBlendAlpha?: () => void;
+  onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
+  onCycleShardTilePairInterval?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -32,13 +40,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onToggleDebug,
-  onToggleNebulaSet,
   onCycleTrailShape,
   onCycleTrailEmitMode,
   onToggleLocalGravity,
   onToggleAttractorGravity,
   onToggleCollisions,
+  onToggleShardTileCollisions,
+  onToggleShardGravity,
+  onToggleShardBonding,
+  onToggleNebulaShardCollisions,
+  onToggleScreenShake,
+  onCycleTileBlendAlpha,
+  onCycleShardBlendAlpha,
+  onCycleColorBlendInterval,
   onCycleShardPairInterval,
+  onCycleShardTilePairInterval,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -47,6 +63,38 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   const perf = stats.perf;
+  // DBG-panel section collapse state.  Each named section has its
+  // own bool; default expanded.  Local-only (no persistence — page
+  // refresh resets), which is fine for a dev panel.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggleSection = (name: string) =>
+    setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
+  // Human label for the cycling blend-alpha buttons.  Mirrors the
+  // four-step cycle Off / Slow / Med / Fast across both Tile and
+  // Shard blend knobs; the underlying values differ per cycle (see
+  // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE) but the label is shared.
+  const blendLabel = (alpha: number | undefined): string => {
+    if (!alpha) return 'Off';
+    if (alpha < 0.01) return 'Slow';
+    if (alpha < 0.10) return 'Med';
+    return 'Fast';
+  };
+  // Plain JSX helper, NOT a sub-component — keeping it as a function
+  // means React inlines the returned button into the parent tree
+  // instead of seeing a freshly-identitied component type on every
+  // render.  Avoiding the unmount/remount churn here was load-bearing
+  // for touch responsiveness (UIOverlay re-renders at ~60 Hz with the
+  // stats stream).
+  const renderSectionHeader = (name: string, label: string) => (
+    <button
+      onClick={() => toggleSection(name)}
+      className="pointer-events-auto mt-1 w-full flex items-center justify-between text-slate-400/80 hover:text-amber-300 uppercase tracking-wider text-[8px] transition-colors"
+      title={`Toggle ${label} section`}
+    >
+      <span>{label}</span>
+      <span className="text-slate-500">{collapsed[name] ? '▸' : '▾'}</span>
+    </button>
+  );
   // Two-digit ms formatter for the perf overlay.  Values under 10 ms get a
   // decimal so sub-millisecond jitter is still visible; bigger numbers
   // collapse to whole ms so the grid stays compact.
@@ -83,158 +131,245 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
               <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
 
-              {/* Nebula-set A/B toggle — compares Nebula00-08 vs Nebula09-16 */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Nebulas</span>
-                <button
-                  onClick={onToggleNebulaSet}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle ALL → A (baseline 00-08) → B (new art) → N16 (16 only)"
-                >
-                  {stats.nebulaSet === 'A'
-                    ? 'A (baseline)'
-                    : stats.nebulaSet === 'B'
-                    ? 'B (new art)'
-                    : stats.nebulaSet === 'N16'
-                    ? 'N16 only'
-                    : 'ALL'}
-                </button>
-              </div>
+              {/* ── Visual ─────────────────────────────────────────── */}
+              {renderSectionHeader('visual', 'Visual')}
+              {!collapsed.visual && (<>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Trail</span>
+                  <button
+                    onClick={onCycleTrailShape}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → PATH → DOTS → NONE"
+                  >
+                    {stats.trailShape === TrailShape.SQUARE ? 'Square'
+                      : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'
+                      : stats.trailShape === TrailShape.LINE ? 'Line'
+                      : stats.trailShape === TrailShape.PATH ? 'Path'
+                      : stats.trailShape === TrailShape.DOTS ? 'Dots'
+                      : stats.trailShape === TrailShape.NONE ? 'None'
+                      : 'Circle'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Dir</span>
+                  <button
+                    onClick={onCycleTrailEmitMode}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle trail direction: VELOCITY vs THRUST"
+                  >
+                    {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
+                  </button>
+                </div>
+                {/* Camera screen-shake on impacts.  OFF keeps the
+                    camera anchored regardless of impact magnitude;
+                    in-flight shakes cancel immediately. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Shake</span>
+                  <button
+                    onClick={onToggleScreenShake}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle camera screen-shake on impacts."
+                  >
+                    {stats.screenShakeEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+              </>)}
 
-              {/* Player trail shape selector */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Trail</span>
-                <button
-                  onClick={onCycleTrailShape}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → PATH → DOTS → NONE"
-                >
-                  {stats.trailShape === TrailShape.SQUARE
-                    ? 'Square'
-                    : stats.trailShape === TrailShape.TRIANGLE
-                    ? 'Triangle'
-                    : stats.trailShape === TrailShape.LINE
-                    ? 'Line'
-                    : stats.trailShape === TrailShape.PATH
-                    ? 'Path'
-                    : stats.trailShape === TrailShape.DOTS
-                    ? 'Dots'
-                    : stats.trailShape === TrailShape.NONE
-                    ? 'None'
-                    : 'Circle'}
-                </button>
-              </div>
+              {/* ── Physics ────────────────────────────────────────── */}
+              {renderSectionHeader('physics', 'Physics')}
+              {!collapsed.physics && (<>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
+                  <button
+                    onClick={onToggleLocalGravity}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
+                  >
+                    {stats.localGravityEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grav</span>
+                  <button
+                    onClick={onToggleAttractorGravity}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle attractor gravity scan (PhysicsSystem.applyGravity)"
+                  >
+                    {stats.attractorGravityEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Coll</span>
+                  <button
+                    onClick={onToggleCollisions}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
+                  >
+                    {stats.collisionsEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+              </>)}
 
-              {/* Trail direction — VELOCITY (extends opposite to velocity) vs THRUST (extends opposite to thrust input) */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Dir</span>
-                <button
-                  onClick={onCycleTrailEmitMode}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Toggle trail direction: VELOCITY (trail extends opposite to velocity) vs THRUST (trail extends opposite to thrust input)"
-                >
-                  {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
-                </button>
-              </div>
+              {/* ── Shards ─────────────────────────────────────────── */}
+              {renderSectionHeader('shards', 'Shards')}
+              {!collapsed.shards && (<>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShGrav</span>
+                  <button
+                    onClick={onToggleShardGravity}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle shard ↔ shard gravity pull (attractedTo pass in ShardSystem.runMergeBroadphase).  Today only nebula-shard has non-'none' attractedTo."
+                  >
+                    {stats.shardGravityEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShBond</span>
+                  <button
+                    onClick={onToggleShardBonding}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle shard ↔ shard bond formation + cohesion.  OFF drops existing bonds and prevents new ones — nebula self-compose and cross-variant absorb stop."
+                  >
+                    {stats.shardBondingEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Neb↔Neb</span>
+                  <button
+                    onClick={onToggleNebulaShardCollisions}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
+                  >
+                    {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl</span>
+                  <button
+                    onClick={onToggleShardTileCollisions}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle mobile-shard ↔ static-tile collision pass."
+                  >
+                    {stats.shardTileCollisionsEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
+                  <button
+                    onClick={onCycleShardPairInterval}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it."
+                  >
+                    {stats.shardPairInterval === 0
+                      ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
+                      : `every ${stats.shardPairInterval ?? 1}`}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl int</span>
+                  <button
+                    onClick={onCycleShardTilePairInterval}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle shard ↔ static-tile interval.  Only fires when Sh↔Tl is ON."
+                  >
+                    {stats.shardTilePairInterval === 0
+                      ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
+                      : `every ${stats.shardTilePairInterval ?? 1}`}
+                  </button>
+                </div>
+                {/* Nebula color equilibration — tiles drift toward
+                    their 6-hex-neighbour weighted average.  Cycle
+                    Off → Slow → Med → Fast (per-frame alpha 0 →
+                    0.005 → 0.02 → 0.08).  Tiles are anchors; shards
+                    have no influence on tiles. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">TileBlend</span>
+                  <button
+                    onClick={onCycleTileBlendAlpha}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle nebula tile→tile color blend.  Tiles drift toward neighbour-hex weighted hue average each frame.  Off / Slow / Med / Fast."
+                  >
+                    {blendLabel(stats.tileBlendAlpha)}
+                  </button>
+                </div>
+                {/* Shard → nearest-tile color blend.  Catch-up alpha
+                    is set higher than tile→tile because shards are
+                    transient and should integrate visibly. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShardBlend</span>
+                  <button
+                    onClick={onCycleShardBlendAlpha}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle nebula shard→nearest-tile color blend.  Shards drift toward the nearest tile's hue each frame.  Off / Slow / Med / Fast."
+                  >
+                    {blendLabel(stats.shardBlendAlpha)}
+                  </button>
+                </div>
+                {/* Cadence interval for the color-equilibration pass.
+                    Trades smoothness for perf — higher = fires less
+                    often.  Only meaningful when TileBlend or
+                    ShardBlend is non-Off. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ColorBlend int</span>
+                  <button
+                    onClick={onCycleColorBlendInterval}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the color-equilibration cadence.  AUTO scales with active-nebula count; manual values pin the interval.  Higher = cheaper but slower visual blend."
+                  >
+                    {stats.colorBlendFrameInterval === 0
+                      ? `auto (${stats.colorBlendEffectiveInterval ?? 1})`
+                      : `every ${stats.colorBlendFrameInterval ?? 1}`}
+                  </button>
+                </div>
+              </>)}
 
-              {/* Player↔asteroid local-gravity toggle — pure on/off so the
-                  `lgrv` perf timer shows the isolated cost when off. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
-                <button
-                  onClick={onToggleLocalGravity}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
-                >
-                  {stats.localGravityEnabled === false ? 'Off' : 'On'}
-                </button>
-              </div>
-
-              {/* POI / attractor gravity toggle — gates PhysicsSystem.applyGravity.
-                  When off the master-list outer loop is skipped and the `grav`
-                  perf timer drops to zero. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grav</span>
-                <button
-                  onClick={onToggleAttractorGravity}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Toggle attractor gravity scan (PhysicsSystem.applyGravity).  Outer loop walks the master entity list each frame."
-                >
-                  {stats.attractorGravityEnabled === false ? 'Off' : 'On'}
-                </button>
-              </div>
-
-              {/* SAT collision broadphase toggle — gates handleEntityCollisions.
-                  Off mode is GAME-BREAKING (projectiles fly through, tiles
-                  inert) — strictly for measuring isolated cost in the `coll`
-                  perf timer. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Coll</span>
-                <button
-                  onClick={onToggleCollisions}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
-                >
-                  {stats.collisionsEnabled === false ? 'Off' : 'On'}
-                </button>
-              </div>
-
-              {/* Shard ↔ shard pair-resolution interval — cycle
-                  AUTO → 1 → 2 → 4 → 8 → 16 → 32 → 64 → 128 → 256 →
-                  512 → 1028.  AUTO scales N with the previous step's
-                  peak shard-cell density; manual values pin the
-                  interval.  Higher N = cheaper but shards may
-                  overlap visibly for longer before separating. */}
-              <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
-                <button
-                  onClick={onCycleShardPairInterval}
-                  className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                  title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it.  Higher = cheaper but laggier separation."
-                >
-                  {stats.shardPairInterval === 0
-                    ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
-                    : `every ${stats.shardPairInterval ?? 1}`}
-                </button>
-              </div>
-
-              <div className="flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
+              {/* ── Stats (always visible — tiny + always useful) ──── */}
+              <div className="mt-1 flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
               <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
               <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>
+
               {perf ? (
                 <>
-                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Entities</div>
-                  <div className="flex justify-between"><span>total</span><span className="text-white">{perf.totalEntities}</span></div>
-                  <div className="flex justify-between"><span>enemies</span><span className="text-white">{perf.enemyCount}</span></div>
-                  <div className="flex justify-between"><span>asteroids</span><span className="text-white">{perf.asteroidCount}</span></div>
-                  <div className="flex justify-between"><span>projectiles</span><span className="text-white">{perf.projectileCount}</span></div>
-                  <div className="flex justify-between"><span>particles</span><span className="text-white">{perf.particleCount}</span></div>
-                  <div className="flex justify-between"><span>drops/POI</span><span className="text-white">{perf.interactableCount}</span></div>
-                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Broadphase</div>
-                  <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
-                  <div className="mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Timing (ms)</div>
-                  <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.physMiscMs)}</span></div>
-                  <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·rings</span><span className="text-white">{fmtMs(perf.explosionRingsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·weapons</span><span className="text-white">{fmtMs(perf.weaponsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·drops</span><span className="text-white">{fmtMs(perf.dropsMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.logicMiscMs)}</span></div>
-                  <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·tLit</span><span className="text-white">{fmtMs(perf.tileLightingMs)}</span></div>
-                  <div className="flex justify-between"><span>&nbsp;·tLit-N</span><span className="text-white">{perf.tileLightingCount}</span></div>
+                  {renderSectionHeader('entities', 'Entities')}
+                  {!collapsed.entities && (<>
+                    <div className="flex justify-between"><span>total</span><span className="text-white">{perf.totalEntities}</span></div>
+                    <div className="flex justify-between"><span>enemies</span><span className="text-white">{perf.enemyCount}</span></div>
+                    <div className="flex justify-between"><span>asteroids</span><span className="text-white">{perf.asteroidCount}</span></div>
+                    <div className="flex justify-between"><span>projectiles</span><span className="text-white">{perf.projectileCount}</span></div>
+                    <div className="flex justify-between"><span>particles</span><span className="text-white">{perf.particleCount}</span></div>
+                    <div className="flex justify-between"><span>drops/POI</span><span className="text-white">{perf.interactableCount}</span></div>
+                  </>)}
+
+                  {renderSectionHeader('broadphase', 'Broadphase')}
+                  {!collapsed.broadphase && (
+                    <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
+                  )}
+
+                  {renderSectionHeader('timing', 'Timing (ms)')}
+                  {!collapsed.timing && (<>
+                    <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.physMiscMs)}</span></div>
+                    <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·rings</span><span className="text-white">{fmtMs(perf.explosionRingsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·weapons</span><span className="text-white">{fmtMs(perf.weaponsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·drops</span><span className="text-white">{fmtMs(perf.dropsMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.logicMiscMs)}</span></div>
+                    <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·tLit</span><span className="text-white">{fmtMs(perf.tileLightingMs)}</span></div>
+                    <div className="flex justify-between"><span>&nbsp;·tLit-N</span><span className="text-white">{perf.tileLightingCount}</span></div>
+                  </>)}
                 </>
               ) : (
                 <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>

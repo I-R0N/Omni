@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS } from '../../constants';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -81,6 +81,25 @@ export class PhysicsSystem {
   // the entire broadphase + SAT pass is skipped (game-breaking;
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
+  // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
+  // collision scan (resolveShardTilePairs).  Default OFF: the main
+  // broadphase already skips this pair (shards are excluded from
+  // the outer loop), so today's behaviour is "shards drift through
+  // tiles' geometry, only the repel field pushes them away."  Flip
+  // ON to add the missing scan — bringing back the dead asteroid-
+  // crash branch in resolveCollision (asteroid-pressure damage +
+  // elastic bounce off the tile face).
+  public shardTileCollisionsEnabled: boolean = false;
+  // Debug toggle — when true, nebula-shard ↔ nebula-shard pairs
+  // ignore the per-variant passThrough flag and take a normal
+  // elastic collision impulse.  Default OFF preserves today's
+  // behaviour (nebula shards intentionally pass through each
+  // other so the cloud reads continuous).  Flip ON to A/B-test
+  // whether hard collisions break up the "one big pile" symptom
+  // when many nebula shards converge.  Scope is intentionally
+  // narrow: nebula-vs-striker and nebula-vs-tile still honour
+  // passThrough — only the same-variant pair is affected.
+  public nebulaShardCollisionsEnabled: boolean = false;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -100,6 +119,14 @@ export class PhysicsSystem {
   // Internal counter, ticked once per handleEntityCollisions call.
   // Used as `counter % interval === 0` to gate shard-shard pairs.
   private shardPairTick: number = 0;
+  // Shard ↔ static-tile pair resolution interval.  Mirrors the
+  // shard-pair knobs above but gates resolveShardTilePairs.  Only
+  // meaningful when shardTileCollisionsEnabled is true; cycled via
+  // the DBG `Sh↔Tl int` button.
+  public shardTilePairFrameInterval: number = SHARD_TILE_PAIR_CONSTANTS.FRAME_INTERVAL;
+  public lastEffectiveShardTilePairInterval: number = 1;
+  public lastRunShardTilePair: boolean = true;
+  private shardTilePairTick: number = 0;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -221,10 +248,11 @@ export class PhysicsSystem {
           if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
               entity.nebulaImpactCooldown -= dt;
           }
-          if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-              entity.nebulaFadeTimer -= dt;
-              if (entity.nebulaFadeTimer <= 0) {
-                  entity.nebulaFadeTimer = undefined;
+          if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
+              entity.mergeFadeTimer -= dt;
+              if (entity.mergeFadeTimer <= 0) {
+                  entity.mergeFadeTimer = undefined;
+                  entity.mergeFadeDuration = undefined;
                   entity.active = false;
               }
           }
@@ -270,23 +298,13 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
-      // Nebula shard fade — shattered shards stay active+rendered while
-      // this counts down, then deactivate and get compacted out.  Tiles
-      // already had their fade ticked above inside the mass=Infinity
-      // branch, so this path only fires for dynamic (shard) entities.
-      if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) {
-          entity.nebulaFadeTimer -= dt;
-          if (entity.nebulaFadeTimer <= 0) {
-              entity.nebulaFadeTimer = undefined;
-              entity.active = false;
-          }
-      }
-      // Generic merge fade-out — same lifecycle as the nebula timer
-      // but applies across non-nebula shard families (rock / glass).
-      // The smaller party of a density-compaction merge stays active
-      // and rendered (with multiplied alpha) while this counts down,
-      // then flips inactive so the in-place compaction in
-      // GameEngine.updatePhysics drops it.
+      // Merge fade-out — both nebula AND non-nebula shard families
+      // ride the same `mergeFadeTimer` field; the value differs by
+      // variant (nebula longer, ~1 s; others crisp, ~0.5 s).  The
+      // entity stays active+rendered with multiplied alpha while
+      // the timer counts down, then flips inactive so the in-place
+      // compaction in GameEngine.updatePhysics drops it.  Tiles
+      // share this tick — see the mass=Infinity branch above.
       if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) {
           entity.mergeFadeTimer -= dt;
           if (entity.mergeFadeTimer <= 0) {
@@ -409,6 +427,18 @@ export class PhysicsSystem {
       if (this.shouldRunShardPairsThisStep()) {
         this.resolveShardPairs(asteroids);
       }
+      if (this.shardTileCollisionsEnabled && this.shouldRunShardTilePairsThisStep()) {
+        this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
+      }
+      // Unconditional nebula-shard ↔ nebula-tile pass.  The main
+      // broadphase skips STRUCTURE outers entirely and the wider
+      // Sh↔Tl scan is opt-in via toggle — without this dedicated
+      // pass nebula shards drift through nebula tiles' geometry.
+      // Cheap: only iterates nebula-shards (a small fraction of
+      // the asteroid list on most maps) and short-circuits inside
+      // checkAndResolveCollision when the inner cell holds no
+      // nebula-tile.
+      this.resolveNebulaShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
     this.lastCollisionsMs = performance.now() - tCol;
 
@@ -537,6 +567,13 @@ export class PhysicsSystem {
         const e = entities[i];
         if (!e.active || e.isExploding) continue;
 
+        // Reset per-substep repel-impulse accumulator BEFORE the
+        // static-grid skip — repel-emitting tiles (mass=∞) also
+        // accumulate on the emitter side so RenderSystem can drive
+        // glow off impulse and light up for any nearby repellable
+        // body, not just the player.
+        if (e.repelImpulse !== 0) e.repelImpulse = 0;
+
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
@@ -546,20 +583,13 @@ export class PhysicsSystem {
         // Fading nebulas (tiles and shards alike) are in their death
         // animation — drop them out of broadphase so they can't be
         // re-shattered mid-fade even after the striker's cooldown expires.
-        if (e.nebulaFadeTimer !== undefined) continue;
+        if (e.mergeFadeTimer !== undefined) continue;
 
         // Nebula shards re-enter the dynamic grid so player/enemy contact
         // can trigger a shatter.  The nebula branch in resolveCollision is
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
-
-        // Reset per-substep repel-impulse accumulator before the
-        // broadphase pass writes into it.  Cheap on entities that
-        // already had it; the field stays defined so optional-chained
-        // reads (e.g. RenderSystem fade fx in the future) don't pay a
-        // tagged-shape miss.
-        if (e.repelImpulse !== 0) e.repelImpulse = 0;
 
         const key = cellKey(e.position.x, e.position.y);
 
@@ -591,10 +621,13 @@ export class PhysicsSystem {
         // ── Repel-field scan (static tiles only) ─────────────────────
         // Hoisted: dynamic-side immunity — projectiles and particles
         // bypass repel unconditionally, and mobile-shard variants
-        // marked `repelImmune` (today: glass-shard, plastic-shard,
-        // metal-shard — same substance as their parent tile) drift
-        // through unimpeded.  Computed once per scanner; static-side
-        // emitter check (variant.repel) still varies per pair.
+        // marked `repelImmune` (today: glass-shard, plastic-shard —
+        // same substance as their parent tile) drift through every
+        // field unimpeded.  Per-emitter immunity via
+        // `repelImmuneFrom` checked inside the inner loop (today
+        // metal-shard ignores glass-tile only).  Computed once per
+        // scanner; static-side emitter check (variant.repel) still
+        // varies per pair.
         //
         // The walk runs for EVERY repellable scanner, including
         // mobile shards (which the SAT outer loop below skips).  That
@@ -603,11 +636,15 @@ export class PhysicsSystem {
         // variant-emitter check; per repel-emitting tile: a single
         // distance compare and (when in range) one sqrt + one
         // velocity nudge.  No allocations on the hot path.
+        const aVariantDef = a.shardVariant !== undefined ? SHARD_VARIANTS[a.shardVariant] : undefined;
         const aRepellable =
             a.type !== EntityType.PROJECTILE
             && a.type !== EntityType.PARTICLE
-            && !(a.shardVariant !== undefined
-                 && SHARD_VARIANTS[a.shardVariant].repelImmune === true);
+            && aVariantDef?.repelImmune !== true;
+        // Hoisted per-emitter immunity list — metal-shard ignores
+        // glass-tile repel but feels every other field.  Undefined
+        // for the common case (no per-emitter filtering).
+        const aImmuneFrom = aVariantDef?.repelImmuneFrom;
         if (aRepellable) {
             for (let x = -2; x <= 2; x++) {
                 for (let y = -2; y <= 2; y++) {
@@ -616,6 +653,7 @@ export class PhysicsSystem {
                     for (let j = 0; j < cell.length; j++) {
                         const b = cell[j];
                         if (!b.active || b.shardVariant === undefined) continue;
+                        if (aImmuneFrom !== undefined && aImmuneFrom.indexOf(b.shardVariant) !== -1) continue;
                         const repel = SHARD_VARIANTS[b.shardVariant].repel;
                         if (repel === undefined) continue;
                         // Torus-correct delta so a tile near one
@@ -637,7 +675,12 @@ export class PhysicsSystem {
                             const inv = 1 / dist;
                             a.velocity.x += dx * inv * accel;
                             a.velocity.y += dy * inv * accel;
+                            // Accumulate on BOTH sides — scanner reads
+                            // it for fade fx; emitter (b, the static
+                            // tile) reads it in RenderSystem to drive
+                            // proximity glow off any repellable body.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                            b.repelImpulse = (b.repelImpulse ?? 0) + accel;
                         }
                     }
                 }
@@ -968,6 +1011,34 @@ export class PhysicsSystem {
   }
 
   /**
+   * Symmetric gate for resolveShardTilePairs — same shape as
+   * shouldRunShardPairsThisStep but with its own counter, interval,
+   * and AUTO threshold table.  Both passes share the same density
+   * signal (lastMaxCellDensity is a proxy for shard count, which
+   * sets the outer-loop size for either scan).  Counter ticks only
+   * when the parent toggle is on, so flipping the toggle doesn't
+   * leave a half-cycled phase that desyncs the first post-enable
+   * frame.
+   */
+  public shouldRunShardTilePairsThisStep(): boolean {
+    let interval = this.shardTilePairFrameInterval | 0;
+    if (interval <= 0) {
+        const density = this.lastMaxCellDensity;
+        const table = SHARD_TILE_PAIR_CONSTANTS.AUTO_THRESHOLDS;
+        let auto = table[table.length - 1].interval;
+        for (let i = 0; i < table.length; i++) {
+            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
+        }
+        interval = auto;
+    }
+    this.lastEffectiveShardTilePairInterval = interval;
+    const run = (this.shardTilePairTick % interval) === 0;
+    this.shardTilePairTick++;
+    this.lastRunShardTilePair = run;
+    return run;
+  }
+
+  /**
    * Dedicated shard ↔ shard pair-resolution pass.  Builds a fresh
    * shard-only spatial hash from the caller-supplied list of mobile
    * shards (typically `entityIndex.shardCandidates`), then walks
@@ -977,9 +1048,9 @@ export class PhysicsSystem {
    * Called from physics.update gated by `shouldRunShardPairsThisStep()`,
    * so on skip-frames the entire build + walk are bypassed (this is
    * the savings the inline branch in handleEntityCollisions was
-   * missing).  Fading shards (nebulaFadeTimer / mergeFadeTimer set)
-   * are filtered out — they shouldn't pull or push other shards
-   * during their death animation.
+   * missing).  Fading shards (mergeFadeTimer set) are filtered
+   * out — they shouldn't pull or push other shards during their
+   * death animation.
    */
   private resolveShardPairs(shards: GameEntity[]): void {
     if (shards.length < 2) return;
@@ -991,7 +1062,6 @@ export class PhysicsSystem {
     for (let i = 0; i < shards.length; i++) {
         const e = shards[i];
         if (!e.active || e.isExploding) continue;
-        if (e.nebulaFadeTimer !== undefined) continue;
         if (e.mergeFadeTimer !== undefined) continue;
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
@@ -1007,7 +1077,6 @@ export class PhysicsSystem {
     for (let i = 0; i < shards.length; i++) {
         const a = shards[i];
         if (!a.active || a.isExploding) continue;
-        if (a.nebulaFadeTimer !== undefined) continue;
         if (a.mergeFadeTimer !== undefined) continue;
 
         const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
@@ -1026,6 +1095,88 @@ export class PhysicsSystem {
             }
         }
     }
+  }
+
+  /**
+   * Mobile-shard ↔ static-tile collision pass — debug-gated by
+   * `shardTileCollisionsEnabled`.  The main broadphase skips
+   * STRUCTURE entities as outer-loop subjects (commit cf69102),
+   * which leaves shard-vs-tile pairs un-iterated.  This pass closes
+   * that gap when the toggle is on: each mobile shard does a 3×3
+   * staticGrid lookup and routes any overlapping tile through
+   * checkAndResolveCollision — the same SAT + resolveCollision
+   * path projectiles / players use.  Re-activates the dead
+   * `aIsMobileShard && bIsStaticTile` branch in resolveCollision
+   * (asteroid-pressure crash + indestructible bounce + elastic
+   * impulse).
+   */
+  private resolveShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
+  /**
+   * Nebula-shard ↔ nebula-tile collision pass.  Runs every frame
+   * regardless of the Sh↔Tl toggle.  Mirrors resolveShardTilePairs
+   * but filtered to nebula variants — nebula shards should bounce
+   * off cloud tiles even though the wider shard-tile pass is opt-
+   * in.  The passThrough bypass in resolveCollision handles the
+   * actual impulse path; this method just gets the pair in front
+   * of it.
+   */
+  private resolveNebulaShardTilePairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (a.shardVariant !== 'nebula-shard') continue;
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (b.shardVariant !== 'nebula-tile') continue;
+                      if (!b.active) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
   }
 
   private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
@@ -1071,8 +1222,17 @@ export class PhysicsSystem {
       // path needs the same gate.  Moved past the early-outs above
       // so most pair calls (no overlap, or settled) skip the dict
       // lookup entirely.
-      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
-      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      //
+      // DBG override: when `nebulaShardCollisionsEnabled` is on AND
+      // both sides are nebula-shards, the passThrough gate is
+      // bypassed and the pair takes the standard elastic bounce.
+      const nebPairCollidesFast = this.nebulaShardCollisionsEnabled
+        && a.shardVariant === 'nebula-shard'
+        && b.shardVariant === 'nebula-shard';
+      if (!nebPairCollidesFast) {
+        if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+        if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+      }
 
       let nx: number;
       let ny: number;
@@ -1266,8 +1426,27 @@ export class PhysicsSystem {
       // shard itself takes a strong kick that the existing
       // linearDamping = 0.97 bleeds off in <1s — the same "cloud
       // shoved aside" feel without a per-EntityType skip.
-      const aPassThrough = a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
-      const bPassThrough = b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
+      // DBG override mirrors the fast-path gate above — nebula-pair
+      // hard collisions when the toggle is on.
+      // nebula-pair hard collisions.  Two cases skip the passThrough
+      // gate so the standard SAT impulse runs:
+      //   - nebula-shard ↔ nebula-shard, DBG-toggled by
+      //     nebulaShardCollisionsEnabled (A/B-test for the gather-
+      //     pile fix).
+      //   - nebula-shard ↔ nebula-tile, unconditional — shards
+      //     should bounce off cloud tiles instead of drifting
+      //     through them.  Strikers (player/enemy/projectile) still
+      //     pass through because they don't have shardVariant set,
+      //     so the conditions below evaluate false for them.
+      const aIsNebShard = a.shardVariant === 'nebula-shard';
+      const bIsNebShard = b.shardVariant === 'nebula-shard';
+      const aIsNebTile  = a.shardVariant === 'nebula-tile';
+      const bIsNebTile  = b.shardVariant === 'nebula-tile';
+      const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
+      const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
+      const nebPairCollides = nebShardPair || nebShardTilePair;
+      const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
+      const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       // Shatter trigger is independent of pass-through — a nebula
       // tile shatters on PLAYER/ENEMY contact regardless.
       const aIsNebulaTile = a.shardVariant === 'nebula-tile';
@@ -1307,8 +1486,8 @@ export class PhysicsSystem {
                       : 0;
                   const rateScale = nebulaFadeRateScale(impactSpeed);
                   const scaledFadeDuration = NEBULA_CONSTANTS.FADE_DURATION / rateScale;
-                  nebula.nebulaFadeTimer = scaledFadeDuration;
-                  nebula.nebulaFadeDuration = scaledFadeDuration;
+                  nebula.mergeFadeTimer = scaledFadeDuration;
+                  nebula.mergeFadeDuration = scaledFadeDuration;
                   if (nebula.shardVariant === 'nebula-tile') {
                       // Tiles live in the static grid — pull them out so
                       // the player can drift through the fading cell.
@@ -1316,7 +1495,7 @@ export class PhysicsSystem {
                   }
                   // Shards live in the dynamic grid which is rebuilt
                   // each frame; the populate loop below skips entities
-                  // with nebulaFadeTimer set, so fading shards drop out
+                  // with mergeFadeTimer set, so fading shards drop out
                   // of broadphase automatically on the next frame.
                   //
                   // Arm the striker's post-shatter cooldown.
@@ -1732,9 +1911,23 @@ export class PhysicsSystem {
               }
               return;
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
-              const envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
-              player.health -= envDmg;
-              player.hitFlash = 0.1;
+              // Light bump — tile doesn't break, but the player takes
+              // environmental damage proportional to the impact speed.
+              // Route through shield first (same model as enemy-ram
+              // damage above): absorb up to the current shield value,
+              // then bleed the remainder into health.
+              let envDmg = impactSpeed * COLLISION_CONFIG.ENV_DAMAGE.MULTIPLIER;
+              if ((player.shield ?? 0) > 0) {
+                  const absorbed = Math.min(player.shield!, envDmg);
+                  player.shield! -= absorbed;
+                  envDmg -= absorbed;
+                  player.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                  player.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+              }
+              if (envDmg > 0) {
+                  player.health -= envDmg;
+                  player.hitFlash = 0.1;
+              }
           }
       }
 

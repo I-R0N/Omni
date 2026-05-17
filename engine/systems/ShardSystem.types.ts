@@ -318,9 +318,17 @@ export interface ShardVariantDef {
   repel?: { range: number; strength: number };
   /** Variants whose tiles / shards should drift through any `repel`
    *  field — i.e. the same substance as the emitter, so it doesn't
-   *  push itself.  Today: glass-shard, plastic-shard, metal-shard.
-   *  Projectiles and particles are exempt regardless of this flag. */
+   *  push itself.  Today: glass-shard, plastic-shard.  Projectiles
+   *  and particles are exempt regardless of this flag.  Use
+   *  `repelImmuneFrom` below for narrower per-emitter immunity. */
   repelImmune?: boolean;
+  /** Per-emitter repel immunity — variants whose `repel` field this
+   *  variant ignores while still feeling every other emitter.
+   *  Implies `repelImmune` for the listed emitters only.  Today:
+   *  metal-shard ignores glass-tile (metal "wins" against glass —
+   *  see g3 material-interactions design), but still feels the
+   *  metal-tile field for the queued attraction work. */
+  repelImmuneFrom?: ShardVariantId[];
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
    *  vertices are pulled inward by a random fraction in
@@ -503,20 +511,17 @@ export interface ShardAdapter {
   onNeighborhoodBlendRegen(entity: import('../../types').GameEntity, entities: import('../../types').GameEntity[]): void;
 
   /**
-   * Compose-completion hook for nebula-shard self-compose.  After
-   * two nebula-shards merge, the host's accumulated nebulaTileArea
-   * may have crossed HEX_AREA — at which point a new nebula-tile
-   * is spawned at the nearest free hex cell and the host shard
-   * dissolves.  The implementation lives in NebulaSystem
-   * (`tryTransmuteShardToTile`) since it depends on hex coords +
-   * nebula tile creation + the static grid; ShardSystem just
-   * invokes it via this hook for variants whose merge.rules
-   * compose-outcome targets the nebula-shard variant.  PhysicsSystem
-   * is passed through because the implementation queries the
-   * static grid for cell occupancy and adds the new tile to it.
+   * Pair-transmute hook fired after a nebula-shard ↔ nebula-shard
+   * bond resolves.  ShardSystem has already faded both source shards
+   * and computed the blended palette + midpoint; this hook spawns
+   * the output (50/50 nebula-tile at nearest free hex vs. glass-
+   * shard at the midpoint).  Lives in NebulaSystem because the tile
+   * path depends on hex coords + static-grid occupancy checks.
    */
-  onComposeNebulaShard(
-    host: import('../../types').GameEntity,
+  onComposeNebulaShardPair(
+    composition: import('../../types').NebulaColorStop[] | undefined,
+    position: import('../../types').Vector2,
+    velocity: import('../../types').Vector2,
     entities: import('../../types').GameEntity[],
     physics: import('./PhysicsSystem').PhysicsSystem,
   ): void;

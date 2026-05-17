@@ -170,16 +170,25 @@ export class FlowFieldGrid {
   /**
    * Populate the obstacle bitmap from the map's tile entities.
    * Call once right after map.init() and before buildAsteroidField().
+   *
+   * Only SOLID static tiles count as flow obstacles — i.e. glass /
+   * plastic / metal / indestructible / rock.  Excluded:
+   *   - Mobile shards (finite mass).  They drift; baking them into
+   *     the bitmap would freeze stale geometry across a frame.
+   *   - Nebula tiles.  They're pass-through to projectiles and
+   *     intentionally don't block traversal — flow should bend
+   *     around walls, not around clouds.
    */
   initObstacles(entities: GameEntity[]): void {
     this._ensureCapacity();
     this.blocked.fill(0);
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e.active && e.type === EntityType.STRUCTURE) {
-        const idx = this.worldToCell(e.position.x, e.position.y);
-        if (idx >= 0) this.blocked[idx] = 1;
-      }
+      if (!e.active || e.type !== EntityType.STRUCTURE) continue;
+      if (e.mass !== Infinity) continue;          // skip mobile shards
+      if (e.shardVariant === 'nebula-tile') continue; // pass-through
+      const idx = this.worldToCell(e.position.x, e.position.y);
+      if (idx >= 0) this.blocked[idx] = 1;
     }
   }
 

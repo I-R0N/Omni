@@ -262,14 +262,18 @@ export const SHARD_PAIR_CONSTANTS = {
   // pressure).  Steps are deliberately coarse so the active interval
   // doesn't hop every frame as density fluctuates by 1-2.  Light
   // fields (a few drifting shards) keep N=1 so impact response
-  // feels crisp; dense piles (cannon spam) climb to N=4 so settled
-  // clusters don't dominate the frame budget.  First entry whose
-  // `maxDensity` ≥ observed wins.
+  // feels crisp; heavy piles climb through powers-of-2 to N=16/32
+  // so settled clusters stop dominating the frame budget — at those
+  // densities pairs are visually settled and the human eye won't
+  // notice a 1/4-sec separation lag.  First entry whose `maxDensity`
+  // ≥ observed wins.
   AUTO_THRESHOLDS: [
-    { maxDensity: 8,   interval: 1 },
-    { maxDensity: 16,  interval: 2 },
-    { maxDensity: 28,  interval: 3 },
-    { maxDensity: 999, interval: 4 },
+    { maxDensity: 8,    interval: 1 },
+    { maxDensity: 16,   interval: 2 },
+    { maxDensity: 32,   interval: 4 },
+    { maxDensity: 64,   interval: 8 },
+    { maxDensity: 128,  interval: 16 },
+    { maxDensity: 9999, interval: 32 },
   ] as const,
   // Manual cycle order, including AUTO sentinel (0).  Spans 1..1028
   // so dense fields can pin a very high interval for stress testing.
@@ -278,6 +282,30 @@ export const SHARD_PAIR_CONSTANTS = {
   // 1028 substeps (~17 s @ 60 Hz) shards effectively never resolve
   // each other — useful for measuring the absolute floor of collision
   // cost.
+  CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
+};
+
+// ─────────────────────────────────────────────────────────────────────
+// Shard ↔ static-tile pair resolution.
+// Mirrors SHARD_PAIR_CONSTANTS for the dedicated shard-vs-tile scan
+// (`PhysicsSystem.resolveShardTilePairs`).  That pass is opt-in via
+// the DBG `Sh↔Tl` toggle; when it is on, this interval gates how
+// often it actually fires per physics substep.  Same density signal
+// as SHARD_PAIR (lastMaxCellDensity proxies the outer-loop size —
+// the shard count drives the cost).
+export const SHARD_TILE_PAIR_CONSTANTS = {
+  // Default AUTO so behaviour matches the shard-pair UX: light
+  // fields resolve every frame for crisp impacts, dense fields back
+  // off so the scan doesn't dominate `coll` ms.
+  FRAME_INTERVAL: 0,
+  AUTO_THRESHOLDS: [
+    { maxDensity: 8,    interval: 1 },
+    { maxDensity: 16,   interval: 2 },
+    { maxDensity: 32,   interval: 4 },
+    { maxDensity: 64,   interval: 8 },
+    { maxDensity: 128,  interval: 16 },
+    { maxDensity: 9999, interval: 32 },
+  ] as const,
   CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
 };
 
@@ -523,9 +551,11 @@ export const NEBULA_CONSTANTS = {
   //   velocity *= Math.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
   // damping = shards drift longer.  LINEAR at 0.97 → velocity halves
-  // in ~23 frames (~0.38 s), heavier than angular so shards translate
-  // less freely (counterweights the stronger GRAVITY_STRENGTH above)
-  // while keeping the softer tumble on spin.
+  // in ~23 frames (~0.38 s).  Nebula shards already skip the flow-
+  // field velocity correction (see GameEngine.applyFlow), so this
+  // damping only has to bleed off transient kicks (shatter scatter,
+  // gravity pull, collision impulse) — 0.97 lets the cloud drift
+  // briefly after a kick instead of slamming to a halt.
   LINEAR_DAMPING: 0.97,
   ANGULAR_DAMPING: 0.98,
   // Speed-based opacity falloff for shards — fast shards read slightly
@@ -643,6 +673,41 @@ export const NEBULA_CONSTANTS = {
   // shared currency, so there is no per-weapon variant here.
   AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
   AMMO_PER_NEBULA: 3,     // shared-pool ammo units per nebula drop
+
+  // ── Color equilibration ───────────────────────────────────────
+  // Per-frame circular-hue lerp alphas for NebulaSystem's
+  // continuous color-equilibration pass.  Tiles drift toward their
+  // 6-hex-neighbour weighted average; shards drift toward the
+  // nearest tile.  Tiles are anchors (no influence from shards).
+  // Cycled via DBG TileBlend / ShardBlend buttons.  0 = off; small
+  // values equilibrate over seconds, larger ones in fractions of
+  // a second.  At 60 Hz, alpha 0.02 ≈ 95 % blend in ~2.5 s.
+  BLEND_TILE_ALPHA: 0,
+  BLEND_SHARD_ALPHA: 0,
+  BLEND_TILE_ALPHA_CYCLE: [0, 0.005, 0.02, 0.08] as const,
+  BLEND_SHARD_ALPHA_CYCLE: [0, 0.02, 0.08, 0.25] as const,
+  // Physics substeps between color-equilibration passes.  Same
+  // skip pattern as SHARD_PAIR_CONSTANTS.FRAME_INTERVAL: lets the
+  // user trade smoothness for perf when nebula entity counts are
+  // high.  Smoothing rate is set by the alpha cycles above and is
+  // independent of this — bumping the interval slows the visual
+  // equilibration proportionally (interval × alpha = total rate).
+  // 0 = AUTO (selects interval from the previous run's active
+  // nebula entity count); ≥1 = manual override.
+  BLEND_FRAME_INTERVAL: 0,
+  BLEND_FRAME_INTERVAL_CYCLE: [0, 1, 2, 4, 8, 16, 32, 64] as const,
+  // AUTO-mode active-nebula-count → interval mapping.  Walked at
+  // each run-frame (cheap O(N) count, never on skip frames).
+  // First entry whose maxCount ≥ observed wins.  Light clusters
+  // run every frame for crisp visual blend; heavy clusters back
+  // off so the per-pass cost doesn't dominate `neb` ms.
+  BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS: [
+    { maxCount: 100,  interval: 1 },
+    { maxCount: 300,  interval: 2 },
+    { maxCount: 600,  interval: 4 },
+    { maxCount: 1200, interval: 8 },
+    { maxCount: 9999, interval: 16 },
+  ] as const,
 };
 
 /**
@@ -1329,10 +1394,10 @@ export const CLEANUP_CONSTANTS = {
 
 // ── ShardSystem variant table ───────────────────────────────────────
 // See docs/SHARD_SYSTEM.md for the design rationale.  This table is
-// the source of truth for tile / shard regen, merge, shatter and
-// pass-through behaviour.  Stage 1 lands the table as data only;
-// the existing GameEngine / NebulaSystem code paths still drive
-// behaviour at runtime.  Subsequent stages migrate the read sites.
+// the source of truth for tile / shard regen, merge, shatter, dent,
+// repel, glow and pass-through behaviour — read at runtime by
+// ShardSystem, PhysicsSystem, RenderSystem, and the variant-aware
+// branches in GameEngine.
 //
 // All shard-family entities share `carrier: EntityType.STRUCTURE`;
 // static-vs-dynamic dispatch is by `mass` (Infinity → static grid,
@@ -1383,11 +1448,10 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
     defaultOutcome: 'compose',
   },
   shatter: {
-    // Today: STRUCTURE tile death does NOT spawn shards directly —
-    // the visual debris comes from DropSystem.spawnGlassShards.  Once
-    // Stage 3 migrates shatter into ShardSystem this becomes the
-    // canonical path; the policy below mirrors today's glass-shard
-    // population.
+    // Glass-tile death's visual debris comes from
+    // DropSystem.spawnGlassShards (called from spawnDrops); the
+    // policy below mirrors that glass-shard population so it stays
+    // a usable spec for any variant inheriting STRUCTURE_TILE_BASE.
     kind: 'powerlaw',
     style: 'asteroid',
     countMin: 4, countMax: 6,
@@ -1451,6 +1515,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Glass tiles do not respawn at their original hex once
+    // shattered.  Fresh glass-tiles only appear via the
+    // glass-shard → glass-tile transmute path
+    // (ShardSystem.tryTransmuteGlassShardToTile), which is the new
+    // canonical glass-tile spawn source after the tier-transition
+    // mechanic landed.  Matches plastic / metal / rock / nebula —
+    // glass was the last variant on the timer-regen path.
+    regen: { kind: 'none' },
     // Light hint-level repel — a soft outward nudge that reads as
     // "the tile is alive" without actually blocking the player.
     // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
@@ -1498,14 +1570,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
     repel: { range: 200, strength: 0.06 },
-    // Warm-white proximity lighting like plastic / rock / indestructible,
-    // but BRIGHTER — metal reads as a more reflective surface, so it
-    // catches the player's "light" harder.  Fill-only radial bloom from
-    // the player-facing edge, no edge stroke (RenderSystem.renderProximityBloom).
-    // (The orange→red "heat" treatment is deferred to a later pass — the
-    // `hot` schema field and the renderer's hot-core layer are still in
-    // place, just not configured here.)
-    glow:  { color: '#fffbeb', range: 250, peakAlpha: 0.75 },
+    // Saturated blue glow that reads as a cold "live field" against
+    // the slate-gray metal face — distinct from glass-tile's pale
+    // cyan (`#a5f3fc`) so the two materials never confuse at a
+    // glance.  Renders as a fill + thin edge stroke driven by
+    // `entity.repelImpulse` (RenderSystem material-tile branch).
+    glow:  { color: '#60a5fa', range: 250, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp;
@@ -1530,10 +1600,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
-    // Warm-white proximity lighting (fill-only radial bloom, no edge
-    // stroke).  Glass-tile uses its cyan layer-2b glow instead;
-    // indestructible takes the same neutral lighting as plastic / rock.
-    glow:    { color: '#fef3c7', range: 250, peakAlpha: 0.75 },
+    // Deep-purple proximity lighting (fill-only radial bloom, no edge
+    // stroke).  Reads as the "void" tile — the unbreakable face of
+    // the map — distinct from glass's cyan and rock's orange.
+    glow:    { color: '#4c1d95', range: 250, peakAlpha: 0.75 },
     regen:   { kind: 'none' },
     shatter: {
       kind: 'powerlaw',
@@ -1820,8 +1890,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cool slate particle puff matches the gunmetal body colour.
     onShatterParticles: { color: '#cbd5e1', count: 5 },
     passThrough: false,
-    // Metal shards drift through the metal-tile repel field.
-    repelImmune: true,
+    // Metal shards feel the metal-tile repel field (priming g3
+    // attraction work where metal-shards orbit metal clusters) but
+    // ignore glass-tile fields — metal "wins" against glass, see
+    // the g3 material-interactions design where metal-tiles will
+    // shatter glass-tiles on contact.  Glass-shard / plastic-shard
+    // stay fully `repelImmune` (their own family is the only field
+    // they'd care about, and they pass through it).
+    repelImmuneFrom: ['glass-tile'],
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
@@ -1855,29 +1931,34 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      // Stick-bonds with self → compose (existing coalesce / transmute);
-      // with glass-shard → absorb after long contact, gated on partner
-      // reaching its variant sizeMax (rare, "unique event").
-      // bondTimeSeconds: 0 fires self-compose instantly on contact
-      // (matches today's nebula proximity-merge); glass-shard absorb
-      // uses thresholdScale to scale to ~5× the self-compose time.
+      // Stick-bonds: nebula self-coalesce runs on the standard
+      // bondsWith pipeline (5 s contact timer; per-pair, pair-
+      // consuming).  Cross-variant glass-absorb still piggy-backs on
+      // bondsWith too — its threshold scale dominates via
+      // requirePartnerSizeFraction so it only fires at sizeMax.
       bondsWith: { include: ['nebula-shard', 'glass-shard'] },
-      bondTimeSeconds: 0,
+      // Base bond time — multiplied by (avgSize / bondTimeSizeRef)
+      // ^bondTimeSizePower per the resolver.  At ref-size shards
+      // (≈20 diameter) the effective threshold ≈ 5 s; larger pairs
+      // wait proportionally longer.
+      bondTimeSeconds: 5,
       bondTimeSizeRef: 20,
       bondTimeSizePower: 1.5,
       rules: [
+        // Self-bond fires the dedicated pair-transmute path in
+        // ShardSystem.composeNebulaShards (50/50 nebula-tile vs
+        // glass-shard at the pair's midpoint).  Listed as 'compose'
+        // because that's the dispatch keyword the bond resolver
+        // uses; the actual outcome is variant-routed inside
+        // composeEntities.
         { partner: 'self', outcome: 'compose' },
         {
           partner: 'glass-shard',
           outcome: 'absorb',
-          // bondTimeSeconds=0 + thresholdScale would still be 0.  We
-          // use NEBULA_CONSTANTS.MERGE_COOLDOWN × 5 as the absorb
-          // threshold base by setting thresholdScale to a value the
-          // resolver multiplies AGAINST a stand-in baseTime — handled
-          // inside ShardSystem (see tickBonds gate).  In practice the
-          // partner-size gate dominates: bonds persist (cohesion) and
-          // never fire the absorb until the glass-shard reaches
-          // sizeMax, which is a rare event regardless of timer.
+          // The partner-size gate dominates: bonds persist
+          // (cohesion) and never fire the absorb until the glass-
+          // shard reaches sizeMax — a rare event regardless of
+          // timer.
           thresholdScale: 5.0,
           requirePartnerSizeFraction: 1.0,
         },
@@ -1927,13 +2008,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
-    // STRUCTURE / NEBULA cluster counts.  Stage 7 inlines the
-    // numbers that previously lived on NEBULA_CONSTANTS (CLUSTER_*
-    // / OUTER_*); MAP_POPULATION is now the single source of truth.
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
     'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
     'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
-    'indestructible-tile': { tileCluster: { clusterCount:  1, minClusterSize:  3, maxClusterSize:  8 } },
+    // indestructible-tile intentionally absent — per decision #6,
+    // reserved for deliberate border/structure placement, not random
+    // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
+    // still spawns it for stress testing.
     'nebula-tile': {
       tileCluster: {
         clusterCount:    65,    // halved for 7.5k map (was 130)
@@ -1958,7 +2039,8 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
     'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
     'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
-    'indestructible-tile': { tileCluster: { clusterCount: 2, minClusterSize: 3, maxClusterSize:  5 } },
+    // indestructible-tile intentionally absent — see UNIVERSE entry
+    // above for the decision-#6 rationale.
     'nebula-tile': {
       tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 20 },
     },

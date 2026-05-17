@@ -25,7 +25,7 @@ import {
   nebulaFadeRateScale,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
-import { HEX_AREA } from '../maps/TileGenerator';
+import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition,
   MAP_WIDTH, MAP_HEIGHT,
@@ -80,6 +80,12 @@ interface RegenEntry {
   variantId: ShardVariantId;
 }
 
+// Tile-equivalent diameter — the size at which a glass-shard is
+// considered "tile-sized" and triggers the tier-transition roll
+// (glass-tile vs. smaller rock-shard).  Matches the diameter of a
+// circle whose area equals one hex tile.
+const GLASS_TIER_DIAMETER = Math.sqrt(HEX_AREA);
+
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
  * `timer` accumulates contact dt; when it reaches `threshold` AND
@@ -106,6 +112,21 @@ export class ShardSystem {
    */
   private pending: RegenEntry[] = [];
 
+  /**
+   * DBG toggle — gates the gravity-pull pass inside
+   * runMergeBroadphase.  When false, no shard accelerates toward
+   * another shard regardless of `attractedTo`.  Only nebula-shard
+   * has non-'none' attractedTo today, so flipping this off mainly
+   * stops nebula self-coalesce gravity and any cross-variant pull.
+   */
+  public shardGravityEnabled: boolean = true;
+  /**
+   * DBG toggle — gates bond formation in runMergeBroadphase AND
+   * drops all existing bonds at the top of update().  When false,
+   * shards never stick on contact; nebula self-compose (which fires
+   * via the zero-time bond) and any cross-variant absorb stop too.
+   */
+  public shardBondingEnabled: boolean = true;
   /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
@@ -193,6 +214,12 @@ export class ShardSystem {
     runMergePass: boolean = true,
   ): void {
     const t0 = performance.now();
+    // DBG bonding toggle is destructive — when off, any bonds left
+    // over from the previous frame are dropped here so cohesion
+    // stops dragging shards together as soon as the user flips it.
+    if (!this.shardBondingEnabled && this.bonds.length > 0) {
+      this.bonds.length = 0;
+    }
     this.tickRegens(entities, dt, physics);
     // tickBonds always runs to advance bond timers, break bonds
     // whose parties have separated, and resolve compose / absorb
@@ -628,8 +655,6 @@ export class ShardSystem {
       const velX = fx * parallelSpeed + perpX;
       const velY = fy * parallelSpeed + perpY;
 
-      const effectiveAreaPerShard = HEX_AREA / shardCount;
-
       entities.push({
         id:              nextId('nebula_shard'),
         // Stage 5: unified carrier with mass-based dispatch.  Mass
@@ -651,7 +676,6 @@ export class ShardSystem {
         polygonPoints:   points,
         sprite:          parent.sprite,
         nebulaColorComposition: composition ? cloneComposition(composition) : undefined,
-        nebulaTileArea:  effectiveAreaPerShard,
         nebulaGridCol:   parent.nebulaGridCol,
         nebulaGridRow:   parent.nebulaGridRow,
         linearDamping:   NEBULA_CONSTANTS.LINEAR_DAMPING,
@@ -837,6 +861,7 @@ export class ShardSystem {
       bonded.add(this.bonds[i].b);
     }
 
+
     // Candidate set: every mobile shard-family entity + eligible drops.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
     // (mass=Infinity tiles are in the static grid — never candidates).
@@ -848,12 +873,10 @@ export class ShardSystem {
       const e = entities[i];
       if (!e.active) continue;
       if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
-      if (e.nebulaFadeTimer !== undefined) continue;
-      // Density-compaction fade-out — same exclusion as nebula's
-      // existing `nebulaFadeTimer` skip.  Once a shard is in its
-      // graceful retire window it must not pull, bond, or get
-      // pulled.  Otherwise its velocity blends with surviving
-      // partners and the dissolve looks chaotic.
+      // Once a shard is in its graceful retire window (merge fade-
+      // out) it must not pull, bond, or get pulled.  Otherwise its
+      // velocity blends with surviving partners and the dissolve
+      // looks chaotic.
       if (e.mergeFadeTimer !== undefined) continue;
       candidates.push(e);
     }
@@ -927,7 +950,9 @@ export class ShardSystem {
       // both sides eventually share via cohesion, accelerating the
       // pair indefinitely.  Asteroid stick-bonds today have no
       // gravity at all, so this matches their behaviour.
-      const wantsPull = aVariant && aVariant.merge.attractedTo !== 'none' && !aBondedAlready;
+      const wantsPull = this.shardGravityEnabled
+                     && aVariant && aVariant.merge.attractedTo !== 'none'
+                     && !aBondedAlready;
 
       for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
         for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
@@ -969,6 +994,9 @@ export class ShardSystem {
 
             // Bond formation: only consider each unordered pair once
             // (j > i), and skip if either party is already bonded.
+            // DBG-gated — when shardBondingEnabled is false, skip
+            // the entire formation block.
+            if (!this.shardBondingEnabled) continue;
             if (j <= i) continue;
             if (aBondedAlready) continue;
             if (bonded.has(b) || bondedThisFrame.has(b)) continue;
@@ -1081,29 +1109,23 @@ export class ShardSystem {
    * goes inactive and the in-place compaction in
    * GameEngine.updatePhysics drops it from the master list.
    *
-   * For nebula entities, today's `nebulaFadeTimer` already covers
-   * the same purpose with a tuned fade-rate-vs-impact-speed
-   * scaling — leave it alone.  For other shard families, fall
-   * through to the generic `mergeFadeTimer` path.
+   * For nebula entities the same field covers impact-driven
+   * fade (PhysicsSystem scales the duration by impact speed) and
+   * non-impact retires (here).  Nebula uses a longer base
+   * duration to read as "dissolving into the cloud"; non-nebula
+   * shards use the crisper CLEANUP_CONSTANTS.MERGE_FADE_DURATION.
    */
   private startMergeFadeOut(entity: GameEntity): void {
     // Skip if entity is already fading out (avoid retriggering the
     // timer mid-fade, which would extend the dissolve).
     if (entity.mergeFadeTimer !== undefined && entity.mergeFadeTimer > 0) return;
-    if (entity.nebulaFadeTimer !== undefined && entity.nebulaFadeTimer > 0) return;
 
     const variantId = shardVariantOf(entity);
-    if (variantId === 'nebula-shard' || variantId === 'nebula-tile') {
-      // Nebula uses its own fade pipeline (tied to fade-rate scaling
-      // off impact speed).  Use the matching tuning so a non-impact-
-      // driven retire still feels nebula-paced.
-      entity.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-      entity.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
-      return;
-    }
-
-    entity.mergeFadeTimer    = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
-    entity.mergeFadeDuration = CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    const duration = (variantId === 'nebula-shard' || variantId === 'nebula-tile')
+      ? NEBULA_CONSTANTS.FADE_DURATION
+      : CLEANUP_CONSTANTS.MERGE_FADE_DURATION;
+    entity.mergeFadeTimer    = duration;
+    entity.mergeFadeDuration = duration;
   }
 
   // ── Large-shard collapse ──────────────────────────────────────────
@@ -1133,7 +1155,6 @@ export class ShardSystem {
         if (!e.active) continue;
         if (e.type !== EntityType.STRUCTURE || e.mass === Infinity) continue;
         if (e.mergeFadeTimer !== undefined) continue;
-        if (e.nebulaFadeTimer !== undefined) continue;
         if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
 
         const variantId = shardVariantOf(e);
@@ -1226,6 +1247,142 @@ export class ShardSystem {
    *  merges (today's behaviour).  Nebula-shard merges use the
    *  existing glimmer burst inside composeNebulaShards.
    */
+
+  /**
+   * Tier-transition router for a glass-shard that has grown to
+   * tile-equivalent diameter via the merge pipeline.  Rolls 50/50
+   * between:
+   *   - glass-tile:  condense at the nearest free hex cell.
+   *   - rock-shard:  downgrade in-place to a smaller, denser rock-
+   *                  shard (first leg of the planned material tier
+   *                  chain: nebula → glass → rock → metal → plastic).
+   *
+   * Glass-tile path can still fail if every candidate hex is
+   * occupied — in that case the shard stays a glass-shard and a
+   * later merge will retry.
+   */
+  private tryConvertOversizedGlassShard(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): void {
+    if (shard.shardVariant !== 'glass-shard') return;
+    if (shard.size.x < GLASS_TIER_DIAMETER) return;
+    if (Math.random() < 0.5) {
+      this.tryTransmuteGlassShardToTile(shard, entities, physics);
+    } else {
+      this.convertGlassShardToRockShard(shard);
+    }
+  }
+
+  /**
+   * In-place transition from glass-shard to a smaller rock-shard.
+   * Size shrinks by the rock-shard density shrinkFactor (≈0.88)
+   * applied to GLASS_TIER_DIAMETER, polygon is regenerated with
+   * rock-shard's irregular spawn config, mass is recomputed via
+   * the rock variant's sizeToMass.  No new entity allocated —
+   * mutates the host in place so the entity-id pipeline / spatial
+   * grids stay stable across the swap.
+   */
+  private convertGlassShardToRockShard(shard: GameEntity): void {
+    const rockVariant = SHARD_VARIANTS['rock-shard'];
+    const rockSpawn = rockVariant.spawn;
+    const newSize = GLASS_TIER_DIAMETER * (rockVariant.density?.shrinkFactor ?? 0.88);
+
+    shard.shardVariant = 'rock-shard';
+    shard.size.x = newSize;
+    shard.size.y = newSize;
+    shard.mass = rockSpawn.sizeToMass(newSize);
+    shard.color = COLORS.ASTEROID;
+    shard.sprite = undefined;
+    // Density tier reset — the new rock-shard starts at base tier;
+    // its own future merges will compact normally.
+    shard.densityTier = undefined;
+    shard.densityCachedTint = undefined;
+
+    const baseR = (newSize / 2) * 0.82;
+    shard.polygonPoints = this.generateShardPolygon(
+      baseR,
+      rockSpawn.polyVerticesMin,
+      rockSpawn.polyVerticesMax,
+      rockSpawn.angleJitter,
+      rockSpawn.radiusMin,
+      rockSpawn.radiusRange,
+      rockSpawn.polyVerticesOptions,
+    );
+  }
+
+  /**
+   * Glass-shard counterpart of the nebula shard→tile transmute.
+   * Snap the shard to the nearest free hex cell and replace it with
+   * a fresh glass-tile.  Candidate cells are the shard's current
+   * hex + 6 neighbours, sorted by distance.  If every candidate is
+   * occupied (by another tile or static collision geometry), the
+   * shard stays a shard and the caller can retry next merge.
+   *
+   * Unlike the nebula path, no system-level bookkeeping needs
+   * dirtying (neighbour-counts, transmutation hooks) — glass tiles
+   * don't drive a regeneration heuristic.  Just push the tile,
+   * register it with PhysicsSystem's static grid, and fade out the
+   * source shard.
+   */
+  private tryTransmuteGlassShardToTile(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    if (shard.shardVariant !== 'glass-shard') return false;
+
+    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+      const p = hexCoordToPixel(c, r);
+      const dx = wrapDeltaX(shard.position.x, p.x);
+      const dy = wrapDeltaY(shard.position.y, p.y);
+      candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+      pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+      const p = hexCoordToPixel(cand.c, cand.r);
+      // Block on any nearby static geometry (existing tiles incl.
+      // nebula-tiles in the same cell, glass tiles, etc.).  Radius
+      // slightly under HEX_SIZE so touching neighbours don't
+      // register as overlap.
+      if (!physics.isPositionClear(p.x, p.y, HEX_SIZE * 0.5)) continue;
+      chosen = cand;
+      break;
+    }
+    if (!chosen) return false;
+
+    const p = hexCoordToPixel(chosen.c, chosen.r);
+    // Hex dimensions match TileGenerator's tile build.  Width is
+    // sqrt(3)*HEX_SIZE; height is 2*HEX_SIZE.
+    const w = Math.sqrt(3) * HEX_SIZE;
+    const h = 2 * HEX_SIZE;
+    const pts: Vector2[] = [
+      { x:  0,    y: -h / 2 },
+      { x:  w / 2, y: -h / 4 },
+      { x:  w / 2, y:  h / 4 },
+      { x:  0,    y:  h / 2 },
+      { x: -w / 2, y:  h / 4 },
+      { x: -w / 2, y: -h / 4 },
+    ];
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, 'glass');
+    entities.push(tile);
+    physics.addStaticEntity(tile);
+
+    // Source shard fades out the same way as nebula transmute — the
+    // tile materialises while the shard dissolves on top of it.
+    this.startMergeFadeOut(shard);
+    return true;
+  }
+
   private composeEntities(
     a: GameEntity,
     b: GameEntity,
@@ -1309,7 +1466,14 @@ export class ShardSystem {
       let newDiam: number;
       let newMass: number;
       let newTier: number | undefined = undefined;
-      if (density?.enabled) {
+      // Glass-shard self-merges bypass density compaction — the
+      // tier-transition mechanic (glass→tile / smaller rock-shard)
+      // wants the shards to *grow* visibly until they hit
+      // GLASS_TIER_DIAMETER.  Density's shrinkFactor would have
+      // them shrinking instead.  Other pairs (rock-self, cross-
+      // variant) keep the density path.
+      const isGlassSelfMerge = a.shardVariant === 'glass-shard' && b.shardVariant === 'glass-shard';
+      if (density?.enabled && !isGlassSelfMerge) {
         const tierA = a.densityTier ?? 0;
         const tierB = b.densityTier ?? 0;
         const proposedTier = Math.max(tierA, tierB) + 1;
@@ -1371,6 +1535,16 @@ export class ShardSystem {
       // RenderSystem multiplies alpha by the fraction remaining so
       // the dissolve reads visibly across the field.
       this.startMergeFadeOut(b);
+
+      // Glass-shard tier transition.  When the survivor is a glass-
+      // shard that has grown to tile-equivalent diameter
+      // (sqrt(HEX_AREA)), roll 50/50: condense into a glass-tile at
+      // the nearest free hex, or downgrade to a smaller (denser)
+      // rock-shard — the first leg of the planned material tier
+      // chain (nebula→glass→rock→metal→plastic).
+      if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
+        this.tryConvertOversizedGlassShard(a, entities, physics);
+      }
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
       if (a.dropType === b.dropType) {
@@ -1484,114 +1658,69 @@ export class ShardSystem {
   }
 
   private composeNebulaShards(
-    larger: GameEntity,
-    smaller: GameEntity,
+    a: GameEntity,
+    b: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    const largeR = Math.max(larger.size.x, larger.size.y) / 2;
-    const smallR = Math.max(smaller.size.x, smaller.size.y) / 2;
-    const largeArea = Math.PI * largeR * largeR;
-    const smallArea = Math.PI * smallR * smallR;
+    // Pair-consuming transmute — both source shards retire and a
+    // single tile-equivalent output materialises (50/50 nebula-tile
+    // vs glass-shard, routed inside the adapter).  No area-
+    // accumulator any more: every successful nebula self-bond
+    // triggers a transmute attempt.
+    const aR = Math.max(a.size.x, a.size.y) / 2;
+    const bR = Math.max(b.size.x, b.size.y) / 2;
+    const aArea = Math.PI * aR * aR;
+    const bArea = Math.PI * bR * bR;
 
-    // Density-aware sizing.  When nebula-shard's density.enabled is set
-    // (today: yes), the merged shard is intentionally smaller than the
-    // larger input to read as compaction; mass = sum of inputs.  The
-    // existing nebulaTileArea accumulation (driving shard→tile
-    // transmutation) is independent of this, so the cycle still fires
-    // at HEX_AREA regardless of physical size.
-    const density = SHARD_VARIANTS['nebula-shard'].density;
-    let newDiameter: number;
-    let newMass: number;
-    let newTier: number | undefined = undefined;
-    if (density?.enabled) {
-      const tierA = larger.densityTier ?? 0;
-      const tierB = smaller.densityTier ?? 0;
-      const proposed = Math.max(tierA, tierB) + 1;
-      if (proposed > density.maxSteps) {
-        // Capped — fall back to legacy area-conserving accretion so
-        // shards continue to grow toward transmutation rather than
-        // refusing to merge.  Tier stays at maxSteps.
-        const newArea = largeArea + smallArea;
-        newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-        newMass = newDiameter;
-      } else {
-        newTier = proposed;
-        newDiameter = larger.size.x * density.shrinkFactor;
-        newMass = larger.mass + smaller.mass;
-      }
-    } else {
-      const newArea = largeArea + smallArea;
-      newDiameter = Math.sqrt(newArea / Math.PI) * 2;
-      newMass = newDiameter;
-    }
-
-    larger.size.x = newDiameter;
-    larger.size.y = newDiameter;
-    larger.mass   = newMass;
-    if (newTier !== undefined) {
-      larger.densityTier = newTier;
-      // Tier change invalidates BOTH the generic density tint cache
-      // AND the nebula fast-path cache — both are functions of the
-      // resolved render colour which now darkens.  Matches the
-      // existing pattern in the regen / merge invalidation sites
-      // (NebulaSystem.recomputeNeighborCounts:188).
-      larger.densityCachedTint = undefined;
-    }
-
-    // Accumulate effective area carried by both shards onto the
-    // larger.  Decoupled from physical disc area so shards can stay
-    // glass-style small while still transmuting back to tiles at a
-    // 1-tile-in → 1-tile-out rate.
-    larger.nebulaTileArea = (larger.nebulaTileArea ?? 0) + (smaller.nebulaTileArea ?? 0);
-
-    // Arm a fresh merge cooldown on the grown shard so it doesn't
-    // immediately chain-merge with another neighbour the same frame.
-    larger.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
-
-    // Regenerate polygon at the new size — uses the same 4–6 vertex
-    // power-law math as nebula-shard spawn.
-    const polyRadius = newDiameter / 2 * 0.5;
-    larger.polygonPoints = this.generateShardPolygon(polyRadius, 4, 6, 0.25, 0.6, 0.55);
-
-    // Blend colour compositions weighted by area; larger dominates.
-    larger.nebulaColorComposition = blendCompositions(
-      larger.nebulaColorComposition, largeArea,
-      smaller.nebulaColorComposition, smallArea,
+    // Area-weighted color blend so the output inherits the pair's
+    // combined palette rather than picking one side arbitrarily.
+    const composition = blendCompositions(
+      a.nebulaColorComposition, aArea,
+      b.nebulaColorComposition, bArea,
     );
-    larger.color = blendCompositionToHex(larger.nebulaColorComposition);
-    larger.nebulaBlendedHex = larger.color;
-    larger.nebulaTintedKey = undefined;
-    larger.nebulaCachedTinted = undefined;
 
-    // Glittery glimmer burst scattered within a radius matching the
-    // smaller shard — the subtle merge feedback (white motes + tinted).
-    const tint = larger.color;
-    const glimmerR = Math.max(smaller.size.x, smaller.size.y) * 0.5;
-    this.particles.spawn(entities, smaller.position, 3, '#ffffff', {
+    // Mass-weighted midpoint position — wrap-aware so a torus-
+    // crossing pair doesn't transmute on the wrong side of the
+    // seam.  Nebula shards share the same low mass; this is
+    // effectively the geometric midpoint.
+    const totalMass = a.mass + b.mass;
+    const bShiftX = a.position.x + wrapDeltaX(a.position.x, b.position.x);
+    const bShiftY = a.position.y + wrapDeltaY(a.position.y, b.position.y);
+    let mx = (a.position.x * a.mass + bShiftX * b.mass) / totalMass;
+    let my = (a.position.y * a.mass + bShiftY * b.mass) / totalMass;
+    { const p = { x: mx, y: my }; wrapPosition(p); mx = p.x; my = p.y; }
+
+    const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
+    const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
+
+    // Glittery glimmer burst at the merge point — same visual
+    // feedback the old grow-larger path had.
+    const tint = blendCompositionToHex(composition);
+    const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
+    const midpoint: Vector2 = { x: mx, y: my };
+    this.particles.spawn(entities, midpoint, 3, '#ffffff', {
       speedMin: 0.1, speedMax: 0.5,
       sizeMin: 0.3, sizeMax: 0.9,
       lifetimeMin: 0.4, lifetimeMax: 0.8,
       positionJitter: glimmerR,
     });
-    this.particles.spawn(entities, smaller.position, 4, tint, {
+    this.particles.spawn(entities, midpoint, 4, tint, {
       speedMin: 0.1, speedMax: 0.4,
       sizeMin: 0.4, sizeMax: 1.1,
       lifetimeMin: 0.5, lifetimeMax: 1.0,
       positionJitter: glimmerR * 1.2,
     });
 
-    // Smaller fades out over top of the already-grown larger — the
-    // eye reads the smaller dissolving INTO the new combined shard
-    // rather than popping out with the result flashing in from
-    // alpha 0.  Compaction removes it once the fade completes.
-    smaller.nebulaFadeTimer    = NEBULA_CONSTANTS.FADE_DURATION;
-    smaller.nebulaFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+    // Both source shards retire — the adapter spawns the output
+    // (tile or glass-shard) as a brand-new entity.
+    this.startMergeFadeOut(a);
+    this.startMergeFadeOut(b);
 
-    // Adapter hook: if the grown shard now carries enough effective
-    // area, transmute to a fresh tile.  NebulaSystem implements this
-    // (depends on hex coords + tile creation + static grid).
-    this.adapter?.onComposeNebulaShard(larger, entities, physics);
+    // Adapter hook routes the 50/50 outcome.  Position is the
+    // pair's midpoint; velocity is the mass-weighted average so a
+    // resulting glass-shard inherits the cloud's drift.
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics);
   }
 
   /**

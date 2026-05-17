@@ -109,10 +109,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.setMapType(type);
   };
 
-  const handleToggleNebulaSet = () => {
-      if (engineRef.current) engineRef.current.toggleNebulaSet();
-  };
-
   const handleCycleTrailShape = () => {
       if (engineRef.current) engineRef.current.cycleTrailShape();
   };
@@ -133,8 +129,44 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleCollisions();
   };
 
+  const handleToggleShardTileCollisions = () => {
+      if (engineRef.current) engineRef.current.toggleShardTileCollisions();
+  };
+
   const handleCycleShardPairInterval = () => {
       if (engineRef.current) engineRef.current.cycleShardPairInterval();
+  };
+
+  const handleCycleShardTilePairInterval = () => {
+      if (engineRef.current) engineRef.current.cycleShardTilePairInterval();
+  };
+
+  const handleToggleShardGravity = () => {
+      if (engineRef.current) engineRef.current.toggleShardGravity();
+  };
+
+  const handleToggleShardBonding = () => {
+      if (engineRef.current) engineRef.current.toggleShardBonding();
+  };
+
+  const handleToggleNebulaShardCollisions = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
+  };
+
+  const handleToggleScreenShake = () => {
+      if (engineRef.current) engineRef.current.toggleScreenShake();
+  };
+
+  const handleCycleTileBlendAlpha = () => {
+      if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
+  };
+
+  const handleCycleShardBlendAlpha = () => {
+      if (engineRef.current) engineRef.current.cycleShardBlendAlpha();
+  };
+
+  const handleCycleColorBlendInterval = () => {
+      if (engineRef.current) engineRef.current.cycleColorBlendInterval();
   };
 
   const handleSkipWave = () => {
@@ -155,13 +187,21 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
-        onToggleNebulaSet={handleToggleNebulaSet}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}
         onToggleLocalGravity={handleToggleLocalGravity}
         onToggleAttractorGravity={handleToggleAttractorGravity}
         onToggleCollisions={handleToggleCollisions}
+        onToggleShardTileCollisions={handleToggleShardTileCollisions}
         onCycleShardPairInterval={handleCycleShardPairInterval}
+        onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
+        onToggleShardGravity={handleToggleShardGravity}
+        onToggleShardBonding={handleToggleShardBonding}
+        onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
+        onToggleScreenShake={handleToggleScreenShake}
+        onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
+        onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
+        onCycleColorBlendInterval={handleCycleColorBlendInterval}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

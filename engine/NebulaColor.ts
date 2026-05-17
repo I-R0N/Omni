@@ -233,6 +233,40 @@ export function randomPaletteHueDeg(): number {
     return (NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE) % 360;
 }
 
+// ── Material-specific palette sub-arcs ─────────────────────────────
+// Split the 210° nebula arc into two non-overlapping sub-arcs so
+// nebula-style dust puffs spawned from breaking glass vs. rock tiles
+// carry visibly distinct hues.  15° dead zone between them keeps the
+// two families perceptually separable.
+//
+//   Glass: 165° (cyan) → 270° (indigo/violet)  — cool half
+//   Rock:  285° (purple-magenta) → 375° (red)  — warm half, wraps past 360°
+export const MATERIAL_GLASS_HUE_MIN = 165;
+export const MATERIAL_GLASS_HUE_MAX = 270;
+export const MATERIAL_ROCK_HUE_MIN  = 285;
+export const MATERIAL_ROCK_HUE_MAX  = 375;
+
+/**
+ * Random single-stop composition from the glass sub-arc (cyan →
+ * indigo).  Used for nebula-style dust puffs released by glass-tile
+ * shatter so the cloud reads as glass-derived material instead of a
+ * neutral light-blue.
+ */
+export function randomGlassNebulaComposition(): NebulaColorStop[] {
+    const hue = MATERIAL_GLASS_HUE_MIN + Math.random() * (MATERIAL_GLASS_HUE_MAX - MATERIAL_GLASS_HUE_MIN);
+    return [{ hex: paletteHueToHex(hue), weight: 1 }];
+}
+
+/**
+ * Random single-stop composition from the rock sub-arc (purple →
+ * red, wrapping past 360°).  Used for rock-tile / rock-shard dust
+ * puffs.
+ */
+export function randomRockNebulaComposition(): NebulaColorStop[] {
+    const hue = (MATERIAL_ROCK_HUE_MIN + Math.random() * (MATERIAL_ROCK_HUE_MAX - MATERIAL_ROCK_HUE_MIN)) % 360;
+    return [{ hex: paletteHueToHex(hue), weight: 1 }];
+}
+
 /**
  * Pick a fresh random-hue palette entry from the cyan-through-red arc
  * (orange, yellow, and green are excluded).  Returns a single-stop
