@@ -251,6 +251,42 @@ export function cyclePlasticBlendMode(): number {
   return activePlasticBlendModeIndex;
 }
 
+// ── Plastic opacity cycle ──────────────────────────────────────────
+// globalAlpha applied to plastic-tile and plastic-shard draw calls.
+// Cycled via the DBG panel's Opacity button.  Default 0.75 (matches
+// the v3+ "translucent polymer" look); 1.0 reads as solid, 0.25 as
+// ghostly.
+
+/** Discrete opacity steps for the cycle.  Index 2 is the startup
+ *  default (0.75). */
+export const PLASTIC_OPACITY_CYCLE: ReadonlyArray<number> = [
+  0.25,
+  0.50,
+  0.75,
+  1.00,
+] as const;
+
+let activePlasticOpacityIndex = 2;
+
+/** Active opacity for plastic rendering, in [0, 1].  Read by
+ *  RenderSystem plastic-tile + plastic-shard branches. */
+export function getActivePlasticOpacity(): number {
+  return PLASTIC_OPACITY_CYCLE[activePlasticOpacityIndex];
+}
+
+/** Active opacity formatted for the DBG button label. */
+export function getActivePlasticOpacityName(): string {
+  const v = PLASTIC_OPACITY_CYCLE[activePlasticOpacityIndex];
+  return `${Math.round(v * 100)}%`;
+}
+
+/** Advance the active opacity by one slot, wrapping at the end.
+ *  Returns the new index. */
+export function cyclePlasticOpacity(): number {
+  activePlasticOpacityIndex = (activePlasticOpacityIndex + 1) % PLASTIC_OPACITY_CYCLE.length;
+  return activePlasticOpacityIndex;
+}
+
 /** djb2-style hash of a colour hex string → phase angle in [0, 2π).
  *  Cheap (one pass over the hex chars), deterministic per colour,
  *  used to seed plastic-shard wiggle phase so each amber shade has

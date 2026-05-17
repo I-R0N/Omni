@@ -17,7 +17,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -487,6 +487,17 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the active plastic opacity through PLASTIC_OPACITY_CYCLE
+   * (25 % → 50 % → 75 % → 100 % → 25 % …).  Applied to both
+   * plastic-tile and plastic-shard render branches.  Live —
+   * takes effect on the next frame since the value is read fresh
+   * from getActivePlasticOpacity() inside each draw.
+   */
+  public cyclePlasticOpacity() {
+    cyclePlasticOpacity();
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -693,6 +704,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -810,6 +822,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,

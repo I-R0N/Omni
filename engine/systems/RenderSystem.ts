@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1896,11 +1896,11 @@ export class RenderSystem {
                     // entity.color (per-instance amber shade picked
                     // at spawn — see TileGenerator.buildStructureTile
                     // + PLASTIC_AMBER_SHADES in constants.ts).
-                    // globalAlpha 0.75 softens the silhouette so the
-                    // cluster doesn't read as a hard solid mass
-                    // against the starfield.
+                    // globalAlpha cycles through the Opacity DBG
+                    // setting so tiles and shards stay matched
+                    // visually.
                     buildPath();
-                    ctx.globalAlpha = 0.75;
+                    ctx.globalAlpha = getActivePlasticOpacity();
                     ctx.fillStyle   = entity.color;
                     ctx.fill();
 
@@ -2190,7 +2190,7 @@ export class RenderSystem {
                     const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
                     const blendMode = getActivePlasticBlendMode();
                     ctx.globalCompositeOperation = blendMode;
-                    ctx.globalAlpha = 0.75 * fadeAlpha;
+                    ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
                     ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
                     ctx.globalCompositeOperation = 'source-over';
 

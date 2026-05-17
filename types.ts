@@ -735,6 +735,10 @@ export interface EngineStats {
   // branch.  Cycled via the DBG Blend button (source-over / multiply
   // / darken / screen / lighter).  Live — next-frame effect.
   plasticBlendMode?: string;
+  // Active opacity (formatted as "NN%") applied to plastic-tile and
+  // plastic-shard draws.  Cycled via the DBG Opacity button
+  // (25 % → 50 % → 75 % → 100 %).
+  plasticOpacity?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.
