@@ -102,20 +102,40 @@ export const PLASTIC_DEEP_BLUE_SHADES: ReadonlyArray<string> = [
   '#075985',  // Sky 800
 ] as const;
 
+/** Plain white shades — porcelain / paper read. */
+export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
+  '#ffffff',
+  '#fafafa',  // Neutral 50
+  '#f5f5f5',  // Neutral 100
+  '#e5e5e5',  // Neutral 200
+] as const;
+
 interface PlasticPalette {
   readonly name: string;
   readonly shades: ReadonlyArray<string>;
+  /** Optional glow-outline colour baked into the cached soft-disc
+   *  bitmap.  When set, the gradient profile's outer ring switches
+   *  from "shard colour fading out" to "outline colour fading out",
+   *  producing a halo around the disc.  No extra draw calls — the
+   *  glow is part of the same drawImage.  Cache key encodes this
+   *  so glow + non-glow palettes coexist without collision. */
+  readonly outline?: string;
 }
 
 /** Cycle order for cyclePlasticPalette().  First entry is the
  *  startup default. */
 export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
-  { name: 'amber',  shades: PLASTIC_AMBER_SHADES       },
-  { name: 'black',  shades: PLASTIC_BLACK_SHADES       },
-  { name: 'green',  shades: PLASTIC_DARK_GREEN_SHADES  },
-  { name: 'purple', shades: PLASTIC_DARK_PURPLE_SHADES },
-  { name: 'gray',   shades: PLASTIC_DARK_GRAY_SHADES   },
-  { name: 'blue',   shades: PLASTIC_DEEP_BLUE_SHADES   },
+  { name: 'amber',       shades: PLASTIC_AMBER_SHADES       },
+  { name: 'black',       shades: PLASTIC_BLACK_SHADES       },
+  { name: 'green',       shades: PLASTIC_DARK_GREEN_SHADES  },
+  { name: 'purple',      shades: PLASTIC_DARK_PURPLE_SHADES },
+  { name: 'gray',        shades: PLASTIC_DARK_GRAY_SHADES   },
+  { name: 'blue',        shades: PLASTIC_DEEP_BLUE_SHADES   },
+  { name: 'white',       shades: PLASTIC_WHITE_SHADES       },
+  // Black core with a glowing white halo around the disc rim.
+  { name: 'black+glow',  shades: ['#000000'], outline: '#ffffff' },
+  // White core with a glowing black halo.
+  { name: 'white+glow',  shades: ['#ffffff'], outline: '#000000' },
 ] as const;
 
 let activePlasticPaletteIndex = 0;
@@ -129,6 +149,13 @@ export function getActivePlasticPaletteIndex(): number {
 /** Name of the active palette (for DBG button label). */
 export function getActivePlasticPaletteName(): string {
   return PLASTIC_PALETTES[activePlasticPaletteIndex].name;
+}
+
+/** Outline colour for the active palette (when set), or undefined.
+ *  Read by RenderSystem.getSoftDiscBitmap to bake a glow ring into
+ *  the cached bitmap. */
+export function getActivePlasticPaletteOutline(): string | undefined {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].outline;
 }
 
 /** Advance the active palette by one slot, wrapping at the end.
