@@ -1813,22 +1813,19 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    // Tile texture diameter = 1.2 × collision diameter
-                    // (tight render, matching the previous gradient
-                    // size from the early softbody-retrofit playtests
-                    // before the v4 expansion).  Opacity 0.75 lets a
-                    // hint of background bleed through so the cluster
-                    // doesn't read as a hard black silhouette against
-                    // the starfield.  Solid-circle fill in entity.
-                    // color (per-instance amber shade picked at
-                    // spawn — see TileGenerator.buildStructureTile
+                    // Hex-tile shape: trace the entity's polygon
+                    // (set by TileGenerator at HEX_SIZE) rather than
+                    // a circle so the silhouette reads as a proper
+                    // tile within the structure grid.  Solid fill in
+                    // entity.color (per-instance amber shade picked
+                    // at spawn — see TileGenerator.buildStructureTile
                     // + PLASTIC_AMBER_SHADES in constants.ts).
-                    const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 1.2;
+                    // globalAlpha 0.75 softens the silhouette so the
+                    // cluster doesn't read as a hard solid mass
+                    // against the starfield.
+                    buildPath();
                     ctx.globalAlpha = 0.75;
                     ctx.fillStyle   = entity.color;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
                     ctx.fill();
 
                     // DBG outline overlay (Outline toggle) — thin

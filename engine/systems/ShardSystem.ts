@@ -520,9 +520,13 @@ export class ShardSystem {
         // Optional per-entity damping from the variant's spawn shape
         // (today plastic-shard sets these so child shards inherit
         // strong cluster damping).  Undefined for variants that
-        // drift naturally (rock / glass).
+        // drift naturally (rock / glass).  restSpeed / restSpin
+        // raise the snap-to-zero floor for sleep-like behaviour
+        // when shards are at rest.
         linearDamping:  childSpawn.linearDamping,
         angularDamping: childSpawn.angularDamping,
+        restSpeed:      childSpawn.restSpeed,
+        restSpin:       childSpawn.restSpin,
       });
     }
 

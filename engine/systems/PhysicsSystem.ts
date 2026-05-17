@@ -381,18 +381,26 @@ export class PhysicsSystem {
           if (entity.linearDamping !== undefined) {
             // Custom heavy linear & angular damping (nebula-shards
             // today, future variants opt in via the same per-entity
-            // field at spawn time).
+            // field at spawn time).  Per-entity restSpeed / restSpin
+            // (when set) raise the snap-to-zero floor — plastic-
+            // shards use this for sleep-like behaviour so tiny
+            // residual drifts get culled and clusters stay
+            // motionless unless directly disturbed.  Falls back to
+            // NEBULA_CONSTANTS values for entities that don't set
+            // them (nebula-shards, free-floating rock-shards).
             const linearD = entity.linearDamping;
             const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
+            const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
+            const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
             const lin = Math.pow(linearD, timeScale);
             const ang = Math.pow(angularD, timeScale);
             entity.velocity.x *= lin;
             entity.velocity.y *= lin;
-            if (Math.abs(entity.velocity.x) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.x = 0;
-            if (Math.abs(entity.velocity.y) < NEBULA_CONSTANTS.REST_SPEED) entity.velocity.y = 0;
+            if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
+            if (Math.abs(entity.velocity.y) < restSpeed) entity.velocity.y = 0;
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;
-                if (Math.abs(entity.rotationSpeed) < NEBULA_CONSTANTS.REST_SPIN) entity.rotationSpeed = 0;
+                if (Math.abs(entity.rotationSpeed) < restSpin) entity.rotationSpeed = 0;
                 entity.rotation += entity.rotationSpeed * dt;
             }
           } else if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY

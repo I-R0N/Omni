@@ -599,11 +599,16 @@ export class DropSystem {
         mass,
         polygonPoints: scaledPts,
         // Optional per-entity damping from the variant's spawn shape
-        // — today plastic-shard sets these so cluster cohesion is
-        // dominated by the elastic-bond spring rather than inertia.
-        // Undefined for variants that drift naturally (rock / metal).
+        // — today plastic-shard sets these so cluster motion damps
+        // out quickly.  Undefined for variants that drift naturally
+        // (rock / metal).  restSpeed / restSpin raise the "snap-
+        // to-zero" floor PhysicsSystem applies after damping so
+        // tiny residual drifts get culled and the shard stays
+        // motionless unless directly disturbed.
         linearDamping:  variantDef.spawn.linearDamping,
         angularDamping: variantDef.spawn.angularDamping,
+        restSpeed:      variantDef.spawn.restSpeed,
+        restSpin:       variantDef.spawn.restSpin,
       });
     }
 

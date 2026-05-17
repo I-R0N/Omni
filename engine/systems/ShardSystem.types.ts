@@ -114,14 +114,26 @@ export interface ShardSpawnShape {
    *  spawn sites copy these onto the entity so PhysicsSystem.update
    *  ticks them via the existing per-entity damping path (gated by
    *  `entity.linearDamping !== undefined`).  Used today by plastic-
-   *  shard for aggressive cluster damping so cohesion is dominated
-   *  by the elastic-bond spring, not by inertia.  Nebula-shards use
+   *  shard for aggressive cluster damping so the shards settle to
+   *  rest without bond infrastructure.  Nebula-shards use
    *  NEBULA_CONSTANTS values stamped directly at spawn — they
    *  predate this field.  Values are per-second decay factors —
    *  PhysicsSystem applies them via `Math.pow(damping, timeScale)`,
    *  so 0.93 ≈ 7 % velocity bleed per second. */
   linearDamping?: number;
   angularDamping?: number;
+  /** Optional per-entity speed/spin floor stamped at spawn time.
+   *  PhysicsSystem snaps |velocity| below this threshold to zero
+   *  each substep so tiny residual drifts (e.g. steady-state
+   *  push-back from a distant repel field, accumulated rounding)
+   *  don't keep the shard alive.  Higher values make the shard
+   *  more "static" — it stays at rest unless something gives it
+   *  a clear external kick.  When unset, the entity falls back to
+   *  NEBULA_CONSTANTS.REST_SPEED / REST_SPIN (tiny — 0.005 / 0.01).
+   *  Today plastic-shard sets these to make clusters effectively
+   *  static unless directly hit. */
+  restSpeed?: number;
+  restSpin?: number;
 }
 
 // ── Regen policy ────────────────────────────────────────────────────

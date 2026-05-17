@@ -1531,9 +1531,17 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // is heavier than nebula-shard (NEBULA_CONSTANTS.LINEAR_DAMPING =
 // 0.97).  At 0.92 a shard kicked at v=4 retains ~0.7 % of its
 // velocity after 1 s (vs ~16 % at 0.97) — basically stops within
-// a half-second, which makes clusters effectively stationary
-// without any bond / cohesion plumbing.  angularDamping matches
-// so spin and translation settle together.
+// a half-second.  angularDamping matches so spin and translation
+// settle together.
+//
+// Sleep thresholds (v5, "no movement without external force"):
+// restSpeed 0.15 / restSpin 0.15 raise the snap-to-zero floor
+// from nebula's tiny 0.005 / 0.01 so any residual drift from a
+// distant repel field / gravity / accumulated rounding gets
+// snapped to exactly zero.  A projectile impact (typical kick
+// v=2-5) clearly clears the threshold; once damping brings the
+// kicked velocity below 0.15 the shard freezes until the next
+// external event.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
   polyVerticesMin: 16, polyVerticesMax: 16,
@@ -1541,6 +1549,8 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeToMass: (d: number) => d * 0.7,
   linearDamping:  0.92,
   angularDamping: 0.92,
+  restSpeed: 0.15,
+  restSpin:  0.15,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low

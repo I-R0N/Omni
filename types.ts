@@ -506,6 +506,14 @@ export interface GameEntity {
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
   angularDamping?: number;
+  // Per-entity speed/spin floors below which PhysicsSystem snaps the
+  // value to zero after damping.  When unset, fall back to
+  // NEBULA_CONSTANTS.REST_SPEED / REST_SPIN (tiny — 0.005 / 0.01).
+  // Higher values make the entity "static" — it stays at rest unless
+  // something pushes it past the threshold.  Today plastic-shard sets
+  // these so clusters effectively sleep unless directly disturbed.
+  restSpeed?: number;
+  restSpin?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
