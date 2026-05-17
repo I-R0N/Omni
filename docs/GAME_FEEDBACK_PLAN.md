@@ -297,6 +297,32 @@ k. After N waves, spawn a portal to a new map.
     are still on the table). Validation will need a manual
     playtest pass before Phase 2 launches.
 
+16. **Flow-field audit + debug tooling (ff-review)** — user
+    direction: before (h) Bosses, audit how the flow fields
+    actually behave and add DBG-panel inspection tooling so any
+    future enemy-AI work has visibility into the field that
+    drives pursuit. Two flow systems live side by side
+    (CLAUDE.md §2 / `engine/systems/`):
+    a. **`FlowField.ts`** — analytical flow vector. Used at
+       map-load asteroid seeding only.
+    b. **`FlowFieldGrid.ts`** — baked enemy-pursuit grid +
+       asteroid-flow field with incremental patching on tile
+       destruction. The `initObstacles` filter was fixed in
+       PR #54 (`mass === Infinity && shardVariant !==
+       'nebula-tile'`) to stop bucketing mobile shards and
+       nebula tiles as obstacles.
+    Session scope is **tooling + a written audit report** —
+    no behavior changes inside this PR unless they're trivial
+    one-liners obvious to fix in passing. Anything substantive
+    (re-tuning pursuit weight, changing rebuild cadence,
+    altering obstacle filter, etc.) is queued as a separate
+    follow-up brief informed by the audit findings. Keeps PR
+    scope bounded and gives the user a decision point after
+    seeing what the audit surfaces. DBG tooling slots into the
+    existing collapsible-section panel rebuilt in PR #54 —
+    either Physics section or a new FlowField section, the
+    implementing session picks.
+
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
    against `main`) bundles four independent changes under a
@@ -353,6 +379,7 @@ Run when convenient; can run in parallel with Phase 2.
 |----|------|--------|--------|-------|
 | g2-housekeeping | Resolve g2 deviations | shipped (PR #54, merged into plan branch) | `claude/g2-housekeeping-T1LR6` | Glass + metal glow → `repelImpulse`; metal-tile heat-bloom replaced with layer-2b style (blue `#60a5fa`); `metal-shard.repelImmune = false` + new per-emitter `repelImmuneFrom: ['glass-tile']` pattern; indestructible dropped from UNIVERSE/POCKET random spawn; CLAUDE.md refresh. Massive over-delivery (see decision #13): DBG rebuild, glass/nebula tier chains, nebula self-coalesce rewrite, continuous color equilibration, fade-timer unification, dust-puff palette split, visual cleanups, FlowField obstacle fix, player-tile shield-first crash damage. |
 | g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | pending | `claude/material-interactions-plastic-softbody-<suffix>` | **Bundled session per user direction (decision #15).** g3 revised: drop metal-shard ↔ metal-shard attraction; ALL `metal-shard` (existing variant, no sub-variant) passes through `glass-tile` / `glass-shard` with little-to-no impulse resolution and instantly shatters them on overlap. Plus retrofit existing `plastic-tile` / `plastic-shard`: circular shard shape, nebula-style soft textures with reduced alpha, strong spring-elastic bonds (stretch + pullback + threshold break), high translational friction, HP roughly preserved, softbody-cluster aesthetic. No new variants in either piece. Does NOT block Phase 2. |
+| ff-review | Flow field audit + debug tooling | pending | `claude/flow-field-debug-<suffix>` | Audit `FlowField.ts` (analytical, map-load asteroid seeding) + `FlowFieldGrid.ts` (baked enemy-pursuit + incremental tile-destroy patching) and add DBG-panel inspection tooling: vector overlay, on/off toggles, obstacle-bitmap visualization, rebuild-event visualization. Session ships tooling + a written audit report; any behavior changes get queued as a separate follow-up. **Must land before (h) Bosses** since boss AI behavior may depend on flow-field correctness; can run in parallel with (f) Timed waves. |
 
 ---
 
