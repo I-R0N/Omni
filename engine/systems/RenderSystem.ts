@@ -271,6 +271,38 @@ export class RenderSystem {
       return c;
   }
 
+  // Pre-rendered soft-gradient bitmap cache, keyed by colour hex.
+  // Plastic tiles + shards stamp the same 3-stop magenta radial
+  // gradient every frame; rasterising it inline via ctx.create
+  // RadialGradient was the hidden cost behind the playtest framerate
+  // drop (the JS allocation is cheap but every fill ships a fresh
+  // gradient to the GPU which doesn't show up in JS perf timing).
+  // Bake once at 128×128 per unique colour, then ctx.drawImage at
+  // any size for free.  Density tiering produces 5 distinct hues
+  // (tiers 0–4) per variant — cache size stays small.
+  private _softGradientBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  private getSoftGradientBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._softGradientBitmaps.get(hex);
+      if (cached) return cached;
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d')!;
+      const center = size / 2;
+      const [r, g, b] = hexToRgb(hex);
+      const grad = cx.createRadialGradient(center, center, 0, center, center, center);
+      grad.addColorStop(0,    `rgba(${r},${g},${b},0.85)`);
+      grad.addColorStop(0.55, `rgba(${r},${g},${b},0.45)`);
+      grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+      cx.fillStyle = grad;
+      cx.beginPath();
+      cx.arc(center, center, center, 0, Math.PI * 2);
+      cx.fill();
+      this._softGradientBitmaps.set(hex, c);
+      return c;
+  }
+
   /**
    * Return a 32×32 offscreen canvas with a soft white star: a radial-gradient
    * glow plus a 4-point spike cross drawn additively.  Created once, reused
@@ -1813,7 +1845,6 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    const [pr, pg, pb] = hexToRgb(entity.color);
                     // Tile texture diameter = 2.4 × collision diameter
                     // (1.2× base × 2 per follow-up playtest — the
                     // earlier 1.2× barely overlapped neighbours and
@@ -1821,24 +1852,18 @@ export class RenderSystem {
                     // instead of a continuous polymer sheet).
                     // entity.size.x is the AABB envelope (≈ hex
                     // flat-to-flat).
+                    //
+                    // Render uses a cached gradient bitmap (see
+                    // getSoftGradientBitmap) — drawImage from a
+                    // pre-baked 128×128 canvas, not a per-frame
+                    // createRadialGradient.  Cuts the hidden GPU
+                    // rasterisation cost that wasn't showing up in
+                    // JS perf timing.
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 2.4;
-
-                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
-                    if (isFlash) {
-                        grad.addColorStop(0,    'rgba(255,255,255,0.95)');
-                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.55)`);
-                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
-                    } else {
-                        grad.addColorStop(0,    `rgba(${pr},${pg},${pb},0.85)`);
-                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.45)`);
-                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
-                    }
+                    const bitmap     = this.getSoftGradientBitmap(entity.color);
                     ctx.globalAlpha = 1.0;
-                    ctx.fillStyle   = grad;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the hex polygon so the SAT collision
@@ -2043,43 +2068,28 @@ export class RenderSystem {
                 if (isPlasticShard) {
                     // ── Plastic shard — soft-edged radial gradient ───────────
                     // Plastic-softbody retrofit (decision #15b): no hard
-                    // polygon outline.  A single radial gradient is drawn
-                    // at 1.2× collision radius, fading from opaque body
-                    // colour at the centre to transparent at the outer
-                    // edge — reads as a translucent polymer blob.  The
-                    // 16-gon polygon is still used for SAT collisions
-                    // (see SHARD_SPAWN_SHAPE_PLASTIC); the renderer just
+                    // polygon outline.  Pre-rendered gradient bitmap
+                    // (getSoftGradientBitmap) drawn at 3.0× collision
+                    // radius — bonded clusters read as one continuous
+                    // sheet of overlapping polymer blobs.  The 16-gon
+                    // polygon is still used for SAT collisions (see
+                    // SHARD_SPAWN_SHAPE_PLASTIC); the renderer just
                     // ignores it.
+                    //
+                    // Bitmap cache by hex so density-tinted variants
+                    // (tier 0-4) each get their own pre-baked
+                    // gradient — avoids the hidden GPU-rasterisation
+                    // cost of per-frame ctx.createRadialGradient
+                    // calls.  Hit-flash dropped: soft polymer doesn't
+                    // need a hard white flash, and the cached-bitmap
+                    // path doesn't support per-instance colour swap.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
-                    const [pr, pg, pb] = hexToRgb(baseHex);
-
-                    // Render radius 3.0× the collision radius (1.5×
-                    // base × 2 per follow-up playtest).  Larger
-                    // gradient bleeds well past the collision body so
-                    // bonded clusters read as one continuous sheet
-                    // of overlapping polymer blobs.
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 3.0;
-
-                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
-                    // Core alpha: 0.85 reads as solid polymer at the
-                    // centre; flashes white briefly on hit.  Outer alpha:
-                    // 0 at the rim so the gradient terminates cleanly.
-                    if (isFlash) {
-                        grad.addColorStop(0,    'rgba(255,255,255,0.95)');
-                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.55)`);
-                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
-                    } else {
-                        grad.addColorStop(0,    `rgba(${pr},${pg},${pb},0.85)`);
-                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.45)`);
-                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
-                    }
+                    const bitmap     = this.getSoftGradientBitmap(baseHex);
                     ctx.globalAlpha = fadeAlpha;
-                    ctx.fillStyle   = grad;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the 16-gon collision shape so the
