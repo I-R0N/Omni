@@ -219,28 +219,73 @@ k. After N waves, spawn a portal to a new map.
     a. **bondsWith pipeline as the canonical pair-trigger primitive.**
        Glass and nebula tier chains both use `bondsWith` with a bond
        time, then `composeXShards` does a pair-consume + transmute.
-       g3's metal-shard ↔ metal-shard attraction should likely flow
-       through the same pipeline rather than reach for the gravity
-       primitive standalone — bondsWith gives attraction + bond time
-       + compose hook for free.
     b. **Per-emitter immunity / filter pattern.** `repelImmuneFrom:
        ['glass-tile']` on metal-shard demonstrates per-emitter
-       filtering on the repel side. g3's attraction filter
-       (originally proposed as `gravityTargetVariant`) should mirror
-       this shape: per-variant declarative list, not a runtime
-       attractor registry.
+       filtering on the repel side. Per-variant declarative list,
+       not a runtime attractor registry.
     c. **Tier-chain question for metal.** With glass-shard pairs
        composing into glass-tiles and nebula-shard pairs composing
-       into nebula-tiles, g3's design phase should explicitly decide
-       whether metal-shard pairs compose into a metal-tile (mirrors
-       the pattern, gives players a way to "rebuild" metal blocks)
-       or stay shard-only (keeps metal feeling "broken-once-broken,"
-       which is closer to a real material's behaviour and to the
-       original (g) feedback's dent/break model).
-    Damage model for metal-shard → glass-tile is still deferred to
-    g3's `AskUserQuestion` phase — recommended axes: flat per-hit
-    vs. speed-gated vs. cooldown-gated; whether damage feeds the
-    existing glass-shatter pipeline or a new partial-damage tier.
+       into nebula-tiles, the obvious symmetry would be metal-shard
+       pairs composing into metal-tiles.
+    Superseded by decision #15 — metal-metal attraction was dropped
+    by user direction; tier-chain question moot. Per-emitter filter
+    pattern is reused below for the metal-passthrough rule.
+
+15. **g3 revised + sticky-plastic bundling** — user direction for
+    one more tile/shard-effect session before Phase 2. Two pieces in
+    one bundled session:
+    a. **g3 revised — metal-passthrough-shatters-glass.** Drop the
+       metal-shard ↔ metal-shard attraction piece entirely (no
+       gravity / bondsWith for metal pairs). Add a new metal
+       sub-variant (default: `armor-piercing-shard`; implementing
+       session may rename) that passes through `glass-tile` and
+       `glass-shard` without collision impulse and instantly
+       shatters them on overlap. Existing metal-shard behaviour
+       unchanged. Use the per-emitter filter pattern from decision
+       #11c / #14b: declarative `passthroughShatter: { targets:
+       ['glass-tile', 'glass-shard'] }` (or equivalent) on the new
+       variant's `SHARD_VARIANTS` entry, not a runtime registry.
+       Spawn rule (how often AP shards appear from metal-tile
+       breaks) is a design-phase question.
+    b. **Sticky-plastic variant** — new `sticky-plastic-tile` and
+       `sticky-plastic-shard` (implementing session may rename to
+       gel / polymer / etc.). Specifications from user:
+       - **Render**: nebula-shard-style. No physical-outline shard
+         shape. Soft-edged texture rendered slightly larger than
+         the collision box. Reduced alpha for translucency.
+         Implementation choice: canvas radial gradient OR PNG
+         texture asset — recommend canvas radial gradient for
+         scope control.
+       - **Shape**: tiles shatter into circular shards. Shards
+         shatter into smaller circles. Polygon shape is either a
+         high-segment-count approximation (e.g., 16-gon) or a
+         dedicated circle render path; implementing session picks.
+       - **Bond model**: strong spring-elastic between all
+         same-variant shards (and shard-to-tile). Cluster behavior
+         should be morph-and-deform when hit/shot, not break-into-
+         free-pieces. Shards may break free briefly and get pulled
+         back with high force (stretching effect). Beyond a
+         distance threshold the bond permanently breaks. This is
+         a NEW bond mode — `bondsWith` today is pair-consume +
+         compose; sticky-plastic needs persistent spring-coupled
+         pairs. Expect a new schema field (`elasticBond?` or
+         similar) and a new tick path in ShardSystem.
+       - **Friction**: high `linearDamping` to limit standalone
+         shard motion (cluster cohesion dominated by spring force).
+       - **Durability**: HP similar to current plastic / metal
+         (post-PR-#53 = 24) so a cluster absorbs many hits before
+         shards break off.
+       - **Out of scope for this session**: sticky-plastic
+         interactions with other variants beyond what falls out
+         naturally (e.g., AP shards passing through glass do NOT
+         pass through sticky-plastic).
+    Ordering inside the bundled session: ship metal-piece first
+    (smaller, well-specified) so it's a clean commit set even if
+    sticky-plastic absorbs more session time. Sticky-plastic's
+    bond model is the most novel piece in the bundle — expect an
+    `AskUserQuestion` round inside the session before
+    implementation. Validation will need a manual playtest pass
+    before Phase 2 launches.
 
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
@@ -297,7 +342,7 @@ Run when convenient; can run in parallel with Phase 2.
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
 | g2-housekeeping | Resolve g2 deviations | shipped (PR #54, merged into plan branch) | `claude/g2-housekeeping-T1LR6` | Glass + metal glow → `repelImpulse`; metal-tile heat-bloom replaced with layer-2b style (blue `#60a5fa`); `metal-shard.repelImmune = false` + new per-emitter `repelImmuneFrom: ['glass-tile']` pattern; indestructible dropped from UNIVERSE/POCKET random spawn; CLAUDE.md refresh. Massive over-delivery (see decision #13): DBG rebuild, glass/nebula tier chains, nebula self-coalesce rewrite, continuous color equilibration, fade-timer unification, dust-puff palette split, visual cleanups, FlowField obstacle fix, player-tile shield-first crash damage. |
-| g3 | Material interactions | pending | `claude/material-interactions-<suffix>` | Metal-shard ↔ metal-shard attraction (build via the bondsWith pipeline + new per-emitter attraction filter — pattern established by PR #54's `repelImmuneFrom`); metal-shard damages glass-tile on contact (damage model designed in g3's `AskUserQuestion` phase). Design phase should also decide whether metal-shard pairs compose into a metal-tile, paralleling the glass and nebula tier chains shipped in #54 (see decision #14). Does NOT block Phase 2. |
+| g3 + sticky-plastic | Material interactions (revised) + sticky-plastic variant | pending | `claude/material-interactions-sticky-plastic-<suffix>` | **Bundled session per user direction (decision #15).** g3 revised: drop metal-shard ↔ metal-shard attraction; keep metal-shard passthrough+instant-shatter against glass-tile/glass-shard, scoped as a new sub-variant (e.g., `armor-piercing-shard`) so normal metal keeps current feel. Plus new `sticky-plastic-tile` / `sticky-plastic-shard` variants: circle-shaped shards, nebula-style soft textures with reduced alpha, strong spring-elastic bonds (stretch + pullback + threshold break), high translational friction, high HP, softbody-cluster aesthetic. Does NOT block Phase 2. |
 
 ---
 
