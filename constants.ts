@@ -23,10 +23,15 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
-  // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
-  // outline so the surface reads as soft injection-moulded plastic
-  // rather than the violet sheen of the prior reinforced tile.
-  STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
+  // Plastic — magenta softbody polymer (Fuchsia 400).  The plastic-
+  // softbody retrofit (decision #15b) shifted the read from rigid
+  // matte amber to a translucent cluster-bonded sheet, so the colour
+  // moved off the warm earth-tone palette where it conflicted with
+  // rock's orange glow.  Magenta also sits cleanly outside the
+  // nebula composition range (which tends pink/teal/purple but
+  // never this saturated a fuchsia) so plastic still reads as its
+  // own material on the HUD and minimap.
+  STRUCTURE_PLASTIC: '#e879f9',           // Fuchsia 400 — softbody polymer body
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
   // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
@@ -1488,15 +1493,25 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   sizeToMass: () => 0.01,
 };
 
-// Plastic shards: always 4 vertices.  Near-square — low angle
-// jitter keeps vertices close to a regular quadrilateral and low
-// radius variance keeps side lengths similar, producing
-// ~70–90° angles consistent with stamped / extruded polymer.
+// Plastic shards: circular 16-gon approximation (decision #15b
+// plastic-softbody retrofit).  Polygon-collision codepath stays
+// unchanged — SAT just sees a 16-vertex regular polygon that's
+// indistinguishable from a circle at typical pair distances.
+// Zero angle jitter and near-zero radius variance hold the shape
+// to a clean round silhouette so cluster deformation reads as
+// "the bonds stretch, not the individual shards."  Render path
+// (RenderSystem plastic-shard branch) draws a soft radial gradient
+// rather than the polygon outline, so the 16-gon is collision-only.
+// linearDamping / angularDamping stamped at spawn so standalone
+// shards damp quickly — cluster cohesion comes from the elasticBond
+// spring (see plastic-shard variant entry), not from inertia.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
-  polyVerticesMin: 4, polyVerticesMax: 4,
-  angleJitter: 0.15, radiusMin: 0.85, radiusRange: 0.20,
+  polyVerticesMin: 16, polyVerticesMax: 16,
+  angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
+  linearDamping:  0.93,
+  angularDamping: 0.93,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
@@ -1536,26 +1551,27 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
-    // Warm-white proximity lighting — the tile FACE brightens as the
+    // Soft magenta proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
-    // Same mechanism as metal's heat glow, minus the `hot` red core.
-    glow: { color: '#fef3c7', range: 250, peakAlpha: 0.33 },
-    // Plastic deforms heavily per hit — each closest-to-impact vertex
-    // pulled inward by up to 25 % of its current radius.  Same hit
-    // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
-    // visibly more dramatic per-hit warp.  Detaches into 3
-    // plastic-shards whose areas sum to the deformed tile's area.
+    // Matches the new STRUCTURE_PLASTIC fuchsia so tile + shard read
+    // as one substance under bloom.
+    glow: { color: '#fbcfe8', range: 250, peakAlpha: 0.33 },
+    // Plastic-softbody retrofit (decision #15b): per-tile dent
+    // (vertexJitter / per-hit polygon pull) is dropped — softbody
+    // cluster deformation via elasticBond stretching supersedes it.
+    // vertexJitter: 0 keeps the tile's HP-per-hit logic (PhysicsSystem
+    // routes through the isDentEntity branch which decrements one HP
+    // per hit, ignoring weapon damage) while disabling visible
+    // polygon deformation.  The tile stays a clean hex until it
+    // detaches.  On detach, 3 circular plastic-shards spawn — each
+    // carries ~1/3 of the deformed tile's area (sizeFraction = sqrt
+    // 1/3 ≈ 0.577).  No `inheritParentPolygon`: shards use the
+    // variant's 16-gon spawn shape, not the hex outline.
     regen: { kind: 'none' },
     dent: {
-      vertexJitter: 0.25,
+      vertexJitter: 0,
       breakShards: [
-        // 3 equal-area shards — each carries 1/3 of the deformed
-        // tile's area.  Linear sizeFraction = sqrt(1/3) ≈ 0.577
-        // (relative to the deformed tile's diameter), so the three
-        // shards sum to a full-area split.  More fragments than
-        // metal's 2-shard break to play up plastic's lower
-        // structural integrity on the killing hit.
         { variant: 'plastic-shard', sizeFraction: 0.577 },
         { variant: 'plastic-shard', sizeFraction: 0.577 },
         { variant: 'plastic-shard', sizeFraction: 0.577 },
@@ -1807,34 +1823,36 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Self-bond only for now — plastic shards stick to other plastic
-    // shards via the standard rock-style cohesion.  No cross-material
-    // bonds with rock / glass / metal yet (kept narrow until we see
-    // how the dent system shakes out).
+    // Plastic-softbody retrofit (decision #15b): no bondsWith pair-
+    // consume / compose merge — plastic clusters cohere via the
+    // persistent elasticBond network below (separate pipeline).
+    // density compaction also disabled so cluster members stay
+    // visible as individual shards rather than collapsing into
+    // single denser blobs.
     merge: {
       attractedTo: 'none',
-      bondsWith: { include: ['plastic-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
-      rules: [
-        { partner: 'self', outcome: 'compose' },
-      ],
+      bondsWith: 'none',
       defaultOutcome: 'compose',
     },
-    // Plastic shards are dent-driven: they deform per hit and are
-    // destroyed cleanly on health = 0 (no recursive sub-shards).
-    // Drops + particles fire via the mobile-shard path in
-    // DropSystem.spawnDrops.
+    // Plastic-shards shatter into smaller plastic-shards on death
+    // (decision #15b: "shards shatter into smaller circles").  Uses
+    // the powerlaw asteroid-style shatter so the size-floor MIN_SIZE
+    // check (childVariant.spawn.sizeMin = 20) terminates the
+    // recursion naturally — chips below ~20 diameter just die
+    // cleanly without spawning further generations.  Children
+    // inherit the 16-gon spawn shape from SHARD_SPAWN_SHAPE_PLASTIC
+    // so they read circular too.
     shatter: {
-      kind: 'none',
+      kind: 'powerlaw',
       style: 'asteroid',
-      countMin: 0, countMax: 0,
-      alphaMin: 1.0, alphaMax: 1.0,
+      countMin: 2, countMax: 4,
+      alphaMin: 1.0, alphaMax: 2.0,
       childVariant: 'plastic-shard',
-      forwardDrag: 0, perpScatter: 0,
-      scatterHalfCone: 0,
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
     },
-    // Warm amber particle puff matches the matte-polymer body colour.
-    onShatterParticles: { color: '#fbbf24', count: 5 },
+    // Magenta particle puff matches the new fuchsia body colour.
+    onShatterParticles: { color: '#e879f9', count: 5 },
     passThrough: false,
     // Plastic shards drift through the plastic-tile repel field.
     // (Plastic-tiles don't emit a field today, but the immunity is
@@ -1842,23 +1860,57 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // is a one-line change.)
     repelImmune: true,
     spawnsDropsOnDeath: true,
-    density: {
-      enabled: true,
-      maxSteps: 4,
-      areaThreshold: 32 * 32,
-      largeShardCollapseSize: 130,
-      tintFloor: 0.60,                         // slightly higher floor — plastic stays warmer when dense
-      shrinkFactor: 0.88,
+    // Elastic-bond network (decision #15b): persistent spring-coupled
+    // pairs between plastic-shards and between shards and tiles.
+    // Each tick the bond applies a Hooke's-law force toward
+    // restFactor × contactDist, plus damping along the bond axis.
+    // Bonds break permanently beyond breakFactor × restFactor ×
+    // contactDist.  Implementation lives in ShardSystem (tickElastic
+    // Bonds + runElasticBondFormation).
+    //
+    // Tunings come from the AskUserQuestion design pass:
+    //   restFactor 1.15 — small visible breathing room, gives the
+    //                     bond slack for both compression and stretch.
+    //   breakFactor 3.0 — cluster takes a few hits / noticeable
+    //                     stretch before pieces snap off.
+    //   stiffness 30   — "Firm" feel, picked to keep per-substep
+    //                     velocity updates in the same range as
+    //                     other shard accelerations (gravity /
+    //                     repel field).  The AskUserQuestion option
+    //                     labels (300 / 1200 / 3000) were aspirational
+    //                     SI-style values; the actual implementation
+    //                     uses unit-mass spring math under
+    //                     PhysicsSystem's FIXED_DT=1/120 substep
+    //                     cadence, so stable values land roughly
+    //                     1–2 orders of magnitude lower.  At
+    //                     stiffness=30 a stretch of 10 units
+    //                     produces dv ≈ 2.5 per substep —
+    //                     comparable to a player projectile's
+    //                     velocity contribution, which is the
+    //                     "Firm" target.
+    //   damping 4      — slight underdamping for visible "stretch
+    //                     and pull-back" effect at moderate
+    //                     stretches.  ω ≈ √30 ≈ 5.5; critical
+    //                     damping c≈11; damping=4 gives ζ ≈ 0.36
+    //                     so the cluster oscillates briefly when
+    //                     yanked, then settles.
+    elasticBond: {
+      partners: ['plastic-shard', 'plastic-tile'],
+      stiffness: 30,
+      restFactor:  1.15,
+      breakFactor: 3.0,
+      damping:     4,
     },
-    // Free-floating plastic shards deform on hit just like plastic
-    // tiles — each impact pulls one vertex inward.  Slightly lower
-    // jitter than the tile (0.22 vs 0.25) since the shard is already
-    // smaller and we want a few hits' worth of cumulative warp before
-    // destruction.  breakShards is empty: when health hits 0 the
-    // shard is destroyed cleanly and drops fall via the mobile-shard
-    // path in DropSystem.spawnDrops.
+    // Plastic-softbody retrofit: per-shard dent (vertexJitter / per-
+    // hit polygon pull) is dropped — softbody cluster deformation
+    // via elasticBond stretching supersedes it.  vertexJitter: 0
+    // keeps the HP-per-hit logic (PhysicsSystem.applyDentStep is a
+    // no-op at zero jitter; the isDentEntity branch still routes
+    // ammo / drop policy through the dent path).  breakShards stays
+    // empty: shatter handles child-spawning via the shatter policy
+    // above.
     dent: {
-      vertexJitter: 0.22,
+      vertexJitter: 0,
       breakShards: [],
     },
   },

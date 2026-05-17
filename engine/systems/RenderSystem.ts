@@ -1948,9 +1948,68 @@ export class RenderSystem {
                 // tile, finite → mobile shard.
                 const isFlash   = entity.mass !== Infinity && !!entity.hitFlash && entity.hitFlash > 0;
                 const isTileShard = entity.shardVariant === 'glass-shard';
+                const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                if (isTileShard) {
+                if (isPlasticShard) {
+                    // ── Plastic shard — soft-edged radial gradient ───────────
+                    // Plastic-softbody retrofit (decision #15b): no hard
+                    // polygon outline.  A single radial gradient is drawn
+                    // at 1.2× collision radius, fading from opaque body
+                    // colour at the centre to transparent at the outer
+                    // edge — reads as a translucent polymer blob.  The
+                    // 16-gon polygon is still used for SAT collisions
+                    // (see SHARD_SPAWN_SHAPE_PLASTIC); the renderer just
+                    // ignores it.
+                    const fadeAlpha = shardMergeFadeAlpha(entity);
+                    const baseHex   = densityTintForRender(entity, entity.color);
+                    const [pr, pg, pb] = hexToRgb(baseHex);
+
+                    // Render radius slightly larger than the collision
+                    // radius so the soft edge bleeds into the surrounding
+                    // space — bonded clusters read as one continuous
+                    // sheet rather than a row of distinct blobs.
+                    const collisionR = entity.size.x / 2;
+                    const renderR    = collisionR * 1.2;
+
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
+                    // Core alpha: 0.85 reads as solid polymer at the
+                    // centre; flashes white briefly on hit.  Outer alpha:
+                    // 0 at the rim so the gradient terminates cleanly.
+                    if (isFlash) {
+                        grad.addColorStop(0,    'rgba(255,255,255,0.95)');
+                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.55)`);
+                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
+                    } else {
+                        grad.addColorStop(0,    `rgba(${pr},${pg},${pb},0.85)`);
+                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.45)`);
+                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
+                    }
+                    ctx.globalAlpha = fadeAlpha;
+                    ctx.fillStyle   = grad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Power-up bloom overlay — same convention as the
+                    // rocky-asteroid branch below, scaled to plastic's
+                    // soft palette.
+                    if (glowColor && !isFlash) {
+                        const [gr, gg, gb] = hexToRgb(glowColor);
+                        const pulse = 0.6 + Math.sin(nowSec * 4.5) * 0.15;
+                        const glowR = collisionR * 2.0 * pulse;
+                        const bloom = ctx.createRadialGradient(0, 0, collisionR * 0.25, 0, 0, glowR);
+                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0)`);
+                        bloom.addColorStop(0.6, `rgba(${gr},${gg},${gb},0.18)`);
+                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
+                        ctx.globalAlpha = fadeAlpha;
+                        ctx.fillStyle   = bloom;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                } else if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
                     // Density tier darkens the base hue (cool blue-white → muted
                     // slate as tier climbs); merge-fade alpha multiplies every
@@ -1995,20 +2054,18 @@ export class RenderSystem {
                     // multiplies every layer so the dissolve is uniform.
                     // Per-variant tweaks so dent shards look identical
                     // to their parent tile:
-                    //  - plastic-shard renders at the same 0.6 alpha
-                    //    as plastic-tile (translucent polymer).
                     //  - metal-shard stays on the gray palette even on
                     //    hit flash (no white) to match metal-tile.
                     //  - Other rocky shards (rock-shard, rock-tile)
                     //    keep their fully-opaque default.
+                    //  - plastic-shard takes the dedicated soft-gradient
+                    //    branch above (decision #15b).
                     const densityHex = densityTintForRender(entity, entity.color);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const flashColor = entity.shardVariant === 'metal-shard'
                         ? '#cbd5e1'
                         : '#ffffff';
-                    const baseAlpha = entity.shardVariant === 'plastic-shard'
-                        ? 0.6
-                        : 1.0;
+                    const baseAlpha = 1.0;
                     buildPath();
                     ctx.globalAlpha = (isFlash ? 0.95 : baseAlpha) * fadeAlpha;
                     ctx.fillStyle   = isFlash ? flashColor : densityHex;

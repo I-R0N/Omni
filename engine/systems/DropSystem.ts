@@ -533,6 +533,12 @@ export class DropSystem {
         maxHealth:     shardHealth,
         mass,
         polygonPoints: scaledPts,
+        // Optional per-entity damping from the variant's spawn shape
+        // — today plastic-shard sets these so cluster cohesion is
+        // dominated by the elastic-bond spring rather than inertia.
+        // Undefined for variants that drift naturally (rock / metal).
+        linearDamping:  variantDef.spawn.linearDamping,
+        angularDamping: variantDef.spawn.angularDamping,
       });
     }
 
@@ -541,7 +547,7 @@ export class DropSystem {
     // first shard's variant (plastic / metal always agree across
     // entries today).
     const firstVariant = breakShards[0].variant;
-    const puffColor = firstVariant === 'plastic-shard' ? '#fbbf24' : '#cbd5e1';
+    const puffColor = firstVariant === 'plastic-shard' ? '#e879f9' : '#cbd5e1';
     this.particles.spawn(entities, tile.position, 5, puffColor, {
       speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
       lifetimeMin: 0.15, lifetimeMax: 0.35,

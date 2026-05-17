@@ -1055,9 +1055,14 @@ export class GameEngine {
           // - dent variants (plastic-tile / metal-tile / rock-tile):
           //   tile detaches via DropSystem.spawnDentShard reading
           //   dent.breakShards — skip ShardSystem.shatter entirely so
-          //   the two paths don't double-spawn.
-          const isDentVariant = SHARD_VARIANTS[variant].dent !== undefined;
-          if (this.currentMap && variant !== 'glass-tile' && !isDentVariant) {
+          //   the two paths don't double-spawn.  Variants with `dent`
+          //   set BUT `breakShards` empty (today plastic-shard) want
+          //   the standard shatter path for child-spawning — dent is
+          //   only there for the HP-per-hit / no-visible-deform
+          //   contract.
+          const dent = SHARD_VARIANTS[variant].dent;
+          const isDentSpawn = dent !== undefined && dent.breakShards.length > 0;
+          if (this.currentMap && variant !== 'glass-tile' && !isDentSpawn) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
@@ -1682,7 +1687,7 @@ export class GameEngine {
                 || target.shardVariant === 'metal-shard')) {
           const dustCount = target.size.x > 50 ? 5 : 3;
           const dustColor =
-              target.shardVariant === 'plastic-shard' ? '#fbbf24'
+              target.shardVariant === 'plastic-shard' ? '#e879f9'
             : target.shardVariant === 'metal-shard'   ? '#cbd5e1'
             :                                            '#94a3b8'; // rock-shard
           this.spawnParticles(impactPos, dustCount, dustColor, {
