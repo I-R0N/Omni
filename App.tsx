@@ -161,6 +161,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleTileOutlines();
   };
 
+  const handleCyclePlasticPalette = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticPalette();
+  };
+
   const handleCycleTileBlendAlpha = () => {
       if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
   };
@@ -204,6 +208,7 @@ const App: React.FC = () => {
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
+        onCyclePlasticPalette={handleCyclePlasticPalette}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}

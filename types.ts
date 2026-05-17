@@ -710,6 +710,11 @@ export interface EngineStats {
   // cloud sprite).  Default false; DBG-toggleable via the Visual
   // section's Outline button.
   tileOutlinesEnabled?: boolean;
+  // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
+  // via the DBG panel's Plastic button — switches the colour family
+  // used by randomPlasticShade() and re-rolls every active plastic
+  // entity's colour on toggle.
+  plasticPaletteName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

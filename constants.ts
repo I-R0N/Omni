@@ -38,28 +38,103 @@ export const COLORS = {
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
 
-// ── Plastic amber palette ──────────────────────────────────────────
-// Spawn sites for plastic-tile (TileGenerator.buildStructureTile) and
-// plastic-shard (DropSystem.spawnDentShard) call randomPlasticShade()
-// per-instance so every tile and shard reads as its own amber tone
-// within a coherent palette.  Range spans Amber 500 (mid-warm) through
-// Amber 900 / Yellow 900 (deep burnt-amber) so the cluster has visible
-// shade variation without straying into orange or brown.
+// ── Plastic palettes ───────────────────────────────────────────────
+// Per-instance random shade picked by randomPlasticShade() at every
+// plastic-tile / plastic-shard spawn site so cluster colour reads as
+// "different shades" rather than one flat tone.  The active palette
+// is switched at runtime via cyclePlasticPalette() (wired through
+// the DBG panel) — useful for trying different material reads
+// (warm amber polymer vs. dark void vs. moss vs. obsidian) without
+// rebuilding.
+
+/** Amber polymer — warm earth tones, the v3 default. */
 export const PLASTIC_AMBER_SHADES: ReadonlyArray<string> = [
-  '#f59e0b',  // Amber 500 — warm honey
+  '#f59e0b',  // Amber 500
   '#d97706',  // Amber 600
   '#b45309',  // Amber 700
   '#92400e',  // Amber 800
-  '#78350f',  // Amber 900 — deep burnt
-  '#a16207',  // Yellow 700 — slightly cooler amber
+  '#78350f',  // Amber 900
+  '#a16207',  // Yellow 700
   '#854d0e',  // Yellow 800
 ] as const;
 
-/** Pick a random shade from PLASTIC_AMBER_SHADES.  Called at every
- *  plastic-tile / plastic-shard spawn site so cluster colour reads
- *  as "different shades of amber" rather than one flat tone. */
+/** Pure black + near-blacks — void / tar / ink read. */
+export const PLASTIC_BLACK_SHADES: ReadonlyArray<string> = [
+  '#000000',
+  '#0a0a0a',
+  '#171717',  // Neutral 900
+  '#262626',  // Neutral 800
+] as const;
+
+/** Dark green — moss / forest read. */
+export const PLASTIC_DARK_GREEN_SHADES: ReadonlyArray<string> = [
+  '#14532d',  // Green 900
+  '#166534',  // Green 800
+  '#15803d',  // Green 700
+  '#064e3b',  // Emerald 900
+  '#065f46',  // Emerald 800
+] as const;
+
+/** Dark purple — obsidian / amethyst read. */
+export const PLASTIC_DARK_PURPLE_SHADES: ReadonlyArray<string> = [
+  '#3b0764',  // Purple 950
+  '#4c1d95',  // Violet 900
+  '#581c87',  // Purple 900
+  '#6b21a8',  // Purple 800
+  '#2e1065',  // Violet 950
+] as const;
+
+/** Dark gray — gunmetal / charcoal read. */
+export const PLASTIC_DARK_GRAY_SHADES: ReadonlyArray<string> = [
+  '#111827',  // Gray 900
+  '#1f2937',  // Gray 800
+  '#374151',  // Gray 700
+  '#0f172a',  // Slate 900
+  '#1e293b',  // Slate 800
+] as const;
+
+interface PlasticPalette {
+  readonly name: string;
+  readonly shades: ReadonlyArray<string>;
+}
+
+/** Cycle order for cyclePlasticPalette().  First entry is the
+ *  startup default. */
+export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
+  { name: 'amber',  shades: PLASTIC_AMBER_SHADES       },
+  { name: 'black',  shades: PLASTIC_BLACK_SHADES       },
+  { name: 'green',  shades: PLASTIC_DARK_GREEN_SHADES  },
+  { name: 'purple', shades: PLASTIC_DARK_PURPLE_SHADES },
+  { name: 'gray',   shades: PLASTIC_DARK_GRAY_SHADES   },
+] as const;
+
+let activePlasticPaletteIndex = 0;
+
+/** Index of the active palette in PLASTIC_PALETTES.  Exposed for
+ *  the DBG panel via EngineStats. */
+export function getActivePlasticPaletteIndex(): number {
+  return activePlasticPaletteIndex;
+}
+
+/** Name of the active palette (for DBG button label). */
+export function getActivePlasticPaletteName(): string {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].name;
+}
+
+/** Advance the active palette by one slot, wrapping at the end.
+ *  Returns the new index.  Re-colouring existing entities is the
+ *  caller's responsibility (see GameEngine.cyclePlasticPalette). */
+export function cyclePlasticPalette(): number {
+  activePlasticPaletteIndex = (activePlasticPaletteIndex + 1) % PLASTIC_PALETTES.length;
+  return activePlasticPaletteIndex;
+}
+
+/** Pick a random shade from the ACTIVE plastic palette.  Called at
+ *  every plastic-tile / plastic-shard spawn site so cluster colour
+ *  reads as "different shades" within the chosen family. */
 export function randomPlasticShade(): string {
-  return PLASTIC_AMBER_SHADES[Math.floor(Math.random() * PLASTIC_AMBER_SHADES.length)];
+  const palette = PLASTIC_PALETTES[activePlasticPaletteIndex].shades;
+  return palette[Math.floor(Math.random() * palette.length)];
 }
 
 /** djb2-style hash of a colour hex string → phase angle in [0, 2π).

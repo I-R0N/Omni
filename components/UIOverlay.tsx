@@ -21,6 +21,7 @@ interface UIOverlayProps {
   onToggleNebulaShardCollisions?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
+  onCyclePlasticPalette?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -52,6 +53,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaShardCollisions,
   onToggleScreenShake,
   onToggleTileOutlines,
+  onCyclePlasticPalette,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -188,6 +190,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle collision outlines on plastic + nebula tiles/shards (soft-gradient variants).  Shows the SAT polygon shape against the gradient fill."
                   >
                     {stats.tileOutlinesEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Plastic palette cycle — amber → black → green →
+                    purple → gray.  Re-rolls every active plastic-
+                    tile and plastic-shard's colour on toggle. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Plastic</span>
+                  <button
+                    onClick={onCyclePlasticPalette}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic palette family (amber / black / green / purple / gray).  Re-rolls every active plastic-tile and plastic-shard's colour on toggle."
+                  >
+                    {stats.plasticPaletteName ?? 'amber'}
                   </button>
                 </div>
               </>)}
