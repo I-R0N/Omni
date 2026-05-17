@@ -93,6 +93,15 @@ export const PLASTIC_DARK_GRAY_SHADES: ReadonlyArray<string> = [
   '#1e293b',  // Slate 800
 ] as const;
 
+/** Deep blue — deep-ocean / midnight read. */
+export const PLASTIC_DEEP_BLUE_SHADES: ReadonlyArray<string> = [
+  '#172554',  // Blue 950
+  '#1e3a8a',  // Blue 900
+  '#1e40af',  // Blue 800
+  '#0c4a6e',  // Sky 900
+  '#075985',  // Sky 800
+] as const;
+
 interface PlasticPalette {
   readonly name: string;
   readonly shades: ReadonlyArray<string>;
@@ -106,6 +115,7 @@ export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
   { name: 'green',  shades: PLASTIC_DARK_GREEN_SHADES  },
   { name: 'purple', shades: PLASTIC_DARK_PURPLE_SHADES },
   { name: 'gray',   shades: PLASTIC_DARK_GRAY_SHADES   },
+  { name: 'blue',   shades: PLASTIC_DEEP_BLUE_SHADES   },
 ] as const;
 
 let activePlasticPaletteIndex = 0;
