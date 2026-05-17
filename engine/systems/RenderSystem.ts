@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -272,27 +272,35 @@ export class RenderSystem {
   }
 
   // Pre-rendered soft-edge disc bitmap cache, keyed by
-  // `${colour}|${outline}`.  Used by the plastic-shard render
-  // branch.  Two profiles:
+  // `${colour}|${outline}|${solidEdge}`.  Three profiles:
   //
   //  - No outline (default palettes): opaque core 0–70 % radius,
   //    smooth falloff to alpha 0 at the rim — polymer chunk with
   //    a fuzzy edge.
-  //  - With outline (black+glow / white+glow palettes): opaque
-  //    core 0–50 %, fade to ~70 %, then a glow ring in the outline
-  //    colour fading out to 100 %.  Glow + disc are one drawImage
-  //    so per-shard cost is unchanged.
+  //  - Soft outline (black+glow / white+glow): opaque core 0–55 %,
+  //    fade to 65 %, then a glow ring in the outline colour fading
+  //    out to 100 %.
+  //  - Solid edge + outline (black palette): solid colour all the
+  //    way to ~60 % radius, then an immediate transition to the
+  //    glow halo.  Hard silhouette with a soft bloom around it.
   //
-  // Overlapping shards in a cluster blend cleanly because the soft
-  // outer rings cross-fade.  Per-frame ctx.createRadialGradient is
-  // the hidden GPU-rasterisation cost that doesn't surface in JS
-  // perf timing — that's why this lives in a cache instead of
-  // being computed inline.  Cache size stays small (one bitmap per
-  // (shade, outline) combo — typically 4-7 across an active map).
+  // All three are one drawImage at render time.  Overlapping shards
+  // in a cluster blend cleanly because the outer rings cross-fade.
+  // Per-frame ctx.createRadialGradient is the hidden GPU-rasterisation
+  // cost that doesn't surface in JS perf timing — that's why this
+  // lives in a cache instead of being computed inline.  Cache size
+  // stays small (typically 4-7 bitmaps across an active map).
   private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
 
-  private getSoftDiscBitmap(hex: string, outline: string | undefined): HTMLCanvasElement {
-      const key = outline === undefined ? hex : `${hex}|${outline}`;
+  private getSoftDiscBitmap(
+      hex: string,
+      outline: string | undefined,
+      solidEdge: boolean,
+  ): HTMLCanvasElement {
+      // Cache key — solidEdge bit only matters when outline is set.
+      const key = outline === undefined
+        ? hex
+        : `${hex}|${outline}|${solidEdge ? 's' : 'f'}`;
       const cached = this._softDiscBitmaps.get(key);
       if (cached) return cached;
       const size = 128;
@@ -307,12 +315,22 @@ export class RenderSystem {
           grad.addColorStop(0,    `rgba(${r},${g},${b},1.0)`);
           grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.95)`);
           grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+      } else if (solidEdge) {
+          // Hard-edge disc + soft outline halo.  Stops at 0.6 and
+          // 0.601 force a near-instant transition between the
+          // solid disc and the glow ring (canvas may interpolate
+          // 1px across identical-position stops, so we offset by a
+          // hair).
+          const [or, og, ob] = hexToRgb(outline);
+          grad.addColorStop(0,     `rgba(${r},${g},${b},1.0)`);
+          grad.addColorStop(0.6,   `rgba(${r},${g},${b},1.0)`);
+          grad.addColorStop(0.601, `rgba(${or},${og},${ob},0.75)`);
+          grad.addColorStop(0.85,  `rgba(${or},${og},${ob},0.40)`);
+          grad.addColorStop(1,     `rgba(${or},${og},${ob},0)`);
       } else {
-          // Glow profile — disc colour 0–0.65, outline glow 0.7–1.0.
-          // Small overlap at 0.65→0.7 to avoid a hard seam between
-          // the two colours.  Disc is slightly smaller than the
-          // non-glow profile to make room for the glow ring within
-          // the same bitmap bounds.
+          // Soft-gradient disc + soft outline halo.  Disc colour
+          // 0–0.65, outline glow 0.7–1.0.  Small overlap at 0.65→
+          // 0.7 to avoid a hard seam between the two colours.
           const [or, og, ob] = hexToRgb(outline);
           grad.addColorStop(0,    `rgba(${r},${g},${b},1.0)`);
           grad.addColorStop(0.55, `rgba(${r},${g},${b},0.95)`);
@@ -2137,7 +2155,8 @@ export class RenderSystem {
                     }
 
                     const outline = getActivePlasticPaletteOutline();
-                    const bitmap = this.getSoftDiscBitmap(baseHex, outline);
+                    const solidEdge = getActivePlasticPaletteSolidEdge();
+                    const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
                     const blendMode = getActivePlasticBlendMode();
                     ctx.globalCompositeOperation = blendMode;
                     ctx.globalAlpha = 0.75 * fadeAlpha;

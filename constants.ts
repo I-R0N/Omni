@@ -102,6 +102,16 @@ export const PLASTIC_DEEP_BLUE_SHADES: ReadonlyArray<string> = [
   '#075985',  // Sky 800
 ] as const;
 
+/** Dark blue — darker than the `blue` palette; navy / indigo
+ *  midnight tones with no Sky brights mixed in. */
+export const PLASTIC_DARK_BLUE_SHADES: ReadonlyArray<string> = [
+  '#020617',  // Slate 950
+  '#1e1b4b',  // Indigo 950
+  '#0c1e3a',  // custom dark navy
+  '#1a1d4a',  // custom dark indigo
+  '#0a1535',  // custom very dark navy
+] as const;
+
 /** Plain white shades — porcelain / paper read. */
 export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
   '#ffffff',
@@ -120,19 +130,33 @@ interface PlasticPalette {
    *  glow is part of the same drawImage.  Cache key encodes this
    *  so glow + non-glow palettes coexist without collision. */
   readonly outline?: string;
+  /** When true (only meaningful alongside `outline`), the disc
+   *  uses a HARD-edge profile — solid colour all the way to the
+   *  disc rim, then an immediate transition to the glow halo.
+   *  Reads as a crisp silhouette with a bloom around it.  When
+   *  false / unset, the glow profile uses a soft-gradient disc
+   *  that fades smoothly into the halo (default for black+glow /
+   *  white+glow palettes). */
+  readonly solidEdge?: boolean;
 }
 
 /** Cycle order for cyclePlasticPalette().  First entry is the
  *  startup default. */
 export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
   { name: 'amber',       shades: PLASTIC_AMBER_SHADES       },
-  { name: 'black',       shades: PLASTIC_BLACK_SHADES       },
+  // Solid black with a glowing white halo — hard-edge silhouette
+  // against a soft bloom.  Single shade, single bitmap.
+  { name: 'black',       shades: ['#000000'], outline: '#ffffff', solidEdge: true },
   { name: 'green',       shades: PLASTIC_DARK_GREEN_SHADES  },
   { name: 'purple',      shades: PLASTIC_DARK_PURPLE_SHADES },
   { name: 'gray',        shades: PLASTIC_DARK_GRAY_SHADES   },
   { name: 'blue',        shades: PLASTIC_DEEP_BLUE_SHADES   },
+  // Darker blue family — Slate 950 / Indigo 950 / custom navies.
+  // Distinct from `blue` (which includes brighter Sky 800/900).
+  { name: 'darkblue',    shades: PLASTIC_DARK_BLUE_SHADES   },
   { name: 'white',       shades: PLASTIC_WHITE_SHADES       },
-  // Black core with a glowing white halo around the disc rim.
+  // Soft-gradient black with a glowing white halo — same colours
+  // as `black` but with the smoother disc-to-glow transition.
   { name: 'black+glow',  shades: ['#000000'], outline: '#ffffff' },
   // White core with a glowing black halo.
   { name: 'white+glow',  shades: ['#ffffff'], outline: '#000000' },
@@ -156,6 +180,13 @@ export function getActivePlasticPaletteName(): string {
  *  the cached bitmap. */
 export function getActivePlasticPaletteOutline(): string | undefined {
   return PLASTIC_PALETTES[activePlasticPaletteIndex].outline;
+}
+
+/** Whether the active palette uses the hard-edge disc profile (solid
+ *  colour all the way to the disc rim, then immediate transition to
+ *  the glow halo).  Only meaningful when outline is also set. */
+export function getActivePlasticPaletteSolidEdge(): boolean {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].solidEdge === true;
 }
 
 /** Advance the active palette by one slot, wrapping at the end.
@@ -197,7 +228,10 @@ export const PLASTIC_BLEND_MODES: ReadonlyArray<GlobalCompositeOperation> = [
   'lighter',
 ] as const;
 
-let activePlasticBlendModeIndex = 0;
+// Cycle starts on 'lighter' — additive blending in clusters reads
+// best with the soft-disc bitmap profile, especially against the
+// dark starfield.  Other modes available via the DBG Blend button.
+let activePlasticBlendModeIndex = 4;
 
 /** Active blend mode for plastic-shard rendering.  Read by the
  *  RenderSystem plastic-shard branch each frame. */
