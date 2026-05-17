@@ -1813,13 +1813,16 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    // Tile texture diameter = 3.0 × collision diameter.
-                    // Solid-circle fill in entity.color (no gradient,
-                    // no cached bitmap) — cheapest possible render
-                    // path, and the user's v4 direction.  entity.size.x
-                    // is the AABB envelope (≈ hex flat-to-flat).
+                    // Tile texture diameter = 4.0 × collision diameter
+                    // (bumped from 3.0× per "more opaque" follow-up —
+                    // bigger radius means more overlap with neighbour
+                    // tiles and the shard burst, so the cluster reads
+                    // as a denser solid mass).  Solid-circle fill in
+                    // entity.color (no gradient, no cached bitmap) —
+                    // cheapest possible render path.  entity.size.x is
+                    // the AABB envelope (≈ hex flat-to-flat).
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 3.0;
+                    const renderR    = collisionR * 4.0;
                     ctx.globalAlpha = 1.0;
                     ctx.fillStyle   = entity.color;
                     ctx.beginPath();
@@ -2030,13 +2033,14 @@ export class RenderSystem {
                     // ── Plastic shard — solid-circle fill ─────────────────
                     // Plastic-softbody retrofit, v4: no gradient, no
                     // cached bitmap — just a solid circle in entity.
-                    // color drawn at 3.6× collision radius.  Cheapest
-                    // possible render path; solid fills are essentially
-                    // free on the GPU vs. the radial-gradient
-                    // rasterisation that was the hidden cost behind
-                    // the v3 framerate drop.  The 16-gon polygon is
-                    // still used for SAT collisions (see SHARD_SPAWN_
-                    // SHAPE_PLASTIC); the renderer just ignores it.
+                    // color drawn at 4.8× collision radius (bumped
+                    // from 3.6× per "more opaque" follow-up — bigger
+                    // radius means more overlap between adjacent
+                    // shards in a cluster, so the burst reads as a
+                    // denser solid mass).  Solid fills are essentially
+                    // free on the GPU.  The 16-gon polygon is still
+                    // used for SAT collisions (see SHARD_SPAWN_SHAPE_
+                    // PLASTIC); the renderer just ignores it.
                     //
                     // Density-tier tinting still applies via densityTint
                     // ForRender — v4 plastic disables density tiering
@@ -2048,7 +2052,7 @@ export class RenderSystem {
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 3.6;
+                    const renderR    = collisionR * 4.8;
                     ctx.globalAlpha = fadeAlpha;
                     ctx.fillStyle   = baseHex;
                     ctx.beginPath();
