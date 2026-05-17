@@ -1916,19 +1916,23 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     //                     overpowers the spring and the cluster
     //                     visibly distorts before pulling back over
     //                     ~3 s.
-    //   damping 0.15   — matched 10× cut so the bond's critical-
-    //                     damping ratio stays roughly constant
-    //                     (ω ∝ √k → ω ≈ 0.89 rad/s; critical
-    //                     damping c ≈ 1.78; ζ ≈ 0.084 — still
-    //                     underdamped, but the lower ω means the
-    //                     bounce-back oscillation is slow and
-    //                     reads as soft, not springy.
+    //   damping 1.8    — slightly above critical (ω ≈ √0.8 ≈ 0.89,
+    //                     critical damping c ≈ 1.79).  At ζ ≈ 1.01
+    //                     the spring is essentially critically
+    //                     damped — no oscillation, no ringing.
+    //                     Earlier damping=0.15 (matched 10× cut)
+    //                     left the bond underdamped (ζ ≈ 0.084)
+    //                     which made shards visibly vibrate for
+    //                     ~13 s after every impact — both bad
+    //                     aesthetics and a perf drain since the
+    //                     bonds never reached the rest-sleep gate
+    //                     in ShardSystem.tickElasticBonds.
     elasticBond: {
       partners: ['plastic-shard', 'plastic-tile'],
       stiffness: 0.8,
       restFactor:  1.15,
       breakFactor: 3.0,
-      damping:     0.15,
+      damping:     1.8,
     },
     // Plastic-softbody retrofit: per-shard dent (vertexJitter / per-
     // hit polygon pull) is dropped — softbody cluster deformation

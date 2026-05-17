@@ -860,6 +860,28 @@ export class ShardSystem {
 
       const stretch = dist - restDist; // positive when stretched, negative when compressed
 
+      // Rest-sleep gate: skip the spring/damping math when the pair
+      // is essentially settled.  Both metrics must clear the
+      // threshold — a bond at rest with non-trivial relative
+      // velocity still needs damping to converge, and a bond
+      // far from rest with zero velocity still needs the spring
+      // pull.  The gate fires for stable cluster interiors where
+      // every pair has reached its rest distance, which is the
+      // common case once a cluster settles after spawn or impact.
+      // Bond stays in the list so a future disturbance (partner
+      // moves, impulse arrives) re-engages the spring on the next
+      // tick.  Major perf win on dense plastic maps where most
+      // bonds are settled most of the time.
+      const SLEEP_STRETCH = 0.5;        // ~1.5 % of typical rest distance
+      const SLEEP_REL_VEL = 0.05;       // ~5 % of typical settled velocity
+      const relVx = b.velocity.x - a.velocity.x;
+      const relVy = b.velocity.y - a.velocity.y;
+      const relAlong = relVx * nx + relVy * ny;
+      if (Math.abs(stretch) < SLEEP_STRETCH && Math.abs(relAlong) < SLEEP_REL_VEL) {
+        this.elasticBonds[writeIdx++] = bond;
+        continue;
+      }
+
       // Spring acceleration along the bond axis.  Hooke's law in
       // unit-mass terms (acceleration, not force) so heavy and
       // light shards in the same cluster respond equally — the
@@ -873,9 +895,6 @@ export class ShardSystem {
       // PhysicsSystem applies entity.linearDamping after this
       // method runs, so the directional damping here doesn't fight
       // the omnidirectional decay — they layer.
-      const relVx = b.velocity.x - a.velocity.x;
-      const relVy = b.velocity.y - a.velocity.y;
-      const relAlong = relVx * nx + relVy * ny;
       const dampAccel = bond.damping * relAlong * dt;
 
       // Total acceleration along the bond axis: positive value
