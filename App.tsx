@@ -157,6 +157,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleScreenShake();
   };
 
+  const handleToggleTileOutlines = () => {
+      if (engineRef.current) engineRef.current.toggleTileOutlines();
+  };
+
   const handleCycleTileBlendAlpha = () => {
       if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
   };
@@ -199,6 +203,7 @@ const App: React.FC = () => {
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onToggleScreenShake={handleToggleScreenShake}
+        onToggleTileOutlines={handleToggleTileOutlines}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}

@@ -144,6 +144,14 @@ export class RenderSystem {
   private debugMode: boolean = false;
   // Player trail shape — selectable from the debug panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
+  // DBG toggle — when true, the renderer draws thin collision-
+  // boundary outlines on variants whose default render is
+  // outlineless (plastic-tile / plastic-shard soft-gradient,
+  // nebula-tile / nebula-shard cloud).  Lets a dev see where the
+  // SAT collision shape ends vs. where the gradient bleeds.
+  // Default OFF.  Wired through GameEngine.toggleTileOutlines and
+  // surfaced in the DBG panel's Visual section.
+  public tileOutlinesEnabled: boolean = false;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -1465,7 +1473,10 @@ export class RenderSystem {
           // Nebula shards: draw the polygon outline (same glass-shard style
           // polygon set at spawn).  Legacy shards without polygonPoints fall
           // back to an implicit circle defined by `size`.
-          if (this.debugMode) {
+          // Gated on the main DBG mode OR the dedicated Outline toggle, so
+          // a dev can show nebula+plastic outlines together without
+          // switching the whole DBG mode on.
+          if (this.debugMode || this.tileOutlinesEnabled) {
               ctx.globalAlpha = 0.9;
               ctx.strokeStyle = '#22d3ee'; // cyan-400 — matches other debug strokes
               ctx.lineWidth = 1;
@@ -1825,6 +1836,17 @@ export class RenderSystem {
                     ctx.beginPath();
                     ctx.arc(0, 0, renderR, 0, Math.PI * 2);
                     ctx.fill();
+
+                    // DBG outline overlay (Outline toggle) — thin
+                    // stroke of the hex polygon so the SAT collision
+                    // shape is visible against the soft gradient.
+                    if (this.tileOutlinesEnabled) {
+                        buildPath();
+                        ctx.globalAlpha = 0.9;
+                        ctx.strokeStyle = '#22d3ee';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
                 }
 
             } else if (isMaterialTile) {
@@ -2057,6 +2079,17 @@ export class RenderSystem {
                     ctx.beginPath();
                     ctx.arc(0, 0, renderR, 0, Math.PI * 2);
                     ctx.fill();
+
+                    // DBG outline overlay (Outline toggle) — thin
+                    // stroke of the 16-gon collision shape so the
+                    // SAT footprint is visible against the gradient.
+                    if (this.tileOutlinesEnabled) {
+                        buildPath();
+                        ctx.globalAlpha = 0.9;
+                        ctx.strokeStyle = '#22d3ee';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
 
                     // Power-up bloom overlay — same convention as the
                     // rocky-asteroid branch below, scaled to plastic's

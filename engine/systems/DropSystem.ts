@@ -517,7 +517,7 @@ export class DropSystem {
       // Per-shard launch angle — fan-spread the shards around the
       // impact direction so a multi-shard break visibly diverges.
       // For a single shard the spread is zero (centred on the
-      // impact direction).  Bursts of 8+ shards use a wider cone
+      // impact direction).  Bursts of 6+ shards use a wider cone
       // (≈ 2π × 0.9 ≈ 5.65 rad → full ring with a small gap) so
       // the shards splay out radially like a small explosion
       // rather than a thin fan.
@@ -528,11 +528,19 @@ export class DropSystem {
       const shardAngle = baseAngle + fan + (Math.random() - 0.5) * 0.3;
       lastShardAngle = shardAngle;
 
-      // Small radial offset from the tile centre so spawned shards
-      // don't overlap at frame 0.  Larger shards move first, leaving
-      // smaller ones nearer the centre — reads as "main chunk pops
-      // off, splinter trails behind."
-      const offsetDist = expanded.length > 1 ? (targetSize / 2) * 0.5 : 0;
+      // Radial spawn offset — scales with the PARENT TILE's
+      // deformed diameter (not the shard size) so bursts cover the
+      // tile area instead of stacking near its centre.  Plastic-
+      // tile's 8–12 shard burst was clumping at the spawn point
+      // before this fix; widening offsetDist + randomising the
+      // radial position over [0.3, 1.0] × tile-half-diameter
+      // smears the shards across the tile footprint.  Smaller
+      // single-shard breaks (metal-tile 1.0× sizeFraction) keep
+      // their tile-centred spawn since `expanded.length === 1`
+      // zeroes the offset.
+      const offsetDist = expanded.length > 1
+        ? (deformedDiameter / 2) * (0.3 + Math.random() * 0.7)
+        : 0;
       const offsetX = Math.cos(shardAngle) * offsetDist;
       const offsetY = Math.sin(shardAngle) * offsetDist;
 

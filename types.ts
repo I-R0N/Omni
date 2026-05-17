@@ -671,6 +671,11 @@ export interface EngineStats {
   nebulaShardCollisionsEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
+  // DBG outline overlay for outlineless variants (plastic-tile /
+  // plastic-shard soft gradient + nebula-tile / nebula-shard
+  // cloud sprite).  Default false; DBG-toggleable via the Visual
+  // section's Outline button.
+  tileOutlinesEnabled?: boolean;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

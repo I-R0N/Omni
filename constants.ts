@@ -1503,15 +1503,21 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // "the bonds stretch, not the individual shards."  Render path
 // (RenderSystem plastic-shard branch) draws a soft radial gradient
 // rather than the polygon outline, so the 16-gon is collision-only.
-// linearDamping / angularDamping stamped at spawn so standalone
-// shards damp quickly — cluster cohesion comes from the elasticBond
-// spring (see plastic-shard variant entry), not from inertia.
+//
+// Damping tuning (post-playtest): linearDamping = 0.96 (was 0.93)
+// so projectile impulses propagate across a few frames before
+// being bled off.  At 0.96 a shard kicked at v=4 retains ~32 % of
+// its velocity after 1 s (vs ~1 % at 0.93) — enough for the bond
+// stretch + cluster drag to read visibly.  Still solidly damped
+// so standalone shards settle within ~2 s.  angularDamping kept
+// at 0.93 — spin should bleed off faster than translation so
+// shards don't pinwheel inside the cluster.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
   polyVerticesMin: 16, polyVerticesMax: 16,
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
-  linearDamping:  0.93,
+  linearDamping:  0.96,
   angularDamping: 0.93,
 };
 
@@ -1886,38 +1892,37 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // contactDist.  Implementation lives in ShardSystem (tickElastic
     // Bonds + runElasticBondFormation).
     //
-    // Tunings come from the AskUserQuestion design pass:
+    // Tunings come from the AskUserQuestion design pass + a follow-
+    // up tuning round after the first playtest showed projectile
+    // impacts produced almost no visible cluster deformation
+    // (stiff spring + heavy per-entity linearDamping = 0.93
+    // cancelled the impact velocity each substep).  Lower stiffness
+    // and lighter along-bond damping let the impulse propagate
+    // through the cluster — the hit shard moves, the bond
+    // stretches, neighbours follow.
     //   restFactor 1.15 — small visible breathing room, gives the
     //                     bond slack for both compression and stretch.
     //   breakFactor 3.0 — cluster takes a few hits / noticeable
     //                     stretch before pieces snap off.
-    //   stiffness 30   — "Firm" feel, picked to keep per-substep
-    //                     velocity updates in the same range as
-    //                     other shard accelerations (gravity /
-    //                     repel field).  The AskUserQuestion option
-    //                     labels (300 / 1200 / 3000) were aspirational
-    //                     SI-style values; the actual implementation
-    //                     uses unit-mass spring math under
-    //                     PhysicsSystem's FIXED_DT=1/120 substep
-    //                     cadence, so stable values land roughly
-    //                     1–2 orders of magnitude lower.  At
-    //                     stiffness=30 a stretch of 10 units
-    //                     produces dv ≈ 2.5 per substep —
-    //                     comparable to a player projectile's
-    //                     velocity contribution, which is the
-    //                     "Firm" target.
-    //   damping 4      — slight underdamping for visible "stretch
-    //                     and pull-back" effect at moderate
-    //                     stretches.  ω ≈ √30 ≈ 5.5; critical
-    //                     damping c≈11; damping=4 gives ζ ≈ 0.36
-    //                     so the cluster oscillates briefly when
-    //                     yanked, then settles.
+    //   stiffness 8    — soft "polymer skin" pull.  At a 20-unit
+    //                     stretch the per-substep dv is 8×20/120 ≈
+    //                     1.3 vel units — gentle enough that a
+    //                     projectile impact (typical impulse 2-5
+    //                     vel units) overpowers the spring briefly,
+    //                     producing the visible stretch + bond-
+    //                     drag effect.
+    //   damping 1.5    — very light along-bond damping; lets the
+    //                     impulse propagate through the cluster
+    //                     before the spring fully restores.  ω ≈
+    //                     √8 ≈ 2.8 rad/s, critical damping c ≈ 5.6;
+    //                     ζ ≈ 0.27 so the cluster jiggles briefly
+    //                     after a big hit, then settles.
     elasticBond: {
       partners: ['plastic-shard', 'plastic-tile'],
-      stiffness: 30,
+      stiffness: 8,
       restFactor:  1.15,
       breakFactor: 3.0,
-      damping:     4,
+      damping:     1.5,
     },
     // Plastic-softbody retrofit: per-shard dent (vertexJitter / per-
     // hit polygon pull) is dropped — softbody cluster deformation

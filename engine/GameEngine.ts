@@ -440,6 +440,19 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the DBG outline overlay for tile-and-shard variants
+   * whose default render is outlineless — plastic-tile / plastic-
+   * shard (soft gradient) and nebula-tile / nebula-shard (cloud
+   * sprite).  When ON the renderer draws a thin cyan stroke of
+   * each entity's collision polygon over the gradient / sprite,
+   * making the SAT footprint visible against the soft fill.
+   * Independent of the main DBG-mode toggle.
+   */
+  public toggleTileOutlines() {
+    this.renderer.tileOutlinesEnabled = !this.renderer.tileOutlinesEnabled;
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -643,6 +656,7 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -757,6 +771,7 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
