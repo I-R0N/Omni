@@ -147,6 +147,49 @@ export function randomPlasticShade(): string {
   return palette[Math.floor(Math.random() * palette.length)];
 }
 
+// ── Plastic blend-mode cycle ───────────────────────────────────────
+// globalCompositeOperation applied to the plastic-shard draw call so
+// overlapping shards in a cluster blend visibly differently.  Cycled
+// via the DBG panel's Blend button.  Per-shard cost is two ctx state
+// writes (set before draw, reset after) — cheap.
+
+/** Cycle order for cyclePlasticBlendMode().  First entry is the
+ *  startup default.  Limited to monochrome-friendly modes — HSL
+ *  and hue-based ops aren't meaningful with single-colour shards.
+ *
+ *  - source-over: default, normal alpha blending (no overlap effect).
+ *  - multiply:    overlap regions darken — reads as denser polymer.
+ *  - darken:      pixel-wise min — overlap keeps the darker shade.
+ *  - screen:      overlap regions lighten — bright halos.
+ *  - lighter:     additive — overlapping colours sum, can clip white. */
+export const PLASTIC_BLEND_MODES: ReadonlyArray<GlobalCompositeOperation> = [
+  'source-over',
+  'multiply',
+  'darken',
+  'screen',
+  'lighter',
+] as const;
+
+let activePlasticBlendModeIndex = 0;
+
+/** Active blend mode for plastic-shard rendering.  Read by the
+ *  RenderSystem plastic-shard branch each frame. */
+export function getActivePlasticBlendMode(): GlobalCompositeOperation {
+  return PLASTIC_BLEND_MODES[activePlasticBlendModeIndex];
+}
+
+/** Active blend-mode name for the DBG button label. */
+export function getActivePlasticBlendModeName(): string {
+  return PLASTIC_BLEND_MODES[activePlasticBlendModeIndex];
+}
+
+/** Advance the active blend mode by one slot, wrapping at the end.
+ *  Returns the new index. */
+export function cyclePlasticBlendMode(): number {
+  activePlasticBlendModeIndex = (activePlasticBlendModeIndex + 1) % PLASTIC_BLEND_MODES.length;
+  return activePlasticBlendModeIndex;
+}
+
 /** djb2-style hash of a colour hex string → phase angle in [0, 2π).
  *  Cheap (one pass over the hex chars), deterministic per colour,
  *  used to seed plastic-shard wiggle phase so each amber shade has

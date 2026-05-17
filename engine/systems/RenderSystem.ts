@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, getActivePlasticBlendMode } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -268,6 +268,43 @@ export class RenderSystem {
       cx.arc(6, 6, 6, 0, Math.PI * 2);
       cx.fill();
       this._specularBitmap = c;
+      return c;
+  }
+
+  // Pre-rendered soft-edge disc bitmap cache, keyed by colour hex.
+  // Used by the plastic-shard render branch.  Profile is "opaque
+  // core + soft halo": fully opaque from 0 to 70 % radius, then
+  // smooth falloff to alpha 0 at the rim — reads as a polymer
+  // chunk with a fuzzy edge rather than a water bubble (which is
+  // what the earlier full-gradient profile gave us).  Overlapping
+  // shards blend cleanly because the soft outer rings cross-fade
+  // into each other.
+  //
+  // Per-frame ctx.createRadialGradient is the hidden GPU-rasterisation
+  // cost that doesn't surface in JS perf timing — that's why this
+  // lives in a cache instead of being computed inline.  Cache size
+  // stays small (one bitmap per active palette shade — typically
+  // 5-7 across an active map).
+  private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  private getSoftDiscBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._softDiscBitmaps.get(hex);
+      if (cached) return cached;
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d')!;
+      const center = size / 2;
+      const [r, g, b] = hexToRgb(hex);
+      const grad = cx.createRadialGradient(center, center, 0, center, center, center);
+      grad.addColorStop(0,    `rgba(${r},${g},${b},1.0)`);
+      grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.95)`);
+      grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+      cx.fillStyle = grad;
+      cx.beginPath();
+      cx.arc(center, center, center, 0, Math.PI * 2);
+      cx.fill();
+      this._softDiscBitmaps.set(hex, c);
       return c;
   }
 
@@ -2029,22 +2066,31 @@ export class RenderSystem {
                 const glowColor = entity.powerupGlowColor;
 
                 if (isPlasticShard) {
-                    // ── Plastic shard — solid-circle fill + wiggle ────────
-                    // Solid circle at 1.2× the collision diameter and
-                    // 0.75 opacity.  Per-instance amber shade comes
+                    // ── Plastic shard — soft-edge disc + wiggle ────────────
+                    // Cached soft-disc bitmap drawn at 1.2× collision
+                    // diameter and 0.75 opacity.  Profile is "opaque
+                    // core + soft halo" (see getSoftDiscBitmap) — the
+                    // outer 30 % fades to transparent so adjacent
+                    // shards in a cluster blend cleanly without
+                    // visible seams.  Per-instance amber shade comes
                     // from entity.color (set at spawn via random
                     // PlasticShade — see DropSystem.spawnDentShard +
-                    // PLASTIC_AMBER_SHADES in constants.ts).
+                    // PLASTIC_PALETTES in constants.ts).
                     //
                     // Wiggle: when entity.wiggleTimer > 0 (set by
                     // PhysicsSystem.maybeStampPlasticWiggle on
                     // collision impulses that wake the shard above
-                    // restSpeed), the shard squashes and stretches
-                    // via a damped sinusoid — scale = 1 + amp ×
-                    // sin(t × freq + phase) × (timer / duration).
-                    // Visual-only: ctx.scale before fill, doesn't
+                    // restSpeed), the shard squashes along the impact
+                    // axis via damped sinusoid math.  Visual-only:
+                    // ctx.rotate + ctx.scale before draw, doesn't
                     // touch the 16-gon collision polygon.  One Math.
                     // sin per draw on the hot path.
+                    //
+                    // Composite op: getActivePlasticBlendMode() is
+                    // cycled via the DBG Blend button (source-over /
+                    // multiply / darken / screen / lighter).  Set
+                    // before draw and reset after so the next entity
+                    // renders with default source-over.
                     //
                     // The 16-gon polygon is still used for SAT
                     // collisions (see SHARD_SPAWN_SHAPE_PLASTIC).
@@ -2064,27 +2110,17 @@ export class RenderSystem {
                         const phase = entity.wigglePhase ?? 0;
                         const wave = Math.sin(tElapsed * WIGGLE_CONSTANTS.FREQ + phase);
                         const amp = WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
-                        // Align local +X with the world-space impact
-                        // direction stamped at wiggle-trigger time —
-                        // entity.rotation is already baked into the
-                        // setTransform above, so the delta is
-                        // (wiggleAngle − entity.rotation).  Then a
-                        // non-uniform scale stretches along impact
-                        // (+amp) and squashes perpendicular (−amp).
-                        // Reads as polymer absorbing the hit rather
-                        // than a bubble pulsing radially.  Roughly
-                        // volume-conserving at small amp ((1+x)(1−x)
-                        // ≈ 1 − x²).
                         const wa = entity.wiggleAngle ?? 0;
                         ctx.rotate(wa - entity.rotation);
                         ctx.scale(1 + amp, 1 - amp);
                     }
 
+                    const bitmap = this.getSoftDiscBitmap(baseHex);
+                    const blendMode = getActivePlasticBlendMode();
+                    ctx.globalCompositeOperation = blendMode;
                     ctx.globalAlpha = 0.75 * fadeAlpha;
-                    ctx.fillStyle   = baseHex;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
+                    ctx.globalCompositeOperation = 'source-over';
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the 16-gon collision shape so the

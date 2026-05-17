@@ -715,6 +715,10 @@ export interface EngineStats {
   // used by randomPlasticShade() and re-rolls every active plastic
   // entity's colour on toggle.
   plasticPaletteName?: string;
+  // Active globalCompositeOperation used by the plastic-shard render
+  // branch.  Cycled via the DBG Blend button (source-over / multiply
+  // / darken / screen / lighter).  Live — next-frame effect.
+  plasticBlendMode?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

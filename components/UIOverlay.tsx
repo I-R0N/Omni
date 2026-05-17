@@ -22,6 +22,7 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onCyclePlasticPalette?: () => void;
+  onCyclePlasticBlendMode?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -54,6 +55,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onToggleTileOutlines,
   onCyclePlasticPalette,
+  onCyclePlasticBlendMode,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -193,16 +195,29 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →
-                    purple → gray.  Re-rolls every active plastic-
-                    tile and plastic-shard's colour on toggle. */}
+                    purple → gray → blue.  Re-rolls every active
+                    plastic-tile and plastic-shard's colour on toggle. */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
                   <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Plastic</span>
                   <button
                     onClick={onCyclePlasticPalette}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the plastic palette family (amber / black / green / purple / gray).  Re-rolls every active plastic-tile and plastic-shard's colour on toggle."
+                    title="Cycle the plastic palette family.  Re-rolls every active plastic-tile and plastic-shard's colour on toggle."
                   >
                     {stats.plasticPaletteName ?? 'amber'}
+                  </button>
+                </div>
+                {/* Plastic composite-op cycle — source-over → multiply →
+                    darken → screen → lighter.  Controls how overlapping
+                    plastic-shards blend in clusters. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Blend</span>
+                  <button
+                    onClick={onCyclePlasticBlendMode}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the globalCompositeOperation used by the plastic-shard render — controls how overlapping shards in a cluster combine.  source-over (default normal blend), multiply (darken overlap), darken (pixel-min), screen (lighten overlap), lighter (additive)."
+                  >
+                    {stats.plasticBlendMode ?? 'source-over'}
                   </button>
                 </div>
               </>)}
