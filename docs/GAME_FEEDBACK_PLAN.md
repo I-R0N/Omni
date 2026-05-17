@@ -168,7 +168,79 @@ k. After N waves, spawn a portal to a new map.
     attractor registration (see CLAUDE.md §8 / `PhysicsSystem
     .applyGravity`); metal-shard damages glass-tile on contact
     (damage model deferred to g3's design phase). Does NOT block
-    Phase 2.
+    Phase 2. See decision #14 for revised design notes after PR #54.
+
+13. **g2-housekeeping over-delivery (PR #54)** — task brief was 5
+    bullets; what shipped was 29 commits / +1711 / -643 across 15
+    files, organized into 11 themes per the PR body. Original scope
+    all landed cleanly. Bonus work:
+    a. **DBG panel rebuild** — collapsible sections; new toggles for
+       ShGrav, ShBond, Sh↔Tl, Neb↔Neb, ShPair/Sh↔Tl/ColorBlend
+       cadence cycles (with AUTO threshold tables to N=32), TileBlend,
+       ShardBlend, Shake. Inline `React.FC` declaration was causing
+       360 unmount/remount cycles per second from stats-driven
+       re-renders, swallowing touch input — replaced with a plain
+       helper.
+    b. **Material tier chain (glass)** — `glass-shard → glass-tile /
+       rock-shard` at `GLASS_TIER_DIAMETER = sqrt(HEX_AREA)`, 50/50
+       roll. Glass+glass merges bypass density compaction to allow
+       growth. Glass-tile timer regen disabled — fresh glass tiles
+       appear only via tier-chain transmute.
+    c. **Nebula self-coalesce rewrite** — `nebula-shard.bondsWith
+       nebula-shard` with `bondTimeSeconds: 5`, pair-consume compose,
+       50/50 transmute to nebula-tile / glass-shard. Killed the
+       `nebulaTileArea` accumulator + `nebulaCoalesceTimers`
+       machinery.
+    d. **Continuous color equilibration** — `NebulaSystem
+       .equilibrateColors` lerps hues across tiles (anchors) and
+       shards (catch-up); TileBlend / ShardBlend alpha cycles in DBG.
+    e. **Fade-timer unification** — `nebulaFadeTimer/Duration` deleted
+       from `GameEntity`; all consumers on `mergeFadeTimer/Duration`.
+       Duration policy stays at the call site.
+    f. **Material-palette dust puffs** — glass/rock palettes split
+       into non-overlapping sub-arcs of the nebula range; dust puffs
+       carry compositions and participate in equilibration.
+    g. **Visual cleanups** — tile hit-flash overlay removed; damage
+       crack-line render path deleted; indestructible glow
+       warm-white → deep purple `#4c1d95`.
+    h. **FlowField obstacle filter** — `initObstacles` now requires
+       `mass === Infinity && shardVariant !== 'nebula-tile'`.
+    i. **Player-tile crash damage** — shield absorbs before health.
+    j. **DBG perf knobs** — Sh↔Tl re-activation via dedicated scan +
+       cadence cycle; AUTO threshold tables extended to N=16/32.
+    Validation status: `npm run build` clean. Manual playtest of
+    material tier, nebula coalesce, color equilibration, dust puffs,
+    and UNIVERSE/POCKET integrity all explicitly deferred in the PR
+    test plan — **playtest pass owed before stacking more visual /
+    shard-system work on top.**
+
+14. **g3 design considerations after PR #54** — PR #54 introduced
+    three patterns that change how g3 should be designed:
+    a. **bondsWith pipeline as the canonical pair-trigger primitive.**
+       Glass and nebula tier chains both use `bondsWith` with a bond
+       time, then `composeXShards` does a pair-consume + transmute.
+       g3's metal-shard ↔ metal-shard attraction should likely flow
+       through the same pipeline rather than reach for the gravity
+       primitive standalone — bondsWith gives attraction + bond time
+       + compose hook for free.
+    b. **Per-emitter immunity / filter pattern.** `repelImmuneFrom:
+       ['glass-tile']` on metal-shard demonstrates per-emitter
+       filtering on the repel side. g3's attraction filter
+       (originally proposed as `gravityTargetVariant`) should mirror
+       this shape: per-variant declarative list, not a runtime
+       attractor registry.
+    c. **Tier-chain question for metal.** With glass-shard pairs
+       composing into glass-tiles and nebula-shard pairs composing
+       into nebula-tiles, g3's design phase should explicitly decide
+       whether metal-shard pairs compose into a metal-tile (mirrors
+       the pattern, gives players a way to "rebuild" metal blocks)
+       or stay shard-only (keeps metal feeling "broken-once-broken,"
+       which is closer to a real material's behaviour and to the
+       original (g) feedback's dent/break model).
+    Damage model for metal-shard → glass-tile is still deferred to
+    g3's `AskUserQuestion` phase — recommended axes: flat per-hit
+    vs. speed-gated vs. cooldown-gated; whether damage feeds the
+    existing glass-shatter pipeline or a new partial-damage tier.
 
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
@@ -224,8 +296,8 @@ Run when convenient; can run in parallel with Phase 2.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| g2-housekeeping | Resolve g2 deviations | pending | `claude/g2-housekeeping-<suffix>` | (1) Decide `repelImpulse` fate — rip out OR wire to glass-tile glow per decision #10. (2) Flip `metal-shard` off `repelImmune` (one-liner). (3) Optional: fold side-cleanup punch-list items in this PR. Tiny scope. |
-| g3 | Material interactions | pending | `claude/material-interactions-<suffix>` | Metal-shard ↔ metal-shard attraction via gravity primitive + `gravityTargetVariant` filter + runtime attractor registration; metal-shard damages glass-tile on contact (damage model designed in g3's `AskUserQuestion` phase). Depends on g2-housekeeping landing first (needs `metal-shard.repelImmune = false` to feel right). |
+| g2-housekeeping | Resolve g2 deviations | shipped (PR #54, merged into plan branch) | `claude/g2-housekeeping-T1LR6` | Glass + metal glow → `repelImpulse`; metal-tile heat-bloom replaced with layer-2b style (blue `#60a5fa`); `metal-shard.repelImmune = false` + new per-emitter `repelImmuneFrom: ['glass-tile']` pattern; indestructible dropped from UNIVERSE/POCKET random spawn; CLAUDE.md refresh. Massive over-delivery (see decision #13): DBG rebuild, glass/nebula tier chains, nebula self-coalesce rewrite, continuous color equilibration, fade-timer unification, dust-puff palette split, visual cleanups, FlowField obstacle fix, player-tile shield-first crash damage. |
+| g3 | Material interactions | pending | `claude/material-interactions-<suffix>` | Metal-shard ↔ metal-shard attraction (build via the bondsWith pipeline + new per-emitter attraction filter — pattern established by PR #54's `repelImmuneFrom`); metal-shard damages glass-tile on contact (damage model designed in g3's `AskUserQuestion` phase). Design phase should also decide whether metal-shard pairs compose into a metal-tile, paralleling the glass and nebula tier chains shipped in #54 (see decision #14). Does NOT block Phase 2. |
 
 ---
 
@@ -283,13 +355,25 @@ each pair.
 
 These are not full tasks — fold into a relevant PR when convenient.
 
-- [ ] Refresh CLAUDE.md to reflect Stage 6/7 having shipped (remove the
-      "today the legacy reads…" notes; remove "Stage 7 wires spawn"
-      caveat on rock-tile; remove the stale comment at GameEngine.ts:869
-      referencing old field names).
-- [ ] Remove indestructible-tile from random map spawn; reserve for
-      deliberate border placement only. (Probably folded into g1 or
-      whichever map-touching task gets there first.)
+- [x] Refresh CLAUDE.md to reflect Stage 6/7 having shipped. **Done in
+      PR #54** — variant count corrected 9 → 11, ASTEROID_GENERATION_CONFIG
+      references stripped, MAP_POPULATION authority note updated.
+- [x] Remove indestructible-tile from random map spawn; reserve for
+      deliberate border placement only. **Done in PR #54** for UNIVERSE
+      and POCKET; SevenRings outer ring + IndestructibleFieldMap showcase
+      preserved as the deliberate-border / showcase cases.
+- [ ] CLAUDE.md §4 still lists `nebulaFadeTimer` / `nebulaFadeDuration`
+      under the nebula field category; PR #54 deleted those fields and
+      unified all consumers onto `mergeFadeTimer` / `mergeFadeDuration`.
+      Trivial doc edit; fold into the next CLAUDE.md-touching PR.
+- [ ] PR #54's own CLAUDE.md update notes that "natural mixed maps
+      (UniverseMap, PocketMap, SevenRingsMap) still hardcode their per-
+      variant ratios in their MapClasses subclass" — MAP_POPULATION is
+      authoritative for the showcase maps and rock-shard free-spawn
+      counts but NOT yet for natural-map tile ratios. Real follow-up,
+      not just a comment fix — flip the natural maps to read from
+      MAP_POPULATION. Bigger than a punch-list item; queue as a small
+      named task if it bites.
 
 ---
 
