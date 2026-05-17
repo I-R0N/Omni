@@ -6,6 +6,7 @@ import {
   DROP_CONFIG,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
+  randomPlasticShade,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -587,7 +588,11 @@ export class DropSystem {
         // Smaller shards spin faster — same angular-momentum-from-
         // impact logic as the speed scaling above.
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
-        color:         tile.color,
+        // Plastic-shards re-roll their amber shade per-instance so
+        // each shard in a burst reads as its own tone (see
+        // PLASTIC_AMBER_SHADES in constants.ts).  Other variants
+        // inherit the parent tile's colour as before.
+        color:         spec.variant === 'plastic-shard' ? randomPlasticShade() : tile.color,
         active:        true,
         health:        shardHealth,
         maxHealth:     shardHealth,
@@ -607,7 +612,7 @@ export class DropSystem {
     // first shard's variant (plastic / metal always agree across
     // entries today).
     const firstVariant = expanded[0].variant;
-    const puffColor = firstVariant === 'plastic-shard' ? '#000000' : '#cbd5e1';
+    const puffColor = firstVariant === 'plastic-shard' ? '#b45309' : '#cbd5e1';
     this.particles.spawn(entities, tile.position, 5, puffColor, {
       speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
       lifetimeMin: 0.15, lifetimeMax: 0.35,

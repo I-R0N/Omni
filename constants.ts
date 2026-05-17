@@ -23,18 +23,44 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
-  // Plastic — black softbody polymer.  Reads as a void / tar /
-  // ink-blot silhouette against the bright nebula and starfield
-  // backgrounds.  No risk of confusion with any other material
-  // (the only other near-black entity is indestructible-tile's
-  // deep-purple #4c1d95, which is markedly more saturated under
-  // the proximity bloom).
-  STRUCTURE_PLASTIC: '#000000',           // Pure black — softbody polymer body
+  // Plastic — amber-shade family.  Per-instance random shade
+  // picked from PLASTIC_AMBER_SHADES below at spawn time
+  // (TileGenerator.buildStructureTile + DropSystem.spawnDentShard
+  // override entity.color with a fresh randomPlasticShade()) so
+  // every plastic-tile and every plastic-shard reads as its own
+  // amber tone within a coherent palette.  This base constant
+  // is the fallback used only if a future spawn site forgets to
+  // pick — set to a mid-range amber so it'd still look correct.
+  STRUCTURE_PLASTIC: '#b45309',           // Amber 700 — fallback shade
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
   // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
+
+// ── Plastic amber palette ──────────────────────────────────────────
+// Spawn sites for plastic-tile (TileGenerator.buildStructureTile) and
+// plastic-shard (DropSystem.spawnDentShard) call randomPlasticShade()
+// per-instance so every tile and shard reads as its own amber tone
+// within a coherent palette.  Range spans Amber 500 (mid-warm) through
+// Amber 900 / Yellow 900 (deep burnt-amber) so the cluster has visible
+// shade variation without straying into orange or brown.
+export const PLASTIC_AMBER_SHADES: ReadonlyArray<string> = [
+  '#f59e0b',  // Amber 500 — warm honey
+  '#d97706',  // Amber 600
+  '#b45309',  // Amber 700
+  '#92400e',  // Amber 800
+  '#78350f',  // Amber 900 — deep burnt
+  '#a16207',  // Yellow 700 — slightly cooler amber
+  '#854d0e',  // Yellow 800
+] as const;
+
+/** Pick a random shade from PLASTIC_AMBER_SHADES.  Called at every
+ *  plastic-tile / plastic-shard spawn site so cluster colour reads
+ *  as "different shades of amber" rather than one flat tone. */
+export function randomPlasticShade(): string {
+  return PLASTIC_AMBER_SHADES[Math.floor(Math.random() * PLASTIC_AMBER_SHADES.length)];
+}
 
 // --- SYSTEM CONFIGURATIONS ---
 
@@ -1875,7 +1901,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       scatterHalfCone: Math.PI * 0.55,
     },
     // Magenta particle puff matches the new fuchsia body colour.
-    onShatterParticles: { color: '#000000', count: 5 },
+    onShatterParticles: { color: '#b45309', count: 5 },
     passThrough: false,
     // Plastic shards drift through the plastic-tile repel field.
     // (Plastic-tiles don't emit a field today, but the immunity is
