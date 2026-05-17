@@ -1814,12 +1814,15 @@ export class RenderSystem {
                     }
                 } else {
                     const [pr, pg, pb] = hexToRgb(entity.color);
-                    // Tile texture diameter = 1.2 × collision diameter.
+                    // Tile texture diameter = 2.4 × collision diameter
+                    // (1.2× base × 2 per follow-up playtest — the
+                    // earlier 1.2× barely overlapped neighbours and
+                    // the cluster read as a row of separate blobs
+                    // instead of a continuous polymer sheet).
                     // entity.size.x is the AABB envelope (≈ hex
-                    // flat-to-flat); 1.2× lands roughly at the hex's
-                    // vertex-to-vertex extent.
+                    // flat-to-flat).
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 1.2;
+                    const renderR    = collisionR * 2.4;
 
                     const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
                     if (isFlash) {
@@ -2051,15 +2054,13 @@ export class RenderSystem {
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const [pr, pg, pb] = hexToRgb(baseHex);
 
-                    // Render radius 1.5× the collision radius so the
-                    // soft edge bleeds well past the collision body —
-                    // bonded clusters read as one continuous sheet of
-                    // overlapping polymer blobs rather than a row of
-                    // distinct circles.  Matches the user's "1.5×
-                    // diameter of the shard collision box" spec
-                    // (decision #15b follow-up).
+                    // Render radius 3.0× the collision radius (1.5×
+                    // base × 2 per follow-up playtest).  Larger
+                    // gradient bleeds well past the collision body so
+                    // bonded clusters read as one continuous sheet
+                    // of overlapping polymer blobs.
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 1.5;
+                    const renderR    = collisionR * 3.0;
 
                     const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
                     // Core alpha: 0.85 reads as solid polymer at the
