@@ -106,11 +106,14 @@ export class DropSystem {
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isDentTile) {
       // Dented-out tile detaches as the shards in variant.dent.breakShards.
-      // Each shard's size is a fraction of the original tile (1/3 for
-      // plastic's single shard; 1/3 + 1/6 for metal's pair).  The
+      // Each shard's size is a fraction of the original tile.  The
       // impactor's velocity (lastImpactVelocity) seeds the fan-spread
-      // launch direction so a 2-shard break visibly diverges.
-      this.spawnDentShard(entities, entity, tileDent!.breakShards);
+      // launch direction so a multi-shard break visibly diverges.
+      // `dent.shardHealth`, when set, overrides the inherited
+      // tile.maxHealth so the tile face can be brittle while the
+      // shards stay durable (plastic-tile: 1 HP face → 8–12 24-HP
+      // shards).
+      this.spawnDentShard(entities, entity, tileDent!.breakShards, tileDent!.shardHealth);
     } else if (isGlassFamilyTile) {
       // Glass tile death — visual debris.  Indestructible tiles
       // short-circuit upstream; rock-tile spawns its own rock-shards
@@ -372,9 +375,50 @@ export class DropSystem {
   public spawnDentShard(
     entities: GameEntity[],
     tile: GameEntity,
-    breakShards: ReadonlyArray<{ variant: ShardVariantId; sizeFraction: number }>,
+    breakShards: ReadonlyArray<{
+      variant: ShardVariantId;
+      sizeFraction: number;
+      inheritParentPolygon?: boolean;
+      countMin?: number;
+      countMax?: number;
+      sizeFractionMin?: number;
+      sizeFractionMax?: number;
+    }>,
+    shardHealthOverride?: number,
   ) {
     if (breakShards.length === 0) return;
+
+    // Expand `countMin/countMax` templates into individual spawn
+    // entries before iterating — keeps the per-shard loop simple
+    // and lets the fan-spread denominator see the true total count.
+    // Each expanded entry also resolves its `sizeFraction` against
+    // the optional `sizeFractionMin/Max` range so the burst varies
+    // in size as well as count.
+    type ExpandedSpec = {
+      variant: ShardVariantId;
+      sizeFraction: number;
+      inheritParentPolygon?: boolean;
+    };
+    const expanded: ExpandedSpec[] = [];
+    for (let s = 0; s < breakShards.length; s++) {
+      const spec = breakShards[s];
+      const hasCount = spec.countMin !== undefined && spec.countMax !== undefined;
+      const count = hasCount
+        ? spec.countMin! + Math.floor(Math.random() * (spec.countMax! - spec.countMin! + 1))
+        : 1;
+      const hasSizeRange = spec.sizeFractionMin !== undefined && spec.sizeFractionMax !== undefined;
+      for (let k = 0; k < count; k++) {
+        const sizeFraction = hasSizeRange
+          ? spec.sizeFractionMin! + Math.random() * (spec.sizeFractionMax! - spec.sizeFractionMin!)
+          : spec.sizeFraction;
+        expanded.push({
+          variant: spec.variant,
+          sizeFraction,
+          inheritParentPolygon: spec.inheritParentPolygon,
+        });
+      }
+    }
+    if (expanded.length === 0) return;
 
     // Base tile size — entity.size is never updated by applyDentStep,
     // so this still equals the original tile footprint (the shrunken
@@ -427,8 +471,8 @@ export class DropSystem {
     // sparks spray along the dominant detach direction.
     let lastShardAngle = baseAngle;
 
-    for (let i = 0; i < breakShards.length; i++) {
-      const spec = breakShards[i];
+    for (let i = 0; i < expanded.length; i++) {
+      const spec = expanded[i];
       const variantDef = SHARD_VARIANTS[spec.variant];
 
       // Target shard size = fraction of the deformed tile's effective
@@ -471,11 +515,15 @@ export class DropSystem {
       const mass = variantDef.spawn.sizeToMass(targetSize);
 
       // Per-shard launch angle — fan-spread the shards around the
-      // impact direction so a 2-shard break visibly diverges.  For
-      // a single shard the spread is zero (centred on the impact
-      // direction).
-      const fan = breakShards.length > 1
-        ? ((i / (breakShards.length - 1)) - 0.5) * 0.9
+      // impact direction so a multi-shard break visibly diverges.
+      // For a single shard the spread is zero (centred on the
+      // impact direction).  Bursts of 8+ shards use a wider cone
+      // (≈ 2π × 0.9 ≈ 5.65 rad → full ring with a small gap) so
+      // the shards splay out radially like a small explosion
+      // rather than a thin fan.
+      const fanWidth = expanded.length >= 6 ? Math.PI * 2 * 0.9 : 0.9;
+      const fan = expanded.length > 1
+        ? ((i / (expanded.length - 1)) - 0.5) * fanWidth
         : 0;
       const shardAngle = baseAngle + fan + (Math.random() - 0.5) * 0.3;
       lastShardAngle = shardAngle;
@@ -484,7 +532,7 @@ export class DropSystem {
       // don't overlap at frame 0.  Larger shards move first, leaving
       // smaller ones nearer the centre — reads as "main chunk pops
       // off, splinter trails behind."
-      const offsetDist = breakShards.length > 1 ? (targetSize / 2) * 0.5 : 0;
+      const offsetDist = expanded.length > 1 ? (targetSize / 2) * 0.5 : 0;
       const offsetX = Math.cos(shardAngle) * offsetDist;
       const offsetY = Math.sin(shardAngle) * offsetDist;
 
@@ -495,15 +543,19 @@ export class DropSystem {
       const launchSpeed = baseSpeed * speedScale;
 
       // Dent-policy shards take exactly as many hits to destroy as
-      // the parent tile they came from — inherit tile.maxHealth so
-      // plastic-shards / metal-shards are as durable as their
-      // matching tile (currently 8 HP each).  Non-dent variants
+      // the parent tile they came from — by default inherit
+      // tile.maxHealth so plastic-shards / metal-shards are as
+      // durable as their matching tile.  `shardHealthOverride`
+      // (set when the dent variant declares `dent.shardHealth`)
+      // decouples shard durability from tile face HP — plastic-
+      // tile uses this so the tile is glass-brittle (1 HP) while
+      // the released shards stay at 24 HP.  Non-dent variants
       // (rock-shard spawned from rock-tile's breakShards) keep
       // single-hit destruction, matching today's rock-shard /
       // glass-shard HP.
-      const shardHealth = variantDef.dent !== undefined
-        ? (tile.maxHealth || 1)
-        : 1;
+      const shardHealth = shardHealthOverride !== undefined
+        ? shardHealthOverride
+        : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -546,7 +598,7 @@ export class DropSystem {
     // last shard's launch direction.  Material colour comes from the
     // first shard's variant (plastic / metal always agree across
     // entries today).
-    const firstVariant = breakShards[0].variant;
+    const firstVariant = expanded[0].variant;
     const puffColor = firstVariant === 'plastic-shard' ? '#e879f9' : '#cbd5e1';
     this.particles.spawn(entities, tile.position, 5, puffColor, {
       speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,

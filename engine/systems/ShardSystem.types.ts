@@ -507,7 +507,31 @@ export interface ShardVariantDef {
        *  fresh material-silhouette polygon from the variant's spawn
        *  config.  Use for "the shard IS the broken tile" effects. */
       inheritParentPolygon?: boolean;
+      /** Optional inclusive random count range — when set, this
+       *  entry is expanded into `countMin..countMax` siblings at
+       *  spawn time.  Each sibling re-rolls `sizeFraction` between
+       *  `sizeFractionMin` and `sizeFractionMax` if those are set;
+       *  otherwise all siblings share the single `sizeFraction`.
+       *  Used by plastic-tile to release a burst of 8–12 small
+       *  shards on shatter rather than a fixed list.  When unset
+       *  the entry spawns exactly one shard at `sizeFraction`. */
+      countMin?: number;
+      countMax?: number;
+      /** Optional sizeFraction randomisation range — when set,
+       *  each spawned sibling picks a fresh sizeFraction in
+       *  `[sizeFractionMin, sizeFractionMax]` instead of using the
+       *  fixed `sizeFraction` above.  Only meaningful alongside
+       *  `countMin/countMax`. */
+      sizeFractionMin?: number;
+      sizeFractionMax?: number;
     }>;
+    /** Optional override for the HP assigned to spawned shards.
+     *  When unset, shards inherit `tile.maxHealth` (today's
+     *  behaviour).  When set, shards spawn with this HP regardless
+     *  of the tile's own health — used by plastic-tile so the
+     *  tile face is glass-brittle (1 HP) while the released shards
+     *  retain the 24-HP plastic durability. */
+    shardHealth?: number;
   };
 }
 

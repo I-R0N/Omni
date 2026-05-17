@@ -1645,14 +1645,22 @@ export class RenderSystem {
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
               && (entity.shardVariant === 'glass-tile'
                   || entity.shardVariant === 'indestructible-tile');
-            // Material tiles (plastic / metal) — solid-color polygon fill
-            // with per-variant alpha.  Distinct from glass-family because
-            // they will dent in place (vertex jitter + scale-down) instead
-            // of shattering.
+            // Plastic-tile takes the dedicated soft-gradient render
+            // (decision #15b follow-up): radial gradient at 1.2× the
+            // tile's collision diameter, no polygon outline.  Matches
+            // the plastic-shard render style so the tile→shard
+            // shatter transition reads continuous.
+            const isPlasticTile =
+              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
+              && entity.shardVariant === 'plastic-tile';
+            // Metal-tile keeps the solid-color polygon-fill render
+            // (variant-specific alpha, dent outline, repel-driven
+            // glow).  Plastic-tile used to share this branch; the
+            // softbody retrofit split it out into its own gradient
+            // path above.
             const isMaterialTile =
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
-              && (entity.shardVariant === 'plastic-tile'
-                  || entity.shardVariant === 'metal-tile');
+              && entity.shardVariant === 'metal-tile';
             if (isGlassFamilyTile) {
                 // Glass-family static tiles render with the glass-tile
                 // aesthetic (translucent fill + edge stroke + specular
@@ -1762,6 +1770,62 @@ export class RenderSystem {
                 }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
+
+            } else if (isPlasticTile) {
+                // ── Plastic tile — soft-edged radial gradient ──────────
+                // Mirrors the plastic-shard render style (decision #15b
+                // follow-up).  Single radial gradient at 1.2× the
+                // tile's collision diameter, no polygon outline.  At
+                // entity.size.x ≈ 99 (HEX_SIZE-derived hex width) the
+                // gradient diameter is ~119 — comparable to the hex's
+                // vertex-to-vertex extent, so adjacent tiles in a
+                // cluster blend their gradient edges and the cluster
+                // reads as one soft polymer sheet rather than a row
+                // of distinct hexes.
+                const isFlash = false;
+
+                // Regen ghost — plastic-tile has regen.kind === 'none'
+                // today so this branch is dead, but kept for parity
+                // with the other tile branches in case regen is
+                // re-enabled.
+                if (!entity.active && entity.regenProgress !== undefined) {
+                    const delay = 12;
+                    const ghostStart = 1 - (3 / delay);
+                    if (entity.regenProgress >= ghostStart) {
+                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
+                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
+                        buildPath();
+                        ctx.globalAlpha = t * pulse * 0.6;
+                        ctx.strokeStyle = 'rgba(103,232,249,1)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        ctx.globalAlpha = 1.0;
+                    }
+                } else {
+                    const [pr, pg, pb] = hexToRgb(entity.color);
+                    // Tile texture diameter = 1.2 × collision diameter.
+                    // entity.size.x is the AABB envelope (≈ hex
+                    // flat-to-flat); 1.2× lands roughly at the hex's
+                    // vertex-to-vertex extent.
+                    const collisionR = entity.size.x / 2;
+                    const renderR    = collisionR * 1.2;
+
+                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
+                    if (isFlash) {
+                        grad.addColorStop(0,    'rgba(255,255,255,0.95)');
+                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.55)`);
+                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
+                    } else {
+                        grad.addColorStop(0,    `rgba(${pr},${pg},${pb},0.85)`);
+                        grad.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.45)`);
+                        grad.addColorStop(1,    `rgba(${pr},${pg},${pb},0)`);
+                    }
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle   = grad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
+                    ctx.fill();
+                }
 
             } else if (isMaterialTile) {
                 // ── Material tile (plastic / metal) ────────────────────────
@@ -1965,12 +2029,15 @@ export class RenderSystem {
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const [pr, pg, pb] = hexToRgb(baseHex);
 
-                    // Render radius slightly larger than the collision
-                    // radius so the soft edge bleeds into the surrounding
-                    // space — bonded clusters read as one continuous
-                    // sheet rather than a row of distinct blobs.
+                    // Render radius 1.5× the collision radius so the
+                    // soft edge bleeds well past the collision body —
+                    // bonded clusters read as one continuous sheet of
+                    // overlapping polymer blobs rather than a row of
+                    // distinct circles.  Matches the user's "1.5×
+                    // diameter of the shard collision box" spec
+                    // (decision #15b follow-up).
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 1.2;
+                    const renderR    = collisionR * 1.5;
 
                     const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, renderR);
                     // Core alpha: 0.85 reads as solid polymer at the

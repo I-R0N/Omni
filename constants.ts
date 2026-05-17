@@ -448,18 +448,19 @@ export const STRUCTURE_VARIANTS = {
     color: COLORS.STRUCTURE,
   },
   plastic: {
-    // 24 HP — 3× the original 8 to tighten the break-loose threshold.
-    // Same hits-to-break as metal.  Differentiation is purely visual:
-    // plastic deforms more per hit (higher dent.vertexJitter) and
-    // detaches as a single ~1/3-size shard; metal warps subtly and
-    // breaks into a 1/3 + 1/6 pair.
-    health: 24,
+    // 1 HP — matches glass: a single projectile shatters the tile
+    // into a burst of plastic-shards.  Per-shard durability (24 HP)
+    // moves down into `plastic-tile.dent.shardHealth` so the cluster
+    // still absorbs sustained damage even though the tile face is
+    // brittle.  The softbody read is "thin polymer skin, dense
+    // shards underneath."
+    health: 1,
     mass: Infinity,
     indestructible: false,
-    // sprite left empty so RenderSystem's sprite branch falls through
-    // to the polygon-based material-tile branch — that's the only
-    // path that draws the dented polygonPoints.  ASSETS.HEX_STRUCTURE_PLASTIC
-    // is kept in the manifest for a future per-variant sprite.
+    // sprite left empty so RenderSystem falls through to the
+    // dedicated plastic-tile soft-gradient branch (no polygon
+    // outline / no sprite).  ASSETS.HEX_STRUCTURE_PLASTIC is kept
+    // in the manifest for a future per-variant sprite.
     sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
   },
@@ -1557,24 +1558,41 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Matches the new STRUCTURE_PLASTIC fuchsia so tile + shard read
     // as one substance under bloom.
     glow: { color: '#fbcfe8', range: 250, peakAlpha: 0.33 },
-    // Plastic-softbody retrofit (decision #15b): per-tile dent
-    // (vertexJitter / per-hit polygon pull) is dropped — softbody
-    // cluster deformation via elasticBond stretching supersedes it.
-    // vertexJitter: 0 keeps the tile's HP-per-hit logic (PhysicsSystem
-    // routes through the isDentEntity branch which decrements one HP
-    // per hit, ignoring weapon damage) while disabling visible
-    // polygon deformation.  The tile stays a clean hex until it
-    // detaches.  On detach, 3 circular plastic-shards spawn — each
-    // carries ~1/3 of the deformed tile's area (sizeFraction = sqrt
-    // 1/3 ≈ 0.577).  No `inheritParentPolygon`: shards use the
-    // variant's 16-gon spawn shape, not the hex outline.
+    // Plastic-softbody retrofit (decision #15b, follow-up tweak):
+    // tile face is now glass-brittle (STRUCTURE_VARIANTS.plastic.
+    // health = 1 → dies in one hit, same as glass) but releases a
+    // burst of 8–12 small plastic-shards on shatter.  Each shard
+    // carries the full plastic durability via `dent.shardHealth =
+    // 24`, decoupled from the tile's own 1-HP face.  The softbody
+    // read is "thin polymer skin pops, dense bonded shards
+    // underneath."
+    //
+    // vertexJitter: 0 is kept so PhysicsSystem.applyDentStep
+    // remains a no-op — even at 1 HP the dent-policy branch still
+    // routes through applyDentStep for tile/shard parity.  No
+    // `inheritParentPolygon`: shards use the variant's 16-gon
+    // spawn shape, not the hex outline.  countMin/countMax expand
+    // a single template into a random burst at spawn time.
+    //
+    // sizeFraction range 0.22-0.32: smaller bursts than the
+    // previous 3×0.577 split — more like a sheet bursting into
+    // confetti than three big chunks splitting off.  The lower
+    // end (0.22) keeps small chips at 25+ diameter; the upper
+    // end (0.32) keeps the chunkiest shards around 38 diameter so
+    // they still read as substantial pieces.
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0,
+      shardHealth: 24,
       breakShards: [
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        {
+          variant: 'plastic-shard',
+          sizeFraction: 0.27,                   // fallback when range fields unset
+          sizeFractionMin: 0.22,
+          sizeFractionMax: 0.32,
+          countMin: 8,
+          countMax: 12,
+        },
       ],
     },
   },
