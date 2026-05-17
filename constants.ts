@@ -23,15 +23,13 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
-  // Plastic — magenta softbody polymer (Fuchsia 400).  The plastic-
-  // softbody retrofit (decision #15b) shifted the read from rigid
-  // matte amber to a translucent cluster-bonded sheet, so the colour
-  // moved off the warm earth-tone palette where it conflicted with
-  // rock's orange glow.  Magenta also sits cleanly outside the
-  // nebula composition range (which tends pink/teal/purple but
-  // never this saturated a fuchsia) so plastic still reads as its
-  // own material on the HUD and minimap.
-  STRUCTURE_PLASTIC: '#e879f9',           // Fuchsia 400 — softbody polymer body
+  // Plastic — black softbody polymer.  Reads as a void / tar /
+  // ink-blot silhouette against the bright nebula and starfield
+  // backgrounds.  No risk of confusion with any other material
+  // (the only other near-black entity is indestructible-tile's
+  // deep-purple #4c1d95, which is markedly more saturated under
+  // the proximity bloom).
+  STRUCTURE_PLASTIC: '#000000',           // Pure black — softbody polymer body
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
   // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
@@ -1883,7 +1881,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       scatterHalfCone: Math.PI * 0.55,
     },
     // Magenta particle puff matches the new fuchsia body colour.
-    onShatterParticles: { color: '#e879f9', count: 5 },
+    onShatterParticles: { color: '#000000', count: 5 },
     passThrough: false,
     // Plastic shards drift through the plastic-tile repel field.
     // (Plastic-tiles don't emit a field today, but the immunity is

@@ -1702,7 +1702,7 @@ export class GameEngine {
                 || target.shardVariant === 'metal-shard')) {
           const dustCount = target.size.x > 50 ? 5 : 3;
           const dustColor =
-              target.shardVariant === 'plastic-shard' ? '#e879f9'
+              target.shardVariant === 'plastic-shard' ? '#000000'
             : target.shardVariant === 'metal-shard'   ? '#cbd5e1'
             :                                            '#94a3b8'; // rock-shard
           this.spawnParticles(impactPos, dustCount, dustColor, {
