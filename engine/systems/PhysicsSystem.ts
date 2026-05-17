@@ -3,18 +3,25 @@
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS } from '../../constants';
 
-/** Set wiggleTimer on a plastic-shard whose post-impulse speed has
+/** Set wiggle state on a plastic-shard whose post-impulse speed has
  *  crossed restSpeed — wakes the shard out of its sleep state, so
  *  it both jiggles (visual) and shows that it actually moved.
- *  No-op for non-plastic entities and for impulses too small to
- *  matter.  Inlined comparison (squared speed vs squared rest) so
- *  the hot path skips a sqrt. */
-function maybeStampPlasticWiggle(e: GameEntity): void {
+ *  `dirX` / `dirY` is the impact direction (need not be normalised
+ *  — atan2 ignores magnitude); stored as wiggleAngle so the
+ *  renderer can align the squash axis with the impact direction
+ *  (stretch along, squash perpendicular).  No-op for non-plastic
+ *  entities and for impulses too small to matter.  Inlined
+ *  comparison (squared speed vs squared rest) so the hot path
+ *  skips a sqrt. */
+function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number): void {
     if (e.shardVariant !== 'plastic-shard') return;
     const rest = e.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
     const restSq = rest * rest;
     const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-    if (vSq > restSq) e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
+    if (vSq > restSq) {
+        e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
+        e.wiggleAngle = Math.atan2(dirY, dirX);
+    }
 }
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
@@ -1448,10 +1455,13 @@ export class PhysicsSystem {
       b.velocity.y += iy * invMassB;
       // Plastic-shard wiggle trigger — fires when the post-impulse
       // speed is above restSpeed (collision was strong enough to
-      // wake the shard out of its sleep state).  No-op for non-
-      // plastic pairs; sqrt-free.
-      maybeStampPlasticWiggle(a);
-      maybeStampPlasticWiggle(b);
+      // wake the shard out of its sleep state).  Impact direction
+      // = the contact normal (nx, ny); for entity b the inbound
+      // direction is opposite, but atan2 produces a 180°-swapped
+      // angle whose squash visual is identical (squash axis is
+      // unsigned).  No-op for non-plastic pairs; sqrt-free.
+      maybeStampPlasticWiggle(a,  nx,  ny);
+      maybeStampPlasticWiggle(b, -nx, -ny);
   }
 
   private checkAndResolveCollision(
@@ -1900,7 +1910,7 @@ export class PhysicsSystem {
                       const pushFactor = (0.20 * bouncinessMul) / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
-                      maybeStampPlasticWiggle(target);
+                      maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y);
                   }
               }
               target.hitFlash = 0.1;
@@ -2237,9 +2247,12 @@ export class PhysicsSystem {
       }
       // Plastic-shard wiggle trigger — fires when post-impulse
       // speed > restSpeed (collision woke the shard from its
-      // sleep state).  No-op for non-plastic.
-      maybeStampPlasticWiggle(a);
-      maybeStampPlasticWiggle(b);
+      // sleep state).  Impact direction = contact normal (nx, ny)
+      // flipped for the b side; squash visual is unsigned so the
+      // 180° flip doesn't matter, but it's cheap to pass the
+      // correct sign anyway.  No-op for non-plastic.
+      maybeStampPlasticWiggle(a,  nx,  ny);
+      maybeStampPlasticWiggle(b, -nx, -ny);
   }
 
   // --- OPTIMIZED SAT HELPERS ---

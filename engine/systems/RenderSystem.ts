@@ -2063,8 +2063,21 @@ export class RenderSystem {
                         const tElapsed = WIGGLE_CONSTANTS.DURATION - wt;
                         const phase = entity.wigglePhase ?? 0;
                         const wave = Math.sin(tElapsed * WIGGLE_CONSTANTS.FREQ + phase);
-                        const scale = 1.0 + WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
-                        ctx.scale(scale, scale);
+                        const amp = WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
+                        // Align local +X with the world-space impact
+                        // direction stamped at wiggle-trigger time —
+                        // entity.rotation is already baked into the
+                        // setTransform above, so the delta is
+                        // (wiggleAngle − entity.rotation).  Then a
+                        // non-uniform scale stretches along impact
+                        // (+amp) and squashes perpendicular (−amp).
+                        // Reads as polymer absorbing the hit rather
+                        // than a bubble pulsing radially.  Roughly
+                        // volume-conserving at small amp ((1+x)(1−x)
+                        // ≈ 1 − x²).
+                        const wa = entity.wiggleAngle ?? 0;
+                        ctx.rotate(wa - entity.rotation);
+                        ctx.scale(1 + amp, 1 - amp);
                     }
 
                     ctx.globalAlpha = 0.75 * fadeAlpha;

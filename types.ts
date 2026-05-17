@@ -520,9 +520,14 @@ export interface GameEntity {
   // scale pulse (visual-only, doesn't touch collision footprint).
   // wigglePhase is set once at spawn from a hash of entity.color so
   // each amber shade has its own oscillation phase — neighbouring
-  // shards in a cluster wiggle out of sync.
+  // shards in a cluster wiggle out of sync.  wiggleAngle is the
+  // world-space impact direction (radians) stamped at trigger time
+  // so the squash aligns to the impact axis — stretch along, squash
+  // perpendicular — reads as polymer absorbing the hit rather than
+  // a bubble pulsing radially.
   wiggleTimer?: number;
   wigglePhase?: number;
+  wiggleAngle?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
