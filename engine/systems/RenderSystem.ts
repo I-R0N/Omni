@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -2142,16 +2142,47 @@ export class RenderSystem {
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 1.2;
 
+                    // B: spawn-time shape variance — entity-local per-axis
+                    // scale rolled at spawn (DropSystem.spawnDentShard /
+                    // ShardSystem.shatterAsteroidStyle).  Static; gives
+                    // each shard its own slightly-irregular outline.
+                    const bsx = entity.baseScaleX ?? 1;
+                    const bsy = entity.baseScaleY ?? 1;
+                    if (bsx !== 1 || bsy !== 1) ctx.scale(bsx, bsy);
+
+                    // A: impact dent (persistent, decaying) + wiggle
+                    // (short pulse).  Both apply along the most recent
+                    // impact axis — wiggle takes precedence while it's
+                    // active (its `wiggleAngle` is the canonical axis);
+                    // once it decays the dent vector's own direction is
+                    // used.  Composed multiplicatively: wiggle stretches
+                    // along axis (1+amp, 1-amp), dent compresses along
+                    // axis (1-dent×SQUASH, 1+dent×BULGE).  At peak hit
+                    // wiggle dominates (stretch), then it decays and the
+                    // dent compression takes over — reads as polymer
+                    // popping out, then sagging back, then slowly
+                    // recovering.
+                    const dxv = entity.dentX ?? 0;
+                    const dyv = entity.dentY ?? 0;
+                    const dentMagSq = dxv * dxv + dyv * dyv;
                     const wt = entity.wiggleTimer;
+                    let wiggleAmp = 0;
                     if (wt !== undefined && wt > 0) {
                         const decay = wt / WIGGLE_CONSTANTS.DURATION;
                         const tElapsed = WIGGLE_CONSTANTS.DURATION - wt;
                         const phase = entity.wigglePhase ?? 0;
                         const wave = Math.sin(tElapsed * WIGGLE_CONSTANTS.FREQ + phase);
-                        const amp = WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
-                        const wa = entity.wiggleAngle ?? 0;
-                        ctx.rotate(wa - entity.rotation);
-                        ctx.scale(1 + amp, 1 - amp);
+                        wiggleAmp = WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
+                    }
+                    if (dentMagSq > 0 || wiggleAmp !== 0) {
+                        const dentMag = dentMagSq > 0 ? Math.sqrt(dentMagSq) : 0;
+                        const axisAngle = (wt !== undefined && wt > 0)
+                          ? (entity.wiggleAngle ?? 0)
+                          : Math.atan2(dyv, dxv);
+                        ctx.rotate(axisAngle - entity.rotation);
+                        const scaleX = (1 + wiggleAmp) * (1 - dentMag * PLASTIC_DEFORM_CONSTANTS.DENT_SQUASH_FACTOR);
+                        const scaleY = (1 - wiggleAmp) * (1 + dentMag * PLASTIC_DEFORM_CONSTANTS.DENT_BULGE_FACTOR);
+                        ctx.scale(scaleX, scaleY);
                     }
 
                     const outline = getActivePlasticPaletteOutline();

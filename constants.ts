@@ -282,6 +282,50 @@ export const WIGGLE_CONSTANTS = {
   AMPLITUDE: 0.15,
 } as const;
 
+/** Plastic-shard deformation constants — two parallel mechanisms:
+ *
+ *  Dent (A): per-impact accumulator (2D vector on entity.dentX/dentY)
+ *  that decays exponentially toward zero.  Persists past the wiggle's
+ *  0.4 s window — reads as polymer "remembering" hits and slowly
+ *  recovering shape.  Renderer applies a squash along the dent
+ *  direction + small bulge perpendicular.
+ *
+ *  Spawn variance (B): per-axis random scale at spawn (entity.base
+ *  ScaleX/Y) in [1-V, 1+V].  Static; gives each shard its own
+ *  slightly irregular shape so clusters don't all look identical. */
+export const PLASTIC_DEFORM_CONSTANTS = {
+  /** Magnitude added to the dent vector per impact, along the
+   *  normalised impact direction.  Multiple hits in the same
+   *  direction stack additively until DENT_MAX_MAGNITUDE caps the
+   *  total. */
+  DENT_INCREMENT_PER_IMPACT: 0.25,
+  /** Cap on the dent vector's total magnitude.  At 0.4 the
+   *  visual squash hits ~18 % along the impact axis (DENT_SQUASH
+   *  _FACTOR × 0.4 = 0.18). */
+  DENT_MAX_MAGNITUDE: 0.4,
+  /** Per-second decay rate for the dent vector.  0.5 = half-life
+   *  one second; a max-magnitude dent visibly persists for ~4 s
+   *  before snapping to zero at DENT_REST_THRESHOLD. */
+  DENT_DECAY_PER_SECOND: 0.5,
+  /** Magnitude below which both axes snap to undefined so the
+   *  renderer's dent check goes cold. */
+  DENT_REST_THRESHOLD: 0.02,
+  /** Multiplier on dent magnitude for the along-axis squash:
+   *  scaleX = 1 − dentMag × SQUASH_FACTOR.  At max dent (0.4)
+   *  this gives 18 % compression along the impact axis. */
+  DENT_SQUASH_FACTOR: 0.45,
+  /** Multiplier on dent magnitude for the perpendicular bulge:
+   *  scaleY = 1 + dentMag × BULGE_FACTOR.  Lower than the squash
+   *  factor so the disc loses some apparent area at high dent —
+   *  reads as "polymer chunk being pressed in" rather than
+   *  rubber-band stretch. */
+  DENT_BULGE_FACTOR: 0.2,
+  /** Spawn-time per-axis scale variance — each plastic-shard rolls
+   *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
+   *  clusters have visible per-shard shape variation. */
+  SPAWN_SHAPE_VARIANCE: 0.15,
+} as const;
+
 // --- SYSTEM CONFIGURATIONS ---
 
 export const CAMERA_CONSTANTS = {

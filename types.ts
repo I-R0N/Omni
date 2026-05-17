@@ -528,6 +528,22 @@ export interface GameEntity {
   wiggleTimer?: number;
   wigglePhase?: number;
   wiggleAngle?: number;
+  // Plastic-shard impact-dent accumulator (option A).  2D vector
+  // representing the sum of recent impact directions (normalised,
+  // weighted by PLASTIC_DEFORM_CONSTANTS.DENT_INCREMENT_PER_IMPACT).
+  // Decays exponentially per substep in PhysicsSystem.update;
+  // renderer applies a squash along the dent direction + small
+  // bulge perpendicular.  Persists past the wiggle's 0.4 s window
+  // (~4 s recovery from max), reads as polymer "remembering" hits.
+  dentX?: number;
+  dentY?: number;
+  // Plastic-shard spawn-time shape variance (option B).  Per-axis
+  // random scale rolled at spawn in [1 − V, 1 + V] where V =
+  // PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE.  Renderer
+  // multiplies through in entity-local space so each shard has
+  // its own slightly irregular outline regardless of impact state.
+  baseScaleX?: number;
+  baseScaleY?: number;
   // Plastic-shard chain-bond list — partners the shard is currently
   // bonded with, ordered by formation time.  Maintained by
   // ShardSystem.runPlasticChainBonds: contact appends, exceeding

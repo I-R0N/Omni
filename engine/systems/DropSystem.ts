@@ -8,6 +8,7 @@ import {
   NEBULA_CONSTANTS,
   randomPlasticShade,
   colorToWigglePhase,
+  PLASTIC_DEFORM_CONSTANTS,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -573,6 +574,13 @@ export class DropSystem {
       const shardColor = spec.variant === 'plastic-shard'
         ? randomPlasticShade()
         : tile.color;
+      // Spawn-time shape variance for plastic-shards — per-axis
+      // random scale in [1 − V, 1 + V] so each shard reads as its
+      // own slightly-irregular outline rather than a perfect circle.
+      const isPlasticShardSpec = spec.variant === 'plastic-shard';
+      const sv = PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE;
+      const baseScaleX = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
+      const baseScaleY = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -621,6 +629,9 @@ export class DropSystem {
         // shade so each colour wiggles with a distinct offset (see
         // WIGGLE_CONSTANTS).  Other variants don't wiggle.
         wigglePhase:   spec.variant === 'plastic-shard' ? colorToWigglePhase(shardColor) : undefined,
+        // Plastic-shard spawn-time shape variance (option B).
+        baseScaleX,
+        baseScaleY,
       });
     }
 

@@ -26,6 +26,7 @@ import {
   randomPlasticShade,
   colorToWigglePhase,
   PLASTIC_CHAIN_CONSTANTS,
+  PLASTIC_DEFORM_CONSTANTS,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -516,6 +517,13 @@ export class ShardSystem {
       const childColor = childVariant.id === 'plastic-shard'
         ? randomPlasticShade()
         : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
+      // Spawn-time shape variance for plastic-shard sub-shards
+      // (option B) — gives shatter-spawned children their own
+      // shape footprint same as freshly-detached shards.
+      const isChildPlasticShard = childVariant.id === 'plastic-shard';
+      const sv = PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE;
+      const baseScaleX = isChildPlasticShard ? (1 - sv + Math.random() * 2 * sv) : undefined;
+      const baseScaleY = isChildPlasticShard ? (1 - sv + Math.random() * 2 * sv) : undefined;
 
       entities.push({
         id:           nextId('shard'),
@@ -547,6 +555,9 @@ export class ShardSystem {
         // shade — gives sub-shards spawned by shatter their own
         // oscillation timing, distinct from the parent.
         wigglePhase:   childVariant.id === 'plastic-shard' ? colorToWigglePhase(childColor) : undefined,
+        // Plastic-shard spawn-time shape variance (option B).
+        baseScaleX,
+        baseScaleY,
       });
     }
 

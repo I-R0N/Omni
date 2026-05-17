@@ -1,27 +1,47 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS } from '../../constants';
 
-/** Set wiggle state on a plastic-shard whose post-impulse speed has
- *  crossed restSpeed — wakes the shard out of its sleep state, so
- *  it both jiggles (visual) and shows that it actually moved.
- *  `dirX` / `dirY` is the impact direction (need not be normalised
- *  — atan2 ignores magnitude); stored as wiggleAngle so the
- *  renderer can align the squash axis with the impact direction
- *  (stretch along, squash perpendicular).  No-op for non-plastic
- *  entities and for impulses too small to matter.  Inlined
- *  comparison (squared speed vs squared rest) so the hot path
- *  skips a sqrt. */
+/** Set wiggle + dent state on a plastic-shard whose post-impulse
+ *  speed has crossed restSpeed — wakes the shard out of its sleep
+ *  state, so it both jiggles (visual short pulse) and accumulates
+ *  a persistent dent in the impact direction (visual long-tail
+ *  squash that decays over ~4 s).  `dirX` / `dirY` is the impact
+ *  direction; stored as wiggleAngle for the wiggle's axis and
+ *  normalised + accumulated into entity.dentX/Y for the dent.
+ *  No-op for non-plastic entities and for impulses too small to
+ *  matter.  Inlined comparison (squared speed vs squared rest) so
+ *  the hot path skips a sqrt. */
 function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number): void {
     if (e.shardVariant !== 'plastic-shard') return;
     const rest = e.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
     const restSq = rest * rest;
     const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-    if (vSq > restSq) {
-        e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
-        e.wiggleAngle = Math.atan2(dirY, dirX);
+    if (vSq <= restSq) return;
+
+    e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
+    e.wiggleAngle = Math.atan2(dirY, dirX);
+
+    // Accumulate impact direction (normalised) into the dent
+    // vector; cap total magnitude so repeated hits in the same
+    // direction don't grow the dent indefinitely.
+    const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (dirLen <= 0.0001) return;
+    const nx = dirX / dirLen;
+    const ny = dirY / dirLen;
+    const inc = PLASTIC_DEFORM_CONSTANTS.DENT_INCREMENT_PER_IMPACT;
+    let newDX = (e.dentX ?? 0) + nx * inc;
+    let newDY = (e.dentY ?? 0) + ny * inc;
+    const max = PLASTIC_DEFORM_CONSTANTS.DENT_MAX_MAGNITUDE;
+    const m = Math.sqrt(newDX * newDX + newDY * newDY);
+    if (m > max) {
+        const k = max / m;
+        newDX *= k;
+        newDY *= k;
     }
+    e.dentX = newDX;
+    e.dentY = newDY;
 }
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
@@ -327,6 +347,25 @@ export class PhysicsSystem {
       if (entity.wiggleTimer !== undefined && entity.wiggleTimer > 0) {
           entity.wiggleTimer -= dt;
           if (entity.wiggleTimer <= 0) entity.wiggleTimer = undefined;
+      }
+      // Plastic-shard impact-dent decay — 2D vector that decays
+      // exponentially toward zero each substep.  Half-life ~1 s
+      // at PLASTIC_DEFORM_CONSTANTS.DENT_DECAY_PER_SECOND = 0.5
+      // (a max-magnitude dent visibly persists ~4 s).  Both axes
+      // snap to undefined together once both fall below the rest
+      // threshold so the renderer's check stays cheap.
+      if (entity.dentX !== undefined || entity.dentY !== undefined) {
+          const decayMul = Math.pow(PLASTIC_DEFORM_CONSTANTS.DENT_DECAY_PER_SECOND, dt);
+          const newDX = (entity.dentX ?? 0) * decayMul;
+          const newDY = (entity.dentY ?? 0) * decayMul;
+          const rest = PLASTIC_DEFORM_CONSTANTS.DENT_REST_THRESHOLD;
+          if (Math.abs(newDX) < rest && Math.abs(newDY) < rest) {
+              entity.dentX = undefined;
+              entity.dentY = undefined;
+          } else {
+              entity.dentX = newDX;
+              entity.dentY = newDY;
+          }
       }
       // Merge fade-out — both nebula AND non-nebula shard families
       // ride the same `mergeFadeTimer` field; the value differs by
