@@ -1558,18 +1558,19 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // shard branch) draws a solid-circle fill in the entity colour,
 // so the 16-gon is collision-only.
 //
-// Damping tuning (v5, chain-bond mode): linearDamping 0.97 +
-// restSpeed 0.05 lets shards drift freely so the chain-bond
-// pipeline (PLASTIC_CHAIN_CONSTANTS below) can pull unbonded
-// shards toward partners and form string-like chains.  Shards
-// still settle to rest eventually but they're free to move when
-// kicked or pulled.
+// Damping tuning (v5, chain-bond mode): linearDamping 0.97 lets
+// shards drift freely so the chain-bond pipeline (PLASTIC_CHAIN_
+// CONSTANTS below) can pull unbonded shards toward partners and
+// form string-like chains.  restSpeed kept at the v4 sleep-state
+// value of 0.15 — shards still drift between bonds but anything
+// below 0.15 vel-units snaps to zero, so a settled chain sleeps
+// cleanly without micro-drift jitter at the contact points.
 //
 // PRESERVED — prior "sleep-state" config (v4) for future use on
 // a different material variant if needed:
 //   linearDamping:  0.92    // ~99 % velocity bleed per second
 //   angularDamping: 0.92
-//   restSpeed:      0.15    // hard sleep threshold
+//   restSpeed:      0.15    // hard sleep threshold (kept current)
 //   restSpin:       0.15
 // That profile gives heavy "sticky" feel — shards barely move
 // after a kick and freeze at the slightest pause.  The directional
@@ -1582,7 +1583,7 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeToMass: (d: number) => d * 0.7,
   linearDamping:  0.97,
   angularDamping: 0.97,
-  restSpeed: 0.05,
+  restSpeed: 0.15,
   restSpin:  0.05,
 };
 
