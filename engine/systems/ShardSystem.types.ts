@@ -329,6 +329,15 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
+  /** Pass-through-and-shatter rule (g3 material-interactions).  When
+   *  this variant contacts an entity whose variant id is in `targets`,
+   *  PhysicsSystem skips collision impulse on the pair (the carrier's
+   *  HP and trajectory are unchanged) and immediately triggers the
+   *  target's death pipeline — same path the target takes when its
+   *  health hits 0 normally, so existing shatter / tier-chain /
+   *  drop logic is reused as-is.  Today: metal-shard targets
+   *  glass-tile + glass-shard. */
+  passthroughShatter?: { targets: ShardVariantId[] };
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
    *  vertices are pulled inward by a random fraction in

@@ -425,7 +425,7 @@ export class PhysicsSystem {
     if (this.collisionsEnabled) {
       this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
       if (this.shouldRunShardPairsThisStep()) {
-        this.resolveShardPairs(asteroids);
+        this.resolveShardPairs(asteroids, onDeath);
       }
       if (this.shardTileCollisionsEnabled && this.shouldRunShardTilePairsThisStep()) {
         this.resolveShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
@@ -439,6 +439,16 @@ export class PhysicsSystem {
       // checkAndResolveCollision when the inner cell holds no
       // nebula-tile.
       this.resolveNebulaShardTilePairs(asteroids, onDamage, onDeath, onShake, onHit);
+      // Unconditional passthroughShatter pass — for variants whose
+      // SHARD_VARIANTS entry sets `passthroughShatter.targets`
+      // (today: metal-shard targeting glass-tile + glass-shard).
+      // Mirrors the nebula-tile pass: gets the dynamic-vs-static
+      // pair in front of resolveCollision so the passthroughShatter
+      // branch there can fire even when shardTileCollisionsEnabled
+      // is off.  Dynamic-vs-dynamic pairs (metal-shard ↔ glass-
+      // shard) flow through resolveAsteroidPair, which calls the
+      // same helper inline.
+      this.resolvePassthroughShatterPairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
     this.lastCollisionsMs = performance.now() - tCol;
 
@@ -1052,7 +1062,10 @@ export class PhysicsSystem {
    * out — they shouldn't pull or push other shards during their
    * death animation.
    */
-  private resolveShardPairs(shards: GameEntity[]): void {
+  private resolveShardPairs(
+      shards: GameEntity[],
+      onDeath?: (entity: GameEntity) => void,
+  ): void {
     if (shards.length < 2) return;
 
     // Build the shard-only grid.  Same SPATIAL_GRID_SIZE as the main
@@ -1090,11 +1103,113 @@ export class PhysicsSystem {
                     const b = cell[j];
                     if (a === b) continue;
                     if (a.id > b.id) continue; // process each pair once
-                    this.resolveAsteroidPair(a, b);
+                    this.resolveAsteroidPair(a, b, onDeath);
                 }
             }
         }
     }
+  }
+
+  /**
+   * Mobile-shard ↔ static-tile pass for variants that declare
+   * `passthroughShatter.targets` (today: metal-shard targeting
+   * glass-tile + glass-shard).  Unconditional — does NOT require
+   * `shardTileCollisionsEnabled` — because the rule is a gameplay
+   * mechanic, not a debug aid.  Cheap: only iterates shards whose
+   * variant has the field set (today just metal-shard), and the
+   * inner cell short-circuits if the static cell holds nothing.
+   *
+   * Dispatches through checkAndResolveCollision → resolveCollision,
+   * where the inline passthroughShatter branch flips the target's
+   * active flag and fires onDeath (which routes through GameEngine
+   * .handleEntityDeath → spawnDrops → spawnGlassShards for tiles,
+   * and ShardSystem.shatter for shards via the existing tier chain).
+   * The carrier shard takes no impulse — its trajectory and HP are
+   * unchanged.
+   */
+  private resolvePassthroughShatterPairs(
+      shards: GameEntity[],
+      onDamage?: (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => void,
+      onDeath?: (entity: GameEntity) => void,
+      onShake?: (amount: number) => void,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): void {
+      for (let i = 0; i < shards.length; i++) {
+          const a = shards[i];
+          if (!a.active || a.isExploding) continue;
+          if (a.mergeFadeTimer !== undefined) continue;
+          if (a.shardVariant === undefined) continue;
+          const aVariant = SHARD_VARIANTS[a.shardVariant];
+          if (aVariant.passthroughShatter === undefined) continue;
+
+          const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
+          const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
+
+          for (let x = -1; x <= 1; x++) {
+              for (let y = -1; y <= 1; y++) {
+                  const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
+                  if (!cell) continue;
+                  for (let j = 0; j < cell.length; j++) {
+                      const b = cell[j];
+                      if (!b.active) continue;
+                      if (b.shardVariant === undefined) continue;
+                      if (aVariant.passthroughShatter.targets.indexOf(b.shardVariant) === -1) continue;
+                      this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                  }
+              }
+          }
+      }
+  }
+
+  /**
+   * Pass-through-and-shatter rule (g3 material-interactions).  Called
+   * from the impulse-resolution sites (resolveAsteroidPair fast-path
+   * and resolveCollision full-path) before any bounce math runs.
+   * Returns true when the pair matches the rule and the target has
+   * been routed through its death pipeline; callers should bail
+   * immediately on true (no positional correction, no impulse, no
+   * bounce).  The carrier's HP and trajectory are unchanged.
+   *
+   * Target dispatch mirrors the standard health-zero death path:
+   * health = 0, active = false, removeStaticEntity for static tiles,
+   * then onDeath().  GameEngine.handleEntityDeath fans out from
+   * there (DropSystem.spawnGlassShards for glass-tile, ShardSystem
+   * .shatter tier chain for glass-shard).
+   */
+  private tryPassthroughShatter(
+      a: GameEntity,
+      b: GameEntity,
+      onDeath?: (entity: GameEntity) => void,
+  ): boolean {
+      if (a.shardVariant === undefined || b.shardVariant === undefined) return false;
+      const aVar = SHARD_VARIANTS[a.shardVariant];
+      const bVar = SHARD_VARIANTS[b.shardVariant];
+      let target: GameEntity | null = null;
+      if (aVar.passthroughShatter !== undefined
+          && aVar.passthroughShatter.targets.indexOf(b.shardVariant) !== -1) {
+          target = b;
+      } else if (bVar.passthroughShatter !== undefined
+          && bVar.passthroughShatter.targets.indexOf(a.shardVariant) !== -1) {
+          target = a;
+      }
+      if (target === null) return false;
+
+      // Stamp impact velocity / damage so the target's shatter
+      // pipeline (asteroid-style tier chain for glass-shard, glass-
+      // shard fan for glass-tile) gets a sensible scatter direction.
+      const carrier = target === a ? b : a;
+      if (carrier.velocity) {
+          target.lastImpactVelocity = { x: carrier.velocity.x, y: carrier.velocity.y };
+      }
+      target.lastImpactDamage = Math.max(1, target.lastImpactDamage ?? 1);
+
+      target.health = 0;
+      target.active = false;
+      if (target.mass === Infinity) {
+          this.removeStaticEntity(target);
+      }
+      if (onDeath) onDeath(target);
+      return true;
   }
 
   /**
@@ -1179,7 +1294,11 @@ export class PhysicsSystem {
       }
   }
 
-  private resolveAsteroidPair(a: GameEntity, b: GameEntity) {
+  private resolveAsteroidPair(
+      a: GameEntity,
+      b: GameEntity,
+      onDeath?: (entity: GameEntity) => void,
+  ) {
       // Cheapest possible early-outs first — most pair calls discard
       // here before paying any further work.
 
@@ -1193,6 +1312,13 @@ export class PhysicsSystem {
       const dy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = dx * dx + dy * dy;
       if (distSq > sumRSq) return;
+
+      // Passthrough-and-shatter (today: metal-shard → glass-shard).
+      // Skips impulse / positional correction entirely and routes
+      // the target through its death pipeline.  Checked before the
+      // settled-pair skip so a metal-shard sliding past a glass-
+      // shard still triggers the shatter on first overlap.
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
 
       // Settled-pair skip: when the pair is barely overlapping AND
       // already drifting at almost the same velocity, separation /
@@ -1416,6 +1542,16 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
       if (a.type === EntityType.PARTICLE || b.type === EntityType.PARTICLE) return;
+
+      // ── Passthrough-and-shatter (g3 material-interactions) ────────────
+      // Variants whose SHARD_VARIANTS entry sets
+      // `passthroughShatter.targets` (today: metal-shard targeting
+      // glass-tile + glass-shard) skip impulse / positional
+      // correction entirely on contact and route the target through
+      // its standard death pipeline.  Checked before everything
+      // else so projectile / shake / drop branches don't bounce
+      // off a tile that's about to shatter from this contact.
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
 
       // ── NEBULA: pass-through with conditional shatter ──────────────────
       // Stage 5: per-variant passThrough flag drives the impulse skip

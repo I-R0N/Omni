@@ -1892,12 +1892,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     passThrough: false,
     // Metal shards feel the metal-tile repel field (priming g3
     // attraction work where metal-shards orbit metal clusters) but
-    // ignore glass-tile fields — metal "wins" against glass, see
-    // the g3 material-interactions design where metal-tiles will
-    // shatter glass-tiles on contact.  Glass-shard / plastic-shard
-    // stay fully `repelImmune` (their own family is the only field
-    // they'd care about, and they pass through it).
+    // ignore glass-tile fields — metal "wins" against glass.
+    // Without this immunity the glass-tile repel field would push
+    // the metal-shard away before contact ever happens, defeating
+    // the passthroughShatter rule below.  Glass-shard / plastic-
+    // shard stay fully `repelImmune` (their own family is the only
+    // field they'd care about, and they pass through it).
     repelImmuneFrom: ['glass-tile'],
+    // g3 material-interactions: metal-shards pass through glass-
+    // tiles and glass-shards with zero impulse and instantly
+    // shatter them on overlap.  The metal-shard's HP and trajectory
+    // are unaffected; the glass target falls through its normal
+    // death pipeline (glass-tile → DropSystem.spawnGlassShards,
+    // glass-shard → ShardSystem.shatter tier chain).
+    passthroughShatter: { targets: ['glass-tile', 'glass-shard'] },
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,
