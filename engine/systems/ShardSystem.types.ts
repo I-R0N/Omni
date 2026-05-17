@@ -341,44 +341,6 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
-  /** Elastic-bond policy (plastic-softbody retrofit).  When set, the
-   *  variant participates in a persistent spring-coupled bond
-   *  network: each tick, every active bond applies a Hooke's-law
-   *  acceleration along the bond axis pulling the pair toward
-   *  `restFactor × contactDist`, plus a damping term proportional
-   *  to relative velocity along the bond axis.  Bonds form during
-   *  the merge broadphase when the pair distance is within
-   *  `restFactor × 1.5 × contactDist` and neither party already has
-   *  this bond; bonds break permanently when the pair distance
-   *  exceeds `breakFactor × restFactor × contactDist`.  Bonds
-   *  persist across frames and are stored in a separate list from
-   *  the bondsWith stick-bond pipeline (which is pair-consume +
-   *  transmute on a one-shot timer — different lifecycle).
-   *
-   *  Either party of a candidate pair may declare the bond — the
-   *  formation pass scans `partners` from both sides.  Today only
-   *  plastic-shard sets this field; plastic-tile bonds are formed
-   *  via plastic-shard's `partners: ['plastic-shard', 'plastic-
-   *  tile']` from the shard side.
-   *
-   *  Units: `stiffness` is acceleration per unit displacement
-   *  (1/s²) — per-second so values survive any future dt tweak;
-   *  `damping` is per-second velocity decay along the bond axis
-   *  (1/s).  Both `restFactor` and `breakFactor` are dimensionless
-   *  multipliers on the pair's contact distance. */
-  elasticBond?: {
-    /** Variants this bonds with.  Bond forms when either side's
-     *  `partners` includes the other side's variant id. */
-    partners: ShardVariantId[];
-    /** Acceleration per unit displacement, 1/s². */
-    stiffness: number;
-    /** Rest distance multiplier on `(sizeA + sizeB) × 0.5`. */
-    restFactor: number;
-    /** Break distance multiplier on rest distance. */
-    breakFactor: number;
-    /** Velocity damping along bond axis, 1/s. */
-    damping: number;
-  };
   /** Pass-through-and-shatter rule (g3 material-interactions).  When
    *  this variant contacts an entity whose variant id is in `targets`,
    *  PhysicsSystem skips collision impulse on the pair (the carrier's

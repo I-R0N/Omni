@@ -1499,26 +1499,24 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // unchanged — SAT just sees a 16-vertex regular polygon that's
 // indistinguishable from a circle at typical pair distances.
 // Zero angle jitter and near-zero radius variance hold the shape
-// to a clean round silhouette so cluster deformation reads as
-// "the bonds stretch, not the individual shards."  Render path
-// (RenderSystem plastic-shard branch) draws a soft radial gradient
-// rather than the polygon outline, so the 16-gon is collision-only.
+// to a clean round silhouette.  Render path (RenderSystem plastic-
+// shard branch) draws a soft radial gradient rather than the
+// polygon outline, so the 16-gon is collision-only.
 //
-// Damping tuning (post-playtest): linearDamping = 0.96 (was 0.93)
-// so projectile impulses propagate across a few frames before
-// being bled off.  At 0.96 a shard kicked at v=4 retains ~32 % of
-// its velocity after 1 s (vs ~1 % at 0.93) — enough for the bond
-// stretch + cluster drag to read visibly.  Still solidly damped
-// so standalone shards settle within ~2 s.  angularDamping kept
-// at 0.93 — spin should bleed off faster than translation so
-// shards don't pinwheel inside the cluster.
+// Damping tuning (v2): linearDamping = 0.97 matches nebula-shard
+// (NEBULA_CONSTANTS.LINEAR_DAMPING).  At 0.97 a shard kicked at
+// v=4 retains ~16 % of velocity after 1 s — heavy enough that
+// standalone shards drift slowly and read as sticky, light
+// enough that projectile impacts still visibly push them before
+// the damping bleeds the impulse away.  angularDamping matches
+// linear so spin and translation settle on the same timescale.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
   polyVerticesMin: 16, polyVerticesMax: 16,
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
-  linearDamping:  0.96,
-  angularDamping: 0.93,
+  linearDamping:  0.97,
+  angularDamping: 0.97,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
@@ -1847,15 +1845,26 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit (decision #15b): no bondsWith pair-
-    // consume / compose merge — plastic clusters cohere via the
-    // persistent elasticBond network below (separate pipeline).
-    // density compaction also disabled so cluster members stay
-    // visible as individual shards rather than collapsing into
-    // single denser blobs.
+    // Plastic-softbody retrofit, v2 (post-playtest pivot): the
+    // elastic-bond network was too perf-hungry (every bond
+    // integrating every substep) and visibly vibrated even at
+    // critical damping.  Switched to the standard bondsWith
+    // pair-consume + cohesion pipeline (same path glass-shard
+    // and rock-shard use) and leaned on heavy linearDamping
+    // (set in SHARD_SPAWN_SHAPE_PLASTIC, matches nebula-shard's
+    // 0.97) to make standalone shards drift slowly and feel
+    // sticky.  Self-bonding only — plastic clusters cohere when
+    // shards touch each other, drift together via the cohesion
+    // velocity blend, and slowly compose into bigger plastic-
+    // shards over ~18 s of contact (same timing as rock-shard /
+    // glass-shard).
     merge: {
       attractedTo: 'none',
-      bondsWith: 'none',
+      bondsWith: { include: ['plastic-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
       defaultOutcome: 'compose',
     },
     // Plastic-shards shatter into smaller plastic-shards on death
@@ -1884,59 +1893,24 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // is a one-line change.)
     repelImmune: true,
     spawnsDropsOnDeath: true,
-    // Elastic-bond network (decision #15b): persistent spring-coupled
-    // pairs between plastic-shards and between shards and tiles.
-    // Each tick the bond applies a Hooke's-law force toward
-    // restFactor × contactDist, plus damping along the bond axis.
-    // Bonds break permanently beyond breakFactor × restFactor ×
-    // contactDist.  Implementation lives in ShardSystem (tickElastic
-    // Bonds + runElasticBondFormation).
-    //
-    // Tunings come from the AskUserQuestion design pass + a follow-
-    // up tuning round after the first playtest showed projectile
-    // impacts produced almost no visible cluster deformation
-    // (stiff spring + heavy per-entity linearDamping = 0.93
-    // cancelled the impact velocity each substep).  Lower stiffness
-    // and lighter along-bond damping let the impulse propagate
-    // through the cluster — the hit shard moves, the bond
-    // stretches, neighbours follow.
-    //   restFactor 1.15 — small visible breathing room, gives the
-    //                     bond slack for both compression and stretch.
-    //   breakFactor 3.0 — cluster takes a few hits / noticeable
-    //                     stretch before pieces snap off.
-    //   stiffness 0.8  — extra-soft "polymer skin" pull (reduced
-    //                     10× from the previous round of tuning).
-    //                     Earlier value of 8 still felt rigid in
-    //                     playtest — projectile impacts barely
-    //                     stretched the cluster before the spring
-    //                     yanked the hit shard back.  At a 20-unit
-    //                     stretch the per-substep dv is now
-    //                     0.8×20/120 ≈ 0.13 vel units — a typical
-    //                     projectile impact (impulse ~2-5) easily
-    //                     overpowers the spring and the cluster
-    //                     visibly distorts before pulling back over
-    //                     ~3 s.
-    //   damping 1.8    — slightly above critical (ω ≈ √0.8 ≈ 0.89,
-    //                     critical damping c ≈ 1.79).  At ζ ≈ 1.01
-    //                     the spring is essentially critically
-    //                     damped — no oscillation, no ringing.
-    //                     Earlier damping=0.15 (matched 10× cut)
-    //                     left the bond underdamped (ζ ≈ 0.084)
-    //                     which made shards visibly vibrate for
-    //                     ~13 s after every impact — both bad
-    //                     aesthetics and a perf drain since the
-    //                     bonds never reached the rest-sleep gate
-    //                     in ShardSystem.tickElasticBonds.
-    elasticBond: {
-      partners: ['plastic-shard', 'plastic-tile'],
-      stiffness: 0.8,
-      restFactor:  1.15,
-      breakFactor: 3.0,
-      damping:     1.8,
+    // Density compaction — same enabled / 4-tier / 0.88 shrink
+    // profile as glass-shard and rock-shard so the cluster slowly
+    // condenses into denser fragments as bonded pairs compose.
+    // Matches the user's "glass shard like" direction for the v2
+    // plastic behaviour.  tintFloor 0.60 (slightly higher than
+    // glass/rock 0.55) — plastic stays warmer when dense so the
+    // magenta hue is still readable at max tier.
+    density: {
+      enabled: true,
+      maxSteps: 4,
+      areaThreshold: 32 * 32,
+      largeShardCollapseSize: 130,
+      tintFloor: 0.60,
+      shrinkFactor: 0.88,
     },
-    // Plastic-softbody retrofit: per-shard dent (vertexJitter / per-
-    // hit polygon pull) is dropped — softbody cluster deformation
-    // via elasticBond stretching supersedes it.  vertexJitter: 0
+    // Plastic-softbody retrofit: per-shard dent (vertexJitter /
+    // per-hit polygon pull) stays dropped — circular shape is the
+    // whole point of the soft-gradient render.  vertexJitter: 0
     // keeps the HP-per-hit logic (PhysicsSystem.applyDentStep is a
     // no-op at zero jitter; the isDentEntity branch still routes
     // ammo / drop policy through the dent path).  breakShards stays
