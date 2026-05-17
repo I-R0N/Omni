@@ -152,6 +152,9 @@ export class GameEngine {
   // Screen Shake State
   private shakeTimer: number = 0;
   private shakeIntensity: number = 0;
+  // DBG toggle — when false, handleScreenShake early-returns and
+  // the camera stays anchored regardless of impact magnitude.
+  private screenShakeEnabled: boolean = true;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -420,6 +423,23 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the camera screen-shake effect on/off.  When off,
+   * handleScreenShake early-returns and any in-flight shake decays
+   * to zero on the next sim step (the existing decay logic clears
+   * shakeOffset once shakeTimer hits 0).
+   */
+  public toggleScreenShake() {
+    this.screenShakeEnabled = !this.screenShakeEnabled;
+    if (!this.screenShakeEnabled) {
+      // Cancel any in-flight shake immediately so the camera
+      // returns to centered on the next frame.
+      this.shakeTimer = 0;
+      this.shakeIntensity = 0;
+      this.camera.shakeOffset = { x: 0, y: 0 };
+    }
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -622,6 +642,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      screenShakeEnabled: this.screenShakeEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -735,6 +756,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      screenShakeEnabled: this.screenShakeEnabled,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -853,6 +875,7 @@ export class GameEngine {
   }
 
   private handleScreenShake = (amount: number) => {
+      if (!this.screenShakeEnabled) return;
       // Prioritize larger shakes
       if (amount > this.shakeIntensity || this.shakeTimer <= 0) {
           this.shakeIntensity = amount;

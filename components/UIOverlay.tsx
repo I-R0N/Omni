@@ -19,6 +19,7 @@ interface UIOverlayProps {
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
+  onToggleScreenShake?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -48,6 +49,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardGravity,
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
+  onToggleScreenShake,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -156,6 +158,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle trail direction: VELOCITY vs THRUST"
                   >
                     {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
+                  </button>
+                </div>
+                {/* Camera screen-shake on impacts.  OFF keeps the
+                    camera anchored regardless of impact magnitude;
+                    in-flight shakes cancel immediately. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Shake</span>
+                  <button
+                    onClick={onToggleScreenShake}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle camera screen-shake on impacts."
+                  >
+                    {stats.screenShakeEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
               </>)}
