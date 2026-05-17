@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -2029,29 +2029,44 @@ export class RenderSystem {
                 const glowColor = entity.powerupGlowColor;
 
                 if (isPlasticShard) {
-                    // ── Plastic shard — solid-circle fill ─────────────────
+                    // ── Plastic shard — solid-circle fill + wiggle ────────
                     // Solid circle at 1.2× the collision diameter and
-                    // 0.75 opacity.  Tight render lets each shard
-                    // read as a distinct amber blob inside the burst
-                    // rather than overlapping into one mass; 0.75
-                    // alpha softens the silhouette so the cluster
-                    // doesn't read as hard black against the
-                    // starfield.  Per-instance amber shade comes
+                    // 0.75 opacity.  Per-instance amber shade comes
                     // from entity.color (set at spawn via random
                     // PlasticShade — see DropSystem.spawnDentShard +
                     // PLASTIC_AMBER_SHADES in constants.ts).
                     //
+                    // Wiggle: when entity.wiggleTimer > 0 (set by
+                    // PhysicsSystem.maybeStampPlasticWiggle on
+                    // collision impulses that wake the shard above
+                    // restSpeed), the shard squashes and stretches
+                    // via a damped sinusoid — scale = 1 + amp ×
+                    // sin(t × freq + phase) × (timer / duration).
+                    // Visual-only: ctx.scale before fill, doesn't
+                    // touch the 16-gon collision polygon.  One Math.
+                    // sin per draw on the hot path.
+                    //
                     // The 16-gon polygon is still used for SAT
-                    // collisions (see SHARD_SPAWN_SHAPE_PLASTIC); the
-                    // renderer just ignores it.  Density-tier tinting
-                    // via densityTintForRender is a no-op while
-                    // density.enabled is false on the variant.
-                    // mergeFadeAlpha multiplies through globalAlpha
-                    // for the graceful retire window.
+                    // collisions (see SHARD_SPAWN_SHAPE_PLASTIC).
+                    // Density-tier tinting via densityTintForRender
+                    // is a no-op while density.enabled is false on
+                    // the variant.  mergeFadeAlpha multiplies through
+                    // globalAlpha for the graceful retire window.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 1.2;
+
+                    const wt = entity.wiggleTimer;
+                    if (wt !== undefined && wt > 0) {
+                        const decay = wt / WIGGLE_CONSTANTS.DURATION;
+                        const tElapsed = WIGGLE_CONSTANTS.DURATION - wt;
+                        const phase = entity.wigglePhase ?? 0;
+                        const wave = Math.sin(tElapsed * WIGGLE_CONSTANTS.FREQ + phase);
+                        const scale = 1.0 + WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
+                        ctx.scale(scale, scale);
+                    }
+
                     ctx.globalAlpha = 0.75 * fadeAlpha;
                     ctx.fillStyle   = baseHex;
                     ctx.beginPath();

@@ -1,7 +1,21 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS } from '../../constants';
+
+/** Set wiggleTimer on a plastic-shard whose post-impulse speed has
+ *  crossed restSpeed — wakes the shard out of its sleep state, so
+ *  it both jiggles (visual) and shows that it actually moved.
+ *  No-op for non-plastic entities and for impulses too small to
+ *  matter.  Inlined comparison (squared speed vs squared rest) so
+ *  the hot path skips a sqrt. */
+function maybeStampPlasticWiggle(e: GameEntity): void {
+    if (e.shardVariant !== 'plastic-shard') return;
+    const rest = e.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
+    const restSq = rest * rest;
+    const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
+    if (vSq > restSq) e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
+}
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -297,6 +311,15 @@ export class PhysicsSystem {
       // a nebula can't break another until this expires.
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
+      }
+      // Plastic-shard wiggle timer — counts down to 0; the renderer
+      // applies a damped-sinusoid scale pulse while > 0.  Set at
+      // collision sites when the impulse wakes the shard above its
+      // restSpeed.  Skipped (and cleared) when at 0 so the renderer's
+      // gate check sees undefined rather than a stale near-zero.
+      if (entity.wiggleTimer !== undefined && entity.wiggleTimer > 0) {
+          entity.wiggleTimer -= dt;
+          if (entity.wiggleTimer <= 0) entity.wiggleTimer = undefined;
       }
       // Merge fade-out — both nebula AND non-nebula shard families
       // ride the same `mergeFadeTimer` field; the value differs by
@@ -1423,6 +1446,12 @@ export class PhysicsSystem {
       a.velocity.y -= iy * invMassA;
       b.velocity.x += ix * invMassB;
       b.velocity.y += iy * invMassB;
+      // Plastic-shard wiggle trigger — fires when the post-impulse
+      // speed is above restSpeed (collision was strong enough to
+      // wake the shard out of its sleep state).  No-op for non-
+      // plastic pairs; sqrt-free.
+      maybeStampPlasticWiggle(a);
+      maybeStampPlasticWiggle(b);
   }
 
   private checkAndResolveCollision(
@@ -1861,10 +1890,17 @@ export class PhysicsSystem {
                   // heavier metal shards take a smaller kick than the
                   // lighter plastic.  Static tiles (mass = Infinity)
                   // are filtered out by the finite-mass check.
+                  //
+                  // Plastic-shards get a 3× push factor — pairs with
+                  // the wiggle visualisation to read as visibly
+                  // bouncy when struck.  Other dent shards keep the
+                  // baseline pushFactor.
                   if (isDentEntity && target.mass !== Infinity && proj.velocity) {
-                      const pushFactor = 0.20 / Math.max(1, target.mass / 10);
+                      const bouncinessMul = target.shardVariant === 'plastic-shard' ? 3.0 : 1.0;
+                      const pushFactor = (0.20 * bouncinessMul) / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
+                      maybeStampPlasticWiggle(target);
                   }
               }
               target.hitFlash = 0.1;
@@ -2199,6 +2235,11 @@ export class PhysicsSystem {
           b.velocity.x += ix * invMassB;
           b.velocity.y += iy * invMassB;
       }
+      // Plastic-shard wiggle trigger — fires when post-impulse
+      // speed > restSpeed (collision woke the shard from its
+      // sleep state).  No-op for non-plastic.
+      maybeStampPlasticWiggle(a);
+      maybeStampPlasticWiggle(b);
   }
 
   // --- OPTIMIZED SAT HELPERS ---

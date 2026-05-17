@@ -62,6 +62,37 @@ export function randomPlasticShade(): string {
   return PLASTIC_AMBER_SHADES[Math.floor(Math.random() * PLASTIC_AMBER_SHADES.length)];
 }
 
+/** djb2-style hash of a colour hex string → phase angle in [0, 2π).
+ *  Cheap (one pass over the hex chars), deterministic per colour,
+ *  used to seed plastic-shard wiggle phase so each amber shade has
+ *  its own oscillation timing.  Skips the leading '#'. */
+export function colorToWigglePhase(hex: string): number {
+  let h = 5381;
+  for (let i = 1; i < hex.length; i++) {
+    h = (h * 33) ^ hex.charCodeAt(i);
+  }
+  return ((h >>> 0) & 0xFFFF) / 0xFFFF * Math.PI * 2;
+}
+
+/** Plastic-shard wiggle constants — damped-sinusoid scale pulse
+ *  triggered when a collision impulse exceeds the shard's restSpeed
+ *  threshold.  Visual-only (renderer applies ctx.scale before fill);
+ *  doesn't affect collision footprint.  See RenderSystem plastic-
+ *  shard branch + PhysicsSystem impulse-application sites. */
+export const WIGGLE_CONSTANTS = {
+  /** Total wiggle duration in seconds.  Timer counts down from
+   *  this value to 0; once at 0 the wiggle stops and the shard
+   *  renders at scale 1.0. */
+  DURATION:  0.4,
+  /** Oscillation frequency in rad/s.  25 rad/s ≈ 4 Hz; over the
+   *  0.4 s duration the shard squashes and stretches ≈ 1.6 times. */
+  FREQ:      25,
+  /** Peak scale deviation, multiplied by the decay envelope each
+   *  frame.  ±0.15 = squash/stretch between 85 % and 115 % at peak;
+   *  decays toward 1.0 ± 0 as timer runs out. */
+  AMPLITUDE: 0.15,
+} as const;
+
 // --- SYSTEM CONFIGURATIONS ---
 
 export const CAMERA_CONSTANTS = {

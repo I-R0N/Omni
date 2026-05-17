@@ -514,6 +514,15 @@ export interface GameEntity {
   // these so clusters effectively sleep unless directly disturbed.
   restSpeed?: number;
   restSpin?: number;
+  // Plastic-shard "jiggle" state — set by collision impulses that
+  // exceed restSpeed, ticked down each substep, consumed by
+  // RenderSystem's plastic-shard branch to apply a damped-sinusoid
+  // scale pulse (visual-only, doesn't touch collision footprint).
+  // wigglePhase is set once at spawn from a hash of entity.color so
+  // each amber shade has its own oscillation phase — neighbouring
+  // shards in a cluster wiggle out of sync.
+  wiggleTimer?: number;
+  wigglePhase?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.

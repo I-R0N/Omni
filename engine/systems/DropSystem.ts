@@ -7,6 +7,7 @@ import {
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
   randomPlasticShade,
+  colorToWigglePhase,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -566,6 +567,13 @@ export class DropSystem {
         ? shardHealthOverride
         : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
 
+      // Resolve colour once — plastic re-rolls its amber shade per
+      // shard, everything else inherits from the tile.  Reused below
+      // for both `color` and (plastic only) `wigglePhase`.
+      const shardColor = spec.variant === 'plastic-shard'
+        ? randomPlasticShade()
+        : tile.color;
+
       entities.push({
         id:            nextId('dent_shard'),
         type:          EntityType.STRUCTURE,
@@ -592,7 +600,7 @@ export class DropSystem {
         // each shard in a burst reads as its own tone (see
         // PLASTIC_AMBER_SHADES in constants.ts).  Other variants
         // inherit the parent tile's colour as before.
-        color:         spec.variant === 'plastic-shard' ? randomPlasticShade() : tile.color,
+        color:         shardColor,
         active:        true,
         health:        shardHealth,
         maxHealth:     shardHealth,
@@ -609,6 +617,10 @@ export class DropSystem {
         angularDamping: variantDef.spawn.angularDamping,
         restSpeed:      variantDef.spawn.restSpeed,
         restSpin:       variantDef.spawn.restSpin,
+        // Plastic-shard wiggle phase derived from the shard's amber
+        // shade so each colour wiggles with a distinct offset (see
+        // WIGGLE_CONSTANTS).  Other variants don't wiggle.
+        wigglePhase:   spec.variant === 'plastic-shard' ? colorToWigglePhase(shardColor) : undefined,
       });
     }
 

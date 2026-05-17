@@ -23,6 +23,8 @@ import {
   WEAPON_LIST,
   getRockShardFreeSpawn,
   nebulaFadeRateScale,
+  randomPlasticShade,
+  colorToWigglePhase,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -501,6 +503,14 @@ export class ShardSystem {
       // (STRUCTURE), with shardVariant declaring the variant id.
       // PhysicsSystem dispatches by mass (∞ → static grid, finite →
       // dynamic) and per-variant passThrough flag.
+      // Plastic-shard sub-shards re-roll their amber shade so each
+      // generation has visible variation; everything else inherits
+      // the parent's colour.  Reused for both `color` and (plastic
+      // only) `wigglePhase`.
+      const childColor = childVariant.id === 'plastic-shard'
+        ? randomPlasticShade()
+        : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
+
       entities.push({
         id:           nextId('shard'),
         type:          EntityType.STRUCTURE,
@@ -510,7 +520,7 @@ export class ShardSystem {
         size:         { x: newSize, y: newSize },
         rotation:      Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
-        color:         isTile ? parent.color : (parent.color || COLORS.ASTEROID),
+        color:         childColor,
         active:        true,
         health:        hp,
         maxHealth:     hp,
@@ -527,6 +537,10 @@ export class ShardSystem {
         angularDamping: childSpawn.angularDamping,
         restSpeed:      childSpawn.restSpeed,
         restSpin:       childSpawn.restSpin,
+        // Plastic-shard wiggle phase derived from this shard's amber
+        // shade — gives sub-shards spawned by shatter their own
+        // oscillation timing, distinct from the parent.
+        wigglePhase:   childVariant.id === 'plastic-shard' ? colorToWigglePhase(childColor) : undefined,
       });
     }
 
