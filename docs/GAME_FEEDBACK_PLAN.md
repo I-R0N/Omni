@@ -231,27 +231,29 @@ k. After N waves, spawn a portal to a new map.
     by user direction; tier-chain question moot. Per-emitter filter
     pattern is reused below for the metal-passthrough rule.
 
-15. **g3 revised + sticky-plastic bundling** — user direction for
-    one more tile/shard-effect session before Phase 2. Two pieces in
-    one bundled session:
+15. **g3 revised + plastic-softbody retrofit (bundled session)** —
+    user direction for one more tile/shard-effect session before
+    Phase 2. NO new variants — both pieces retrofit existing
+    variant entries. Two pieces in one bundled session:
     a. **g3 revised — metal-passthrough-shatters-glass.** Drop the
-       metal-shard ↔ metal-shard attraction piece entirely (no
-       gravity / bondsWith for metal pairs). Add a new metal
-       sub-variant (default: `armor-piercing-shard`; implementing
-       session may rename) that passes through `glass-tile` and
-       `glass-shard` without collision impulse and instantly
-       shatters them on overlap. Existing metal-shard behaviour
-       unchanged. Use the per-emitter filter pattern from decision
-       #11c / #14b: declarative `passthroughShatter: { targets:
-       ['glass-tile', 'glass-shard'] }` (or equivalent) on the new
-       variant's `SHARD_VARIANTS` entry, not a runtime registry.
-       Spawn rule (how often AP shards appear from metal-tile
-       breaks) is a design-phase question.
-    b. **Sticky-plastic variant** — new `sticky-plastic-tile` and
-       `sticky-plastic-shard` (implementing session may rename to
-       gel / polymer / etc.). Specifications from user:
-       - **Render**: nebula-shard-style. No physical-outline shard
-         shape. Soft-edged texture rendered slightly larger than
+       metal-shard ↔ metal-shard attraction piece entirely. Modify
+       the EXISTING `metal-shard` variant so ALL metal shards pass
+       through `glass-tile` and `glass-shard` with zero (or very
+       little) impulse resolution and instantly shatter them on
+       overlap. No new sub-variant. Use the per-emitter filter
+       pattern from decision #11c / #14b: declarative
+       `passthroughShatter: { targets: ['glass-tile',
+       'glass-shard'] }` (or equivalent) on the existing
+       `metal-shard` `SHARD_VARIANTS` entry, not a runtime
+       registry. Existing `metal-shard.repelImmuneFrom:
+       ['glass-tile']` (from PR #54) becomes redundant for the
+       glass-tile side once passthrough lands — leave it in or
+       remove it as the implementing session sees fit.
+    b. **Plastic-softbody retrofit.** Modify EXISTING `plastic-tile`
+       and `plastic-shard` variants in place. No new variant ids.
+       Specifications from user:
+       - **Render**: nebula-shard-style. Remove the hard polygon
+         outline. Soft-edged texture rendered slightly larger than
          the collision box. Reduced alpha for translucency.
          Implementation choice: canvas radial gradient OR PNG
          texture asset — recommend canvas radial gradient for
@@ -260,32 +262,40 @@ k. After N waves, spawn a portal to a new map.
          shatter into smaller circles. Polygon shape is either a
          high-segment-count approximation (e.g., 16-gon) or a
          dedicated circle render path; implementing session picks.
+         The current `plastic-shard` inherits its parent tile's
+         dented polygon (PR #53 over-delivery) — that inheritance
+         should be removed since the new shape is always circular.
        - **Bond model**: strong spring-elastic between all
-         same-variant shards (and shard-to-tile). Cluster behavior
-         should be morph-and-deform when hit/shot, not break-into-
-         free-pieces. Shards may break free briefly and get pulled
-         back with high force (stretching effect). Beyond a
-         distance threshold the bond permanently breaks. This is
-         a NEW bond mode — `bondsWith` today is pair-consume +
-         compose; sticky-plastic needs persistent spring-coupled
-         pairs. Expect a new schema field (`elasticBond?` or
-         similar) and a new tick path in ShardSystem.
+         plastic-shard ↔ plastic-shard and plastic-shard ↔
+         plastic-tile pairs. Cluster behavior should morph-and-
+         deform when hit/shot, not break into free pieces. Shards
+         may break free briefly and get pulled back with high
+         force (stretching effect). Beyond a distance threshold
+         the bond permanently breaks. This is a NEW bond mode —
+         `bondsWith` today is pair-consume + compose; this needs
+         persistent spring-coupled pairs. Expect a new schema
+         field (`elasticBond?` or similar) and a new tick path in
+         ShardSystem.
        - **Friction**: high `linearDamping` to limit standalone
-         shard motion (cluster cohesion dominated by spring force).
-       - **Durability**: HP similar to current plastic / metal
-         (post-PR-#53 = 24) so a cluster absorbs many hits before
-         shards break off.
-       - **Out of scope for this session**: sticky-plastic
-         interactions with other variants beyond what falls out
-         naturally (e.g., AP shards passing through glass do NOT
-         pass through sticky-plastic).
+         shard motion (cluster cohesion dominated by spring
+         force).
+       - **Durability**: HP roughly preserved at current plastic
+         level (post-PR-#53 = 24).
+       - **Current plastic dent / vertexJitter behaviour**: drop
+         it. With softbody cluster deformation via bond
+         stretching, per-tile dent is moot.
+       - **Out of scope**: interactions with other variants beyond
+         what falls out naturally. Don't make metal-shard passthrough
+         affect plastic-tile.
     Ordering inside the bundled session: ship metal-piece first
     (smaller, well-specified) so it's a clean commit set even if
-    sticky-plastic absorbs more session time. Sticky-plastic's
-    bond model is the most novel piece in the bundle — expect an
+    plastic-softbody absorbs more session time. Plastic-softbody's
+    elastic-bond model is the most novel piece — expect an
     `AskUserQuestion` round inside the session before
-    implementation. Validation will need a manual playtest pass
-    before Phase 2 launches.
+    implementation (stiffness / restDistance / breakDistance
+    defaults; render approach if both canvas-gradient and PNG
+    are still on the table). Validation will need a manual
+    playtest pass before Phase 2 launches.
 
 9. **PR #45 partial cherry-pick into materials work** — PR #45
    (branch `claude/test-nebulae-textures-Sdp4D`, currently open
@@ -342,7 +352,7 @@ Run when convenient; can run in parallel with Phase 2.
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
 | g2-housekeeping | Resolve g2 deviations | shipped (PR #54, merged into plan branch) | `claude/g2-housekeeping-T1LR6` | Glass + metal glow → `repelImpulse`; metal-tile heat-bloom replaced with layer-2b style (blue `#60a5fa`); `metal-shard.repelImmune = false` + new per-emitter `repelImmuneFrom: ['glass-tile']` pattern; indestructible dropped from UNIVERSE/POCKET random spawn; CLAUDE.md refresh. Massive over-delivery (see decision #13): DBG rebuild, glass/nebula tier chains, nebula self-coalesce rewrite, continuous color equilibration, fade-timer unification, dust-puff palette split, visual cleanups, FlowField obstacle fix, player-tile shield-first crash damage. |
-| g3 + sticky-plastic | Material interactions (revised) + sticky-plastic variant | pending | `claude/material-interactions-sticky-plastic-<suffix>` | **Bundled session per user direction (decision #15).** g3 revised: drop metal-shard ↔ metal-shard attraction; keep metal-shard passthrough+instant-shatter against glass-tile/glass-shard, scoped as a new sub-variant (e.g., `armor-piercing-shard`) so normal metal keeps current feel. Plus new `sticky-plastic-tile` / `sticky-plastic-shard` variants: circle-shaped shards, nebula-style soft textures with reduced alpha, strong spring-elastic bonds (stretch + pullback + threshold break), high translational friction, high HP, softbody-cluster aesthetic. Does NOT block Phase 2. |
+| g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | pending | `claude/material-interactions-plastic-softbody-<suffix>` | **Bundled session per user direction (decision #15).** g3 revised: drop metal-shard ↔ metal-shard attraction; ALL `metal-shard` (existing variant, no sub-variant) passes through `glass-tile` / `glass-shard` with little-to-no impulse resolution and instantly shatters them on overlap. Plus retrofit existing `plastic-tile` / `plastic-shard`: circular shard shape, nebula-style soft textures with reduced alpha, strong spring-elastic bonds (stretch + pullback + threshold break), high translational friction, HP roughly preserved, softbody-cluster aesthetic. No new variants in either piece. Does NOT block Phase 2. |
 
 ---
 
