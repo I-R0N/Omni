@@ -271,38 +271,6 @@ export class RenderSystem {
       return c;
   }
 
-  // Pre-rendered soft-gradient bitmap cache, keyed by colour hex.
-  // Plastic tiles + shards stamp the same 3-stop magenta radial
-  // gradient every frame; rasterising it inline via ctx.create
-  // RadialGradient was the hidden cost behind the playtest framerate
-  // drop (the JS allocation is cheap but every fill ships a fresh
-  // gradient to the GPU which doesn't show up in JS perf timing).
-  // Bake once at 128×128 per unique colour, then ctx.drawImage at
-  // any size for free.  Density tiering produces 5 distinct hues
-  // (tiers 0–4) per variant — cache size stays small.
-  private _softGradientBitmaps: Map<string, HTMLCanvasElement> = new Map();
-
-  private getSoftGradientBitmap(hex: string): HTMLCanvasElement {
-      const cached = this._softGradientBitmaps.get(hex);
-      if (cached) return cached;
-      const size = 128;
-      const c = document.createElement('canvas');
-      c.width = size; c.height = size;
-      const cx = c.getContext('2d')!;
-      const center = size / 2;
-      const [r, g, b] = hexToRgb(hex);
-      const grad = cx.createRadialGradient(center, center, 0, center, center, center);
-      grad.addColorStop(0,    `rgba(${r},${g},${b},0.85)`);
-      grad.addColorStop(0.55, `rgba(${r},${g},${b},0.45)`);
-      grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
-      cx.fillStyle = grad;
-      cx.beginPath();
-      cx.arc(center, center, center, 0, Math.PI * 2);
-      cx.fill();
-      this._softGradientBitmaps.set(hex, c);
-      return c;
-  }
-
   /**
    * Return a 32×32 offscreen canvas with a soft white star: a radial-gradient
    * glow plus a 4-point spike cross drawn additively.  Created once, reused
@@ -1845,25 +1813,22 @@ export class RenderSystem {
                         ctx.globalAlpha = 1.0;
                     }
                 } else {
-                    // Tile texture diameter = 3.0 × collision diameter
-                    // (bumped from 2.4× per playtest).  entity.size.x
+                    // Tile texture diameter = 3.0 × collision diameter.
+                    // Solid-circle fill in entity.color (no gradient,
+                    // no cached bitmap) — cheapest possible render
+                    // path, and the user's v4 direction.  entity.size.x
                     // is the AABB envelope (≈ hex flat-to-flat).
-                    //
-                    // Render uses a cached gradient bitmap (see
-                    // getSoftGradientBitmap) — drawImage from a
-                    // pre-baked 128×128 canvas, not a per-frame
-                    // createRadialGradient.  Cuts the hidden GPU
-                    // rasterisation cost that wasn't showing up in
-                    // JS perf timing.
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 3.0;
-                    const bitmap     = this.getSoftGradientBitmap(entity.color);
                     ctx.globalAlpha = 1.0;
-                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
+                    ctx.fillStyle   = entity.color;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
+                    ctx.fill();
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the hex polygon so the SAT collision
-                    // shape is visible against the soft gradient.
+                    // shape is visible inside the solid circle.
                     if (this.tileOutlinesEnabled) {
                         buildPath();
                         ctx.globalAlpha = 0.9;
@@ -2062,32 +2027,33 @@ export class RenderSystem {
                 const glowColor = entity.powerupGlowColor;
 
                 if (isPlasticShard) {
-                    // ── Plastic shard — soft-edged radial gradient ───────────
-                    // Plastic-softbody retrofit (decision #15b): no hard
-                    // polygon outline.  Pre-rendered gradient bitmap
-                    // (getSoftGradientBitmap) drawn at 3.6× collision
-                    // radius (bumped from 3.0× per playtest) — bonded
-                    // clusters read as one continuous sheet of
-                    // overlapping polymer blobs.  The 16-gon polygon
-                    // is still used for SAT collisions (see SHARD_
-                    // SPAWN_SHAPE_PLASTIC); the renderer just ignores
-                    // it.
+                    // ── Plastic shard — solid-circle fill ─────────────────
+                    // Plastic-softbody retrofit, v4: no gradient, no
+                    // cached bitmap — just a solid circle in entity.
+                    // color drawn at 3.6× collision radius.  Cheapest
+                    // possible render path; solid fills are essentially
+                    // free on the GPU vs. the radial-gradient
+                    // rasterisation that was the hidden cost behind
+                    // the v3 framerate drop.  The 16-gon polygon is
+                    // still used for SAT collisions (see SHARD_SPAWN_
+                    // SHAPE_PLASTIC); the renderer just ignores it.
                     //
-                    // Cache by base hex.  v3 plastic disables density
-                    // tiering so only one bitmap is ever requested,
-                    // but keeping the cache key as the resolved hex
-                    // means future tier work would land naturally
-                    // without a render-path change.  Hit-flash dropped
-                    // — soft polymer doesn't need a hard white flash,
-                    // and the cached-bitmap path doesn't support
-                    // per-instance colour swap.
+                    // Density-tier tinting still applies via densityTint
+                    // ForRender — v4 plastic disables density tiering
+                    // (density.enabled = false on the variant) so this
+                    // is a no-op, but the call is left in so a future
+                    // re-enable wouldn't need a render-path change.
+                    // mergeFadeAlpha multiplies globalAlpha for the
+                    // graceful retire window.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * 3.6;
-                    const bitmap     = this.getSoftGradientBitmap(baseHex);
                     ctx.globalAlpha = fadeAlpha;
-                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
+                    ctx.fillStyle   = baseHex;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, renderR, 0, Math.PI * 2);
+                    ctx.fill();
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the 16-gon collision shape so the

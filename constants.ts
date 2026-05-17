@@ -1498,23 +1498,23 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // indistinguishable from a circle at typical pair distances.
 // Zero angle jitter and near-zero radius variance hold the shape
 // to a clean round silhouette.  Render path (RenderSystem plastic-
-// shard branch) draws a soft radial gradient rather than the
-// polygon outline, so the 16-gon is collision-only.
+// shard branch) draws a solid-circle fill in the entity colour,
+// so the 16-gon is collision-only.
 //
-// Damping tuning (v2): linearDamping = 0.97 matches nebula-shard
-// (NEBULA_CONSTANTS.LINEAR_DAMPING).  At 0.97 a shard kicked at
-// v=4 retains ~16 % of velocity after 1 s — heavy enough that
-// standalone shards drift slowly and read as sticky, light
-// enough that projectile impacts still visibly push them before
-// the damping bleeds the impulse away.  angularDamping matches
-// linear so spin and translation settle on the same timescale.
+// Damping tuning (v4, "increase damping"): linearDamping = 0.92
+// is heavier than nebula-shard (NEBULA_CONSTANTS.LINEAR_DAMPING =
+// 0.97).  At 0.92 a shard kicked at v=4 retains ~0.7 % of its
+// velocity after 1 s (vs ~16 % at 0.97) — basically stops within
+// a half-second, which makes clusters effectively stationary
+// without any bond / cohesion plumbing.  angularDamping matches
+// so spin and translation settle together.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
   polyVerticesMin: 16, polyVerticesMax: 16,
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
-  linearDamping:  0.97,
-  angularDamping: 0.97,
+  linearDamping:  0.92,
+  angularDamping: 0.92,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
