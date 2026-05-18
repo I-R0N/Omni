@@ -2226,18 +2226,25 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit, v4 (free-particle, no bonds):
-    // bondsWith dropped entirely so plastic-shards never enter the
-    // bond list — no per-frame tickBonds work, no cohesion velocity
-    // blend, no compose timer.  Heavy linearDamping (0.97, set in
-    // SHARD_SPAWN_SHAPE_PLASTIC) is the only mechanism holding
-    // clusters together — shards damp toward zero velocity
-    // individually, and natural SAT bounces keep them visually
-    // separated when they touch.  Cheapest path; was option 3 in
-    // the "outline overlap" diagnosis.
+    // Plastic-softbody retrofit, v5 (tier-chain merge): plastic-
+    // shards self-bond on contact via the standard bondsWith
+    // pipeline.  Compose merges grow the survivor (area-conserving;
+    // density compaction is disabled on plastic) until it reaches
+    // PLASTIC_TIER_DIAMETER, at which point it transmutes back to
+    // a plastic-tile at the nearest free hex cell — same loop as
+    // glass-shard → glass-tile.  See ShardSystem.tryTransmute
+    // PlasticShardToTile.
+    //
+    // Bond timing matches rock/glass: 10 s base, scaled by avg
+    // size to power 1.5.  At typical plastic-shard sizes (17–24
+    // from a tile burst) effective threshold is ≈ 13 s of contact.
     merge: {
       attractedTo: 'none',
-      bondsWith: 'none',
+      bondsWith: { include: ['plastic-shard'] },
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
       defaultOutcome: 'compose',
     },
     // Plastic-shards shatter into smaller plastic-shards on death

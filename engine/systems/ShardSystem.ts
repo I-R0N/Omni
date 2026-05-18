@@ -89,6 +89,13 @@ interface RegenEntry {
 // (glass-tile vs. smaller rock-shard).  Matches the diameter of a
 // circle whose area equals one hex tile.
 const GLASS_TIER_DIAMETER = Math.sqrt(HEX_AREA);
+// Same threshold for plastic — merged plastic-shard at or above
+// this diameter transmutes back into a plastic-tile via
+// tryTransmutePlasticShardToTile.  HEX_AREA is the regular-hex
+// area at HEX_SIZE = 22, so the diameter ≈ 35 — well above the
+// 17-24 sizes that plastic-shards spawn at from a tile burst,
+// so a typical merge of 2-3 shards reaches the threshold.
+const PLASTIC_TIER_DIAMETER = Math.sqrt(HEX_AREA);
 
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
@@ -1589,6 +1596,70 @@ export class ShardSystem {
     return true;
   }
 
+  /**
+   * Plastic counterpart to tryTransmuteGlassShardToTile.  Snap the
+   * shard to the nearest free hex cell and replace it with a fresh
+   * plastic-tile.  Candidate cells are the shard's current hex + 6
+   * neighbours, sorted by distance.  If every candidate is occupied
+   * (by another tile or static geometry), the shard stays a shard
+   * and the next compose tick may retry.
+   *
+   * Closes the plastic tier chain: plastic-tile → dent burst →
+   * plastic-shards → bondsWith compose merges → growth past
+   * PLASTIC_TIER_DIAMETER → transmute back to plastic-tile.
+   */
+  private tryTransmutePlasticShardToTile(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    if (shard.shardVariant !== 'plastic-shard') return false;
+
+    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+      const p = hexCoordToPixel(c, r);
+      const dx = wrapDeltaX(shard.position.x, p.x);
+      const dy = wrapDeltaY(shard.position.y, p.y);
+      candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+      pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+      const p = hexCoordToPixel(cand.c, cand.r);
+      if (!physics.isPositionClear(p.x, p.y, HEX_SIZE * 0.5)) continue;
+      chosen = cand;
+      break;
+    }
+    if (!chosen) return false;
+
+    const p = hexCoordToPixel(chosen.c, chosen.r);
+    const w = Math.sqrt(3) * HEX_SIZE;
+    const h = 2 * HEX_SIZE;
+    const pts: Vector2[] = [
+      { x:  0,    y: -h / 2 },
+      { x:  w / 2, y: -h / 4 },
+      { x:  w / 2, y:  h / 4 },
+      { x:  0,    y:  h / 2 },
+      { x: -w / 2, y:  h / 4 },
+      { x: -w / 2, y: -h / 4 },
+    ];
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, 'plastic');
+    entities.push(tile);
+    physics.addStaticEntity(tile);
+
+    // Source shard fades out the same way as glass / nebula
+    // transmute — the tile materialises while the shard dissolves
+    // on top of it.
+    this.startMergeFadeOut(shard);
+    return true;
+  }
+
   private composeEntities(
     a: GameEntity,
     b: GameEntity,
@@ -1612,11 +1683,12 @@ export class ShardSystem {
     const bVariant = shardVariantOf(b);
     const aIsNebShard = aVariant === 'nebula-shard';
     const bIsNebShard = bVariant === 'nebula-shard';
-    // Mobile-shard family: rock-shard or glass-shard ride the asteroid
-    // accretion path.  Tile variants have shatter.kind=none here so
-    // they don't compose (only mobile shards merge).
-    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard';
-    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard';
+    // Mobile-shard family: rock-shard, glass-shard, and plastic-
+    // shard ride the asteroid accretion path.  Tile variants have
+    // shatter.kind=none here so they don't compose (only mobile
+    // shards merge).
+    const aIsAst = aVariant === 'rock-shard' || aVariant === 'glass-shard' || aVariant === 'plastic-shard';
+    const bIsAst = bVariant === 'rock-shard' || bVariant === 'glass-shard' || bVariant === 'plastic-shard';
 
     // Nebula-shard self-merge — own code path with composition blend +
     // transmutation hook.
@@ -1676,10 +1748,14 @@ export class ShardSystem {
       // tier-transition mechanic (glass→tile / smaller rock-shard)
       // wants the shards to *grow* visibly until they hit
       // GLASS_TIER_DIAMETER.  Density's shrinkFactor would have
-      // them shrinking instead.  Other pairs (rock-self, cross-
-      // variant) keep the density path.
-      const isGlassSelfMerge = a.shardVariant === 'glass-shard' && b.shardVariant === 'glass-shard';
-      if (density?.enabled && !isGlassSelfMerge) {
+      // them shrinking instead.  Plastic-shard self-merge follows
+      // the same rule for plastic→plastic-tile transmute, though
+      // plastic.density is already disabled so this gate is
+      // double-defence.  Other pairs (rock-self, cross-variant)
+      // keep the density path.
+      const isGlassSelfMerge   = a.shardVariant === 'glass-shard'   && b.shardVariant === 'glass-shard';
+      const isPlasticSelfMerge = a.shardVariant === 'plastic-shard' && b.shardVariant === 'plastic-shard';
+      if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge) {
         const tierA = a.densityTier ?? 0;
         const tierB = b.densityTier ?? 0;
         const proposedTier = Math.max(tierA, tierB) + 1;
@@ -1706,13 +1782,27 @@ export class ShardSystem {
         ...(b.dropComposition ?? []),
       ];
 
-      // Regenerate polygon at new size; blocky for tile-derived
-      // glass-shard, jagged for rock-shard.
-      const isTile  = dominantVariant === 'glass-shard';
-      const numPts  = isTile ? (4 + Math.floor(Math.random() * 3)) : (7 + Math.floor(Math.random() * 4));
-      const jitterK = isTile ? 0.25 : 0.7;
-      const rMin    = isTile ? 0.60 : 0.60;
-      const rRange  = isTile ? 0.55 : 0.65;
+      // Regenerate polygon at new size — vertex count + jitter per
+      // dominant variant.  Glass: 4–6 verts, blocky panel shape.
+      // Plastic: 16 verts, near-circular (matches SHARD_SPAWN_SHAPE_
+      // PLASTIC's collision-only round silhouette).  Default
+      // (rock): 7–10 verts, jagged.
+      const isTile     = dominantVariant === 'glass-shard';
+      const isPlasticS = dominantVariant === 'plastic-shard';
+      let numPts: number;
+      let jitterK: number;
+      let rMin: number;
+      let rRange: number;
+      if (isTile) {
+        numPts = 4 + Math.floor(Math.random() * 3);
+        jitterK = 0.25; rMin = 0.60; rRange = 0.55;
+      } else if (isPlasticS) {
+        numPts = 16;
+        jitterK = 0.0; rMin = 0.98; rRange = 0.04;
+      } else {
+        numPts = 7 + Math.floor(Math.random() * 4);
+        jitterK = 0.7; rMin = 0.60; rRange = 0.65;
+      }
       const baseR   = (newDiam / 2) * 0.82;
       a.polygonPoints = this.generateShardPolygon(baseR, numPts, numPts, jitterK, rMin, rRange);
 
@@ -1750,6 +1840,15 @@ export class ShardSystem {
       // chain (nebula→glass→rock→metal→plastic).
       if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
         this.tryConvertOversizedGlassShard(a, entities, physics);
+      }
+      // Plastic-shard tier transition — mirrors the glass path but
+      // always transmutes to plastic-tile (no rock-shard downgrade
+      // alternative).  Closes the loop: plastic-tile shatters into
+      // plastic-shards via dent.breakShards; shards merge via
+      // bondsWith; merged shards hit PLASTIC_TIER_DIAMETER and
+      // transmute back to plastic-tile at the nearest free hex.
+      if (a.shardVariant === 'plastic-shard' && a.size.x >= PLASTIC_TIER_DIAMETER) {
+        this.tryTransmutePlasticShardToTile(a, entities, physics);
       }
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
