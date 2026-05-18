@@ -497,6 +497,17 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the nebula-shard velocity-stretch rotation mode.
+   * Snap: sprite rotates to align with velocity vector.  Free:
+   * sprite keeps its entity.rotation; only the squash axis tracks
+   * velocity.  The stretch itself is always active for moving
+   * shards (see NEBULA_CONSTANTS.VEL_STRETCH_*).
+   */
+  public toggleNebulaShardStretchSnap() {
+    this.renderer.nebulaShardStretchSnap = !this.renderer.nebulaShardStretchSnap;
+  }
+
+  /**
    * Cycle the active plastic opacity through PLASTIC_OPACITY_CYCLE
    * (25 % → 50 % → 75 % → 100 % → 25 % …).  Applied to both
    * plastic-tile and plastic-shard render branches.  Live —
@@ -715,6 +726,7 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
+      nebulaShardStretchSnap: this.renderer.nebulaShardStretchSnap,
       plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
@@ -834,6 +846,7 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
+      nebulaShardStretchSnap: this.renderer.nebulaShardStretchSnap,
       plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,

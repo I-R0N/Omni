@@ -24,6 +24,7 @@ interface UIOverlayProps {
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
+  onToggleNebulaShardStretchSnap?: () => void;
   onCyclePlasticOpacity?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
@@ -59,6 +60,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
+  onToggleNebulaShardStretchSnap,
   onCyclePlasticOpacity,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
@@ -317,6 +319,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
                   >
                     {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Nebula-shard velocity-stretch rotation mode.
+                    free = squash axis aligns to velocity, sprite
+                    keeps entity rotation.  snap = sprite also rotates
+                    to face velocity. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NShStr</span>
+                  <button
+                    onClick={onToggleNebulaShardStretchSnap}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle nebula-shard velocity-stretch rotation mode.  free (default) = only the squash axis aligns to velocity, sprite stays at its own rotation.  snap = sprite rotates to match velocity direction.  The stretch itself is always active for moving shards (NEBULA_CONSTANTS.VEL_STRETCH_*)."
+                  >
+                    {stats.nebulaShardStretchSnap === true ? 'snap' : 'free'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

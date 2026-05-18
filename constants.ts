@@ -899,6 +899,20 @@ export const NEBULA_CONSTANTS = {
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
   REST_SPEED: 0.005,
   REST_SPIN: 0.01,
+  // ── Velocity-aligned stretch (nebula shard) ──────────────────────
+  // Continuous render-side deformation: while a nebula-shard moves,
+  // it stretches along its velocity axis (1 + STRETCH_K × speed,
+  // capped at MAX_STRETCH) and squashes perpendicular by
+  // SQUASH_RATIO × stretch.  Reads as "wind tugging the cloud
+  // forward."  Cost gated on speed² > VEL_STRETCH_REST_SPEED_SQ so
+  // settled shards skip the math.
+  // See RenderSystem nebula-shard render branch.  The snap-vs-free
+  // rotation behaviour is controlled by RenderSystem.nebulaShard
+  // StretchSnap (DBG-toggleable).
+  VEL_STRETCH_REST_SPEED_SQ: 0.01,
+  VEL_STRETCH_K:             0.05,
+  VEL_STRETCH_MAX:           0.4,
+  VEL_STRETCH_SQUASH_RATIO:  0.6,
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
   SPIN_PER_UNIT_SPEED: 1.2,
   MAX_SPIN: 6.0,  // rad/s cap

@@ -152,6 +152,16 @@ export class RenderSystem {
   // Default OFF.  Wired through GameEngine.toggleTileOutlines and
   // surfaced in the DBG panel's Visual section.
   public tileOutlinesEnabled: boolean = false;
+  // DBG toggle for the nebula-shard velocity-aligned stretch
+  // rotation mode.  When true ("snap"), the sprite rotates to
+  // align with the velocity vector — the squash AND the sprite
+  // share the velocity axis.  When false ("free", default), only
+  // the directional squash aligns to velocity; the sprite itself
+  // keeps its entity rotation (controlled by rotationSpeed).
+  // Independent of whether the stretch fires at all — the stretch
+  // is always active for moving shards (see VEL_STRETCH_*
+  // constants in NEBULA_CONSTANTS).
+  public nebulaShardStretchSnap: boolean = false;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -1510,11 +1520,59 @@ export class RenderSystem {
                   const dOffset = -(drawSize / 2);
                   const dx = dOffset - centroid.dx * drawSize;
                   const dy = dOffset - centroid.dy * drawSize;
+                  // Velocity-aligned stretch (nebula-shard only).
+                  // Reads as "wind tugging the cloud forward" — the
+                  // sprite squashes along the velocity axis as the
+                  // shard moves.  Gated on speed² > REST so settled
+                  // shards skip the math.  Two modes:
+                  //   snap  — sprite rotates to match velocity axis
+                  //           (the squash + the sprite share the
+                  //           velocity vector).  Distinct visual
+                  //           but ignores the entity's own rotation.
+                  //   free  — only the squash aligns to velocity;
+                  //           the sprite stays at entity.rotation
+                  //           (controlled by rotationSpeed).
+                  //           Default.
+                  let velStretchApplied = false;
+                  let velStretchUndoAngle = 0;
+                  if (!isTile) {
+                      const vx = entity.velocity.x;
+                      const vy = entity.velocity.y;
+                      const speedSq = vx * vx + vy * vy;
+                      if (speedSq > NEBULA_CONSTANTS.VEL_STRETCH_REST_SPEED_SQ) {
+                          const speed = Math.sqrt(speedSq);
+                          const stretch = Math.min(
+                              NEBULA_CONSTANTS.VEL_STRETCH_MAX,
+                              speed * NEBULA_CONSTANTS.VEL_STRETCH_K,
+                          );
+                          const velAngle = Math.atan2(vy, vx);
+                          const delta = velAngle - entity.rotation;
+                          ctx.rotate(delta);
+                          ctx.scale(
+                              1 + stretch,
+                              1 - stretch * NEBULA_CONSTANTS.VEL_STRETCH_SQUASH_RATIO,
+                          );
+                          velStretchApplied = true;
+                          // Free mode: undo the rotation after the
+                          // scale so the sprite draws aligned to
+                          // entity.rotation while the local coord
+                          // system stays squashed along velocity.
+                          if (!this.nebulaShardStretchSnap) {
+                              velStretchUndoAngle = -delta;
+                              ctx.rotate(velStretchUndoAngle);
+                          }
+                      }
+                  }
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
+                  // velStretchApplied / velStretchUndoAngle don't need
+                  // a manual undo here — the next entity's setTransform
+                  // overwrites the cumulative ctx state.  Vars kept in
+                  // scope as documentation only.
+                  void velStretchApplied; void velStretchUndoAngle;
                   // Populate the nebula fast-path cache while we have
                   // every input on hand.  See the fast-path block above
                   // renderEntities()'s slow body — once these four
