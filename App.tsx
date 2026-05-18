@@ -169,6 +169,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
   };
 
+  const handleTogglePlasticBlend = () => {
+      if (engineRef.current) engineRef.current.togglePlasticBlend();
+  };
+
   const handleCyclePlasticOpacity = () => {
       if (engineRef.current) engineRef.current.cyclePlasticOpacity();
   };
@@ -218,6 +222,7 @@ const App: React.FC = () => {
         onToggleTileOutlines={handleToggleTileOutlines}
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
+        onTogglePlasticBlend={handleTogglePlasticBlend}
         onCyclePlasticOpacity={handleCyclePlasticOpacity}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}

@@ -80,6 +80,14 @@ export class NebulaSystem {
     // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE.
     public tileBlendAlpha: number = NEBULA_CONSTANTS.BLEND_TILE_ALPHA;
     public shardBlendAlpha: number = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA;
+    /** DBG gate for the plastic-equilibration block at the end of
+     *  equilibrateColors.  Independent of the nebula tile/shard
+     *  alphas — plastic still uses the same `tileBlendAlpha` /
+     *  `shardBlendAlpha` for its lerp rate when enabled, but flipping
+     *  this off skips the plastic passes entirely so a dev can
+     *  isolate the nebula-only behaviour or freeze plastic colours
+     *  at their spawn values for a screenshot.  Default ON. */
+    public plasticBlendEnabled: boolean = true;
 
     // Frame-skip cadence for the color-equilibration pass.  Same
     // shape as PhysicsSystem.shardPairFrameInterval: cycled through
@@ -417,7 +425,13 @@ export class NebulaSystem {
         // into nebula's fixed saturation/lightness.  Direct RGB lerp
         // keeps each palette's character intact while smoothing
         // neighbour-to-neighbour variation over time.
-        if (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0) {
+        //
+        // Gate: independent DBG toggle (plasticBlendEnabled) lets a
+        // dev freeze plastic colours at spawn values while leaving
+        // nebula blending running, useful for isolating nebula-only
+        // behaviour or capturing screenshots before plastic
+        // homogenises.
+        if (this.plasticBlendEnabled && (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)) {
             // Build per-call hex-coord index of plastic-tiles.  Reused
             // by both the tile-pass and shard-pass below.  Cheap —
             // plastic-tile counts are bounded by MAP_POPULATION

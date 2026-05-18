@@ -487,6 +487,16 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the plastic colour-equilibration pipeline (NebulaSystem
+   * .equilibrateColors plastic block).  When off, plastic tiles
+   * and shards stop drifting toward each other and stay at their
+   * spawn / shatter colours.  Nebula blending is unaffected.
+   */
+  public togglePlasticBlend() {
+    this.nebulas.plasticBlendEnabled = !this.nebulas.plasticBlendEnabled;
+  }
+
+  /**
    * Cycle the active plastic opacity through PLASTIC_OPACITY_CYCLE
    * (25 % → 50 % → 75 % → 100 % → 25 % …).  Applied to both
    * plastic-tile and plastic-shard render branches.  Live —
@@ -704,6 +714,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
@@ -822,6 +833,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       plasticOpacity:     getActivePlasticOpacityName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,

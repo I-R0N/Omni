@@ -23,6 +23,7 @@ interface UIOverlayProps {
   onToggleTileOutlines?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
+  onTogglePlasticBlend?: () => void;
   onCyclePlasticOpacity?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
@@ -57,6 +58,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleTileOutlines,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
+  onTogglePlasticBlend,
   onCyclePlasticOpacity,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
@@ -232,6 +234,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle the globalAlpha used by plastic-tile and plastic-shard renders.  25 % is ghostly translucent, 100 % is fully opaque.  Default 75 %."
                   >
                     {stats.plasticOpacity ?? '75%'}
+                  </button>
+                </div>
+                {/* Plastic colour-equilibration toggle — independent
+                    of the nebula tile/shard blend alphas.  When off,
+                    plastic colours stay at spawn / shatter values. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlend</span>
+                  <button
+                    onClick={onTogglePlasticBlend}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle plastic colour equilibration (NebulaSystem plastic block).  Off freezes plastic tiles + shards at their spawn / shatter colours; nebula blending unaffected.  Uses the same tileBlendAlpha / shardBlendAlpha as nebula when on."
+                  >
+                    {stats.plasticBlendEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
               </>)}
