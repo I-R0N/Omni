@@ -1951,34 +1951,43 @@ export class PhysicsSystem {
                       target.velocity.y += proj.velocity.y * pushFactor;
                       maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y);
 
-                      // Plastic-shard spin kick from off-centre
-                      // impacts.  Torque sign comes from the cross
-                      // product of the impact offset (from shard
-                      // centre) and the projectile velocity vector.
-                      // Magnitude scales with how off-centre the
-                      // hit is — dead-centre adds nothing, edge
-                      // hits add the full SPIN_PER_HIT.  Sign is
-                      // randomised on near-centre hits so even a
-                      // bullseye gives a little jitter.
+                      // Plastic-shard tangent-rule spin from off-
+                      // centre projectile hits.  Mirrors the
+                      // nebula-shatter spin convention (ShardSystem
+                      // .shatterNebulaStyle: `cross = fx*dy − fy*dx`,
+                      // sign drives rotationSpeed direction) so
+                      // plastic absorbs impacts with the same fluid-
+                      // swirl handedness — shards on the upper /
+                      // lower side of the impact axis rotate in
+                      // opposite directions, like a fluid being
+                      // parted.
+                      //
+                      // fx/fy = projectile forward (striker velocity).
+                      // dx/dy = shard offset from striker position.
+                      // |cross| is essentially |F|·|d|·sin(θ), i.e.
+                      // the unsigned torque.  Magnitude here scales
+                      // with how off-centre the hit is — dead-centre
+                      // hits (cross ≈ 0) fall back to a random sign
+                      // so the shard still nudges.
+                      //
                       // angularDamping = 0.99 (variant config) is
                       // intentionally lighter than linearDamping
                       // (0.97) so the spin persists noticeably
                       // longer than the linear push — plastic
                       // shards visibly twirl after a hit.
                       if (target.shardVariant === 'plastic-shard' && target.rotationSpeed !== undefined) {
-                          const ox = proj.position.x - target.position.x;
-                          const oy = proj.position.y - target.position.y;
-                          const cross = ox * proj.velocity.y - oy * proj.velocity.x;
-                          const offsetLen = Math.sqrt(ox * ox + oy * oy);
+                          const fx = proj.velocity.x;
+                          const fy = proj.velocity.y;
+                          const dx = target.position.x - proj.position.x;
+                          const dy = target.position.y - proj.position.y;
+                          const cross = fx * dy - fy * dx;
+                          const offsetLen = Math.sqrt(dx * dx + dy * dy);
                           const radius = target.size.x * 0.5;
                           const offsetFrac = Math.min(1, offsetLen / Math.max(1, radius));
                           const SPIN_PER_HIT = 3.0;
-                          // |cross| can be 0 for dead-centre hits;
-                          // fall back to a random sign so the shard
-                          // still nudges.
-                          const sign = Math.abs(cross) > 0.001
-                              ? Math.sign(cross)
-                              : (Math.random() < 0.5 ? -1 : 1);
+                          const sign = cross > 0.01 ? 1
+                                     : cross < -0.01 ? -1
+                                     : (Math.random() < 0.5 ? 1 : -1);
                           target.rotationSpeed += sign * SPIN_PER_HIT * Math.max(0.15, offsetFrac);
                       }
                   }
