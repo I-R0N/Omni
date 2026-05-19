@@ -265,6 +265,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleFFKernelR();
   };
 
+  const handleCycleFFTangentMix = () => {
+      if (engineRef.current) engineRef.current.cycleFFTangentMix();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -322,6 +326,7 @@ const App: React.FC = () => {
         onCycleFFOverlaySampleN={handleCycleFFOverlaySampleN}
         onCycleFFDensity={handleCycleFFDensity}
         onCycleFFKernelR={handleCycleFFKernelR}
+        onCycleFFTangentMix={handleCycleFFTangentMix}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

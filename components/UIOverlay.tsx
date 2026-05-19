@@ -49,6 +49,7 @@ interface UIOverlayProps {
   onCycleFFOverlaySampleN?: () => void;
   onCycleFFDensity?: () => void;
   onCycleFFKernelR?: () => void;
+  onCycleFFTangentMix?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -103,6 +104,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFFOverlaySampleN,
   onCycleFFDensity,
   onCycleFFKernelR,
+  onCycleFFTangentMix,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -632,6 +634,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle the wall-repulsion kernel radius (cells): 0 → 1 → 2 → 3 → 4 → 5.  R=0 is the legacy 4-cardinal-only scan (A/B baseline).  R≥1 enables the (2R+1)² kernel with 1/d² falloff — wider kernels curve the flow earlier."
                   >
                     R={stats.ffKernelR ?? 3}
+                  </button>
+                </div>
+                {/* Tangent-mix factor.  Blends radial (push away from
+                    wall, current behaviour — creates opposing vectors
+                    on opposite sides of long walls) with tangent
+                    (slide along wall in the base-flow direction).
+                    At mix=1, both sides of a wall flow in the same
+                    along-wall direction → no saddle, shards escape. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Tangent</span>
+                  <button
+                    onClick={onCycleFFTangentMix}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the tangent-mix factor: 0.00 → 0.25 → 0.50 → 0.75 → 1.00.  0 = pure radial repulsion (opposing vectors at long walls, saddle dead-zones).  1 = pure tangent (slide along walls, both sides flow the same way — no saddle)."
+                  >
+                    {(stats.ffTangentMix ?? 0.5).toFixed(2)}
                   </button>
                 </div>
                 {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}

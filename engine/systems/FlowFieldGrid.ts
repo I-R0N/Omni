@@ -88,6 +88,14 @@ const WALL_REPULSE = 1.2;
 // cycles this at runtime via the DBG "FF KernelR" button.
 const DEFAULT_KERNEL_R = 3;
 
+// Default tangent-mix factor.  0 = pure radial (push perpendicular
+// away from walls — produces opposing vectors on either side of a
+// wall and traps shards on the boundary).  1 = pure tangent (slide
+// along walls — both sides flow in the same along-wall direction,
+// no saddle).  0.5 = balanced.  GameEngine cycles this via the DBG
+// "FF Tangent" button.
+const DEFAULT_TANGENT_MIX = 0.5;
+
 // Enemy pursuit BFS is capped at this many cells from the player so each
 // rebuild stays cheap AND the range stays under half the grid axis,
 // which is required on the toroidal map: a BFS that propagates past
@@ -150,6 +158,15 @@ export class FlowFieldGrid {
   // is responsible for re-baking the asteroid field afterward.  Reads
   // are uncontended (single-threaded sim) so no copy/snapshot needed.
   private kernelR: number = DEFAULT_KERNEL_R;
+
+  // Tangent-mix factor in [0, 1].  Each blocked-neighbour contribution
+  // is blended (1 - mix) × radial + mix × tangent, where tangent is
+  // the radial vector rotated 90° in the direction whose dot product
+  // with the base flow is non-negative.  Eliminates the opposing-
+  // vectors saddle along long walls — both sides of the wall produce
+  // tangents that point the same way (along the wall, with the base
+  // flow) instead of perpendicular-and-opposite.
+  private tangentMix: number = DEFAULT_TANGENT_MIX;
 
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
   // performance.now() domain).  Written by `_computeAsteroidCell` for
@@ -296,6 +313,21 @@ export class FlowFieldGrid {
     }
   }
 
+  /**
+   * Change the tangent-mix factor and re-bake every cell.  See the
+   * `tangentMix` field comment for semantics.  Clamped to [0, 1];
+   * no-op when the value matches the current mix.
+   */
+  setTangentMix(mix: number): void {
+    if (mix < 0) mix = 0;
+    else if (mix > 1) mix = 1;
+    if (mix === this.tangentMix) return;
+    this.tangentMix = mix;
+    for (let idx = 0; idx < TOTAL; idx++) {
+      this._computeAsteroidCell(idx);
+    }
+  }
+
   /** Recompute the asteroid flow vector for a single cell. */
   private _computeAsteroidCell(idx: number): void {
     // Stamp the recompute time for the DBG "FF Rebuilds" overlay
@@ -322,14 +354,37 @@ export class FlowFieldGrid {
     // still bend the flow, just more softly.  All neighbour lookups
     // wrap on the torus so edge cells consider their counterparts
     // across the seam.
+    //
+    // Each contribution is split into a radial component (push
+    // perpendicular away from the wall, vector = (-dc, -dr) × w) and
+    // a tangent component (the radial rotated 90° in the direction
+    // whose dot product with the base flow is non-negative — i.e.,
+    // "slide along the wall, keeping the base flow's direction
+    // sense").  The two are blended (1 - mix) × radial + mix ×
+    // tangent so at mix = 1 the cell flows purely along walls
+    // (eliminates the opposing-vectors saddle that traps shards on
+    // long wall surfaces); at mix = 0 the kernel reduces to the
+    // pre-tangent radial-only behaviour exactly.
     const R = this.kernelR;
+    const mix = this.tangentMix;
+    const rWeight = 1 - mix;
+    const baseX = base.x;
+    const baseY = base.y;
     if (R === 0) {
       for (let k = 0; k < 4; k++) {
         const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
         const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
         if (this.blocked[nr * FF_COLS + nc]) {
-          fx -= DC4[k] * WALL_REPULSE;
-          fy -= DR4[k] * WALL_REPULSE;
+          const dc = DC4[k], dr = DR4[k];
+          const radX = -dc * WALL_REPULSE;
+          const radY = -dr * WALL_REPULSE;
+          // tangent = radial rotated 90°; sign chosen so dot(tan,
+          // base) ≥ 0 (flow continues in the base direction sense
+          // along the wall instead of reversing).
+          const t1x = -radY, t1y = radX;
+          const sign = (t1x * baseX + t1y * baseY) >= 0 ? 1 : -1;
+          fx += rWeight * radX + mix * sign * t1x;
+          fy += rWeight * radY + mix * sign * t1y;
         }
       }
     } else {
@@ -341,8 +396,12 @@ export class FlowFieldGrid {
           if (this.blocked[nr * FF_COLS + nc]) {
             const d2 = dr * dr + dc * dc;
             const w  = WALL_REPULSE / d2;
-            fx -= dc * w;
-            fy -= dr * w;
+            const radX = -dc * w;
+            const radY = -dr * w;
+            const t1x = -radY, t1y = radX;
+            const sign = (t1x * baseX + t1y * baseY) >= 0 ? 1 : -1;
+            fx += rWeight * radX + mix * sign * t1x;
+            fy += rWeight * radY + mix * sign * t1y;
           }
         }
       }

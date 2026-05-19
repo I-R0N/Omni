@@ -841,6 +841,11 @@ export interface EngineStats {
   // the DBG "FF KernelR" button.  0 = legacy 4-cardinal-only scan;
   // 1..5 = (2R+1)² extended kernel with 1/d² falloff.  Default 3.
   ffKernelR?: number;
+  // Tangent-mix factor in [0, 1] for the wall-repulsion contribution.
+  // 0 = pure radial (current behaviour, opposing vectors at long
+  // walls); 1 = pure tangent (slide along walls — eliminates the
+  // saddle dead-zone failure mode).  Default 0.5.  DBG-cycle.
+  ffTangentMix?: number;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

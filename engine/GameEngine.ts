@@ -195,6 +195,17 @@ export class GameEngine {
   private static readonly FF_KERNEL_R_CYCLE: readonly number[] =
     [0, 1, 2, 3, 4, 5] as const;
   private ffKernelR: number = 3;
+  // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
+  // radial (push perpendicular away from walls — current behaviour
+  // produces opposing vectors on opposite sides of a long wall and
+  // traps shards in the saddle along the boundary).  1 = pure tangent
+  // (slide along the wall in the direction of the base flow — both
+  // sides of the wall now point the same way along the wall, no
+  // saddle).  Default 0.5 — meaningful tangent contribution while
+  // still preserving some push-away behaviour.  DBG-cycle.
+  private static readonly FF_TANGENT_MIX_CYCLE: readonly number[] =
+    [0.0, 0.25, 0.5, 0.75, 1.0] as const;
+  private ffTangentMix: number = 0.5;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -731,9 +742,10 @@ export class GameEngine {
     this.flowField.setCellSize(next);
     this.flowField.initObstacles(this.currentMap.entities);
     this.flowField.buildAsteroidField((x, y) => this.currentMap!.sampleFlow(x, y));
-    // The new grid starts with the default kernel radius (3); push the
-    // current cycled value back so it survives density changes.
+    // The new grid starts with defaults; push the current cycled
+    // values back so they survive density changes.
     this.flowField.setKernelR(this.ffKernelR);
+    this.flowField.setTangentMix(this.ffTangentMix);
   }
 
   /**
@@ -750,6 +762,24 @@ export class GameEngine {
     const next = order[(idx + 1) % order.length];
     this.ffKernelR = next;
     this.flowField.setKernelR(next);
+  }
+
+  /**
+   * Cycle the wall-repulsion tangent-mix factor through
+   * `FF_TANGENT_MIX_CYCLE` (0.00 → 0.25 → 0.50 → 0.75 → 1.00).  At 0
+   * the kernel pushes purely perpendicular away from walls (creates
+   * opposing vectors on either side of a long wall — the saddle
+   * dead-zone failure mode).  At 1 each blocked-neighbour
+   * contribution is rotated 90° so the flow slides ALONG the wall
+   * (both sides flow in the same direction along the wall, no
+   * saddle).  Re-bakes the asteroid field in-place.
+   */
+  public cycleFFTangentMix() {
+    const order = GameEngine.FF_TANGENT_MIX_CYCLE;
+    const idx = order.indexOf(this.ffTangentMix);
+    const next = order[(idx + 1) % order.length];
+    this.ffTangentMix = next;
+    this.flowField.setTangentMix(next);
   }
 
   /**
@@ -985,6 +1015,7 @@ export class GameEngine {
       ffOverlaySampleN:   this.ffOverlaySampleN,
       ffCellSize:         this.ffCellSize,
       ffKernelR:          this.ffKernelR,
+      ffTangentMix:       this.ffTangentMix,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1123,6 +1154,7 @@ export class GameEngine {
       ffOverlaySampleN:   this.ffOverlaySampleN,
       ffCellSize:         this.ffCellSize,
       ffKernelR:          this.ffKernelR,
+      ffTangentMix:       this.ffTangentMix,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
