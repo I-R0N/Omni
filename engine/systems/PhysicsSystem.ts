@@ -1972,7 +1972,7 @@ export class PhysicsSystem {
                           const offsetLen = Math.sqrt(ox * ox + oy * oy);
                           const radius = target.size.x * 0.5;
                           const offsetFrac = Math.min(1, offsetLen / Math.max(1, radius));
-                          const SPIN_PER_HIT = 0.6;
+                          const SPIN_PER_HIT = 3.0;
                           // |cross| can be 0 for dead-centre hits;
                           // fall back to a random sign so the shard
                           // still nudges.
