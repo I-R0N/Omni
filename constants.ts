@@ -290,10 +290,10 @@ export function cyclePlasticOpacity(): number {
 // ── Nebula-shard velocity-stretch stiffness cycle ──────────────────
 // K multiplier on speed for the velocity-aligned stretch (see
 // NEBULA_CONSTANTS.VEL_STRETCH_* above + RenderSystem nebula-shard
-// render branch).  Cycled via the DBG NStr button — each step is a
-// 2× stiffness change so the visual response across the cycle is
-// distinct.  Index 2 (medium, 0.05) is the startup default; index
-// 0 (0) skips the stretch entirely.
+// render branch).  Cycled via the DBG NStr button — four active
+// stops between K = 0.05 and K = 0.10 (plus an off step at K = 0
+// that short-circuits the entire stretch block).  Default index 2
+// (K = 0.07) sits in the middle of the range.
 
 interface NebulaStretchStep {
   readonly name: string;
@@ -301,11 +301,11 @@ interface NebulaStretchStep {
 }
 
 export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
-  { name: 'off',    k: 0     },
-  { name: 'soft',   k: 0.025 },
-  { name: 'med',    k: 0.05  },
-  { name: 'firm',   k: 0.10  },
-  { name: 'stiff',  k: 0.20  },
+  { name: 'off',   k: 0     },
+  { name: '0.05',  k: 0.05  },
+  { name: '0.07',  k: 0.07  },
+  { name: '0.085', k: 0.085 },
+  { name: '0.10',  k: 0.10  },
 ] as const;
 
 let activeNebulaStretchKIndex = 2;

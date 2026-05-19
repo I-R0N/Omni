@@ -330,9 +330,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     onClick={onCycleNebulaStretch}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle nebula-shard velocity-stretch stiffness (K multiplier on speed → stretch).  off / soft (0.025) / med (0.05) / firm (0.10) / stiff (0.20).  At any K > 0 the squash axis aligns to velocity while the sprite keeps its own rotation."
+                    title="Cycle nebula-shard velocity-stretch stiffness (K multiplier on speed → stretch).  off / 0.05 / 0.07 / 0.085 / 0.10.  At any K > 0 the squash axis aligns to velocity while the sprite keeps its own rotation."
                   >
-                    {stats.nebulaStretchName ?? 'med'}
+                    {stats.nebulaStretchName ?? '0.07'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
