@@ -2332,11 +2332,34 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     shatter: {
       kind: 'powerlaw',
       style: 'asteroid',
-      countMin: 2, countMax: 4,
+      // countMin/countMax are dead config under the size-keyed
+      // override below — shatterAsteroidStyle picks count from
+      // shatterCountBySize when present.  Left at 12 as a sane
+      // fallback if the override is ever removed.
+      countMin: 12, countMax: 12,
       alphaMin: 1.0, alphaMax: 2.0,
       childVariant: 'plastic-shard',
       forwardDrag: 0.35, perpScatter: 0.0,
       scatterHalfCone: Math.PI * 0.55,
+      // Children are 30-50 % of parent diameter (not area-
+      // conserving).  Bypasses the MIN_SIZE filter so all
+      // requested children spawn — bigger merged shards visibly
+      // burst into the full count.  Recursion still terminates
+      // at MIN_SIZE (parent.size < 20 doesn't shatter), so deep
+      // children die cleanly.
+      childSizeFractionMin: 0.3,
+      childSizeFractionMax: 0.5,
+      // Five size levels — bigger shards burst into more pieces.
+      // maxSize is exclusive (parentSize < maxSize → use that
+      // level's count).  Past the final threshold (200), the
+      // last entry's count applies regardless.
+      shatterCountBySize: [
+        { maxSize: 30,  count: 12 },
+        { maxSize: 60,  count: 14 },
+        { maxSize: 90,  count: 16 },
+        { maxSize: 130, count: 18 },
+        { maxSize: 200, count: 20 },
+      ],
     },
     // Magenta particle puff matches the new fuchsia body colour.
     onShatterParticles: { color: '#b45309', count: 5 },

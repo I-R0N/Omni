@@ -448,10 +448,25 @@ export class ShardSystem {
   ): void {
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const MIN_SIZE = childVariant.spawn.sizeMin;
-    const parentArea = parent.size.x * parent.size.x;
 
-    // If parent is too small to yield two valid fragments, stop.
-    if (parentArea < MIN_SIZE * MIN_SIZE * 2) return;
+    // Fraction-sized override (today: plastic-shard).  When both
+    // childSizeFractionMin and childSizeFractionMax are set, sizes
+    // are picked as `parent.size × random(fMin, fMax)` per child
+    // — no area conservation, no MIN_SIZE filter on outputs — so a
+    // fixed count of visible-sized children spawns regardless of
+    // parent area math.  Termination: parent below MIN_SIZE
+    // doesn't shatter, so shrinking generations die cleanly.
+    const fMin = parentVariant.shatter.childSizeFractionMin;
+    const fMax = parentVariant.shatter.childSizeFractionMax;
+    const useFraction = fMin !== undefined && fMax !== undefined;
+
+    if (useFraction) {
+      if (parent.size.x < MIN_SIZE) return;
+    } else {
+      // Area-conservative mode: parent needs enough area for at
+      // least two MIN_SIZE children.
+      if (parent.size.x * parent.size.x < MIN_SIZE * MIN_SIZE * 2) return;
+    }
 
     // Damage scales both count and size distribution.  damageNorm 0
     // → countMin pieces, mostly large (alphaMin); damageNorm 1 →
@@ -459,17 +474,43 @@ export class ShardSystem {
     const damage     = parent.lastImpactDamage ?? 1;
     const damageNorm = Math.min(1, (damage - 1) / 4);
     const { countMin, countMax, alphaMin, alphaMax } = parentVariant.shatter;
-    const count = countMin + Math.round(damageNorm * (countMax - countMin));
+
+    // Size-keyed count override (today: plastic-shard, 5 levels).
+    // When set, picks the count from the first entry whose
+    // `maxSize` exceeds parent.size — "bigger shards burst into
+    // more children."  Falls through to the damage-based formula
+    // otherwise.
+    let count: number;
+    const sizeLevels = parentVariant.shatter.shatterCountBySize;
+    if (sizeLevels && sizeLevels.length > 0) {
+      const parentSize = parent.size.x;
+      let chosen = sizeLevels[sizeLevels.length - 1].count;
+      for (let i = 0; i < sizeLevels.length; i++) {
+        if (parentSize < sizeLevels[i].maxSize) { chosen = sizeLevels[i].count; break; }
+      }
+      count = chosen;
+    } else {
+      count = countMin + Math.round(damageNorm * (countMax - countMin));
+    }
     if (count < 2) return;
 
-    const alpha = alphaMin + damageNorm * (alphaMax - alphaMin);
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-    const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-
-    const sizes: number[] = rawAreas
-      .map(a => Math.sqrt((a / rawSum) * parentArea))
-      .filter(s => s >= MIN_SIZE);
-    if (sizes.length < 2) return;
+    let sizes: number[];
+    if (useFraction) {
+      sizes = [];
+      const span = fMax! - fMin!;
+      for (let i = 0; i < count; i++) {
+        sizes.push(parent.size.x * (fMin! + Math.random() * span));
+      }
+    } else {
+      const parentArea = parent.size.x * parent.size.x;
+      const alpha = alphaMin + damageNorm * (alphaMax - alphaMin);
+      const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+      const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
+      sizes = rawAreas
+        .map(a => Math.sqrt((a / rawSum) * parentArea))
+        .filter(s => s >= MIN_SIZE);
+      if (sizes.length < 2) return;
+    }
 
     // Resolve impact direction.
     const iv = parent.lastImpactVelocity;

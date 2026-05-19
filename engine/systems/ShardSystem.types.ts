@@ -216,6 +216,27 @@ export interface ShardShatterPolicy {
   fadeInSeconds?: number;
   /** Optional merge cooldown stamped on each child. */
   postShatterMergeCooldown?: number;
+  /** Optional non-area-conservative sizing override.  When BOTH
+   *  min/max are set, shatterAsteroidStyle bypasses the power-law
+   *  area distribution + MIN_SIZE filter and instead sizes each
+   *  child as `parent.size.x × random(min, max)`.  Total child
+   *  area can (and usually will) exceed parent area — used by
+   *  plastic-shard so a break visibly produces a fixed count of
+   *  visible-sized children regardless of parent area math.
+   *  Termination comes from the parent-size floor at top of
+   *  shatterAsteroidStyle (parent < MIN_SIZE doesn't shatter),
+   *  so a few generations of shrinking children die cleanly. */
+  childSizeFractionMin?: number;
+  childSizeFractionMax?: number;
+  /** Optional size-keyed count override.  When set, shatter
+   *  AsteroidStyle picks `count` from the first entry whose
+   *  `maxSize` strictly exceeds `parent.size.x`.  Lets a variant
+   *  scale shatter burst size by the parent's diameter — used
+   *  today by plastic-shard for "bigger shards break into more
+   *  pieces, in 5 size levels."  When unset, count falls back
+   *  to the standard `countMin + damageNorm × (countMax − countMin)`
+   *  formula. */
+  shatterCountBySize?: ReadonlyArray<{ maxSize: number; count: number }>;
   /** Shatter geometry strategy.  Two flavours today:
    *
    *    'asteroid' — children scattered in a cone around the impact
