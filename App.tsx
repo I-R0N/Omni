@@ -173,8 +173,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.togglePlasticBlend();
   };
 
-  const handleToggleNebulaShardStretchSnap = () => {
-      if (engineRef.current) engineRef.current.toggleNebulaShardStretchSnap();
+  const handleCycleNebulaStretch = () => {
+      if (engineRef.current) engineRef.current.cycleNebulaStretch();
   };
 
   const handleCyclePlasticOpacity = () => {
@@ -227,7 +227,7 @@ const App: React.FC = () => {
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
-        onToggleNebulaShardStretchSnap={handleToggleNebulaShardStretchSnap}
+        onCycleNebulaStretch={handleCycleNebulaStretch}
         onCyclePlasticOpacity={handleCyclePlasticOpacity}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}

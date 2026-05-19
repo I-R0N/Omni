@@ -287,6 +287,47 @@ export function cyclePlasticOpacity(): number {
   return activePlasticOpacityIndex;
 }
 
+// ── Nebula-shard velocity-stretch stiffness cycle ──────────────────
+// K multiplier on speed for the velocity-aligned stretch (see
+// NEBULA_CONSTANTS.VEL_STRETCH_* above + RenderSystem nebula-shard
+// render branch).  Cycled via the DBG NStr button — each step is a
+// 2× stiffness change so the visual response across the cycle is
+// distinct.  Index 2 (medium, 0.05) is the startup default; index
+// 0 (0) skips the stretch entirely.
+
+interface NebulaStretchStep {
+  readonly name: string;
+  readonly k: number;
+}
+
+export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
+  { name: 'off',    k: 0     },
+  { name: 'soft',   k: 0.025 },
+  { name: 'med',    k: 0.05  },
+  { name: 'firm',   k: 0.10  },
+  { name: 'stiff',  k: 0.20  },
+] as const;
+
+let activeNebulaStretchKIndex = 2;
+
+/** Active stretch multiplier K (in speed → stretch).  Read by
+ *  RenderSystem nebula-shard render each frame. */
+export function getActiveNebulaStretchK(): number {
+  return VEL_STRETCH_K_CYCLE[activeNebulaStretchKIndex].k;
+}
+
+/** Active stretch step name for the DBG button label. */
+export function getActiveNebulaStretchName(): string {
+  return VEL_STRETCH_K_CYCLE[activeNebulaStretchKIndex].name;
+}
+
+/** Advance the active stretch slot by one, wrapping at the end.
+ *  Returns the new index. */
+export function cycleNebulaStretch(): number {
+  activeNebulaStretchKIndex = (activeNebulaStretchKIndex + 1) % VEL_STRETCH_K_CYCLE.length;
+  return activeNebulaStretchKIndex;
+}
+
 /** djb2-style hash of a colour hex string → phase angle in [0, 2π).
  *  Cheap (one pass over the hex chars), deterministic per colour,
  *  used to seed plastic-shard wiggle phase so each amber shade has
@@ -901,16 +942,18 @@ export const NEBULA_CONSTANTS = {
   REST_SPIN: 0.01,
   // ── Velocity-aligned stretch (nebula shard) ──────────────────────
   // Continuous render-side deformation: while a nebula-shard moves,
-  // it stretches along its velocity axis (1 + STRETCH_K × speed,
-  // capped at MAX_STRETCH) and squashes perpendicular by
-  // SQUASH_RATIO × stretch.  Reads as "wind tugging the cloud
-  // forward."  Cost gated on speed² > VEL_STRETCH_REST_SPEED_SQ so
-  // settled shards skip the math.
-  // See RenderSystem nebula-shard render branch.  The snap-vs-free
-  // rotation behaviour is controlled by RenderSystem.nebulaShard
-  // StretchSnap (DBG-toggleable).
+  // it stretches along its velocity axis (1 + K × speed, capped at
+  // MAX_STRETCH) and squashes perpendicular by SQUASH_RATIO ×
+  // stretch.  Reads as "wind tugging the cloud forward."  Cost
+  // gated on speed² > VEL_STRETCH_REST_SPEED_SQ so settled shards
+  // skip the math.  Always uses the "free" rotation mode — only
+  // the squash axis aligns to velocity, the sprite keeps
+  // entity.rotation.
+  //
+  // The K multiplier is selected at runtime from VEL_STRETCH_K_CYCLE
+  // via the DBG NStr button — getActiveNebulaStretchK() returns
+  // the current value.  K = 0 disables the stretch entirely.
   VEL_STRETCH_REST_SPEED_SQ: 0.01,
-  VEL_STRETCH_K:             0.05,
   VEL_STRETCH_MAX:           0.4,
   VEL_STRETCH_SQUASH_RATIO:  0.6,
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.

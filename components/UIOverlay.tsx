@@ -24,7 +24,7 @@ interface UIOverlayProps {
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
-  onToggleNebulaShardStretchSnap?: () => void;
+  onCycleNebulaStretch?: () => void;
   onCyclePlasticOpacity?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
@@ -60,7 +60,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
-  onToggleNebulaShardStretchSnap,
+  onCycleNebulaStretch,
   onCyclePlasticOpacity,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
@@ -321,18 +321,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
-                {/* Nebula-shard velocity-stretch rotation mode.
-                    free = squash axis aligns to velocity, sprite
-                    keeps entity rotation.  snap = sprite also rotates
-                    to face velocity. */}
+                {/* Nebula-shard velocity-stretch stiffness cycle —
+                    off / soft / med / firm / stiff.  Rotation mode
+                    is fixed to "free" (only squash axis aligns to
+                    velocity, sprite stays at its own rotation). */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NShStr</span>
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NStr</span>
                   <button
-                    onClick={onToggleNebulaShardStretchSnap}
+                    onClick={onCycleNebulaStretch}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle nebula-shard velocity-stretch rotation mode.  free (default) = only the squash axis aligns to velocity, sprite stays at its own rotation.  snap = sprite rotates to match velocity direction.  The stretch itself is always active for moving shards (NEBULA_CONSTANTS.VEL_STRETCH_*)."
+                    title="Cycle nebula-shard velocity-stretch stiffness (K multiplier on speed → stretch).  off / soft (0.025) / med (0.05) / firm (0.10) / stiff (0.20).  At any K > 0 the squash axis aligns to velocity while the sprite keeps its own rotation."
                   >
-                    {stats.nebulaShardStretchSnap === true ? 'snap' : 'free'}
+                    {stats.nebulaStretchName ?? 'med'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

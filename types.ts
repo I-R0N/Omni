@@ -739,11 +739,9 @@ export interface EngineStats {
   // NebulaSystem.equilibrateColors.  Independent of the nebula
   // tile/shard blend alphas.  Default true.
   plasticBlendEnabled?: boolean;
-  // DBG rotation mode for the nebula-shard velocity stretch.
-  // false (default) = "free" — only the squash axis aligns to
-  // velocity, sprite keeps entity.rotation.
-  // true             = "snap" — sprite rotates to velocity axis.
-  nebulaShardStretchSnap?: boolean;
+  // DBG stiffness step for the nebula-shard velocity stretch
+  // (VEL_STRETCH_K_CYCLE name).  off → soft → med → firm → stiff.
+  nebulaStretchName?: string;
   // Active opacity (formatted as "NN%") applied to plastic-tile and
   // plastic-shard draws.  Cycled via the DBG Opacity button
   // (25 % → 50 % → 75 % → 100 %).
