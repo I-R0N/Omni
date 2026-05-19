@@ -1892,6 +1892,13 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // below 0.15 vel-units snaps to zero, so a settled chain sleeps
 // cleanly without micro-drift jitter at the contact points.
 //
+// angularDamping 0.99 (higher retention than linearDamping = less
+// damping on spin) so a projectile-induced spin kick (see
+// PhysicsSystem plastic spin block) decays slower than the
+// linear velocity — plastic shards visibly rotate after a hit
+// for longer than they translate.  restSpin stays at 0.05 so
+// micro-rotations from rounding still snap to zero.
+//
 // PRESERVED — prior "sleep-state" config (v4) for future use on
 // a different material variant if needed:
 //   linearDamping:  0.92    // ~99 % velocity bleed per second
@@ -1908,7 +1915,7 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
   linearDamping:  0.97,
-  angularDamping: 0.97,
+  angularDamping: 0.99,
   restSpeed: 0.15,
   restSpin:  0.05,
 };

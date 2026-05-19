@@ -1960,9 +1960,11 @@ export class PhysicsSystem {
                       // hits add the full SPIN_PER_HIT.  Sign is
                       // randomised on near-centre hits so even a
                       // bullseye gives a little jitter.
-                      // angularDamping = 0.97 (variant config)
-                      // bleeds the spin off over a couple seconds,
-                      // matching the linear-damping cadence.
+                      // angularDamping = 0.99 (variant config) is
+                      // intentionally lighter than linearDamping
+                      // (0.97) so the spin persists noticeably
+                      // longer than the linear push — plastic
+                      // shards visibly twirl after a hit.
                       if (target.shardVariant === 'plastic-shard' && target.rotationSpeed !== undefined) {
                           const ox = proj.position.x - target.position.x;
                           const oy = proj.position.y - target.position.y;
