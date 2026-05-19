@@ -1950,6 +1950,35 @@ export class PhysicsSystem {
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
                       maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y);
+
+                      // Plastic-shard spin kick from off-centre
+                      // impacts.  Torque sign comes from the cross
+                      // product of the impact offset (from shard
+                      // centre) and the projectile velocity vector.
+                      // Magnitude scales with how off-centre the
+                      // hit is — dead-centre adds nothing, edge
+                      // hits add the full SPIN_PER_HIT.  Sign is
+                      // randomised on near-centre hits so even a
+                      // bullseye gives a little jitter.
+                      // angularDamping = 0.97 (variant config)
+                      // bleeds the spin off over a couple seconds,
+                      // matching the linear-damping cadence.
+                      if (target.shardVariant === 'plastic-shard' && target.rotationSpeed !== undefined) {
+                          const ox = proj.position.x - target.position.x;
+                          const oy = proj.position.y - target.position.y;
+                          const cross = ox * proj.velocity.y - oy * proj.velocity.x;
+                          const offsetLen = Math.sqrt(ox * ox + oy * oy);
+                          const radius = target.size.x * 0.5;
+                          const offsetFrac = Math.min(1, offsetLen / Math.max(1, radius));
+                          const SPIN_PER_HIT = 0.6;
+                          // |cross| can be 0 for dead-centre hits;
+                          // fall back to a random sign so the shard
+                          // still nudges.
+                          const sign = Math.abs(cross) > 0.001
+                              ? Math.sign(cross)
+                              : (Math.random() < 0.5 ? -1 : 1);
+                          target.rotationSpeed += sign * SPIN_PER_HIT * Math.max(0.15, offsetFrac);
+                      }
                   }
               }
               target.hitFlash = 0.1;
