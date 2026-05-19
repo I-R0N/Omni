@@ -1794,9 +1794,10 @@ export class ShardSystem {
         // sizeCap applies to rock / glass shards (avoid producing
         // shards larger than the map's free-spawn maxSize, which
         // would look like rogue giant rocks).  Plastic self-merge
-        // has no upper limit per user direction — the only
-        // termination is the PLASTIC_TIER_DIAMETER transmute back
-        // to a plastic-tile, which already fires below.
+        // has no upper limit per user direction — plastic-shards
+        // grow indefinitely.  The plastic-shard → plastic-tile
+        // transmute is also disabled (see below), so there's no
+        // tier-up termination either.
         if (!isPlasticSelfMerge) {
           const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
           if (newDiam > sizeCap) return;
@@ -1872,15 +1873,16 @@ export class ShardSystem {
       if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
         this.tryConvertOversizedGlassShard(a, entities, physics);
       }
-      // Plastic-shard tier transition — mirrors the glass path but
-      // always transmutes to plastic-tile (no rock-shard downgrade
-      // alternative).  Closes the loop: plastic-tile shatters into
-      // plastic-shards via dent.breakShards; shards merge via
-      // bondsWith; merged shards hit PLASTIC_TIER_DIAMETER and
-      // transmute back to plastic-tile at the nearest free hex.
-      if (a.shardVariant === 'plastic-shard' && a.size.x >= PLASTIC_TIER_DIAMETER) {
-        this.tryTransmutePlasticShardToTile(a, entities, physics);
-      }
+      // Plastic-shard tier transition — DISABLED per user direction.
+      // Plastic-shards merge into ever-larger plastic-shards
+      // indefinitely; no transmute back to plastic-tile.  The
+      // tryTransmutePlasticShardToTile method is kept (unused) in
+      // case the feature is re-enabled later; PLASTIC_TIER_DIAMETER
+      // likewise.  Uncomment the call to restore.
+      //
+      // if (a.shardVariant === 'plastic-shard' && a.size.x >= PLASTIC_TIER_DIAMETER) {
+      //   this.tryTransmutePlasticShardToTile(a, entities, physics);
+      // }
     } else if (!aIsAst && !bIsAst) {
       // Drop + Drop.
       if (a.dropType === b.dropType) {
