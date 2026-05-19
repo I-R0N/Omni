@@ -71,12 +71,22 @@ const INF = 0x7FFF_FFFF;
 const DR4 = [-1,  1,  0,  0] as const;
 const DC4 = [ 0,  0, -1,  1] as const;
 
-// How strongly blocked cardinal neighbours deflect the asteroid flow.
-// Each blocked neighbour subtracts WALL_REPULSE in the opposing axis from
-// the base vortex vector before normalisation.  At 1.2 a single wall
-// neighbour rotates the flow ~50° away from the obstacle; two adjacent
-// walls (inside corner) rotate it ~90°.
+// How strongly blocked neighbours deflect the asteroid flow.  Each
+// blocked neighbour subtracts (dc, dr) * WALL_REPULSE / d² from the
+// base vortex vector before normalisation, where d² is the squared
+// cell-distance (1 for cardinal, 2 for diagonal, ...).  At 1.2 a
+// single cardinal-neighbour wall (d²=1) rotates the flow ~50° away
+// from the obstacle; two adjacent walls (inside corner) rotate it
+// ~90°.  Farther walls in the kernel contribute smoothly less.
 const WALL_REPULSE = 1.2;
+
+// Default wall-kernel radius (cells).  R = 0 reproduces the legacy
+// 4-cardinal-only scan for A/B testing; R ≥ 1 enables the extended
+// (2R+1)² kernel.  Default 3 — wide enough to bend the flow several
+// cells before an obstacle so streamlines curve around tile clusters
+// instead of pointing straight at them until impact.  GameEngine
+// cycles this at runtime via the DBG "FF KernelR" button.
+const DEFAULT_KERNEL_R = 3;
 
 // Enemy pursuit BFS is capped at this many cells from the player so each
 // rebuild stays cheap AND the range stays under half the grid axis,
@@ -135,6 +145,11 @@ export class FlowFieldGrid {
   // Read by GameEngine for the dev perf overlay so we can catch pathological
   // rebuild thrash (e.g. player oscillating across a cell boundary).
   public lastFlushMs: number = 0;
+
+  // Wall-kernel radius (cells).  Mutated only by setKernelR(); caller
+  // is responsible for re-baking the asteroid field afterward.  Reads
+  // are uncontended (single-threaded sim) so no copy/snapshot needed.
+  private kernelR: number = DEFAULT_KERNEL_R;
 
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
   // performance.now() domain).  Written by `_computeAsteroidCell` for
@@ -251,16 +266,31 @@ export class FlowFieldGrid {
    * Build the asteroid streaming field from the analytical vortex field.
    *
    * For every unblocked cell the base flow direction is sampled from
-   * sampleFlow() and then corrected by wall repulsion: each blocked
-   * cardinal neighbour subtracts WALL_REPULSE along its axis so that
-   * the resulting vector curves away from obstacles while still following
-   * the global vortex current.
-   *
-   * This replaces the old BFS-to-4-corners approach which caused all
-   * asteroids to funnel toward the same convergence points.
+   * sampleFlow() and then corrected by wall repulsion over the active
+   * kernel (radius = `kernelR`).  Each blocked neighbour contributes
+   * (dc, dr) * WALL_REPULSE / d² in the away-from-obstacle direction;
+   * the sum is added to the base vector before normalisation.  Wider
+   * kernels make the field curve gradually around tile clusters
+   * instead of staying straight until the very last cell.
    */
   buildAsteroidField(sampler?: FlowSampler): void {
     if (sampler) this.flowSampler = sampler;
+    for (let idx = 0; idx < TOTAL; idx++) {
+      this._computeAsteroidCell(idx);
+    }
+  }
+
+  /**
+   * Change the wall-kernel radius and re-bake every cell.  R = 0
+   * reproduces the legacy 4-cardinal-only scan for A/B testing; R ≥ 1
+   * enables the extended (2R+1)² kernel with 1/d² falloff.  Cycled at
+   * runtime via the DBG "FF KernelR" button.  No-op when `r` equals
+   * the current radius.
+   */
+  setKernelR(r: number): void {
+    if (r < 0) r = 0;
+    if (r === this.kernelR) return;
+    this.kernelR = r;
     for (let idx = 0; idx < TOTAL; idx++) {
       this._computeAsteroidCell(idx);
     }
@@ -286,16 +316,35 @@ export class FlowFieldGrid {
     let fx = base.x;
     let fy = base.y;
 
-    // Wall repulsion: each blocked cardinal neighbour pushes the flow
-    // away from it.  Neighbours wrap around the torus so edge cells
-    // consider their counterparts across the seam rather than treating
-    // the edge as open space.
-    for (let k = 0; k < 4; k++) {
-      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
-      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
-      if (this.blocked[nr * FF_COLS + nc]) {
-        fx -= DC4[k] * WALL_REPULSE;
-        fy -= DR4[k] * WALL_REPULSE;
+    // Wall repulsion.  R = 0 hits only the 4 cardinal neighbours
+    // (legacy mode, preserved for A/B comparison).  R ≥ 1 scans the
+    // full (2R+1)² neighbourhood with 1/d² falloff so distant walls
+    // still bend the flow, just more softly.  All neighbour lookups
+    // wrap on the torus so edge cells consider their counterparts
+    // across the seam.
+    const R = this.kernelR;
+    if (R === 0) {
+      for (let k = 0; k < 4; k++) {
+        const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+        const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
+        if (this.blocked[nr * FF_COLS + nc]) {
+          fx -= DC4[k] * WALL_REPULSE;
+          fy -= DR4[k] * WALL_REPULSE;
+        }
+      }
+    } else {
+      for (let dr = -R; dr <= R; dr++) {
+        const nr = (row + dr + FF_ROWS) % FF_ROWS;
+        for (let dc = -R; dc <= R; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nc = (col + dc + FF_COLS) % FF_COLS;
+          if (this.blocked[nr * FF_COLS + nc]) {
+            const d2 = dr * dr + dc * dc;
+            const w  = WALL_REPULSE / d2;
+            fx -= dc * w;
+            fy -= dr * w;
+          }
+        }
       }
     }
 
@@ -348,9 +397,10 @@ export class FlowFieldGrid {
   /**
    * Notify the grid that a tile was destroyed at world position (wx, wy).
    *
-   * Asteroid field: recompute the cleared cell and its 4 cardinal
-   * neighbours — their wall-repulsion vectors change because one obstacle
-   * just disappeared.  O(5) cells touched.
+   * Asteroid field: recompute every cell whose kernel includes the
+   * destroyed tile — the (2R+1)² neighbourhood centred on the cleared
+   * cell, where R = kernelR.  In legacy mode (R=0) this is just the 5
+   * cells (self + 4 cardinals); at the default R=3 it's 49 cells.
    *
    * Enemy field: incremental BFS patch (unchanged).
    */
@@ -359,14 +409,25 @@ export class FlowFieldGrid {
     if (idx < 0 || !this.blocked[idx]) return;
     this.blocked[idx] = 0;
 
-    // Asteroid field — cheap neighbourhood recompute
-    this._computeAsteroidCell(idx);
+    // Asteroid field — recompute the kernel neighbourhood
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
-    for (let k = 0; k < 4; k++) {
-      const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
-      const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
-      this._computeAsteroidCell(nr * FF_COLS + nc);
+    const R = this.kernelR;
+    if (R === 0) {
+      this._computeAsteroidCell(idx);
+      for (let k = 0; k < 4; k++) {
+        const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
+        const nc = (col + DC4[k] + FF_COLS) % FF_COLS;
+        this._computeAsteroidCell(nr * FF_COLS + nc);
+      }
+    } else {
+      for (let dr = -R; dr <= R; dr++) {
+        const nr = (row + dr + FF_ROWS) % FF_ROWS;
+        for (let dc = -R; dc <= R; dc++) {
+          const nc = (col + dc + FF_COLS) % FF_COLS;
+          this._computeAsteroidCell(nr * FF_COLS + nc);
+        }
+      }
     }
 
     // Enemy field — BFS patch

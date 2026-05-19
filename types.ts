@@ -837,6 +837,10 @@ export interface EngineStats {
   // 256 (production); finer values rebuild both the asteroid and
   // pursuit fields at higher resolution.
   ffCellSize?: number;
+  // Asteroid-field wall-repulsion kernel radius (cells).  Cycled by
+  // the DBG "FF KernelR" button.  0 = legacy 4-cardinal-only scan;
+  // 1..5 = (2R+1)² extended kernel with 1/d² falloff.  Default 3.
+  ffKernelR?: number;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

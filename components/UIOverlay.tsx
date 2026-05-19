@@ -48,6 +48,7 @@ interface UIOverlayProps {
   onToggleFFOverlayRebuilds?: () => void;
   onCycleFFOverlaySampleN?: () => void;
   onCycleFFDensity?: () => void;
+  onCycleFFKernelR?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -101,6 +102,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleFFOverlayRebuilds,
   onCycleFFOverlaySampleN,
   onCycleFFDensity,
+  onCycleFFKernelR,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -613,6 +615,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle the FF cell size (world units): 256 → 192 → 128 → 96 → 64 → 48 → 32.  Each step rebuilds both flow grids.  Pursuit-field BFS range is in cells, so finer densities reduce enemy long-range pathfinding."
                   >
                     {stats.ffCellSize ?? 256}u
+                  </button>
+                </div>
+                {/* Wall-repulsion kernel radius.  R=0 reproduces the
+                    legacy 4-cardinal-only scan for A/B comparison;
+                    R≥1 enables the (2R+1)² kernel with 1/d² falloff
+                    so cells several positions away from a wall start
+                    curving the flow gradually instead of staying
+                    straight until impact.  Each step re-bakes the
+                    asteroid field (sub-ms). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF KernelR</span>
+                  <button
+                    onClick={onCycleFFKernelR}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the wall-repulsion kernel radius (cells): 0 → 1 → 2 → 3 → 4 → 5.  R=0 is the legacy 4-cardinal-only scan (A/B baseline).  R≥1 enables the (2R+1)² kernel with 1/d² falloff — wider kernels curve the flow earlier."
+                  >
+                    R={stats.ffKernelR ?? 3}
                   </button>
                 </div>
                 {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}

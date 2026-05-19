@@ -187,6 +187,14 @@ export class GameEngine {
   private static readonly FF_DENSITY_CYCLE: readonly number[] =
     [256, 192, 128, 96, 64, 48, 32] as const;
   private ffCellSize: number = 256;
+  // Wall-repulsion kernel radius for the asteroid field, in cells.
+  // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
+  // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
+  // tile clusters from several cells away.  Default 3 — matches the
+  // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
+  private static readonly FF_KERNEL_R_CYCLE: readonly number[] =
+    [0, 1, 2, 3, 4, 5] as const;
+  private ffKernelR: number = 3;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -723,6 +731,25 @@ export class GameEngine {
     this.flowField.setCellSize(next);
     this.flowField.initObstacles(this.currentMap.entities);
     this.flowField.buildAsteroidField((x, y) => this.currentMap!.sampleFlow(x, y));
+    // The new grid starts with the default kernel radius (3); push the
+    // current cycled value back so it survives density changes.
+    this.flowField.setKernelR(this.ffKernelR);
+  }
+
+  /**
+   * Cycle the asteroid-field wall-repulsion kernel radius through
+   * `FF_KERNEL_R_CYCLE` (0 → 1 → 2 → 3 → 4 → 5).  R = 0 is the legacy
+   * 4-cardinal-only scan kept for A/B testing; R ≥ 1 enables the
+   * (2R+1)² kernel with 1/d² falloff so cells several positions away
+   * from a wall already start curving the flow.  Each step re-bakes
+   * the asteroid field in-place (sub-ms even at the finest density).
+   */
+  public cycleFFKernelR() {
+    const order = GameEngine.FF_KERNEL_R_CYCLE;
+    const idx = order.indexOf(this.ffKernelR);
+    const next = order[(idx + 1) % order.length];
+    this.ffKernelR = next;
+    this.flowField.setKernelR(next);
   }
 
   /**
@@ -957,6 +984,7 @@ export class GameEngine {
       ffOverlayRebuilds:  this.ffOverlayRebuilds,
       ffOverlaySampleN:   this.ffOverlaySampleN,
       ffCellSize:         this.ffCellSize,
+      ffKernelR:          this.ffKernelR,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1094,6 +1122,7 @@ export class GameEngine {
       ffOverlayRebuilds:  this.ffOverlayRebuilds,
       ffOverlaySampleN:   this.ffOverlaySampleN,
       ffCellSize:         this.ffCellSize,
+      ffKernelR:          this.ffKernelR,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
