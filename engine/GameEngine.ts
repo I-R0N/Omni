@@ -175,6 +175,18 @@ export class GameEngine {
   // overlays always render every cell.
   private static readonly FF_SAMPLE_N_CYCLE: readonly number[] = [1, 2, 4, 8, 16] as const;
   private ffOverlaySampleN: number = 1;
+  // Cycle of cell sizes for the DBG "FF Density" toggle.  Coarsest
+  // first (matches the existing default).  Each step rebuilds both
+  // grids — asteroid field via the analytical formula + repulsion,
+  // pursuit field lazily on the next sample.  Note: pursuit-field
+  // range (MAX_ENEMY_RANGE) is measured in cells, so shrinking the
+  // cell size also shrinks the world-units range — at 32 / 6 ≈ 50 %
+  // of the default the BFS only fans out ~350 units, leaving enemies
+  // outside that radius to rely on direct steering.  DBG-only knob;
+  // production stays at the default 256.
+  private static readonly FF_DENSITY_CYCLE: readonly number[] =
+    [256, 192, 128, 96, 64, 48, 32] as const;
+  private ffCellSize: number = 256;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -690,6 +702,30 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the flow-field cell size through `FF_DENSITY_CYCLE` (256 →
+   * 192 → 128 → 96 → 64 → 48 → 32 → 256).  Each step reallocates the
+   * grid's typed-array buffers at the new resolution, rebuilds the
+   * obstacle bitmap from the live entity list, and re-bakes the
+   * asteroid field with the active map's sampleFlow.  The enemy
+   * pursuit field is marked dirty so the next `flushEnemyField()`
+   * rebuilds it for the new resolution.  All of this happens
+   * synchronously inside the cycle — at the highest density (32-unit
+   * cells on a 6 k map) the bake is still sub-millisecond.
+   *
+   * No-op when no map is loaded.
+   */
+  public cycleFFDensity() {
+    if (!this.currentMap) return;
+    const order = GameEngine.FF_DENSITY_CYCLE;
+    const idx = order.indexOf(this.ffCellSize);
+    const next = order[(idx + 1) % order.length];
+    this.ffCellSize = next;
+    this.flowField.setCellSize(next);
+    this.flowField.initObstacles(this.currentMap.entities);
+    this.flowField.buildAsteroidField((x, y) => this.currentMap!.sampleFlow(x, y));
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -920,6 +956,7 @@ export class GameEngine {
       ffOverlayObstacles: this.ffOverlayObstacles,
       ffOverlayRebuilds:  this.ffOverlayRebuilds,
       ffOverlaySampleN:   this.ffOverlaySampleN,
+      ffCellSize:         this.ffCellSize,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1056,6 +1093,7 @@ export class GameEngine {
       ffOverlayObstacles: this.ffOverlayObstacles,
       ffOverlayRebuilds:  this.ffOverlayRebuilds,
       ffOverlaySampleN:   this.ffOverlaySampleN,
+      ffCellSize:         this.ffCellSize,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,

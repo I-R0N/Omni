@@ -47,6 +47,7 @@ interface UIOverlayProps {
   onToggleFFOverlayObstacles?: () => void;
   onToggleFFOverlayRebuilds?: () => void;
   onCycleFFOverlaySampleN?: () => void;
+  onCycleFFDensity?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -99,6 +100,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleFFOverlayObstacles,
   onToggleFFOverlayRebuilds,
   onCycleFFOverlaySampleN,
+  onCycleFFDensity,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -592,6 +594,25 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle the asteroid/shard flow-field velocity nudge.  OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity."
                   >
                     {stats.asteroidFlowEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                {/* Grid density — cell size in world units.  Cycles
+                    256 → 192 → 128 → 96 → 64 → 48 → 32.  Each step
+                    reallocates both grids' typed-array buffers, re-
+                    bakes the asteroid field from the analytical
+                    formula + wall repulsion, and dirties the enemy
+                    pursuit field for the next sample.  Note: enemy
+                    pursuit range is measured in cells, so finer
+                    densities also shrink the BFS reach in world
+                    units. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Density</span>
+                  <button
+                    onClick={onCycleFFDensity}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the FF cell size (world units): 256 → 192 → 128 → 96 → 64 → 48 → 32.  Each step rebuilds both flow grids.  Pursuit-field BFS range is in cells, so finer densities reduce enemy long-range pathfinding."
+                  >
+                    {stats.ffCellSize ?? 256}u
                   </button>
                 </div>
                 {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}

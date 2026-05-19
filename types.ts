@@ -832,6 +832,11 @@ export interface EngineStats {
   // Cycled via the DBG "FF SampleN" button.  The cells/obstacles/
   // rebuilds overlays always render every cell.
   ffOverlaySampleN?: number;
+  // Active flow-field cell size in world units.  Cycled by the DBG
+  // "FF Density" button through the FF_DENSITY_CYCLE values.  Default
+  // 256 (production); finer values rebuild both the asteroid and
+  // pursuit fields at higher resolution.
+  ffCellSize?: number;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

@@ -257,6 +257,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleFFOverlaySampleN();
   };
 
+  const handleCycleFFDensity = () => {
+      if (engineRef.current) engineRef.current.cycleFFDensity();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -312,6 +316,7 @@ const App: React.FC = () => {
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
         onToggleFFOverlayRebuilds={handleToggleFFOverlayRebuilds}
         onCycleFFOverlaySampleN={handleCycleFFOverlaySampleN}
+        onCycleFFDensity={handleCycleFFDensity}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

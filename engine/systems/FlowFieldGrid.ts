@@ -44,7 +44,8 @@ export type FlowSampler = (wx: number, wy: number) => AnalyticalFlowVector;
 // off-grid cells — every world coordinate maps to exactly one cell and
 // every cell has four in-range neighbours.
 
-const CELL_SIZE = 256;          // world units per cell
+const CELL_SIZE_DEFAULT = 256;
+let CELL_SIZE = CELL_SIZE_DEFAULT;          // world units per cell
 // Min corner + cell counts are `let` so setMapDimensions() updates them
 // on map load.  Instances reallocate their typed arrays in
 // `_ensureCapacity()` when the cell count grows past their current size.
@@ -179,6 +180,47 @@ export class FlowFieldGrid {
     this.astRebuildTs = new Float64Array(TOTAL);
     this._allocTotal = TOTAL;
   }
+
+  /**
+   * Change the grid's cell size and rebuild every grid-sized buffer.
+   * Caller (GameEngine) must re-invoke `initObstacles()` +
+   * `buildAsteroidField()` afterward, since the obstacle bitmap and
+   * asteroid-flow vectors are wiped here.  The enemy pursuit field is
+   * marked dirty so the next `flushEnemyField()` rebakes it for the
+   * new resolution.
+   *
+   * No-op when `size` equals the current cell size.  Otherwise FF_COLS
+   * / FF_ROWS / TOTAL are recomputed against the current map
+   * dimensions, and every typed array is reallocated at the new TOTAL
+   * — old data is intentionally dropped because cell indices change
+   * meaning when the cell size changes.
+   *
+   * Today this is only called from GameEngine's DBG "FF Density" cycle.
+   */
+  setCellSize(size: number): void {
+    if (size === CELL_SIZE || !(size > 0)) return;
+    CELL_SIZE = size;
+    FF_COLS = Math.ceil(MAP_WIDTH  / CELL_SIZE);
+    FF_ROWS = Math.ceil(MAP_HEIGHT / CELL_SIZE);
+    TOTAL   = FF_COLS * FF_ROWS;
+    this.blocked      = new Uint8Array(TOTAL);
+    this.astFlowX     = new Float32Array(TOTAL);
+    this.astFlowY     = new Float32Array(TOTAL);
+    this.eneDist      = new Int32Array(TOTAL).fill(INF);
+    this.eneFlowX     = new Float32Array(TOTAL);
+    this.eneFlowY     = new Float32Array(TOTAL);
+    this.fullQ        = new Int32Array(TOTAL + 4);
+    this.inFullQ      = new Uint8Array(TOTAL);
+    this.astRebuildTs = new Float64Array(TOTAL);
+    this._allocTotal  = TOTAL;
+    // Invalidate the cached player cell — the index meaning changed
+    // and the next scheduleEnemyRebuild() call will re-derive it.
+    this.playerCell = -1;
+    this.enemyDirty = true;
+  }
+
+  /** Default cell size used at construction and after a reset. */
+  static readonly DEFAULT_CELL_SIZE = CELL_SIZE_DEFAULT;
 
   /**
    * Populate the obstacle bitmap from the map's tile entities.
