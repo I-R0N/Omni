@@ -1093,21 +1093,44 @@ export class ShardSystem {
             // Stage 5b.  Other outcomes (none yet) skip the bond.
             if (rule.outcome !== 'compose' && rule.outcome !== 'absorb') continue;
 
+            // Optional size-disparity gate (today: plastic-shard).
+            // Skip the bond when the pair is too close in size —
+            // forces "smaller merges into larger" by refusing equal
+            // pairs.  Symmetric: applies regardless of which side
+            // is the puller.
+            const reqDelta = pullerVariant.merge.requireSizeDeltaFraction;
+            if (reqDelta !== undefined && reqDelta > 0) {
+              const larger  = Math.max(a.size.x, b.size.x);
+              const smaller = Math.min(a.size.x, b.size.x);
+              if (larger <= 0 || (larger - smaller) / larger < reqDelta) continue;
+            }
+
             // Threshold: pullerVariant.merge.bondTimeSeconds, scaled
-            // by size and the rule's thresholdScale.  For absorb
-            // rules with bondTimeSeconds=0 (nebula → glass-shard) we
-            // bump the base to MERGE_COOLDOWN so thresholdScale is
+            // by size and the rule's thresholdScale.  Two scaling
+            // modes — exponential (bondTimeSizeExp set, used by
+            // plastic-shard) or polynomial (bondTimeSizePower, the
+            // default for rock/glass).  For absorb rules with
+            // bondTimeSeconds=0 (nebula → glass-shard) we bump the
+            // base to MERGE_COOLDOWN so thresholdScale is
             // meaningful; the size-fraction gate is the dominant
             // gate anyway.
             let baseTime  = pullerVariant.merge.bondTimeSeconds ?? 10;
             if (rule.outcome === 'absorb' && baseTime <= 0) {
               baseTime = pullerVariant.merge.postMergeCooldown ?? 1.0;
             }
-            const sizeRef   = pullerVariant.merge.bondTimeSizeRef   ?? 20;
-            const sizePower = pullerVariant.merge.bondTimeSizePower ?? 1.5;
-            const avgSize   = (a.size.x + b.size.x) * 0.5;
-            const sizeRatio = sizeRef > 0 ? Math.max(1, avgSize / sizeRef) : 1;
-            const baseScaled = baseTime * Math.pow(sizeRatio, sizePower);
+            const sizeRef    = pullerVariant.merge.bondTimeSizeRef   ?? 20;
+            const sizeExp    = pullerVariant.merge.bondTimeSizeExp;
+            const sizePower  = pullerVariant.merge.bondTimeSizePower ?? 1.5;
+            const avgSize    = (a.size.x + b.size.x) * 0.5;
+            let baseScaled: number;
+            if (sizeExp !== undefined && sizeExp > 0) {
+              // Exponential mode — threshold doubles roughly every
+              // ln(2)/sizeExp units of additional size above ref.
+              baseScaled = baseTime * Math.exp(Math.max(0, avgSize - sizeRef) * sizeExp);
+            } else {
+              const sizeRatio = sizeRef > 0 ? Math.max(1, avgSize / sizeRef) : 1;
+              baseScaled = baseTime * Math.pow(sizeRatio, sizePower);
+            }
             const threshold  = baseScaled * (rule.thresholdScale ?? 1);
 
             this.bonds.push({
@@ -1768,8 +1791,16 @@ export class ShardSystem {
         newMass = a.mass + b.mass;
       } else {
         newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
-        const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
-        if (newDiam > sizeCap) return;
+        // sizeCap applies to rock / glass shards (avoid producing
+        // shards larger than the map's free-spawn maxSize, which
+        // would look like rogue giant rocks).  Plastic self-merge
+        // has no upper limit per user direction — the only
+        // termination is the PLASTIC_TIER_DIAMETER transmute back
+        // to a plastic-tile, which already fires below.
+        if (!isPlasticSelfMerge) {
+          const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
+          if (newDiam > sizeCap) return;
+        }
         newMass = newDiam;
       }
 

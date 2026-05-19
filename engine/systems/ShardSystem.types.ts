@@ -171,6 +171,20 @@ export interface ShardMergePolicy {
   bondTimeSeconds?: number;
   bondTimeSizeRef?: number;
   bondTimeSizePower?: number;
+  /** Optional exponential size-scaling rate for the bond timer.
+   *  When set, threshold = baseTime × exp((avgSize − sizeRef) ×
+   *  bondTimeSizeExp) instead of the polynomial sizePower
+   *  formulation.  Mutually exclusive in practice — variants pick
+   *  one or the other.  Used by plastic-shard so very large shards
+   *  take exponentially longer to merge (k = 0.04 doubles the
+   *  threshold for every ~17 units of additional size). */
+  bondTimeSizeExp?: number;
+  /** Optional size-disparity gate at bond formation.  Bond only
+   *  forms when |a.size − b.size| / max(a.size, b.size) >=
+   *  requireSizeDeltaFraction.  At 0.05 the pair must differ by
+   *  at least 5 % in diameter — used by plastic-shard so two
+   *  equal-sized shards don't compose (only smaller-into-larger). */
+  requireSizeDeltaFraction?: number;
 
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];

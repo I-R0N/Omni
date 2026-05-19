@@ -2283,22 +2283,32 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit, v5 (tier-chain merge): plastic-
-    // shards self-bond on contact via the standard bondsWith
-    // pipeline.  Compose merges grow the survivor (area-conserving;
-    // density compaction is disabled on plastic) until it reaches
-    // PLASTIC_TIER_DIAMETER, at which point it transmutes back to
-    // a plastic-tile at the nearest free hex cell — same loop as
-    // glass-shard → glass-tile.  See ShardSystem.tryTransmute
-    // PlasticShardToTile.
+    // Plastic-softbody retrofit, v6 (size-gated tier merge):
+    // plastic-shards self-bond on contact via the standard bondsWith
+    // pipeline, but only when there's a clear size disparity —
+    // smaller merges into larger; equal-sized pairs don't bond.
+    // The bond-time scaling uses an exponential curve in avgSize
+    // so very large shards take exponentially longer to merge.
+    // No upper size limit on the survivor (composeEntities skips
+    // the asteroid sizeCap for plastic-self-merge).  Once a
+    // merged shard reaches PLASTIC_TIER_DIAMETER it transmutes
+    // back to a plastic-tile at the nearest free hex cell.
     //
-    // Bond timing matches rock/glass: 10 s base, scaled by avg
-    // size to power 1.5.  At typical plastic-shard sizes (17–24
-    // from a tile burst) effective threshold is ≈ 13 s of contact.
+    // Bond timing math (avgSize = (a.size + b.size) / 2):
+    //   threshold = bondTimeSeconds × exp((avgSize − sizeRef)
+    //                                     × bondTimeSizeExp)
+    //   At avgSize = sizeRef (20): exp(0) = 1 → 10 s.
+    //   At avgSize = 40: exp(0.8) ≈ 2.2 → 22 s.
+    //   At avgSize = 80: exp(2.4) ≈ 11  → 110 s.
+    //   At avgSize = 160: exp(5.6) ≈ 270 → 45 min.
+    // Past ~size 80 a pair effectively never merges within a
+    // normal play session, which is the "no upper limit but
+    // diminishing return" feel.
     merge: {
       attractedTo: 'none',
       bondsWith: { include: ['plastic-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizeExp: 0.04,
+      requireSizeDeltaFraction: 0.05,
       rules: [
         { partner: 'self', outcome: 'compose' },
       ],
