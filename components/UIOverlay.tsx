@@ -26,7 +26,7 @@ interface UIOverlayProps {
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
   onCyclePlasticOpacity?: () => void;
-  onCyclePlasticAnchorK?: () => void;
+  onCyclePlasticYield?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -63,7 +63,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTogglePlasticBlend,
   onCycleNebulaStretch,
   onCyclePlasticOpacity,
-  onCyclePlasticAnchorK,
+  onCyclePlasticYield,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -337,18 +337,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.nebulaStretchName ?? '0.07'}
                   </button>
                 </div>
-                {/* Plastic-shard sticky-bond anchor stiffness cycle —
-                    flow / 8 / 15 / 22 / stiff.  Lower k = larger
-                    motion limit before the spring pulls the shard
-                    back to its anchor. */}
+                {/* Plastic-shard elastoplastic yield cycle —
+                    putty / soft / med / firm / elastic.  Smaller
+                    yield = more plastic: the anchor permanently
+                    migrates once displacement exceeds the yield, so
+                    less of a shove springs back. */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PAnch</span>
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PYld</span>
                   <button
-                    onClick={onCyclePlasticAnchorK}
+                    onClick={onCyclePlasticYield}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard sticky-bond anchor stiffness.  flow / 8 / 15 / 22 / stiff.  Lower k means the spring lets shards swing further from their rest position before pulling them back — flowier feel."
+                    title="Cycle plastic-shard elastoplastic yield distance.  putty / soft / med / firm / elastic.  Within the yield the spring returns fully; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  'elastic' (∞) is the original full-return spring."
                   >
-                    {stats.plasticAnchorKName ?? '8'}
+                    {stats.plasticYieldName ?? 'soft'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

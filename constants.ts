@@ -403,47 +403,56 @@ export const PLASTIC_DEFORM_CONSTANTS = {
   SPAWN_SHAPE_VARIANCE: 0.15,
 } as const;
 
-// Sticky-bond anchor spring stiffness cycle for plastic-shards.
-// Each substep PhysicsSystem applies dv = −displacement × k × dt
-// toward the shard's anchorX / anchorY.  Lower k means larger
-// "motion limit" — under a transient impulse the shard swings out
-// to x_max ≈ v0 / √k before returning, so the cycle trades
-// stiffness for flow.  Active value is read live via
-// getActivePlasticAnchorK() so the DBG button takes effect on
-// the next substep without re-spawning shards.
+// Fixed elastic stiffness of the sticky-bond spring (1/s² per
+// displacement unit).  Within the yield zone (|displacement| <
+// yieldDist) the spring is purely elastic at this k; beyond it the
+// anchor yields (see PLASTIC_YIELD_CYCLE) so the restoring force is
+// capped at k × yieldDist.  Chosen stiff enough that the in-zone
+// return stays crisp under the heavy linearDamping (0.97/substep).
+export const PLASTIC_ANCHOR_SPRING_K = 15.0;
 
-interface PlasticAnchorKStep {
+// Elastoplastic yield-distance cycle for plastic-shards.  The
+// sticky-bond anchor behaves like an elastic-perfectly-plastic
+// element: while the shard sits within `yieldDist` of its anchor
+// the spring pulls it back fully (elastic recovery).  Once
+// displacement exceeds `yieldDist` the anchor permanently MIGRATES
+// toward the shard so displacement stays clamped at the yield —
+// i.e. the spring "forgets" the over-yield part of the motion.
+// That permanent migration is the lossy/plastic behaviour: a hard
+// shove leaves the cluster deformed instead of snapping all the way
+// back.  Smaller yieldDist = more plastic (less recovery); the
+// 'elastic' step (∞) disables plastic flow for an A/B reference.
+
+interface PlasticYieldStep {
   readonly name: string;
-  readonly k: number;
+  readonly yieldDist: number;
 }
 
-export const PLASTIC_ANCHOR_K_CYCLE: ReadonlyArray<PlasticAnchorKStep> = [
-  { name: 'gel',   k:  0.5 },
-  { name: 'goo',   k:  1   },
-  { name: 'soft',  k:  2   },
-  { name: '4',     k:  4   },
-  { name: '8',     k:  8   },
-  { name: '15',    k: 15   },
-  { name: 'stiff', k: 30   },
+export const PLASTIC_YIELD_CYCLE: ReadonlyArray<PlasticYieldStep> = [
+  { name: 'putty',   yieldDist:  3        },
+  { name: 'soft',    yieldDist: 10        },
+  { name: 'med',     yieldDist: 25        },
+  { name: 'firm',    yieldDist: 60        },
+  { name: 'elastic', yieldDist: Infinity  },
 ] as const;
 
-// Default to index 2 (k = 2, "soft") — softer than the previous
-// k = 8 default so plastic clusters read as flowy by default, with
-// even softer ("gel" / "goo") and stiffer ("15" / "stiff") steps
-// available via the DBG PAnch cycle.
-let activePlasticAnchorKIndex = 2;
+// Default index 1 ('soft', yieldDist 10) — clearly plastic (a solid
+// hit leaves visible permanent deformation) without yielding on the
+// tiniest nudge.  Cycle down to 'putty' for near-total loss or up to
+// 'elastic' for the original full-return spring.
+let activePlasticYieldIndex = 1;
 
-export function getActivePlasticAnchorK(): number {
-  return PLASTIC_ANCHOR_K_CYCLE[activePlasticAnchorKIndex].k;
+export function getActivePlasticYield(): number {
+  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex].yieldDist;
 }
 
-export function getActivePlasticAnchorKName(): string {
-  return PLASTIC_ANCHOR_K_CYCLE[activePlasticAnchorKIndex].name;
+export function getActivePlasticYieldName(): string {
+  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex].name;
 }
 
-export function cyclePlasticAnchorK(): number {
-  activePlasticAnchorKIndex = (activePlasticAnchorKIndex + 1) % PLASTIC_ANCHOR_K_CYCLE.length;
-  return activePlasticAnchorKIndex;
+export function cyclePlasticYield(): number {
+  activePlasticYieldIndex = (activePlasticYieldIndex + 1) % PLASTIC_YIELD_CYCLE.length;
+  return activePlasticYieldIndex;
 }
 
 // --- SYSTEM CONFIGURATIONS ---

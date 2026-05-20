@@ -758,10 +758,11 @@ export interface EngineStats {
   // plastic-shard draws.  Cycled via the DBG Opacity button
   // (25 % → 50 % → 75 % → 100 %).
   plasticOpacity?: string;
-  // DBG sticky-bond anchor stiffness step name for plastic-shards
-  // (PLASTIC_ANCHOR_K_CYCLE).  flow → 8 → 15 → 22 → stiff.  Lower
-  // k = larger motion limit / flowier feel.
-  plasticAnchorKName?: string;
+  // DBG elastoplastic yield-distance step name for plastic-shards
+  // (PLASTIC_YIELD_CYCLE).  putty → soft → med → firm → elastic.
+  // Smaller yield = more plastic (less spring-back); 'elastic' (∞)
+  // is the original full-return spring.
+  plasticYieldName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

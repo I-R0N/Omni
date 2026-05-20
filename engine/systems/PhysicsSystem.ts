@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticAnchorK } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, PLASTIC_ANCHOR_SPRING_K, getActivePlasticYield } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -467,22 +467,41 @@ export class PhysicsSystem {
             entity.velocity.y *= lin;
             if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < restSpeed) entity.velocity.y = 0;
-            // Sticky-bond anchor spring (today: plastic-shard).
-            // Applied AFTER the damping + rest snap so the spring
-            // can re-introduce velocity above restSpeed and keep
-            // pulling the shard toward its anchor even after the
-            // damping has snapped its drift velocity to zero.
-            // Toroidal-correct delta so anchors near a wrap seam
-            // pull the shorter way.  Sustained external force
-            // overcomes the spring (equilibrium displacement =
-            // F_ext / k) — the "exceed motion limit under
-            // continuous force" behaviour.
+            // Elastoplastic sticky-bond anchor (today: plastic-shard).
+            // Applied AFTER the damping + rest snap so the spring can
+            // re-introduce velocity above restSpeed and keep pulling
+            // the shard toward its anchor.  Toroidal-correct delta so
+            // anchors near a wrap seam pull the shorter way.
+            //
+            // The anchor is an elastic-perfectly-plastic element:
+            // while |displacement| <= yieldDist the spring pulls back
+            // fully (elastic recovery); once displacement exceeds
+            // yieldDist the anchor permanently MIGRATES toward the
+            // shard so the clamped displacement stays at yieldDist —
+            // the over-yield motion is "forgotten", leaving the shard
+            // deformed.  That permanent migration is the lossy/plastic
+            // behaviour the elastic spring alone could not produce.
             if (entity.anchorX !== undefined && entity.anchorY !== undefined) {
-                const adx = wrapDeltaX(entity.anchorX, entity.position.x);
-                const ady = wrapDeltaY(entity.anchorY, entity.position.y);
-                const k = getActivePlasticAnchorK();
-                entity.velocity.x -= adx * k * dt;
-                entity.velocity.y -= ady * k * dt;
+                let adx = wrapDeltaX(entity.anchorX, entity.position.x);
+                let ady = wrapDeltaY(entity.anchorY, entity.position.y);
+                const yieldDist = getActivePlasticYield();
+                const distSq = adx * adx + ady * ady;
+                if (distSq > yieldDist * yieldDist) {
+                    // Plastic flow: migrate the anchor toward the
+                    // shard along the displacement direction by the
+                    // over-yield excess, then clamp the displacement
+                    // used for the restoring force to yieldDist.
+                    const dist = Math.sqrt(distSq);
+                    const excess = dist - yieldDist;
+                    const ux = adx / dist;
+                    const uy = ady / dist;
+                    entity.anchorX = wrapX(entity.anchorX + ux * excess);
+                    entity.anchorY = wrapY(entity.anchorY + uy * excess);
+                    adx = ux * yieldDist;
+                    ady = uy * yieldDist;
+                }
+                entity.velocity.x -= adx * PLASTIC_ANCHOR_SPRING_K * dt;
+                entity.velocity.y -= ady * PLASTIC_ANCHOR_SPRING_K * dt;
             }
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;
