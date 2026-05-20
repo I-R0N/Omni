@@ -161,6 +161,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleTileOutlines();
   };
 
+  const handleTogglePlasticNebulaTexture = () => {
+      if (engineRef.current) engineRef.current.togglePlasticNebulaTexture();
+  };
+
   const handleCyclePlasticPalette = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
@@ -240,6 +244,7 @@ const App: React.FC = () => {
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
+        onTogglePlasticNebulaTexture={handleTogglePlasticNebulaTexture}
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}

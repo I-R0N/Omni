@@ -453,6 +453,15 @@ export class GameEngine {
   }
 
   /**
+   * Toggle plastic-shard rendering between the plain soft-disc
+   * gradient (off) and a nebula image tinted to the shard's palette
+   * colour (on).  Live — RenderSystem reads the flag each draw.
+   */
+  public togglePlasticNebulaTexture() {
+    this.renderer.plasticNebulaTextureEnabled = !this.renderer.plasticNebulaTextureEnabled;
+  }
+
+  /**
    * Cycle the active plastic palette (amber → black → green →
    * purple → gray → amber …) and immediately re-roll the colour
    * of every active plastic-tile and plastic-shard so the swap
@@ -772,6 +781,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
@@ -896,6 +906,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,

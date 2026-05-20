@@ -401,6 +401,12 @@ export const PLASTIC_DEFORM_CONSTANTS = {
    *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
    *  clusters have visible per-shard shape variation. */
   SPAWN_SHAPE_VARIANCE: 0.15,
+  /** Rendered soft-disc / texture radius as a multiple of the
+   *  shard's collision radius.  >1 makes the visible blob spill
+   *  past the SAT footprint so neighbouring shards' textures
+   *  overlap and read as a continuous polymer mass rather than
+   *  separate discs. */
+  RENDER_RADIUS_FACTOR: 1.7,
 } as const;
 
 // Elastic stiffness cycle of the sticky-bond spring (1/s² per

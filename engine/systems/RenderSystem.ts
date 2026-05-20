@@ -3,6 +3,7 @@
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
+import { NEBULA_IMAGES } from '../../assets';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA, HEX_SIZE } from '../maps/TileGenerator';
@@ -152,6 +153,12 @@ export class RenderSystem {
   // Default OFF.  Wired through GameEngine.toggleTileOutlines and
   // surfaced in the DBG panel's Visual section.
   public tileOutlinesEnabled: boolean = false;
+  // DBG toggle — when true, plastic-shards render a nebula image
+  // tinted to their palette colour instead of the plain soft-disc
+  // gradient.  Default OFF.  Wired through
+  // GameEngine.togglePlasticNebulaTexture, surfaced as the DBG
+  // panel's PTex button.
+  public plasticNebulaTextureEnabled: boolean = false;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -2178,7 +2185,7 @@ export class RenderSystem {
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * 1.2;
+                    const renderR    = collisionR * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
 
                     // B: spawn-time shape variance — entity-local per-axis
                     // scale rolled at spawn (DropSystem.spawnDentShard /
@@ -2223,13 +2230,41 @@ export class RenderSystem {
                         ctx.scale(scaleX, scaleY);
                     }
 
-                    const outline = getActivePlasticPaletteOutline();
-                    const solidEdge = getActivePlasticPaletteSolidEdge();
-                    const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
                     const blendMode = getActivePlasticBlendMode();
                     ctx.globalCompositeOperation = blendMode;
                     ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
-                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
+                    // Texture source: when the PTex toggle is on, draw a
+                    // nebula image tinted to the shard's palette colour
+                    // instead of the plain soft-disc gradient.  The
+                    // chosen image is picked once per shard (stable hash
+                    // of its id) and cached on entity.sprite — plastic
+                    // shards don't otherwise use sprite, and the nebula
+                    // render branch keys off shardVariant so it won't
+                    // pick these up.  Falls back to the soft disc if no
+                    // nebula images are loaded or the tint isn't ready.
+                    let drewTexture = false;
+                    if (this.plasticNebulaTextureEnabled) {
+                        if (entity.sprite === undefined && NEBULA_IMAGES.length > 0) {
+                            let h = 0;
+                            for (let ci = 0; ci < entity.id.length; ci++) {
+                                h = (h * 31 + entity.id.charCodeAt(ci)) | 0;
+                            }
+                            entity.sprite = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
+                        }
+                        if (entity.sprite) {
+                            const tinted = this.getTintedSprite(entity.sprite, baseHex);
+                            if (tinted) {
+                                ctx.drawImage(tinted, -renderR, -renderR, renderR * 2, renderR * 2);
+                                drewTexture = true;
+                            }
+                        }
+                    }
+                    if (!drewTexture) {
+                        const outline = getActivePlasticPaletteOutline();
+                        const solidEdge = getActivePlasticPaletteSolidEdge();
+                        const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
+                        ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
+                    }
                     ctx.globalCompositeOperation = 'source-over';
 
                     // DBG outline overlay (Outline toggle) — thin

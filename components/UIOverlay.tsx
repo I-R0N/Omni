@@ -21,6 +21,7 @@ interface UIOverlayProps {
   onToggleNebulaShardCollisions?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
+  onTogglePlasticNebulaTexture?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -61,6 +62,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaShardCollisions,
   onToggleScreenShake,
   onToggleTileOutlines,
+  onTogglePlasticNebulaTexture,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
@@ -206,6 +208,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle collision outlines on plastic + nebula tiles/shards (soft-gradient variants).  Shows the SAT polygon shape against the gradient fill."
                   >
                     {stats.tileOutlinesEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Plastic-shard texture source — plain soft-disc
+                    gradient (Off) vs. a tinted nebula image (On). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PTex</span>
+                  <button
+                    onClick={onTogglePlasticNebulaTexture}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle plastic-shard texture: plain soft-disc gradient (Off) vs. a nebula image tinted to the shard's palette colour (On).  Each shard keeps a stable nebula image picked from its id."
+                  >
+                    {stats.plasticNebulaTextureEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →

@@ -733,6 +733,10 @@ export interface EngineStats {
   // cloud sprite).  Default false; DBG-toggleable via the Visual
   // section's Outline button.
   tileOutlinesEnabled?: boolean;
+  // When true, plastic-shards render a tinted nebula image instead
+  // of the plain soft-disc gradient.  DBG-toggleable via the PTex
+  // button.  Default false.
+  plasticNebulaTextureEnabled?: boolean;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Plastic button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic
