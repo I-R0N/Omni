@@ -15,11 +15,16 @@ import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE
  *  the hot path skips a sqrt. */
 function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number): void {
     if (e.shardVariant !== 'plastic-shard') return;
+    // Debounce: a shard packed among neighbours fields several
+    // contacts per substep; without this gate each one re-orients
+    // the deformation axis, making the disc twitch back and forth.
+    if ((e.wiggleCooldown ?? 0) > 0) return;
     const rest = e.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
     const restSq = rest * rest;
     const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
     if (vSq <= restSq) return;
 
+    e.wiggleCooldown = WIGGLE_CONSTANTS.IMPACT_COOLDOWN;
     e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
     e.wiggleAngle = Math.atan2(dirY, dirX);
 
@@ -347,6 +352,12 @@ export class PhysicsSystem {
       if (entity.wiggleTimer !== undefined && entity.wiggleTimer > 0) {
           entity.wiggleTimer -= dt;
           if (entity.wiggleTimer <= 0) entity.wiggleTimer = undefined;
+      }
+      // Impact-stamp cooldown — gates how often maybeStampPlasticWiggle
+      // can re-orient the deformation axis (anti-twitch debounce).
+      if (entity.wiggleCooldown !== undefined && entity.wiggleCooldown > 0) {
+          entity.wiggleCooldown -= dt;
+          if (entity.wiggleCooldown <= 0) entity.wiggleCooldown = undefined;
       }
       // Plastic-shard impact-dent decay — 2D vector that decays
       // exponentially toward zero each substep.  Half-life ~1 s

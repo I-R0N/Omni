@@ -528,6 +528,13 @@ export interface GameEntity {
   wiggleTimer?: number;
   wigglePhase?: number;
   wiggleAngle?: number;
+  // Plastic-shard impact-stamp cooldown.  After a collision stamps
+  // the wiggle/dent deformation, this counts down; further stamps
+  // are suppressed until it reaches 0.  Without it, a shard packed
+  // among neighbours re-stamps its deformation axis on every
+  // substep, making the (radially-symmetric) disc's squash axis
+  // flip rapidly — reads as the shard twitching back and forth.
+  wiggleCooldown?: number;
   // Plastic-shard impact-dent accumulator (option A).  2D vector
   // representing the sum of recent impact directions (normalised,
   // weighted by PLASTIC_DEFORM_CONSTANTS.DENT_INCREMENT_PER_IMPACT).
