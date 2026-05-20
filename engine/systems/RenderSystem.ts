@@ -503,6 +503,40 @@ export class RenderSystem {
       return c;
   }
 
+  /**
+   * Draw a plastic entity (tile or shard) as a nebula image tinted to
+   * baseHex — used when the PTex DBG toggle is on.  Picks a stable
+   * nebula image for the entity (hash of its id, cached on
+   * entity.sprite, which plastic entities don't otherwise use for
+   * rendering) and draws it centred at ±renderR.  Forces source-over:
+   * the plastic blend cycle defaults to 'lighter', and additive /
+   * screen blending sums the tinted clouds toward white, which is why
+   * the texture looked colourless.  Returns false (caller draws the
+   * default fill) when no nebula image is loaded or its tint canvas
+   * isn't ready yet.
+   */
+  private drawPlasticNebulaTexture(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      baseHex: string,
+      renderR: number,
+      alpha: number,
+  ): boolean {
+      if (NEBULA_IMAGES.length === 0) return false;
+      if (!entity.sprite) {
+          let h = 0;
+          const id = entity.id;
+          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+          entity.sprite = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
+      }
+      const tinted = this.getTintedSprite(entity.sprite, baseHex);
+      if (!tinted) return false;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tinted, -renderR, -renderR, renderR * 2, renderR * 2);
+      return true;
+  }
+
   // Helper to load/get images
   private getImage(src: string): HTMLImageElement {
       if (this.images.has(src)) {
@@ -1944,10 +1978,22 @@ export class RenderSystem {
                     // globalAlpha cycles through the Opacity DBG
                     // setting so tiles and shards stay matched
                     // visually.
-                    buildPath();
-                    ctx.globalAlpha = getActivePlasticOpacity();
-                    ctx.fillStyle   = entity.color;
-                    ctx.fill();
+                    // PTex toggle — draw a nebula image tinted to the
+                    // tile's plastic colour (so a tile cluster matches
+                    // its shards in texture mode); otherwise the flat
+                    // hex-polygon fill.
+                    const tileRenderR =
+                        (entity.size.x / 2) * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
+                    const drewTileTexture = this.plasticNebulaTextureEnabled
+                        && this.drawPlasticNebulaTexture(
+                            ctx, entity, entity.color, tileRenderR, getActivePlasticOpacity(),
+                        );
+                    if (!drewTileTexture) {
+                        buildPath();
+                        ctx.globalAlpha = getActivePlasticOpacity();
+                        ctx.fillStyle   = entity.color;
+                        ctx.fill();
+                    }
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the hex polygon so the SAT collision
@@ -2230,39 +2276,23 @@ export class RenderSystem {
                         ctx.scale(scaleX, scaleY);
                     }
 
-                    const blendMode = getActivePlasticBlendMode();
-                    ctx.globalCompositeOperation = blendMode;
-                    ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
                     // Texture source: when the PTex toggle is on, draw a
                     // nebula image tinted to the shard's palette colour
-                    // instead of the plain soft-disc gradient.  The
-                    // chosen image is picked once per shard (stable hash
-                    // of its id) and cached on entity.sprite — plastic
-                    // shards don't otherwise use sprite, and the nebula
-                    // render branch keys off shardVariant so it won't
-                    // pick these up.  Falls back to the soft disc if no
-                    // nebula images are loaded or the tint isn't ready.
-                    let drewTexture = false;
-                    if (this.plasticNebulaTextureEnabled) {
-                        if (entity.sprite === undefined && NEBULA_IMAGES.length > 0) {
-                            let h = 0;
-                            for (let ci = 0; ci < entity.id.length; ci++) {
-                                h = (h * 31 + entity.id.charCodeAt(ci)) | 0;
-                            }
-                            entity.sprite = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
-                        }
-                        if (entity.sprite) {
-                            const tinted = this.getTintedSprite(entity.sprite, baseHex);
-                            if (tinted) {
-                                ctx.drawImage(tinted, -renderR, -renderR, renderR * 2, renderR * 2);
-                                drewTexture = true;
-                            }
-                        }
-                    }
+                    // (source-over — see drawPlasticNebulaTexture) instead
+                    // of the plain soft-disc gradient.  Falls back to the
+                    // soft disc (under the active blend mode) when no
+                    // nebula image is loaded or the tint isn't ready.
+                    const drewTexture = this.plasticNebulaTextureEnabled
+                        && this.drawPlasticNebulaTexture(
+                            ctx, entity, baseHex, renderR,
+                            getActivePlasticOpacity() * fadeAlpha,
+                        );
                     if (!drewTexture) {
                         const outline = getActivePlasticPaletteOutline();
                         const solidEdge = getActivePlasticPaletteSolidEdge();
                         const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
+                        ctx.globalCompositeOperation = getActivePlasticBlendMode();
+                        ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
                         ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
                     }
                     ctx.globalCompositeOperation = 'source-over';
