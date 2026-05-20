@@ -407,6 +407,12 @@ export const PLASTIC_DEFORM_CONSTANTS = {
    *  overlap and read as a continuous polymer mass rather than
    *  separate discs. */
   RENDER_RADIUS_FACTOR: 1.7,
+  /** Texture-mode (PTex) draw radius as a multiple of the collision
+   *  radius.  Larger than RENDER_RADIUS_FACTOR because the nebula
+   *  PNGs carry transparent padding — the visible cloud only fills
+   *  ~60–70 % of the bitmap, so we over-draw to land the cloud's
+   *  visible extent in the same ballpark as the soft disc. */
+  TEXTURE_RADIUS_FACTOR: 2.6,
 } as const;
 
 // Elastic stiffness cycle of the sticky-bond spring (1/s² per

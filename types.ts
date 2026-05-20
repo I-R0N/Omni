@@ -563,6 +563,13 @@ export interface GameEntity {
   // its own slightly irregular outline regardless of impact state.
   baseScaleX?: number;
   baseScaleY?: number;
+  // Stable nebula image source for a plastic tile/shard when the PTex
+  // DBG toggle is on — picked once from a hash of the entity id and
+  // cached here.  Kept OFF entity.sprite on purpose: a truthy
+  // entity.sprite routes the entity through the generic raw-sprite
+  // draw path (untinted, collision-sized), which is exactly what we
+  // don't want — the plastic structure branch tints + upsizes it.
+  plasticTexSrc?: string;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.

@@ -507,33 +507,36 @@ export class RenderSystem {
    * Draw a plastic entity (tile or shard) as a nebula image tinted to
    * baseHex — used when the PTex DBG toggle is on.  Picks a stable
    * nebula image for the entity (hash of its id, cached on
-   * entity.sprite, which plastic entities don't otherwise use for
-   * rendering) and draws it centred at ±renderR.  Forces source-over:
-   * the plastic blend cycle defaults to 'lighter', and additive /
-   * screen blending sums the tinted clouds toward white, which is why
-   * the texture looked colourless.  Returns false (caller draws the
-   * default fill) when no nebula image is loaded or its tint canvas
-   * isn't ready yet.
+   * entity.plasticTexSrc — NOT entity.sprite, which would route the
+   * entity through the generic raw-sprite draw path and skip this
+   * tinted branch entirely) and draws it centred, sized by
+   * TEXTURE_RADIUS_FACTOR × collisionR so the cloud over-fills the
+   * collision circle like the soft disc.  Forces source-over: the
+   * plastic blend cycle defaults to 'lighter', and additive / screen
+   * blending sums the tinted clouds toward white.  Returns false
+   * (caller draws the default fill) when no nebula image is loaded or
+   * its tint canvas isn't ready yet.
    */
   private drawPlasticNebulaTexture(
       ctx: CanvasRenderingContext2D,
       entity: GameEntity,
       baseHex: string,
-      renderR: number,
+      collisionR: number,
       alpha: number,
   ): boolean {
       if (NEBULA_IMAGES.length === 0) return false;
-      if (!entity.sprite) {
+      if (entity.plasticTexSrc === undefined) {
           let h = 0;
           const id = entity.id;
           for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-          entity.sprite = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
+          entity.plasticTexSrc = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
       }
-      const tinted = this.getTintedSprite(entity.sprite, baseHex);
+      const tinted = this.getTintedSprite(entity.plasticTexSrc, baseHex);
       if (!tinted) return false;
+      const texR = collisionR * PLASTIC_DEFORM_CONSTANTS.TEXTURE_RADIUS_FACTOR;
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = alpha;
-      ctx.drawImage(tinted, -renderR, -renderR, renderR * 2, renderR * 2);
+      ctx.drawImage(tinted, -texR, -texR, texR * 2, texR * 2);
       return true;
   }
 
@@ -1982,11 +1985,9 @@ export class RenderSystem {
                     // tile's plastic colour (so a tile cluster matches
                     // its shards in texture mode); otherwise the flat
                     // hex-polygon fill.
-                    const tileRenderR =
-                        (entity.size.x / 2) * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
                     const drewTileTexture = this.plasticNebulaTextureEnabled
                         && this.drawPlasticNebulaTexture(
-                            ctx, entity, entity.color, tileRenderR, getActivePlasticOpacity(),
+                            ctx, entity, entity.color, entity.size.x / 2, getActivePlasticOpacity(),
                         );
                     if (!drewTileTexture) {
                         buildPath();
@@ -2284,7 +2285,7 @@ export class RenderSystem {
                     // nebula image is loaded or the tint isn't ready.
                     const drewTexture = this.plasticNebulaTextureEnabled
                         && this.drawPlasticNebulaTexture(
-                            ctx, entity, baseHex, renderR,
+                            ctx, entity, baseHex, collisionR,
                             getActivePlasticOpacity() * fadeAlpha,
                         );
                     if (!drewTexture) {
