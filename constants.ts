@@ -418,17 +418,20 @@ interface PlasticAnchorKStep {
 }
 
 export const PLASTIC_ANCHOR_K_CYCLE: ReadonlyArray<PlasticAnchorKStep> = [
-  { name: 'flow',  k:  4 },
-  { name: '8',     k:  8 },
-  { name: '15',    k: 15 },
-  { name: '22',    k: 22 },
-  { name: 'stiff', k: 30 },
+  { name: 'gel',   k:  0.5 },
+  { name: 'goo',   k:  1   },
+  { name: 'soft',  k:  2   },
+  { name: '4',     k:  4   },
+  { name: '8',     k:  8   },
+  { name: '15',    k: 15   },
+  { name: 'stiff', k: 30   },
 ] as const;
 
-// Default to index 1 (k = 8) — softer than the original k = 30
-// so plastic clusters read as flowy out of the gate.  User can
-// cycle up to "stiff" for the original feel.
-let activePlasticAnchorKIndex = 1;
+// Default to index 2 (k = 2, "soft") — softer than the previous
+// k = 8 default so plastic clusters read as flowy by default, with
+// even softer ("gel" / "goo") and stiffer ("15" / "stiff") steps
+// available via the DBG PAnch cycle.
+let activePlasticAnchorKIndex = 2;
 
 export function getActivePlasticAnchorK(): number {
   return PLASTIC_ANCHOR_K_CYCLE[activePlasticAnchorKIndex].k;

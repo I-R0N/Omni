@@ -1334,6 +1334,19 @@ export class PhysicsSystem {
           const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
           const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
 
+          // Snapshot the plastic-shard's pre-collision position so we
+          // can detect after the inner loop whether SAT pushed it.
+          // Sustained contact with a static tile means the shard's
+          // sticky-bond anchor is pulling it INTO geometry — the
+          // shard oscillates against the tile and damages it on every
+          // bounce.  When that happens we snap the anchor to the
+          // post-correction position so the spring stops fighting
+          // the wall (see plastic anchor reset below).
+          const isPlasticWithAnchor =
+              a.shardVariant === 'plastic-shard' && a.anchorX !== undefined;
+          const preX = isPlasticWithAnchor ? a.position.x : 0;
+          const preY = isPlasticWithAnchor ? a.position.y : 0;
+
           for (let x = -1; x <= 1; x++) {
               for (let y = -1; y <= 1; y++) {
                   const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
@@ -1343,6 +1356,21 @@ export class PhysicsSystem {
                       if (!b.active) continue;
                       this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                   }
+              }
+          }
+
+          // Plastic-shard anchor reset on real tile contact.  If the
+          // collision pass moved the shard (positional correction
+          // fired), the shard's anchor was effectively unreachable
+          // — relocating the anchor to its current position breaks
+          // the spring-into-tile vibration loop that would otherwise
+          // chain-destroy neighbouring plastic-tiles.
+          if (isPlasticWithAnchor && a.active) {
+              const dxA = a.position.x - preX;
+              const dyA = a.position.y - preY;
+              if (dxA * dxA + dyA * dyA > 0.01) {
+                  a.anchorX = a.position.x;
+                  a.anchorY = a.position.y;
               }
           }
       }
