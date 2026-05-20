@@ -27,6 +27,7 @@ interface UIOverlayProps {
   onCycleNebulaStretch?: () => void;
   onCyclePlasticOpacity?: () => void;
   onCyclePlasticYield?: () => void;
+  onCyclePlasticStiffness?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -64,6 +65,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaStretch,
   onCyclePlasticOpacity,
   onCyclePlasticYield,
+  onCyclePlasticStiffness,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -350,6 +352,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle plastic-shard elastoplastic yield distance (world units).  2 / 5 / 10 / 25 / 60.  Within the yield the spring returns the shard; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  Smaller = yields more easily; 60 is a near-elastic full-return reference."
                   >
                     {stats.plasticYieldName ?? '5'}
+                  </button>
+                </div>
+                {/* Plastic-shard sticky-bond spring stiffness cycle —
+                    k from 0.01 to 4.  Lower k = gentler in-zone
+                    recovery and weaker over-yield cap (more flow). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PStf</span>
+                  <button
+                    onClick={onCyclePlasticStiffness}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard sticky-bond spring stiffness k.  0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4.  Lower k = gentler recovery within the yield zone and a weaker over-yield cap, so kicks carry shards further past the yield point (more flow / deformation)."
+                  >
+                    {stats.plasticStiffnessName ?? '0.5'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

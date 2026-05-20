@@ -403,16 +403,38 @@ export const PLASTIC_DEFORM_CONSTANTS = {
   SPAWN_SHAPE_VARIANCE: 0.15,
 } as const;
 
-// Fixed elastic stiffness of the sticky-bond spring (1/s² per
+// Elastic stiffness cycle of the sticky-bond spring (1/s² per
 // displacement unit).  Within the yield zone (|displacement| <
 // yieldDist) the spring is purely elastic at this k; beyond it the
 // anchor yields (see PLASTIC_YIELD_CYCLE) so the restoring force is
-// capped at k × yieldDist.  Kept low so (a) the in-zone recovery is
-// gentle rather than rigid and (b) the capped over-yield force is
-// weak enough that a kick actually carries the shard past the yield
-// point and deforms it — a stiff spring just snaps it back inside
-// the zone and never yields.
-export const PLASTIC_ANCHOR_SPRING_K = 4.0;
+// capped at k × yieldDist.  Lower k = gentler in-zone recovery AND
+// a weaker over-yield cap, so a kick carries the shard further past
+// the yield point before settling (more deformation / flow).  Read
+// live via getActivePlasticStiffness() so the DBG PStf button takes
+// effect on the next substep.  Values are the literal k; the DBG
+// label is just that number.
+
+export const PLASTIC_STIFFNESS_CYCLE: ReadonlyArray<number> = [
+  0.01, 0.05, 0.1, 0.5, 1, 2, 4,
+] as const;
+
+// Default index 3 (k 0.01 → 0.5) — well below the old fixed k=4 so
+// plastic reads soft/flowy out of the gate; cycle down to 0.01 for
+// near-zero recovery or up to 4 for the previous firmer feel.
+let activePlasticStiffnessIndex = 3;
+
+export function getActivePlasticStiffness(): number {
+  return PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex];
+}
+
+export function getActivePlasticStiffnessName(): string {
+  return String(PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex]);
+}
+
+export function cyclePlasticStiffness(): number {
+  activePlasticStiffnessIndex = (activePlasticStiffnessIndex + 1) % PLASTIC_STIFFNESS_CYCLE.length;
+  return activePlasticStiffnessIndex;
+}
 
 // Elastoplastic yield-distance cycle for plastic-shards.  The
 // sticky-bond anchor behaves like an elastic-perfectly-plastic

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, PLASTIC_ANCHOR_SPRING_K, getActivePlasticYield } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -500,8 +500,9 @@ export class PhysicsSystem {
                     adx = ux * yieldDist;
                     ady = uy * yieldDist;
                 }
-                entity.velocity.x -= adx * PLASTIC_ANCHOR_SPRING_K * dt;
-                entity.velocity.y -= ady * PLASTIC_ANCHOR_SPRING_K * dt;
+                const k = getActivePlasticStiffness();
+                entity.velocity.x -= adx * k * dt;
+                entity.velocity.y -= ady * k * dt;
             }
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;

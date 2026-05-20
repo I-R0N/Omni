@@ -763,6 +763,10 @@ export interface EngineStats {
   // Smaller yield = more plastic (less spring-back); 'elastic' (∞)
   // is the original full-return spring.
   plasticYieldName?: string;
+  // DBG sticky-bond spring stiffness step name for plastic-shards
+  // (PLASTIC_STIFFNESS_CYCLE, 0.01 … 4).  Lower k = gentler
+  // recovery and more over-yield flow.
+  plasticStiffnessName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.
