@@ -1989,53 +1989,13 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   // anchor / rest-snap settle it.
   linearDamping:  0.99,
   angularDamping: 0.99,
-  restSpeed: 0.15,
+  // restSpeed 0 disables the snap-to-zero floor for plastic-shards:
+  // they coast to a stop under damping + anchor spring instead of
+  // hard-freezing the instant their speed drops below a threshold,
+  // so slow drift reads as continuous flow.
+  restSpeed: 0,
   restSpin:  0.05,
 };
-
-/** Chain-bond constants for plastic-shards.  Drives the polymer-
- *  chain behaviour: unbonded shards seek nearest plastic-shard
- *  via gravity pull, bonded shards stop seeking.  Bond strength
- *  is rank-based — first STRONG_BOND_COUNT bonds use the large
- *  break distance (durable, won't snap from normal jostling),
- *  bonds at higher ranks use the small break distance (fragile,
- *  collapse on the slightest separation).  Shards naturally
- *  settle into chain topology since each holds at most 2 strong
- *  bonds; extras break away leaving a chain.
- *
- *  Pipeline lives in ShardSystem.runPlasticChainBonds, called at
- *  merge-pass cadence (not every substep) so cost scales with
- *  the active plastic-shard count, not the substep rate. */
-export const PLASTIC_CHAIN_CONSTANTS = {
-  /** Number of "strong" bonds per shard — these resist breaking
-   *  with the large break-distance threshold. */
-  STRONG_BOND_COUNT: 2,
-  /** Break-distance multiplier on (sizeA + sizeB) × 0.5 for
-   *  strong bonds (rank 1 and 2).  4× contact means the pair has
-   *  to drift roughly 3 shard-widths apart before the bond snaps
-   *  — durable. */
-  STRONG_BREAK_FACTOR: 4.0,
-  /** Break-distance multiplier on contact distance for weak bonds
-   *  (rank 3+).  1.2× contact means the bond breaks the instant
-   *  the pair separates beyond touching. */
-  WEAK_BREAK_FACTOR:   1.2,
-  /** Distance within which an unbonded shard seeks a partner.
-   *  3× SPATIAL_GRID_SIZE (360) — fits the 3×3 cell scan. */
-  SEEK_RANGE:    360,
-  /** Acceleration applied to an unbonded shard per substep,
-   *  scaled by 1/distance so the pull is stronger when closer.
-   *  Same form as nebula-shard gravity (pullStrength × dt / dist
-   *  → velocity delta).  Tuned alongside the lighter damping so
-   *  orphans visibly drift toward partners. */
-  SEEK_STRENGTH: 30,
-  /** Minimum distance used in the seek division to avoid blowups
-   *  when shards almost overlap. */
-  SEEK_MIN_DIST: 10,
-  /** Contact buffer added to (sizeA + sizeB) × 0.5 when deciding
-   *  whether a pair is "in contact" for bond formation.  Same
-   *  4-unit buffer as the merge broadphase. */
-  CONTACT_BUFFER: 4,
-} as const;
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
 // jitter + low radius variance for a clean, hex-like or polygon-
@@ -2385,7 +2345,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // normal play session, which is the "no upper limit but
     // diminishing return" feel.
     merge: {
-      attractedTo: 'none',
+      // Standard shard-gravity pull (same mechanism nebula uses):
+      // unbonded plastic-shards are accelerated toward the nearest
+      // larger-or-equal plastic-shard neighbour within pullRange,
+      // and the pull stops once the puller enters a stick-bond.
+      // Replaces the old bespoke chain-seek pull.
+      attractedTo:  { include: ['plastic-shard'] },
+      pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
+      pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
+      pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
       bondsWith: { include: ['plastic-shard'] },
       bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizeExp: 0.04,
       requireSizeDeltaFraction: 0.05,

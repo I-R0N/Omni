@@ -556,18 +556,6 @@ export interface GameEntity {
   // its own slightly irregular outline regardless of impact state.
   baseScaleX?: number;
   baseScaleY?: number;
-  // Plastic-shard chain-bond list — partners the shard is currently
-  // bonded with, ordered by formation time.  Maintained by
-  // ShardSystem.runPlasticChainBonds: contact appends, exceeding
-  // the rank-dependent break distance removes.  Bonds 1-2 are
-  // "strong" (durable, large break distance); bonds 3+ are "weak"
-  // (fragile, small break distance) — produces string-like chain
-  // topology since each shard preferentially keeps 2 strong bonds.
-  // Unbonded shards (length 0) experience a gravity pull toward
-  // the nearest other plastic-shard; bonded shards (length > 0)
-  // drift freely.  Cleared lazily — if a partner goes inactive,
-  // the bond tick drops it on the next merge frame.
-  chainBonds?: GameEntity[];
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
