@@ -606,6 +606,12 @@ export class ShardSystem {
         // Plastic-shard spawn-time shape variance (option B).
         baseScaleX,
         baseScaleY,
+        // Plastic-shard sticky-bond anchor — PhysicsSystem pulls each
+        // shard toward this rest position every substep.  Anchor sits
+        // at the child's spawn position so the shatter spread becomes
+        // the cluster's new rest configuration.
+        anchorX: isChildPlasticShard ? (parent.position.x + offsetX) : undefined,
+        anchorY: isChildPlasticShard ? (parent.position.y + offsetY) : undefined,
       });
     }
 
@@ -1886,6 +1892,13 @@ export class ShardSystem {
       a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
+      // Plastic-shard sticky-bond anchor — re-pin to the merged
+      // centroid so the new (larger) shard treats this spot as its
+      // rest position.  Without this the survivor would still be
+      // pulled toward the smaller party's old anchor.
+      if (a.shardVariant === 'plastic-shard' && a.anchorX !== undefined) {
+        a.anchorX = nmx; a.anchorY = nmy;
+      }
       a.health     = Math.min(MAX_HP, a.health + b.health);
       a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
       a.dropComposition = composition.length > 0 ? composition : undefined;

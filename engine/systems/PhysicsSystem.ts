@@ -467,6 +467,23 @@ export class PhysicsSystem {
             entity.velocity.y *= lin;
             if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < restSpeed) entity.velocity.y = 0;
+            // Sticky-bond anchor spring (today: plastic-shard).
+            // Applied AFTER the damping + rest snap so the spring
+            // can re-introduce velocity above restSpeed and keep
+            // pulling the shard toward its anchor even after the
+            // damping has snapped its drift velocity to zero.
+            // Toroidal-correct delta so anchors near a wrap seam
+            // pull the shorter way.  Sustained external force
+            // overcomes the spring (equilibrium displacement =
+            // F_ext / k) — the "exceed motion limit under
+            // continuous force" behaviour.
+            if (entity.anchorX !== undefined && entity.anchorY !== undefined) {
+                const adx = wrapDeltaX(entity.anchorX, entity.position.x);
+                const ady = wrapDeltaY(entity.anchorY, entity.position.y);
+                const k = PLASTIC_DEFORM_CONSTANTS.ANCHOR_SPRING_K;
+                entity.velocity.x -= adx * k * dt;
+                entity.velocity.y -= ady * k * dt;
+            }
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;
                 if (Math.abs(entity.rotationSpeed) < restSpin) entity.rotationSpeed = 0;

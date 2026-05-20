@@ -537,6 +537,18 @@ export interface GameEntity {
   // (~4 s recovery from max), reads as polymer "remembering" hits.
   dentX?: number;
   dentY?: number;
+  // Plastic-shard sticky-bond anchor (option E).  Per-shard rest
+  // position toward which a soft spring pulls each substep —
+  // simulates the cluster being tethered to its placement.  Set
+  // at every plastic-shard spawn site (hex placement, dent burst,
+  // shatter recursion).  Reset to the new centroid on merge so a
+  // merged shard "claims" its new resting place.  Spring strength
+  // PLASTIC_DEFORM_CONSTANTS.ANCHOR_SPRING_K; toroidal-corrected
+  // delta via wrapDeltaX/Y in PhysicsSystem.update.  External
+  // force can overcome the spring (shard drifts further), but
+  // once the force stops the spring pulls back to the anchor.
+  anchorX?: number;
+  anchorY?: number;
   // Plastic-shard spawn-time shape variance (option B).  Per-axis
   // random scale rolled at spawn in [1 − V, 1 + V] where V =
   // PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE.  Renderer

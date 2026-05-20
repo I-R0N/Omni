@@ -632,6 +632,12 @@ export class DropSystem {
         // Plastic-shard spawn-time shape variance (option B).
         baseScaleX,
         baseScaleY,
+        // Plastic-shard sticky-bond anchor — PhysicsSystem pulls each
+        // shard toward this rest position every substep, so the cluster
+        // can be shoved off-anchor by continuous force but returns when
+        // the force releases.  Anchor sits at the spawn position.
+        anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
+        anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
       });
     }
 

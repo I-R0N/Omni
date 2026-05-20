@@ -401,6 +401,16 @@ export const PLASTIC_DEFORM_CONSTANTS = {
    *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
    *  clusters have visible per-shard shape variation. */
   SPAWN_SHAPE_VARIANCE: 0.15,
+  /** Sticky-bond anchor spring stiffness (1/s² per displacement
+   *  unit).  Each substep PhysicsSystem applies dv = −displacement
+   *  × k × dt toward the shard's anchorX / anchorY.  At k = 1.0
+   *  and ζ ≈ 0.9 (with linearDamping 0.97), shards are slightly
+   *  underdamped — a single projectile kick produces a few units
+   *  of drift that settles back to the anchor over 2-3 seconds.
+   *  Sustained external force overcomes the spring (equilibrium
+   *  displacement = F_ext / k); once the force ends the spring
+   *  pulls back. */
+  ANCHOR_SPRING_K: 1.0,
 } as const;
 
 // --- SYSTEM CONFIGURATIONS ---
