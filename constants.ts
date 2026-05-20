@@ -1983,7 +1983,11 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   polyVerticesMin: 16, polyVerticesMax: 16,
   angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
-  linearDamping:  0.97,
+  // Reduced from 0.97 → 0.99 to cut translational friction: at 120
+  // Hz that lifts per-second velocity retention from ~2.6 % to
+  // ~30 %, so a kicked shard glides noticeably further before the
+  // anchor / rest-snap settle it.
+  linearDamping:  0.99,
   angularDamping: 0.99,
   restSpeed: 0.15,
   restSpin:  0.05,
