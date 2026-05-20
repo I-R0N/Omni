@@ -401,17 +401,47 @@ export const PLASTIC_DEFORM_CONSTANTS = {
    *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
    *  clusters have visible per-shard shape variation. */
   SPAWN_SHAPE_VARIANCE: 0.15,
-  /** Sticky-bond anchor spring stiffness (1/s² per displacement
-   *  unit).  Each substep PhysicsSystem applies dv = −displacement
-   *  × k × dt toward the shard's anchorX / anchorY.  With heavy
-   *  linearDamping (0.97 per substep ≈ 3.7/s effective drag), the
-   *  spring needs to be stiff enough that the steady-state pull
-   *  velocity (k × displacement / drag) remains visible after
-   *  damping eats it each substep.  At k = 30 a 50-px displacement
-   *  settles back over ~0.5 s; sustained external force still
-   *  overcomes the spring (equilibrium displacement = F_ext / k). */
-  ANCHOR_SPRING_K: 30.0,
 } as const;
+
+// Sticky-bond anchor spring stiffness cycle for plastic-shards.
+// Each substep PhysicsSystem applies dv = −displacement × k × dt
+// toward the shard's anchorX / anchorY.  Lower k means larger
+// "motion limit" — under a transient impulse the shard swings out
+// to x_max ≈ v0 / √k before returning, so the cycle trades
+// stiffness for flow.  Active value is read live via
+// getActivePlasticAnchorK() so the DBG button takes effect on
+// the next substep without re-spawning shards.
+
+interface PlasticAnchorKStep {
+  readonly name: string;
+  readonly k: number;
+}
+
+export const PLASTIC_ANCHOR_K_CYCLE: ReadonlyArray<PlasticAnchorKStep> = [
+  { name: 'flow',  k:  4 },
+  { name: '8',     k:  8 },
+  { name: '15',    k: 15 },
+  { name: '22',    k: 22 },
+  { name: 'stiff', k: 30 },
+] as const;
+
+// Default to index 1 (k = 8) — softer than the original k = 30
+// so plastic clusters read as flowy out of the gate.  User can
+// cycle up to "stiff" for the original feel.
+let activePlasticAnchorKIndex = 1;
+
+export function getActivePlasticAnchorK(): number {
+  return PLASTIC_ANCHOR_K_CYCLE[activePlasticAnchorKIndex].k;
+}
+
+export function getActivePlasticAnchorKName(): string {
+  return PLASTIC_ANCHOR_K_CYCLE[activePlasticAnchorKIndex].name;
+}
+
+export function cyclePlasticAnchorK(): number {
+  activePlasticAnchorKIndex = (activePlasticAnchorKIndex + 1) % PLASTIC_ANCHOR_K_CYCLE.length;
+  return activePlasticAnchorKIndex;
+}
 
 // --- SYSTEM CONFIGURATIONS ---
 
