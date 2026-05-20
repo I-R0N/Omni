@@ -396,7 +396,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
                     title="Cycle plastic-shard collision-deformation cooldown (seconds).  0.2 / 0.4 / 0.8 / 1.5 / off.  Caps how often a collision re-orients the wiggle/dent squash axis — longer stops the rapid axis-flip 'twitch' when shards are packed together.  'off' disables collision-driven deformation entirely; projectile hits still wiggle."
                   >
-                    {stats.plasticImpactCooldownName ?? '0.8'}
+                    {stats.plasticImpactCooldownName ?? 'off'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

@@ -479,8 +479,11 @@ export const PLASTIC_IMPACT_COOLDOWN_CYCLE: ReadonlyArray<number> = [
   0.2, 0.4, 0.8, 1.5, Infinity,
 ] as const;
 
-// Default index 2 (0.8 s) — calmer than the original fixed 0.4 s.
-let activePlasticImpactCooldownIndex = 2;
+// Default index 4 ('off') — collision contacts don't re-orient the
+// deformation axis, which is what made packed clusters twitch.
+// Projectile hits still wiggle.  Cycle to a finite value to re-enable
+// collision-driven squash with that debounce interval.
+let activePlasticImpactCooldownIndex = 4;
 
 export function getActivePlasticImpactCooldown(): number {
   return PLASTIC_IMPACT_COOLDOWN_CYCLE[activePlasticImpactCooldownIndex];
