@@ -436,6 +436,36 @@ export function cyclePlasticStiffness(): number {
   return activePlasticStiffnessIndex;
 }
 
+// Linear-damping cycle for plastic-shards (per-substep velocity
+// multiplier).  Read live via getActivePlasticDamping() so the DBG
+// PDmp button retunes friction on every plastic-shard immediately,
+// not just newly-spawned ones.  At the 120 Hz substep rate the
+// per-second retention is value^120: 0.95→~0.2%, 0.97→~2.6%,
+// 0.99→~30%, 0.995→~55%, 0.999→~89%, 1.0→frictionless.  Lower =
+// heavier friction (shards stop sooner); the DBG label is the raw
+// multiplier.
+
+export const PLASTIC_DAMPING_CYCLE: ReadonlyArray<number> = [
+  0.95, 0.97, 0.99, 0.995, 0.999, 1.0,
+] as const;
+
+// Default index 2 (0.99) — matches the spawn-time SHARD_SPAWN_SHAPE
+// _PLASTIC.linearDamping so the feel is unchanged until cycled.
+let activePlasticDampingIndex = 2;
+
+export function getActivePlasticDamping(): number {
+  return PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex];
+}
+
+export function getActivePlasticDampingName(): string {
+  return String(PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex]);
+}
+
+export function cyclePlasticDamping(): number {
+  activePlasticDampingIndex = (activePlasticDampingIndex + 1) % PLASTIC_DAMPING_CYCLE.length;
+  return activePlasticDampingIndex;
+}
+
 // Elastoplastic yield-distance cycle for plastic-shards.  The
 // sticky-bond anchor behaves like an elastic-perfectly-plastic
 // element: while the shard sits within `yieldDist` of its anchor

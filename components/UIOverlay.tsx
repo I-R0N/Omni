@@ -28,6 +28,7 @@ interface UIOverlayProps {
   onCyclePlasticOpacity?: () => void;
   onCyclePlasticYield?: () => void;
   onCyclePlasticStiffness?: () => void;
+  onCyclePlasticDamping?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -66,6 +67,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticOpacity,
   onCyclePlasticYield,
   onCyclePlasticStiffness,
+  onCyclePlasticDamping,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -365,6 +367,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle plastic-shard sticky-bond spring stiffness k.  0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4.  Lower k = gentler recovery within the yield zone and a weaker over-yield cap, so kicks carry shards further past the yield point (more flow / deformation)."
                   >
                     {stats.plasticStiffnessName ?? '0.5'}
+                  </button>
+                </div>
+                {/* Plastic-shard linear damping cycle — per-substep
+                    velocity multiplier 0.95 … 1.0.  Lower = heavier
+                    friction (shards stop sooner); 1.0 frictionless. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PDmp</span>
+                  <button
+                    onClick={onCyclePlasticDamping}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard linear damping (per-substep velocity multiplier).  0.95 / 0.97 / 0.99 / 0.995 / 0.999 / 1.0.  At 120 Hz the per-second retention is value^120, so 0.95 ≈ 0.2 % (heavy) and 0.999 ≈ 89 % (very light); 1.0 is frictionless.  Applies live to all active plastic-shards."
+                  >
+                    {stats.plasticDampingName ?? '0.99'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

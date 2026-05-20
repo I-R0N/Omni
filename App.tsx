@@ -189,6 +189,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticStiffness();
   };
 
+  const handleCyclePlasticDamping = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticDamping();
+  };
+
   const handleCycleTileBlendAlpha = () => {
       if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
   };
@@ -239,6 +243,7 @@ const App: React.FC = () => {
         onCyclePlasticOpacity={handleCyclePlasticOpacity}
         onCyclePlasticYield={handleCyclePlasticYield}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
+        onCyclePlasticDamping={handleCyclePlasticDamping}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}

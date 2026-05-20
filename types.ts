@@ -755,6 +755,9 @@ export interface EngineStats {
   // (PLASTIC_STIFFNESS_CYCLE, 0.01 … 4).  Lower k = gentler
   // recovery and more over-yield flow.
   plasticStiffnessName?: string;
+  // DBG linear-damping step name for plastic-shards
+  // (PLASTIC_DAMPING_CYCLE, 0.95 … 1.0).  Lower = heavier friction.
+  plasticDampingName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

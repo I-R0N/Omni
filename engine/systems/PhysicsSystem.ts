@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -457,7 +457,13 @@ export class PhysicsSystem {
             // motionless unless directly disturbed.  Falls back to
             // NEBULA_CONSTANTS values for entities that don't set
             // them (nebula-shards, free-floating rock-shards).
-            const linearD = entity.linearDamping;
+            // Plastic-shards read the live DBG damping cycle so the
+            // PDmp button retunes friction on every active shard, not
+            // just newly-spawned ones.  Other variants keep their
+            // spawn-time per-entity value.
+            const linearD = entity.shardVariant === 'plastic-shard'
+                ? getActivePlasticDamping()
+                : entity.linearDamping;
             const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
             const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
             const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
