@@ -337,9 +337,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.nebulaStretchName ?? '0.07'}
                   </button>
                 </div>
-                {/* Plastic-shard elastoplastic yield cycle —
-                    putty / soft / med / firm / elastic.  Smaller
-                    yield = more plastic: the anchor permanently
+                {/* Plastic-shard elastoplastic yield cycle — yield
+                    distance in world units (2 / 5 / 10 / 25 / 60).
+                    Smaller = more plastic: the anchor permanently
                     migrates once displacement exceeds the yield, so
                     less of a shove springs back. */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -347,9 +347,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     onClick={onCyclePlasticYield}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard elastoplastic yield distance.  putty / soft / med / firm / elastic.  Within the yield the spring returns fully; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  'elastic' (∞) is the original full-return spring."
+                    title="Cycle plastic-shard elastoplastic yield distance (world units).  2 / 5 / 10 / 25 / 60.  Within the yield the spring returns the shard; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  Smaller = yields more easily; 60 is a near-elastic full-return reference."
                   >
-                    {stats.plasticYieldName ?? 'soft'}
+                    {stats.plasticYieldName ?? '5'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

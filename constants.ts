@@ -407,47 +407,42 @@ export const PLASTIC_DEFORM_CONSTANTS = {
 // displacement unit).  Within the yield zone (|displacement| <
 // yieldDist) the spring is purely elastic at this k; beyond it the
 // anchor yields (see PLASTIC_YIELD_CYCLE) so the restoring force is
-// capped at k × yieldDist.  Chosen stiff enough that the in-zone
-// return stays crisp under the heavy linearDamping (0.97/substep).
-export const PLASTIC_ANCHOR_SPRING_K = 15.0;
+// capped at k × yieldDist.  Kept low so (a) the in-zone recovery is
+// gentle rather than rigid and (b) the capped over-yield force is
+// weak enough that a kick actually carries the shard past the yield
+// point and deforms it — a stiff spring just snaps it back inside
+// the zone and never yields.
+export const PLASTIC_ANCHOR_SPRING_K = 4.0;
 
 // Elastoplastic yield-distance cycle for plastic-shards.  The
 // sticky-bond anchor behaves like an elastic-perfectly-plastic
 // element: while the shard sits within `yieldDist` of its anchor
-// the spring pulls it back fully (elastic recovery).  Once
-// displacement exceeds `yieldDist` the anchor permanently MIGRATES
-// toward the shard so displacement stays clamped at the yield —
-// i.e. the spring "forgets" the over-yield part of the motion.
-// That permanent migration is the lossy/plastic behaviour: a hard
-// shove leaves the cluster deformed instead of snapping all the way
-// back.  Smaller yieldDist = more plastic (less recovery); the
-// 'elastic' step (∞) disables plastic flow for an A/B reference.
+// the spring pulls it back (elastic recovery).  Once displacement
+// exceeds `yieldDist` the anchor permanently MIGRATES toward the
+// shard so displacement stays clamped at the yield — i.e. the
+// spring "forgets" the over-yield part of the motion.  That
+// permanent migration is the lossy/plastic behaviour: a hard shove
+// leaves the cluster deformed instead of snapping all the way back.
+// Smaller yieldDist = more plastic (less recovery, easier to yield).
+// Values are the yield distance in world units; the DBG label is
+// just that number.
 
-interface PlasticYieldStep {
-  readonly name: string;
-  readonly yieldDist: number;
-}
-
-export const PLASTIC_YIELD_CYCLE: ReadonlyArray<PlasticYieldStep> = [
-  { name: 'putty',   yieldDist:  3        },
-  { name: 'soft',    yieldDist: 10        },
-  { name: 'med',     yieldDist: 25        },
-  { name: 'firm',    yieldDist: 60        },
-  { name: 'elastic', yieldDist: Infinity  },
+export const PLASTIC_YIELD_CYCLE: ReadonlyArray<number> = [
+  2, 5, 10, 25, 60,
 ] as const;
 
-// Default index 1 ('soft', yieldDist 10) — clearly plastic (a solid
-// hit leaves visible permanent deformation) without yielding on the
-// tiniest nudge.  Cycle down to 'putty' for near-total loss or up to
-// 'elastic' for the original full-return spring.
+// Default index 1 (yieldDist 2 → 5) — easy to yield: most hits
+// leave visible permanent deformation, but a sub-5-unit nudge still
+// springs back.  Cycle down to 2 for near-total loss or up to 60
+// for a near-elastic full-return reference.
 let activePlasticYieldIndex = 1;
 
 export function getActivePlasticYield(): number {
-  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex].yieldDist;
+  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex];
 }
 
 export function getActivePlasticYieldName(): string {
-  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex].name;
+  return String(PLASTIC_YIELD_CYCLE[activePlasticYieldIndex]);
 }
 
 export function cyclePlasticYield(): number {
