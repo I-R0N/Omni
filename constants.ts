@@ -403,14 +403,14 @@ export const PLASTIC_DEFORM_CONSTANTS = {
   SPAWN_SHAPE_VARIANCE: 0.15,
   /** Sticky-bond anchor spring stiffness (1/s² per displacement
    *  unit).  Each substep PhysicsSystem applies dv = −displacement
-   *  × k × dt toward the shard's anchorX / anchorY.  At k = 1.0
-   *  and ζ ≈ 0.9 (with linearDamping 0.97), shards are slightly
-   *  underdamped — a single projectile kick produces a few units
-   *  of drift that settles back to the anchor over 2-3 seconds.
-   *  Sustained external force overcomes the spring (equilibrium
-   *  displacement = F_ext / k); once the force ends the spring
-   *  pulls back. */
-  ANCHOR_SPRING_K: 1.0,
+   *  × k × dt toward the shard's anchorX / anchorY.  With heavy
+   *  linearDamping (0.97 per substep ≈ 3.7/s effective drag), the
+   *  spring needs to be stiff enough that the steady-state pull
+   *  velocity (k × displacement / drag) remains visible after
+   *  damping eats it each substep.  At k = 30 a 50-px displacement
+   *  settles back over ~0.5 s; sustained external force still
+   *  overcomes the spring (equilibrium displacement = F_ext / k). */
+  ANCHOR_SPRING_K: 30.0,
 } as const;
 
 // --- SYSTEM CONFIGURATIONS ---
