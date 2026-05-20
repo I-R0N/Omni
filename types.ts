@@ -765,6 +765,10 @@ export interface EngineStats {
   // DBG linear-damping step name for plastic-shards
   // (PLASTIC_DAMPING_CYCLE, 0.95 … 1.0).  Lower = heavier friction.
   plasticDampingName?: string;
+  // DBG impact-stamp cooldown step name for plastic-shards
+  // (PLASTIC_IMPACT_COOLDOWN_CYCLE, 0.2 … 1.5 / off).  Longer =
+  // calmer deformation; 'off' disables collision-driven deformation.
+  plasticImpactCooldownName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -13,8 +13,13 @@ import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE
  *  No-op for non-plastic entities and for impulses too small to
  *  matter.  Inlined comparison (squared speed vs squared rest) so
  *  the hot path skips a sqrt. */
-function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number): void {
+function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCollision: boolean): void {
     if (e.shardVariant !== 'plastic-shard') return;
+    const cooldownVal = getActivePlasticImpactCooldown();
+    // 'off' (Infinity): collision contacts never re-orient the
+    // deformation axis — kills the cluster-jitter entirely.
+    // Projectile hits (isCollision=false) still wiggle.
+    if (isCollision && cooldownVal === Infinity) return;
     // Debounce: a shard packed among neighbours fields several
     // contacts per substep; without this gate each one re-orients
     // the deformation axis, making the disc twitch back and forth.
@@ -24,7 +29,7 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number): voi
     const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
     if (vSq <= restSq) return;
 
-    e.wiggleCooldown = WIGGLE_CONSTANTS.IMPACT_COOLDOWN;
+    e.wiggleCooldown = cooldownVal === Infinity ? WIGGLE_CONSTANTS.DURATION : cooldownVal;
     e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
     e.wiggleAngle = Math.atan2(dirY, dirX);
 
@@ -1581,8 +1586,8 @@ export class PhysicsSystem {
       // direction is opposite, but atan2 produces a 180°-swapped
       // angle whose squash visual is identical (squash axis is
       // unsigned).  No-op for non-plastic pairs; sqrt-free.
-      maybeStampPlasticWiggle(a,  nx,  ny);
-      maybeStampPlasticWiggle(b, -nx, -ny);
+      maybeStampPlasticWiggle(a,  nx,  ny, true);
+      maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
   private checkAndResolveCollision(
@@ -2031,7 +2036,7 @@ export class PhysicsSystem {
                       const pushFactor = (0.20 * bouncinessMul) / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
-                      maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y);
+                      maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y, false);
 
                       // Plastic-shard tangent-rule spin from off-
                       // centre projectile hits.  Mirrors the
@@ -2412,8 +2417,8 @@ export class PhysicsSystem {
       // flipped for the b side; squash visual is unsigned so the
       // 180° flip doesn't matter, but it's cheap to pass the
       // correct sign anyway.  No-op for non-plastic.
-      maybeStampPlasticWiggle(a,  nx,  ny);
-      maybeStampPlasticWiggle(b, -nx, -ny);
+      maybeStampPlasticWiggle(a,  nx,  ny, true);
+      maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
   // --- OPTIMIZED SAT HELPERS ---

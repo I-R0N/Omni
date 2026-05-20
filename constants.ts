@@ -357,12 +357,6 @@ export const WIGGLE_CONSTANTS = {
    *  frame.  ±0.15 = squash/stretch between 85 % and 115 % at peak;
    *  decays toward 1.0 ± 0 as timer runs out. */
   AMPLITUDE: 0.15,
-  /** Minimum seconds between successive impact stamps on one shard.
-   *  Caps how often a collision can re-orient the deformation axis;
-   *  prevents the rapid axis-flip "twitching" when a shard is packed
-   *  among neighbours triggering several contacts per substep.  Set
-   *  ≈ DURATION so a wiggle plays out before a fresh one can start. */
-  IMPACT_COOLDOWN: 0.4,
 } as const;
 
 /** Plastic-shard deformation constants — two parallel mechanisms:
@@ -470,6 +464,37 @@ export function getActivePlasticDampingName(): string {
 export function cyclePlasticDamping(): number {
   activePlasticDampingIndex = (activePlasticDampingIndex + 1) % PLASTIC_DAMPING_CYCLE.length;
   return activePlasticDampingIndex;
+}
+
+// Impact-stamp cooldown cycle for plastic-shards (seconds).  Gates
+// how often a collision can re-orient the wiggle/dent deformation
+// axis on one shard — longer = calmer (the radially-symmetric disc
+// can't twitch its squash axis every substep when packed among
+// neighbours).  The 'off' entry (Infinity) disables collision-
+// driven deformation entirely; projectile hits still wiggle.  Read
+// live via getActivePlasticImpactCooldown() so the DBG PRot button
+// retunes immediately.
+
+export const PLASTIC_IMPACT_COOLDOWN_CYCLE: ReadonlyArray<number> = [
+  0.2, 0.4, 0.8, 1.5, Infinity,
+] as const;
+
+// Default index 2 (0.8 s) — calmer than the original fixed 0.4 s.
+let activePlasticImpactCooldownIndex = 2;
+
+export function getActivePlasticImpactCooldown(): number {
+  return PLASTIC_IMPACT_COOLDOWN_CYCLE[activePlasticImpactCooldownIndex];
+}
+
+export function getActivePlasticImpactCooldownName(): string {
+  const v = PLASTIC_IMPACT_COOLDOWN_CYCLE[activePlasticImpactCooldownIndex];
+  return v === Infinity ? 'off' : String(v);
+}
+
+export function cyclePlasticImpactCooldown(): number {
+  activePlasticImpactCooldownIndex =
+    (activePlasticImpactCooldownIndex + 1) % PLASTIC_IMPACT_COOLDOWN_CYCLE.length;
+  return activePlasticImpactCooldownIndex;
 }
 
 // Elastoplastic yield-distance cycle for plastic-shards.  The

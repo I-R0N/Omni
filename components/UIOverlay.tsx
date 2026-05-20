@@ -29,6 +29,7 @@ interface UIOverlayProps {
   onCyclePlasticYield?: () => void;
   onCyclePlasticStiffness?: () => void;
   onCyclePlasticDamping?: () => void;
+  onCyclePlasticImpactCooldown?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -68,6 +69,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticYield,
   onCyclePlasticStiffness,
   onCyclePlasticDamping,
+  onCyclePlasticImpactCooldown,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -380,6 +382,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle plastic-shard linear damping (per-substep velocity multiplier).  0.95 / 0.97 / 0.99 / 0.995 / 0.999 / 1.0.  At 120 Hz the per-second retention is value^120, so 0.95 ≈ 0.2 % (heavy) and 0.999 ≈ 89 % (very light); 1.0 is frictionless.  Applies live to all active plastic-shards."
                   >
                     {stats.plasticDampingName ?? '0.99'}
+                  </button>
+                </div>
+                {/* Plastic-shard impact-deformation cooldown — gates
+                    how often a collision can re-orient the wiggle/dent
+                    squash axis.  Longer = calmer; 'off' disables
+                    collision-driven deformation (projectile hits still
+                    wiggle). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRot</span>
+                  <button
+                    onClick={onCyclePlasticImpactCooldown}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard collision-deformation cooldown (seconds).  0.2 / 0.4 / 0.8 / 1.5 / off.  Caps how often a collision re-orients the wiggle/dent squash axis — longer stops the rapid axis-flip 'twitch' when shards are packed together.  'off' disables collision-driven deformation entirely; projectile hits still wiggle."
+                  >
+                    {stats.plasticImpactCooldownName ?? '0.8'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

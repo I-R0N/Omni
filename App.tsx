@@ -193,6 +193,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticDamping();
   };
 
+  const handleCyclePlasticImpactCooldown = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticImpactCooldown();
+  };
+
   const handleCycleTileBlendAlpha = () => {
       if (engineRef.current) engineRef.current.cycleTileBlendAlpha();
   };
@@ -244,6 +248,7 @@ const App: React.FC = () => {
         onCyclePlasticYield={handleCyclePlasticYield}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}
+        onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
