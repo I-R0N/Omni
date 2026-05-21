@@ -217,6 +217,18 @@ export class RenderSystem {
   // colour composition applied via source-atop, so tinting happens once per
   // (sprite, colour) pair instead of every frame.
   private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
+  // Dedicated plastic-texture cache (PTex mode): `${src}|${hex}` → a
+  // content-filled, tinted nebula bitmap.  Kept SEPARATE from
+  // _tintedSprites on purpose — that cache is capped at 256 and
+  // contended by hundreds of distinct nebula composition hexes, so
+  // sharing it made plastic tints (20 images × ~7 palette shades)
+  // evict + rebuild a 128² canvas every frame.  Plastic's working
+  // set is small and discrete, so its own LRU map stays warm and
+  // rebuilds drop to ~zero.  Per-src content fraction (visible-pixel
+  // half-extent) is cached alongside so the cloud can be zoomed to
+  // fill its bitmap, trimming the PNG's transparent padding.
+  private _plasticTextureBitmaps: Map<string, HTMLCanvasElement> = new Map();
+  private _plasticContentFrac: Map<string, number> = new Map();
   // Normalized (range [-0.5, 0.5]) alpha-weighted centroid offset of the
   // visible content within each sprite's bitmap bounds.  Computed once
   // per source URL at first draw, then reused to shift drawImage so the
@@ -504,18 +516,94 @@ export class RenderSystem {
   }
 
   /**
+   * Fraction of a sprite's half-extent occupied by visible pixels
+   * (alpha > threshold), scanned once per src and cached.  Used to
+   * zoom the cloud so it fills its tinted bitmap — the nebula PNGs
+   * carry transparent padding, so without this the visible cloud is
+   * far smaller than its draw rect and we'd have to over-draw to
+   * compensate.  Coarse 64² scan is plenty for an extent estimate.
+   * Returns 1 (no zoom) when the image isn't ready or is tainted.
+   */
+  private getPlasticContentFraction(src: string): number {
+      const cached = this._plasticContentFrac.get(src);
+      if (cached !== undefined) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return 1;
+      const size = 64;
+      const tmp = document.createElement('canvas');
+      tmp.width = size; tmp.height = size;
+      const tctx = tmp.getContext('2d');
+      if (!tctx) return 1;
+      tctx.drawImage(img, 0, 0, size, size);
+      let data: Uint8ClampedArray;
+      try {
+          data = tctx.getImageData(0, 0, size, size).data;
+      } catch {
+          return 1; // tainted canvas — skip zoom
+      }
+      const c = size / 2;
+      let maxExtent = 0;
+      for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+              if (data[(y * size + x) * 4 + 3] > 16) {
+                  const ex = Math.max(Math.abs(x + 0.5 - c), Math.abs(y + 0.5 - c));
+                  if (ex > maxExtent) maxExtent = ex;
+              }
+          }
+      }
+      const frac = maxExtent > 0 ? Math.max(0.4, Math.min(1, maxExtent / c)) : 1;
+      this._plasticContentFrac.set(src, frac);
+      return frac;
+  }
+
+  /**
+   * Content-filled, tinted nebula bitmap for plastic rendering, in the
+   * dedicated _plasticTextureBitmaps cache (see field comment).  The
+   * cloud is zoomed by 1/contentFraction so it fills the 128² bitmap;
+   * the caller then draws at the soft-disc radius instead of
+   * over-drawing to cover the PNG's transparent padding.
+   */
+  private getPlasticTexture(src: string, hex: string): HTMLCanvasElement | null {
+      const key = `${src}|${hex}`;
+      const cached = this._plasticTextureBitmaps.get(key);
+      if (cached) return cached;
+      const img = this.getImage(src);
+      if (!img.complete || img.naturalWidth === 0) return null;
+      const f = this.getPlasticContentFraction(src);
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d');
+      if (!cx) return null;
+      const dw = size / f;
+      const off = (size - dw) / 2;
+      cx.drawImage(img, off, off, dw, dw); // zoom to fill, padding clipped
+      cx.globalCompositeOperation = 'source-atop';
+      cx.fillStyle = hex;
+      cx.fillRect(0, 0, size, size);
+      cx.globalCompositeOperation = 'source-over';
+      if (this._plasticTextureBitmaps.size >= 256) {
+          const firstKey = this._plasticTextureBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._plasticTextureBitmaps.delete(firstKey);
+      }
+      this._plasticTextureBitmaps.set(key, c);
+      return c;
+  }
+
+  /**
    * Draw a plastic entity (tile or shard) as a nebula image tinted to
    * baseHex — used when the PTex DBG toggle is on.  Picks a stable
    * nebula image for the entity (hash of its id, cached on
    * entity.plasticTexSrc — NOT entity.sprite, which would route the
    * entity through the generic raw-sprite draw path and skip this
-   * tinted branch entirely) and draws it centred, sized by
-   * TEXTURE_RADIUS_FACTOR × collisionR so the cloud over-fills the
-   * collision circle like the soft disc.  Forces source-over: the
-   * plastic blend cycle defaults to 'lighter', and additive / screen
-   * blending sums the tinted clouds toward white.  Returns false
-   * (caller draws the default fill) when no nebula image is loaded or
-   * its tint canvas isn't ready yet.
+   * tinted branch entirely) and draws it centred at RENDER_RADIUS_FACTOR
+   * × collisionR — the same radius as the soft disc, since
+   * getPlasticTexture content-fills the bitmap (no transparent padding
+   * to over-draw past).  Forces source-over: the plastic blend cycle
+   * defaults to 'lighter', and additive / screen blending sums the
+   * tinted clouds toward white.  Returns false (caller draws the
+   * default fill) when no nebula image is loaded or its tint canvas
+   * isn't ready yet.
    */
   private drawPlasticNebulaTexture(
       ctx: CanvasRenderingContext2D,
@@ -531,9 +619,9 @@ export class RenderSystem {
           for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
           entity.plasticTexSrc = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
       }
-      const tinted = this.getTintedSprite(entity.plasticTexSrc, baseHex);
+      const tinted = this.getPlasticTexture(entity.plasticTexSrc, baseHex);
       if (!tinted) return false;
-      const texR = collisionR * PLASTIC_DEFORM_CONSTANTS.TEXTURE_RADIUS_FACTOR;
+      const texR = collisionR * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = alpha;
       ctx.drawImage(tinted, -texR, -texR, texR * 2, texR * 2);
