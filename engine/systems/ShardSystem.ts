@@ -26,6 +26,7 @@ import {
   randomPlasticShade,
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
+  PLASTIC_SHARD_AUTOMATA,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -137,6 +138,13 @@ export class ShardSystem {
    * via the zero-time bond) and any cross-variant absorb stop too.
    */
   public shardBondingEnabled: boolean = true;
+  /**
+   * DBG toggle (PAuto) — gates the plastic-shard neighbour-contact
+   * count computed in runMergeBroadphase.  When false, the count
+   * isn't refreshed (RenderSystem then falls back to per-instance
+   * shades), saving the extra plastic-only neighbour scan.
+   */
+  public plasticAutomataEnabled: boolean = true;
   /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
@@ -968,6 +976,12 @@ export class ShardSystem {
       // velocity blends with surviving partners and the dissolve
       // looks chaotic.
       if (e.mergeFadeTimer !== undefined) continue;
+      // Reset the plastic neighbour-contact count up front so the
+      // count pass below only ever increments, and lone shards (or
+      // the candidates.length < 2 early-return path) read 0.
+      if (this.plasticAutomataEnabled && e.shardVariant === 'plastic-shard') {
+        e.plasticNeighborCount = 0;
+      }
       candidates.push(e);
     }
     for (let i = 0; i < this.activeDrops.length; i++) {
@@ -997,6 +1011,43 @@ export class ShardSystem {
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
       cell.push(i);
+    }
+
+    // ── Plastic neighbour-contact count (PAuto automata) ───────────
+    // Reuses the grid above (no second build).  For each plastic-
+    // shard, count other plastic-shards whose centres fall within
+    // CONTACT_BUFFER × (rA + rB) — i.e. touching or near-touching.
+    // Runs before the gated pull/bond loop so every plastic-shard is
+    // counted regardless of merge cooldown.  Drives RenderSystem's
+    // brightness automata.
+    if (this.plasticAutomataEnabled) {
+      const buf = PLASTIC_SHARD_AUTOMATA.CONTACT_BUFFER;
+      for (let i = 0; i < candidates.length; i++) {
+        const a = candidates[i];
+        if (a.shardVariant !== 'plastic-shard' || !a.active) continue;
+        const acx = Math.floor(a.position.x / CELL);
+        const acy = Math.floor(a.position.y / CELL);
+        const aR = Math.max(a.size.x, a.size.y) / 2;
+        let count = 0;
+        for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
+          for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
+            const cell = grid.get(keyFor(ncx, ncy));
+            if (!cell) continue;
+            for (let k = 0; k < cell.length; k++) {
+              const j = cell[k];
+              if (j === i) continue;
+              const b = candidates[j];
+              if (b.shardVariant !== 'plastic-shard' || !b.active) continue;
+              const dx = wrapDeltaX(a.position.x, b.position.x);
+              const dy = wrapDeltaY(a.position.y, b.position.y);
+              const bR = Math.max(b.size.x, b.size.y) / 2;
+              const reach = (aR + bR) * buf;
+              if (dx * dx + dy * dy <= reach * reach) count++;
+            }
+          }
+        }
+        a.plasticNeighborCount = count;
+      }
     }
 
     const CONTACT_BUFFER = 4;

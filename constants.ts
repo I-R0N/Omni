@@ -205,6 +205,35 @@ export function randomPlasticShade(): string {
   return palette[Math.floor(Math.random() * palette.length)];
 }
 
+/** Single representative shade of the ACTIVE palette — the constant
+ *  base colour used by the plastic-shard neighbour-brightness automata
+ *  (PAuto), so every plastic-shard reads as the same colour and only
+ *  its brightness encodes local cluster density.  shades[0] is the
+ *  brightest stop of each palette, giving the most headroom to darken
+ *  toward the cluster interior. */
+export function getActivePlasticBaseShade(): string {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].shades[0];
+}
+
+// ── Plastic-shard neighbour-brightness automata (PAuto) ────────────
+// When enabled, plastic-shards drop their per-instance random shade
+// and all render in the active palette's constant base shade, with
+// brightness scaled by how many other plastic-shards are in contact —
+// mirroring the nebula-tile interior-darken rule.  More contacts =
+// darker, so cluster interiors recede and edges/lone shards pop.
+// ShardSystem computes the per-shard contact count off the merge
+// broadphase grid; RenderSystem applies the brightness factor.
+export const PLASTIC_SHARD_AUTOMATA = {
+  /** Multiplier on the summed collision radii (aR + bR) below which a
+   *  pair counts as "in contact".  >1 so near-touching shards count. */
+  CONTACT_BUFFER: 1.4,
+  /** Contact count at which the brightness factor saturates. */
+  MAX_NEIGHBORS: 6,
+  /** Brightness multiplier at MAX_NEIGHBORS (1.0 at zero contacts).
+   *  <1 darkens dense interiors; raise above 1 to brighten instead. */
+  MIN_BRIGHTNESS: 0.5,
+} as const;
+
 // ── Plastic blend-mode cycle ───────────────────────────────────────
 // globalCompositeOperation applied to the plastic-shard draw call so
 // overlapping shards in a cluster blend visibly differently.  Cycled

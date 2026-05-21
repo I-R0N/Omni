@@ -22,6 +22,7 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticNebulaTexture?: () => void;
+  onTogglePlasticAutomata?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -65,6 +66,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticNebulaTexture,
+  onTogglePlasticAutomata,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
@@ -224,6 +226,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle plastic-shard texture: plain soft-disc gradient (Off) vs. a nebula image tinted to the shard's palette colour (On).  Each shard keeps a stable nebula image picked from its id."
                   >
                     {stats.plasticNebulaTextureEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Plastic-shard neighbour-brightness automata — On =
+                    constant palette base shade darkened by contact
+                    count; Off = per-instance random shades. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PAuto</span>
+                  <button
+                    onClick={onTogglePlasticAutomata}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Plastic-shard neighbour-brightness automata.  On: all shards use the palette's constant base shade, darkened by how many plastic-shards each is in contact with (like nebula interior-darkening).  Off: per-instance random shades."
+                  >
+                    {stats.plasticAutomataEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →

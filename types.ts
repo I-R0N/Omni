@@ -570,6 +570,11 @@ export interface GameEntity {
   // draw path (untinted, collision-sized), which is exactly what we
   // don't want — the plastic structure branch tints + upsizes it.
   plasticTexSrc?: string;
+  // Number of other plastic-shards currently in contact with this one,
+  // computed by ShardSystem off the merge-broadphase grid.  Drives the
+  // PAuto neighbour-brightness automata in RenderSystem (more contacts
+  // = darker, like nebula interior-darkening).  Plastic-shards only.
+  plasticNeighborCount?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
@@ -744,6 +749,10 @@ export interface EngineStats {
   // of the plain soft-disc gradient.  DBG-toggleable via the PTex
   // button.  Default false.
   plasticNebulaTextureEnabled?: boolean;
+  // When true, plastic-shards render in the active palette's constant
+  // base shade, brightness-scaled by their plastic-shard contact
+  // count (PAuto automata).  Default true.
+  plasticAutomataEnabled?: boolean;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Plastic button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic

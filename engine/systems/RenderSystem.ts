@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { BackgroundManager } from './BackgroundManager';
@@ -88,6 +88,23 @@ function densityTintForRender(entity: GameEntity, baseHex: string): string {
 }
 
 /**
+ * PAuto automata colour for a plastic-shard: the active palette's
+ * constant base shade, darkened toward the cluster interior by its
+ * neighbour-contact count (mirrors the nebula interior-darken rule).
+ * Returns a small, discrete set of hexes (base × contact bucket) so
+ * the soft-disc bitmap cache stays warm.
+ */
+function plasticAutomataHex(neighborCount: number): string {
+    const base = getActivePlasticBaseShade();
+    if (neighborCount <= 0) return base;
+    const t = Math.min(1, neighborCount / PLASTIC_SHARD_AUTOMATA.MAX_NEIGHBORS);
+    const factor = 1 + t * (PLASTIC_SHARD_AUTOMATA.MIN_BRIGHTNESS - 1);
+    if (factor === 1) return base;
+    const [r, g, b] = hexToRgb(base);
+    return rgbToHex(r * factor, g * factor, b * factor);
+}
+
+/**
  * Combined alpha multiplier for graceful retire windows on a shard.
  * Returns 1.0 outside any fade window; during a `mergeFadeTimer`
  * it returns the remaining-fraction (timer / duration) so the entity
@@ -159,6 +176,11 @@ export class RenderSystem {
   // GameEngine.togglePlasticNebulaTexture, surfaced as the DBG
   // panel's PTex button.
   public plasticNebulaTextureEnabled: boolean = false;
+  // DBG toggle (PAuto) — when true, plastic-shards render in the
+  // active palette's constant base shade, brightness-scaled by their
+  // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
+  // false, they keep their per-instance random shade.  Default ON.
+  public plasticAutomataEnabled: boolean = true;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -2328,7 +2350,12 @@ export class RenderSystem {
                     // the variant.  mergeFadeAlpha multiplies through
                     // globalAlpha for the graceful retire window.
                     const fadeAlpha = shardMergeFadeAlpha(entity);
-                    const baseHex   = densityTintForRender(entity, entity.color);
+                    // PAuto: constant palette base shade darkened by the
+                    // contact-count automata; otherwise the per-instance
+                    // density-tinted spawn shade.
+                    const baseHex   = this.plasticAutomataEnabled
+                        ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
+                        : densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
                     const renderR    = collisionR * getActivePlasticBlendRadius();
 

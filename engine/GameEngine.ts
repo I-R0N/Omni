@@ -462,6 +462,20 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the plastic-shard neighbour-brightness automata (PAuto).
+   * On: shards render in the active palette's constant base shade,
+   * darkened by how many plastic-shards they're in contact with.
+   * Off: per-instance random shades (and the contact count isn't
+   * computed).  Flips the render flag AND the ShardSystem compute
+   * flag together so the count work is skipped when off.
+   */
+  public togglePlasticAutomata() {
+    const next = !this.renderer.plasticAutomataEnabled;
+    this.renderer.plasticAutomataEnabled = next;
+    this.shards.plasticAutomataEnabled = next;
+  }
+
+  /**
    * Cycle the active plastic palette (amber → black → green →
    * purple → gray → amber …) and immediately re-roll the colour
    * of every active plastic-tile and plastic-shard so the swap
@@ -801,6 +815,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
+      plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
@@ -928,6 +943,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
+      plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
