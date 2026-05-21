@@ -140,7 +140,7 @@ export class PhysicsSystem {
   // ON to add the missing scan — bringing back the dead asteroid-
   // crash branch in resolveCollision (asteroid-pressure damage +
   // elastic bounce off the tile face).
-  public shardTileCollisionsEnabled: boolean = false;
+  public shardTileCollisionsEnabled: boolean = true;
   // Debug toggle — when true, nebula-shard ↔ nebula-shard pairs
   // ignore the per-variant passThrough flag and take a normal
   // elastic collision impulse.  Default OFF preserves today's
@@ -150,7 +150,7 @@ export class PhysicsSystem {
   // when many nebula shards converge.  Scope is intentionally
   // narrow: nebula-vs-striker and nebula-vs-tile still honour
   // passThrough — only the same-variant pair is affected.
-  public nebulaShardCollisionsEnabled: boolean = false;
+  public nebulaShardCollisionsEnabled: boolean = true;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.

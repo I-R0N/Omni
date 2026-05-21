@@ -229,10 +229,30 @@ export const PLASTIC_SHARD_AUTOMATA = {
   CONTACT_BUFFER: 1.4,
   /** Contact count at which the brightness factor saturates. */
   MAX_NEIGHBORS: 6,
-  /** Brightness multiplier at MAX_NEIGHBORS (1.0 at zero contacts).
-   *  <1 darkens dense interiors; raise above 1 to brighten instead. */
+  /** Brightness multiplier at MAX_NEIGHBORS when DARKENING interiors
+   *  (the default direction) — <1 so dense clusters recede. */
   MIN_BRIGHTNESS: 0.5,
+  /** Brightness multiplier at MAX_NEIGHBORS when BRIGHTENING interiors
+   *  — >1 so dense clusters glow.  Selected by the PADIR toggle. */
+  MAX_BRIGHTNESS: 1.6,
 } as const;
+
+// PADIR toggle — direction of the PAuto automata.  false (default) =
+// darken dense interiors (mirrors nebula); true = brighten them.
+let activePlasticAutomataBrighten = false;
+
+/** True when the PAuto automata brightens dense interiors instead of
+ *  darkening them.  Read by RenderSystem's plasticAutomataHex. */
+export function isPlasticAutomataBrighten(): boolean {
+  return activePlasticAutomataBrighten;
+}
+
+/** Flip the PAuto automata between darken and brighten.  Returns the
+ *  new state (true = brighten). */
+export function togglePlasticAutomataBrighten(): boolean {
+  activePlasticAutomataBrighten = !activePlasticAutomataBrighten;
+  return activePlasticAutomataBrighten;
+}
 
 // ── Plastic blend-mode cycle ───────────────────────────────────────
 // globalCompositeOperation applied to the plastic-shard draw call so
@@ -257,10 +277,9 @@ export const PLASTIC_BLEND_MODES: ReadonlyArray<GlobalCompositeOperation> = [
   'lighter',
 ] as const;
 
-// Cycle starts on 'lighter' — additive blending in clusters reads
-// best with the soft-disc bitmap profile, especially against the
-// dark starfield.  Other modes available via the DBG Blend button.
-let activePlasticBlendModeIndex = 4;
+// Cycle starts on 'source-over' — plain alpha blending; the additive
+// 'lighter' look is still one click away via the DBG Blend button.
+let activePlasticBlendModeIndex = 0;
 
 /** Active blend mode for plastic-shard rendering.  Read by the
  *  RenderSystem plastic-shard branch each frame. */
@@ -336,7 +355,7 @@ export const PLASTIC_CORE_RADIUS_CYCLE: ReadonlyArray<number> = [
   0.0, 0.15, 0.3, 0.45, 0.7,
 ] as const;
 
-let activePlasticCoreRadiusIndex = 1; // 0.15 — small core, deep blend
+let activePlasticCoreRadiusIndex = 2; // 0.30 — moderate core, deep blend
 
 export function getActivePlasticCoreRadius(): number {
   return PLASTIC_CORE_RADIUS_CYCLE[activePlasticCoreRadiusIndex];
@@ -394,7 +413,7 @@ export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
   { name: '0.10',  k: 0.10  },
 ] as const;
 
-let activeNebulaStretchKIndex = 2;
+let activeNebulaStretchKIndex = 3; // 0.085
 
 /** Active stretch multiplier K (in speed → stretch).  Read by
  *  RenderSystem nebula-shard render each frame. */
@@ -487,12 +506,6 @@ export const PLASTIC_DEFORM_CONSTANTS = {
    *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
    *  clusters have visible per-shard shape variation. */
   SPAWN_SHAPE_VARIANCE: 0.15,
-  /** Rendered soft-disc / texture radius as a multiple of the
-   *  shard's collision radius.  >1 makes the visible blob spill
-   *  past the SAT footprint so neighbouring shards' textures
-   *  overlap and read as a continuous polymer mass rather than
-   *  separate discs. */
-  RENDER_RADIUS_FACTOR: 1.7,
 } as const;
 
 // Elastic stiffness cycle of the sticky-bond spring (1/s² per
@@ -510,10 +523,9 @@ export const PLASTIC_STIFFNESS_CYCLE: ReadonlyArray<number> = [
   0.01, 0.05, 0.1, 0.5, 1, 2, 4,
 ] as const;
 
-// Default index 3 (k 0.01 → 0.5) — well below the old fixed k=4 so
-// plastic reads soft/flowy out of the gate; cycle down to 0.01 for
+// Default index 2 (k = 0.1) — soft/flowy; cycle down to 0.01 for
 // near-zero recovery or up to 4 for the previous firmer feel.
-let activePlasticStiffnessIndex = 3;
+let activePlasticStiffnessIndex = 2;
 
 export function getActivePlasticStiffness(): number {
   return PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex];
@@ -541,9 +553,9 @@ export const PLASTIC_DAMPING_CYCLE: ReadonlyArray<number> = [
   0.95, 0.97, 0.99, 0.995, 0.999, 1.0,
 ] as const;
 
-// Default index 2 (0.99) — matches the spawn-time SHARD_SPAWN_SHAPE
-// _PLASTIC.linearDamping so the feel is unchanged until cycled.
-let activePlasticDampingIndex = 2;
+// Default index 0 (0.95) — heaviest friction in the cycle, so shards
+// settle quickly; cycle up toward 1.0 for slippery, long-coasting feel.
+let activePlasticDampingIndex = 0;
 
 export function getActivePlasticDamping(): number {
   return PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex];
@@ -609,11 +621,10 @@ export const PLASTIC_YIELD_CYCLE: ReadonlyArray<number> = [
   2, 5, 10, 25, 60,
 ] as const;
 
-// Default index 1 (yieldDist 2 → 5) — easy to yield: most hits
-// leave visible permanent deformation, but a sub-5-unit nudge still
-// springs back.  Cycle down to 2 for near-total loss or up to 60
-// for a near-elastic full-return reference.
-let activePlasticYieldIndex = 1;
+// Default index 3 (yieldDist 25) — fairly elastic: a shard tolerates
+// a 25-unit anchor stretch before permanently migrating.  Cycle down
+// toward 2 for near-total plastic loss or up to 60 for near-elastic.
+let activePlasticYieldIndex = 3;
 
 export function getActivePlasticYield(): number {
   return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex];
@@ -1295,7 +1306,9 @@ export const NEBULA_CONSTANTS = {
   // values equilibrate over seconds, larger ones in fractions of
   // a second.  At 60 Hz, alpha 0.02 ≈ 95 % blend in ~2.5 s.
   BLEND_TILE_ALPHA: 0,
-  BLEND_SHARD_ALPHA: 0,
+  // 0.02 → "Med" on the ShardBlend button: nebula shards equilibrate
+  // toward the nearest tile's hue out of the gate (cycle to 0 for off).
+  BLEND_SHARD_ALPHA: 0.02,
   BLEND_TILE_ALPHA_CYCLE: [0, 0.005, 0.02, 0.08] as const,
   BLEND_SHARD_ALPHA_CYCLE: [0, 0.02, 0.08, 0.25] as const,
   // Physics substeps between color-equilibration passes.  Same

@@ -563,13 +563,6 @@ export interface GameEntity {
   // its own slightly irregular outline regardless of impact state.
   baseScaleX?: number;
   baseScaleY?: number;
-  // Stable nebula image source for a plastic tile/shard when the PTex
-  // DBG toggle is on — picked once from a hash of the entity id and
-  // cached here.  Kept OFF entity.sprite on purpose: a truthy
-  // entity.sprite routes the entity through the generic raw-sprite
-  // draw path (untinted, collision-sized), which is exactly what we
-  // don't want — the plastic structure branch tints + upsizes it.
-  plasticTexSrc?: string;
   // Number of other plastic-shards currently in contact with this one,
   // computed by ShardSystem off the merge-broadphase grid.  Drives the
   // PAuto neighbour-brightness automata in RenderSystem (more contacts
@@ -745,14 +738,13 @@ export interface EngineStats {
   // cloud sprite).  Default false; DBG-toggleable via the Visual
   // section's Outline button.
   tileOutlinesEnabled?: boolean;
-  // When true, plastic-shards render a tinted nebula image instead
-  // of the plain soft-disc gradient.  DBG-toggleable via the PTex
-  // button.  Default false.
-  plasticNebulaTextureEnabled?: boolean;
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
   plasticAutomataEnabled?: boolean;
+  // PAuto direction: true = brighten dense interiors, false = darken
+  // them (default).  Toggled via the PADIR button.
+  plasticAutomataBrighten?: boolean;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Plastic button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic

@@ -17,7 +17,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -105,7 +105,7 @@ export class GameEngine {
   // space).  THRUST extends the trail opposite to the input/thrust
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
 
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
@@ -135,7 +135,7 @@ export class GameEngine {
   // broadphase doesn't pair these (shards skip the outer loop), so
   // mobile shards drift through tiles' geometry; flipping ON adds
   // the missing scan and the asteroid-crash branch starts firing.
-  private shardTileCollisionsEnabled: boolean = false;
+  private shardTileCollisionsEnabled: boolean = true;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -154,7 +154,7 @@ export class GameEngine {
   private shakeIntensity: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
-  private screenShakeEnabled: boolean = true;
+  private screenShakeEnabled: boolean = false;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -453,15 +453,6 @@ export class GameEngine {
   }
 
   /**
-   * Toggle plastic-shard rendering between the plain soft-disc
-   * gradient (off) and a nebula image tinted to the shard's palette
-   * colour (on).  Live — RenderSystem reads the flag each draw.
-   */
-  public togglePlasticNebulaTexture() {
-    this.renderer.plasticNebulaTextureEnabled = !this.renderer.plasticNebulaTextureEnabled;
-  }
-
-  /**
    * Toggle the plastic-shard neighbour-brightness automata (PAuto).
    * On: shards render in the active palette's constant base shade,
    * darkened by how many plastic-shards they're in contact with.
@@ -473,6 +464,15 @@ export class GameEngine {
     const next = !this.renderer.plasticAutomataEnabled;
     this.renderer.plasticAutomataEnabled = next;
     this.shards.plasticAutomataEnabled = next;
+  }
+
+  /**
+   * Flip the PAuto automata direction between darkening dense
+   * interiors (default) and brightening them.  Live — RenderSystem
+   * reads the shared flag in plasticAutomataHex each draw.
+   */
+  public togglePlasticAutomataDirection() {
+    togglePlasticAutomataBrighten();
   }
 
   /**
@@ -814,8 +814,8 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
-      plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
+      plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
@@ -942,8 +942,8 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
-      plasticNebulaTextureEnabled: this.renderer.plasticNebulaTextureEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
+      plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,

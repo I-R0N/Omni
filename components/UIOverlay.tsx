@@ -21,8 +21,8 @@ interface UIOverlayProps {
   onToggleNebulaShardCollisions?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
-  onTogglePlasticNebulaTexture?: () => void;
   onTogglePlasticAutomata?: () => void;
+  onTogglePlasticAutomataDirection?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -65,8 +65,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaShardCollisions,
   onToggleScreenShake,
   onToggleTileOutlines,
-  onTogglePlasticNebulaTexture,
   onTogglePlasticAutomata,
+  onTogglePlasticAutomataDirection,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
@@ -216,18 +216,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.tileOutlinesEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
-                {/* Plastic-shard texture source — plain soft-disc
-                    gradient (Off) vs. a tinted nebula image (On). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PTex</span>
-                  <button
-                    onClick={onTogglePlasticNebulaTexture}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle plastic-shard texture: plain soft-disc gradient (Off) vs. a nebula image tinted to the shard's palette colour (On).  Each shard keeps a stable nebula image picked from its id."
-                  >
-                    {stats.plasticNebulaTextureEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
                 {/* Plastic-shard neighbour-brightness automata — On =
                     constant palette base shade darkened by contact
                     count; Off = per-instance random shades. */}
@@ -239,6 +227,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Plastic-shard neighbour-brightness automata.  On: all shards use the palette's constant base shade, darkened by how many plastic-shards each is in contact with (like nebula interior-darkening).  Off: per-instance random shades."
                   >
                     {stats.plasticAutomataEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* PAuto direction — darken vs. brighten dense
+                    interiors.  Only meaningful while PAuto is On. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PADIR</span>
+                  <button
+                    onClick={onTogglePlasticAutomataDirection}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="PAuto automata direction: Darken dense cluster interiors (default, like nebula) or Brighten them.  Only affects rendering while PAuto is On."
+                  >
+                    {stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark'}
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →

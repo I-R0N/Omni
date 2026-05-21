@@ -1,9 +1,8 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
-import { NEBULA_IMAGES } from '../../assets';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
 import { HEX_AREA, HEX_SIZE } from '../maps/TileGenerator';
@@ -98,7 +97,10 @@ function plasticAutomataHex(neighborCount: number): string {
     const base = getActivePlasticBaseShade();
     if (neighborCount <= 0) return base;
     const t = Math.min(1, neighborCount / PLASTIC_SHARD_AUTOMATA.MAX_NEIGHBORS);
-    const factor = 1 + t * (PLASTIC_SHARD_AUTOMATA.MIN_BRIGHTNESS - 1);
+    const target = isPlasticAutomataBrighten()
+        ? PLASTIC_SHARD_AUTOMATA.MAX_BRIGHTNESS
+        : PLASTIC_SHARD_AUTOMATA.MIN_BRIGHTNESS;
+    const factor = 1 + t * (target - 1);
     if (factor === 1) return base;
     const [r, g, b] = hexToRgb(base);
     return rgbToHex(r * factor, g * factor, b * factor);
@@ -170,12 +172,6 @@ export class RenderSystem {
   // Default OFF.  Wired through GameEngine.toggleTileOutlines and
   // surfaced in the DBG panel's Visual section.
   public tileOutlinesEnabled: boolean = false;
-  // DBG toggle — when true, plastic-shards render a nebula image
-  // tinted to their palette colour instead of the plain soft-disc
-  // gradient.  Default OFF.  Wired through
-  // GameEngine.togglePlasticNebulaTexture, surfaced as the DBG
-  // panel's PTex button.
-  public plasticNebulaTextureEnabled: boolean = false;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -239,18 +235,6 @@ export class RenderSystem {
   // colour composition applied via source-atop, so tinting happens once per
   // (sprite, colour) pair instead of every frame.
   private _tintedSprites: Map<string, HTMLCanvasElement> = new Map();
-  // Dedicated plastic-texture cache (PTex mode): `${src}|${hex}` → a
-  // content-filled, tinted nebula bitmap.  Kept SEPARATE from
-  // _tintedSprites on purpose — that cache is capped at 256 and
-  // contended by hundreds of distinct nebula composition hexes, so
-  // sharing it made plastic tints (20 images × ~7 palette shades)
-  // evict + rebuild a 128² canvas every frame.  Plastic's working
-  // set is small and discrete, so its own LRU map stays warm and
-  // rebuilds drop to ~zero.  Per-src content fraction (visible-pixel
-  // half-extent) is cached alongside so the cloud can be zoomed to
-  // fill its bitmap, trimming the PNG's transparent padding.
-  private _plasticTextureBitmaps: Map<string, HTMLCanvasElement> = new Map();
-  private _plasticContentFrac: Map<string, number> = new Map();
   // Normalized (range [-0.5, 0.5]) alpha-weighted centroid offset of the
   // visible content within each sprite's bitmap bounds.  Computed once
   // per source URL at first draw, then reused to shift drawImage so the
@@ -542,119 +526,6 @@ export class RenderSystem {
       }
       this._tintedSprites.set(key, c);
       return c;
-  }
-
-  /**
-   * Fraction of a sprite's half-extent occupied by visible pixels
-   * (alpha > threshold), scanned once per src and cached.  Used to
-   * zoom the cloud so it fills its tinted bitmap — the nebula PNGs
-   * carry transparent padding, so without this the visible cloud is
-   * far smaller than its draw rect and we'd have to over-draw to
-   * compensate.  Coarse 64² scan is plenty for an extent estimate.
-   * Returns 1 (no zoom) when the image isn't ready or is tainted.
-   */
-  private getPlasticContentFraction(src: string): number {
-      const cached = this._plasticContentFrac.get(src);
-      if (cached !== undefined) return cached;
-      const img = this.getImage(src);
-      if (!img.complete || img.naturalWidth === 0) return 1;
-      const size = 64;
-      const tmp = document.createElement('canvas');
-      tmp.width = size; tmp.height = size;
-      const tctx = tmp.getContext('2d');
-      if (!tctx) return 1;
-      tctx.drawImage(img, 0, 0, size, size);
-      let data: Uint8ClampedArray;
-      try {
-          data = tctx.getImageData(0, 0, size, size).data;
-      } catch {
-          return 1; // tainted canvas — skip zoom
-      }
-      const c = size / 2;
-      let maxExtent = 0;
-      for (let y = 0; y < size; y++) {
-          for (let x = 0; x < size; x++) {
-              if (data[(y * size + x) * 4 + 3] > 16) {
-                  const ex = Math.max(Math.abs(x + 0.5 - c), Math.abs(y + 0.5 - c));
-                  if (ex > maxExtent) maxExtent = ex;
-              }
-          }
-      }
-      const frac = maxExtent > 0 ? Math.max(0.4, Math.min(1, maxExtent / c)) : 1;
-      this._plasticContentFrac.set(src, frac);
-      return frac;
-  }
-
-  /**
-   * Content-filled, tinted nebula bitmap for plastic rendering, in the
-   * dedicated _plasticTextureBitmaps cache (see field comment).  The
-   * cloud is zoomed by 1/contentFraction so it fills the 128² bitmap;
-   * the caller then draws at the soft-disc radius instead of
-   * over-drawing to cover the PNG's transparent padding.
-   */
-  private getPlasticTexture(src: string, hex: string): HTMLCanvasElement | null {
-      const key = `${src}|${hex}`;
-      const cached = this._plasticTextureBitmaps.get(key);
-      if (cached) return cached;
-      const img = this.getImage(src);
-      if (!img.complete || img.naturalWidth === 0) return null;
-      const f = this.getPlasticContentFraction(src);
-      const size = 128;
-      const c = document.createElement('canvas');
-      c.width = size; c.height = size;
-      const cx = c.getContext('2d');
-      if (!cx) return null;
-      const dw = size / f;
-      const off = (size - dw) / 2;
-      cx.drawImage(img, off, off, dw, dw); // zoom to fill, padding clipped
-      cx.globalCompositeOperation = 'source-atop';
-      cx.fillStyle = hex;
-      cx.fillRect(0, 0, size, size);
-      cx.globalCompositeOperation = 'source-over';
-      if (this._plasticTextureBitmaps.size >= 256) {
-          const firstKey = this._plasticTextureBitmaps.keys().next().value;
-          if (firstKey !== undefined) this._plasticTextureBitmaps.delete(firstKey);
-      }
-      this._plasticTextureBitmaps.set(key, c);
-      return c;
-  }
-
-  /**
-   * Draw a plastic entity (tile or shard) as a nebula image tinted to
-   * baseHex — used when the PTex DBG toggle is on.  Picks a stable
-   * nebula image for the entity (hash of its id, cached on
-   * entity.plasticTexSrc — NOT entity.sprite, which would route the
-   * entity through the generic raw-sprite draw path and skip this
-   * tinted branch entirely) and draws it centred at RENDER_RADIUS_FACTOR
-   * × collisionR — the same radius as the soft disc, since
-   * getPlasticTexture content-fills the bitmap (no transparent padding
-   * to over-draw past).  Forces source-over: the plastic blend cycle
-   * defaults to 'lighter', and additive / screen blending sums the
-   * tinted clouds toward white.  Returns false (caller draws the
-   * default fill) when no nebula image is loaded or its tint canvas
-   * isn't ready yet.
-   */
-  private drawPlasticNebulaTexture(
-      ctx: CanvasRenderingContext2D,
-      entity: GameEntity,
-      baseHex: string,
-      collisionR: number,
-      alpha: number,
-  ): boolean {
-      if (NEBULA_IMAGES.length === 0) return false;
-      if (entity.plasticTexSrc === undefined) {
-          let h = 0;
-          const id = entity.id;
-          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-          entity.plasticTexSrc = NEBULA_IMAGES[Math.abs(h) % NEBULA_IMAGES.length];
-      }
-      const tinted = this.getPlasticTexture(entity.plasticTexSrc, baseHex);
-      if (!tinted) return false;
-      const texR = collisionR * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(tinted, -texR, -texR, texR * 2, texR * 2);
-      return true;
   }
 
   // Helper to load/get images
@@ -2098,20 +1969,10 @@ export class RenderSystem {
                     // globalAlpha cycles through the Opacity DBG
                     // setting so tiles and shards stay matched
                     // visually.
-                    // PTex toggle — draw a nebula image tinted to the
-                    // tile's plastic colour (so a tile cluster matches
-                    // its shards in texture mode); otherwise the flat
-                    // hex-polygon fill.
-                    const drewTileTexture = this.plasticNebulaTextureEnabled
-                        && this.drawPlasticNebulaTexture(
-                            ctx, entity, entity.color, entity.size.x / 2, getActivePlasticOpacity(),
-                        );
-                    if (!drewTileTexture) {
-                        buildPath();
-                        ctx.globalAlpha = getActivePlasticOpacity();
-                        ctx.fillStyle   = entity.color;
-                        ctx.fill();
-                    }
+                    buildPath();
+                    ctx.globalAlpha = getActivePlasticOpacity();
+                    ctx.fillStyle   = entity.color;
+                    ctx.fill();
 
                     // DBG outline overlay (Outline toggle) — thin
                     // stroke of the hex polygon so the SAT collision
@@ -2402,25 +2263,12 @@ export class RenderSystem {
                         ctx.scale(scaleX, scaleY);
                     }
 
-                    // Texture source: when the PTex toggle is on, draw a
-                    // nebula image tinted to the shard's palette colour
-                    // (source-over — see drawPlasticNebulaTexture) instead
-                    // of the plain soft-disc gradient.  Falls back to the
-                    // soft disc (under the active blend mode) when no
-                    // nebula image is loaded or the tint isn't ready.
-                    const drewTexture = this.plasticNebulaTextureEnabled
-                        && this.drawPlasticNebulaTexture(
-                            ctx, entity, baseHex, collisionR,
-                            getActivePlasticOpacity() * fadeAlpha,
-                        );
-                    if (!drewTexture) {
-                        const outline = getActivePlasticPaletteOutline();
-                        const solidEdge = getActivePlasticPaletteSolidEdge();
-                        const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge, getActivePlasticCoreRadius());
-                        ctx.globalCompositeOperation = getActivePlasticBlendMode();
-                        ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
-                        ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
-                    }
+                    const outline = getActivePlasticPaletteOutline();
+                    const solidEdge = getActivePlasticPaletteSolidEdge();
+                    const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge, getActivePlasticCoreRadius());
+                    ctx.globalCompositeOperation = getActivePlasticBlendMode();
+                    ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
+                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
                     ctx.globalCompositeOperation = 'source-over';
 
                     // DBG outline overlay (Outline toggle) — thin
