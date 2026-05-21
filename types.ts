@@ -780,6 +780,12 @@ export interface EngineStats {
   // (PLASTIC_IMPACT_COOLDOWN_CYCLE, 0.2 … 1.5 / off).  Longer =
   // calmer deformation; 'off' disables collision-driven deformation.
   plasticImpactCooldownName?: string;
+  // DBG soft-disc blend knobs for plastic-shards.  Core = opaque-core
+  // radius fraction (PLASTIC_CORE_RADIUS_CYCLE); Blend = disc draw
+  // radius as a multiple of collision radius (PLASTIC_BLEND_RADIUS_
+  // CYCLE).  Smaller core / larger blend = deeper inter-shard blend.
+  plasticCoreRadiusName?: string;
+  plasticBlendRadiusName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

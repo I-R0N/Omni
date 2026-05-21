@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { BackgroundManager } from './BackgroundManager';
@@ -315,10 +315,13 @@ export class RenderSystem {
       hex: string,
       outline: string | undefined,
       solidEdge: boolean,
+      coreRadius: number,
   ): HTMLCanvasElement {
-      // Cache key — solidEdge bit only matters when outline is set.
+      // Cache key — solidEdge bit only matters when outline is set;
+      // coreRadius only shapes the plain (no-outline) profile, so it
+      // only enters the key there.
       const key = outline === undefined
-        ? hex
+        ? `${hex}|c${coreRadius}`
         : `${hex}|${outline}|${solidEdge ? 's' : 'f'}`;
       const cached = this._softDiscBitmaps.get(key);
       if (cached) return cached;
@@ -330,10 +333,14 @@ export class RenderSystem {
       const [r, g, b] = hexToRgb(hex);
       const grad = cx.createRadialGradient(center, center, 0, center, center, center);
       if (outline === undefined) {
-          // Plain polymer chunk profile.
-          grad.addColorStop(0,    `rgba(${r},${g},${b},1.0)`);
-          grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.95)`);
-          grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+          // Plain polymer chunk profile.  Opaque out to coreRadius,
+          // then a long alpha fade to the edge — smaller core =
+          // deeper blend between overlapping shards.
+          grad.addColorStop(0, `rgba(${r},${g},${b},1.0)`);
+          if (coreRadius > 0 && coreRadius < 1) {
+              grad.addColorStop(coreRadius, `rgba(${r},${g},${b},0.95)`);
+          }
+          grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
       } else if (solidEdge) {
           // Hard-edge disc + soft outline halo.  Stops at 0.6 and
           // 0.601 force a near-instant transition between the
@@ -2286,12 +2293,15 @@ export class RenderSystem {
 
                 if (isPlasticShard) {
                     // ── Plastic shard — soft-edge disc + wiggle ────────────
-                    // Cached soft-disc bitmap drawn at 1.2× collision
-                    // diameter and 0.75 opacity.  Profile is "opaque
-                    // core + soft halo" (see getSoftDiscBitmap) — the
-                    // outer 30 % fades to transparent so adjacent
-                    // shards in a cluster blend cleanly without
-                    // visible seams.  Per-instance amber shade comes
+                    // Cached soft-disc bitmap drawn at getActivePlastic
+                    // BlendRadius()× the collision diameter (PBlnd knob)
+                    // and getActivePlasticOpacity().  Profile is "opaque
+                    // core + alpha fade" (see getSoftDiscBitmap): the
+                    // core fraction (PCore knob) stays opaque, then a
+                    // long fade to transparent lets adjacent shards in a
+                    // cluster blend cleanly without visible seams — a
+                    // smaller core / larger blend radius deepens that
+                    // blend.  Per-instance amber shade comes
                     // from entity.color (set at spawn via random
                     // PlasticShade — see DropSystem.spawnDentShard +
                     // PLASTIC_PALETTES in constants.ts).
@@ -2320,7 +2330,7 @@ export class RenderSystem {
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const baseHex   = densityTintForRender(entity, entity.color);
                     const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * PLASTIC_DEFORM_CONSTANTS.RENDER_RADIUS_FACTOR;
+                    const renderR    = collisionR * getActivePlasticBlendRadius();
 
                     // B: spawn-time shape variance — entity-local per-axis
                     // scale rolled at spawn (DropSystem.spawnDentShard /
@@ -2379,7 +2389,7 @@ export class RenderSystem {
                     if (!drewTexture) {
                         const outline = getActivePlasticPaletteOutline();
                         const solidEdge = getActivePlasticPaletteSolidEdge();
-                        const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge);
+                        const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge, getActivePlasticCoreRadius());
                         ctx.globalCompositeOperation = getActivePlasticBlendMode();
                         ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
                         ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);

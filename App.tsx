@@ -185,6 +185,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticOpacity();
   };
 
+  const handleCyclePlasticCoreRadius = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticCoreRadius();
+  };
+
+  const handleCyclePlasticBlendRadius = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticBlendRadius();
+  };
+
   const handleCyclePlasticYield = () => {
       if (engineRef.current) engineRef.current.cyclePlasticYield();
   };
@@ -250,6 +258,8 @@ const App: React.FC = () => {
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
         onCyclePlasticOpacity={handleCyclePlasticOpacity}
+        onCyclePlasticCoreRadius={handleCyclePlasticCoreRadius}
+        onCyclePlasticBlendRadius={handleCyclePlasticBlendRadius}
         onCyclePlasticYield={handleCyclePlasticYield}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}

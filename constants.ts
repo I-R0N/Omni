@@ -287,6 +287,63 @@ export function cyclePlasticOpacity(): number {
   return activePlasticOpacityIndex;
 }
 
+// ── Plastic soft-disc blend tuning ─────────────────────────────────
+// Two radii shape the plain (no-outline) plastic-shard disc and how
+// deeply neighbouring discs blend into one another:
+//  - CORE radius: the fraction of the disc radius that stays ~opaque
+//    before the alpha fade begins.  Smaller core → longer fade →
+//    deeper, seam-free blending between overlapping shards.
+//  - BLEND radius: the disc's overall draw radius as a multiple of the
+//    collision radius.  Larger → discs reach further past their SAT
+//    footprint → more overlap with neighbours.
+// Both are DBG-cyclable (PCore / PBlnd buttons) so the blend depth can
+// be dialled in live.  Defaults are deeper than the original fixed
+// 0.7 core / 1.7 radius the shards shipped with.
+
+/** Opaque-core radius fraction for the plain plastic disc gradient.
+ *  0 = fade straight from the centre (softest); higher keeps a flat
+ *  opaque core out to that fraction before fading. */
+export const PLASTIC_CORE_RADIUS_CYCLE: ReadonlyArray<number> = [
+  0.0, 0.15, 0.3, 0.45, 0.7,
+] as const;
+
+let activePlasticCoreRadiusIndex = 1; // 0.15 — small core, deep blend
+
+export function getActivePlasticCoreRadius(): number {
+  return PLASTIC_CORE_RADIUS_CYCLE[activePlasticCoreRadiusIndex];
+}
+
+export function getActivePlasticCoreRadiusName(): string {
+  return getActivePlasticCoreRadius().toFixed(2);
+}
+
+export function cyclePlasticCoreRadius(): number {
+  activePlasticCoreRadiusIndex = (activePlasticCoreRadiusIndex + 1) % PLASTIC_CORE_RADIUS_CYCLE.length;
+  return activePlasticCoreRadiusIndex;
+}
+
+/** Plastic-shard disc draw radius as a multiple of the collision
+ *  radius.  Larger spreads the disc further past the SAT footprint so
+ *  neighbouring discs overlap and blend more. */
+export const PLASTIC_BLEND_RADIUS_CYCLE: ReadonlyArray<number> = [
+  1.4, 1.7, 2.0, 2.4, 2.8,
+] as const;
+
+let activePlasticBlendRadiusIndex = 2; // 2.0 — more overlap than the old 1.7
+
+export function getActivePlasticBlendRadius(): number {
+  return PLASTIC_BLEND_RADIUS_CYCLE[activePlasticBlendRadiusIndex];
+}
+
+export function getActivePlasticBlendRadiusName(): string {
+  return getActivePlasticBlendRadius().toFixed(1);
+}
+
+export function cyclePlasticBlendRadius(): number {
+  activePlasticBlendRadiusIndex = (activePlasticBlendRadiusIndex + 1) % PLASTIC_BLEND_RADIUS_CYCLE.length;
+  return activePlasticBlendRadiusIndex;
+}
+
 // ── Nebula-shard velocity-stretch stiffness cycle ──────────────────
 // K multiplier on speed for the velocity-aligned stretch (see
 // NEBULA_CONSTANTS.VEL_STRETCH_* above + RenderSystem nebula-shard

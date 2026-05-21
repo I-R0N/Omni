@@ -27,6 +27,8 @@ interface UIOverlayProps {
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
   onCyclePlasticOpacity?: () => void;
+  onCyclePlasticCoreRadius?: () => void;
+  onCyclePlasticBlendRadius?: () => void;
   onCyclePlasticYield?: () => void;
   onCyclePlasticStiffness?: () => void;
   onCyclePlasticDamping?: () => void;
@@ -68,6 +70,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTogglePlasticBlend,
   onCycleNebulaStretch,
   onCyclePlasticOpacity,
+  onCyclePlasticCoreRadius,
+  onCyclePlasticBlendRadius,
   onCyclePlasticYield,
   onCyclePlasticStiffness,
   onCyclePlasticDamping,
@@ -258,6 +262,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle the globalAlpha used by plastic-tile and plastic-shard renders.  25 % is ghostly translucent, 100 % is fully opaque.  Default 75 %."
                   >
                     {stats.plasticOpacity ?? '75%'}
+                  </button>
+                </div>
+                {/* Plastic disc blend depth — PCore is the opaque-core
+                    radius fraction (smaller = longer fade = deeper
+                    blend); PBlnd is the disc draw radius (larger =
+                    more overlap).  Both shape plastic-SHARD discs. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PCore</span>
+                  <button
+                    onClick={onCyclePlasticCoreRadius}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-shard disc's opaque-core radius (fraction of disc radius).  Smaller core = longer alpha fade = deeper blend between overlapping shards."
+                  >
+                    {stats.plasticCoreRadiusName ?? '0.15'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlnd</span>
+                  <button
+                    onClick={onCyclePlasticBlendRadius}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-shard disc draw radius (× collision radius).  Larger spreads the disc further past its collision footprint so neighbouring discs overlap and blend more."
+                  >
+                    {stats.plasticBlendRadiusName ?? '2.0'}
                   </button>
                 </div>
                 {/* Plastic colour-equilibration toggle — independent
