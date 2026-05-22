@@ -2512,15 +2512,26 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit, v7: merge REPLACED by self-break.
-    // Plastic-shards no longer pull toward / bond with / compose into
-    // each other.  Instead they self-shatter over time down to chips
-    // that explode on their own (GameEngine.tickPlasticSelfBreak +
-    // the shatter policy below — no merge, no tile transmute).
+    // Plastic-softbody retrofit, v8: attraction + cohesion bonding
+    // are back (they were never meant to be dropped), but bonds are
+    // cohesion-ONLY.  bondTimeSeconds: Infinity means the compose
+    // timer never matures, so plastic-shards pull toward each other
+    // and stick into soft blobs WITHOUT ever combining into larger
+    // shards or transmuting back to tiles.  The disintegration that
+    // used to be "merge" is handled by the v7 timed self-break
+    // (GameEngine.tickPlasticSelfBreak) instead.  No requireSizeDelta
+    // gate so any nearby pair bonds (free clustering, not just
+    // size-mismatched pairs).
     merge: {
-      attractedTo: 'none',
-      bondsWith:   'none',
-      rules: [],
+      attractedTo:  { include: ['plastic-shard'] },
+      pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
+      pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
+      pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
+      bondsWith:    { include: ['plastic-shard'] },
+      bondTimeSeconds: Infinity,
+      rules: [
+        { partner: 'self', outcome: 'compose' },
+      ],
       defaultOutcome: 'compose',
     },
     // Plastic-shards shatter into smaller plastic-shards on death
