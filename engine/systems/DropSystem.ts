@@ -340,13 +340,13 @@ export class DropSystem {
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
 
-    // Release 4-6 glass-palette nebula-shards alongside the glass
+    // Release 3-5 glass-palette nebula-shards alongside the glass
     // debris so the shatter has a substantial cloud-puff dimension.
     // Each puff samples a hue from the cool half of the nebula arc
     // (cyan → indigo) — sets a per-shard composition so each puff
     // participates in the color-equilibration pass and blends
     // smoothly into any surrounding nebula cluster.
-    const nebulaCount = 4 + Math.floor(Math.random() * 3);
+    const nebulaCount = 3 + Math.floor(Math.random() * 3);
     const tileSize = Math.max(tile.size.x, tile.size.y);
     for (let i = 0; i < nebulaCount; i++) {
       const spawnPos = {
@@ -904,11 +904,18 @@ export class DropSystem {
     const impactSpeed = inheritVelocity
       ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)
       : 0;
-    const baseAngle = impactSpeed > 0.001
+    const hasImpact = impactSpeed > 0.001;
+    const baseAngle = hasImpact
       ? Math.atan2(inheritVelocity!.y, inheritVelocity!.x)
       : Math.random() * Math.PI * 2;
-    const launchSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
-    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.6;
+    // Fan the shards in a wide cone around the hit direction (full
+    // circle when there's no impact) AND give each its own speed, so a
+    // multi-shard break sprays apart instead of travelling as one
+    // parallel clump that lands in the same spot.
+    const spreadCone = hasImpact ? 1.5 : Math.PI * 2; // ±~43° around the hit dir
+    const launchAngle = baseAngle + (Math.random() - 0.5) * spreadCone;
+    const baseSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
+    const launchSpeed = baseSpeed * (0.4 + Math.random() * 1.4); // 0.4×–1.8× per shard
 
     entities.push({
       id:                  nextId('colored_nebula_shard'),

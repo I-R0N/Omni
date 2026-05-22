@@ -1275,8 +1275,8 @@ export class GameEngine {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
-          // Rock-shard death also releases 2 colour-matched nebula-
-          // shards (cloud-style fragments) alongside the solid shatter
+          // Rock-shard death also releases 1 colour-matched nebula-
+          // shard (cloud-style fragment) alongside the solid shatter
           // children.  Only fires for mobile shards (mass !==
           // Infinity) and only when the shard was big enough to
           // produce shatter children — small chips (size < 24)
@@ -1286,7 +1286,7 @@ export class GameEngine {
               && entity.mass !== Infinity
               && Math.max(entity.size.x, entity.size.y) >= 24) {
               const baseSize = this.deformedDiameter(entity);
-              for (let nb = 0; nb < 2; nb++) {
+              for (let nb = 0; nb < 1; nb++) {
                   const jitter = baseSize * 0.2;
                   const puffPos = {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
@@ -1305,7 +1305,7 @@ export class GameEngine {
               }
           }
 
-          // Rock-tile death burst — 4-6 colour-matched nebula-shards
+          // Rock-tile death burst — 3-5 colour-matched nebula-shards
           // scattered around the tile centre, on top of the per-hit
           // puffs that fired during deformation.  Sells the final
           // collapse as a substantial dust cloud rather than just
@@ -1314,7 +1314,7 @@ export class GameEngine {
               && variant === 'rock-tile'
               && entity.mass === Infinity) {
               const baseSize = this.deformedDiameter(entity);
-              const count = 4 + Math.floor(Math.random() * 3);
+              const count = 3 + Math.floor(Math.random() * 3);
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * 0.4;
                   const puffPos = {
@@ -2007,10 +2007,9 @@ export class GameEngine {
                   // the cleaner solid-shard-only readout.
                   if (target.shardVariant === 'rock-tile') {
                       const baseSize = this.deformedDiameter(target);
-                      // 2 puffs per hit at slightly varied sizes +
-                      // small jitter on spawn position so they don't
-                      // overlap exactly.
-                      for (let nb = 0; nb < 2; nb++) {
+                      // 1 puff per hit at a varied size + small jitter
+                      // on spawn position so it doesn't overlap exactly.
+                      for (let nb = 0; nb < 1; nb++) {
                           const jitter = baseSize * 0.15;
                           const puffPos = {
                               x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
