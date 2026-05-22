@@ -263,8 +263,8 @@ export function togglePlasticAutomataBrighten(): boolean {
 // rolled per shard so a cluster disintegrates as a staggered cascade
 // rather than all at once.
 export const PLASTIC_SELF_BREAK = {
-  MIN_SECONDS: 2.5,
-  MAX_SECONDS: 6.0,
+  MIN_SECONDS: 12.5,
+  MAX_SECONDS: 30.0,
 } as const;
 
 
