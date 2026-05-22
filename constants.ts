@@ -275,15 +275,37 @@ export const PLASTIC_SELF_BREAK = {
 // PBLND blend radius), so debris is eaten once it's visually inside.
 // A gentle inverse-distance attraction (ATTRACT_*) draws glass/rock
 // toward the nearest plastic within ATTRACT_RANGE so debris settles
-// into contact instead of just bouncing off.  See
-// ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
+// into contact instead of just bouncing off.  The attract STRENGTH is
+// DBG-cyclable (PEat button) — see PLASTIC_EAT_ATTRACT_CYCLE below.
+// See ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
 export const PLASTIC_EAT = {
   SECONDS: 1.5,
   CONTACT_RADIUS_FACTOR: 2.0,
   ATTRACT_RANGE: 220,
-  ATTRACT_STRENGTH: 90,   // gentle — well below nebula self-gravity (380)
   ATTRACT_MIN_DIST: 8,
 } as const;
+
+/** Attract-strength steps for the PEat DBG cycle.  Index 0 (90) is the
+ *  startup default; the rest crank it up (nebula self-gravity is 380
+ *  for reference).  Read live by ShardSystem's eat pass. */
+export const PLASTIC_EAT_ATTRACT_CYCLE: ReadonlyArray<number> = [
+  90, 180, 360, 720, 1440,
+] as const;
+
+let activePlasticEatAttractIndex = 0;
+
+export function getActivePlasticEatAttract(): number {
+  return PLASTIC_EAT_ATTRACT_CYCLE[activePlasticEatAttractIndex];
+}
+
+export function getActivePlasticEatAttractName(): string {
+  return String(getActivePlasticEatAttract());
+}
+
+export function cyclePlasticEatAttract(): number {
+  activePlasticEatAttractIndex = (activePlasticEatAttractIndex + 1) % PLASTIC_EAT_ATTRACT_CYCLE.length;
+  return activePlasticEatAttractIndex;
+}
 
 
 // ── Plastic blend-mode cycle ───────────────────────────────────────

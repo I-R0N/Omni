@@ -756,6 +756,9 @@ export interface EngineStats {
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
   plasticAutomataBrighten?: boolean;
+  // Active plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_CYCLE),
+  // formatted for the PEat DBG button.
+  plasticEatAttractName?: string;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Plastic button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic

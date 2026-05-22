@@ -28,6 +28,7 @@ import {
   PLASTIC_DEFORM_CONSTANTS,
   PLASTIC_SHARD_AUTOMATA,
   PLASTIC_EAT,
+  getActivePlasticEatAttract,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -1067,6 +1068,7 @@ export class ShardSystem {
     if (hasPlastic) {
       const factor = PLASTIC_EAT.CONTACT_RADIUS_FACTOR;
       const attractRangeSq = PLASTIC_EAT.ATTRACT_RANGE * PLASTIC_EAT.ATTRACT_RANGE;
+      const attractStrength = getActivePlasticEatAttract();
       let eats: Array<{ eater: GameEntity; consumed: GameEntity }> | null = null;
       for (let i = 0; i < candidates.length; i++) {
         const g = candidates[i];
@@ -1107,7 +1109,7 @@ export class ShardSystem {
         const dist = Math.sqrt(nearDistSq);
         if (dist > 0.0001) {
           const effDist = Math.max(dist, PLASTIC_EAT.ATTRACT_MIN_DIST);
-          const accel = (PLASTIC_EAT.ATTRACT_STRENGTH * dt) / effDist;
+          const accel = (attractStrength * dt) / effDist;
           const inv = 1 / dist;
           g.velocity.x += nearDx * inv * accel;
           g.velocity.y += nearDy * inv * accel;

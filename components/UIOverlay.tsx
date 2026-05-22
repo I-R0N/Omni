@@ -23,6 +23,7 @@ interface UIOverlayProps {
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
+  onCyclePlasticEatAttract?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -67,6 +68,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleTileOutlines,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
+  onCyclePlasticEatAttract,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
@@ -239,6 +241,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="PAuto automata direction: Darken dense cluster interiors (default, like nebula) or Brighten them.  Only affects rendering while PAuto is On."
                   >
                     {stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark'}
+                  </button>
+                </div>
+                {/* Plastic-eat attraction strength — how hard plastic
+                    pulls nearby glass/rock debris in to be eaten. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PEat</span>
+                  <button
+                    onClick={onCyclePlasticEatAttract}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed.  90 (gentle default) → 1440.  Nebula self-gravity is 380 for reference."
+                  >
+                    {stats.plasticEatAttractName ?? '90'}
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →
