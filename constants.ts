@@ -254,14 +254,13 @@ export function togglePlasticAutomataBrighten(): boolean {
   return activePlasticAutomataBrighten;
 }
 
-// ── Plastic-shard self-break (v7) ──────────────────────────────────
-// Plastic no longer merges; instead every plastic-shard self-shatters
-// after a random delay (reusing the variant's existing shatter policy,
-// triggered by GameEngine.tickPlasticSelfBreak).  Shards above the
-// shatter size-floor break into smaller shards; shards below it just
-// explode on their own.  Self-breaks suppress drops.  The delay is
-// rolled per shard so a cluster disintegrates as a staggered cascade
-// rather than all at once.
+// ── Plastic-shard self-break (smallest chips only) ─────────────────
+// Plastic-shards break into smaller shards on damage (the normal
+// shatter path).  ONLY the smallest chips — already below the shatter
+// size-floor and unable to split further — keep a timed self-destruct
+// so they don't linger forever: each rolls a random delay in this
+// range and then explodes on its own (drops suppressed).  See
+// GameEngine.tickPlasticSelfBreak.
 export const PLASTIC_SELF_BREAK = {
   MIN_SECONDS: 12.5,
   MAX_SECONDS: 30.0,

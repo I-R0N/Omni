@@ -2574,27 +2574,30 @@ export class GameEngine {
   }
 
   /**
-   * Plastic self-break tick (v7).  Each active plastic-shard rolls a
-   * random countdown (PLASTIC_SELF_BREAK) the first time it's seen;
-   * when the countdown expires the shard is routed through the normal
-   * death/shatter path with drops suppressed, so it bursts into smaller
-   * plastic-shards (or, below the shatter size-floor, simply explodes
-   * on its own).  Children spawned by the shatter pick up their own
-   * timers on a later frame, producing a staggered disintegration
-   * cascade.  Reuses the variant's existing shatter policy — no new
-   * break logic.
+   * Plastic self-break tick.  Larger plastic-shards break only on
+   * damage (the normal projectile → death → shatter path).  ONLY the
+   * smallest shards — those already below the shatter size-floor
+   * (plastic-shard spawn.sizeMin), which can't split into children —
+   * keep a timed self-destruct: each rolls a random countdown
+   * (PLASTIC_SELF_BREAK) and, on expiry, is routed through the death
+   * path with drops suppressed so it simply explodes on its own.
+   * This keeps the terminal chips from lingering forever without
+   * making the whole cluster disintegrate on a timer.
    *
-   * Breaks are collected first and applied after the scan so the
-   * shatter's freshly-spawned children aren't iterated (and thus can't
-   * break) in the same frame.
+   * Breaks are collected first and applied after the scan so any
+   * freshly-spawned entities aren't iterated in the same frame.
    */
   private tickPlasticSelfBreak(dt: number) {
     if (!this.currentMap) return;
     const ents = this.currentMap.entities;
+    const floor = SHARD_VARIANTS['plastic-shard'].spawn.sizeMin;
     let toBreak: GameEntity[] | null = null;
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
       if (!e.active || e.shardVariant !== 'plastic-shard' || e.mass === Infinity) continue;
+      // Larger shards break on damage only — skip the timer for any
+      // shard big enough to still shatter into children.
+      if (e.size.x >= floor) continue;
       if (e.plasticBreakTimer === undefined) {
         e.plasticBreakTimer = PLASTIC_SELF_BREAK.MIN_SECONDS
           + Math.random() * (PLASTIC_SELF_BREAK.MAX_SECONDS - PLASTIC_SELF_BREAK.MIN_SECONDS);
