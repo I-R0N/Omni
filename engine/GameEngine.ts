@@ -1378,6 +1378,8 @@ export class GameEngine {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+      } else if (variant === 'plastic-tile' || variant === 'plastic-shard') {
+          // Plastic intentionally emits no death spark burst.
       } else if (isNebula) {
           // Nebulae fade out gracefully via mergeFadeTimer in the
           // renderer — no spark burst on destruction.  Merge/transmute

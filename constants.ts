@@ -2573,8 +2573,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
         { maxSize: 200, count: 20 },
       ],
     },
-    // Magenta particle puff matches the new fuchsia body colour.
-    onShatterParticles: { color: '#b45309', count: 5 },
+    // Plastic emits no shatter spark/dust burst.
+    onShatterParticles: 'none',
     passThrough: false,
     // Plastic shards drift through the plastic-tile repel field.
     // (Plastic-tiles don't emit a field today, but the immunity is
