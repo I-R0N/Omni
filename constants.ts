@@ -2109,7 +2109,10 @@ const GLASS_SHARD_SPAWN_SHAPE = {
   polyVerticesMin: 3, polyVerticesMax: 4,
   polyVerticesOptions: [3, 4],
   angleJitter: 0.5, radiusMin: 0.45, radiusRange: 0.75,
-  sizeToMass: (d: number) => d,
+  // Weight ∝ area (d²) so small shards are trivially pushable and big
+  // ones are heavy.  Material coefficient makes glass the LIGHTEST of
+  // the solids (glass 0.010 : rock 0.018 : metal 0.030 ≈ 1 : 1.8 : 3).
+  sizeToMass: (d: number) => d * d * 0.010,
 };
 
 // Base config shared by glass / plastic / metal STRUCTURE tiles.
@@ -2159,7 +2162,8 @@ const SHARD_SPAWN_SHAPE_ROCK = {
   polyVerticesMin: 5, polyVerticesMax: 9,
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
-  sizeToMass: (d: number) => d,
+  // Weight ∝ area (d²); rock sits mid-weight between glass and metal.
+  sizeToMass: (d: number) => d * d * 0.018,
 };
 
 const SHARD_SPAWN_SHAPE_NEBULA = {
@@ -2235,7 +2239,8 @@ const SHARD_SPAWN_SHAPE_METAL = {
   polyVerticesMin: 6, polyVerticesMax: 10,
   polyVerticesOptions: [6, 8, 10],
   angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
-  sizeToMass: (d: number) => d * 1.3,
+  // Weight ∝ area (d²); metal is the heaviest solid — hardest to shove.
+  sizeToMass: (d: number) => d * d * 0.030,
 };
 
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {

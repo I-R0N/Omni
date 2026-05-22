@@ -1811,7 +1811,9 @@ export class ShardSystem {
           const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
           if (newDiam > sizeCap) return;
         }
-        newMass = newDiam;
+        // Mass follows the dominant variant's (now area-based) curve so
+        // a merged shard weighs the same as one spawned at that size.
+        newMass = dominantDef.spawn.sizeToMass(newDiam);
       }
 
       const glowA = a.powerupGlowColor;

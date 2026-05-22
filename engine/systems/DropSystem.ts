@@ -244,7 +244,7 @@ export class DropSystem {
         active:        true,
         health:        1,
         maxHealth:     1,
-        mass:          size,
+        mass:          SHARD_VARIANTS[variantId].spawn.sizeToMass(size),
         polygonPoints: pts,
       });
     }
@@ -320,7 +320,7 @@ export class DropSystem {
         active:         true,
         health:         1,
         maxHealth:      1,
-        mass:           size,
+        mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
       });
     }
