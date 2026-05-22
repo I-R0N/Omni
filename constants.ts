@@ -162,7 +162,7 @@ export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
   { name: 'white+glow',  shades: ['#ffffff'], outline: '#000000' },
 ] as const;
 
-let activePlasticPaletteIndex = 0;
+let activePlasticPaletteIndex = 3; // purple
 
 /** Index of the active palette in PLASTIC_PALETTES.  Exposed for
  *  the DBG panel via EngineStats. */
@@ -239,7 +239,7 @@ export const PLASTIC_SHARD_AUTOMATA = {
 
 // PADIR toggle — direction of the PAuto automata.  false (default) =
 // darken dense interiors (mirrors nebula); true = brighten them.
-let activePlasticAutomataBrighten = false;
+let activePlasticAutomataBrighten = true; // brighten dense interiors
 
 /** True when the PAuto automata brightens dense interiors instead of
  *  darkening them.  Read by RenderSystem's plasticAutomataHex. */
@@ -327,7 +327,7 @@ export const PLASTIC_OPACITY_CYCLE: ReadonlyArray<number> = [
   1.00,
 ] as const;
 
-let activePlasticOpacityIndex = 2;
+let activePlasticOpacityIndex = 3; // 100%
 
 /** Active opacity for plastic rendering, in [0, 1].  Read by
  *  RenderSystem plastic-tile + plastic-shard branches. */
