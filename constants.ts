@@ -254,6 +254,20 @@ export function togglePlasticAutomataBrighten(): boolean {
   return activePlasticAutomataBrighten;
 }
 
+// ── Plastic-shard self-break (v7) ──────────────────────────────────
+// Plastic no longer merges; instead every plastic-shard self-shatters
+// after a random delay (reusing the variant's existing shatter policy,
+// triggered by GameEngine.tickPlasticSelfBreak).  Shards above the
+// shatter size-floor break into smaller shards; shards below it just
+// explode on their own.  Self-breaks suppress drops.  The delay is
+// rolled per shard so a cluster disintegrates as a staggered cascade
+// rather than all at once.
+export const PLASTIC_SELF_BREAK = {
+  MIN_SECONDS: 2.5,
+  MAX_SECONDS: 6.0,
+} as const;
+
+
 // ── Plastic blend-mode cycle ───────────────────────────────────────
 // globalCompositeOperation applied to the plastic-shard draw call so
 // overlapping shards in a cluster blend visibly differently.  Cycled
@@ -1710,6 +1724,12 @@ export const DROP_CONFIG = {
   // Drop-spawn probabilities
   AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
   AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
+  // Plastic-shards break into a large number of children (and each
+  // child is another drop opportunity), so their per-shard drop
+  // chance is cut well below the generic dent-shard rate.  Self-break
+  // deaths suppress drops entirely (see GameEngine.tickPlasticSelfBreak);
+  // this only governs player-caused breaks.
+  AMMO_DROP_CHANCE_PLASTIC_SHARD:   0.20, // 20 % chance a plastic shard drops ammo
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
@@ -2492,43 +2512,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Plastic-softbody retrofit, v6 (size-gated tier merge):
-    // plastic-shards self-bond on contact via the standard bondsWith
-    // pipeline, but only when there's a clear size disparity —
-    // smaller merges into larger; equal-sized pairs don't bond.
-    // The bond-time scaling uses an exponential curve in avgSize
-    // so very large shards take exponentially longer to merge.
-    // No upper size limit on the survivor (composeEntities skips
-    // the asteroid sizeCap for plastic-self-merge).  Once a
-    // merged shard reaches PLASTIC_TIER_DIAMETER it transmutes
-    // back to a plastic-tile at the nearest free hex cell.
-    //
-    // Bond timing math (avgSize = (a.size + b.size) / 2):
-    //   threshold = bondTimeSeconds × exp((avgSize − sizeRef)
-    //                                     × bondTimeSizeExp)
-    //   At avgSize = sizeRef (20): exp(0) = 1 → 10 s.
-    //   At avgSize = 40: exp(0.8) ≈ 2.2 → 22 s.
-    //   At avgSize = 80: exp(2.4) ≈ 11  → 110 s.
-    //   At avgSize = 160: exp(5.6) ≈ 270 → 45 min.
-    // Past ~size 80 a pair effectively never merges within a
-    // normal play session, which is the "no upper limit but
-    // diminishing return" feel.
+    // Plastic-softbody retrofit, v7: merge REPLACED by self-break.
+    // Plastic-shards no longer pull toward / bond with / compose into
+    // each other.  Instead they self-shatter over time down to chips
+    // that explode on their own (GameEngine.tickPlasticSelfBreak +
+    // the shatter policy below — no merge, no tile transmute).
     merge: {
-      // Standard shard-gravity pull (same mechanism nebula uses):
-      // unbonded plastic-shards are accelerated toward the nearest
-      // larger-or-equal plastic-shard neighbour within pullRange,
-      // and the pull stops once the puller enters a stick-bond.
-      // Replaces the old bespoke chain-seek pull.
-      attractedTo:  { include: ['plastic-shard'] },
-      pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
-      pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
-      pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
-      bondsWith: { include: ['plastic-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizeExp: 0.04,
-      requireSizeDeltaFraction: 0.05,
-      rules: [
-        { partner: 'self', outcome: 'compose' },
-      ],
+      attractedTo: 'none',
+      bondsWith:   'none',
+      rules: [],
       defaultOutcome: 'compose',
     },
     // Plastic-shards shatter into smaller plastic-shards on death

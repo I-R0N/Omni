@@ -143,9 +143,14 @@ export class DropSystem {
         // asteroid drop rate.
         const isDentShard = entity.shardVariant !== undefined
           && SHARD_VARIANTS[entity.shardVariant].dent !== undefined;
-        const dropChance = isDentShard
-          ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
-          : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
+        // Plastic-shards burst into many children, so they roll a much
+        // lower drop chance than other dent shards (metal) to avoid a
+        // flood of ammo from one cluster break.
+        const dropChance = entity.shardVariant === 'plastic-shard'
+          ? DROP_CONFIG.AMMO_DROP_CHANCE_PLASTIC_SHARD
+          : isDentShard
+            ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
+            : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
         const dropAmount = isDentShard
           ? DROP_CONFIG.AMMO_PER_DENT_SHARD
           : DROP_CONFIG.AMMO_PER_ASTEROID;

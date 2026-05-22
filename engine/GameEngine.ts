@@ -17,7 +17,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -1474,6 +1474,12 @@ export class GameEngine {
         this.shards.update(this.currentMap.entities, dt, this.physics, this.physics.lastRunShardPair);
     }
 
+    // Plastic self-break (v7): plastic-shards no longer merge — each
+    // counts down a per-shard timer and self-shatters when it expires,
+    // cascading down to chips that explode on their own.  Drops are
+    // suppressed for these self-triggered breaks.
+    this.tickPlasticSelfBreak(dt);
+
     // Tick down regenPopTimer on tiles
     if (this.currentMap) {
         const ents = this.currentMap.entities;
@@ -2565,6 +2571,48 @@ export class GameEngine {
 
   private applyDropEffect(entity: GameEntity) {
     this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
+  }
+
+  /**
+   * Plastic self-break tick (v7).  Each active plastic-shard rolls a
+   * random countdown (PLASTIC_SELF_BREAK) the first time it's seen;
+   * when the countdown expires the shard is routed through the normal
+   * death/shatter path with drops suppressed, so it bursts into smaller
+   * plastic-shards (or, below the shatter size-floor, simply explodes
+   * on its own).  Children spawned by the shatter pick up their own
+   * timers on a later frame, producing a staggered disintegration
+   * cascade.  Reuses the variant's existing shatter policy — no new
+   * break logic.
+   *
+   * Breaks are collected first and applied after the scan so the
+   * shatter's freshly-spawned children aren't iterated (and thus can't
+   * break) in the same frame.
+   */
+  private tickPlasticSelfBreak(dt: number) {
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+    let toBreak: GameEntity[] | null = null;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (!e.active || e.shardVariant !== 'plastic-shard' || e.mass === Infinity) continue;
+      if (e.plasticBreakTimer === undefined) {
+        e.plasticBreakTimer = PLASTIC_SELF_BREAK.MIN_SECONDS
+          + Math.random() * (PLASTIC_SELF_BREAK.MAX_SECONDS - PLASTIC_SELF_BREAK.MIN_SECONDS);
+        continue;
+      }
+      e.plasticBreakTimer -= dt;
+      if (e.plasticBreakTimer <= 0) {
+        (toBreak ??= []).push(e);
+      }
+    }
+    if (!toBreak) return;
+    for (let i = 0; i < toBreak.length; i++) {
+      const e = toBreak[i];
+      if (!e.active) continue;
+      e.suppressDrops = true;     // self-break: no ammo/health drops
+      this.handleEntityDeath(e);
+      e.active = false;
+    }
   }
 
   private spawnDrops(entity: GameEntity) {

@@ -568,6 +568,12 @@ export interface GameEntity {
   // PAuto neighbour-brightness automata in RenderSystem (more contacts
   // = darker, like nebula interior-darkening).  Plastic-shards only.
   plasticNeighborCount?: number;
+  // Countdown (seconds) until a plastic-shard self-shatters (v7
+  // self-break replaces merge).  Lazily rolled in
+  // GameEngine.tickPlasticSelfBreak from PLASTIC_SELF_BREAK; on expiry
+  // the shard is routed through the death/shatter path with drops
+  // suppressed.  Plastic-shards only.
+  plasticBreakTimer?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
