@@ -285,14 +285,14 @@ export const PLASTIC_EAT = {
   ATTRACT_MIN_DIST: 8,
 } as const;
 
-/** Attract-strength steps for the PEat DBG cycle.  Index 0 (90) is the
- *  startup default; the rest crank it up (nebula self-gravity is 380
- *  for reference).  Read live by ShardSystem's eat pass. */
+/** Attract-strength steps for the PEat DBG cycle.  Index 1 (180) is
+ *  the startup default; the rest crank it up (nebula self-gravity is
+ *  380 for reference).  Read live by ShardSystem's eat pass. */
 export const PLASTIC_EAT_ATTRACT_CYCLE: ReadonlyArray<number> = [
   90, 180, 360, 720, 1440,
 ] as const;
 
-let activePlasticEatAttractIndex = 0;
+let activePlasticEatAttractIndex = 1;
 
 export function getActivePlasticEatAttract(): number {
   return PLASTIC_EAT_ATTRACT_CYCLE[activePlasticEatAttractIndex];
