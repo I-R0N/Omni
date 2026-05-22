@@ -273,10 +273,16 @@ export const PLASTIC_SELF_BREAK = {
 // inside it.  CONTACT_RADIUS_FACTOR multiplies the eater's collision
 // radius to approximate its rendered orb extent (matches the default
 // PBLND blend radius), so debris is eaten once it's visually inside.
-// See ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
+// A gentle inverse-distance attraction (ATTRACT_*) draws glass/rock
+// toward the nearest plastic within ATTRACT_RANGE so debris settles
+// into contact instead of just bouncing off.  See
+// ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
 export const PLASTIC_EAT = {
   SECONDS: 1.5,
   CONTACT_RADIUS_FACTOR: 2.0,
+  ATTRACT_RANGE: 220,
+  ATTRACT_STRENGTH: 90,   // gentle — well below nebula self-gravity (380)
+  ATTRACT_MIN_DIST: 8,
 } as const;
 
 

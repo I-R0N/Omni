@@ -1055,15 +1055,18 @@ export class ShardSystem {
 
     // ── Plastic eat pass ───────────────────────────────────────────
     // Plastic-shards consume glass-/rock-shards on prolonged contact.
-    // While a glass/rock shard's centre sits within a plastic-shard's
-    // visual orb (plasticR × CONTACT_RADIUS_FACTOR + own radius) it
-    // accumulates an eat timer (decaying when it drifts off); once the
-    // timer matures the nearest such plastic eats it.  Reuses the grid
-    // above; eats are collected then applied so growth doesn't perturb
-    // the in-progress scan.  Skipped entirely when no plastic-shards
-    // are present.
+    // A gentle inverse-distance attraction draws each glass/rock shard
+    // toward the nearest plastic-shard within ATTRACT_RANGE so debris
+    // settles into the plastic instead of bouncing away.  While the
+    // shard's centre is within that plastic's visual orb (plasticR ×
+    // CONTACT_RADIUS_FACTOR + own radius) it accumulates an eat timer
+    // (decaying when it drifts off); once the timer matures the plastic
+    // eats it.  Reuses the grid above; eats are collected then applied
+    // so growth doesn't perturb the in-progress scan.  Skipped entirely
+    // when no plastic-shards are present.
     if (hasPlastic) {
       const factor = PLASTIC_EAT.CONTACT_RADIUS_FACTOR;
+      const attractRangeSq = PLASTIC_EAT.ATTRACT_RANGE * PLASTIC_EAT.ATTRACT_RANGE;
       let eats: Array<{ eater: GameEntity; consumed: GameEntity }> | null = null;
       for (let i = 0; i < candidates.length; i++) {
         const g = candidates[i];
@@ -1072,8 +1075,10 @@ export class ShardSystem {
         const gcx = Math.floor(g.position.x / CELL);
         const gcy = Math.floor(g.position.y / CELL);
         const gR = Math.max(g.size.x, g.size.y) / 2;
-        let eater: GameEntity | null = null;
-        let bestDistSq = Infinity;
+        // Nearest plastic-shard within the attraction range.
+        let nearP: GameEntity | null = null;
+        let nearDistSq = Infinity;
+        let nearDx = 0, nearDy = 0;
         for (let ncx = gcx - 1; ncx <= gcx + 1; ncx++) {
           for (let ncy = gcy - 1; ncy <= gcy + 1; ncy++) {
             const cell = grid.get(keyFor(ncx, ncy));
@@ -1084,18 +1089,35 @@ export class ShardSystem {
               const dx = wrapDeltaX(g.position.x, p.position.x);
               const dy = wrapDeltaY(g.position.y, p.position.y);
               const distSq = dx * dx + dy * dy;
-              const reach = (p.size.x / 2) * factor + gR;
-              if (distSq <= reach * reach && distSq < bestDistSq) {
-                bestDistSq = distSq;
-                eater = p;
+              if (distSq <= attractRangeSq && distSq < nearDistSq) {
+                nearDistSq = distSq;
+                nearP = p;
+                nearDx = dx;
+                nearDy = dy;
               }
             }
           }
         }
-        if (eater) {
+        if (!nearP) {
+          if (g.plasticEatTimer) g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
+          continue;
+        }
+        // Gentle attraction toward the nearest plastic (dx/dy already
+        // point g → p since wrapDelta is to − from).
+        const dist = Math.sqrt(nearDistSq);
+        if (dist > 0.0001) {
+          const effDist = Math.max(dist, PLASTIC_EAT.ATTRACT_MIN_DIST);
+          const accel = (PLASTIC_EAT.ATTRACT_STRENGTH * dt) / effDist;
+          const inv = 1 / dist;
+          g.velocity.x += nearDx * inv * accel;
+          g.velocity.y += nearDy * inv * accel;
+        }
+        // Eat timer — only while inside the plastic's orb.
+        const reach = (nearP.size.x / 2) * factor + gR;
+        if (nearDistSq <= reach * reach) {
           const t = (g.plasticEatTimer ?? 0) + dt;
           g.plasticEatTimer = t;
-          if (t >= PLASTIC_EAT.SECONDS) (eats ??= []).push({ eater, consumed: g });
+          if (t >= PLASTIC_EAT.SECONDS) (eats ??= []).push({ eater: nearP, consumed: g });
         } else if (g.plasticEatTimer) {
           g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
         }
