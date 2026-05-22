@@ -485,6 +485,15 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the plastic "reach" pseudopod behaviour (PRch) — reach toward
+   * loose plastic / glass / rock, grab, retract.  Off leaves plastic as
+   * a passive cohesive cluster.  Live.
+   */
+  public togglePlasticReach() {
+    this.shards.plasticReachEnabled = !this.shards.plasticReachEnabled;
+  }
+
+  /**
    * Cycle the active plastic palette (amber → black → green →
    * purple → gray → amber …) and immediately re-roll the colour
    * of every active plastic-tile and plastic-shard so the swap
@@ -826,6 +835,7 @@ export class GameEngine {
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticEatAttractName: getActivePlasticEatAttractName(),
+      plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
@@ -955,6 +965,7 @@ export class GameEngine {
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticEatAttractName: getActivePlasticEatAttractName(),
+      plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,

@@ -173,6 +173,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticEatAttract();
   };
 
+  const handleTogglePlasticReach = () => {
+      if (engineRef.current) engineRef.current.togglePlasticReach();
+  };
+
   const handleCyclePlasticPalette = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
@@ -263,6 +267,7 @@ const App: React.FC = () => {
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
         onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
+        onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}

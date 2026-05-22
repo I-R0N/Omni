@@ -29,11 +29,13 @@ import {
   PLASTIC_SHARD_AUTOMATA,
   PLASTIC_EAT,
   getActivePlasticEatAttract,
+  PLASTIC_REACH,
+  getActivePlasticYield,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
 import {
-  wrapDeltaX, wrapDeltaY, wrapPosition,
+  wrapDeltaX, wrapDeltaY, wrapPosition, wrapX, wrapY,
   MAP_WIDTH, MAP_HEIGHT,
 } from '../toroidal';
 import {
@@ -147,6 +149,12 @@ export class ShardSystem {
    * shades), saving the extra plastic-only neighbour scan.
    */
   public plasticAutomataEnabled: boolean = true;
+  /**
+   * DBG toggle (PRch) — gates the plastic "reach" pseudopod behaviour
+   * (reach toward loose plastic / glass / rock, grab, retract).  Off
+   * leaves plastic shards as a passive cohesive cluster.
+   */
+  public plasticReachEnabled: boolean = true;
   /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
@@ -1131,6 +1139,114 @@ export class ShardSystem {
       }
     }
 
+    // ── Plastic reach pass (living-blob pseudopod) ─────────────────
+    // Emergent reach → grab → retract via the existing anchor spring:
+    //  1. Each loose target (glass/rock shard, or an unbonded plastic
+    //     shard) is assigned its single nearest plastic reacher.
+    //  2. A reacher leads its anchor toward the target (a yield-length
+    //     "leash" ahead) so the spring stretches it out as a pseudopod;
+    //     it saves its current anchor as "home" first.
+    //  3. On contact (GRAB_DIST) it flips to retract: it leads its
+    //     anchor back to home so the spring reels it (and whatever the
+    //     bond / eat systems grabbed) back into the cluster.
+    // One reacher per target keeps it a protrusion, not a whole-cluster
+    // lurch.  Reuses the grid + `bonded` set above.
+    if (hasPlastic && this.plasticReachEnabled) {
+      const RANGE_SQ = PLASTIC_REACH.RANGE * PLASTIC_REACH.RANGE;
+      const grabF = PLASTIC_REACH.GRAB_DIST_FACTOR;
+      const leash = getActivePlasticYield();
+      // 1. Assign each target its nearest eligible plastic reacher.
+      const assign = new Map<GameEntity, GameEntity>();      // reacher → target
+      const assignDistSq = new Map<GameEntity, number>();
+      for (let i = 0; i < candidates.length; i++) {
+        const t = candidates[i];
+        if (!t.active) continue;
+        const tv = t.shardVariant;
+        const isDebris = tv === 'glass-shard' || tv === 'rock-shard';
+        const isLoosePlastic = tv === 'plastic-shard' && !bonded.has(t);
+        if (!isDebris && !isLoosePlastic) continue;
+        const tcx = Math.floor(t.position.x / CELL);
+        const tcy = Math.floor(t.position.y / CELL);
+        const tR = Math.max(t.size.x, t.size.y) / 2;
+        let bestP: GameEntity | null = null;
+        let bestSq = Infinity;
+        for (let ncx = tcx - 1; ncx <= tcx + 1; ncx++) {
+          for (let ncy = tcy - 1; ncy <= tcy + 1; ncy++) {
+            const cell = grid.get(keyFor(ncx, ncy));
+            if (!cell) continue;
+            for (let k = 0; k < cell.length; k++) {
+              const p = candidates[cell[k]];
+              if (p === t || p.shardVariant !== 'plastic-shard' || !p.active) continue;
+              if (p.reachBack) continue; // busy retracting
+              const dx = wrapDeltaX(p.position.x, t.position.x);
+              const dy = wrapDeltaY(p.position.y, t.position.y);
+              const dSq = dx * dx + dy * dy;
+              const grab = (Math.max(p.size.x, p.size.y) / 2 + tR) * grabF;
+              if (dSq > grab * grab && dSq <= RANGE_SQ && dSq < bestSq) {
+                bestSq = dSq;
+                bestP = p;
+              }
+            }
+          }
+        }
+        if (bestP) {
+          const cur = assignDistSq.get(bestP);
+          if (cur === undefined || bestSq < cur) {
+            assign.set(bestP, t);
+            assignDistSq.set(bestP, bestSq);
+          }
+        }
+      }
+      // 2. Drive each plastic shard's anchor per its reach phase.
+      for (let i = 0; i < candidates.length; i++) {
+        const p = candidates[i];
+        if (p.shardVariant !== 'plastic-shard' || !p.active) continue;
+        if (p.reachBack) {
+          // Retract: lead the anchor back toward home.
+          const hx = p.reachHomeX ?? p.position.x;
+          const hy = p.reachHomeY ?? p.position.y;
+          const dx = wrapDeltaX(p.position.x, hx);
+          const dy = wrapDeltaY(p.position.y, hy);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= PLASTIC_REACH.HOME_EPS) {
+            p.anchorX = hx; p.anchorY = hy;
+            p.reachBack = undefined;
+            p.reachTargetId = undefined;
+            p.reachHomeX = undefined;
+            p.reachHomeY = undefined;
+          } else {
+            const lead = Math.min(dist, leash);
+            p.anchorX = wrapX(p.position.x + (dx / dist) * lead);
+            p.anchorY = wrapY(p.position.y + (dy / dist) * lead);
+          }
+          continue;
+        }
+        const t = assign.get(p);
+        if (t) {
+          // Reach out toward the assigned target.
+          if (p.reachHomeX === undefined) {
+            p.reachHomeX = p.anchorX ?? p.position.x;
+            p.reachHomeY = p.anchorY ?? p.position.y;
+          }
+          p.reachTargetId = t.id;
+          const dx = wrapDeltaX(p.position.x, t.position.x);
+          const dy = wrapDeltaY(p.position.y, t.position.y);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const grab = (Math.max(p.size.x, p.size.y) / 2 + Math.max(t.size.x, t.size.y) / 2) * grabF;
+          if (dist <= grab) {
+            p.reachBack = true; // grabbed → retract (bond/eat systems take it from here)
+          } else if (dist > 0.001) {
+            const lead = Math.min(dist, leash);
+            p.anchorX = wrapX(p.position.x + (dx / dist) * lead);
+            p.anchorY = wrapY(p.position.y + (dy / dist) * lead);
+          }
+        } else if (p.reachTargetId !== undefined) {
+          // Lost the target before contact — retract home.
+          p.reachBack = true;
+        }
+      }
+    }
+
     const CONTACT_BUFFER = 4;
 
     // Per-frame set: at most one merge per target this frame keeps
@@ -1174,7 +1290,11 @@ export class ShardSystem {
       // gravity at all, so this matches their behaviour.
       const wantsPull = this.shardGravityEnabled
                      && aVariant && aVariant.merge.attractedTo !== 'none'
-                     && !aBondedAlready;
+                     && !aBondedAlready
+                     // A reaching / retracting plastic shard is driven by
+                     // its reach anchor — don't let the cohesion pull drag
+                     // it back toward the cluster and cancel the reach.
+                     && a.reachTargetId === undefined && !a.reachBack;
 
       for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
         for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {

@@ -307,6 +307,22 @@ export function cyclePlasticEatAttract(): number {
   return activePlasticEatAttractIndex;
 }
 
+// ── Plastic "reach" (living-blob pseudopod) ────────────────────────
+// Emergent reach-grab-retract (option B): the plastic shard nearest a
+// loose target (glass/rock shard, or an unbonded "loose" plastic shard)
+// leads its anchor toward that target so the spring stretches it out as
+// a pseudopod; on contact the existing bond / eat systems "grab" it,
+// then the reacher leads its anchor back to its saved home so the
+// spring reels itself (and the grabbed thing) back into the cluster.
+// One reacher per target keeps it a protrusion rather than the whole
+// cluster lurching.  Lead distance reuses the plastic yield (PYLD) so
+// it tracks the spring feel.  See ShardSystem.runMergeBroadphase.
+export const PLASTIC_REACH = {
+  RANGE: 160,            // how far a plastic shard looks for a reach target
+  GRAB_DIST_FACTOR: 1.3, // contact = (reacherR + targetR) × this → "grab"
+  HOME_EPS: 5,           // within this of home anchor ⇒ reach complete
+} as const;
+
 
 // ── Plastic blend-mode cycle ───────────────────────────────────────
 // globalCompositeOperation applied to the plastic-shard draw call so

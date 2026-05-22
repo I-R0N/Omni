@@ -24,6 +24,7 @@ interface UIOverlayProps {
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onCyclePlasticEatAttract?: () => void;
+  onTogglePlasticReach?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -69,6 +70,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onCyclePlasticEatAttract,
+  onTogglePlasticReach,
   onCyclePlasticPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
@@ -252,7 +254,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
                     title="Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed.  90 (gentle default) → 1440.  Nebula self-gravity is 380 for reference."
                   >
-                    {stats.plasticEatAttractName ?? '90'}
+                    {stats.plasticEatAttractName ?? '180'}
+                  </button>
+                </div>
+                {/* Plastic "reach" pseudopod — plastic stretches toward
+                    loose plastic/glass/rock, grabs, and reels it in. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRch</span>
+                  <button
+                    onClick={onTogglePlasticReach}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Plastic 'reach' pseudopod: the nearest plastic shard leads its anchor toward a loose plastic/glass/rock target so the spring stretches it out, grabs on contact, then retracts to reel it in.  Off = passive cohesive cluster."
+                  >
+                    {stats.plasticReachEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
                 {/* Plastic palette cycle — amber → black → green →

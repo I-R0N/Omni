@@ -579,6 +579,15 @@ export interface GameEntity {
   // the plastic eats it (grows by its area; this shard fades out).
   // Decays toward 0 while not in contact.  Glass-/rock-shards only.
   plasticEatTimer?: number;
+  // Plastic "reach" pseudopod state (ShardSystem).  reachTargetId is the
+  // entity this plastic shard is currently reaching toward; reachHomeX/Y
+  // is the anchor it retracts back to once it grabs (or loses) the
+  // target; reachBack flips it from extend → retract.  Plastic-shards
+  // only; all undefined when idle.
+  reachTargetId?: string;
+  reachHomeX?: number;
+  reachHomeY?: number;
+  reachBack?: boolean;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
@@ -759,6 +768,8 @@ export interface EngineStats {
   // Active plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_CYCLE),
   // formatted for the PEat DBG button.
   plasticEatAttractName?: string;
+  // Whether the plastic "reach" pseudopod behaviour is on (PRch button).
+  plasticReachEnabled?: boolean;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Plastic button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic
