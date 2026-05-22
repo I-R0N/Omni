@@ -266,6 +266,19 @@ export const PLASTIC_SELF_BREAK = {
   MAX_SECONDS: 30.0,
 } as const;
 
+// ── Plastic eats glass / rock ──────────────────────────────────────
+// A plastic-shard "eats" glass-/rock-shards whose centre lingers
+// inside its visual orb: after SECONDS of (net) contact the plastic
+// grows by the consumed shard's area and the consumed shard fades out
+// inside it.  CONTACT_RADIUS_FACTOR multiplies the eater's collision
+// radius to approximate its rendered orb extent (matches the default
+// PBLND blend radius), so debris is eaten once it's visually inside.
+// See ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
+export const PLASTIC_EAT = {
+  SECONDS: 1.5,
+  CONTACT_RADIUS_FACTOR: 2.0,
+} as const;
+
 
 // ── Plastic blend-mode cycle ───────────────────────────────────────
 // globalCompositeOperation applied to the plastic-shard draw call so

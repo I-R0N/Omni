@@ -27,6 +27,7 @@ import {
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
   PLASTIC_SHARD_AUTOMATA,
+  PLASTIC_EAT,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
@@ -967,6 +968,7 @@ export class ShardSystem {
     // site that hasn't migrated yet.  Fading nebula-shards are
     // skipped (they're in their death animation).
     const candidates: GameEntity[] = [];
+    let hasPlastic = false;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
@@ -976,11 +978,12 @@ export class ShardSystem {
       // velocity blends with surviving partners and the dissolve
       // looks chaotic.
       if (e.mergeFadeTimer !== undefined) continue;
-      // Reset the plastic neighbour-contact count up front so the
-      // count pass below only ever increments, and lone shards (or
-      // the candidates.length < 2 early-return path) read 0.
-      if (this.plasticAutomataEnabled && e.shardVariant === 'plastic-shard') {
-        e.plasticNeighborCount = 0;
+      if (e.shardVariant === 'plastic-shard') {
+        hasPlastic = true;
+        // Reset the plastic neighbour-contact count up front so the
+        // count pass below only ever increments, and lone shards (or
+        // the candidates.length < 2 early-return path) read 0.
+        if (this.plasticAutomataEnabled) e.plasticNeighborCount = 0;
       }
       candidates.push(e);
     }
@@ -1047,6 +1050,60 @@ export class ShardSystem {
           }
         }
         a.plasticNeighborCount = count;
+      }
+    }
+
+    // ── Plastic eat pass ───────────────────────────────────────────
+    // Plastic-shards consume glass-/rock-shards on prolonged contact.
+    // While a glass/rock shard's centre sits within a plastic-shard's
+    // visual orb (plasticR × CONTACT_RADIUS_FACTOR + own radius) it
+    // accumulates an eat timer (decaying when it drifts off); once the
+    // timer matures the nearest such plastic eats it.  Reuses the grid
+    // above; eats are collected then applied so growth doesn't perturb
+    // the in-progress scan.  Skipped entirely when no plastic-shards
+    // are present.
+    if (hasPlastic) {
+      const factor = PLASTIC_EAT.CONTACT_RADIUS_FACTOR;
+      let eats: Array<{ eater: GameEntity; consumed: GameEntity }> | null = null;
+      for (let i = 0; i < candidates.length; i++) {
+        const g = candidates[i];
+        if (!g.active) continue;
+        if (g.shardVariant !== 'glass-shard' && g.shardVariant !== 'rock-shard') continue;
+        const gcx = Math.floor(g.position.x / CELL);
+        const gcy = Math.floor(g.position.y / CELL);
+        const gR = Math.max(g.size.x, g.size.y) / 2;
+        let eater: GameEntity | null = null;
+        let bestDistSq = Infinity;
+        for (let ncx = gcx - 1; ncx <= gcx + 1; ncx++) {
+          for (let ncy = gcy - 1; ncy <= gcy + 1; ncy++) {
+            const cell = grid.get(keyFor(ncx, ncy));
+            if (!cell) continue;
+            for (let k = 0; k < cell.length; k++) {
+              const p = candidates[cell[k]];
+              if (p.shardVariant !== 'plastic-shard' || !p.active) continue;
+              const dx = wrapDeltaX(g.position.x, p.position.x);
+              const dy = wrapDeltaY(g.position.y, p.position.y);
+              const distSq = dx * dx + dy * dy;
+              const reach = (p.size.x / 2) * factor + gR;
+              if (distSq <= reach * reach && distSq < bestDistSq) {
+                bestDistSq = distSq;
+                eater = p;
+              }
+            }
+          }
+        }
+        if (eater) {
+          const t = (g.plasticEatTimer ?? 0) + dt;
+          g.plasticEatTimer = t;
+          if (t >= PLASTIC_EAT.SECONDS) (eats ??= []).push({ eater, consumed: g });
+        } else if (g.plasticEatTimer) {
+          g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
+        }
+      }
+      if (eats) {
+        for (let i = 0; i < eats.length; i++) {
+          this.applyPlasticEat(eats[i].eater, eats[i].consumed);
+        }
       }
     }
 
@@ -1895,6 +1952,34 @@ export class ShardSystem {
    * (the only absorb rule).  Future variants opt in by adding an
    * absorb rule to their merge.rules.
    */
+  /**
+   * Plastic eats a glass-/rock-shard: the plastic-shard `eater` grows
+   * by the `consumed` shard's area (newDiameter = √(d_e² + d_c²) so
+   * the rendered circle's area gains exactly the consumed area) and
+   * the consumed shard fades out inside it.  The eater stays put — it
+   * engulfs the debris rather than drifting toward it.
+   */
+  private applyPlasticEat(eater: GameEntity, consumed: GameEntity): void {
+    if (!eater.active || !consumed.active) return;
+    if (consumed.mergeFadeTimer !== undefined) return; // already being eaten
+    const de = eater.size.x;
+    const dc = consumed.size.x;
+    const newDiam = Math.sqrt(de * de + dc * dc);
+    // Regenerate the near-circular 16-gon collision polygon at the new
+    // size (same params the asteroid-accretion path uses for plastic).
+    eater.polygonPoints = this.generateShardPolygon((newDiam / 2) * 0.82, 16, 16, 0, 0.98, 0.04);
+    eater.size.x = newDiam;
+    eater.size.y = newDiam;
+    eater.mass = SHARD_VARIANTS['plastic-shard'].spawn.sizeToMass(newDiam);
+    // Re-pin the soft-body anchor to the eater's (unchanged) centre.
+    if (eater.anchorX !== undefined) {
+      eater.anchorX = eater.position.x;
+      eater.anchorY = eater.position.y;
+    }
+    // The consumed shard dissolves inside the eater rather than popping.
+    this.startMergeFadeOut(consumed);
+  }
+
   private applyAbsorb(a: GameEntity, b: GameEntity, entities: GameEntity[]): void {
     // Larger entity is the host; smaller is consumed.
     const aR = Math.max(a.size.x, a.size.y);

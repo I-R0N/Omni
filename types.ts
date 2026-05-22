@@ -574,6 +574,11 @@ export interface GameEntity {
   // the shard is routed through the death/shatter path with drops
   // suppressed.  Plastic-shards only.
   plasticBreakTimer?: number;
+  // Accumulated contact time (seconds) a glass-/rock-shard has spent
+  // inside a plastic-shard's orb.  When it matures (PLASTIC_EAT.SECONDS)
+  // the plastic eats it (grows by its area; this shard fades out).
+  // Decays toward 0 while not in contact.  Glass-/rock-shards only.
+  plasticEatTimer?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
