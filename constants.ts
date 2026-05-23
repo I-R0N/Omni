@@ -1097,8 +1097,11 @@ export const PERF_CONTROLLER_CONSTANTS = {
   NUM_TIERS: 5,
   // Upward thresholds (length NUM_TIERS-1): smoothed load must exceed
   // TIER_THRESH_UP[t] to climb to tier t+1.  Dropping back requires load
-  // to fall below TIER_THRESH_UP[t] - TIER_HYSTERESIS.
-  TIER_THRESH_UP: [0.18, 0.38, 0.6, 0.82] as const,
+  // to fall below TIER_THRESH_UP[t] - TIER_HYSTERESIS.  Nudged down from
+  // [0.18, 0.38, 0.6, 0.82] so the higher frame-skip intervals engage at
+  // a slightly lower load (≈ lower dynamic-entity count) — trading a
+  // little settling fidelity for smoother frames under pressure.
+  TIER_THRESH_UP: [0.16, 0.34, 0.55, 0.76] as const,
   TIER_HYSTERESIS: 0.06,
   // Human-readable tier names for the DBG load readout.
   TIER_NAMES: ['idle', 'light', 'med', 'heavy', 'max'] as const,
@@ -1118,16 +1121,25 @@ export const PERF_CONTROLLER_CONSTANTS = {
 //                                purely cosmetic and held stale safely.
 //   ai / flowField / nebulaNeighbors / dropScan / plasticSelfBreak —
 //                                new skippable passes (see PerfController).
+//
+// `autoCurve` (optional, default 1 = linear) is a convexity exponent on
+// the load fraction.  >1 keeps low/mid load responsive then ramps hard
+// toward maxInterval near peak.  The shard collision passes use a wide
+// 1→128 span with autoCurve 2 so they only reach the very high
+// intervals under genuine pressure — letting the field back off harder
+// (smoother) at heavy/peak load without over-throttling light fields.
+// Resulting shardPair ladder across the 5 tiers (idle…max):
+// [1, 9, 33, 72, 128] — vs the old linear-to-32 [1, 9, 17, 24, 32].
 export const PERF_TASKS = {
-  shardPair:        { minInterval: 1, maxInterval: 32, costWeight: 1.0 },
-  shardTilePair:    { minInterval: 1, maxInterval: 32, costWeight: 1.0 },
-  colorBlend:       { minInterval: 1, maxInterval: 16, costWeight: 0.8 },
-  plasticCosmetic:  { minInterval: 1, maxInterval: 32, costWeight: 1.2 },
-  ai:               { minInterval: 1, maxInterval: 3,  costWeight: 0.7 },
-  flowField:        { minInterval: 1, maxInterval: 2,  costWeight: 1.0 },
-  nebulaNeighbors:  { minInterval: 1, maxInterval: 4,  costWeight: 0.9 },
-  dropScan:         { minInterval: 1, maxInterval: 2,  costWeight: 0.6 },
-  plasticSelfBreak: { minInterval: 1, maxInterval: 4,  costWeight: 0.8 },
+  shardPair:        { minInterval: 1, maxInterval: 128, costWeight: 1.0, autoCurve: 2.0 },
+  shardTilePair:    { minInterval: 1, maxInterval: 128, costWeight: 1.0, autoCurve: 2.0 },
+  colorBlend:       { minInterval: 1, maxInterval: 16,  costWeight: 0.8, autoCurve: 1.0 },
+  plasticCosmetic:  { minInterval: 1, maxInterval: 32,  costWeight: 1.2, autoCurve: 1.0 },
+  ai:               { minInterval: 1, maxInterval: 3,   costWeight: 0.7, autoCurve: 1.0 },
+  flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
+  nebulaNeighbors:  { minInterval: 1, maxInterval: 4,   costWeight: 0.9, autoCurve: 1.0 },
+  dropScan:         { minInterval: 1, maxInterval: 2,   costWeight: 0.6, autoCurve: 1.0 },
+  plasticSelfBreak: { minInterval: 1, maxInterval: 4,   costWeight: 0.8, autoCurve: 1.0 },
 } as const;
 
 export type PerfTaskId = keyof typeof PERF_TASKS;

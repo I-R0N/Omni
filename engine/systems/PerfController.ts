@@ -38,6 +38,11 @@ interface PerfTask {
   minInterval: number;
   maxInterval: number;
   costWeight: number;
+  /** Convexity exponent applied to the (cost-weighted) load fraction
+   *  before interpolating min→max.  1 = linear; >1 keeps low/mid load
+   *  responsive then ramps hard toward maxInterval near peak (so a wide
+   *  min→max span doesn't pull big intervals down to light load). */
+  autoCurve: number;
   /** Deterministic phase offset = registration index. */
   offset: number;
   /** 0 = AUTO (controller-driven); >= 1 = manual pin (DBG override). */
@@ -102,6 +107,7 @@ export class PerfController {
         minInterval: cfg.minInterval,
         maxInterval: cfg.maxInterval,
         costWeight: cfg.costWeight,
+        autoCurve: (cfg as { autoCurve?: number }).autoCurve ?? 1,
         offset: i,
         manualInterval: 0,
         effectiveInterval: cfg.minInterval,
@@ -217,6 +223,11 @@ export class PerfController {
     let shaped = frac * t.costWeight;
     if (shaped > 1) shaped = 1;
     else if (shaped < 0) shaped = 0;
+    // Convexity: >1 holds low/mid load near minInterval, then ramps
+    // hard toward maxInterval near peak — lets a wide min→max span
+    // (e.g. shardPair 1→128) reach the top only under real pressure
+    // instead of dragging big intervals down to light load.
+    if (t.autoCurve !== 1) shaped = Math.pow(shaped, t.autoCurve);
     return Math.round(t.minInterval + (t.maxInterval - t.minInterval) * shaped);
   }
 
