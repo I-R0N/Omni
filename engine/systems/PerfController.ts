@@ -93,6 +93,10 @@ export class PerfController {
   /** Live multiplier applied to merge/eat time-accumulators.  Ramps from
    *  the slowest level (sparse fields) up through the crowded tiers. */
   public mergeRateMultiplier: number = MR.LEVELS[0].mult;
+  /** DBG toggle — when false, the count-driven multiplier is held at a
+   *  neutral 1.0× (merges/eats run at their base rate, no acceleration).
+   *  Default ON. */
+  public mergeRateEnabled: boolean = true;
 
   constructor() {
     this.registerDefaults();
@@ -253,7 +257,12 @@ export class PerfController {
     while (tier > 0 && count < levels[tier].count - MR.HYSTERESIS) tier--;
     this.mergeRateTier = tier;
 
-    const target = levels[tier].mult;
+    // DBG toggle: when disabled, target a neutral 1.0× (no count-driven
+    // scaling) so merges/eats run at their un-multiplied base rate — lets
+    // the merge-rate feature be A/B'd against its perf cost.  The tier is
+    // still tracked above so re-enabling resumes smoothly.  EWMA toward
+    // the target either way so the multiplier eases rather than snaps.
+    const target = this.mergeRateEnabled ? levels[tier].mult : 1.0;
     this.mergeRateMultiplier += (target - this.mergeRateMultiplier) * MR.EWMA_ALPHA;
   }
 

@@ -169,6 +169,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleShardLod();
   };
 
+  const handleToggleMergeRate = () => {
+      if (engineRef.current) engineRef.current.toggleMergeRate();
+  };
+
   const handleToggleScreenShake = () => {
       if (engineRef.current) engineRef.current.toggleScreenShake();
   };
@@ -282,6 +286,7 @@ const App: React.FC = () => {
         onToggleShardSleep={handleToggleShardSleep}
         onToggleShardViewportCull={handleToggleShardViewportCull}
         onToggleShardLod={handleToggleShardLod}
+        onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}

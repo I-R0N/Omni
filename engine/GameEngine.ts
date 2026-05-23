@@ -471,6 +471,16 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the entity-count-driven merge/eat rate multiplier.  When off,
+   * the multiplier eases to a neutral 1.0× (merges run at their base rate
+   * with no count-driven acceleration) — used to A/B whether the higher
+   * merge throughput at high entity counts is itself a perf cost.
+   */
+  public toggleMergeRate() {
+    this.perfController.mergeRateEnabled = !this.perfController.mergeRateEnabled;
+  }
+
+  /**
    * Toggle the camera screen-shake effect on/off.  When off,
    * handleScreenShake early-returns and any in-flight shake decays
    * to zero on the next sim step (the existing decay logic clears
@@ -890,6 +900,7 @@ export class GameEngine {
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
+      mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -1025,6 +1036,7 @@ export class GameEngine {
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
+      mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,

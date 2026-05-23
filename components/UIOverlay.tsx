@@ -22,6 +22,7 @@ interface UIOverlayProps {
   onToggleShardSleep?: () => void;
   onToggleShardViewportCull?: () => void;
   onToggleShardLod?: () => void;
+  onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -72,6 +73,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardSleep,
   onToggleShardViewportCull,
   onToggleShardLod,
+  onToggleMergeRate,
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticAutomata,
@@ -452,6 +454,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.shardLodEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">MrgRt</span>
+                  <button
+                    onClick={onToggleMergeRate}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle the entity-count-driven merge/eat rate multiplier.  When ON, dense fields merge/eat up to ~3.5x faster to cull entities.  OFF holds the multiplier at a neutral 1.0x (base merge rate, no count-driven acceleration) — use to A/B whether the higher merge throughput is itself a perf cost.  See the 'merge rate' readout below for the live multiplier."
+                  >
+                    {stats.mergeRateEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —
                     off / soft / med / firm / stiff.  Rotation mode
                     is fixed to "free" (only squash axis aligns to
@@ -659,8 +671,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     </div>
                     {/* Entity-count merge/eat rate multiplier (Goal 4). */}
                     <div className="flex justify-between">
-                      <span>merge rate</span>
-                      <span className={perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
+                      <span>merge rate{stats.mergeRateEnabled === false ? ' (off)' : ''}</span>
+                      <span className={stats.mergeRateEnabled === false ? 'text-slate-500' : perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
                         {perf.perfMergeRateMult.toFixed(2)}×
                       </span>
                     </div>
