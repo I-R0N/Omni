@@ -1133,7 +1133,16 @@ export const PERF_CONTROLLER_CONSTANTS = {
 export const PERF_TASKS = {
   shardPair:        { minInterval: 1, maxInterval: 128, costWeight: 1.0, autoCurve: 2.0 },
   shardTilePair:    { minInterval: 1, maxInterval: 128, costWeight: 1.0, autoCurve: 2.0 },
-  colorBlend:       { minInterval: 1, maxInterval: 16,  costWeight: 0.8, autoCurve: 1.0 },
+  // colorBlend drives the ambient nebula/plastic hue equilibration.  Its
+  // visual rate is alpha × (1/interval) — the pass is intentionally NOT
+  // skip-compensated, so a lower interval blends FASTER.  minInterval is
+  // a deliberate floor (not 1): at low/idle load (which nebula maps now
+  // correctly report, since the load signal counts dynamic entities, not
+  // the ~1500 static nebula tiles) running it every frame blends ~6× too
+  // fast and the per-step palette re-snap reads as the tiles flashing.
+  // Flooring at 6 keeps the idle blend calm — matching the cadence these
+  // maps saw before the load-signal fix un-throttled it.
+  colorBlend:       { minInterval: 6, maxInterval: 16,  costWeight: 0.8, autoCurve: 1.0 },
   plasticCosmetic:  { minInterval: 1, maxInterval: 32,  costWeight: 1.2, autoCurve: 1.0 },
   ai:               { minInterval: 1, maxInterval: 3,   costWeight: 0.7, autoCurve: 1.0 },
   flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
