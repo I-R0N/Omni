@@ -238,7 +238,12 @@ export interface GameEntity {
   visionRange?: number;
   maxSpeed?: number;    // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
   aggroTimer?: number;  // Remaining seconds of post-kill aggro boost (speed + shorter idle)
-  
+  // Stable per-shard lane bias in [-1, 1] for the asteroid-flow lane
+  // jitter (DBG "FF Lane").  Lazily seeded the first time the flow
+  // nudge processes the entity; constant thereafter so the shard
+  // keeps the same offset lane instead of jittering frame-to-frame.
+  flowLane?: number;
+
   // AI Specific Params (Orbiter/Skirmisher)
   orbitRadius?: number;
   orbitSpin?: number; // 1 or -1
@@ -846,6 +851,14 @@ export interface EngineStats {
   // walls); 1 = pure tangent (slide along walls — eliminates the
   // saddle dead-zone failure mode).  Default 0.5.  DBG-cycle.
   ffTangentMix?: number;
+  // Breathing-field scroll rate (rad/s).  0 = off (static field);
+  // > 0 = the asteroid field undulates over time so convergence zones
+  // drift and shard piles dissolve.  DBG-cycle "FF Breathe".
+  ffBreatheRate?: number;
+  // Per-shard flow lane-jitter strength.  0 = off; > 0 = shards ride
+  // parallel offset lanes instead of one streamline.  DBG-cycle
+  // "FF Lane".
+  ffLaneJitter?: number;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

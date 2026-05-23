@@ -50,6 +50,8 @@ interface UIOverlayProps {
   onCycleFFDensity?: () => void;
   onCycleFFKernelR?: () => void;
   onCycleFFTangentMix?: () => void;
+  onCycleFFBreathe?: () => void;
+  onCycleFFLaneJitter?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -105,6 +107,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFFDensity,
   onCycleFFKernelR,
   onCycleFFTangentMix,
+  onCycleFFBreathe,
+  onCycleFFLaneJitter,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -650,6 +654,37 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle the tangent-mix factor: 0.00 → 0.25 → 0.50 → 0.75 → 1.00.  0 = pure radial repulsion (opposing vectors at long walls, saddle dead-zones).  1 = pure tangent (slide along walls, both sides flow the same way — no saddle)."
                   >
                     {(stats.ffTangentMix ?? 0.5).toFixed(2)}
+                  </button>
+                </div>
+                {/* Breathing field — slow undulation that migrates
+                    convergence zones over time so shard piles
+                    dissolve.  Off = static field. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Breathe</span>
+                  <button
+                    onClick={onCycleFFBreathe}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the breathing scroll rate (off / slow / med / fast).  Slowly undulates the asteroid flow so convergence/saddle zones drift over time and shard piles get walked out from under them.  Re-bakes on a throttled cadence."
+                  >
+                    {!stats.ffBreatheRate ? 'Off'
+                      : stats.ffBreatheRate < 0.2 ? 'Slow'
+                      : stats.ffBreatheRate < 0.6 ? 'Med'
+                      : 'Fast'}
+                  </button>
+                </div>
+                {/* Per-shard lane jitter — stable perpendicular offset
+                    so shards ride parallel lanes instead of one line. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Lane</span>
+                  <button
+                    onClick={onCycleFFLaneJitter}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle per-shard lane jitter (off / low / med / high).  Each shard gets a stable perpendicular offset to its flow target so shards ride parallel lanes instead of collapsing onto the same streamline."
+                  >
+                    {!stats.ffLaneJitter ? 'Off'
+                      : stats.ffLaneJitter < 0.15 ? 'Low'
+                      : stats.ffLaneJitter < 0.3 ? 'Med'
+                      : 'High'}
                   </button>
                 </div>
                 {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}

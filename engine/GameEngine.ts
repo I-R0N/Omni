@@ -206,6 +206,26 @@ export class GameEngine {
   private static readonly FF_TANGENT_MIX_CYCLE: readonly number[] =
     [0.0, 0.25, 0.5, 0.75, 1.0] as const;
   private ffTangentMix: number = 0.5;
+  // Breathing field — scroll rate (rad/s) for the slow undulation
+  // that migrates convergence zones so shard piles dissolve.  0 = off
+  // (static field, no periodic re-bake).  DBG-cycle "FF Breathe":
+  // off / slow / med / fast.
+  private static readonly FF_BREATHE_RATE_CYCLE: readonly number[] =
+    [0, 0.15, 0.4, 0.9] as const;
+  private ffBreatheRate: number = 0;
+  private ffBreathePhase: number = 0;
+  private ffBreatheRebakeTimer: number = 0;
+  // Seconds between breathing re-bakes.  ~3 Hz: smooth enough for a
+  // slow drift, cheap enough that the per-bake cost (sub-ms at default
+  // density) is negligible.
+  private static readonly FF_BREATHE_REBAKE_INTERVAL = 0.33;
+  // Per-shard lane jitter — strength of the persistent perpendicular
+  // offset added to each shard's flow target so shards ride slightly
+  // different parallel lanes instead of collapsing onto one streamline.
+  // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
+  private static readonly FF_LANE_JITTER_CYCLE: readonly number[] =
+    [0, 0.1, 0.2, 0.35] as const;
+  private ffLaneJitter: number = 0;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -783,6 +803,38 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the breathing scroll rate through `FF_BREATHE_RATE_CYCLE`
+   * (off → slow → med → fast).  When non-zero, the asteroid field's
+   * base direction undulates over time (re-baked on a throttled
+   * cadence in updatePhysics) so convergence zones drift and shard
+   * piles dissolve.  Cycling to a non-zero rate immediately re-bakes
+   * at the current phase so the undulation appears; cycling back to
+   * off re-bakes once with amplitude 0 to restore the static field.
+   */
+  public cycleFFBreathe() {
+    const order = GameEngine.FF_BREATHE_RATE_CYCLE;
+    const idx = order.indexOf(this.ffBreatheRate);
+    const next = order[(idx + 1) % order.length];
+    this.ffBreatheRate = next;
+    const amp = next > 0 ? FlowFieldGrid.BREATHE_AMP : 0;
+    this.flowField.setBreathe(amp, this.ffBreathePhase);
+  }
+
+  /**
+   * Cycle the per-shard lane-jitter strength through
+   * `FF_LANE_JITTER_CYCLE` (off → low → med → high).  Adds a stable
+   * per-shard perpendicular offset to the flow target so shards ride
+   * slightly different parallel lanes instead of collapsing onto one
+   * streamline.  Live — no re-bake (applied at sample time in the
+   * per-shard flow nudge).
+   */
+  public cycleFFLaneJitter() {
+    const order = GameEngine.FF_LANE_JITTER_CYCLE;
+    const idx = order.indexOf(this.ffLaneJitter);
+    this.ffLaneJitter = order[(idx + 1) % order.length];
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -1016,6 +1068,8 @@ export class GameEngine {
       ffCellSize:         this.ffCellSize,
       ffKernelR:          this.ffKernelR,
       ffTangentMix:       this.ffTangentMix,
+      ffBreatheRate:      this.ffBreatheRate,
+      ffLaneJitter:       this.ffLaneJitter,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1155,6 +1209,8 @@ export class GameEngine {
       ffCellSize:         this.ffCellSize,
       ffKernelR:          this.ffKernelR,
       ffTangentMix:       this.ffTangentMix,
+      ffBreatheRate:      this.ffBreatheRate,
+      ffLaneJitter:       this.ffLaneJitter,
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1290,6 +1346,19 @@ export class GameEngine {
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
       this.flowField.flushEnemyField();
 
+      // Breathing field: advance the scroll phase and re-bake the
+      // asteroid field on a throttled cadence so convergence zones
+      // migrate over time (shard piles dissolve).  No-op when the
+      // breathing rate is off.
+      if (this.ffBreatheRate > 0) {
+          this.ffBreatheRebakeTimer += dt;
+          if (this.ffBreatheRebakeTimer >= GameEngine.FF_BREATHE_REBAKE_INTERVAL) {
+              this.ffBreathePhase += this.ffBreatheRate * this.ffBreatheRebakeTimer;
+              this.ffBreatheRebakeTimer = 0;
+              this.flowField.setBreathe(FlowFieldGrid.BREATHE_AMP, this.ffBreathePhase);
+          }
+      }
+
       this.ai.update(dt, this.entityIndex.enemies, this.player, this.flowField);
       this.handleEnemyShooting(dt);
 
@@ -1362,6 +1431,7 @@ export class GameEngine {
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
       const flowEnabled = this.asteroidFlowEnabled;
+      const laneJitter = this.ffLaneJitter;
       const applyFlow = (e: GameEntity) => {
           // Nebula shards anchor in place — flow correction is
           // skipped so the field can't drag them around the map.
@@ -1382,9 +1452,25 @@ export class GameEngine {
               return;
           }
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
-          const tx = flow.x * FLOW_TARGET_SPEED;
-          const ty = flow.y * FLOW_TARGET_SPEED;
-          const vAlongFlow = e.velocity.x * flow.x + e.velocity.y * flow.y;
+          // Per-shard lane jitter: nudge the target slightly
+          // perpendicular to the flow by a STABLE per-shard amount so
+          // shards ride parallel lanes instead of collapsing onto one
+          // streamline.  Lazily seeded once per entity (stable
+          // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
+          let fxDir = flow.x, fyDir = flow.y;
+          if (laneJitter > 0) {
+              if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+              const off = e.flowLane * laneJitter;
+              const px = -flow.y, py = flow.x;
+              let nx = flow.x + px * off;
+              let ny = flow.y + py * off;
+              const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+              fxDir = nx / nmag;
+              fyDir = ny / nmag;
+          }
+          const tx = fxDir * FLOW_TARGET_SPEED;
+          const ty = fyDir * FLOW_TARGET_SPEED;
+          const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
           const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
           const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
           const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));

@@ -96,6 +96,19 @@ const DEFAULT_KERNEL_R = 3;
 // "FF Tangent" button.
 const DEFAULT_TANGENT_MIX = 0.5;
 
+// Breathing field — a slow spatio-temporal undulation added to the
+// base flow direction so convergence/saddle zones migrate over time
+// instead of sitting still and continuously feeding the same pile of
+// shards.  Each cell's base vector is rotated by
+//   a = breatheAmp · sin(2π·WAVES·(wx/W + wy/H) + breathePhase)
+// before wall repulsion.  WAVES is an integer so the term is
+// seam-continuous on the (square) torus.  Amplitude is fixed; the
+// scroll rate (phase advance per second) is the DBG-tunable knob —
+// GameEngine advances breathePhase and re-bakes on a throttled
+// cadence.  Amp 0 ⇒ static field (current behaviour).
+const BREATHE_AMP_RAD = 0.45;   // ≈ 26° peak undulation
+const BREATHE_WAVES   = 2;      // wavelengths across each map axis
+
 // Enemy pursuit BFS is capped at this many cells from the player so each
 // rebuild stays cheap AND the range stays under half the grid axis,
 // which is required on the toroidal map: a BFS that propagates past
@@ -167,6 +180,13 @@ export class FlowFieldGrid {
   // tangents that point the same way (along the wall, with the base
   // flow) instead of perpendicular-and-opposite.
   private tangentMix: number = DEFAULT_TANGENT_MIX;
+
+  // Breathing-field state.  `breatheAmp` 0 ⇒ static field; > 0 ⇒ the
+  // base flow vector is rotated per-cell by a scrolling spatial wave.
+  // `breathePhase` is advanced by GameEngine before each throttled
+  // re-bake.  Both mutated only via setBreathe(); the caller re-bakes.
+  private breatheAmp:   number = 0;
+  private breathePhase: number = 0;
 
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
   // performance.now() domain).  Written by `_computeAsteroidCell` for
@@ -254,6 +274,10 @@ export class FlowFieldGrid {
   /** Default cell size used at construction and after a reset. */
   static readonly DEFAULT_CELL_SIZE = CELL_SIZE_DEFAULT;
 
+  /** Fixed breathing undulation amplitude (radians).  GameEngine
+   *  passes this to setBreathe() when the breathing rate is non-zero. */
+  static readonly BREATHE_AMP = BREATHE_AMP_RAD;
+
   /**
    * Populate the obstacle bitmap from the map's tile entities.
    * Call once right after map.init() and before buildAsteroidField().
@@ -328,6 +352,20 @@ export class FlowFieldGrid {
     }
   }
 
+  /**
+   * Set the breathing amplitude (radians) and scroll phase, then
+   * re-bake every cell.  Amp 0 restores the static field.  GameEngine
+   * advances `phase` on a throttled cadence so convergence zones drift
+   * over time and shard piles dissolve.  See the BREATHE_* constants.
+   */
+  setBreathe(amp: number, phase: number): void {
+    this.breatheAmp = amp;
+    this.breathePhase = phase;
+    for (let idx = 0; idx < TOTAL; idx++) {
+      this._computeAsteroidCell(idx);
+    }
+  }
+
   /** Recompute the asteroid flow vector for a single cell. */
   private _computeAsteroidCell(idx: number): void {
     // Stamp the recompute time for the DBG "FF Rebuilds" overlay
@@ -343,10 +381,25 @@ export class FlowFieldGrid {
     const wx  = MAP_MIN_X + (col + 0.5) * CELL_SIZE;
     const wy  = MAP_MIN_Y + (row + 0.5) * CELL_SIZE;
 
-    // Base direction from the active map flow sampler
+    // Base direction from the active map flow sampler, optionally
+    // rotated by the breathing wave so the field slowly undulates.
+    // The wall-repulsion tangent below keys off this rotated base, so
+    // the along-wall slide direction breathes with the field too.
     const base = this.flowSampler(wx, wy);
-    let fx = base.x;
-    let fy = base.y;
+    let baseX = base.x;
+    let baseY = base.y;
+    if (this.breatheAmp !== 0) {
+      const a = this.breatheAmp * Math.sin(
+        2 * Math.PI * BREATHE_WAVES * (wx / MAP_WIDTH + wy / MAP_HEIGHT)
+        + this.breathePhase,
+      );
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const rx = baseX * ca - baseY * sa;
+      const ry = baseX * sa + baseY * ca;
+      baseX = rx; baseY = ry;
+    }
+    let fx = baseX;
+    let fy = baseY;
 
     // Wall repulsion.  R = 0 hits only the 4 cardinal neighbours
     // (legacy mode, preserved for A/B comparison).  R ≥ 1 scans the
@@ -368,8 +421,6 @@ export class FlowFieldGrid {
     const R = this.kernelR;
     const mix = this.tangentMix;
     const rWeight = 1 - mix;
-    const baseX = base.x;
-    const baseY = base.y;
     if (R === 0) {
       for (let k = 0; k < 4; k++) {
         const nr = (row + DR4[k] + FF_ROWS) % FF_ROWS;
@@ -412,9 +463,10 @@ export class FlowFieldGrid {
       this.astFlowX[idx] = fx / mag;
       this.astFlowY[idx] = fy / mag;
     } else {
-      // Near-zero after repulsion (e.g. inside corner) — fall back to base
-      this.astFlowX[idx] = base.x;
-      this.astFlowY[idx] = base.y;
+      // Near-zero after repulsion (e.g. inside corner) — fall back to
+      // the (breathed) base direction.
+      this.astFlowX[idx] = baseX;
+      this.astFlowY[idx] = baseY;
     }
   }
 

@@ -269,6 +269,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleFFTangentMix();
   };
 
+  const handleCycleFFBreathe = () => {
+      if (engineRef.current) engineRef.current.cycleFFBreathe();
+  };
+
+  const handleCycleFFLaneJitter = () => {
+      if (engineRef.current) engineRef.current.cycleFFLaneJitter();
+  };
+
   const handleSkipWave = () => {
       if (engineRef.current) engineRef.current.skipWave();
   };
@@ -327,6 +335,8 @@ const App: React.FC = () => {
         onCycleFFDensity={handleCycleFFDensity}
         onCycleFFKernelR={handleCycleFFKernelR}
         onCycleFFTangentMix={handleCycleFFTangentMix}
+        onCycleFFBreathe={handleCycleFFBreathe}
+        onCycleFFLaneJitter={handleCycleFFLaneJitter}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
