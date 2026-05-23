@@ -873,12 +873,13 @@ export class ShardSystem {
   private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem, applyCohesion: boolean = true): void {
     if (this.bonds.length === 0) return;
 
-    // Crowd-driven merge RATE multiplier (>= 1).  tickBonds runs EVERY
-    // sim step (only the cohesion blend below is paced), so the bond
-    // timer never drifts under frame-skipping and needs no skip
-    // compensation — the multiplier alone makes bonds mature FASTER when
-    // the field is crowded.  It also scales up the per-frame merge
-    // budget so a dense field can compact more bonds per tick.
+    // Entity-count-driven merge RATE multiplier (sparse fields < 1 =
+    // slower, crowded > 1 = faster).  tickBonds runs EVERY sim step
+    // (only the cohesion blend below is paced), so the bond timer never
+    // drifts under frame-skipping and needs no skip compensation — the
+    // multiplier alone scales how fast bonds mature with crowd level.
+    // It also scales the per-frame merge budget so a dense field can
+    // compact more bonds per tick.
     const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
@@ -1015,8 +1016,9 @@ export class ShardSystem {
     // time-based eat accumulation is multiplied by it to stay
     // frame-skip-independent (see the eat pass below).
     const skipComp = Math.max(1, _physics.lastEffectiveShardPairInterval | 0);
-    // Crowd-driven merge/eat RATE multiplier (>= 1): denser fields eat
-    // and bond FASTER to cull entities.  Separate from the throttle.
+    // Entity-count-driven merge/eat RATE multiplier: sparse fields < 1
+    // (slower), crowded > 1 (faster, to cull entities).  Separate from
+    // the throttle above.
     const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
     // Track which entities are currently in active stick-bonds so
     // the bond-formation pass doesn't double-bond.
@@ -1136,11 +1138,12 @@ export class ShardSystem {
       const attractStrength = getActivePlasticEatAttract();
       // The eat timer accumulates ONLY when this broadphase runs, which
       // is once per `skipComp` substeps — so multiply dt by skipComp to
-      // keep digest time frame-skip-independent under load.  The
-      // crowd-rate multiplier then SHORTENS the maturation threshold so
-      // dense fields digest debris faster (entity culling).  The pull
-      // force is intentionally NOT compensated: it stays at the merge
-      // cadence (a pre-existing "dense fields back off" behaviour).
+      // keep digest time frame-skip-independent under load.  The rate
+      // multiplier then scales the maturation threshold (eatTime = base
+      // / mult): > 1 shortens it (dense fields digest faster), < 1
+      // lengthens it (sparse fields linger).  The pull force is
+      // intentionally NOT compensated: it stays at the merge cadence (a
+      // pre-existing "dense fields back off" behaviour).
       const dtEat = dt * skipComp;
       let eats: Array<{ eater: GameEntity; consumed: GameEntity }> | null = null;
       for (let i = 0; i < candidates.length; i++) {
@@ -1193,8 +1196,8 @@ export class ShardSystem {
           const t = (g.plasticEatTimer ?? 0) + dtEat;
           g.plasticEatTimer = t;
           // Metal is dense — it takes significantly longer to digest.
-          // Crowd-rate multiplier shortens the maturation time so dense
-          // fields cull debris faster.
+          // Rate multiplier scales maturation: crowded fields (mult > 1)
+          // digest faster, sparse fields (mult < 1) linger.
           const baseEatTime = g.shardVariant === 'metal-shard'
             ? PLASTIC_EAT.SECONDS * PLASTIC_EAT.METAL_TIME_FACTOR
             : PLASTIC_EAT.SECONDS;

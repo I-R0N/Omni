@@ -1073,22 +1073,32 @@ export type PerfTaskId = keyof typeof PERF_TASKS;
 // When the field is crowded the merge / eat systems should run FASTER
 // (shorter timers, bigger merge budget) to cull entities — the opposite
 // of the throttle above, which makes expensive scans run LESS often.
-// The multiplier is selected from the live total entity count with
-// hysteresis, then EWMA-smoothed each step so it ramps rather than
-// snapping at the boundary.  Applied by ShardSystem to the plastic-eat
-// timer (incl. metal's longer digest), the cohesion/merge bond
-// threshold, and the per-frame merge budget.
+// The level is selected from the live total entity count (an ascending
+// ladder: pick the highest level whose `count` the field meets) with
+// hysteresis, then the multiplier is EWMA-smoothed each step so it ramps
+// rather than snapping at a boundary.  Applied by ShardSystem to the
+// plastic-eat timer (incl. metal's longer digest), the cohesion/merge
+// bond timer, and the per-frame merge budget.
+//
+// The ladder ramps progressively: sparse fields merge lazily (mult < 1
+// → slower than the raw PLASTIC_EAT / bond times), normal play sits at
+// the baseline, and the crowded tiers escalate hard to cull entities.
+// Below 3000 there are three levels (two "slower" ones beneath the
+// baseline); 3000+ keeps climbing through quick / very-quick / extreme.
 export const MERGE_RATE_CONSTANTS = {
-  // below QUICK → baseline (slow); at/above QUICK → quick; at/above
-  // VERY_QUICK → very quick.
-  THRESHOLD_QUICK: 3000,
-  THRESHOLD_VERY_QUICK: 4000,
-  // Entity-count margin a count must fall back below a threshold by
-  // before the rate steps down (anti-oscillation at the boundary).
+  // Ascending ladder. `count` thresholds AND `mult` values must both be
+  // ascending.  The first entry (count 0) is the floor.
+  LEVELS: [
+    { count: 0,    mult: 0.6  },  // very sparse — merge/eat lazily
+    { count: 1000, mult: 0.85 },  // sparse
+    { count: 2000, mult: 1.25 },  // baseline (normal play; raised from 1.0)
+    { count: 3000, mult: 2.0  },  // quick (raised from 1.75)
+    { count: 4000, mult: 2.75 },  // very quick
+    { count: 5000, mult: 3.5  },  // extreme — keep culling hard
+  ] as const,
+  // Entity-count margin a count must fall back below a level's threshold
+  // by before stepping down (anti-oscillation at the boundary).
   HYSTERESIS: 250,
-  MULT_BASELINE: 1.0,
-  MULT_QUICK: 1.75,
-  MULT_VERY_QUICK: 2.75,
   // Per-step EWMA toward the target multiplier so the rate ramps in
   // smoothly over ~tenths of a second instead of snapping on crossing.
   EWMA_ALPHA: 0.05,

@@ -705,8 +705,9 @@ export interface PerfSnapshot {
   // Smoothed load level [0,1] and its quantised tier name (idle … max).
   perfLoadLevel: number;
   perfLoadTier: string;
-  // Entity-count-driven merge/eat RATE multiplier (>= 1).  Separate from
-  // throttling — crowded fields merge/eat FASTER to cull entities.
+  // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
+  // crowded > 1).  Separate from throttling — crowded fields merge/eat
+  // faster to cull entities, sparse fields merge lazily.
   perfMergeRateMult: number;
   // Per-task effective frame-skip intervals (+ manual pin, 0 = AUTO).
   perfTasks: PerfTaskStat[];

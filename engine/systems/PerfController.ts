@@ -79,9 +79,11 @@ export class PerfController {
   public lastCellDensity: number = 0;
 
   // ── entity-count-driven merge/eat rate ──
-  private mergeRateTier: number = 0; // 0 = baseline, 1 = quick, 2 = very quick
-  /** Live multiplier (>= 1) applied to merge/eat time-accumulators. */
-  public mergeRateMultiplier: number = MR.MULT_BASELINE;
+  // Index into MR.LEVELS (ascending ladder). 0 = slowest/floor.
+  private mergeRateTier: number = 0;
+  /** Live multiplier applied to merge/eat time-accumulators.  Ramps from
+   *  the slowest level (sparse fields) up through the crowded tiers. */
+  public mergeRateMultiplier: number = MR.LEVELS[0].mult;
 
   constructor() {
     this.registerDefaults();
@@ -118,7 +120,7 @@ export class PerfController {
     this.lastEntityCount = 0;
     this.lastCellDensity = 0;
     this.mergeRateTier = 0;
-    this.mergeRateMultiplier = MR.MULT_BASELINE;
+    this.mergeRateMultiplier = MR.LEVELS[0].mult;
     for (let i = 0; i < this.tasks.length; i++) {
       const t = this.tasks[i];
       t.effectiveInterval = t.minInterval;
@@ -217,17 +219,17 @@ export class PerfController {
   }
 
   private updateMergeRate(count: number): void {
+    const levels = MR.LEVELS;
     let tier = this.mergeRateTier;
-    // Climb (sequential so a big jump can skip straight to very-quick).
-    if (tier < 1 && count >= MR.THRESHOLD_QUICK) tier = 1;
-    if (tier < 2 && count >= MR.THRESHOLD_VERY_QUICK) tier = 2;
-    // Drop only past the hysteresis margin.
-    if (tier === 2 && count < MR.THRESHOLD_VERY_QUICK - MR.HYSTERESIS) tier = 1;
-    if (tier === 1 && count < MR.THRESHOLD_QUICK - MR.HYSTERESIS) tier = 0;
+    // Climb while the next level's threshold is met (a big jump can skip
+    // straight up multiple levels in one step).
+    while (tier < levels.length - 1 && count >= levels[tier + 1].count) tier++;
+    // Drop only once the count falls a full hysteresis margin below the
+    // current level's threshold (anti-oscillation at the boundary).
+    while (tier > 0 && count < levels[tier].count - MR.HYSTERESIS) tier--;
     this.mergeRateTier = tier;
 
-    const target =
-      tier === 2 ? MR.MULT_VERY_QUICK : tier === 1 ? MR.MULT_QUICK : MR.MULT_BASELINE;
+    const target = levels[tier].mult;
     this.mergeRateMultiplier += (target - this.mergeRateMultiplier) * MR.EWMA_ALPHA;
   }
 
