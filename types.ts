@@ -701,6 +701,22 @@ export interface PerfSnapshot {
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs
+  // ── PerfController readouts (central frame-skip coordinator) ──
+  // Smoothed load level [0,1] and its quantised tier name (idle … max).
+  perfLoadLevel: number;
+  perfLoadTier: string;
+  // Entity-count-driven merge/eat RATE multiplier (>= 1).  Separate from
+  // throttling — crowded fields merge/eat FASTER to cull entities.
+  perfMergeRateMult: number;
+  // Per-task effective frame-skip intervals (+ manual pin, 0 = AUTO).
+  perfTasks: PerfTaskStat[];
+}
+
+// One row of the PerfController per-task readout in the DBG panel.
+export interface PerfTaskStat {
+  id: string;
+  eff: number;     // effective frame-skip interval this step
+  manual: number;  // manual override (0 = AUTO)
 }
 
 export interface EngineStats {
@@ -825,6 +841,9 @@ export interface EngineStats {
   // colorBlendFrameInterval in manual mode; tracks the density-
   // selected value in AUTO mode.
   colorBlendEffectiveInterval?: number;
+  // Master AUTO toggle for the central PerfController.  When false all
+  // automatic frame-skipping is disabled (manual pins still apply).
+  perfAutoEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

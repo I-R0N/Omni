@@ -41,6 +41,7 @@ interface UIOverlayProps {
   onCycleColorBlendInterval?: () => void;
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
+  onTogglePerfAuto?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -87,6 +88,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleColorBlendInterval,
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
+  onTogglePerfAuto,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -585,6 +587,47 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {!collapsed.broadphase && (
                     <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
                   )}
+
+                  {/* ── Perf controller (central frame-skip coordinator) ── */}
+                  {renderSectionHeader('perfctl', 'Perf')}
+                  {!collapsed.perfctl && (<>
+                    {/* Master AUTO toggle — OFF disables all auto frame-
+                        skipping (manual pins still apply). */}
+                    <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                      <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Auto</span>
+                      <button
+                        onClick={onTogglePerfAuto}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                        title="Master AUTO toggle for the central performance controller.  ON: skippable passes self-throttle from the load signal.  OFF: every AUTO task runs every step (manual ShPair / Sh↔Tl / ColorBlend pins still apply)."
+                      >
+                        {stats.perfAutoEnabled === false ? 'Off' : 'On'}
+                      </button>
+                    </div>
+                    {/* Load tier + smoothed level driving the throttle. */}
+                    <div className="flex justify-between">
+                      <span>load</span>
+                      <span className={perf.perfLoadLevel >= 0.82 ? 'text-red-400' : perf.perfLoadLevel >= 0.38 ? 'text-amber-300' : 'text-white'}>
+                        {perf.perfLoadTier} ({Math.round(perf.perfLoadLevel * 100)}%)
+                      </span>
+                    </div>
+                    {/* Entity-count merge/eat rate multiplier (Goal 4). */}
+                    <div className="flex justify-between">
+                      <span>merge rate</span>
+                      <span className={perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
+                        {perf.perfMergeRateMult.toFixed(2)}×
+                      </span>
+                    </div>
+                    {/* Per-task effective frame-skip intervals.  "·N" = AUTO
+                        effective N; "·N!" = manual pin.  1 = runs every step. */}
+                    {perf.perfTasks?.map(t => (
+                      <div key={t.id} className="flex justify-between">
+                        <span>&nbsp;·{t.id}</span>
+                        <span className={t.eff >= 8 ? 'text-amber-300' : 'text-white'}>
+                          {t.eff}{t.manual >= 1 ? '!' : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </>)}
 
                   {renderSectionHeader('timing', 'Timing (ms)')}
                   {!collapsed.timing && (<>

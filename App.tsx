@@ -141,6 +141,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleShardTilePairInterval();
   };
 
+  const handleTogglePerfAuto = () => {
+      if (engineRef.current) engineRef.current.togglePerfAuto();
+  };
+
   const handleToggleShardGravity = () => {
       if (engineRef.current) engineRef.current.toggleShardGravity();
   };
@@ -259,6 +263,7 @@ const App: React.FC = () => {
         onToggleShardTileCollisions={handleToggleShardTileCollisions}
         onCycleShardPairInterval={handleCycleShardPairInterval}
         onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
+        onTogglePerfAuto={handleTogglePerfAuto}
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}

@@ -993,6 +993,107 @@ export const SHARD_TILE_PAIR_CONSTANTS = {
   CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// Central performance controller (engine/systems/PerfController.ts).
+//
+// One coordinator replaces the scattered per-system AUTO tables: it
+// samples a load signal each sim step, quantises it into a small number
+// of tiers (with hysteresis so the interval doesn't hop every frame),
+// and hands each registered skippable task an effective frame-skip
+// interval scaled between its own min/max.  Phase offsets (assigned by
+// registration order) stagger same-interval tasks so a heavy step never
+// stacks every pass at once.
+export const PERF_CONTROLLER_CONSTANTS = {
+  // Master AUTO default — matches the existing "0 = AUTO" UX where the
+  // field self-tunes without dev intervention.  Flip via the DBG Perf
+  // section; OFF runs every AUTO task every step (manual pins still win).
+  AUTO_DEFAULT: true,
+  // ── Load-signal normalisation ──────────────────────────────────────
+  // Each raw signal is normalised to [0,1] against its REF; the
+  // instantaneous load is the max of the three (the binding constraint
+  // wins).  Entity count + peak collision-cell density are the reliable,
+  // vsync-independent signals the old tables already used; sim-time is a
+  // secondary booster so a genuinely slow substep can escalate further.
+  ENTITY_COUNT_REF: 4000,
+  CELL_DENSITY_REF: 96,
+  // Per-substep sim time (updatePhysics + updateGameLogic, ms) that maps
+  // to load 1.0.  Deliberately uses SIM time, NOT render frame time —
+  // render frame time is vsync-capped (~16.6 ms even when idle) and would
+  // read as permanent high load.  ~6 ms/substep is already heavy.
+  SIM_MS_REF: 6,
+  // EWMA smoothing for the per-substep sim-time sample (de-spikes it).
+  SIM_MS_EWMA_ALPHA: 0.15,
+  // EWMA smoothing for the combined load level.  Lower = steadier (less
+  // interval hopping as the raw signals fluctuate frame-to-frame).
+  LOAD_EWMA_ALPHA: 0.06,
+  // ── Discrete load tiers (with hysteresis) ──────────────────────────
+  // The smoothed load is quantised into NUM_TIERS levels.  A task's
+  // effective interval interpolates from its minInterval (tier 0) to its
+  // maxInterval (top tier).  Coarse tiers + hysteresis stop the interval
+  // from oscillating as load wobbles around a boundary.
+  NUM_TIERS: 5,
+  // Upward thresholds (length NUM_TIERS-1): smoothed load must exceed
+  // TIER_THRESH_UP[t] to climb to tier t+1.  Dropping back requires load
+  // to fall below TIER_THRESH_UP[t] - TIER_HYSTERESIS.
+  TIER_THRESH_UP: [0.18, 0.38, 0.6, 0.82] as const,
+  TIER_HYSTERESIS: 0.06,
+  // Human-readable tier names for the DBG load readout.
+  TIER_NAMES: ['idle', 'light', 'med', 'heavy', 'max'] as const,
+};
+
+// Per-task throttle profiles read by PerfController.registerDefaults().
+// minInterval / maxInterval bound the effective frame-skip interval;
+// costWeight scales how aggressively the task climbs toward maxInterval
+// as the load tier rises (>1 backs off sooner, <1 stays responsive
+// longer).  Order here is the registration order, which also assigns the
+// deterministic phase offset (0,1,2,…) so equal-interval tasks stagger.
+//
+//   shardPair / shardTilePair  — migrated from SHARD_*_PAIR_CONSTANTS.
+//   colorBlend                 — migrated from NEBULA blend interval.
+//   plasticCosmetic            — PAuto count + reach scans; backs off
+//                                hardest (costWeight 1.2) since it's
+//                                purely cosmetic and held stale safely.
+//   ai / flowField / nebulaNeighbors / dropScan / plasticSelfBreak —
+//                                new skippable passes (see PerfController).
+export const PERF_TASKS = {
+  shardPair:        { minInterval: 1, maxInterval: 32, costWeight: 1.0 },
+  shardTilePair:    { minInterval: 1, maxInterval: 32, costWeight: 1.0 },
+  colorBlend:       { minInterval: 1, maxInterval: 16, costWeight: 0.8 },
+  plasticCosmetic:  { minInterval: 1, maxInterval: 32, costWeight: 1.2 },
+  ai:               { minInterval: 1, maxInterval: 3,  costWeight: 0.7 },
+  flowField:        { minInterval: 1, maxInterval: 2,  costWeight: 1.0 },
+  nebulaNeighbors:  { minInterval: 1, maxInterval: 4,  costWeight: 0.9 },
+  dropScan:         { minInterval: 1, maxInterval: 2,  costWeight: 0.6 },
+  plasticSelfBreak: { minInterval: 1, maxInterval: 4,  costWeight: 0.8 },
+} as const;
+
+export type PerfTaskId = keyof typeof PERF_TASKS;
+
+// ── Entity-count-driven merge / eat RATE (separate from throttling) ───
+// When the field is crowded the merge / eat systems should run FASTER
+// (shorter timers, bigger merge budget) to cull entities — the opposite
+// of the throttle above, which makes expensive scans run LESS often.
+// The multiplier is selected from the live total entity count with
+// hysteresis, then EWMA-smoothed each step so it ramps rather than
+// snapping at the boundary.  Applied by ShardSystem to the plastic-eat
+// timer (incl. metal's longer digest), the cohesion/merge bond
+// threshold, and the per-frame merge budget.
+export const MERGE_RATE_CONSTANTS = {
+  // below QUICK → baseline (slow); at/above QUICK → quick; at/above
+  // VERY_QUICK → very quick.
+  THRESHOLD_QUICK: 3000,
+  THRESHOLD_VERY_QUICK: 4000,
+  // Entity-count margin a count must fall back below a threshold by
+  // before the rate steps down (anti-oscillation at the boundary).
+  HYSTERESIS: 250,
+  MULT_BASELINE: 1.0,
+  MULT_QUICK: 1.75,
+  MULT_VERY_QUICK: 2.75,
+  // Per-step EWMA toward the target multiplier so the rate ramps in
+  // smoothly over ~tenths of a second instead of snapping on crossing.
+  EWMA_ALPHA: 0.05,
+};
+
 export const TRAIL_CONSTANTS = {
   LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point

@@ -23,6 +23,7 @@ import { nextId } from './IdAllocator';
 import { ParticleSystem } from './ParticleSystem';
 import { DropSystem } from './DropSystem';
 import { PhysicsSystem } from './PhysicsSystem';
+import type { PerfController } from './PerfController';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
 
 /**
@@ -98,12 +99,22 @@ export class NebulaSystem {
     // is stable across cadence changes.
     public colorBlendFrameInterval: number = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL;
     public lastEffectiveColorBlendInterval: number = 1;
-    private colorBlendTick: number = 0;
+
+    /**
+     * Central performance controller.  Drives the color-equilibration
+     * cadence gate (`colorBlend` task) and the neighbour-count recompute
+     * throttle (`nebulaNeighbors` task).  Null only pre-wire.
+     */
+    private perfController: PerfController | null = null;
 
     constructor(
         private particles: ParticleSystem,
         private drops: DropSystem,
     ) {}
+
+    public setPerfController(pc: PerfController): void {
+        this.perfController = pc;
+    }
 
     /**
      * Hard reset — called on game restart so a fresh run doesn't inherit
@@ -187,8 +198,15 @@ export class NebulaSystem {
 
         // Refresh every tile's neighbour count if something changed
         // since last frame.  Cheap — O(N) over active tiles, no
-        // recompute when nothing moved.
-        if (this.neighborCountsDirty) {
+        // recompute when nothing moved.  The PerfController's
+        // `nebulaNeighbors` task throttles the recompute under load: the
+        // dirty flag stays set until an allowed step, so counts go stale
+        // (the interior-darken render rule holds its last value — no
+        // flicker) rather than recomputing every frame.
+        const neighborsAllowed = this.perfController
+            ? this.perfController.shouldRun('nebulaNeighbors')
+            : true;
+        if (this.neighborCountsDirty && neighborsAllowed) {
             if (this.recomputeNeighborCounts(entities) > 0) {
                 this.neighborCountsDirty = false;
             }
@@ -202,7 +220,7 @@ export class NebulaSystem {
         // no influence on tiles), so the cluster's structural hue
         // stays stable while transient shards visually catch up.
         if ((this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)
-            && this.shouldRunColorBlendThisStep(entities)) {
+            && this.shouldRunColorBlendThisStep()) {
             this.equilibrateColors(entities);
         }
     }
@@ -218,38 +236,24 @@ export class NebulaSystem {
      * the entity list on actual run-frames, so skip frames stay
      * O(1).
      */
-    private shouldRunColorBlendThisStep(entities: GameEntity[]): boolean {
-        // Resolve effective interval up-front so AUTO uses the
-        // freshest value (recomputed at the end of each run-frame).
-        if (this.colorBlendFrameInterval > 0) {
-            this.lastEffectiveColorBlendInterval = this.colorBlendFrameInterval;
+    private shouldRunColorBlendThisStep(): boolean {
+        // Delegated to the PerfController's `colorBlend` task.  The
+        // manual DBG override (colorBlendFrameInterval) is synced into
+        // the controller before beginStep, so 0 = AUTO delegates here
+        // and a manual pin still wins.  Note: the AUTO interval is now
+        // driven by the global load signal (total entities + cell
+        // density) rather than the old per-system active-nebula count —
+        // entity count is a sound proxy on nebula-heavy maps and the
+        // single-coordinator model is the point.  interval × alpha still
+        // sets the visual blend rate, so a higher interval intentionally
+        // slows equilibration (no skip-compensation here — equilibration
+        // is meant to ease off under load).
+        if (this.perfController) {
+            this.lastEffectiveColorBlendInterval = this.perfController.effectiveInterval('colorBlend');
+            return this.perfController.shouldRun('colorBlend');
         }
-        const interval = Math.max(1, this.lastEffectiveColorBlendInterval | 0);
-        const run = (this.colorBlendTick % interval) === 0;
-        this.colorBlendTick++;
-
-        if (run && this.colorBlendFrameInterval === 0) {
-            // AUTO: refresh count from the entity list (cheap O(N)),
-            // pick the next effective interval from the threshold
-            // table.  Picked here rather than every frame so skip
-            // frames stay pure tick checks.
-            let count = 0;
-            for (let i = 0; i < entities.length; i++) {
-                const e = entities[i];
-                if ((e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard')
-                    && e.active
-                    && e.mergeFadeTimer === undefined) {
-                    count++;
-                }
-            }
-            const table = NEBULA_CONSTANTS.BLEND_FRAME_INTERVAL_AUTO_THRESHOLDS;
-            let auto: number = table[table.length - 1].interval;
-            for (let i = 0; i < table.length; i++) {
-                if (count <= table[i].maxCount) { auto = table[i].interval; break; }
-            }
-            this.lastEffectiveColorBlendInterval = auto;
-        }
-        return run;
+        this.lastEffectiveColorBlendInterval = 1;
+        return true;
     }
 
     /**

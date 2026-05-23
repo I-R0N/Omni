@@ -54,6 +54,7 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCo
     e.dentY = newDY;
 }
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
+import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
@@ -167,9 +168,6 @@ export class PhysicsSystem {
   // while separation runs only every Nth, and dense clusters
   // collapse to a single point.
   public lastRunShardPair: boolean = true;
-  // Internal counter, ticked once per handleEntityCollisions call.
-  // Used as `counter % interval === 0` to gate shard-shard pairs.
-  private shardPairTick: number = 0;
   // Shard ↔ static-tile pair resolution interval.  Mirrors the
   // shard-pair knobs above but gates resolveShardTilePairs.  Only
   // meaningful when shardTileCollisionsEnabled is true; cycled via
@@ -177,7 +175,12 @@ export class PhysicsSystem {
   public shardTilePairFrameInterval: number = SHARD_TILE_PAIR_CONSTANTS.FRAME_INTERVAL;
   public lastEffectiveShardTilePairInterval: number = 1;
   public lastRunShardTilePair: boolean = true;
-  private shardTilePairTick: number = 0;
+  // Central performance controller (engine/systems/PerfController.ts).
+  // The shard-pair / shard-tile-pair gates delegate to it; the per-step
+  // run decision + effective interval are precomputed there each substep.
+  // Null only in the (unused) bare-instantiation path; GameEngine always
+  // wires it before the first update.
+  private perfController: PerfController | null = null;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
@@ -199,6 +202,10 @@ export class PhysicsSystem {
   // One-shot warning guard so a new polygon source that exceeds the cap
   // produces exactly one console entry instead of spamming every frame.
   private warnedVertexOverflow = false;
+
+  public setPerfController(pc: PerfController) {
+      this.perfController = pc;
+  }
 
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
@@ -1139,21 +1146,22 @@ export class PhysicsSystem {
    * climb so settled piles don't eat the frame budget.
    */
   public shouldRunShardPairsThisStep(): boolean {
-    let interval = this.shardPairFrameInterval | 0;
-    if (interval <= 0) {
-        const density = this.lastMaxCellDensity;
-        const table = SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS;
-        let auto = table[table.length - 1].interval;
-        for (let i = 0; i < table.length; i++) {
-            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
-        }
-        interval = auto;
+    const pc = this.perfController;
+    if (pc) {
+        // The controller already folded `lastMaxCellDensity` (+ entity
+        // count + sim time) into the load level and precomputed this
+        // task's interval / run flag in beginStep().  The manual DBG
+        // override (shardPairFrameInterval) was synced into the
+        // controller before beginStep, so 0 = AUTO delegates here and
+        // a manual pin still wins.
+        this.lastEffectiveShardPairInterval = pc.effectiveInterval('shardPair');
+        this.lastRunShardPair = pc.shouldRun('shardPair');
+        return this.lastRunShardPair;
     }
-    this.lastEffectiveShardPairInterval = interval;
-    const run = (this.shardPairTick % interval) === 0;
-    this.shardPairTick++;
-    this.lastRunShardPair = run;
-    return run;
+    // Fallback (no controller wired): run every step.
+    this.lastEffectiveShardPairInterval = 1;
+    this.lastRunShardPair = true;
+    return true;
   }
 
   /**
@@ -1167,21 +1175,15 @@ export class PhysicsSystem {
    * frame.
    */
   public shouldRunShardTilePairsThisStep(): boolean {
-    let interval = this.shardTilePairFrameInterval | 0;
-    if (interval <= 0) {
-        const density = this.lastMaxCellDensity;
-        const table = SHARD_TILE_PAIR_CONSTANTS.AUTO_THRESHOLDS;
-        let auto = table[table.length - 1].interval;
-        for (let i = 0; i < table.length; i++) {
-            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
-        }
-        interval = auto;
+    const pc = this.perfController;
+    if (pc) {
+        this.lastEffectiveShardTilePairInterval = pc.effectiveInterval('shardTilePair');
+        this.lastRunShardTilePair = pc.shouldRun('shardTilePair');
+        return this.lastRunShardTilePair;
     }
-    this.lastEffectiveShardTilePairInterval = interval;
-    const run = (this.shardTilePairTick % interval) === 0;
-    this.shardTilePairTick++;
-    this.lastRunShardTilePair = run;
-    return run;
+    this.lastEffectiveShardTilePairInterval = 1;
+    this.lastRunShardTilePair = true;
+    return true;
   }
 
   /**

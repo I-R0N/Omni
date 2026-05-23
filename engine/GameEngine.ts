@@ -14,6 +14,7 @@ import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
+import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
@@ -48,7 +49,11 @@ export class GameEngine {
   private shards: ShardSystem;
   private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
-  
+  // Central performance controller — samples load each sim step and
+  // hands every skippable pass an effective frame-skip interval.  See
+  // engine/systems/PerfController.ts.
+  private perfController: PerfController;
+
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
@@ -402,6 +407,17 @@ export class GameEngine {
   }
 
   /**
+   * Master AUTO toggle for the central performance controller.  When
+   * off, every AUTO task (manual interval 0) runs every step — i.e. all
+   * automatic frame-skipping is disabled — while explicit manual pins
+   * (set via the ShPair / Sh↔Tl int / ColorBlend int buttons) still
+   * apply.  Lets a dev A/B the whole throttling system in one click.
+   */
+  public togglePerfAuto() {
+    this.perfController.autoEnabled = !this.perfController.autoEnabled;
+  }
+
+  /**
    * Toggle shard ↔ shard bond formation + cohesion.  When off, any
    * existing bonds drop on the next ShardSystem.update() tick and
    * no new bonds form.  Nebula self-compose (which fires via the
@@ -703,6 +719,15 @@ export class GameEngine {
     this.shards.setEntityIndex(this.entityIndex);
     this.flowField = new FlowFieldGrid();
 
+    // Central performance controller — injected into every system that
+    // owns a skippable pass.  It samples load in beginStep() (called
+    // once per sim substep in the loop) and precomputes each task's
+    // run decision; the systems just query shouldRun()/effectiveInterval().
+    this.perfController = new PerfController();
+    this.physics.setPerfController(this.perfController);
+    this.shards.setPerfController(this.perfController);
+    this.nebulas.setPerfController(this.perfController);
+
     this.player = {
       id: 'player',
       type: EntityType.PLAYER,
@@ -851,6 +876,7 @@ export class GameEngine {
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
+      perfAutoEnabled: this.perfController.autoEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -872,6 +898,7 @@ export class GameEngine {
 
   public restartGame() {
       this.shards.reset();
+      this.perfController.reset();
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -981,6 +1008,7 @@ export class GameEngine {
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
+      perfAutoEnabled: this.perfController.autoEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -1012,6 +1040,20 @@ export class GameEngine {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
+        // Sample load + precompute every skippable task's run decision
+        // for this substep.  Manual DBG overrides (which still live on
+        // the systems that own their cycle buttons) are synced in first
+        // so `0 = AUTO` delegates to the controller and a manual pin
+        // wins.  Signals: current total entities, previous step's peak
+        // collision-cell density, and the previous substep's sim time.
+        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
+        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
+        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
+        this.perfController.beginStep(
+            this.perfCounts.totalEntities,
+            this.physics.lastMaxCellDensity,
+            this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
+        );
         // Wall-clock the two top-level sim phases so the perf overlay
         // can show the gap between summed sub-timers and total sim
         // time.  Untimed work (entity compaction, flow-field nudge,
@@ -1109,10 +1151,30 @@ export class GameEngine {
       const allEntities = this.frameEntities;
 
       // Rebuild the enemy pursuit field if the player changed grid cells.
+      // The rebuild is already dirty-gated (only when the player crosses a
+      // cell), but the PerfController's `flowField` task throttles the
+      // flush itself so a player oscillating on a cell boundary under load
+      // can't thrash the BFS every step.  When skipped the field holds its
+      // last state (enemies pursue the last-known cell — no snap) and the
+      // dirty flag stays set so the next allowed step rebuilds it.
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
-      this.flowField.flushEnemyField();
+      if (this.perfController.shouldRun('flowField')) {
+          this.flowField.flushEnemyField();
+      } else {
+          this.flowField.lastFlushMs = 0;
+      }
 
-      this.ai.update(dt, this.entityIndex.enemies, this.player, this.flowField);
+      // Enemy AI state machine — skippable.  When throttled we dt-compensate
+      // (multiply dt by the effective interval) so acceleration impulses and
+      // reaction/idle/chase timers integrate to the same per-second behaviour
+      // regardless of skip cadence; physics still integrates velocity every
+      // step, so enemies coast smoothly between AI updates (no snap).
+      if (this.perfController.shouldRun('ai')) {
+          const aiDt = dt * this.perfController.effectiveInterval('ai');
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField);
+      } else {
+          this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
+      }
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -1501,8 +1563,12 @@ export class GameEngine {
     // Plastic self-break (v7): plastic-shards no longer merge — each
     // counts down a per-shard timer and self-shatters when it expires,
     // cascading down to chips that explode on their own.  Drops are
-    // suppressed for these self-triggered breaks.
-    this.tickPlasticSelfBreak(dt);
+    // suppressed for these self-triggered breaks.  Skippable: the timers
+    // are long (12.5–30 s) so dt-compensating the decrement on the steps
+    // it does run keeps the self-break cadence frame-skip-independent.
+    if (this.perfController.shouldRun('plasticSelfBreak')) {
+        this.tickPlasticSelfBreak(dt * this.perfController.effectiveInterval('plasticSelfBreak'));
+    }
 
     // Tick down regenPopTimer on tiles
     if (this.currentMap) {
@@ -1795,9 +1861,15 @@ export class GameEngine {
 
     // Proximity collection + magnetic pull — single pass over activeDrops.
     // Ammo shards get a magnet accelerator; health hearts collect on contact
-    // only (static pickup).
+    // only (static pickup).  Skippable (PerfController `dropScan` task):
+    // collection has a generous radius so a few-step lag is imperceptible,
+    // and the magnet pull is dt-compensated by the effective interval so
+    // the integrated acceleration toward the player stays the same
+    // regardless of skip cadence.  The compaction below still runs every
+    // step so drops shot/expired elsewhere drop out promptly.
     const tDrops = performance.now();
-    if (!this.player.isExploding) {
+    if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
+      const dropDt = dt * this.perfController.effectiveInterval('dropScan');
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const MAGNET_RANGE_SQ = 150 * 150;
       const MAGNET_ACCEL    = 7; // world-units/s² toward player; scales up as dist shrinks
@@ -1817,8 +1889,8 @@ export class GameEngine {
         if (distSq < MAGNET_RANGE_SQ) {
           const dist = Math.sqrt(distSq);
           const a    = MAGNET_ACCEL / dist; // inverse-linear: stronger when closer
-          drop.velocity.x += dx * a * dt;
-          drop.velocity.y += dy * a * dt;
+          drop.velocity.x += dx * a * dropDt;
+          drop.velocity.y += dy * a * dropDt;
         }
       }
     }
@@ -2854,6 +2926,13 @@ export class GameEngine {
           projectileCount:   this.perfCounts.projectileCount,
           particleCount:     this.perfCounts.particleCount,
           interactableCount: this.perfCounts.interactableCount,
+          perfLoadLevel:     this.perfController.loadLevel,
+          perfLoadTier:      this.perfController.tierName(),
+          perfMergeRateMult: this.perfController.mergeRateMultiplier,
+          // Fresh small array (9 tasks) per render frame — negligible vs.
+          // the per-frame stats object the loop already builds, and keeps
+          // the controller's internal `run` flag out of the snapshot.
+          perfTasks: this.perfController.debug.map(t => ({ id: t.id, eff: t.eff, manual: t.manual })),
       };
   }
 }

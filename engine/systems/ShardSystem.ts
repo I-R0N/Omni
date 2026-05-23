@@ -33,6 +33,7 @@ import {
   getActivePlasticYield,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
+import type { PerfController } from './PerfController';
 import { HEX_AREA, HEX_SIZE, TileGenerator, hexCoordToPixel, pixelToHexCoord } from '../maps/TileGenerator';
 import {
   wrapDeltaX, wrapDeltaY, wrapPosition, wrapX, wrapY,
@@ -156,13 +157,6 @@ export class ShardSystem {
    */
   public plasticReachEnabled: boolean = true;
   /**
-   * Counter for the SHPAIR-paced plastic cosmetic passes (PAuto count +
-   * reach).  These run only every `physics.lastEffectiveShardPairInterval`-th
-   * merge broadphase so the two most expensive plastic scans back off
-   * under load while the eat / bonding passes keep the merge cadence.
-   */
-  private plasticCosmeticTick: number = 0;
-  /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
    * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
@@ -202,7 +196,30 @@ export class ShardSystem {
    */
   private entityIndex: EntityIndex | null = null;
 
+  /**
+   * Central performance controller.  Drives the plastic-cosmetic skip
+   * gate (PAuto count + reach) and the entity-count merge/eat RATE
+   * multiplier.  Null only pre-wire; GameEngine sets it at construction.
+   */
+  private perfController: PerfController | null = null;
+
+  /**
+   * Per-merge-pass counter for the plastic cosmetic sub-gate (PAuto
+   * count + reach).  These passes are NESTED inside runMergeBroadphase,
+   * which itself only runs on shard-pair steps — so they can't use the
+   * controller's global-tick `shouldRun` (its phase might never coincide
+   * with merge-pass steps, starving the gate forever).  Instead the
+   * controller supplies the effective INTERVAL and we apply it against a
+   * counter that ticks once per merge pass, so the gate fires every Nth
+   * merge pass exactly like the old SHPAIR-paced cadence.
+   */
+  private plasticCosmeticTick: number = 0;
+
   constructor(private particles: ParticleSystem) {}
+
+  public setPerfController(pc: PerfController): void {
+    this.perfController = pc;
+  }
 
   /** Wire the variant-specific completion adapter.  Called once at
    *  GameEngine construction after NebulaSystem is built. */
@@ -295,6 +312,7 @@ export class ShardSystem {
   public reset(): void {
     this.pending.length = 0;
     this.bonds.length = 0;
+    this.plasticCosmeticTick = 0;
   }
 
   // ── Regen queue ───────────────────────────────────────────────────
@@ -855,6 +873,14 @@ export class ShardSystem {
   private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem, applyCohesion: boolean = true): void {
     if (this.bonds.length === 0) return;
 
+    // Crowd-driven merge RATE multiplier (>= 1).  tickBonds runs EVERY
+    // sim step (only the cohesion blend below is paced), so the bond
+    // timer never drifts under frame-skipping and needs no skip
+    // compensation — the multiplier alone makes bonds mature FASTER when
+    // the field is crowded.  It also scales up the per-frame merge
+    // budget so a dense field can compact more bonds per tick.
+    const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
+
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
     // Per-frame merge budget — caps how many density-compaction merges
@@ -866,7 +892,7 @@ export class ShardSystem {
     // next tick.  Sized at MAX_REMOVALS_PER_FRAME for the same reason
     // the cleanup pacing uses that budget — fade-pacing and merge-
     // pacing should breathe at the same rate.
-    let mergeBudget = CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME;
+    let mergeBudget = Math.max(1, Math.round(CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME * rateMult));
 
     let writeIdx = 0;
     for (let bi = 0; bi < this.bonds.length; bi++) {
@@ -898,7 +924,7 @@ export class ShardSystem {
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
       }
 
-      bond.timer += dt;
+      bond.timer += dt * rateMult;
 
       if (bond.timer >= bond.threshold) {
         // Stage 5b: requirePartnerSizeFraction gate.  If unmet, the
@@ -968,17 +994,30 @@ export class ShardSystem {
    *  104-unit max contact distance.
    */
   private runMergeBroadphase(entities: GameEntity[], dt: number, _physics: PhysicsSystem): void {
-    // SHPAIR-paced gate for the cosmetic plastic scans (PAuto count +
-    // reach).  This broadphase already runs at the shard-pair cadence;
-    // gating these two passes by the effective interval ON TOP of that
-    // makes them back off harder when SHPAIR escalates under load,
-    // leaving the eat / bonding work at the merge cadence.  When the
+    // PerfController-driven gate for the cosmetic plastic scans (PAuto
+    // count + reach).  This broadphase already runs at the shard-pair
+    // cadence; the controller's `plasticCosmetic` task supplies an extra
+    // effective interval that throttles these two passes further (its
+    // higher cost weight backs off harder under load) while the eat /
+    // bonding work keeps the merge cadence.  Applied against a per-
+    // merge-pass counter (not the controller's global-tick gate) so the
+    // nested sub-pass can't be starved by phase misalignment.  When the
     // skip is active, plasticNeighborCount is left stale (the renderer
     // keeps the last brightness) and reach anchors hold (the spring
     // keeps chasing the last-aimed anchor) — no flicker, no snap.
-    const cosmeticInterval = Math.max(1, _physics.lastEffectiveShardPairInterval | 0);
+    const cosmeticInterval = Math.max(1, this.perfController
+        ? this.perfController.effectiveInterval('plasticCosmetic') | 0
+        : 1);
     const runCosmetic = (this.plasticCosmeticTick % cosmeticInterval) === 0;
     this.plasticCosmeticTick++;
+    // Frame-skip compensation factor: this whole broadphase runs once
+    // per `skipComp` substeps (the shard-pair effective interval), so
+    // time-based eat accumulation is multiplied by it to stay
+    // frame-skip-independent (see the eat pass below).
+    const skipComp = Math.max(1, _physics.lastEffectiveShardPairInterval | 0);
+    // Crowd-driven merge/eat RATE multiplier (>= 1): denser fields eat
+    // and bond FASTER to cull entities.  Separate from the throttle.
+    const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
     // Track which entities are currently in active stick-bonds so
     // the bond-formation pass doesn't double-bond.
     const bonded = new Set<GameEntity>();
@@ -1095,6 +1134,14 @@ export class ShardSystem {
       const factor = PLASTIC_EAT.CONTACT_RADIUS_FACTOR;
       const attractRangeSq = PLASTIC_EAT.ATTRACT_RANGE * PLASTIC_EAT.ATTRACT_RANGE;
       const attractStrength = getActivePlasticEatAttract();
+      // The eat timer accumulates ONLY when this broadphase runs, which
+      // is once per `skipComp` substeps — so multiply dt by skipComp to
+      // keep digest time frame-skip-independent under load.  The
+      // crowd-rate multiplier then SHORTENS the maturation threshold so
+      // dense fields digest debris faster (entity culling).  The pull
+      // force is intentionally NOT compensated: it stays at the merge
+      // cadence (a pre-existing "dense fields back off" behaviour).
+      const dtEat = dt * skipComp;
       let eats: Array<{ eater: GameEntity; consumed: GameEntity }> | null = null;
       for (let i = 0; i < candidates.length; i++) {
         const g = candidates[i];
@@ -1127,7 +1174,7 @@ export class ShardSystem {
           }
         }
         if (!nearP) {
-          if (g.plasticEatTimer) g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
+          if (g.plasticEatTimer) g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dtEat);
           continue;
         }
         // Gentle attraction toward the nearest plastic (dx/dy already
@@ -1143,15 +1190,18 @@ export class ShardSystem {
         // Eat timer — only while inside the plastic's orb.
         const reach = (nearP.size.x / 2) * factor + gR;
         if (nearDistSq <= reach * reach) {
-          const t = (g.plasticEatTimer ?? 0) + dt;
+          const t = (g.plasticEatTimer ?? 0) + dtEat;
           g.plasticEatTimer = t;
           // Metal is dense — it takes significantly longer to digest.
-          const eatTime = g.shardVariant === 'metal-shard'
+          // Crowd-rate multiplier shortens the maturation time so dense
+          // fields cull debris faster.
+          const baseEatTime = g.shardVariant === 'metal-shard'
             ? PLASTIC_EAT.SECONDS * PLASTIC_EAT.METAL_TIME_FACTOR
             : PLASTIC_EAT.SECONDS;
+          const eatTime = baseEatTime / rateMult;
           if (t >= eatTime) (eats ??= []).push({ eater: nearP, consumed: g });
         } else if (g.plasticEatTimer) {
-          g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
+          g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dtEat);
         }
       }
       if (eats) {
