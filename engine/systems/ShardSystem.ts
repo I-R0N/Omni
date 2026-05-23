@@ -101,6 +101,14 @@ const GLASS_TIER_DIAMETER = Math.sqrt(HEX_AREA);
 // 17-24 sizes that plastic-shards spawn at from a tile burst,
 // so a typical merge of 2-3 shards reaches the threshold.
 const PLASTIC_TIER_DIAMETER = Math.sqrt(HEX_AREA);
+// Rock-shard "grow into a tile" threshold.  Unlike glass (which condenses
+// at exactly hex-area), rocks are allowed to grow LARGER before they
+// transmute, so a dense cluster forms a visible big rock that keeps
+// absorbing chips before snapping to a static rock-tile.  Set as a
+// multiple of the hex-area diameter; raise/lower to tune how big rocks
+// get before they tile.  At ×1.8 the rock reaches ≈ 3.2× hex area (many
+// absorbed chips) before transmuting.
+const ROCK_TIER_DIAMETER = Math.sqrt(HEX_AREA) * 1.8;
 
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
@@ -1826,6 +1834,65 @@ export class ShardSystem {
   }
 
   /**
+   * Rock counterpart to tryTransmuteGlassShardToTile.  Snap the grown
+   * rock-shard to the nearest free hex cell and replace it with a static
+   * rock-tile (mass ∞).  Candidate cells are the shard's current hex + 6
+   * neighbours, sorted by distance; if every candidate is occupied the
+   * shard stays a (big) rock and a later merge retries.  Unconditional
+   * tile outcome (no glass-style 50/50 downgrade) — the whole point is to
+   * move consolidated rock mass into the static grid.
+   */
+  private tryTransmuteRockShardToTile(
+    shard: GameEntity,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    if (shard.shardVariant !== 'rock-shard') return false;
+
+    const origin = pixelToHexCoord(shard.position.x, shard.position.y);
+    const candidates: { c: number; r: number; distSq: number }[] = [];
+    const pushCandidate = (c: number, r: number) => {
+      const p = hexCoordToPixel(c, r);
+      const dx = wrapDeltaX(shard.position.x, p.x);
+      const dy = wrapDeltaY(shard.position.y, p.y);
+      candidates.push({ c, r, distSq: dx * dx + dy * dy });
+    };
+    pushCandidate(origin.c, origin.r);
+    for (const n of TileGenerator.getHexNeighbors(origin.c, origin.r)) {
+      pushCandidate(n.c, n.r);
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    let chosen: { c: number; r: number } | null = null;
+    for (const cand of candidates) {
+      const p = hexCoordToPixel(cand.c, cand.r);
+      if (!physics.isPositionClear(p.x, p.y, HEX_SIZE * 0.5)) continue;
+      chosen = cand;
+      break;
+    }
+    if (!chosen) return false;
+
+    const p = hexCoordToPixel(chosen.c, chosen.r);
+    const w = Math.sqrt(3) * HEX_SIZE;
+    const h = 2 * HEX_SIZE;
+    const pts: Vector2[] = [
+      { x:  0,    y: -h / 2 },
+      { x:  w / 2, y: -h / 4 },
+      { x:  w / 2, y:  h / 4 },
+      { x:  0,    y:  h / 2 },
+      { x: -w / 2, y:  h / 4 },
+      { x: -w / 2, y: -h / 4 },
+    ];
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, 'rock');
+    entities.push(tile);
+    physics.addStaticEntity(tile);
+
+    // Source shard fades out while the tile materialises on top of it.
+    this.startMergeFadeOut(shard);
+    return true;
+  }
+
+  /**
    * Plastic counterpart to tryTransmuteGlassShardToTile.  Snap the
    * shard to the nearest free hex cell and replace it with a fresh
    * plastic-tile.  Candidate cells are the shard's current hex + 6
@@ -1984,7 +2051,13 @@ export class ShardSystem {
       // keep the density path.
       const isGlassSelfMerge   = a.shardVariant === 'glass-shard'   && b.shardVariant === 'glass-shard';
       const isPlasticSelfMerge = a.shardVariant === 'plastic-shard' && b.shardVariant === 'plastic-shard';
-      if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge) {
+      // Rock self-merge GROWS (area-conserving) toward ROCK_TIER_DIAMETER
+      // instead of density-shrinking.  The old shrink/tier-cap path left
+      // dense clusters stuck as tier-capped fragments (the hotspot that
+      // never consolidated); growth + the rock→tile transmute below let a
+      // cluster collapse into a few big rocks that become static tiles.
+      const isRockSelfMerge    = a.shardVariant === 'rock-shard'    && b.shardVariant === 'rock-shard';
+      if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge && !isRockSelfMerge) {
         const tierA = a.densityTier ?? 0;
         const tierB = b.densityTier ?? 0;
         const proposedTier = Math.max(tierA, tierB) + 1;
@@ -1997,14 +2070,20 @@ export class ShardSystem {
         newMass = a.mass + b.mass;
       } else {
         newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
-        // sizeCap applies to rock / glass shards (avoid producing
-        // shards larger than the map's free-spawn maxSize, which
-        // would look like rogue giant rocks).  Plastic self-merge
-        // has no upper limit per user direction — plastic-shards
-        // grow indefinitely.  The plastic-shard → plastic-tile
-        // transmute is also disabled (see below), so there's no
-        // tier-up termination either.
-        if (!isPlasticSelfMerge) {
+        // Rock self-merge: clamp growth at ROCK_TIER_DIAMETER (the post-
+        // compose transmute below converts it to a static rock-tile once
+        // it reaches that size) and bump the density tier so the growing
+        // rock visibly darkens ("denser rocks") without shrinking.
+        if (isRockSelfMerge) {
+          if (newDiam > ROCK_TIER_DIAMETER) newDiam = ROCK_TIER_DIAMETER;
+          if (density) {
+            newTier = Math.min(density.maxSteps, Math.max(a.densityTier ?? 0, b.densityTier ?? 0) + 1);
+          }
+        } else if (!isPlasticSelfMerge) {
+          // sizeCap applies to glass shards (avoid producing shards
+          // larger than the map's free-spawn maxSize, which would look
+          // like rogue giants).  Plastic self-merge has no upper limit
+          // per user direction — plastic-shards grow indefinitely.
           const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
           if (newDiam > sizeCap) return;
         }
@@ -2087,6 +2166,14 @@ export class ShardSystem {
       // chain (nebula→glass→rock→metal→plastic).
       if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
         this.tryConvertOversizedGlassShard(a, entities, physics);
+      }
+      // Rock-shard tier transition.  A rock grown to ROCK_TIER_DIAMETER by
+      // absorbing its cluster condenses into a STATIC rock-tile at the
+      // nearest free hex — leaving the dynamic collision system entirely,
+      // which is the hotspot win.  If no hex is free it stays a big rock
+      // and a later merge retries.
+      if (a.shardVariant === 'rock-shard' && a.size.x >= ROCK_TIER_DIAMETER) {
+        this.tryTransmuteRockShardToTile(a, entities, physics);
       }
       // Plastic-shard tier transition — DISABLED per user direction.
       // Plastic-shards merge into ever-larger plastic-shards
