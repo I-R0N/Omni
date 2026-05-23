@@ -859,6 +859,10 @@ export interface EngineStats {
   // parallel offset lanes instead of one streamline.  DBG-cycle
   // "FF Lane".
   ffLaneJitter?: number;
+  // Short label of the active base-flow pattern (DBG "FF Pattern":
+  // Map / Meander / Circular / Spiral / Well / WavyWell / Outward /
+  // Horiz / Vert / WavyH / WavyV).
+  ffPatternName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

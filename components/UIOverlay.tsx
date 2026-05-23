@@ -52,6 +52,7 @@ interface UIOverlayProps {
   onCycleFFTangentMix?: () => void;
   onCycleFFBreathe?: () => void;
   onCycleFFLaneJitter?: () => void;
+  onCycleFFPattern?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -109,6 +110,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFFTangentMix,
   onCycleFFBreathe,
   onCycleFFLaneJitter,
+  onCycleFFPattern,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -589,6 +591,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* ── FlowField (asteroid/shard FF — DBG only) ───────── */}
               {renderSectionHeader('flowfield', 'FlowField')}
               {!collapsed.flowfield && (<>
+                {/* Base-flow pattern.  Swaps the analytical field the
+                    grid bakes from — map default / meander / circular /
+                    spiral / gravity well / wavy well / outward /
+                    directional + wavy.  Re-bakes on each cycle; kernel /
+                    tangent / breathing all still apply on top. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Pattern</span>
+                  <button
+                    onClick={onCycleFFPattern}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the base-flow pattern: Map (default) → Meander → Circular → Spiral → Well → WavyWell → Outward → Horiz → Vert → WavyH → WavyV.  Re-bakes the asteroid field; kernel / tangent / breathing apply on top."
+                  >
+                    {stats.ffPatternName ?? 'Map'}
+                  </button>
+                </div>
                 {/* Asteroid FF behaviour toggle.  OFF skips the per-
                     asteroid / per-ammo-drop velocity nudge entirely;
                     asteroids decay toward zero velocity over a few

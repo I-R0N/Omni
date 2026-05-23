@@ -20,6 +20,8 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { FlowPattern, samplePattern } from './systems/FlowField';
+import type { FlowSampler } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
 import { randomRockNebulaComposition } from './NebulaColor';
 
@@ -226,6 +228,40 @@ export class GameEngine {
   private static readonly FF_LANE_JITTER_CYCLE: readonly number[] =
     [0, 0.1, 0.2, 0.35] as const;
   private ffLaneJitter: number = 0;
+  // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
+  // the active map's own sampleFlow(); the rest swap in an analytical
+  // field (circular / spiral / gravity well / directional / wavy …).
+  // Persists across map loads so a pattern can be compared on different
+  // maps.  Cycling re-bakes the asteroid field with the chosen sampler;
+  // kernel / tangent / breathing all still apply on top.
+  private static readonly FF_PATTERN_CYCLE: readonly FlowPattern[] = [
+    FlowPattern.DEFAULT,
+    FlowPattern.MEANDER,
+    FlowPattern.CIRCULAR,
+    FlowPattern.SPIRAL,
+    FlowPattern.GRAVITY_WELL,
+    FlowPattern.WAVY_GRAVITY_WELL,
+    FlowPattern.OUTWARD,
+    FlowPattern.HORIZONTAL,
+    FlowPattern.VERTICAL,
+    FlowPattern.WAVY_HORIZONTAL,
+    FlowPattern.WAVY_VERTICAL,
+  ];
+  // Short DBG-button labels per pattern (compact for the panel chip).
+  private static readonly FF_PATTERN_LABELS: Record<FlowPattern, string> = {
+    [FlowPattern.DEFAULT]:           'Map',
+    [FlowPattern.MEANDER]:           'Meander',
+    [FlowPattern.CIRCULAR]:          'Circular',
+    [FlowPattern.SPIRAL]:            'Spiral',
+    [FlowPattern.GRAVITY_WELL]:      'Well',
+    [FlowPattern.WAVY_GRAVITY_WELL]: 'WavyWell',
+    [FlowPattern.OUTWARD]:           'Outward',
+    [FlowPattern.HORIZONTAL]:        'Horiz',
+    [FlowPattern.VERTICAL]:          'Vert',
+    [FlowPattern.WAVY_HORIZONTAL]:   'WavyH',
+    [FlowPattern.WAVY_VERTICAL]:     'WavyV',
+  };
+  private ffPattern: FlowPattern = FlowPattern.DEFAULT;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -761,7 +797,9 @@ export class GameEngine {
     this.ffCellSize = next;
     this.flowField.setCellSize(next);
     this.flowField.initObstacles(this.currentMap.entities);
-    this.flowField.buildAsteroidField((x, y) => this.currentMap!.sampleFlow(x, y));
+    // Re-bake under the active pattern selection (not necessarily the
+    // map's own sampler) so the chosen pattern survives density changes.
+    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
     // The new grid starts with defaults; push the current cycled
     // values back so they survive density changes.
     this.flowField.setKernelR(this.ffKernelR);
@@ -832,6 +870,38 @@ export class GameEngine {
     const order = GameEngine.FF_LANE_JITTER_CYCLE;
     const idx = order.indexOf(this.ffLaneJitter);
     this.ffLaneJitter = order[(idx + 1) % order.length];
+  }
+
+  /**
+   * Resolve the base-flow sampler for the given map under the current
+   * DBG pattern selection.  DEFAULT uses the map's own sampleFlow();
+   * any other pattern swaps in the corresponding analytical field.
+   * Used at map load and at every re-bake (density / pattern cycle)
+   * so the selection sticks.
+   */
+  private flowSamplerFor(map: BaseMapLayer): FlowSampler {
+    if (this.ffPattern === FlowPattern.DEFAULT) {
+      return (x, y) => map.sampleFlow(x, y);
+    }
+    const p = this.ffPattern;
+    return (x, y) => samplePattern(p, x, y);
+  }
+
+  /**
+   * Cycle the base-flow pattern through `FF_PATTERN_CYCLE` (map default
+   * → meander → circular → spiral → gravity well → wavy well → outward
+   * → horizontal → vertical → wavy-H → wavy-V).  Re-bakes the asteroid
+   * field with the new sampler; current kernel / tangent / breathing
+   * settings still apply on top.  The map's spawn-time seeding is
+   * unaffected — existing shards re-settle onto the new pattern over a
+   * second or two via the per-frame flow nudge.
+   */
+  public cycleFFPattern() {
+    if (!this.currentMap) return;
+    const order = GameEngine.FF_PATTERN_CYCLE;
+    const idx = order.indexOf(this.ffPattern);
+    this.ffPattern = order[(idx + 1) % order.length];
+    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
   }
 
   /**
@@ -1070,6 +1140,7 @@ export class GameEngine {
       ffTangentMix:       this.ffTangentMix,
       ffBreatheRate:      this.ffBreatheRate,
       ffLaneJitter:       this.ffLaneJitter,
+      ffPatternName:      GameEngine.FF_PATTERN_LABELS[this.ffPattern],
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1211,6 +1282,7 @@ export class GameEngine {
       ffTangentMix:       this.ffTangentMix,
       ffBreatheRate:      this.ffBreatheRate,
       ffLaneJitter:       this.ffLaneJitter,
+      ffPatternName:      GameEngine.FF_PATTERN_LABELS[this.ffPattern],
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -2982,7 +3054,10 @@ export class GameEngine {
       // cache matches their lifecycle.
       this.physics.initializeAttractors(map.entities);
       this.flowField.initObstacles(map.entities);
-      this.flowField.buildAsteroidField((x, y) => map.sampleFlow(x, y));
+      // Bake under the active DBG pattern (DEFAULT = the map's own
+      // sampler) so a selected pattern persists across map loads /
+      // restarts.
+      this.flowField.buildAsteroidField(this.flowSamplerFor(map));
       this.renderer.setMapType(map.type);
       // Forward the map's recorded nebula cluster-center positions to
       // the background layer so its puffs render at the same world
