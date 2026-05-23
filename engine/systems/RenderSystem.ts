@@ -2210,28 +2210,31 @@ export class RenderSystem {
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                // ── LOD: tiny mobile shards → cached solid disc ────────────
-                // Below MIN_APPARENT_RADIUS_PX the polygon irregularity,
-                // edge stroke and bloom are sub-pixel, so a flat disc is
-                // indistinguishable from the full render at a fraction of
-                // the cost (one drawImage vs beginPath + per-vertex lineTo
-                // + fill + stroke).  Restricted to plain mobile shards:
+                // ── LOD: tiny round mobile shards → cached solid disc ──────
+                // Below MIN_APPARENT_RADIUS_PX a roundish shard's polygon
+                // irregularity, edge stroke and bloom are sub-pixel, so a
+                // flat disc is indistinguishable from the full render at a
+                // fraction of the cost (one drawImage vs beginPath +
+                // per-vertex lineTo + fill + stroke).  Restricted to plain
+                // ROUND mobile shards — rock (5-9-gon, roundish) and metal
+                // (6-10-gon, near-circular).  EXCLUDED: glass-shard, whose
+                // 3-4-vertex sharp-splinter silhouette reads as angular even
+                // when small, so a circle is a visible mis-render (the
+                // splinter is the material's identity).  Also excluded:
                 // static tiles, plastic (already disc-cached), hit-flashing
-                // and power-up-glowing shards keep their full path so those
-                // cues still read.  Reset globalAlpha before the early
-                // return so a following fast-path tile blit isn't faded.
+                // and power-up-glowing shards (those cues must still read).
+                // Reset globalAlpha before the early return so a following
+                // fast-path tile blit isn't faded.
                 const lodR = entity.size.x * 0.5;
                 if (this.shardLodEnabled
                     && entity.mass !== Infinity
                     && !isPlasticShard
+                    && !isTileShard
                     && !isFlash
                     && glowColor === undefined
                     && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
-                    const lodHex = isTileShard
-                        ? densityTintForRender(entity, '#b4e6fd')
-                        : densityTintForRender(entity, entity.color);
-                    ctx.globalAlpha = (isTileShard ? 0.6 : 1.0) * shardMergeFadeAlpha(entity);
-                    const disc = this.getSolidDiscBitmap(lodHex);
+                    const disc = this.getSolidDiscBitmap(densityTintForRender(entity, entity.color));
+                    ctx.globalAlpha = shardMergeFadeAlpha(entity);
                     ctx.drawImage(disc, -lodR, -lodR, lodR * 2, lodR * 2);
                     ctx.globalAlpha = 1.0;
                     this.lastLodShardCount++;
