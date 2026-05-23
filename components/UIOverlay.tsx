@@ -20,6 +20,7 @@ interface UIOverlayProps {
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
   onToggleShardSleep?: () => void;
+  onToggleShardViewportCull?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -68,6 +69,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
   onToggleShardSleep,
+  onToggleShardViewportCull,
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticAutomata,
@@ -428,6 +430,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.shardSleepEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">VpCull</span>
+                  <button
+                    onClick={onToggleShardViewportCull}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle viewport-gated shard-pair cadence.  When ON, two shards that are both offscreen resolve their collision only on a periodic catch-up pass (~8x less often); any pair with a shard on/near the camera resolves every pass.  OFF resolves every pair regardless of visibility — use to confirm no visible pop when off-screen piles scroll into view."
+                  >
+                    {stats.shardViewportCullEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —
                     off / soft / med / firm / stiff.  Rotation mode
                     is fixed to "free" (only squash axis aligns to
@@ -628,8 +640,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       <span>dyn ents</span>
                       <span className="text-white">
                         {perf.perfDynamicCount}
-                        {perf.perfAsleepCount > 0 && (
-                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp)</span>
+                        {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0) && (
+                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''})</span>
                         )}
                       </span>
                     </div>

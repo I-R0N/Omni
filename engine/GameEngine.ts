@@ -450,6 +450,17 @@ export class GameEngine {
   }
 
   /**
+   * Toggle viewport-gated shard-pair cadence.  When on, both-offscreen
+   * shard pairs resolve only on the catch-up phase (every Nth pass);
+   * on/near-screen pairs always resolve.  Off resolves every pair
+   * regardless of visibility — used to A/B the win and confirm no
+   * visible pop when off-screen piles scroll into view.
+   */
+  public toggleShardViewportCull() {
+    this.physics.shardViewportCullEnabled = !this.physics.shardViewportCullEnabled;
+  }
+
+  /**
    * Toggle the camera screen-shake effect on/off.  When off,
    * handleScreenShake early-returns and any in-flight shake decays
    * to zero on the next sim step (the existing decay logic clears
@@ -867,6 +878,7 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
+      shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -1000,6 +1012,7 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
+      shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -1132,6 +1145,12 @@ export class GameEngine {
       this._viewportRect.top    = this.camera.position.y - halfH - margin;
       this._viewportRect.bottom = this.camera.position.y + halfH + margin;
       this.entityIndex.setViewportRect(this._viewportRect);
+      // Feed the same rect to PhysicsSystem so the shard-pair pass can
+      // run both-offscreen pairs at a reduced cadence (Step 3).
+      this.physics.setViewportRect(
+          this._viewportRect.left, this._viewportRect.right,
+          this._viewportRect.top, this._viewportRect.bottom,
+      );
 
       // Mirror the latest entity-type counts into the perf snapshot — the
       // index just walked the full list anyway, so this is O(0) extra work.
@@ -2944,6 +2963,7 @@ export class GameEngine {
           perfLoadTier:      this.perfController.tierName(),
           perfDynamicCount:  this.perfController.lastDynamicCount,
           perfAsleepCount:   this.physics.lastAsleepCount,
+          perfOffscreenShards: this.physics.lastOffscreenShardCount,
           perfMergeRateMult: this.perfController.mergeRateMultiplier,
           // Fresh small array (9 tasks) per render frame — negligible vs.
           // the per-frame stats object the loop already builds, and keeps

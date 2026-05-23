@@ -526,6 +526,14 @@ export interface GameEntity {
   // accumulator (seconds).
   asleep?: boolean;
   sleepTimer?: number;
+  // Transient per-pass visibility flag for the collision viewport gate.
+  // Recomputed each resolveShardPairs grid build (torus-aware): true when
+  // the shard sits outside the CULL_MARGIN-padded camera rect.  A pair
+  // where both ends are offscreen resolves only on the catch-up phase
+  // (SHARD_PAIR_CONSTANTS.OFFSCREEN_RESOLVE_DIVISOR); on/near-screen
+  // pairs always resolve.  Not gameplay state — never persisted, only
+  // read within the same pass it's written.
+  offscreen?: boolean;
   // Plastic-shard "jiggle" state — set by collision impulses that
   // exceed restSpeed, ticked down each substep, consumed by
   // RenderSystem's plastic-shard branch to apply a damped-sinusoid
@@ -723,6 +731,9 @@ export interface PerfSnapshot {
   // Mobile shards currently flagged asleep (skipped from asleep↔asleep
   // pair resolution).  High in a settled field → the sleep win is live.
   perfAsleepCount: number;
+  // Mobile shards currently offscreen (both-offscreen pairs resolve at
+  // reduced cadence).  Set by the last resolveShardPairs grid build.
+  perfOffscreenShards: number;
   // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
   // crowded > 1).  Separate from throttling — crowded fields merge/eat
   // faster to cull entities, sparse fields merge lazily.
@@ -789,6 +800,9 @@ export interface EngineStats {
   // Collision-sleep for mobile shards — skips asleep↔asleep pair math
   // in resolveShardPairs.  DBG-toggleable; default ON.
   shardSleepEnabled?: boolean;
+  // Viewport-gated shard-pair cadence — both-offscreen pairs resolve
+  // only on the catch-up phase.  DBG-toggleable; default ON.
+  shardViewportCullEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
   // DBG outline overlay for outlineless variants (plastic-tile /

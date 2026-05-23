@@ -967,6 +967,18 @@ export const SHARD_PAIR_CONSTANTS = {
   // each other — useful for measuring the absolute floor of collision
   // cost.
   CYCLE_ORDER: [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1028] as const,
+  // Viewport-gated cadence: a shard-pair where BOTH shards are
+  // offscreen resolves only once every OFFSCREEN_RESOLVE_DIVISOR
+  // shard-pair passes (a "catch-up" phase); any pair with at least one
+  // shard on/near the camera resolves every pass.  Targets the
+  // unbounded cost of free-drift shards the player kicked and abandoned
+  // — those never sleep (no friction) and otherwise resolve at full
+  // cadence forever, off-screen and unseen.  The catch-up phase keeps
+  // off-screen piles from interpenetrating without bound, and any shard
+  // entering the (CULL_MARGIN-padded) viewport resolves at full rate
+  // before it's visible, so the gate is invisible.  8 ≈ resolve
+  // off-screen pairs ~7-8× less often.
+  OFFSCREEN_RESOLVE_DIVISOR: 8,
 };
 
 // ─────────────────────────────────────────────────────────────────────

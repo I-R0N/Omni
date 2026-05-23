@@ -53,7 +53,7 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCo
     e.dentX = newDX;
     e.dentY = newDY;
 }
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -163,6 +163,27 @@ export class PhysicsSystem {
   // Count of shards flagged asleep as of the last resolveShardPairs
   // call — exposed for the DBG perf readout so the win is visible.
   public lastAsleepCount: number = 0;
+  // Debug toggle — viewport-gated shard-pair cadence.  When true,
+  // both-offscreen shard pairs resolve only on the catch-up phase
+  // (every OFFSCREEN_RESOLVE_DIVISOR passes); on/near-screen pairs
+  // always resolve.  Off restores resolving every pair regardless of
+  // visibility.
+  public shardViewportCullEnabled: boolean = true;
+  // Camera-aligned viewport rect (world coords, CULL_MARGIN-padded),
+  // set per sim frame by GameEngine.  Null until the first set — then
+  // resolveShardPairs treats all shards as on-screen (conservative).
+  private viewportLeft: number = 0;
+  private viewportRight: number = 0;
+  private viewportTop: number = 0;
+  private viewportBottom: number = 0;
+  private hasViewportRect: boolean = false;
+  // Monotonic resolveShardPairs call counter — drives the off-screen
+  // catch-up phase (every OFFSCREEN_RESOLVE_DIVISOR-th call resolves
+  // both-offscreen pairs too).
+  private shardPairCallCount: number = 0;
+  // Count of shards flagged offscreen in the last resolveShardPairs
+  // grid build — exposed for the DBG perf readout.
+  public lastOffscreenShardCount: number = 0;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -261,6 +282,17 @@ export class PhysicsSystem {
               this.attractorsCache.push(e);
           }
       }
+  }
+
+  /** Per-frame camera-aligned viewport rect (world coords, already
+   *  CULL_MARGIN-padded by the caller).  Drives the both-offscreen
+   *  shard-pair cadence gate in resolveShardPairs. */
+  public setViewportRect(left: number, right: number, top: number, bottom: number): void {
+      this.viewportLeft = left;
+      this.viewportRight = right;
+      this.viewportTop = top;
+      this.viewportBottom = bottom;
+      this.hasViewportRect = true;
   }
 
   public update(
@@ -1252,19 +1284,41 @@ export class PhysicsSystem {
     // with everything else in the broadphase.  Asleep shards stay in
     // the grid (an awake neighbour must still find and resolve against
     // them); only the asleep↔asleep pair body is skipped below.
+    // Viewport-gated cadence: this pass resolves both-offscreen pairs
+    // only on the catch-up phase (every Nth call); on/near-screen pairs
+    // resolve every call.  Compute the flags here (once per shard) so
+    // the inner pair loop is a single bool read.  When no rect is set
+    // or the gate is off, treat every shard as on-screen (offscreen=
+    // false) so behaviour is identical to ungated resolution.
+    this.shardPairCallCount++;
+    const viewportGate = this.shardViewportCullEnabled && this.hasViewportRect;
+    const catchUpPhase = (this.shardPairCallCount
+        % SHARD_PAIR_CONSTANTS.OFFSCREEN_RESOLVE_DIVISOR) === 0;
+    const vl = this.viewportLeft, vr = this.viewportRight;
+    const vt = this.viewportTop, vb = this.viewportBottom;
+
     this.shardGrid.clear();
     let asleepCount = 0;
+    let offscreenCount = 0;
     for (let i = 0; i < shards.length; i++) {
         const e = shards[i];
         if (!e.active || e.isExploding) continue;
         if (e.mergeFadeTimer !== undefined) continue;
         if (e.asleep === true) asleepCount++;
+        if (viewportGate) {
+            const r = (e.size.x > e.size.y ? e.size.x : e.size.y) * 0.5;
+            e.offscreen = !isVisibleOnTorus(e.position.x, e.position.y, r, vl, vr, vt, vb);
+            if (e.offscreen) offscreenCount++;
+        } else {
+            e.offscreen = false;
+        }
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
         if (!cell) { cell = []; this.shardGrid.set(key, cell); }
         cell.push(e);
     }
     this.lastAsleepCount = asleepCount;
+    this.lastOffscreenShardCount = offscreenCount;
 
     // Walk the shard list and resolve pairs.  j > i ordering via
     // id comparison ensures each unordered pair is processed once.
@@ -1295,6 +1349,15 @@ export class PhysicsSystem {
                     // through the island over successive substeps.
                     if (this.shardSleepEnabled
                         && a.asleep === true && b.asleep === true) continue;
+                    // Viewport gate: both shards offscreen → resolve
+                    // only on the catch-up phase.  Either shard on/near
+                    // screen → resolve every pass (full fidelity where
+                    // the player can see it).  Bounded catch-up keeps
+                    // off-screen piles from interpenetrating without
+                    // limit; entering the padded viewport restores full
+                    // rate before the shard is visible.
+                    if (viewportGate && !catchUpPhase
+                        && a.offscreen === true && b.offscreen === true) continue;
                     this.resolveAsteroidPair(a, b, onDeath);
                 }
             }
