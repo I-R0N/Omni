@@ -283,6 +283,9 @@ export const PLASTIC_EAT = {
   CONTACT_RADIUS_FACTOR: 2.0,
   ATTRACT_RANGE: 220,
   ATTRACT_MIN_DIST: 8,
+  // Metal is dense — multiply the eat time so it takes significantly
+  // longer to consume than glass/rock (1.5 s × this).
+  METAL_TIME_FACTOR: 6,
 } as const;
 
 /** Attract-strength steps for the PEat DBG cycle.  Index 1 (180) is

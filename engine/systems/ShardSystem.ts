@@ -1081,7 +1081,7 @@ export class ShardSystem {
       for (let i = 0; i < candidates.length; i++) {
         const g = candidates[i];
         if (!g.active) continue;
-        if (g.shardVariant !== 'glass-shard' && g.shardVariant !== 'rock-shard') continue;
+        if (g.shardVariant !== 'glass-shard' && g.shardVariant !== 'rock-shard' && g.shardVariant !== 'metal-shard') continue;
         const gcx = Math.floor(g.position.x / CELL);
         const gcy = Math.floor(g.position.y / CELL);
         const gR = Math.max(g.size.x, g.size.y) / 2;
@@ -1127,7 +1127,11 @@ export class ShardSystem {
         if (nearDistSq <= reach * reach) {
           const t = (g.plasticEatTimer ?? 0) + dt;
           g.plasticEatTimer = t;
-          if (t >= PLASTIC_EAT.SECONDS) (eats ??= []).push({ eater: nearP, consumed: g });
+          // Metal is dense — it takes significantly longer to digest.
+          const eatTime = g.shardVariant === 'metal-shard'
+            ? PLASTIC_EAT.SECONDS * PLASTIC_EAT.METAL_TIME_FACTOR
+            : PLASTIC_EAT.SECONDS;
+          if (t >= eatTime) (eats ??= []).push({ eater: nearP, consumed: g });
         } else if (g.plasticEatTimer) {
           g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dt);
         }
@@ -1162,7 +1166,7 @@ export class ShardSystem {
         const t = candidates[i];
         if (!t.active) continue;
         const tv = t.shardVariant;
-        const isDebris = tv === 'glass-shard' || tv === 'rock-shard';
+        const isDebris = tv === 'glass-shard' || tv === 'rock-shard' || tv === 'metal-shard';
         const isLoosePlastic = tv === 'plastic-shard' && !bonded.has(t);
         if (!isDebris && !isLoosePlastic) continue;
         const tcx = Math.floor(t.position.x / CELL);
