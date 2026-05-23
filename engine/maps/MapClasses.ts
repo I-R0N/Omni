@@ -207,8 +207,8 @@ export class UniverseMap extends BaseMapLayer {
   // per axis gives room for many landmark clusters before the player
   // meets the wrap seam.  Other maps override this with their own
   // constants.
-  public static readonly WIDTH  = 8000;
-  public static readonly HEIGHT = 8000;
+  public static readonly WIDTH  = 16000;
+  public static readonly HEIGHT = 16000;
 
   constructor() {
     super('universe_01', 'Deep Space', MapType.UNIVERSE);
@@ -333,9 +333,9 @@ export class RingMap extends BaseMapLayer {
   // Radius of the tile ring in world units.  Sized so it's clearly
   // visible from spawn (well inside the half-map) and leaves a large
   // safe zone at the centre.
-  private static readonly RING_TILE_RADIUS = 700;
-  public  static readonly WIDTH  = 6000;
-  public  static readonly HEIGHT = 6000;
+  private static readonly RING_TILE_RADIUS = 1400;
+  public  static readonly WIDTH  = 12000;
+  public  static readonly HEIGHT = 12000;
 
   constructor() {
     super('ring_01', 'Ring World', MapType.RING);
@@ -365,7 +365,9 @@ export class RingMap extends BaseMapLayer {
     for (const e of this.entities) wrapPosition(e.position);
 
     // Glass tile ring at the featured radius.
-    emitGlassTileRing(this.entities, RingMap.RING_TILE_RADIUS, HEX_SIZE);
+    // keepEvery = 2: ring radius doubled to track the 2× map, so thin
+    // to half the tiles to preserve the original ring tile count.
+    emitGlassTileRing(this.entities, RingMap.RING_TILE_RADIUS, HEX_SIZE, 'glass', 2);
 
     // Clear a safe open area around spawn (same rule as UniverseMap so
     // the player never spawns inside an asteroid).
@@ -385,10 +387,10 @@ export class RingMap extends BaseMapLayer {
  */
 export class SevenRingsMap extends BaseMapLayer {
   private static readonly RING_COUNT = 7;
-  private static readonly INNER_RADIUS = 400;
-  private static readonly OUTER_RADIUS = 2200;
-  public  static readonly WIDTH  = 6000;
-  public  static readonly HEIGHT = 6000;
+  private static readonly INNER_RADIUS = 800;
+  private static readonly OUTER_RADIUS = 4400;
+  public  static readonly WIDTH  = 12000;
+  public  static readonly HEIGHT = 12000;
 
   constructor() {
     super('seven_rings_01', 'Seven Rings', MapType.SEVEN_RINGS);
@@ -427,7 +429,9 @@ export class SevenRingsMap extends BaseMapLayer {
                  (SevenRingsMap.RING_COUNT - 1);
     for (let i = 0; i < SevenRingsMap.RING_COUNT; i++) {
       const r = SevenRingsMap.INNER_RADIUS + step * i;
-      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass');
+      // keepEvery = 2: ring radii doubled to track the 2× map, so thin
+      // each ring to half its tiles to preserve the original counts.
+      emitGlassTileRing(this.entities, r, HEX_SIZE, RING_VARIANTS[i] ?? 'glass', 2);
     }
 
     // Keep a spawn bubble clear — use a radius slightly smaller than the
@@ -449,8 +453,8 @@ export class SevenRingsMap extends BaseMapLayer {
  * having to fly around a full-size map to find each element.
  */
 export class PocketMap extends BaseMapLayer {
-  public static readonly WIDTH  = 2000;
-  public static readonly HEIGHT = 2000;
+  public static readonly WIDTH  = 4000;
+  public static readonly HEIGHT = 4000;
 
   // Cluster counts — the sandbox is a showcase so population leans
   // heavy on tiles / nebulae and light on asteroids.  Background nebula
@@ -541,7 +545,7 @@ function concentricRingFlow(wx: number, wy: number): FlowVector {
  * never materialises inside a tile/asteroid regardless of which element
  * is selected.
  */
-const SINGLE_ELEMENT_MAP_SIZE   = 6000;
+const SINGLE_ELEMENT_MAP_SIZE   = 12000;
 const SINGLE_ELEMENT_SPAWN_CLEAR = 350;
 // Cluster zone shrinks by the same 5 % safe-fraction used on the
 // UniverseMap so clusters never crowd the wrap seam.
@@ -849,7 +853,13 @@ function emitGlassTileRing(
     entities: GameEntity[],
     radius: number,
     band: number,
-    variant: StructureVariant = 'glass'
+    variant: StructureVariant = 'glass',
+    // Thin the ring: keep 1 of every `keepEvery` candidate tiles
+    // (evenly by angle).  A solid hex ring's tile count scales with
+    // radius, so when the ring radius is scaled up to track a larger
+    // map we pass keepEvery = scale factor to preserve the original
+    // tile count with proportionally wider spacing.  Default 1 = solid.
+    keepEvery: number = 1,
 ): void {
   const maxCol = Math.ceil((radius + HEX_SIZE) / HEX_WIDTH) + 1;
   const maxRow = Math.ceil((radius + HEX_SIZE) / HEX_V_SPACING) + 1;
@@ -863,12 +873,23 @@ function emitGlassTileRing(
     { x: -w/2, y: h/4 },
     { x: -w/2, y: -h/4 },
   ];
+  const stride = Math.max(1, Math.round(keepEvery));
+  // Collect ring candidates so they can be thinned evenly by angle.
+  // Tiles stay on their hex-grid coords (c, r) — only which ones are
+  // kept changes — so the position === hexCoord invariant holds.
+  const cand: { c: number; r: number; x: number; y: number; a: number }[] = [];
   for (let r = -maxRow; r <= maxRow; r++) {
     for (let c = -maxCol; c <= maxCol; c++) {
       const { x, y } = hexCoordToPixel(c, r);
       const d = Math.sqrt(x * x + y * y);
       if (Math.abs(d - radius) > band) continue;
-      entities.push(TileGenerator.buildStructureTile(c, r, x, y, w, h, pts, variant));
+      cand.push({ c, r, x, y, a: Math.atan2(y, x) });
     }
+  }
+  if (stride > 1) cand.sort((p, q) => p.a - q.a);
+  for (let i = 0; i < cand.length; i++) {
+    if (stride > 1 && (i % stride) !== 0) continue;
+    const t = cand[i];
+    entities.push(TileGenerator.buildStructureTile(t.c, t.r, t.x, t.y, w, h, pts, variant));
   }
 }

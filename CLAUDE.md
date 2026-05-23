@@ -58,7 +58,7 @@ engine/
   maps/
     MapClasses.ts         BaseMapLayer + full-game maps (UniverseMap,
                           RingMap, SevenRingsMap, PocketMap) and the
-                          single-element 6k showcase maps
+                          single-element 12k showcase maps
                           (AsteroidFieldMap, GlassFieldMap,
                           PlasticFieldMap, MetalFieldMap,
                           IndestructibleFieldMap, NebulaFieldMap)
@@ -301,7 +301,7 @@ of `BaseMapLayer`:
   `SevenRingsMap` (`SEVEN_RINGS`), `PocketMap` (`POCKET`). These mix
   asteroids, structures (multiple variants), and nebulae and are the
   ones a normal play session uses.
-- **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
+- **Single-element 12 000 × 12 000 showcase maps** — `AsteroidFieldMap`
   (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`),
   `PlasticFieldMap` (`PLASTIC_FIELD`), `MetalFieldMap` (`METAL_FIELD`),
   `IndestructibleFieldMap` (`INDESTRUCTIBLE_FIELD`),
