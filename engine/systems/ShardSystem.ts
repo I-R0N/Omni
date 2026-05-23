@@ -156,6 +156,13 @@ export class ShardSystem {
    */
   public plasticReachEnabled: boolean = true;
   /**
+   * Counter for the SHPAIR-paced plastic cosmetic passes (PAuto count +
+   * reach).  These run only every `physics.lastEffectiveShardPairInterval`-th
+   * merge broadphase so the two most expensive plastic scans back off
+   * under load while the eat / bonding passes keep the merge cadence.
+   */
+  private plasticCosmeticTick: number = 0;
+  /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
    * accumulates a contact timer; when timer >= threshold the bond's
    * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
@@ -961,6 +968,17 @@ export class ShardSystem {
    *  104-unit max contact distance.
    */
   private runMergeBroadphase(entities: GameEntity[], dt: number, _physics: PhysicsSystem): void {
+    // SHPAIR-paced gate for the cosmetic plastic scans (PAuto count +
+    // reach).  This broadphase already runs at the shard-pair cadence;
+    // gating these two passes by the effective interval ON TOP of that
+    // makes them back off harder when SHPAIR escalates under load,
+    // leaving the eat / bonding work at the merge cadence.  When the
+    // skip is active, plasticNeighborCount is left stale (the renderer
+    // keeps the last brightness) and reach anchors hold (the spring
+    // keeps chasing the last-aimed anchor) — no flicker, no snap.
+    const cosmeticInterval = Math.max(1, _physics.lastEffectiveShardPairInterval | 0);
+    const runCosmetic = (this.plasticCosmeticTick % cosmeticInterval) === 0;
+    this.plasticCosmeticTick++;
     // Track which entities are currently in active stick-bonds so
     // the bond-formation pass doesn't double-bond.
     const bonded = new Set<GameEntity>();
@@ -992,7 +1010,7 @@ export class ShardSystem {
         // Reset the plastic neighbour-contact count up front so the
         // count pass below only ever increments, and lone shards (or
         // the candidates.length < 2 early-return path) read 0.
-        if (this.plasticAutomataEnabled) e.plasticNeighborCount = 0;
+        if (this.plasticAutomataEnabled && runCosmetic) e.plasticNeighborCount = 0;
       }
       candidates.push(e);
     }
@@ -1031,8 +1049,8 @@ export class ShardSystem {
     // CONTACT_BUFFER × (rA + rB) — i.e. touching or near-touching.
     // Runs before the gated pull/bond loop so every plastic-shard is
     // counted regardless of merge cooldown.  Drives RenderSystem's
-    // brightness automata.
-    if (this.plasticAutomataEnabled) {
+    // brightness automata.  SHPAIR-paced (runCosmetic).
+    if (this.plasticAutomataEnabled && runCosmetic) {
       const buf = PLASTIC_SHARD_AUTOMATA.CONTACT_BUFFER;
       for (let i = 0; i < candidates.length; i++) {
         const a = candidates[i];
@@ -1154,8 +1172,10 @@ export class ShardSystem {
     //     anchor back to home so the spring reels it (and whatever the
     //     bond / eat systems grabbed) back into the cluster.
     // One reacher per target keeps it a protrusion, not a whole-cluster
-    // lurch.  Reuses the grid + `bonded` set above.
-    if (hasPlastic && this.plasticReachEnabled) {
+    // lurch.  Reuses the grid + `bonded` set above.  SHPAIR-paced
+    // (runCosmetic) — anchors hold between updates so the reach stays
+    // smooth even when this pass is throttled under load.
+    if (hasPlastic && this.plasticReachEnabled && runCosmetic) {
       const RANGE_SQ = PLASTIC_REACH.RANGE * PLASTIC_REACH.RANGE;
       const grabF = PLASTIC_REACH.GRAB_DIST_FACTOR;
       const leash = getActivePlasticYield();
