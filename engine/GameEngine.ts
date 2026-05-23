@@ -1051,6 +1051,7 @@ export class GameEngine {
         this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
         this.perfController.beginStep(
             this.perfCounts.totalEntities,
+            this.physics.lastDynamicCount,
             this.physics.lastMaxCellDensity,
             this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
         );
@@ -2928,6 +2929,7 @@ export class GameEngine {
           interactableCount: this.perfCounts.interactableCount,
           perfLoadLevel:     this.perfController.loadLevel,
           perfLoadTier:      this.perfController.tierName(),
+          perfDynamicCount:  this.perfController.lastDynamicCount,
           perfMergeRateMult: this.perfController.mergeRateMultiplier,
           // Fresh small array (9 tasks) per render frame — negligible vs.
           // the per-frame stats object the loop already builds, and keeps

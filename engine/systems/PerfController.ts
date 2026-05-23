@@ -75,7 +75,11 @@ export class PerfController {
   public loadLevel: number = 0;
   /** Quantised tier 0..NUM_TIERS-1. */
   public loadTier: number = 0;
-  public lastEntityCount: number = 0;
+  /** Dynamic (mobile) entity count driving the throttle — the broadphase
+   *  cost driver, exposed for the DBG readout. */
+  public lastDynamicCount: number = 0;
+  /** Total entity count driving the merge/eat rate ladder. */
+  public lastTotalCount: number = 0;
   public lastCellDensity: number = 0;
 
   // ── entity-count-driven merge/eat rate ──
@@ -117,7 +121,8 @@ export class PerfController {
     this.simMsEwma = 0;
     this.loadLevel = 0;
     this.loadTier = 0;
-    this.lastEntityCount = 0;
+    this.lastDynamicCount = 0;
+    this.lastTotalCount = 0;
     this.lastCellDensity = 0;
     this.mergeRateTier = 0;
     this.mergeRateMultiplier = MR.LEVELS[0].mult;
@@ -145,18 +150,26 @@ export class PerfController {
    * Sample load + precompute every task's run decision for this step.
    * Call exactly once per fixed sim substep, before any `shouldRun` query.
    *
-   * @param entityCount total active entities (master list / EntityIndex)
-   * @param cellDensity PhysicsSystem.lastMaxCellDensity from the prev step
-   * @param simMs       prev substep's updatePhysics+updateGameLogic ms
+   * The THROTTLE load is driven by `dynamicCount` (the broadphase cost
+   * driver) + cell density + sim time — NOT total entities, so a field of
+   * inert tiles doesn't falsely peg it.  The merge/eat RATE ladder is
+   * driven by `totalCount` (the user-specified 3000/4000 thresholds are
+   * in total entities).
+   *
+   * @param totalCount   total active entities (drives merge/eat rate)
+   * @param dynamicCount mobile entities in the broadphase (drives throttle)
+   * @param cellDensity  PhysicsSystem.lastMaxCellDensity from the prev step
+   * @param simMs        prev substep's updatePhysics+updateGameLogic ms
    */
-  public beginStep(entityCount: number, cellDensity: number, simMs: number): void {
-    this.lastEntityCount = entityCount;
+  public beginStep(totalCount: number, dynamicCount: number, cellDensity: number, simMs: number): void {
+    this.lastTotalCount = totalCount;
+    this.lastDynamicCount = dynamicCount;
     this.lastCellDensity = cellDensity;
 
     // EWMA the (spiky) sim-time sample before normalising.
     this.simMsEwma += (simMs - this.simMsEwma) * PC.SIM_MS_EWMA_ALPHA;
 
-    const nEnt = entityCount / PC.ENTITY_COUNT_REF;
+    const nEnt = dynamicCount / PC.DYNAMIC_COUNT_REF;
     const nDen = cellDensity / PC.CELL_DENSITY_REF;
     const nSim = this.simMsEwma / PC.SIM_MS_REF;
     let inst = nEnt > nDen ? nEnt : nDen;
@@ -166,7 +179,7 @@ export class PerfController {
 
     this.loadEwmaStep(inst);
     this.loadTier = this.resolveTier(this.loadLevel, this.loadTier);
-    this.updateMergeRate(entityCount);
+    this.updateMergeRate(totalCount);
 
     this.globalTick++;
 

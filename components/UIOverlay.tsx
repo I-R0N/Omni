@@ -610,6 +610,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                         {perf.perfLoadTier} ({Math.round(perf.perfLoadLevel * 100)}%)
                       </span>
                     </div>
+                    {/* Dynamic (mobile) entity count — the throttle driver,
+                        vs. total entities (which counts inert tiles). */}
+                    <div className="flex justify-between">
+                      <span>dyn ents</span>
+                      <span className="text-white">{perf.perfDynamicCount}</span>
+                    </div>
                     {/* Entity-count merge/eat rate multiplier (Goal 4). */}
                     <div className="flex justify-between">
                       <span>merge rate</span>

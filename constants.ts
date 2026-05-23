@@ -1011,10 +1011,16 @@ export const PERF_CONTROLLER_CONSTANTS = {
   // ── Load-signal normalisation ──────────────────────────────────────
   // Each raw signal is normalised to [0,1] against its REF; the
   // instantaneous load is the max of the three (the binding constraint
-  // wins).  Entity count + peak collision-cell density are the reliable,
-  // vsync-independent signals the old tables already used; sim-time is a
-  // secondary booster so a genuinely slow substep can escalate further.
-  ENTITY_COUNT_REF: 4000,
+  // wins).  Peak collision-cell density is the reliable, vsync-
+  // independent clustering signal; sim-time is a secondary booster so a
+  // genuinely slow substep can escalate further.
+  //
+  // The entity term uses the DYNAMIC (mobile) entity count — the exact
+  // set the collision broadphase iterates — NOT total entities.  Total
+  // count is dominated by inert mass=∞ tiles (TILE_HEAVY ships 4000+)
+  // that cost ~nothing per frame, so keying off it falsely pegged the
+  // throttle at max from frame 0.  ~1500 mobile entities ≈ full load.
+  DYNAMIC_COUNT_REF: 1500,
   CELL_DENSITY_REF: 96,
   // Per-substep sim time (updatePhysics + updateGameLogic, ms) that maps
   // to load 1.0.  Deliberately uses SIM time, NOT render frame time —

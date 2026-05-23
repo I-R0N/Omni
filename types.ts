@@ -705,6 +705,9 @@ export interface PerfSnapshot {
   // Smoothed load level [0,1] and its quantised tier name (idle … max).
   perfLoadLevel: number;
   perfLoadTier: string;
+  // Dynamic (mobile) entity count driving the throttle — the broadphase
+  // cost driver, distinct from totalEntities (which counts inert tiles).
+  perfDynamicCount: number;
   // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
   // crowded > 1).  Separate from throttling — crowded fields merge/eat
   // faster to cull entities, sparse fields merge lazily.

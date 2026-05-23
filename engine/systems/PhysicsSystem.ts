@@ -185,6 +185,13 @@ export class PhysicsSystem {
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
   public lastMaxCellDensity: number = 0;
+  // Count of entities inserted into the dynamic grid this step — i.e. the
+  // exact set the collision broadphase outer loop iterates (mobile shards,
+  // projectiles, enemies, drops, player; particles + mass=∞ tiles
+  // excluded).  This is the true per-frame collision cost driver, unlike
+  // total entity count which is dominated by inert static tiles.  Read by
+  // PerfController as the throttle's entity-load signal.
+  public lastDynamicCount: number = 0;
 
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
   //
@@ -755,6 +762,7 @@ export class PhysicsSystem {
         if (cell.length > maxDensity) maxDensity = cell.length;
     }
     this.lastMaxCellDensity = maxDensity;
+    this.lastDynamicCount = dynamicEntities.length;
 
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary
     //    subjects, AND skip shards as outer-loop subjects entirely.
