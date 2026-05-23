@@ -526,6 +526,10 @@ export interface GameEntity {
   // accumulator (seconds).
   asleep?: boolean;
   sleepTimer?: number;
+  // Transient local-crowd signal for the merge system: occupancy of this
+  // shard's merge-grid cell, stamped each merge-broadphase pass and read
+  // by tickBonds to focus absorption acceleration on dense pockets.
+  mergeCellCount?: number;
   // Transient per-pass visibility flag for the collision viewport gate.
   // Recomputed each resolveShardPairs grid build (torus-aware): true when
   // the shard sits outside the CULL_MARGIN-padded camera rect.  A pair

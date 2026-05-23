@@ -1,7 +1,6 @@
 import {
   PERF_CONTROLLER_CONSTANTS as PC,
   PERF_TASKS,
-  MERGE_RATE_CONSTANTS as MR,
   PerfTaskId,
 } from '../../constants';
 
@@ -87,15 +86,11 @@ export class PerfController {
   public lastTotalCount: number = 0;
   public lastCellDensity: number = 0;
 
-  // ── entity-count-driven merge/eat rate ──
-  // Index into MR.LEVELS (ascending ladder). 0 = slowest/floor.
-  private mergeRateTier: number = 0;
-  /** Live multiplier applied to merge/eat time-accumulators.  Ramps from
-   *  the slowest level (sparse fields) up through the crowded tiers. */
-  public mergeRateMultiplier: number = MR.LEVELS[0].mult;
-  /** DBG toggle — when false, the count-driven multiplier is held at a
-   *  neutral 1.0× (merges/eats run at their base rate, no acceleration).
-   *  Default ON. */
+  // ── merge/eat rate gate ──
+  // The merge/absorption rate itself is now computed LOCALLY by
+  // ShardSystem (per-cell density + absorbing-rock size); this flag is
+  // the DBG MrgRt gate it reads.  When false, ShardSystem holds the rate
+  // at a neutral 1.0× (base merge rate, no acceleration).  Default ON.
   public mergeRateEnabled: boolean = true;
 
   constructor() {
@@ -134,8 +129,6 @@ export class PerfController {
     this.lastDynamicCount = 0;
     this.lastTotalCount = 0;
     this.lastCellDensity = 0;
-    this.mergeRateTier = 0;
-    this.mergeRateMultiplier = MR.LEVELS[0].mult;
     for (let i = 0; i < this.tasks.length; i++) {
       const t = this.tasks[i];
       t.effectiveInterval = t.minInterval;
@@ -189,7 +182,6 @@ export class PerfController {
 
     this.loadEwmaStep(inst);
     this.loadTier = this.resolveTier(this.loadLevel, this.loadTier);
-    this.updateMergeRate(totalCount);
 
     this.globalTick++;
 
@@ -244,26 +236,6 @@ export class PerfController {
     while (tier < up.length && load > up[tier]) tier++;
     while (tier > 0 && load < up[tier - 1] - hy) tier--;
     return tier;
-  }
-
-  private updateMergeRate(count: number): void {
-    const levels = MR.LEVELS;
-    let tier = this.mergeRateTier;
-    // Climb while the next level's threshold is met (a big jump can skip
-    // straight up multiple levels in one step).
-    while (tier < levels.length - 1 && count >= levels[tier + 1].count) tier++;
-    // Drop only once the count falls a full hysteresis margin below the
-    // current level's threshold (anti-oscillation at the boundary).
-    while (tier > 0 && count < levels[tier].count - MR.HYSTERESIS) tier--;
-    this.mergeRateTier = tier;
-
-    // DBG toggle: when disabled, target a neutral 1.0× (no count-driven
-    // scaling) so merges/eats run at their un-multiplied base rate — lets
-    // the merge-rate feature be A/B'd against its perf cost.  The tier is
-    // still tracked above so re-enabling resumes smoothly.  EWMA toward
-    // the target either way so the multiplier eases rather than snaps.
-    const target = this.mergeRateEnabled ? levels[tier].mult : 1.0;
-    this.mergeRateMultiplier += (target - this.mergeRateMultiplier) * MR.EWMA_ALPHA;
   }
 
   // ── query API ──

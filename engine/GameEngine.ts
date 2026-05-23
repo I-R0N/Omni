@@ -471,10 +471,11 @@ export class GameEngine {
   }
 
   /**
-   * Toggle the entity-count-driven merge/eat rate multiplier.  When off,
-   * the multiplier eases to a neutral 1.0× (merges run at their base rate
-   * with no count-driven acceleration) — used to A/B whether the higher
-   * merge throughput at high entity counts is itself a perf cost.
+   * Toggle the local-density-driven merge/absorption rate.  When off, the
+   * rate holds at a neutral 1.0× (base merge rate, no acceleration, base
+   * per-frame budget) — used to A/B the consolidation feature.  When on,
+   * shards in dense pockets merge/absorb faster and big absorbing rocks
+   * slow down (see ShardSystem.tickBonds + LOCAL_MERGE_CONSTANTS).
    */
   public toggleMergeRate() {
     this.perfController.mergeRateEnabled = !this.perfController.mergeRateEnabled;
@@ -2989,7 +2990,7 @@ export class GameEngine {
           perfAsleepCount:   this.physics.lastAsleepCount,
           perfOffscreenShards: this.physics.lastOffscreenShardCount,
           perfLodShards:     this.renderer.lastLodShardCount,
-          perfMergeRateMult: this.perfController.mergeRateMultiplier,
+          perfMergeRateMult: this.shards.lastMergeRatePeak,
           // Fresh small array (9 tasks) per render frame — negligible vs.
           // the per-frame stats object the loop already builds, and keeps
           // the controller's internal `run` flag out of the snapshot.

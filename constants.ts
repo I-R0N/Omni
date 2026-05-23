@@ -1153,39 +1153,34 @@ export const PERF_TASKS = {
 
 export type PerfTaskId = keyof typeof PERF_TASKS;
 
-// ── Entity-count-driven merge / eat RATE (separate from throttling) ───
-// When the field is crowded the merge / eat systems should run FASTER
-// (shorter timers, bigger merge budget) to cull entities — the opposite
-// of the throttle above, which makes expensive scans run LESS often.
-// The level is selected from the live total entity count (an ascending
-// ladder: pick the highest level whose `count` the field meets) with
-// hysteresis, then the multiplier is EWMA-smoothed each step so it ramps
-// rather than snapping at a boundary.  Applied by ShardSystem to the
-// plastic-eat timer (incl. metal's longer digest), the cohesion/merge
-// bond timer, and the per-frame merge budget.
-//
-// The ladder ramps progressively: sparse fields merge lazily (mult < 1
-// → slower than the raw PLASTIC_EAT / bond times), normal play sits at
-// the baseline, and the crowded tiers escalate hard to cull entities.
-// Below 3000 there are three levels (two "slower" ones beneath the
-// baseline); 3000+ keeps climbing through quick / very-quick / extreme.
-export const MERGE_RATE_CONSTANTS = {
-  // Ascending ladder. `count` thresholds AND `mult` values must both be
-  // ascending.  The first entry (count 0) is the floor.
-  LEVELS: [
-    { count: 0,    mult: 0.6  },  // very sparse — merge/eat lazily
-    { count: 1000, mult: 0.85 },  // sparse
-    { count: 2000, mult: 1.25 },  // baseline (normal play; raised from 1.0)
-    { count: 3000, mult: 2.0  },  // quick (raised from 1.75)
-    { count: 4000, mult: 2.75 },  // very quick
-    { count: 5000, mult: 3.5  },  // extreme — keep culling hard
-  ] as const,
-  // Entity-count margin a count must fall back below a level's threshold
-  // by before stepping down (anti-oscillation at the boundary).
-  HYSTERESIS: 250,
-  // Per-step EWMA toward the target multiplier so the rate ramps in
-  // smoothly over ~tenths of a second instead of snapping on crossing.
-  EWMA_ALPHA: 0.05,
+// ── LOCAL-density-driven merge / absorption rate ──────────────────────
+// Replaces the old global total-entity-count merge-rate ladder.  Rather
+// than speeding up EVERY merge when the whole field is crowded, the
+// acceleration is focused on the dense pockets (hotspots) that actually
+// drive collision cost: a shard's merge/absorb rate scales with the
+// occupancy of its local merge-grid cell, and slows as the absorbing
+// rock grows (so a big rock consolidates its cluster gradually rather
+// than vacuuming it in a spike).  Applied by ShardSystem in tickBonds
+// (bond timer + per-frame budget) and the plastic-eat pass; gated by the
+// DBG MrgRt toggle (off → neutral 1.0×, no acceleration).
+export const LOCAL_MERGE_CONSTANTS = {
+  // Local-density boost: a shard whose merge-grid cell holds DENSITY_LO
+  // or fewer bodies gets no boost (sparse → 1.0×); at DENSITY_HI or more
+  // it gets the full MAX_BOOST; linear between.  Cells are GRAVITY_RANGE
+  // (380) wide, so occupancy is a coarse "am I in a crowd" proxy.
+  DENSITY_LO: 3,
+  DENSITY_HI: 16,
+  MAX_BOOST: 3.0,
+  // Size diminishing: a rock at/below SIZE_LO diameter absorbs at full
+  // rate; as it grows toward ROCK_TIER_DIAMETER the rate eases to
+  // MIN_ABSORB so big rocks keep absorbing but slowly.
+  SIZE_LO: 30,
+  MIN_ABSORB: 0.3,
+  // Per-frame merge budget multiplier (× CLEANUP_CONSTANTS
+  // .MAX_REMOVALS_PER_FRAME) when the rate feature is enabled — caps how
+  // many merges fire per tick so a hotspot consolidates over several
+  // frames instead of one spike.  1× when disabled.
+  BUDGET_MULT: 3,
 };
 
 export const TRAIL_CONSTANTS = {

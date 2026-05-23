@@ -19,6 +19,7 @@ import {
   COLORS,
   NEBULA_CONSTANTS,
   CLEANUP_CONSTANTS,
+  LOCAL_MERGE_CONSTANTS,
   WEAPONS,
   WEAPON_LIST,
   getRockShardFreeSpawn,
@@ -110,6 +111,27 @@ const PLASTIC_TIER_DIAMETER = Math.sqrt(HEX_AREA);
 // absorbed chips) before transmuting.
 const ROCK_TIER_DIAMETER = Math.sqrt(HEX_AREA) * 1.8;
 
+/** Local-density boost for the merge/absorption rate: 1.0× in sparse
+ *  areas, ramping to MAX_BOOST in dense pockets (a shard's merge-grid
+ *  cell occupancy).  Focuses the acceleration on the hotspots that
+ *  actually drive collision cost. */
+function localDensityBoost(cellCount: number): number {
+  const { DENSITY_LO, DENSITY_HI, MAX_BOOST } = LOCAL_MERGE_CONSTANTS;
+  if (cellCount <= DENSITY_LO) return 1;
+  if (cellCount >= DENSITY_HI) return MAX_BOOST;
+  return 1 + (MAX_BOOST - 1) * (cellCount - DENSITY_LO) / (DENSITY_HI - DENSITY_LO);
+}
+
+/** Size diminishing for the absorbing rock: full rate at/under SIZE_LO,
+ *  easing to MIN_ABSORB as it approaches ROCK_TIER_DIAMETER, so a big
+ *  rock keeps absorbing but slowly (no vacuum spike). */
+function sizeDiminish(hostDiameter: number): number {
+  const { SIZE_LO, MIN_ABSORB } = LOCAL_MERGE_CONSTANTS;
+  if (hostDiameter <= SIZE_LO) return 1;
+  if (hostDiameter >= ROCK_TIER_DIAMETER) return MIN_ABSORB;
+  return 1 + (MIN_ABSORB - 1) * (hostDiameter - SIZE_LO) / (ROCK_TIER_DIAMETER - SIZE_LO);
+}
+
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
  * `timer` accumulates contact dt; when it reaches `threshold` AND
@@ -170,6 +192,10 @@ export class ShardSystem {
    * resolved outcome ('compose' today, 'absorb' in Stage 5) fires.
    */
   private bonds: BondEntry[] = [];
+  // Peak per-bond local merge-rate multiplier applied last tickBonds —
+  // exposed for the DBG "merge rate" readout (replaces the old global
+  // count-driven multiplier).  1.0 = no local acceleration this frame.
+  public lastMergeRatePeak: number = 1;
 
   /**
    * Optional adapter providing variant-specific completion hooks.
@@ -881,27 +907,26 @@ export class ShardSystem {
   private tickBonds(entities: GameEntity[], dt: number, physics: PhysicsSystem, applyCohesion: boolean = true): void {
     if (this.bonds.length === 0) return;
 
-    // Entity-count-driven merge RATE multiplier (sparse fields < 1 =
-    // slower, crowded > 1 = faster).  tickBonds runs EVERY sim step
-    // (only the cohesion blend below is paced), so the bond timer never
-    // drifts under frame-skipping and needs no skip compensation — the
-    // multiplier alone scales how fast bonds mature with crowd level.
-    // It also scales the per-frame merge budget so a dense field can
-    // compact more bonds per tick.
-    const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
+    // Merge RATE is now computed LOCALLY per bond (see below): a bond in
+    // a dense pocket matures faster (focus the cull on hotspots) and a
+    // bond whose absorbing rock has grown large matures slower (gradual
+    // consolidation).  The DBG MrgRt gate (perfController.mergeRateEnabled)
+    // holds it at a neutral 1.0× when off.  tickBonds runs EVERY sim step,
+    // so the bond timer needs no skip compensation.
+    const rateEnabled = this.perfController ? this.perfController.mergeRateEnabled : true;
+    let ratePeak = 1;
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
-    // Per-frame merge budget — caps how many density-compaction merges
-    // may fire this tick.  Prevents a freshly-shattered cluster (whose
-    // bond timers all elapse in the same frame) from collapsing into a
-    // single shard in one frame; instead, the cluster compacts visibly
-    // over a few frames.  Once exhausted, surplus bonds defer their
-    // resolution by reverting timer to (threshold - dt) so they fire
-    // next tick.  Sized at MAX_REMOVALS_PER_FRAME for the same reason
-    // the cleanup pacing uses that budget — fade-pacing and merge-
-    // pacing should breathe at the same rate.
-    let mergeBudget = Math.max(1, Math.round(CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME * rateMult));
+    // Per-frame merge budget — caps how many merges may fire this tick so
+    // a freshly-shattered or hotspot cluster (whose bond timers elapse
+    // together) compacts over several frames instead of one spike.  Once
+    // exhausted, surplus bonds defer (timer = threshold - dt) to next
+    // tick.  Boosted by LOCAL_MERGE.BUDGET_MULT when the rate feature is
+    // on so dense fields consolidate at a useful throughput; base budget
+    // when off.
+    const budgetMult = rateEnabled ? LOCAL_MERGE_CONSTANTS.BUDGET_MULT : 1;
+    let mergeBudget = Math.max(1, Math.round(CLEANUP_CONSTANTS.MAX_REMOVALS_PER_FRAME * budgetMult));
 
     let writeIdx = 0;
     for (let bi = 0; bi < this.bonds.length; bi++) {
@@ -933,7 +958,17 @@ export class ShardSystem {
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
       }
 
-      bond.timer += dt * rateMult;
+      // Per-bond local rate: density boost (denser pocket → faster) ×
+      // size diminish (bigger absorbing rock → slower).  Neutral 1.0×
+      // when the DBG gate is off.
+      let bondRate = 1;
+      if (rateEnabled) {
+        const cell = Math.max(a.mergeCellCount ?? 0, b.mergeCellCount ?? 0);
+        const host = a.size.x >= b.size.x ? a : b;
+        bondRate = localDensityBoost(cell) * sizeDiminish(host.size.x);
+        if (bondRate > ratePeak) ratePeak = bondRate;
+      }
+      bond.timer += dt * bondRate;
 
       if (bond.timer >= bond.threshold) {
         // Stage 5b: requirePartnerSizeFraction gate.  If unmet, the
@@ -974,6 +1009,7 @@ export class ShardSystem {
       this.bonds[writeIdx++] = bond;
     }
     this.bonds.length = writeIdx;
+    this.lastMergeRatePeak = ratePeak;
   }
 
   /**
@@ -1024,10 +1060,11 @@ export class ShardSystem {
     // time-based eat accumulation is multiplied by it to stay
     // frame-skip-independent (see the eat pass below).
     const skipComp = Math.max(1, _physics.lastEffectiveShardPairInterval | 0);
-    // Entity-count-driven merge/eat RATE multiplier: sparse fields < 1
-    // (slower), crowded > 1 (faster, to cull entities).  Separate from
-    // the throttle above.
-    const rateMult = this.perfController ? this.perfController.mergeRateMultiplier : 1;
+    // Local-density merge/eat acceleration gate (replaces the old global
+    // count multiplier).  The eat pass below applies a per-shard density
+    // boost from the consumed shard's merge-grid cell occupancy so plastic
+    // digests faster inside a dense pocket; neutral when the gate is off.
+    const eatRateEnabled = this.perfController ? this.perfController.mergeRateEnabled : true;
     // Track which entities are currently in active stick-bonds so
     // the bond-formation pass doesn't double-bond.
     const bonded = new Set<GameEntity>();
@@ -1090,6 +1127,12 @@ export class ShardSystem {
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
       cell.push(i);
+    }
+    // Stamp each candidate's local-crowd signal: the occupancy of its
+    // merge-grid cell.  Cheap O(k); read by tickBonds to focus the
+    // absorption-rate boost on dense pockets (hotspots).
+    for (const cell of grid.values()) {
+      for (let k = 0; k < cell.length; k++) candidates[cell[k]].mergeCellCount = cell.length;
     }
 
     // ── Plastic neighbour-contact count (PAuto automata) ───────────
@@ -1204,12 +1247,13 @@ export class ShardSystem {
           const t = (g.plasticEatTimer ?? 0) + dtEat;
           g.plasticEatTimer = t;
           // Metal is dense — it takes significantly longer to digest.
-          // Rate multiplier scales maturation: crowded fields (mult > 1)
-          // digest faster, sparse fields (mult < 1) linger.
+          // Local density scales maturation: a debris shard in a dense
+          // pocket digests faster, a lone one lingers at the base time.
           const baseEatTime = g.shardVariant === 'metal-shard'
             ? PLASTIC_EAT.SECONDS * PLASTIC_EAT.METAL_TIME_FACTOR
             : PLASTIC_EAT.SECONDS;
-          const eatTime = baseEatTime / rateMult;
+          const eatBoost = eatRateEnabled ? localDensityBoost(g.mergeCellCount ?? 0) : 1;
+          const eatTime = baseEatTime / eatBoost;
           if (t >= eatTime) (eats ??= []).push({ eater: nearP, consumed: g });
         } else if (g.plasticEatTimer) {
           g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dtEat);
