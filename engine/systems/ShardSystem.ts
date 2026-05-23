@@ -20,6 +20,7 @@ import {
   NEBULA_CONSTANTS,
   CLEANUP_CONSTANTS,
   LOCAL_MERGE_CONSTANTS,
+  ROCK_CONDENSE,
   WEAPONS,
   WEAPON_LIST,
   getRockShardFreeSpawn,
@@ -109,7 +110,43 @@ const PLASTIC_TIER_DIAMETER = Math.sqrt(HEX_AREA);
 // multiple of the hex-area diameter; raise/lower to tune how big rocks
 // get before they tile.  At ×1.8 the rock reaches ≈ 3.2× hex area (many
 // absorbed chips) before transmuting.
-const ROCK_TIER_DIAMETER = Math.sqrt(HEX_AREA) * 1.8;
+// ── Rock condensation grid helpers (see ROCK_CONDENSE in constants) ──
+const ROCK_MAX_DIAMETER  = ROCK_CONDENSE.DIAMETERS[ROCK_CONDENSE.DIAMETERS.length - 1];
+/** Nominal mass of grid cell (sizeTier, densityTier), tiers 1-indexed. */
+function rockCellMass(s: number, d: number): number {
+  return ROCK_CONDENSE.MASS_COEFF
+    * ROCK_CONDENSE.DIAMETERS[s - 1] * ROCK_CONDENSE.DIAMETERS[s - 1]
+    * ROCK_CONDENSE.DENSITY_MULT[d - 1];
+}
+const ROCK_MAX_CELL_MASS = rockCellMass(ROCK_CONDENSE.DIAMETERS.length, ROCK_CONDENSE.DENSITY_MULT.length);
+/** Nearest size tier (1..5) for an arbitrary diameter (snaps spawned /
+ *  legacy rocks onto the grid). */
+function nearestRockSizeTier(diam: number): number {
+  const D = ROCK_CONDENSE.DIAMETERS;
+  let best = 1, bestErr = Infinity;
+  for (let i = 0; i < D.length; i++) {
+    const e = Math.abs(diam - D[i]);
+    if (e < bestErr) { bestErr = e; best = i + 1; }
+  }
+  return best;
+}
+/** Denser-first placement of mass M onto the grid, starting at size tier
+ *  s0 (the larger input's size — never shrink below it): pick the
+ *  smallest density tier that holds M at the current size, growing size
+ *  only when density caps.  Returns null when M exceeds the top cell
+ *  (→ condense into a static rock-tile). */
+function deriveRockCell(s0: number, M: number): { s: number; d: number } | null {
+  const nS = ROCK_CONDENSE.DIAMETERS.length;
+  const nD = ROCK_CONDENSE.DENSITY_MULT.length;
+  let s = Math.max(1, Math.min(nS, s0));
+  while (s <= nS) {
+    for (let d = 1; d <= nD; d++) {
+      if (rockCellMass(s, d) >= M - 1e-6) return { s, d };
+    }
+    s++; // density maxed at this size — grow size
+  }
+  return null; // overflow → tile
+}
 
 /** Local-density boost for the merge/absorption rate: 1.0× in sparse
  *  areas, ramping to MAX_BOOST in dense pockets (a shard's merge-grid
@@ -123,13 +160,13 @@ function localDensityBoost(cellCount: number): number {
 }
 
 /** Size diminishing for the absorbing rock: full rate at/under SIZE_LO,
- *  easing to MIN_ABSORB as it approaches ROCK_TIER_DIAMETER, so a big
+ *  easing to MIN_ABSORB as it approaches ROCK_MAX_DIAMETER, so a big
  *  rock keeps absorbing but slowly (no vacuum spike). */
 function sizeDiminish(hostDiameter: number): number {
   const { SIZE_LO, MIN_ABSORB } = LOCAL_MERGE_CONSTANTS;
   if (hostDiameter <= SIZE_LO) return 1;
-  if (hostDiameter >= ROCK_TIER_DIAMETER) return MIN_ABSORB;
-  return 1 + (MIN_ABSORB - 1) * (hostDiameter - SIZE_LO) / (ROCK_TIER_DIAMETER - SIZE_LO);
+  if (hostDiameter >= ROCK_MAX_DIAMETER) return MIN_ABSORB;
+  return 1 + (MIN_ABSORB - 1) * (hostDiameter - SIZE_LO) / (ROCK_MAX_DIAMETER - SIZE_LO);
 }
 
 /**
@@ -2095,13 +2132,33 @@ export class ShardSystem {
       // keep the density path.
       const isGlassSelfMerge   = a.shardVariant === 'glass-shard'   && b.shardVariant === 'glass-shard';
       const isPlasticSelfMerge = a.shardVariant === 'plastic-shard' && b.shardVariant === 'plastic-shard';
-      // Rock self-merge GROWS (area-conserving) toward ROCK_TIER_DIAMETER
-      // instead of density-shrinking.  The old shrink/tier-cap path left
-      // dense clusters stuck as tier-capped fragments (the hotspot that
-      // never consolidated); growth + the rock→tile transmute below let a
-      // cluster collapse into a few big rocks that become static tiles.
-      const isRockSelfMerge    = a.shardVariant === 'rock-shard'    && b.shardVariant === 'rock-shard';
-      if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge && !isRockSelfMerge) {
+      // Rock-dominant merges condense through the ROCK_CONDENSE grid
+      // (denser-first, CONTINUOUS — never refused, which was the old
+      // stall).  Any two rock(+absorbed) shards combine: mass is
+      // conserved, the survivor keeps the larger input's size and bumps
+      // DENSITY (smaller footprint per mass, darker, heavier), growing
+      // size only once density caps.  When the combined mass would exceed
+      // the top cell (largest size + max density) the shard condenses into
+      // a STATIC rock-tile — the only tile-forming event, so tiles are
+      // rare and appear only after a cluster is already consolidated
+      // (they don't get smashed by surrounding shards mid-process).
+      const isRockResult = dominantVariant === 'rock-shard';
+      if (isRockResult) {
+        newMass = a.mass + b.mass;
+        const startTier = Math.max(nearestRockSizeTier(aDia), nearestRockSizeTier(bDia));
+        const cell = deriveRockCell(startTier, newMass);
+        if (cell === null) {
+          // Overflow — clamp visuals to the top cell; the post-compose
+          // mass check below transmutes to a tile (or retries next merge
+          // if no hex is free).
+          newDiam = ROCK_MAX_DIAMETER;
+          if (density) newTier = density.maxSteps;
+        } else {
+          newDiam = ROCK_CONDENSE.DIAMETERS[cell.s - 1];
+          if (density) newTier = Math.min(density.maxSteps, cell.d - 1);
+        }
+      } else if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge) {
+        // Glass-dominant cross-variant density compaction (shrink + tier).
         const tierA = a.densityTier ?? 0;
         const tierB = b.densityTier ?? 0;
         const proposedTier = Math.max(tierA, tierB) + 1;
@@ -2113,26 +2170,15 @@ export class ShardSystem {
         newDiam = largerDia * density.shrinkFactor;
         newMass = a.mass + b.mass;
       } else {
+        // Glass-self / plastic-self growth (area-conserving).
         newDiam = Math.sqrt(rA * rA + rB * rB) * 2;
-        // Rock self-merge: clamp growth at ROCK_TIER_DIAMETER (the post-
-        // compose transmute below converts it to a static rock-tile once
-        // it reaches that size) and bump the density tier so the growing
-        // rock visibly darkens ("denser rocks") without shrinking.
-        if (isRockSelfMerge) {
-          if (newDiam > ROCK_TIER_DIAMETER) newDiam = ROCK_TIER_DIAMETER;
-          if (density) {
-            newTier = Math.min(density.maxSteps, Math.max(a.densityTier ?? 0, b.densityTier ?? 0) + 1);
-          }
-        } else if (!isPlasticSelfMerge) {
-          // sizeCap applies to glass shards (avoid producing shards
-          // larger than the map's free-spawn maxSize, which would look
-          // like rogue giants).  Plastic self-merge has no upper limit
-          // per user direction — plastic-shards grow indefinitely.
+        if (!isPlasticSelfMerge) {
+          // sizeCap avoids glass shards larger than the map's free-spawn
+          // maxSize.  Plastic self-merge grows indefinitely per user dir.
           const sizeCap = getRockShardFreeSpawn(this.currentMapType).maxSize;
           if (newDiam > sizeCap) return;
         }
-        // Mass follows the dominant variant's (now area-based) curve so
-        // a merged shard weighs the same as one spawned at that size.
+        // Mass follows the dominant variant's area-based curve.
         newMass = dominantDef.spawn.sizeToMass(newDiam);
       }
 
@@ -2211,12 +2257,14 @@ export class ShardSystem {
       if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
         this.tryConvertOversizedGlassShard(a, entities, physics);
       }
-      // Rock-shard tier transition.  A rock grown to ROCK_TIER_DIAMETER by
-      // absorbing its cluster condenses into a STATIC rock-tile at the
-      // nearest free hex — leaving the dynamic collision system entirely,
-      // which is the hotspot win.  If no hex is free it stays a big rock
-      // and a later merge retries.
-      if (a.shardVariant === 'rock-shard' && a.size.x >= ROCK_TIER_DIAMETER) {
+      // Rock-shard tile transition.  Only once the survivor's mass would
+      // exceed the top condensation cell (largest size + max density) does
+      // it condense into a STATIC rock-tile at the nearest free hex —
+      // leaving the dynamic collision system entirely (the hotspot win).
+      // This is the sole tile-forming event, so tiles are rare and appear
+      // only after a cluster is fully consolidated.  If no hex is free it
+      // stays a max-tier shard and a later merge retries.
+      if (a.shardVariant === 'rock-shard' && a.mass > ROCK_MAX_CELL_MASS) {
         this.tryTransmuteRockShardToTile(a, entities, physics);
       }
       // Plastic-shard tier transition — DISABLED per user direction.

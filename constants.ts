@@ -1183,6 +1183,27 @@ export const LOCAL_MERGE_CONSTANTS = {
   BUDGET_MULT: 3,
 };
 
+// ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
+// Rock self-merges condense CONTINUOUSLY (any two shards, never refused)
+// through a discrete size × density grid, preferring density (denser-
+// first / smallest footprint) so a packed cluster collapses into fewer,
+// heavier shards that take up less space.  A merge keeps the larger
+// input's size and bumps density; it only grows size once density is
+// maxed.  The top cell (largest size, max density) is the cap — once a
+// shard's mass would exceed it, the shard condenses into a STATIC rock-
+// tile (the only tile-forming event, so tiles are rare and form after a
+// cluster is already consolidated — they don't get smashed mid-process).
+// mass(s,d) = MASS_COEFF × DIAMETERS[s]² × DENSITY_MULT[d]; MASS_COEFF
+// matches the rock-shard spawn sizeToMass so a tier-1/density-1 shard
+// weighs exactly as much as a freshly spawned 20px rock.
+export const ROCK_CONDENSE = {
+  // 5 size tiers (diameter), ≈ area-doubling from the 20px spawn min.
+  DIAMETERS: [20, 28, 40, 56, 80],
+  // 5 density tiers (mass-per-area multiplier), doubling.
+  DENSITY_MULT: [1, 2, 4, 8, 16],
+  MASS_COEFF: 0.018,
+};
+
 export const TRAIL_CONSTANTS = {
   LIFETIME: 2.5, // Seconds until trail part fades completely (longer = exhaust-like plume)
   MIN_DISTANCE_SQ: 30 // Minimum squared distance to move before recording a new trail point
