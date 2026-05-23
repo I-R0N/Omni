@@ -110,6 +110,30 @@ export interface ShardSpawnShape {
    *  striker impulse).  Tiles are mass = Infinity (passed in by the
    *  caller, not via this fn). */
   sizeToMass: (diameter: number) => number;
+  /** Optional per-entity damping stamped at spawn time.  When set,
+   *  spawn sites copy these onto the entity so PhysicsSystem.update
+   *  ticks them via the existing per-entity damping path (gated by
+   *  `entity.linearDamping !== undefined`).  Used today by plastic-
+   *  shard for aggressive cluster damping so the shards settle to
+   *  rest without bond infrastructure.  Nebula-shards use
+   *  NEBULA_CONSTANTS values stamped directly at spawn — they
+   *  predate this field.  Values are per-second decay factors —
+   *  PhysicsSystem applies them via `Math.pow(damping, timeScale)`,
+   *  so 0.93 ≈ 7 % velocity bleed per second. */
+  linearDamping?: number;
+  angularDamping?: number;
+  /** Optional per-entity speed/spin floor stamped at spawn time.
+   *  PhysicsSystem snaps |velocity| below this threshold to zero
+   *  each substep so tiny residual drifts (e.g. steady-state
+   *  push-back from a distant repel field, accumulated rounding)
+   *  don't keep the shard alive.  Higher values make the shard
+   *  more "static" — it stays at rest unless something gives it
+   *  a clear external kick.  When unset, the entity falls back to
+   *  NEBULA_CONSTANTS.REST_SPEED / REST_SPIN (tiny — 0.005 / 0.01).
+   *  Today plastic-shard sets these to make clusters effectively
+   *  static unless directly hit. */
+  restSpeed?: number;
+  restSpin?: number;
 }
 
 // ── Regen policy ────────────────────────────────────────────────────
@@ -147,6 +171,20 @@ export interface ShardMergePolicy {
   bondTimeSeconds?: number;
   bondTimeSizeRef?: number;
   bondTimeSizePower?: number;
+  /** Optional exponential size-scaling rate for the bond timer.
+   *  When set, threshold = baseTime × exp((avgSize − sizeRef) ×
+   *  bondTimeSizeExp) instead of the polynomial sizePower
+   *  formulation.  Mutually exclusive in practice — variants pick
+   *  one or the other.  Used by plastic-shard so very large shards
+   *  take exponentially longer to merge (k = 0.04 doubles the
+   *  threshold for every ~17 units of additional size). */
+  bondTimeSizeExp?: number;
+  /** Optional size-disparity gate at bond formation.  Bond only
+   *  forms when |a.size − b.size| / max(a.size, b.size) >=
+   *  requireSizeDeltaFraction.  At 0.05 the pair must differ by
+   *  at least 5 % in diameter — used by plastic-shard so two
+   *  equal-sized shards don't compose (only smaller-into-larger). */
+  requireSizeDeltaFraction?: number;
 
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];
@@ -178,6 +216,27 @@ export interface ShardShatterPolicy {
   fadeInSeconds?: number;
   /** Optional merge cooldown stamped on each child. */
   postShatterMergeCooldown?: number;
+  /** Optional non-area-conservative sizing override.  When BOTH
+   *  min/max are set, shatterAsteroidStyle bypasses the power-law
+   *  area distribution + MIN_SIZE filter and instead sizes each
+   *  child as `parent.size.x × random(min, max)`.  Total child
+   *  area can (and usually will) exceed parent area — used by
+   *  plastic-shard so a break visibly produces a fixed count of
+   *  visible-sized children regardless of parent area math.
+   *  Termination comes from the parent-size floor at top of
+   *  shatterAsteroidStyle (parent < MIN_SIZE doesn't shatter),
+   *  so a few generations of shrinking children die cleanly. */
+  childSizeFractionMin?: number;
+  childSizeFractionMax?: number;
+  /** Optional size-keyed count override.  When set, shatter
+   *  AsteroidStyle picks `count` from the first entry whose
+   *  `maxSize` strictly exceeds `parent.size.x`.  Lets a variant
+   *  scale shatter burst size by the parent's diameter — used
+   *  today by plastic-shard for "bigger shards break into more
+   *  pieces, in 5 size levels."  When unset, count falls back
+   *  to the standard `countMin + damageNorm × (countMax − countMin)`
+   *  formula. */
+  shatterCountBySize?: ReadonlyArray<{ maxSize: number; count: number }>;
   /** Shatter geometry strategy.  Two flavours today:
    *
    *    'asteroid' — children scattered in a cone around the impact
@@ -329,6 +388,15 @@ export interface ShardVariantDef {
    *  see g3 material-interactions design), but still feels the
    *  metal-tile field for the queued attraction work. */
   repelImmuneFrom?: ShardVariantId[];
+  /** Pass-through-and-shatter rule (g3 material-interactions).  When
+   *  this variant contacts an entity whose variant id is in `targets`,
+   *  PhysicsSystem skips collision impulse on the pair (the carrier's
+   *  HP and trajectory are unchanged) and immediately triggers the
+   *  target's death pipeline — same path the target takes when its
+   *  health hits 0 normally, so existing shatter / tier-chain /
+   *  drop logic is reused as-is.  Today: metal-shard targets
+   *  glass-tile + glass-shard. */
+  passthroughShatter?: { targets: ShardVariantId[] };
   /** Dent-in-place policy.  When set, the variant deforms in its grid
    *  cell on each damage event instead of shattering — polygon
    *  vertices are pulled inward by a random fraction in
@@ -448,7 +516,31 @@ export interface ShardVariantDef {
        *  fresh material-silhouette polygon from the variant's spawn
        *  config.  Use for "the shard IS the broken tile" effects. */
       inheritParentPolygon?: boolean;
+      /** Optional inclusive random count range — when set, this
+       *  entry is expanded into `countMin..countMax` siblings at
+       *  spawn time.  Each sibling re-rolls `sizeFraction` between
+       *  `sizeFractionMin` and `sizeFractionMax` if those are set;
+       *  otherwise all siblings share the single `sizeFraction`.
+       *  Used by plastic-tile to release a burst of 8–12 small
+       *  shards on shatter rather than a fixed list.  When unset
+       *  the entry spawns exactly one shard at `sizeFraction`. */
+      countMin?: number;
+      countMax?: number;
+      /** Optional sizeFraction randomisation range — when set,
+       *  each spawned sibling picks a fresh sizeFraction in
+       *  `[sizeFractionMin, sizeFractionMax]` instead of using the
+       *  fixed `sizeFraction` above.  Only meaningful alongside
+       *  `countMin/countMax`. */
+      sizeFractionMin?: number;
+      sizeFractionMax?: number;
     }>;
+    /** Optional override for the HP assigned to spawned shards.
+     *  When unset, shards inherit `tile.maxHealth` (today's
+     *  behaviour).  When set, shards spawn with this HP regardless
+     *  of the tile's own health — used by plastic-tile so the
+     *  tile face is glass-brittle (1 HP) while the released shards
+     *  retain the 24-HP plastic durability. */
+    shardHealth?: number;
   };
 }
 

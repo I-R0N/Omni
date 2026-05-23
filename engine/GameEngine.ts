@@ -17,7 +17,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -105,7 +105,7 @@ export class GameEngine {
   // space).  THRUST extends the trail opposite to the input/thrust
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
 
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
@@ -135,7 +135,7 @@ export class GameEngine {
   // broadphase doesn't pair these (shards skip the outer loop), so
   // mobile shards drift through tiles' geometry; flipping ON adds
   // the missing scan and the asteroid-crash branch starts firing.
-  private shardTileCollisionsEnabled: boolean = false;
+  private shardTileCollisionsEnabled: boolean = true;
 
   // Wave system state lives on this.waves (WaveSystem) — these accessors
   // preserve the old GameEngine.waveX field ergonomics for the handful of
@@ -154,7 +154,7 @@ export class GameEngine {
   private shakeIntensity: number = 0;
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
-  private screenShakeEnabled: boolean = true;
+  private screenShakeEnabled: boolean = false;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -440,6 +440,194 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the DBG outline overlay for tile-and-shard variants
+   * whose default render is outlineless — plastic-tile / plastic-
+   * shard (soft gradient) and nebula-tile / nebula-shard (cloud
+   * sprite).  When ON the renderer draws a thin cyan stroke of
+   * each entity's collision polygon over the gradient / sprite,
+   * making the SAT footprint visible against the soft fill.
+   * Independent of the main DBG-mode toggle.
+   */
+  public toggleTileOutlines() {
+    this.renderer.tileOutlinesEnabled = !this.renderer.tileOutlinesEnabled;
+  }
+
+  /**
+   * Toggle the plastic-shard neighbour-brightness automata (PAuto).
+   * On: shards render in the active palette's constant base shade,
+   * darkened by how many plastic-shards they're in contact with.
+   * Off: per-instance random shades (and the contact count isn't
+   * computed).  Flips the render flag AND the ShardSystem compute
+   * flag together so the count work is skipped when off.
+   */
+  public togglePlasticAutomata() {
+    const next = !this.renderer.plasticAutomataEnabled;
+    this.renderer.plasticAutomataEnabled = next;
+    this.shards.plasticAutomataEnabled = next;
+  }
+
+  /**
+   * Flip the PAuto automata direction between darkening dense
+   * interiors (default) and brightening them.  Live — RenderSystem
+   * reads the shared flag in plasticAutomataHex each draw.
+   */
+  public togglePlasticAutomataDirection() {
+    togglePlasticAutomataBrighten();
+  }
+
+  /**
+   * Cycle the plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_
+   * CYCLE) — how hard plastic-shards pull nearby glass/rock debris in
+   * to be eaten.  Live; ShardSystem reads it each eat pass.
+   */
+  public cyclePlasticEatAttract() {
+    cyclePlasticEatAttract();
+  }
+
+  /**
+   * Toggle the plastic "reach" pseudopod behaviour (PRch) — reach toward
+   * loose plastic / glass / rock, grab, retract.  Off leaves plastic as
+   * a passive cohesive cluster.  Live.
+   */
+  public togglePlasticReach() {
+    this.shards.plasticReachEnabled = !this.shards.plasticReachEnabled;
+  }
+
+  /**
+   * Cycle the active plastic palette (amber → black → green →
+   * purple → gray → amber …) and immediately re-roll the colour
+   * of every active plastic-tile and plastic-shard so the swap
+   * is visible without breaking tiles.  Plastic-shards also
+   * re-derive wigglePhase from the new colour so the per-shade
+   * wiggle phase mapping stays in sync.
+   */
+  public cyclePlasticPalette() {
+    cyclePlasticPalette();
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (e.shardVariant !== 'plastic-tile' && e.shardVariant !== 'plastic-shard') continue;
+      e.color = randomPlasticShade();
+      if (e.shardVariant === 'plastic-shard') {
+        e.wigglePhase = colorToWigglePhase(e.color);
+      }
+    }
+  }
+
+  /**
+   * Cycle the active globalCompositeOperation used by the plastic-
+   * shard render branch (source-over → multiply → darken → screen →
+   * lighter → source-over).  Live — takes effect on the next frame
+   * without any entity-state mutation, since the mode is read fresh
+   * from getActivePlasticBlendMode() inside the renderer's per-
+   * entity slot.
+   */
+  public cyclePlasticBlendMode() {
+    cyclePlasticBlendMode();
+  }
+
+  /**
+   * Toggle the plastic colour-equilibration pipeline (NebulaSystem
+   * .equilibrateColors plastic block).  When off, plastic tiles
+   * and shards stop drifting toward each other and stay at their
+   * spawn / shatter colours.  Nebula blending is unaffected.
+   */
+  public togglePlasticBlend() {
+    this.nebulas.plasticBlendEnabled = !this.nebulas.plasticBlendEnabled;
+  }
+
+  /**
+   * Cycle the nebula-shard velocity-stretch stiffness through
+   * VEL_STRETCH_K_CYCLE (off → soft → med → firm → stiff → off …).
+   * The renderer reads getActiveNebulaStretchK() fresh each frame
+   * so the change takes effect immediately.  The "free" rotation
+   * behaviour (only squash aligns to velocity; sprite keeps its
+   * own rotation) is fixed — see RenderSystem nebula-shard branch.
+   */
+  public cycleNebulaStretch() {
+    cycleNebulaStretch();
+  }
+
+  /**
+   * Cycle the active plastic opacity through PLASTIC_OPACITY_CYCLE
+   * (25 % → 50 % → 75 % → 100 % → 25 % …).  Applied to both
+   * plastic-tile and plastic-shard render branches.  Live —
+   * takes effect on the next frame since the value is read fresh
+   * from getActivePlasticOpacity() inside each draw.
+   */
+  public cyclePlasticOpacity() {
+    cyclePlasticOpacity();
+  }
+
+  /**
+   * Cycle the plastic-shard disc's opaque-core radius fraction
+   * (PLASTIC_CORE_RADIUS_CYCLE).  Smaller core = longer alpha fade =
+   * deeper blend between overlapping shards.  Live — re-read from
+   * getActivePlasticCoreRadius() inside the soft-disc draw.
+   */
+  public cyclePlasticCoreRadius() {
+    cyclePlasticCoreRadius();
+  }
+
+  /**
+   * Cycle the plastic-shard disc draw radius (PLASTIC_BLEND_RADIUS_CYCLE,
+   * as a multiple of the collision radius).  Larger = more overlap
+   * with neighbouring shards.  Live.
+   */
+  public cyclePlasticBlendRadius() {
+    cyclePlasticBlendRadius();
+  }
+
+  /**
+   * Cycle the plastic-shard sticky-bond spring stiffness through
+   * PLASTIC_STIFFNESS_CYCLE (0.01 … 4).  Lower k = gentler in-zone
+   * recovery and a weaker over-yield cap, so kicks carry shards
+   * further past the yield point (more flow / deformation).
+   * PhysicsSystem reads getActivePlasticStiffness() each substep so
+   * the change takes effect on the next frame.
+   */
+  public cyclePlasticStiffness() {
+    cyclePlasticStiffness();
+  }
+
+  /**
+   * Cycle the plastic-shard linear damping through
+   * PLASTIC_DAMPING_CYCLE (0.95 … 1.0).  Lower = heavier friction
+   * (shards stop sooner); 1.0 is frictionless.  PhysicsSystem reads
+   * getActivePlasticDamping() each substep for every plastic-shard,
+   * so the change retunes all active shards immediately.
+   */
+  public cyclePlasticDamping() {
+    cyclePlasticDamping();
+  }
+
+  /**
+   * Cycle the plastic-shard impact-stamp cooldown through
+   * PLASTIC_IMPACT_COOLDOWN_CYCLE (0.2 / 0.4 / 0.8 / 1.5 / off).
+   * Longer = the collision-driven wiggle/dent deformation axis
+   * re-orients less often (calmer); 'off' disables collision-driven
+   * deformation entirely (projectile hits still wiggle).
+   * PhysicsSystem reads getActivePlasticImpactCooldown() live.
+   */
+  public cyclePlasticImpactCooldown() {
+    cyclePlasticImpactCooldown();
+  }
+
+  /**
+   * Cycle the plastic-shard elastoplastic yield distance through
+   * PLASTIC_YIELD_CYCLE (putty → soft → med → firm → elastic).
+   * Smaller yield = more plastic (less of the displacement springs
+   * back; the anchor permanently migrates past the yield point);
+   * 'elastic' (∞) disables plastic flow for a full-return reference.
+   * PhysicsSystem reads getActivePlasticYield() each substep so the
+   * change takes effect on the next frame.
+   */
+  public cyclePlasticYield() {
+    cyclePlasticYield();
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -643,6 +831,22 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
+      plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      plasticEatAttractName: getActivePlasticEatAttractName(),
+      plasticReachEnabled: this.shards.plasticReachEnabled,
+      plasticPaletteName: getActivePlasticPaletteName(),
+      plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
+      nebulaStretchName:   getActiveNebulaStretchName(),
+      plasticOpacity:     getActivePlasticOpacityName(),
+      plasticYieldName:   getActivePlasticYieldName(),
+      plasticStiffnessName: getActivePlasticStiffnessName(),
+      plasticDampingName: getActivePlasticDampingName(),
+      plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
+      plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
+      plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -757,6 +961,22 @@ export class GameEngine {
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
+      plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      plasticEatAttractName: getActivePlasticEatAttractName(),
+      plasticReachEnabled: this.shards.plasticReachEnabled,
+      plasticPaletteName: getActivePlasticPaletteName(),
+      plasticBlendMode:   getActivePlasticBlendModeName(),
+      plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
+      nebulaStretchName:   getActiveNebulaStretchName(),
+      plasticOpacity:     getActivePlasticOpacityName(),
+      plasticYieldName:   getActivePlasticYieldName(),
+      plasticStiffnessName: getActivePlasticStiffnessName(),
+      plasticDampingName: getActivePlasticDampingName(),
+      plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
+      plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
+      plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1055,14 +1275,19 @@ export class GameEngine {
           // - dent variants (plastic-tile / metal-tile / rock-tile):
           //   tile detaches via DropSystem.spawnDentShard reading
           //   dent.breakShards — skip ShardSystem.shatter entirely so
-          //   the two paths don't double-spawn.
-          const isDentVariant = SHARD_VARIANTS[variant].dent !== undefined;
-          if (this.currentMap && variant !== 'glass-tile' && !isDentVariant) {
+          //   the two paths don't double-spawn.  Variants with `dent`
+          //   set BUT `breakShards` empty (today plastic-shard) want
+          //   the standard shatter path for child-spawning — dent is
+          //   only there for the HP-per-hit / no-visible-deform
+          //   contract.
+          const dent = SHARD_VARIANTS[variant].dent;
+          const isDentSpawn = dent !== undefined && dent.breakShards.length > 0;
+          if (this.currentMap && variant !== 'glass-tile' && !isDentSpawn) {
               this.shards.shatter(entity, this.currentMap.entities);
           }
 
-          // Rock-shard death also releases 2 colour-matched nebula-
-          // shards (cloud-style fragments) alongside the solid shatter
+          // Rock-shard death also releases 1 colour-matched nebula-
+          // shard (cloud-style fragment) alongside the solid shatter
           // children.  Only fires for mobile shards (mass !==
           // Infinity) and only when the shard was big enough to
           // produce shatter children — small chips (size < 24)
@@ -1072,7 +1297,7 @@ export class GameEngine {
               && entity.mass !== Infinity
               && Math.max(entity.size.x, entity.size.y) >= 24) {
               const baseSize = this.deformedDiameter(entity);
-              for (let nb = 0; nb < 2; nb++) {
+              for (let nb = 0; nb < 1; nb++) {
                   const jitter = baseSize * 0.2;
                   const puffPos = {
                       x: entity.position.x + (Math.random() - 0.5) * jitter,
@@ -1091,7 +1316,7 @@ export class GameEngine {
               }
           }
 
-          // Rock-tile death burst — 4-6 colour-matched nebula-shards
+          // Rock-tile death burst — 3-5 colour-matched nebula-shards
           // scattered around the tile centre, on top of the per-hit
           // puffs that fired during deformation.  Sells the final
           // collapse as a substantial dust cloud rather than just
@@ -1100,7 +1325,7 @@ export class GameEngine {
               && variant === 'rock-tile'
               && entity.mass === Infinity) {
               const baseSize = this.deformedDiameter(entity);
-              const count = 4 + Math.floor(Math.random() * 3);
+              const count = 3 + Math.floor(Math.random() * 3);
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * 0.4;
                   const puffPos = {
@@ -1175,6 +1400,8 @@ export class GameEngine {
               speedMin: 2, speedMax: 5, sizeMin: 1, sizeMax: 2,
               lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+      } else if (variant === 'plastic-tile' || variant === 'plastic-shard') {
+          // Plastic intentionally emits no death spark burst.
       } else if (isNebula) {
           // Nebulae fade out gracefully via mergeFadeTimer in the
           // renderer — no spark burst on destruction.  Merge/transmute
@@ -1270,6 +1497,12 @@ export class GameEngine {
         // single point on high-N ShPair settings.
         this.shards.update(this.currentMap.entities, dt, this.physics, this.physics.lastRunShardPair);
     }
+
+    // Plastic self-break (v7): plastic-shards no longer merge — each
+    // counts down a per-shard timer and self-shatters when it expires,
+    // cascading down to chips that explode on their own.  Drops are
+    // suppressed for these self-triggered breaks.
+    this.tickPlasticSelfBreak(dt);
 
     // Tick down regenPopTimer on tiles
     if (this.currentMap) {
@@ -1682,7 +1915,7 @@ export class GameEngine {
                 || target.shardVariant === 'metal-shard')) {
           const dustCount = target.size.x > 50 ? 5 : 3;
           const dustColor =
-              target.shardVariant === 'plastic-shard' ? '#fbbf24'
+              target.shardVariant === 'plastic-shard' ? '#b45309'
             : target.shardVariant === 'metal-shard'   ? '#cbd5e1'
             :                                            '#94a3b8'; // rock-shard
           this.spawnParticles(impactPos, dustCount, dustColor, {
@@ -1785,10 +2018,9 @@ export class GameEngine {
                   // the cleaner solid-shard-only readout.
                   if (target.shardVariant === 'rock-tile') {
                       const baseSize = this.deformedDiameter(target);
-                      // 2 puffs per hit at slightly varied sizes +
-                      // small jitter on spawn position so they don't
-                      // overlap exactly.
-                      for (let nb = 0; nb < 2; nb++) {
+                      // 1 puff per hit at a varied size + small jitter
+                      // on spawn position so it doesn't overlap exactly.
+                      for (let nb = 0; nb < 1; nb++) {
                           const jitter = baseSize * 0.15;
                           const puffPos = {
                               x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
@@ -2362,6 +2594,51 @@ export class GameEngine {
 
   private applyDropEffect(entity: GameEntity) {
     this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
+  }
+
+  /**
+   * Plastic self-break tick.  Larger plastic-shards break only on
+   * damage (the normal projectile → death → shatter path).  ONLY the
+   * smallest shards — those already below the shatter size-floor
+   * (plastic-shard spawn.sizeMin), which can't split into children —
+   * keep a timed self-destruct: each rolls a random countdown
+   * (PLASTIC_SELF_BREAK) and, on expiry, is routed through the death
+   * path with drops suppressed so it simply explodes on its own.
+   * This keeps the terminal chips from lingering forever without
+   * making the whole cluster disintegrate on a timer.
+   *
+   * Breaks are collected first and applied after the scan so any
+   * freshly-spawned entities aren't iterated in the same frame.
+   */
+  private tickPlasticSelfBreak(dt: number) {
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+    const floor = SHARD_VARIANTS['plastic-shard'].spawn.sizeMin;
+    let toBreak: GameEntity[] | null = null;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (!e.active || e.shardVariant !== 'plastic-shard' || e.mass === Infinity) continue;
+      // Larger shards break on damage only — skip the timer for any
+      // shard big enough to still shatter into children.
+      if (e.size.x >= floor) continue;
+      if (e.plasticBreakTimer === undefined) {
+        e.plasticBreakTimer = PLASTIC_SELF_BREAK.MIN_SECONDS
+          + Math.random() * (PLASTIC_SELF_BREAK.MAX_SECONDS - PLASTIC_SELF_BREAK.MIN_SECONDS);
+        continue;
+      }
+      e.plasticBreakTimer -= dt;
+      if (e.plasticBreakTimer <= 0) {
+        (toBreak ??= []).push(e);
+      }
+    }
+    if (!toBreak) return;
+    for (let i = 0; i < toBreak.length; i++) {
+      const e = toBreak[i];
+      if (!e.active) continue;
+      e.suppressDrops = true;     // self-break: no ammo/health drops
+      this.handleEntityDeath(e);
+      e.active = false;
+    }
   }
 
   private spawnDrops(entity: GameEntity) {

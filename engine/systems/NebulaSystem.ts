@@ -80,6 +80,14 @@ export class NebulaSystem {
     // NEBULA_CONSTANTS.BLEND_*_ALPHA_CYCLE.
     public tileBlendAlpha: number = NEBULA_CONSTANTS.BLEND_TILE_ALPHA;
     public shardBlendAlpha: number = NEBULA_CONSTANTS.BLEND_SHARD_ALPHA;
+    /** DBG gate for the plastic-equilibration block at the end of
+     *  equilibrateColors.  Independent of the nebula tile/shard
+     *  alphas — plastic still uses the same `tileBlendAlpha` /
+     *  `shardBlendAlpha` for its lerp rate when enabled, but flipping
+     *  this off skips the plastic passes entirely so a dev can
+     *  isolate the nebula-only behaviour or freeze plastic colours
+     *  at their spawn values for a screenshot.  Default ON. */
+    public plasticBlendEnabled: boolean = true;
 
     // Frame-skip cadence for the color-equilibration pass.  Same
     // shape as PhysicsSystem.shardPairFrameInterval: cycled through
@@ -405,6 +413,127 @@ export class NebulaSystem {
                 e.nebulaBlendedHex = newHex;
                 e.nebulaTintedKey = undefined;
                 e.nebulaCachedTinted = undefined;
+            }
+        }
+
+        // ── Plastic equilibration ────────────────────────────────────
+        // Plastic tiles and shards participate in the same continuous-
+        // blending pipeline as nebula, but use RGB lerp instead of
+        // HSL/hue arithmetic — plastic colours live within a narrow
+        // palette family (amber / blue / etc.) and routing them
+        // through paletteHueToHex would drift them out of the palette
+        // into nebula's fixed saturation/lightness.  Direct RGB lerp
+        // keeps each palette's character intact while smoothing
+        // neighbour-to-neighbour variation over time.
+        //
+        // Gate: independent DBG toggle (plasticBlendEnabled) lets a
+        // dev freeze plastic colours at spawn values while leaving
+        // nebula blending running, useful for isolating nebula-only
+        // behaviour or capturing screenshots before plastic
+        // homogenises.
+        if (this.plasticBlendEnabled && (this.tileBlendAlpha > 0 || this.shardBlendAlpha > 0)) {
+            // Build per-call hex-coord index of plastic-tiles.  Reused
+            // by both the tile-pass and shard-pass below.  Cheap —
+            // plastic-tile counts are bounded by MAP_POPULATION
+            // cluster sizes (~50-150 typical).  Bail when empty so
+            // non-plastic maps pay zero cost after the walk.
+            const plasticTileIndex = new Map<number, GameEntity>();
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                if (e.shardVariant !== 'plastic-tile') continue;
+                if (!e.active) continue;
+                if (e.mergeFadeTimer !== undefined) continue;
+                const hc = pixelToHexCoord(e.position.x, e.position.y);
+                const key = (hc.c << 16) | (hc.r & 0xFFFF);
+                plasticTileIndex.set(key, e);
+            }
+
+            if (plasticTileIndex.size > 0) {
+                // ── Plastic-tile → plastic-tile neighbours ───────────
+                if (this.tileBlendAlpha > 0) {
+                    const alpha = this.tileBlendAlpha;
+                    for (const tile of plasticTileIndex.values()) {
+                        const hc = pixelToHexCoord(tile.position.x, tile.position.y);
+                        const neighbors = TileGenerator.getHexNeighbors(hc.c, hc.r);
+                        let sumR = 0, sumG = 0, sumB = 0, cnt = 0;
+                        for (let ni = 0; ni < neighbors.length; ni++) {
+                            const n = neighbors[ni];
+                            const key = (n.c << 16) | (n.r & 0xFFFF);
+                            const nTile = plasticTileIndex.get(key);
+                            if (!nTile) continue;
+                            const c = nTile.color;
+                            sumR += parseInt(c.slice(1, 3), 16);
+                            sumG += parseInt(c.slice(3, 5), 16);
+                            sumB += parseInt(c.slice(5, 7), 16);
+                            cnt++;
+                        }
+                        if (cnt === 0) continue;
+                        const avgR = sumR / cnt, avgG = sumG / cnt, avgB = sumB / cnt;
+                        const c0 = tile.color;
+                        const r0 = parseInt(c0.slice(1, 3), 16);
+                        const g0 = parseInt(c0.slice(3, 5), 16);
+                        const b0 = parseInt(c0.slice(5, 7), 16);
+                        const r1 = Math.round(r0 * (1 - alpha) + avgR * alpha);
+                        const g1 = Math.round(g0 * (1 - alpha) + avgG * alpha);
+                        const b1 = Math.round(b0 * (1 - alpha) + avgB * alpha);
+                        // Skip the write when the per-channel change is
+                        // below 1 — matches the nebula QUANTIZE_EPSILON
+                        // role (avoid pointless string allocations).
+                        if (r1 === r0 && g1 === g0 && b1 === b0) continue;
+                        tile.color = '#'
+                          + r1.toString(16).padStart(2, '0')
+                          + g1.toString(16).padStart(2, '0')
+                          + b1.toString(16).padStart(2, '0');
+                    }
+                }
+
+                // ── Plastic-shard → nearest plastic-tile ─────────────
+                if (this.shardBlendAlpha > 0) {
+                    const alpha = this.shardBlendAlpha;
+                    for (let i = 0; i < entities.length; i++) {
+                        const e = entities[i];
+                        if (e.shardVariant !== 'plastic-shard') continue;
+                        if (!e.active) continue;
+                        if (e.mergeFadeTimer !== undefined) continue;
+
+                        const origin = pixelToHexCoord(e.position.x, e.position.y);
+                        let bestTile: GameEntity | null = null;
+                        let bestDistSq = Infinity;
+                        const probeCell = (c: number, r: number) => {
+                            const key = (c << 16) | (r & 0xFFFF);
+                            const t = plasticTileIndex.get(key);
+                            if (!t) return;
+                            const dx = wrapDeltaX(e.position.x, t.position.x);
+                            const dy = wrapDeltaY(e.position.y, t.position.y);
+                            const d2 = dx * dx + dy * dy;
+                            if (d2 < bestDistSq) { bestDistSq = d2; bestTile = t; }
+                        };
+                        probeCell(origin.c, origin.r);
+                        const ns = TileGenerator.getHexNeighbors(origin.c, origin.r);
+                        for (let ni = 0; ni < ns.length; ni++) {
+                            probeCell(ns[ni].c, ns[ni].r);
+                        }
+                        if (!bestTile) continue;
+                        // Cast: bestTile is set inside the closure but
+                        // TS's flow narrowing can't see through it.
+                        const target = (bestTile as GameEntity).color;
+                        const tR = parseInt(target.slice(1, 3), 16);
+                        const tG = parseInt(target.slice(3, 5), 16);
+                        const tB = parseInt(target.slice(5, 7), 16);
+                        const c0 = e.color;
+                        const r0 = parseInt(c0.slice(1, 3), 16);
+                        const g0 = parseInt(c0.slice(3, 5), 16);
+                        const b0 = parseInt(c0.slice(5, 7), 16);
+                        const r1 = Math.round(r0 * (1 - alpha) + tR * alpha);
+                        const g1 = Math.round(g0 * (1 - alpha) + tG * alpha);
+                        const b1 = Math.round(b0 * (1 - alpha) + tB * alpha);
+                        if (r1 === r0 && g1 === g0 && b1 === b0) continue;
+                        e.color = '#'
+                          + r1.toString(16).padStart(2, '0')
+                          + g1.toString(16).padStart(2, '0')
+                          + b1.toString(16).padStart(2, '0');
+                    }
+                }
             }
         }
     }

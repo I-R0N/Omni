@@ -23,15 +23,699 @@ export const COLORS = {
   ASTEROID: '#94a3b8',    // Slate 400
   STRUCTURE: '#6366f1',   // Indigo 500
   STRUCTURE_BORDER: '#818cf8', // Indigo 400 (legacy, glass-only)
-  // Plastic — matte warm-orange polymer.  Mid-saturation, low-contrast
-  // outline so the surface reads as soft injection-moulded plastic
-  // rather than the violet sheen of the prior reinforced tile.
-  STRUCTURE_PLASTIC: '#d97706',           // Amber 600 — matte polymer body
+  // Plastic — amber-shade family.  Per-instance random shade
+  // picked from PLASTIC_AMBER_SHADES below at spawn time
+  // (TileGenerator.buildStructureTile + DropSystem.spawnDentShard
+  // override entity.color with a fresh randomPlasticShade()) so
+  // every plastic-tile and every plastic-shard reads as its own
+  // amber tone within a coherent palette.  This base constant
+  // is the fallback used only if a future spawn site forgets to
+  // pick — set to a mid-range amber so it'd still look correct.
+  STRUCTURE_PLASTIC: '#b45309',           // Amber 700 — fallback shade
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
   // against the indigo glass tiles.
   STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
+
+// ── Plastic palettes ───────────────────────────────────────────────
+// Per-instance random shade picked by randomPlasticShade() at every
+// plastic-tile / plastic-shard spawn site so cluster colour reads as
+// "different shades" rather than one flat tone.  The active palette
+// is switched at runtime via cyclePlasticPalette() (wired through
+// the DBG panel) — useful for trying different material reads
+// (warm amber polymer vs. dark void vs. moss vs. obsidian) without
+// rebuilding.
+
+/** Amber polymer — warm earth tones, the v3 default. */
+export const PLASTIC_AMBER_SHADES: ReadonlyArray<string> = [
+  '#f59e0b',  // Amber 500
+  '#d97706',  // Amber 600
+  '#b45309',  // Amber 700
+  '#92400e',  // Amber 800
+  '#78350f',  // Amber 900
+  '#a16207',  // Yellow 700
+  '#854d0e',  // Yellow 800
+] as const;
+
+/** Pure black + near-blacks — void / tar / ink read. */
+export const PLASTIC_BLACK_SHADES: ReadonlyArray<string> = [
+  '#000000',
+  '#0a0a0a',
+  '#171717',  // Neutral 900
+  '#262626',  // Neutral 800
+] as const;
+
+/** Dark green — moss / forest read. */
+export const PLASTIC_DARK_GREEN_SHADES: ReadonlyArray<string> = [
+  '#14532d',  // Green 900
+  '#166534',  // Green 800
+  '#15803d',  // Green 700
+  '#064e3b',  // Emerald 900
+  '#065f46',  // Emerald 800
+] as const;
+
+/** Dark purple — obsidian / amethyst read. */
+export const PLASTIC_DARK_PURPLE_SHADES: ReadonlyArray<string> = [
+  '#3b0764',  // Purple 950
+  '#4c1d95',  // Violet 900
+  '#581c87',  // Purple 900
+  '#6b21a8',  // Purple 800
+  '#2e1065',  // Violet 950
+] as const;
+
+/** Dark gray — gunmetal / charcoal read. */
+export const PLASTIC_DARK_GRAY_SHADES: ReadonlyArray<string> = [
+  '#111827',  // Gray 900
+  '#1f2937',  // Gray 800
+  '#374151',  // Gray 700
+  '#0f172a',  // Slate 900
+  '#1e293b',  // Slate 800
+] as const;
+
+/** Deep blue — deep-ocean / midnight read. */
+export const PLASTIC_DEEP_BLUE_SHADES: ReadonlyArray<string> = [
+  '#172554',  // Blue 950
+  '#1e3a8a',  // Blue 900
+  '#1e40af',  // Blue 800
+  '#0c4a6e',  // Sky 900
+  '#075985',  // Sky 800
+] as const;
+
+/** Dark blue — darker than the `blue` palette; navy / indigo
+ *  midnight tones with no Sky brights mixed in. */
+export const PLASTIC_DARK_BLUE_SHADES: ReadonlyArray<string> = [
+  '#020617',  // Slate 950
+  '#1e1b4b',  // Indigo 950
+  '#0c1e3a',  // custom dark navy
+  '#1a1d4a',  // custom dark indigo
+  '#0a1535',  // custom very dark navy
+] as const;
+
+/** Plain white shades — porcelain / paper read. */
+export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
+  '#ffffff',
+  '#fafafa',  // Neutral 50
+  '#f5f5f5',  // Neutral 100
+  '#e5e5e5',  // Neutral 200
+] as const;
+
+interface PlasticPalette {
+  readonly name: string;
+  readonly shades: ReadonlyArray<string>;
+  /** Optional glow-outline colour baked into the cached soft-disc
+   *  bitmap.  When set, the gradient profile's outer ring switches
+   *  from "shard colour fading out" to "outline colour fading out",
+   *  producing a halo around the disc.  No extra draw calls — the
+   *  glow is part of the same drawImage.  Cache key encodes this
+   *  so glow + non-glow palettes coexist without collision. */
+  readonly outline?: string;
+  /** When true (only meaningful alongside `outline`), the disc
+   *  uses a HARD-edge profile — solid colour all the way to the
+   *  disc rim, then an immediate transition to the glow halo.
+   *  Reads as a crisp silhouette with a bloom around it.  When
+   *  false / unset, the glow profile uses a soft-gradient disc
+   *  that fades smoothly into the halo (default for black+glow /
+   *  white+glow palettes). */
+  readonly solidEdge?: boolean;
+}
+
+/** Cycle order for cyclePlasticPalette().  First entry is the
+ *  startup default. */
+export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
+  { name: 'amber',       shades: PLASTIC_AMBER_SHADES       },
+  // Solid black with a glowing white halo — hard-edge silhouette
+  // against a soft bloom.  Single shade, single bitmap.
+  { name: 'black',       shades: ['#000000'], outline: '#ffffff', solidEdge: true },
+  { name: 'green',       shades: PLASTIC_DARK_GREEN_SHADES  },
+  { name: 'purple',      shades: PLASTIC_DARK_PURPLE_SHADES },
+  { name: 'gray',        shades: PLASTIC_DARK_GRAY_SHADES   },
+  { name: 'blue',        shades: PLASTIC_DEEP_BLUE_SHADES   },
+  // Darker blue family — Slate 950 / Indigo 950 / custom navies.
+  // Distinct from `blue` (which includes brighter Sky 800/900).
+  { name: 'darkblue',    shades: PLASTIC_DARK_BLUE_SHADES   },
+  { name: 'white',       shades: PLASTIC_WHITE_SHADES       },
+  // Soft-gradient black with a glowing white halo — same colours
+  // as `black` but with the smoother disc-to-glow transition.
+  { name: 'black+glow',  shades: ['#000000'], outline: '#ffffff' },
+  // White core with a glowing black halo.
+  { name: 'white+glow',  shades: ['#ffffff'], outline: '#000000' },
+] as const;
+
+let activePlasticPaletteIndex = 3; // purple
+
+/** Index of the active palette in PLASTIC_PALETTES.  Exposed for
+ *  the DBG panel via EngineStats. */
+export function getActivePlasticPaletteIndex(): number {
+  return activePlasticPaletteIndex;
+}
+
+/** Name of the active palette (for DBG button label). */
+export function getActivePlasticPaletteName(): string {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].name;
+}
+
+/** Outline colour for the active palette (when set), or undefined.
+ *  Read by RenderSystem.getSoftDiscBitmap to bake a glow ring into
+ *  the cached bitmap. */
+export function getActivePlasticPaletteOutline(): string | undefined {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].outline;
+}
+
+/** Whether the active palette uses the hard-edge disc profile (solid
+ *  colour all the way to the disc rim, then immediate transition to
+ *  the glow halo).  Only meaningful when outline is also set. */
+export function getActivePlasticPaletteSolidEdge(): boolean {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].solidEdge === true;
+}
+
+/** Advance the active palette by one slot, wrapping at the end.
+ *  Returns the new index.  Re-colouring existing entities is the
+ *  caller's responsibility (see GameEngine.cyclePlasticPalette). */
+export function cyclePlasticPalette(): number {
+  activePlasticPaletteIndex = (activePlasticPaletteIndex + 1) % PLASTIC_PALETTES.length;
+  return activePlasticPaletteIndex;
+}
+
+/** Pick a random shade from the ACTIVE plastic palette.  Called at
+ *  every plastic-tile / plastic-shard spawn site so cluster colour
+ *  reads as "different shades" within the chosen family. */
+export function randomPlasticShade(): string {
+  const palette = PLASTIC_PALETTES[activePlasticPaletteIndex].shades;
+  return palette[Math.floor(Math.random() * palette.length)];
+}
+
+/** Single representative shade of the ACTIVE palette — the constant
+ *  base colour used by the plastic-shard neighbour-brightness automata
+ *  (PAuto), so every plastic-shard reads as the same colour and only
+ *  its brightness encodes local cluster density.  shades[0] is the
+ *  brightest stop of each palette, giving the most headroom to darken
+ *  toward the cluster interior. */
+export function getActivePlasticBaseShade(): string {
+  return PLASTIC_PALETTES[activePlasticPaletteIndex].shades[0];
+}
+
+// ── Plastic-shard neighbour-brightness automata (PAuto) ────────────
+// When enabled, plastic-shards drop their per-instance random shade
+// and all render in the active palette's constant base shade, with
+// brightness scaled by how many other plastic-shards are in contact —
+// mirroring the nebula-tile interior-darken rule.  More contacts =
+// darker, so cluster interiors recede and edges/lone shards pop.
+// ShardSystem computes the per-shard contact count off the merge
+// broadphase grid; RenderSystem applies the brightness factor.
+export const PLASTIC_SHARD_AUTOMATA = {
+  /** Multiplier on the summed collision radii (aR + bR) below which a
+   *  pair counts as "in contact".  >1 so near-touching shards count. */
+  CONTACT_BUFFER: 1.4,
+  /** Contact count at which the brightness factor saturates. */
+  MAX_NEIGHBORS: 6,
+  /** Brightness multiplier at MAX_NEIGHBORS when DARKENING interiors
+   *  (the default direction) — <1 so dense clusters recede. */
+  MIN_BRIGHTNESS: 0.5,
+  /** Brightness multiplier at MAX_NEIGHBORS when BRIGHTENING interiors
+   *  — >1 so dense clusters glow.  Selected by the PADIR toggle. */
+  MAX_BRIGHTNESS: 1.6,
+} as const;
+
+// PADIR toggle — direction of the PAuto automata.  false (default) =
+// darken dense interiors (mirrors nebula); true = brighten them.
+let activePlasticAutomataBrighten = true; // brighten dense interiors
+
+/** True when the PAuto automata brightens dense interiors instead of
+ *  darkening them.  Read by RenderSystem's plasticAutomataHex. */
+export function isPlasticAutomataBrighten(): boolean {
+  return activePlasticAutomataBrighten;
+}
+
+/** Flip the PAuto automata between darken and brighten.  Returns the
+ *  new state (true = brighten). */
+export function togglePlasticAutomataBrighten(): boolean {
+  activePlasticAutomataBrighten = !activePlasticAutomataBrighten;
+  return activePlasticAutomataBrighten;
+}
+
+// ── Plastic-shard self-break (smallest chips only) ─────────────────
+// Plastic-shards break into smaller shards on damage (the normal
+// shatter path).  ONLY the smallest chips — already below the shatter
+// size-floor and unable to split further — keep a timed self-destruct
+// so they don't linger forever: each rolls a random delay in this
+// range and then explodes on its own (drops suppressed).  See
+// GameEngine.tickPlasticSelfBreak.
+export const PLASTIC_SELF_BREAK = {
+  MIN_SECONDS: 12.5,
+  MAX_SECONDS: 30.0,
+} as const;
+
+// ── Plastic eats glass / rock ──────────────────────────────────────
+// A plastic-shard "eats" glass-/rock-shards whose centre lingers
+// inside its visual orb: after SECONDS of (net) contact the plastic
+// grows by the consumed shard's area and the consumed shard fades out
+// inside it.  CONTACT_RADIUS_FACTOR multiplies the eater's collision
+// radius to approximate its rendered orb extent (matches the default
+// PBLND blend radius), so debris is eaten once it's visually inside.
+// A gentle inverse-distance attraction (ATTRACT_*) draws glass/rock
+// toward the nearest plastic within ATTRACT_RANGE so debris settles
+// into contact instead of just bouncing off.  The attract STRENGTH is
+// DBG-cyclable (PEat button) — see PLASTIC_EAT_ATTRACT_CYCLE below.
+// See ShardSystem.runMergeBroadphase (eat pass) + applyPlasticEat.
+export const PLASTIC_EAT = {
+  SECONDS: 1.5,
+  CONTACT_RADIUS_FACTOR: 2.0,
+  ATTRACT_RANGE: 220,
+  ATTRACT_MIN_DIST: 8,
+  // Metal is dense — multiply the eat time so it takes significantly
+  // longer to consume than glass/rock (1.5 s × this).
+  METAL_TIME_FACTOR: 6,
+  // Fraction of a consumed shard's area added to the eater on each
+  // eat.  <1 means it takes more shards to grow — at 0.2 a plastic
+  // shard must eat ~5× the area to grow the same amount as full
+  // (1.0) absorption would.
+  GROWTH_AREA_FACTOR: 0.2,
+} as const;
+
+/** Attract-strength steps for the PEat DBG cycle.  Index 1 (180) is
+ *  the startup default; the rest crank it up (nebula self-gravity is
+ *  380 for reference).  Read live by ShardSystem's eat pass. */
+export const PLASTIC_EAT_ATTRACT_CYCLE: ReadonlyArray<number> = [
+  90, 180, 360, 720, 1440,
+] as const;
+
+let activePlasticEatAttractIndex = 1;
+
+export function getActivePlasticEatAttract(): number {
+  return PLASTIC_EAT_ATTRACT_CYCLE[activePlasticEatAttractIndex];
+}
+
+export function getActivePlasticEatAttractName(): string {
+  return String(getActivePlasticEatAttract());
+}
+
+export function cyclePlasticEatAttract(): number {
+  activePlasticEatAttractIndex = (activePlasticEatAttractIndex + 1) % PLASTIC_EAT_ATTRACT_CYCLE.length;
+  return activePlasticEatAttractIndex;
+}
+
+// ── Plastic "reach" (living-blob pseudopod) ────────────────────────
+// Emergent reach-grab-retract (option B): the plastic shard nearest a
+// loose target (glass/rock shard, or an unbonded "loose" plastic shard)
+// leads its anchor toward that target so the spring stretches it out as
+// a pseudopod; on contact the existing bond / eat systems "grab" it,
+// then the reacher leads its anchor back to its saved home so the
+// spring reels itself (and the grabbed thing) back into the cluster.
+// One reacher per target keeps it a protrusion rather than the whole
+// cluster lurching.  Lead distance reuses the plastic yield (PYLD) so
+// it tracks the spring feel.  See ShardSystem.runMergeBroadphase.
+export const PLASTIC_REACH = {
+  RANGE: 160,            // how far a plastic shard looks for a reach target
+  GRAB_DIST_FACTOR: 1.3, // contact = (reacherR + targetR) × this → "grab"
+  HOME_EPS: 5,           // within this of home anchor ⇒ reach complete
+} as const;
+
+
+// ── Plastic blend-mode cycle ───────────────────────────────────────
+// globalCompositeOperation applied to the plastic-shard draw call so
+// overlapping shards in a cluster blend visibly differently.  Cycled
+// via the DBG panel's Blend button.  Per-shard cost is two ctx state
+// writes (set before draw, reset after) — cheap.
+
+/** Cycle order for cyclePlasticBlendMode().  First entry is the
+ *  startup default.  Limited to monochrome-friendly modes — HSL
+ *  and hue-based ops aren't meaningful with single-colour shards.
+ *
+ *  - source-over: default, normal alpha blending (no overlap effect).
+ *  - multiply:    overlap regions darken — reads as denser polymer.
+ *  - darken:      pixel-wise min — overlap keeps the darker shade.
+ *  - screen:      overlap regions lighten — bright halos.
+ *  - lighter:     additive — overlapping colours sum, can clip white. */
+export const PLASTIC_BLEND_MODES: ReadonlyArray<GlobalCompositeOperation> = [
+  'source-over',
+  'multiply',
+  'darken',
+  'screen',
+  'lighter',
+] as const;
+
+// Cycle starts on 'source-over' — plain alpha blending; the additive
+// 'lighter' look is still one click away via the DBG Blend button.
+let activePlasticBlendModeIndex = 0;
+
+/** Active blend mode for plastic-shard rendering.  Read by the
+ *  RenderSystem plastic-shard branch each frame. */
+export function getActivePlasticBlendMode(): GlobalCompositeOperation {
+  return PLASTIC_BLEND_MODES[activePlasticBlendModeIndex];
+}
+
+/** Active blend-mode name for the DBG button label. */
+export function getActivePlasticBlendModeName(): string {
+  return PLASTIC_BLEND_MODES[activePlasticBlendModeIndex];
+}
+
+/** Advance the active blend mode by one slot, wrapping at the end.
+ *  Returns the new index. */
+export function cyclePlasticBlendMode(): number {
+  activePlasticBlendModeIndex = (activePlasticBlendModeIndex + 1) % PLASTIC_BLEND_MODES.length;
+  return activePlasticBlendModeIndex;
+}
+
+// ── Plastic opacity cycle ──────────────────────────────────────────
+// globalAlpha applied to plastic-tile and plastic-shard draw calls.
+// Cycled via the DBG panel's Opacity button.  Default 0.75 (matches
+// the v3+ "translucent polymer" look); 1.0 reads as solid, 0.25 as
+// ghostly.
+
+/** Discrete opacity steps for the cycle.  Index 2 is the startup
+ *  default (0.75). */
+export const PLASTIC_OPACITY_CYCLE: ReadonlyArray<number> = [
+  0.25,
+  0.50,
+  0.75,
+  1.00,
+] as const;
+
+let activePlasticOpacityIndex = 3; // 100%
+
+/** Active opacity for plastic rendering, in [0, 1].  Read by
+ *  RenderSystem plastic-tile + plastic-shard branches. */
+export function getActivePlasticOpacity(): number {
+  return PLASTIC_OPACITY_CYCLE[activePlasticOpacityIndex];
+}
+
+/** Active opacity formatted for the DBG button label. */
+export function getActivePlasticOpacityName(): string {
+  const v = PLASTIC_OPACITY_CYCLE[activePlasticOpacityIndex];
+  return `${Math.round(v * 100)}%`;
+}
+
+/** Advance the active opacity by one slot, wrapping at the end.
+ *  Returns the new index. */
+export function cyclePlasticOpacity(): number {
+  activePlasticOpacityIndex = (activePlasticOpacityIndex + 1) % PLASTIC_OPACITY_CYCLE.length;
+  return activePlasticOpacityIndex;
+}
+
+// ── Plastic soft-disc blend tuning ─────────────────────────────────
+// Two radii shape the plain (no-outline) plastic-shard disc and how
+// deeply neighbouring discs blend into one another:
+//  - CORE radius: the fraction of the disc radius that stays ~opaque
+//    before the alpha fade begins.  Smaller core → longer fade →
+//    deeper, seam-free blending between overlapping shards.
+//  - BLEND radius: the disc's overall draw radius as a multiple of the
+//    collision radius.  Larger → discs reach further past their SAT
+//    footprint → more overlap with neighbours.
+// Both are DBG-cyclable (PCore / PBlnd buttons) so the blend depth can
+// be dialled in live.  Defaults are deeper than the original fixed
+// 0.7 core / 1.7 radius the shards shipped with.
+
+/** Opaque-core radius fraction for the plain plastic disc gradient.
+ *  0 = fade straight from the centre (softest); higher keeps a flat
+ *  opaque core out to that fraction before fading. */
+export const PLASTIC_CORE_RADIUS_CYCLE: ReadonlyArray<number> = [
+  0.0, 0.15, 0.3, 0.45, 0.7,
+] as const;
+
+let activePlasticCoreRadiusIndex = 2; // 0.30 — moderate core, deep blend
+
+export function getActivePlasticCoreRadius(): number {
+  return PLASTIC_CORE_RADIUS_CYCLE[activePlasticCoreRadiusIndex];
+}
+
+export function getActivePlasticCoreRadiusName(): string {
+  return getActivePlasticCoreRadius().toFixed(2);
+}
+
+export function cyclePlasticCoreRadius(): number {
+  activePlasticCoreRadiusIndex = (activePlasticCoreRadiusIndex + 1) % PLASTIC_CORE_RADIUS_CYCLE.length;
+  return activePlasticCoreRadiusIndex;
+}
+
+/** Plastic-shard disc draw radius as a multiple of the collision
+ *  radius.  Larger spreads the disc further past the SAT footprint so
+ *  neighbouring discs overlap and blend more. */
+export const PLASTIC_BLEND_RADIUS_CYCLE: ReadonlyArray<number> = [
+  1.4, 1.7, 2.0, 2.4, 2.8,
+] as const;
+
+let activePlasticBlendRadiusIndex = 2; // 2.0 — more overlap than the old 1.7
+
+export function getActivePlasticBlendRadius(): number {
+  return PLASTIC_BLEND_RADIUS_CYCLE[activePlasticBlendRadiusIndex];
+}
+
+export function getActivePlasticBlendRadiusName(): string {
+  return getActivePlasticBlendRadius().toFixed(1);
+}
+
+export function cyclePlasticBlendRadius(): number {
+  activePlasticBlendRadiusIndex = (activePlasticBlendRadiusIndex + 1) % PLASTIC_BLEND_RADIUS_CYCLE.length;
+  return activePlasticBlendRadiusIndex;
+}
+
+// ── Nebula-shard velocity-stretch stiffness cycle ──────────────────
+// K multiplier on speed for the velocity-aligned stretch (see
+// NEBULA_CONSTANTS.VEL_STRETCH_* above + RenderSystem nebula-shard
+// render branch).  Cycled via the DBG NStr button — four active
+// stops between K = 0.05 and K = 0.10 (plus an off step at K = 0
+// that short-circuits the entire stretch block).  Default index 2
+// (K = 0.07) sits in the middle of the range.
+
+interface NebulaStretchStep {
+  readonly name: string;
+  readonly k: number;
+}
+
+export const VEL_STRETCH_K_CYCLE: ReadonlyArray<NebulaStretchStep> = [
+  { name: 'off',   k: 0     },
+  { name: '0.05',  k: 0.05  },
+  { name: '0.07',  k: 0.07  },
+  { name: '0.085', k: 0.085 },
+  { name: '0.10',  k: 0.10  },
+] as const;
+
+let activeNebulaStretchKIndex = 3; // 0.085
+
+/** Active stretch multiplier K (in speed → stretch).  Read by
+ *  RenderSystem nebula-shard render each frame. */
+export function getActiveNebulaStretchK(): number {
+  return VEL_STRETCH_K_CYCLE[activeNebulaStretchKIndex].k;
+}
+
+/** Active stretch step name for the DBG button label. */
+export function getActiveNebulaStretchName(): string {
+  return VEL_STRETCH_K_CYCLE[activeNebulaStretchKIndex].name;
+}
+
+/** Advance the active stretch slot by one, wrapping at the end.
+ *  Returns the new index. */
+export function cycleNebulaStretch(): number {
+  activeNebulaStretchKIndex = (activeNebulaStretchKIndex + 1) % VEL_STRETCH_K_CYCLE.length;
+  return activeNebulaStretchKIndex;
+}
+
+/** djb2-style hash of a colour hex string → phase angle in [0, 2π).
+ *  Cheap (one pass over the hex chars), deterministic per colour,
+ *  used to seed plastic-shard wiggle phase so each amber shade has
+ *  its own oscillation timing.  Skips the leading '#'. */
+export function colorToWigglePhase(hex: string): number {
+  let h = 5381;
+  for (let i = 1; i < hex.length; i++) {
+    h = (h * 33) ^ hex.charCodeAt(i);
+  }
+  return ((h >>> 0) & 0xFFFF) / 0xFFFF * Math.PI * 2;
+}
+
+/** Plastic-shard wiggle constants — damped-sinusoid scale pulse
+ *  triggered when a collision impulse exceeds the shard's restSpeed
+ *  threshold.  Visual-only (renderer applies ctx.scale before fill);
+ *  doesn't affect collision footprint.  See RenderSystem plastic-
+ *  shard branch + PhysicsSystem impulse-application sites. */
+export const WIGGLE_CONSTANTS = {
+  /** Total wiggle duration in seconds.  Timer counts down from
+   *  this value to 0; once at 0 the wiggle stops and the shard
+   *  renders at scale 1.0. */
+  DURATION:  0.4,
+  /** Oscillation frequency in rad/s.  25 rad/s ≈ 4 Hz; over the
+   *  0.4 s duration the shard squashes and stretches ≈ 1.6 times. */
+  FREQ:      25,
+  /** Peak scale deviation, multiplied by the decay envelope each
+   *  frame.  ±0.15 = squash/stretch between 85 % and 115 % at peak;
+   *  decays toward 1.0 ± 0 as timer runs out. */
+  AMPLITUDE: 0.15,
+} as const;
+
+/** Plastic-shard deformation constants — two parallel mechanisms:
+ *
+ *  Dent (A): per-impact accumulator (2D vector on entity.dentX/dentY)
+ *  that decays exponentially toward zero.  Persists past the wiggle's
+ *  0.4 s window — reads as polymer "remembering" hits and slowly
+ *  recovering shape.  Renderer applies a squash along the dent
+ *  direction + small bulge perpendicular.
+ *
+ *  Spawn variance (B): per-axis random scale at spawn (entity.base
+ *  ScaleX/Y) in [1-V, 1+V].  Static; gives each shard its own
+ *  slightly irregular shape so clusters don't all look identical. */
+export const PLASTIC_DEFORM_CONSTANTS = {
+  /** Magnitude added to the dent vector per impact, along the
+   *  normalised impact direction.  Multiple hits in the same
+   *  direction stack additively until DENT_MAX_MAGNITUDE caps the
+   *  total. */
+  DENT_INCREMENT_PER_IMPACT: 0.25,
+  /** Cap on the dent vector's total magnitude.  At 0.4 the
+   *  visual squash hits ~18 % along the impact axis (DENT_SQUASH
+   *  _FACTOR × 0.4 = 0.18). */
+  DENT_MAX_MAGNITUDE: 0.4,
+  /** Per-second decay rate for the dent vector.  0.5 = half-life
+   *  one second; a max-magnitude dent visibly persists for ~4 s
+   *  before snapping to zero at DENT_REST_THRESHOLD. */
+  DENT_DECAY_PER_SECOND: 0.5,
+  /** Magnitude below which both axes snap to undefined so the
+   *  renderer's dent check goes cold. */
+  DENT_REST_THRESHOLD: 0.02,
+  /** Multiplier on dent magnitude for the along-axis squash:
+   *  scaleX = 1 − dentMag × SQUASH_FACTOR.  At max dent (0.4)
+   *  this gives 18 % compression along the impact axis. */
+  DENT_SQUASH_FACTOR: 0.45,
+  /** Multiplier on dent magnitude for the perpendicular bulge:
+   *  scaleY = 1 + dentMag × BULGE_FACTOR.  Lower than the squash
+   *  factor so the disc loses some apparent area at high dent —
+   *  reads as "polymer chunk being pressed in" rather than
+   *  rubber-band stretch. */
+  DENT_BULGE_FACTOR: 0.2,
+  /** Spawn-time per-axis scale variance — each plastic-shard rolls
+   *  baseScaleX / baseScaleY in [1 − V, 1 + V] at spawn time so
+   *  clusters have visible per-shard shape variation. */
+  SPAWN_SHAPE_VARIANCE: 0.15,
+} as const;
+
+// Elastic stiffness cycle of the sticky-bond spring (1/s² per
+// displacement unit).  Within the yield zone (|displacement| <
+// yieldDist) the spring is purely elastic at this k; beyond it the
+// anchor yields (see PLASTIC_YIELD_CYCLE) so the restoring force is
+// capped at k × yieldDist.  Lower k = gentler in-zone recovery AND
+// a weaker over-yield cap, so a kick carries the shard further past
+// the yield point before settling (more deformation / flow).  Read
+// live via getActivePlasticStiffness() so the DBG PStf button takes
+// effect on the next substep.  Values are the literal k; the DBG
+// label is just that number.
+
+export const PLASTIC_STIFFNESS_CYCLE: ReadonlyArray<number> = [
+  0.01, 0.05, 0.1, 0.5, 1, 2, 4,
+] as const;
+
+// Default index 2 (k = 0.1) — soft/flowy; cycle down to 0.01 for
+// near-zero recovery or up to 4 for the previous firmer feel.
+let activePlasticStiffnessIndex = 2;
+
+export function getActivePlasticStiffness(): number {
+  return PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex];
+}
+
+export function getActivePlasticStiffnessName(): string {
+  return String(PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex]);
+}
+
+export function cyclePlasticStiffness(): number {
+  activePlasticStiffnessIndex = (activePlasticStiffnessIndex + 1) % PLASTIC_STIFFNESS_CYCLE.length;
+  return activePlasticStiffnessIndex;
+}
+
+// Linear-damping cycle for plastic-shards (per-substep velocity
+// multiplier).  Read live via getActivePlasticDamping() so the DBG
+// PDmp button retunes friction on every plastic-shard immediately,
+// not just newly-spawned ones.  At the 120 Hz substep rate the
+// per-second retention is value^120: 0.95→~0.2%, 0.97→~2.6%,
+// 0.99→~30%, 0.995→~55%, 0.999→~89%, 1.0→frictionless.  Lower =
+// heavier friction (shards stop sooner); the DBG label is the raw
+// multiplier.
+
+export const PLASTIC_DAMPING_CYCLE: ReadonlyArray<number> = [
+  0.95, 0.97, 0.99, 0.995, 0.999, 1.0,
+] as const;
+
+// Default index 0 (0.95) — heaviest friction in the cycle, so shards
+// settle quickly; cycle up toward 1.0 for slippery, long-coasting feel.
+let activePlasticDampingIndex = 0;
+
+export function getActivePlasticDamping(): number {
+  return PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex];
+}
+
+export function getActivePlasticDampingName(): string {
+  return String(PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex]);
+}
+
+export function cyclePlasticDamping(): number {
+  activePlasticDampingIndex = (activePlasticDampingIndex + 1) % PLASTIC_DAMPING_CYCLE.length;
+  return activePlasticDampingIndex;
+}
+
+// Impact-stamp cooldown cycle for plastic-shards (seconds).  Gates
+// how often a collision can re-orient the wiggle/dent deformation
+// axis on one shard — longer = calmer (the radially-symmetric disc
+// can't twitch its squash axis every substep when packed among
+// neighbours).  The 'off' entry (Infinity) disables collision-
+// driven deformation entirely; projectile hits still wiggle.  Read
+// live via getActivePlasticImpactCooldown() so the DBG PRot button
+// retunes immediately.
+
+export const PLASTIC_IMPACT_COOLDOWN_CYCLE: ReadonlyArray<number> = [
+  0.2, 0.4, 0.8, 1.5, Infinity,
+] as const;
+
+// Default index 4 ('off') — collision contacts don't re-orient the
+// deformation axis, which is what made packed clusters twitch.
+// Projectile hits still wiggle.  Cycle to a finite value to re-enable
+// collision-driven squash with that debounce interval.
+let activePlasticImpactCooldownIndex = 4;
+
+export function getActivePlasticImpactCooldown(): number {
+  return PLASTIC_IMPACT_COOLDOWN_CYCLE[activePlasticImpactCooldownIndex];
+}
+
+export function getActivePlasticImpactCooldownName(): string {
+  const v = PLASTIC_IMPACT_COOLDOWN_CYCLE[activePlasticImpactCooldownIndex];
+  return v === Infinity ? 'off' : String(v);
+}
+
+export function cyclePlasticImpactCooldown(): number {
+  activePlasticImpactCooldownIndex =
+    (activePlasticImpactCooldownIndex + 1) % PLASTIC_IMPACT_COOLDOWN_CYCLE.length;
+  return activePlasticImpactCooldownIndex;
+}
+
+// Elastoplastic yield-distance cycle for plastic-shards.  The
+// sticky-bond anchor behaves like an elastic-perfectly-plastic
+// element: while the shard sits within `yieldDist` of its anchor
+// the spring pulls it back (elastic recovery).  Once displacement
+// exceeds `yieldDist` the anchor permanently MIGRATES toward the
+// shard so displacement stays clamped at the yield — i.e. the
+// spring "forgets" the over-yield part of the motion.  That
+// permanent migration is the lossy/plastic behaviour: a hard shove
+// leaves the cluster deformed instead of snapping all the way back.
+// Smaller yieldDist = more plastic (less recovery, easier to yield).
+// Values are the yield distance in world units; the DBG label is
+// just that number.
+
+export const PLASTIC_YIELD_CYCLE: ReadonlyArray<number> = [
+  2, 5, 10, 25, 60,
+] as const;
+
+// Default index 3 (yieldDist 25) — fairly elastic: a shard tolerates
+// a 25-unit anchor stretch before permanently migrating.  Cycle down
+// toward 2 for near-total plastic loss or up to 60 for near-elastic.
+let activePlasticYieldIndex = 3;
+
+export function getActivePlasticYield(): number {
+  return PLASTIC_YIELD_CYCLE[activePlasticYieldIndex];
+}
+
+export function getActivePlasticYieldName(): string {
+  return String(PLASTIC_YIELD_CYCLE[activePlasticYieldIndex]);
+}
+
+export function cyclePlasticYield(): number {
+  activePlasticYieldIndex = (activePlasticYieldIndex + 1) % PLASTIC_YIELD_CYCLE.length;
+  return activePlasticYieldIndex;
+}
 
 // --- SYSTEM CONFIGURATIONS ---
 
@@ -443,18 +1127,19 @@ export const STRUCTURE_VARIANTS = {
     color: COLORS.STRUCTURE,
   },
   plastic: {
-    // 24 HP — 3× the original 8 to tighten the break-loose threshold.
-    // Same hits-to-break as metal.  Differentiation is purely visual:
-    // plastic deforms more per hit (higher dent.vertexJitter) and
-    // detaches as a single ~1/3-size shard; metal warps subtly and
-    // breaks into a 1/3 + 1/6 pair.
-    health: 24,
+    // 1 HP — matches glass: a single projectile shatters the tile
+    // into a burst of plastic-shards.  Per-shard durability (24 HP)
+    // moves down into `plastic-tile.dent.shardHealth` so the cluster
+    // still absorbs sustained damage even though the tile face is
+    // brittle.  The softbody read is "thin polymer skin, dense
+    // shards underneath."
+    health: 1,
     mass: Infinity,
     indestructible: false,
-    // sprite left empty so RenderSystem's sprite branch falls through
-    // to the polygon-based material-tile branch — that's the only
-    // path that draws the dented polygonPoints.  ASSETS.HEX_STRUCTURE_PLASTIC
-    // is kept in the manifest for a future per-variant sprite.
+    // sprite left empty so RenderSystem falls through to the
+    // dedicated plastic-tile soft-gradient branch (no polygon
+    // outline / no sprite).  ASSETS.HEX_STRUCTURE_PLASTIC is kept
+    // in the manifest for a future per-variant sprite.
     sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
   },
@@ -569,6 +1254,22 @@ export const NEBULA_CONSTANTS = {
   // Velocity below which shards snap to rest (prevents infinite micro-drift).
   REST_SPEED: 0.005,
   REST_SPIN: 0.01,
+  // ── Velocity-aligned stretch (nebula shard) ──────────────────────
+  // Continuous render-side deformation: while a nebula-shard moves,
+  // it stretches along its velocity axis (1 + K × speed, capped at
+  // MAX_STRETCH) and squashes perpendicular by SQUASH_RATIO ×
+  // stretch.  Reads as "wind tugging the cloud forward."  Cost
+  // gated on speed² > VEL_STRETCH_REST_SPEED_SQ so settled shards
+  // skip the math.  Always uses the "free" rotation mode — only
+  // the squash axis aligns to velocity, the sprite keeps
+  // entity.rotation.
+  //
+  // The K multiplier is selected at runtime from VEL_STRETCH_K_CYCLE
+  // via the DBG NStr button — getActiveNebulaStretchK() returns
+  // the current value.  K = 0 disables the stretch entirely.
+  VEL_STRETCH_REST_SPEED_SQ: 0.01,
+  VEL_STRETCH_MAX:           0.4,
+  VEL_STRETCH_SQUASH_RATIO:  0.6,
   // Rotation magnitude applied to shards at shatter.  Scales with striker speed.
   SPIN_PER_UNIT_SPEED: 1.2,
   MAX_SPIN: 6.0,  // rad/s cap
@@ -683,7 +1384,9 @@ export const NEBULA_CONSTANTS = {
   // values equilibrate over seconds, larger ones in fractions of
   // a second.  At 60 Hz, alpha 0.02 ≈ 95 % blend in ~2.5 s.
   BLEND_TILE_ALPHA: 0,
-  BLEND_SHARD_ALPHA: 0,
+  // 0.02 → "Med" on the ShardBlend button: nebula shards equilibrate
+  // toward the nearest tile's hue out of the gate (cycle to 0 for off).
+  BLEND_SHARD_ALPHA: 0.02,
   BLEND_TILE_ALPHA_CYCLE: [0, 0.005, 0.02, 0.08] as const,
   BLEND_SHARD_ALPHA_CYCLE: [0, 0.02, 0.08, 0.25] as const,
   // Physics substeps between color-equilibration passes.  Same
@@ -1085,6 +1788,12 @@ export const DROP_CONFIG = {
   // Drop-spawn probabilities
   AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
   AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
+  // Plastic-shards break into a large number of children (and each
+  // child is another drop opportunity), so their per-shard drop
+  // chance is cut well below the generic dent-shard rate.  Self-break
+  // deaths suppress drops entirely (see GameEngine.tickPlasticSelfBreak);
+  // this only governs player-caused breaks.
+  AMMO_DROP_CHANCE_PLASTIC_SHARD:   0.20, // 20 % chance a plastic shard drops ammo
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
@@ -1424,7 +2133,10 @@ const GLASS_SHARD_SPAWN_SHAPE = {
   polyVerticesMin: 3, polyVerticesMax: 4,
   polyVerticesOptions: [3, 4],
   angleJitter: 0.5, radiusMin: 0.45, radiusRange: 0.75,
-  sizeToMass: (d: number) => d,
+  // Weight ∝ area (d²) so small shards are trivially pushable and big
+  // ones are heavy.  Material coefficient makes glass the LIGHTEST of
+  // the solids (glass 0.010 : rock 0.018 : metal 0.030 ≈ 1 : 1.8 : 3).
+  sizeToMass: (d: number) => d * d * 0.010,
 };
 
 // Base config shared by glass / plastic / metal STRUCTURE tiles.
@@ -1474,7 +2186,8 @@ const SHARD_SPAWN_SHAPE_ROCK = {
   polyVerticesMin: 5, polyVerticesMax: 9,
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
-  sizeToMass: (d: number) => d,
+  // Weight ∝ area (d²); rock sits mid-weight between glass and metal.
+  sizeToMass: (d: number) => d * d * 0.018,
 };
 
 const SHARD_SPAWN_SHAPE_NEBULA = {
@@ -1488,15 +2201,57 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   sizeToMass: () => 0.01,
 };
 
-// Plastic shards: always 4 vertices.  Near-square — low angle
-// jitter keeps vertices close to a regular quadrilateral and low
-// radius variance keeps side lengths similar, producing
-// ~70–90° angles consistent with stamped / extruded polymer.
+// Plastic shards: circular 16-gon approximation (decision #15b
+// plastic-softbody retrofit).  Polygon-collision codepath stays
+// unchanged — SAT just sees a 16-vertex regular polygon that's
+// indistinguishable from a circle at typical pair distances.
+// Zero angle jitter and near-zero radius variance hold the shape
+// to a clean round silhouette.  Render path (RenderSystem plastic-
+// shard branch) draws a solid-circle fill in the entity colour,
+// so the 16-gon is collision-only.
+//
+// Damping tuning (v5, chain-bond mode): linearDamping 0.97 lets
+// shards drift freely so the chain-bond pipeline (PLASTIC_CHAIN_
+// CONSTANTS below) can pull unbonded shards toward partners and
+// form string-like chains.  restSpeed kept at the v4 sleep-state
+// value of 0.15 — shards still drift between bonds but anything
+// below 0.15 vel-units snaps to zero, so a settled chain sleeps
+// cleanly without micro-drift jitter at the contact points.
+//
+// angularDamping 0.99 (higher retention than linearDamping = less
+// damping on spin) so a projectile-induced spin kick (see
+// PhysicsSystem plastic spin block) decays slower than the
+// linear velocity — plastic shards visibly rotate after a hit
+// for longer than they translate.  restSpin stays at 0.05 so
+// micro-rotations from rounding still snap to zero.
+//
+// PRESERVED — prior "sleep-state" config (v4) for future use on
+// a different material variant if needed:
+//   linearDamping:  0.92    // ~99 % velocity bleed per second
+//   angularDamping: 0.92
+//   restSpeed:      0.15    // hard sleep threshold (kept current)
+//   restSpin:       0.15
+// That profile gives heavy "sticky" feel — shards barely move
+// after a kick and freeze at the slightest pause.  The directional
+// wiggle + 3× projectile bounciness on plastic-shard work with
+// either profile.
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 120,
-  polyVerticesMin: 4, polyVerticesMax: 4,
-  angleJitter: 0.15, radiusMin: 0.85, radiusRange: 0.20,
+  polyVerticesMin: 16, polyVerticesMax: 16,
+  angleJitter: 0.0, radiusMin: 0.98, radiusRange: 0.04,
   sizeToMass: (d: number) => d * 0.7,
+  // Reduced from 0.97 → 0.99 to cut translational friction: at 120
+  // Hz that lifts per-second velocity retention from ~2.6 % to
+  // ~30 %, so a kicked shard glides noticeably further before the
+  // anchor / rest-snap settle it.
+  linearDamping:  0.99,
+  angularDamping: 0.99,
+  // restSpeed 0 disables the snap-to-zero floor for plastic-shards:
+  // they coast to a stop under damping + anchor spring instead of
+  // hard-freezing the instant their speed drops below a threshold,
+  // so slow drift reads as continuous flow.
+  restSpeed: 0,
+  restSpin:  0.05,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
@@ -1508,7 +2263,8 @@ const SHARD_SPAWN_SHAPE_METAL = {
   polyVerticesMin: 6, polyVerticesMax: 10,
   polyVerticesOptions: [6, 8, 10],
   angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
-  sizeToMass: (d: number) => d * 1.3,
+  // Weight ∝ area (d²); metal is the heaviest solid — hardest to shove.
+  sizeToMass: (d: number) => d * d * 0.030,
 };
 
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
@@ -1536,29 +2292,47 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
-    // Warm-white proximity lighting — the tile FACE brightens as the
+    // Soft magenta proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
-    // Same mechanism as metal's heat glow, minus the `hot` red core.
-    glow: { color: '#fef3c7', range: 250, peakAlpha: 0.33 },
-    // Plastic deforms heavily per hit — each closest-to-impact vertex
-    // pulled inward by up to 25 % of its current radius.  Same hit
-    // count as metal (STRUCTURE_VARIANTS.plastic.health = 8) but
-    // visibly more dramatic per-hit warp.  Detaches into 3
-    // plastic-shards whose areas sum to the deformed tile's area.
+    // Matches the new STRUCTURE_PLASTIC fuchsia so tile + shard read
+    // as one substance under bloom.
+    glow: { color: '#fbcfe8', range: 250, peakAlpha: 0.33 },
+    // Plastic-softbody retrofit (decision #15b, follow-up tweak):
+    // tile face is now glass-brittle (STRUCTURE_VARIANTS.plastic.
+    // health = 1 → dies in one hit, same as glass) but releases a
+    // burst of 8–12 small plastic-shards on shatter.  Each shard
+    // carries the full plastic durability via `dent.shardHealth =
+    // 24`, decoupled from the tile's own 1-HP face.  The softbody
+    // read is "thin polymer skin pops, dense bonded shards
+    // underneath."
+    //
+    // vertexJitter: 0 is kept so PhysicsSystem.applyDentStep
+    // remains a no-op — even at 1 HP the dent-policy branch still
+    // routes through applyDentStep for tile/shard parity.  No
+    // `inheritParentPolygon`: shards use the variant's 16-gon
+    // spawn shape, not the hex outline.  countMin/countMax expand
+    // a single template into a random burst at spawn time.
+    //
+    // sizeFraction range 0.44-0.64: chunky shards (2× larger than
+    // the earlier 0.22-0.32 burst per playtest feedback).  At a
+    // ~120-diameter hex tile the burst spawns 8-12 shards in the
+    // 53-77 diameter range — they overlap each other and the tile
+    // footprint, which reads as the polymer sheet breaking into
+    // big visible chunks rather than confetti.
     regen: { kind: 'none' },
     dent: {
-      vertexJitter: 0.25,
+      vertexJitter: 0,
+      shardHealth: 24,
       breakShards: [
-        // 3 equal-area shards — each carries 1/3 of the deformed
-        // tile's area.  Linear sizeFraction = sqrt(1/3) ≈ 0.577
-        // (relative to the deformed tile's diameter), so the three
-        // shards sum to a full-area split.  More fragments than
-        // metal's 2-shard break to play up plastic's lower
-        // structural integrity on the killing hit.
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
-        { variant: 'plastic-shard', sizeFraction: 0.577 },
+        {
+          variant: 'plastic-shard',
+          sizeFraction: 0.54,                   // fallback when range fields unset
+          sizeFractionMin: 0.44,
+          sizeFractionMax: 0.64,
+          countMin: 8,
+          countMax: 12,
+        },
       ],
     },
   },
@@ -1807,34 +2581,70 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Self-bond only for now — plastic shards stick to other plastic
-    // shards via the standard rock-style cohesion.  No cross-material
-    // bonds with rock / glass / metal yet (kept narrow until we see
-    // how the dent system shakes out).
+    // Plastic-softbody retrofit, v8: attraction + cohesion bonding
+    // are back (they were never meant to be dropped), but bonds are
+    // cohesion-ONLY.  bondTimeSeconds: Infinity means the compose
+    // timer never matures, so plastic-shards pull toward each other
+    // and stick into soft blobs WITHOUT ever combining into larger
+    // shards or transmuting back to tiles.  The disintegration that
+    // used to be "merge" is handled by the v7 timed self-break
+    // (GameEngine.tickPlasticSelfBreak) instead.  No requireSizeDelta
+    // gate so any nearby pair bonds (free clustering, not just
+    // size-mismatched pairs).
     merge: {
-      attractedTo: 'none',
-      bondsWith: { include: ['plastic-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
+      attractedTo:  { include: ['plastic-shard'] },
+      pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
+      pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
+      pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
+      bondsWith:    { include: ['plastic-shard'] },
+      bondTimeSeconds: Infinity,
       rules: [
         { partner: 'self', outcome: 'compose' },
       ],
       defaultOutcome: 'compose',
     },
-    // Plastic shards are dent-driven: they deform per hit and are
-    // destroyed cleanly on health = 0 (no recursive sub-shards).
-    // Drops + particles fire via the mobile-shard path in
-    // DropSystem.spawnDrops.
+    // Plastic-shards shatter into smaller plastic-shards on death
+    // (decision #15b: "shards shatter into smaller circles").  Uses
+    // the powerlaw asteroid-style shatter so the size-floor MIN_SIZE
+    // check (childVariant.spawn.sizeMin = 20) terminates the
+    // recursion naturally — chips below ~20 diameter just die
+    // cleanly without spawning further generations.  Children
+    // inherit the 16-gon spawn shape from SHARD_SPAWN_SHAPE_PLASTIC
+    // so they read circular too.
     shatter: {
-      kind: 'none',
+      kind: 'powerlaw',
       style: 'asteroid',
-      countMin: 0, countMax: 0,
-      alphaMin: 1.0, alphaMax: 1.0,
+      // countMin/countMax are dead config under the size-keyed
+      // override below — shatterAsteroidStyle picks count from
+      // shatterCountBySize when present.  Left at 12 as a sane
+      // fallback if the override is ever removed.
+      countMin: 12, countMax: 12,
+      alphaMin: 1.0, alphaMax: 2.0,
       childVariant: 'plastic-shard',
-      forwardDrag: 0, perpScatter: 0,
-      scatterHalfCone: 0,
+      forwardDrag: 0.35, perpScatter: 0.0,
+      scatterHalfCone: Math.PI * 0.55,
+      // Children are 30-50 % of parent diameter (not area-
+      // conserving).  Bypasses the MIN_SIZE filter so all
+      // requested children spawn — bigger merged shards visibly
+      // burst into the full count.  Recursion still terminates
+      // at MIN_SIZE (parent.size < 20 doesn't shatter), so deep
+      // children die cleanly.
+      childSizeFractionMin: 0.3,
+      childSizeFractionMax: 0.5,
+      // Five size levels — bigger shards burst into more pieces.
+      // maxSize is exclusive (parentSize < maxSize → use that
+      // level's count).  Past the final threshold (200), the
+      // last entry's count applies regardless.
+      shatterCountBySize: [
+        { maxSize: 30,  count: 12 },
+        { maxSize: 60,  count: 14 },
+        { maxSize: 90,  count: 16 },
+        { maxSize: 130, count: 18 },
+        { maxSize: 200, count: 20 },
+      ],
     },
-    // Warm amber particle puff matches the matte-polymer body colour.
-    onShatterParticles: { color: '#fbbf24', count: 5 },
+    // Plastic emits no shatter spark/dust burst.
+    onShatterParticles: 'none',
     passThrough: false,
     // Plastic shards drift through the plastic-tile repel field.
     // (Plastic-tiles don't emit a field today, but the immunity is
@@ -1842,23 +2652,30 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // is a one-line change.)
     repelImmune: true,
     spawnsDropsOnDeath: true,
+    // Density compaction disabled — v3 plastic keeps every shard
+    // visible as an individual blob (no merging of any kind, see
+    // bondsWith.bondTimeSeconds = Infinity above).  Per-frame
+    // density-tinting work and large-shard-collapse passes are
+    // skipped, which also drops the bitmap-cache footprint to one
+    // colour (no tier-darkened variants).
     density: {
-      enabled: true,
-      maxSteps: 4,
-      areaThreshold: 32 * 32,
-      largeShardCollapseSize: 130,
-      tintFloor: 0.60,                         // slightly higher floor — plastic stays warmer when dense
-      shrinkFactor: 0.88,
+      enabled: false,
+      maxSteps: 0,
+      areaThreshold: 0,
+      largeShardCollapseSize: 99999,
+      tintFloor: 1.0,
+      shrinkFactor: 1.0,
     },
-    // Free-floating plastic shards deform on hit just like plastic
-    // tiles — each impact pulls one vertex inward.  Slightly lower
-    // jitter than the tile (0.22 vs 0.25) since the shard is already
-    // smaller and we want a few hits' worth of cumulative warp before
-    // destruction.  breakShards is empty: when health hits 0 the
-    // shard is destroyed cleanly and drops fall via the mobile-shard
-    // path in DropSystem.spawnDrops.
+    // Plastic-softbody retrofit: per-shard dent (vertexJitter /
+    // per-hit polygon pull) stays dropped — circular shape is the
+    // whole point of the soft-gradient render.  vertexJitter: 0
+    // keeps the HP-per-hit logic (PhysicsSystem.applyDentStep is a
+    // no-op at zero jitter; the isDentEntity branch still routes
+    // ammo / drop policy through the dent path).  breakShards stays
+    // empty: shatter handles child-spawning via the shatter policy
+    // above.
     dent: {
-      vertexJitter: 0.22,
+      vertexJitter: 0,
       breakShards: [],
     },
   },
@@ -1892,12 +2709,20 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     passThrough: false,
     // Metal shards feel the metal-tile repel field (priming g3
     // attraction work where metal-shards orbit metal clusters) but
-    // ignore glass-tile fields — metal "wins" against glass, see
-    // the g3 material-interactions design where metal-tiles will
-    // shatter glass-tiles on contact.  Glass-shard / plastic-shard
-    // stay fully `repelImmune` (their own family is the only field
-    // they'd care about, and they pass through it).
+    // ignore glass-tile fields — metal "wins" against glass.
+    // Without this immunity the glass-tile repel field would push
+    // the metal-shard away before contact ever happens, defeating
+    // the passthroughShatter rule below.  Glass-shard / plastic-
+    // shard stay fully `repelImmune` (their own family is the only
+    // field they'd care about, and they pass through it).
     repelImmuneFrom: ['glass-tile'],
+    // g3 material-interactions: metal-shards pass through glass-
+    // tiles and glass-shards with zero impulse and instantly
+    // shatter them on overlap.  The metal-shard's HP and trajectory
+    // are unaffected; the glass target falls through its normal
+    // death pipeline (glass-tile → DropSystem.spawnGlassShards,
+    // glass-shard → ShardSystem.shatter tier chain).
+    passthroughShatter: { targets: ['glass-tile', 'glass-shard'] },
     spawnsDropsOnDeath: true,
     density: {
       enabled: true,

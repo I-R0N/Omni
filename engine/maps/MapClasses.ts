@@ -192,7 +192,7 @@ export abstract class BaseMapLayer {
         health: hp,
         maxHealth: hp,
         polygonPoints: points,
-        mass: size,
+        mass: SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(size),
         sprite: randomSprite
     };
   }

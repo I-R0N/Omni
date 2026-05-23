@@ -506,6 +506,88 @@ export interface GameEntity {
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
   angularDamping?: number;
+  // Per-entity speed/spin floors below which PhysicsSystem snaps the
+  // value to zero after damping.  When unset, fall back to
+  // NEBULA_CONSTANTS.REST_SPEED / REST_SPIN (tiny — 0.005 / 0.01).
+  // Higher values make the entity "static" — it stays at rest unless
+  // something pushes it past the threshold.  Today plastic-shard sets
+  // these so clusters effectively sleep unless directly disturbed.
+  restSpeed?: number;
+  restSpin?: number;
+  // Plastic-shard "jiggle" state — set by collision impulses that
+  // exceed restSpeed, ticked down each substep, consumed by
+  // RenderSystem's plastic-shard branch to apply a damped-sinusoid
+  // scale pulse (visual-only, doesn't touch collision footprint).
+  // wigglePhase is set once at spawn from a hash of entity.color so
+  // each amber shade has its own oscillation phase — neighbouring
+  // shards in a cluster wiggle out of sync.  wiggleAngle is the
+  // world-space impact direction (radians) stamped at trigger time
+  // so the squash aligns to the impact axis — stretch along, squash
+  // perpendicular — reads as polymer absorbing the hit rather than
+  // a bubble pulsing radially.
+  wiggleTimer?: number;
+  wigglePhase?: number;
+  wiggleAngle?: number;
+  // Plastic-shard impact-stamp cooldown.  After a collision stamps
+  // the wiggle/dent deformation, this counts down; further stamps
+  // are suppressed until it reaches 0.  Without it, a shard packed
+  // among neighbours re-stamps its deformation axis on every
+  // substep, making the (radially-symmetric) disc's squash axis
+  // flip rapidly — reads as the shard twitching back and forth.
+  wiggleCooldown?: number;
+  // Plastic-shard impact-dent accumulator (option A).  2D vector
+  // representing the sum of recent impact directions (normalised,
+  // weighted by PLASTIC_DEFORM_CONSTANTS.DENT_INCREMENT_PER_IMPACT).
+  // Decays exponentially per substep in PhysicsSystem.update;
+  // renderer applies a squash along the dent direction + small
+  // bulge perpendicular.  Persists past the wiggle's 0.4 s window
+  // (~4 s recovery from max), reads as polymer "remembering" hits.
+  dentX?: number;
+  dentY?: number;
+  // Plastic-shard sticky-bond anchor (option E).  Per-shard rest
+  // position toward which a soft spring pulls each substep —
+  // simulates the cluster being tethered to its placement.  Set
+  // at every plastic-shard spawn site (hex placement, dent burst,
+  // shatter recursion).  Reset to the new centroid on merge so a
+  // merged shard "claims" its new resting place.  Spring strength
+  // PLASTIC_DEFORM_CONSTANTS.ANCHOR_SPRING_K; toroidal-corrected
+  // delta via wrapDeltaX/Y in PhysicsSystem.update.  External
+  // force can overcome the spring (shard drifts further), but
+  // once the force stops the spring pulls back to the anchor.
+  anchorX?: number;
+  anchorY?: number;
+  // Plastic-shard spawn-time shape variance (option B).  Per-axis
+  // random scale rolled at spawn in [1 − V, 1 + V] where V =
+  // PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE.  Renderer
+  // multiplies through in entity-local space so each shard has
+  // its own slightly irregular outline regardless of impact state.
+  baseScaleX?: number;
+  baseScaleY?: number;
+  // Number of other plastic-shards currently in contact with this one,
+  // computed by ShardSystem off the merge-broadphase grid.  Drives the
+  // PAuto neighbour-brightness automata in RenderSystem (more contacts
+  // = darker, like nebula interior-darkening).  Plastic-shards only.
+  plasticNeighborCount?: number;
+  // Countdown (seconds) until a plastic-shard self-shatters (v7
+  // self-break replaces merge).  Lazily rolled in
+  // GameEngine.tickPlasticSelfBreak from PLASTIC_SELF_BREAK; on expiry
+  // the shard is routed through the death/shatter path with drops
+  // suppressed.  Plastic-shards only.
+  plasticBreakTimer?: number;
+  // Accumulated contact time (seconds) a glass-/rock-shard has spent
+  // inside a plastic-shard's orb.  When it matures (PLASTIC_EAT.SECONDS)
+  // the plastic eats it (grows by its area; this shard fades out).
+  // Decays toward 0 while not in contact.  Glass-/rock-shards only.
+  plasticEatTimer?: number;
+  // Plastic "reach" pseudopod state (ShardSystem).  reachTargetId is the
+  // entity this plastic shard is currently reaching toward; reachHomeX/Y
+  // is the anchor it retracts back to once it grabs (or loses) the
+  // target; reachBack flips it from extend → retract.  Plastic-shards
+  // only; all undefined when idle.
+  reachTargetId?: string;
+  reachHomeX?: number;
+  reachHomeY?: number;
+  reachBack?: boolean;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
@@ -671,6 +753,65 @@ export interface EngineStats {
   nebulaShardCollisionsEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
+  // DBG outline overlay for outlineless variants (plastic-tile /
+  // plastic-shard soft gradient + nebula-tile / nebula-shard
+  // cloud sprite).  Default false; DBG-toggleable via the Visual
+  // section's Outline button.
+  tileOutlinesEnabled?: boolean;
+  // When true, plastic-shards render in the active palette's constant
+  // base shade, brightness-scaled by their plastic-shard contact
+  // count (PAuto automata).  Default true.
+  plasticAutomataEnabled?: boolean;
+  // PAuto direction: true = brighten dense interiors, false = darken
+  // them (default).  Toggled via the PADIR button.
+  plasticAutomataBrighten?: boolean;
+  // Active plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_CYCLE),
+  // formatted for the PEat DBG button.
+  plasticEatAttractName?: string;
+  // Whether the plastic "reach" pseudopod behaviour is on (PRch button).
+  plasticReachEnabled?: boolean;
+  // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
+  // via the DBG panel's Plastic button — switches the colour family
+  // used by randomPlasticShade() and re-rolls every active plastic
+  // entity's colour on toggle.
+  plasticPaletteName?: string;
+  // Active globalCompositeOperation used by the plastic-shard render
+  // branch.  Cycled via the DBG Blend button (source-over / multiply
+  // / darken / screen / lighter).  Live — next-frame effect.
+  plasticBlendMode?: string;
+  // DBG gate for the plastic colour-equilibration block in
+  // NebulaSystem.equilibrateColors.  Independent of the nebula
+  // tile/shard blend alphas.  Default true.
+  plasticBlendEnabled?: boolean;
+  // DBG stiffness step for the nebula-shard velocity stretch
+  // (VEL_STRETCH_K_CYCLE name).  off → soft → med → firm → stiff.
+  nebulaStretchName?: string;
+  // Active opacity (formatted as "NN%") applied to plastic-tile and
+  // plastic-shard draws.  Cycled via the DBG Opacity button
+  // (25 % → 50 % → 75 % → 100 %).
+  plasticOpacity?: string;
+  // DBG elastoplastic yield-distance step name for plastic-shards
+  // (PLASTIC_YIELD_CYCLE).  putty → soft → med → firm → elastic.
+  // Smaller yield = more plastic (less spring-back); 'elastic' (∞)
+  // is the original full-return spring.
+  plasticYieldName?: string;
+  // DBG sticky-bond spring stiffness step name for plastic-shards
+  // (PLASTIC_STIFFNESS_CYCLE, 0.01 … 4).  Lower k = gentler
+  // recovery and more over-yield flow.
+  plasticStiffnessName?: string;
+  // DBG linear-damping step name for plastic-shards
+  // (PLASTIC_DAMPING_CYCLE, 0.95 … 1.0).  Lower = heavier friction.
+  plasticDampingName?: string;
+  // DBG impact-stamp cooldown step name for plastic-shards
+  // (PLASTIC_IMPACT_COOLDOWN_CYCLE, 0.2 … 1.5 / off).  Longer =
+  // calmer deformation; 'off' disables collision-driven deformation.
+  plasticImpactCooldownName?: string;
+  // DBG soft-disc blend knobs for plastic-shards.  Core = opaque-core
+  // radius fraction (PLASTIC_CORE_RADIUS_CYCLE); Blend = disc draw
+  // radius as a multiple of collision radius (PLASTIC_BLEND_RADIUS_
+  // CYCLE).  Smaller core / larger blend = deeper inter-shard blend.
+  plasticCoreRadiusName?: string;
+  plasticBlendRadiusName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.

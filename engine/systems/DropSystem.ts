@@ -6,6 +6,9 @@ import {
   DROP_CONFIG,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
+  randomPlasticShade,
+  colorToWigglePhase,
+  PLASTIC_DEFORM_CONSTANTS,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -106,11 +109,14 @@ export class DropSystem {
     const isMobileShard = entity.type === EntityType.STRUCTURE && entity.mass !== Infinity;
     if (isDentTile) {
       // Dented-out tile detaches as the shards in variant.dent.breakShards.
-      // Each shard's size is a fraction of the original tile (1/3 for
-      // plastic's single shard; 1/3 + 1/6 for metal's pair).  The
+      // Each shard's size is a fraction of the original tile.  The
       // impactor's velocity (lastImpactVelocity) seeds the fan-spread
-      // launch direction so a 2-shard break visibly diverges.
-      this.spawnDentShard(entities, entity, tileDent!.breakShards);
+      // launch direction so a multi-shard break visibly diverges.
+      // `dent.shardHealth`, when set, overrides the inherited
+      // tile.maxHealth so the tile face can be brittle while the
+      // shards stay durable (plastic-tile: 1 HP face → 8–12 24-HP
+      // shards).
+      this.spawnDentShard(entities, entity, tileDent!.breakShards, tileDent!.shardHealth);
     } else if (isGlassFamilyTile) {
       // Glass tile death — visual debris.  Indestructible tiles
       // short-circuit upstream; rock-tile spawns its own rock-shards
@@ -137,9 +143,14 @@ export class DropSystem {
         // asteroid drop rate.
         const isDentShard = entity.shardVariant !== undefined
           && SHARD_VARIANTS[entity.shardVariant].dent !== undefined;
-        const dropChance = isDentShard
-          ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
-          : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
+        // Plastic-shards burst into many children, so they roll a much
+        // lower drop chance than other dent shards (metal) to avoid a
+        // flood of ammo from one cluster break.
+        const dropChance = entity.shardVariant === 'plastic-shard'
+          ? DROP_CONFIG.AMMO_DROP_CHANCE_PLASTIC_SHARD
+          : isDentShard
+            ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
+            : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
         const dropAmount = isDentShard
           ? DROP_CONFIG.AMMO_PER_DENT_SHARD
           : DROP_CONFIG.AMMO_PER_ASTEROID;
@@ -233,7 +244,7 @@ export class DropSystem {
         active:        true,
         health:        1,
         maxHealth:     1,
-        mass:          size,
+        mass:          SHARD_VARIANTS[variantId].spawn.sizeToMass(size),
         polygonPoints: pts,
       });
     }
@@ -309,7 +320,7 @@ export class DropSystem {
         active:         true,
         health:         1,
         maxHealth:      1,
-        mass:           size,
+        mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
       });
     }
@@ -329,13 +340,13 @@ export class DropSystem {
       spreadAngle: tileImpactAngle, spreadCone: Math.PI * 0.5,
     });
 
-    // Release 4-6 glass-palette nebula-shards alongside the glass
+    // Release 3-5 glass-palette nebula-shards alongside the glass
     // debris so the shatter has a substantial cloud-puff dimension.
     // Each puff samples a hue from the cool half of the nebula arc
     // (cyan → indigo) — sets a per-shard composition so each puff
     // participates in the color-equilibration pass and blends
     // smoothly into any surrounding nebula cluster.
-    const nebulaCount = 4 + Math.floor(Math.random() * 3);
+    const nebulaCount = 3 + Math.floor(Math.random() * 3);
     const tileSize = Math.max(tile.size.x, tile.size.y);
     for (let i = 0; i < nebulaCount; i++) {
       const spawnPos = {
@@ -372,9 +383,50 @@ export class DropSystem {
   public spawnDentShard(
     entities: GameEntity[],
     tile: GameEntity,
-    breakShards: ReadonlyArray<{ variant: ShardVariantId; sizeFraction: number }>,
+    breakShards: ReadonlyArray<{
+      variant: ShardVariantId;
+      sizeFraction: number;
+      inheritParentPolygon?: boolean;
+      countMin?: number;
+      countMax?: number;
+      sizeFractionMin?: number;
+      sizeFractionMax?: number;
+    }>,
+    shardHealthOverride?: number,
   ) {
     if (breakShards.length === 0) return;
+
+    // Expand `countMin/countMax` templates into individual spawn
+    // entries before iterating — keeps the per-shard loop simple
+    // and lets the fan-spread denominator see the true total count.
+    // Each expanded entry also resolves its `sizeFraction` against
+    // the optional `sizeFractionMin/Max` range so the burst varies
+    // in size as well as count.
+    type ExpandedSpec = {
+      variant: ShardVariantId;
+      sizeFraction: number;
+      inheritParentPolygon?: boolean;
+    };
+    const expanded: ExpandedSpec[] = [];
+    for (let s = 0; s < breakShards.length; s++) {
+      const spec = breakShards[s];
+      const hasCount = spec.countMin !== undefined && spec.countMax !== undefined;
+      const count = hasCount
+        ? spec.countMin! + Math.floor(Math.random() * (spec.countMax! - spec.countMin! + 1))
+        : 1;
+      const hasSizeRange = spec.sizeFractionMin !== undefined && spec.sizeFractionMax !== undefined;
+      for (let k = 0; k < count; k++) {
+        const sizeFraction = hasSizeRange
+          ? spec.sizeFractionMin! + Math.random() * (spec.sizeFractionMax! - spec.sizeFractionMin!)
+          : spec.sizeFraction;
+        expanded.push({
+          variant: spec.variant,
+          sizeFraction,
+          inheritParentPolygon: spec.inheritParentPolygon,
+        });
+      }
+    }
+    if (expanded.length === 0) return;
 
     // Base tile size — entity.size is never updated by applyDentStep,
     // so this still equals the original tile footprint (the shrunken
@@ -427,8 +479,8 @@ export class DropSystem {
     // sparks spray along the dominant detach direction.
     let lastShardAngle = baseAngle;
 
-    for (let i = 0; i < breakShards.length; i++) {
-      const spec = breakShards[i];
+    for (let i = 0; i < expanded.length; i++) {
+      const spec = expanded[i];
       const variantDef = SHARD_VARIANTS[spec.variant];
 
       // Target shard size = fraction of the deformed tile's effective
@@ -471,20 +523,32 @@ export class DropSystem {
       const mass = variantDef.spawn.sizeToMass(targetSize);
 
       // Per-shard launch angle — fan-spread the shards around the
-      // impact direction so a 2-shard break visibly diverges.  For
-      // a single shard the spread is zero (centred on the impact
-      // direction).
-      const fan = breakShards.length > 1
-        ? ((i / (breakShards.length - 1)) - 0.5) * 0.9
+      // impact direction so a multi-shard break visibly diverges.
+      // For a single shard the spread is zero (centred on the
+      // impact direction).  Bursts of 6+ shards use a wider cone
+      // (≈ 2π × 0.9 ≈ 5.65 rad → full ring with a small gap) so
+      // the shards splay out radially like a small explosion
+      // rather than a thin fan.
+      const fanWidth = expanded.length >= 6 ? Math.PI * 2 * 0.9 : 0.9;
+      const fan = expanded.length > 1
+        ? ((i / (expanded.length - 1)) - 0.5) * fanWidth
         : 0;
       const shardAngle = baseAngle + fan + (Math.random() - 0.5) * 0.3;
       lastShardAngle = shardAngle;
 
-      // Small radial offset from the tile centre so spawned shards
-      // don't overlap at frame 0.  Larger shards move first, leaving
-      // smaller ones nearer the centre — reads as "main chunk pops
-      // off, splinter trails behind."
-      const offsetDist = breakShards.length > 1 ? (targetSize / 2) * 0.5 : 0;
+      // Radial spawn offset — scales with the PARENT TILE's
+      // deformed diameter (not the shard size) so bursts cover the
+      // tile area instead of stacking near its centre.  Plastic-
+      // tile's 8–12 shard burst was clumping at the spawn point
+      // before this fix; widening offsetDist + randomising the
+      // radial position over [0.3, 1.0] × tile-half-diameter
+      // smears the shards across the tile footprint.  Smaller
+      // single-shard breaks (metal-tile 1.0× sizeFraction) keep
+      // their tile-centred spawn since `expanded.length === 1`
+      // zeroes the offset.
+      const offsetDist = expanded.length > 1
+        ? (deformedDiameter / 2) * (0.3 + Math.random() * 0.7)
+        : 0;
       const offsetX = Math.cos(shardAngle) * offsetDist;
       const offsetY = Math.sin(shardAngle) * offsetDist;
 
@@ -495,15 +559,33 @@ export class DropSystem {
       const launchSpeed = baseSpeed * speedScale;
 
       // Dent-policy shards take exactly as many hits to destroy as
-      // the parent tile they came from — inherit tile.maxHealth so
-      // plastic-shards / metal-shards are as durable as their
-      // matching tile (currently 8 HP each).  Non-dent variants
+      // the parent tile they came from — by default inherit
+      // tile.maxHealth so plastic-shards / metal-shards are as
+      // durable as their matching tile.  `shardHealthOverride`
+      // (set when the dent variant declares `dent.shardHealth`)
+      // decouples shard durability from tile face HP — plastic-
+      // tile uses this so the tile is glass-brittle (1 HP) while
+      // the released shards stay at 24 HP.  Non-dent variants
       // (rock-shard spawned from rock-tile's breakShards) keep
       // single-hit destruction, matching today's rock-shard /
       // glass-shard HP.
-      const shardHealth = variantDef.dent !== undefined
-        ? (tile.maxHealth || 1)
-        : 1;
+      const shardHealth = shardHealthOverride !== undefined
+        ? shardHealthOverride
+        : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
+
+      // Resolve colour once — plastic re-rolls its amber shade per
+      // shard, everything else inherits from the tile.  Reused below
+      // for both `color` and (plastic only) `wigglePhase`.
+      const shardColor = spec.variant === 'plastic-shard'
+        ? randomPlasticShade()
+        : tile.color;
+      // Spawn-time shape variance for plastic-shards — per-axis
+      // random scale in [1 − V, 1 + V] so each shard reads as its
+      // own slightly-irregular outline rather than a perfect circle.
+      const isPlasticShardSpec = spec.variant === 'plastic-shard';
+      const sv = PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE;
+      const baseScaleX = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
+      const baseScaleY = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -527,12 +609,40 @@ export class DropSystem {
         // Smaller shards spin faster — same angular-momentum-from-
         // impact logic as the speed scaling above.
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
-        color:         tile.color,
+        // Plastic-shards re-roll their amber shade per-instance so
+        // each shard in a burst reads as its own tone (see
+        // PLASTIC_AMBER_SHADES in constants.ts).  Other variants
+        // inherit the parent tile's colour as before.
+        color:         shardColor,
         active:        true,
         health:        shardHealth,
         maxHealth:     shardHealth,
         mass,
         polygonPoints: scaledPts,
+        // Optional per-entity damping from the variant's spawn shape
+        // — today plastic-shard sets these so cluster motion damps
+        // out quickly.  Undefined for variants that drift naturally
+        // (rock / metal).  restSpeed / restSpin raise the "snap-
+        // to-zero" floor PhysicsSystem applies after damping so
+        // tiny residual drifts get culled and the shard stays
+        // motionless unless directly disturbed.
+        linearDamping:  variantDef.spawn.linearDamping,
+        angularDamping: variantDef.spawn.angularDamping,
+        restSpeed:      variantDef.spawn.restSpeed,
+        restSpin:       variantDef.spawn.restSpin,
+        // Plastic-shard wiggle phase derived from the shard's amber
+        // shade so each colour wiggles with a distinct offset (see
+        // WIGGLE_CONSTANTS).  Other variants don't wiggle.
+        wigglePhase:   spec.variant === 'plastic-shard' ? colorToWigglePhase(shardColor) : undefined,
+        // Plastic-shard spawn-time shape variance (option B).
+        baseScaleX,
+        baseScaleY,
+        // Plastic-shard sticky-bond anchor — PhysicsSystem pulls each
+        // shard toward this rest position every substep, so the cluster
+        // can be shoved off-anchor by continuous force but returns when
+        // the force releases.  Anchor sits at the spawn position.
+        anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
+        anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
       });
     }
 
@@ -540,8 +650,8 @@ export class DropSystem {
     // last shard's launch direction.  Material colour comes from the
     // first shard's variant (plastic / metal always agree across
     // entries today).
-    const firstVariant = breakShards[0].variant;
-    const puffColor = firstVariant === 'plastic-shard' ? '#fbbf24' : '#cbd5e1';
+    const firstVariant = expanded[0].variant;
+    const puffColor = firstVariant === 'plastic-shard' ? '#b45309' : '#cbd5e1';
     this.particles.spawn(entities, tile.position, 5, puffColor, {
       speedMin: 1.5, speedMax: 4, sizeMin: 1, sizeMax: 2,
       lifetimeMin: 0.15, lifetimeMax: 0.35,
@@ -794,11 +904,18 @@ export class DropSystem {
     const impactSpeed = inheritVelocity
       ? Math.sqrt(inheritVelocity.x * inheritVelocity.x + inheritVelocity.y * inheritVelocity.y)
       : 0;
-    const baseAngle = impactSpeed > 0.001
+    const hasImpact = impactSpeed > 0.001;
+    const baseAngle = hasImpact
       ? Math.atan2(inheritVelocity!.y, inheritVelocity!.x)
       : Math.random() * Math.PI * 2;
-    const launchSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
-    const launchAngle = baseAngle + (Math.random() - 0.5) * 0.6;
+    // Fan the shards in a wide cone around the hit direction (full
+    // circle when there's no impact) AND give each its own speed, so a
+    // multi-shard break sprays apart instead of travelling as one
+    // parallel clump that lands in the same spot.
+    const spreadCone = hasImpact ? 1.5 : Math.PI * 2; // ±~43° around the hit dir
+    const launchAngle = baseAngle + (Math.random() - 0.5) * spreadCone;
+    const baseSpeed = 0.4 + Math.min(impactSpeed * 0.04, 1.2);
+    const launchSpeed = baseSpeed * (0.4 + Math.random() * 1.4); // 0.4×–1.8× per shard
 
     entities.push({
       id:                  nextId('colored_nebula_shard'),

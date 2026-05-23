@@ -20,6 +20,22 @@ interface UIOverlayProps {
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
   onToggleScreenShake?: () => void;
+  onToggleTileOutlines?: () => void;
+  onTogglePlasticAutomata?: () => void;
+  onTogglePlasticAutomataDirection?: () => void;
+  onCyclePlasticEatAttract?: () => void;
+  onTogglePlasticReach?: () => void;
+  onCyclePlasticPalette?: () => void;
+  onCyclePlasticBlendMode?: () => void;
+  onTogglePlasticBlend?: () => void;
+  onCycleNebulaStretch?: () => void;
+  onCyclePlasticOpacity?: () => void;
+  onCyclePlasticCoreRadius?: () => void;
+  onCyclePlasticBlendRadius?: () => void;
+  onCyclePlasticYield?: () => void;
+  onCyclePlasticStiffness?: () => void;
+  onCyclePlasticDamping?: () => void;
+  onCyclePlasticImpactCooldown?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -50,6 +66,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
   onToggleScreenShake,
+  onToggleTileOutlines,
+  onTogglePlasticAutomata,
+  onTogglePlasticAutomataDirection,
+  onCyclePlasticEatAttract,
+  onTogglePlasticReach,
+  onCyclePlasticPalette,
+  onCyclePlasticBlendMode,
+  onTogglePlasticBlend,
+  onCycleNebulaStretch,
+  onCyclePlasticOpacity,
+  onCyclePlasticCoreRadius,
+  onCyclePlasticBlendRadius,
+  onCyclePlasticYield,
+  onCyclePlasticStiffness,
+  onCyclePlasticDamping,
+  onCyclePlasticImpactCooldown,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -173,6 +205,145 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.screenShakeEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
+                {/* Collision-shape outlines on otherwise-outlineless
+                    variants (plastic-tile / plastic-shard soft
+                    gradient + nebula-tile / nebula-shard cloud).
+                    Default OFF; flip ON to see the SAT footprint
+                    against the soft fill. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Outline</span>
+                  <button
+                    onClick={onToggleTileOutlines}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle collision outlines on plastic + nebula tiles/shards (soft-gradient variants).  Shows the SAT polygon shape against the gradient fill."
+                  >
+                    {stats.tileOutlinesEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Plastic-shard neighbour-brightness automata — On =
+                    constant palette base shade darkened by contact
+                    count; Off = per-instance random shades. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PAuto</span>
+                  <button
+                    onClick={onTogglePlasticAutomata}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Plastic-shard neighbour-brightness automata.  On: all shards use the palette's constant base shade, darkened by how many plastic-shards each is in contact with (like nebula interior-darkening).  Off: per-instance random shades."
+                  >
+                    {stats.plasticAutomataEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* PAuto direction — darken vs. brighten dense
+                    interiors.  Only meaningful while PAuto is On. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PADIR</span>
+                  <button
+                    onClick={onTogglePlasticAutomataDirection}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="PAuto automata direction: Darken dense cluster interiors (default, like nebula) or Brighten them.  Only affects rendering while PAuto is On."
+                  >
+                    {stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark'}
+                  </button>
+                </div>
+                {/* Plastic-eat attraction strength — how hard plastic
+                    pulls nearby glass/rock debris in to be eaten. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PEat</span>
+                  <button
+                    onClick={onCyclePlasticEatAttract}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed.  90 (gentle default) → 1440.  Nebula self-gravity is 380 for reference."
+                  >
+                    {stats.plasticEatAttractName ?? '180'}
+                  </button>
+                </div>
+                {/* Plastic "reach" pseudopod — plastic stretches toward
+                    loose plastic/glass/rock, grabs, and reels it in. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRch</span>
+                  <button
+                    onClick={onTogglePlasticReach}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Plastic 'reach' pseudopod: the nearest plastic shard leads its anchor toward a loose plastic/glass/rock target so the spring stretches it out, grabs on contact, then retracts to reel it in.  Off = passive cohesive cluster."
+                  >
+                    {stats.plasticReachEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Plastic palette cycle — amber → black → green →
+                    purple → gray → blue.  Re-rolls every active
+                    plastic-tile and plastic-shard's colour on toggle. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Plastic</span>
+                  <button
+                    onClick={onCyclePlasticPalette}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic palette family.  Re-rolls every active plastic-tile and plastic-shard's colour on toggle."
+                  >
+                    {stats.plasticPaletteName ?? 'amber'}
+                  </button>
+                </div>
+                {/* Plastic composite-op cycle — source-over → multiply →
+                    darken → screen → lighter.  Controls how overlapping
+                    plastic-shards blend in clusters. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Blend</span>
+                  <button
+                    onClick={onCyclePlasticBlendMode}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the globalCompositeOperation used by the plastic-shard render — controls how overlapping shards in a cluster combine.  source-over (default normal blend), multiply (darken overlap), darken (pixel-min), screen (lighten overlap), lighter (additive)."
+                  >
+                    {stats.plasticBlendMode ?? 'source-over'}
+                  </button>
+                </div>
+                {/* Plastic opacity cycle — 25 % → 50 % → 75 % → 100 %.
+                    Applied to both plastic-tile and plastic-shard. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Opacity</span>
+                  <button
+                    onClick={onCyclePlasticOpacity}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the globalAlpha used by plastic-tile and plastic-shard renders.  25 % is ghostly translucent, 100 % is fully opaque.  Default 75 %."
+                  >
+                    {stats.plasticOpacity ?? '75%'}
+                  </button>
+                </div>
+                {/* Plastic disc blend depth — PCore is the opaque-core
+                    radius fraction (smaller = longer fade = deeper
+                    blend); PBlnd is the disc draw radius (larger =
+                    more overlap).  Both shape plastic-SHARD discs. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PCore</span>
+                  <button
+                    onClick={onCyclePlasticCoreRadius}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-shard disc's opaque-core radius (fraction of disc radius).  Smaller core = longer alpha fade = deeper blend between overlapping shards."
+                  >
+                    {stats.plasticCoreRadiusName ?? '0.15'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlnd</span>
+                  <button
+                    onClick={onCyclePlasticBlendRadius}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the plastic-shard disc draw radius (× collision radius).  Larger spreads the disc further past its collision footprint so neighbouring discs overlap and blend more."
+                  >
+                    {stats.plasticBlendRadiusName ?? '2.0'}
+                  </button>
+                </div>
+                {/* Plastic colour-equilibration toggle — independent
+                    of the nebula tile/shard blend alphas.  When off,
+                    plastic colours stay at spawn / shatter values. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlend</span>
+                  <button
+                    onClick={onTogglePlasticBlend}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle plastic colour equilibration (NebulaSystem plastic block).  Off freezes plastic tiles + shards at their spawn / shatter colours; nebula blending unaffected.  Uses the same tileBlendAlpha / shardBlendAlpha as nebula when on."
+                  >
+                    {stats.plasticBlendEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
               </>)}
 
               {/* ── Physics ────────────────────────────────────────── */}
@@ -241,6 +412,76 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
                   >
                     {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {/* Nebula-shard velocity-stretch stiffness cycle —
+                    off / soft / med / firm / stiff.  Rotation mode
+                    is fixed to "free" (only squash axis aligns to
+                    velocity, sprite stays at its own rotation). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NStr</span>
+                  <button
+                    onClick={onCycleNebulaStretch}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle nebula-shard velocity-stretch stiffness (K multiplier on speed → stretch).  off / 0.05 / 0.07 / 0.085 / 0.10.  At any K > 0 the squash axis aligns to velocity while the sprite keeps its own rotation."
+                  >
+                    {stats.nebulaStretchName ?? '0.07'}
+                  </button>
+                </div>
+                {/* Plastic-shard elastoplastic yield cycle — yield
+                    distance in world units (2 / 5 / 10 / 25 / 60).
+                    Smaller = more plastic: the anchor permanently
+                    migrates once displacement exceeds the yield, so
+                    less of a shove springs back. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PYld</span>
+                  <button
+                    onClick={onCyclePlasticYield}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard elastoplastic yield distance (world units).  2 / 5 / 10 / 25 / 60.  Within the yield the spring returns the shard; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  Smaller = yields more easily; 60 is a near-elastic full-return reference."
+                  >
+                    {stats.plasticYieldName ?? '5'}
+                  </button>
+                </div>
+                {/* Plastic-shard sticky-bond spring stiffness cycle —
+                    k from 0.01 to 4.  Lower k = gentler in-zone
+                    recovery and weaker over-yield cap (more flow). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PStf</span>
+                  <button
+                    onClick={onCyclePlasticStiffness}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard sticky-bond spring stiffness k.  0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4.  Lower k = gentler recovery within the yield zone and a weaker over-yield cap, so kicks carry shards further past the yield point (more flow / deformation)."
+                  >
+                    {stats.plasticStiffnessName ?? '0.5'}
+                  </button>
+                </div>
+                {/* Plastic-shard linear damping cycle — per-substep
+                    velocity multiplier 0.95 … 1.0.  Lower = heavier
+                    friction (shards stop sooner); 1.0 frictionless. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PDmp</span>
+                  <button
+                    onClick={onCyclePlasticDamping}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard linear damping (per-substep velocity multiplier).  0.95 / 0.97 / 0.99 / 0.995 / 0.999 / 1.0.  At 120 Hz the per-second retention is value^120, so 0.95 ≈ 0.2 % (heavy) and 0.999 ≈ 89 % (very light); 1.0 is frictionless.  Applies live to all active plastic-shards."
+                  >
+                    {stats.plasticDampingName ?? '0.99'}
+                  </button>
+                </div>
+                {/* Plastic-shard impact-deformation cooldown — gates
+                    how often a collision can re-orient the wiggle/dent
+                    squash axis.  Longer = calmer; 'off' disables
+                    collision-driven deformation (projectile hits still
+                    wiggle). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRot</span>
+                  <button
+                    onClick={onCyclePlasticImpactCooldown}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle plastic-shard collision-deformation cooldown (seconds).  0.2 / 0.4 / 0.8 / 1.5 / off.  Caps how often a collision re-orients the wiggle/dent squash axis — longer stops the rapid axis-flip 'twitch' when shards are packed together.  'off' disables collision-driven deformation entirely; projectile hits still wiggle."
+                  >
+                    {stats.plasticImpactCooldownName ?? 'off'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

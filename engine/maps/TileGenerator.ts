@@ -1,6 +1,6 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS } from '../../constants';
+import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
@@ -256,10 +256,14 @@ export class TileGenerator {
         velocity: { x: 0, y: 0 },
         size: { x: w * 0.95, y: h * 0.95 }, // Slight gap
         rotation: 0,
-        // Constant per-variant body colour (no border/main-colour
-        // randomisation) — plastic = orange, metal = dark gray, rock =
-        // light gray; mobile shards inherit `tile.color` so they match.
-        color: cfg.color,
+        // Per-variant body colour.  Plastic randomises across an
+        // amber palette per-instance (PLASTIC_AMBER_SHADES) so each
+        // tile reads as its own shade; metal / rock / glass /
+        // indestructible take the single constant colour from
+        // STRUCTURE_VARIANTS.  Mobile shards inherit `tile.color`
+        // by default (see DropSystem.spawnDentShard, which re-rolls
+        // plastic shards independently for further variation).
+        color: variant === 'plastic' ? randomPlasticShade() : cfg.color,
         active: true,
         health: cfg.health,
         maxHealth: cfg.health,
