@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -177,6 +177,12 @@ export class RenderSystem {
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
   // false, they keep their per-instance random shade.  Default ON.
   public plasticAutomataEnabled: boolean = true;
+  // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
+  // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
+  // solid disc instead of their full polygon render.  Default ON.
+  public shardLodEnabled: boolean = true;
+  // Count of shards drawn via the LOD disc this frame — DBG perf readout.
+  public lastLodShardCount: number = 0;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -316,6 +322,35 @@ export class RenderSystem {
   // lives in a cache instead of being computed inline.  Cache size
   // stays small (typically 4-7 bitmaps across an active map).
   private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  // LOD solid-disc cache (Step 4).  Keyed by fill colour; a flat
+  // opaque filled circle blitted for mobile shards too small for their
+  // polygon detail to read.  Bounded like the tinted-sprite cache —
+  // the rock/glass/metal palette + density-tier darkening yields only a
+  // handful of distinct colours in practice.
+  private _solidDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  private getSolidDiscBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._solidDiscBitmaps.get(hex);
+      if (cached) return cached;
+      const size = SHARD_LOD_CONSTANTS.DISC_BITMAP_SIZE;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d')!;
+      const center = size / 2;
+      cx.fillStyle = hex;
+      cx.beginPath();
+      // Inset by 1px so the disc's anti-aliased rim isn't clipped by the
+      // bitmap edge when blitted.
+      cx.arc(center, center, center - 1, 0, Math.PI * 2);
+      cx.fill();
+      if (this._solidDiscBitmaps.size >= 64) {
+          const firstKey = this._solidDiscBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._solidDiscBitmaps.delete(firstKey);
+      }
+      this._solidDiscBitmaps.set(hex, c);
+      return c;
+  }
 
   private getSoftDiscBitmap(
       hex: string,
@@ -743,6 +778,7 @@ export class RenderSystem {
     // indestructible path, asteroid/shard branch's rock-tile path).
     this.lastTileLightingMs = 0;
     this.lastTileLightingCount = 0;
+    this.lastLodShardCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -2173,6 +2209,34 @@ export class RenderSystem {
                 const isTileShard = entity.shardVariant === 'glass-shard';
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
+
+                // ── LOD: tiny mobile shards → cached solid disc ────────────
+                // Below MIN_APPARENT_RADIUS_PX the polygon irregularity,
+                // edge stroke and bloom are sub-pixel, so a flat disc is
+                // indistinguishable from the full render at a fraction of
+                // the cost (one drawImage vs beginPath + per-vertex lineTo
+                // + fill + stroke).  Restricted to plain mobile shards:
+                // static tiles, plastic (already disc-cached), hit-flashing
+                // and power-up-glowing shards keep their full path so those
+                // cues still read.  Reset globalAlpha before the early
+                // return so a following fast-path tile blit isn't faded.
+                const lodR = entity.size.x * 0.5;
+                if (this.shardLodEnabled
+                    && entity.mass !== Infinity
+                    && !isPlasticShard
+                    && !isFlash
+                    && glowColor === undefined
+                    && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
+                    const lodHex = isTileShard
+                        ? densityTintForRender(entity, '#b4e6fd')
+                        : densityTintForRender(entity, entity.color);
+                    ctx.globalAlpha = (isTileShard ? 0.6 : 1.0) * shardMergeFadeAlpha(entity);
+                    const disc = this.getSolidDiscBitmap(lodHex);
+                    ctx.drawImage(disc, -lodR, -lodR, lodR * 2, lodR * 2);
+                    ctx.globalAlpha = 1.0;
+                    this.lastLodShardCount++;
+                    return;
+                }
 
                 if (isPlasticShard) {
                     // ── Plastic shard — soft-edge disc + wiggle ────────────

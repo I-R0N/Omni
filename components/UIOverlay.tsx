@@ -21,6 +21,7 @@ interface UIOverlayProps {
   onToggleNebulaShardCollisions?: () => void;
   onToggleShardSleep?: () => void;
   onToggleShardViewportCull?: () => void;
+  onToggleShardLod?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -70,6 +71,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleNebulaShardCollisions,
   onToggleShardSleep,
   onToggleShardViewportCull,
+  onToggleShardLod,
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticAutomata,
@@ -440,6 +442,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.shardViewportCullEnabled === false ? 'Off' : 'On'}
                   </button>
                 </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShLOD</span>
+                  <button
+                    onClick={onToggleShardLod}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle shard render LOD.  When ON, mobile shards too small for their polygon detail to read blit a cached solid disc instead of the full polygon fill+stroke+glow.  Purely visual — collision/physics unaffected.  OFF renders every shard at full per-vertex detail."
+                  >
+                    {stats.shardLodEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —
                     off / soft / med / firm / stiff.  Rotation mode
                     is fixed to "free" (only squash axis aligns to
@@ -640,8 +652,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       <span>dyn ents</span>
                       <span className="text-white">
                         {perf.perfDynamicCount}
-                        {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0) && (
-                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''})</span>
+                        {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0 || perf.perfLodShards > 0) && (
+                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''}{perf.perfLodShards > 0 ? `, ${perf.perfLodShards} lod` : ''})</span>
                         )}
                       </span>
                     </div>

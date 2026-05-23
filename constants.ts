@@ -1006,6 +1006,27 @@ export const SHARD_SLEEP_CONSTANTS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// Shard render LOD (level-of-detail).
+//
+// A mobile shard whose apparent (zoom-scaled) radius falls below
+// MIN_APPARENT_RADIUS_PX is too small for its polygon irregularity,
+// edge stroke, or power-up bloom to read — at a few pixels a 5-9-gon
+// and a disc are indistinguishable.  At that size RenderSystem skips
+// the per-frame beginPath + per-vertex lineTo + fill (+ stroke + glow)
+// and blits a cached solid-disc bitmap (one drawImage), tinted to the
+// shard's fill colour.  Purely visual: collision/merge/physics are
+// untouched, and the threshold is small enough that the swap is
+// sub-pixel.  Special states (hit-flash, power-up glow) keep the full
+// path so they still read.  DEFAULT_ZOOM (0.65) means radius 9 px ≈ a
+// 28-world-unit shard — i.e. the small chips a dense field is made of.
+export const SHARD_LOD_CONSTANTS = {
+  MIN_APPARENT_RADIUS_PX: 9,
+  // Offscreen disc bitmap resolution.  Blitted downscaled to a handful
+  // of pixels, so 48² is ample and keeps each cached colour tiny.
+  DISC_BITMAP_SIZE: 48,
+};
+
+// ─────────────────────────────────────────────────────────────────────
 // Shard ↔ static-tile pair resolution.
 // Mirrors SHARD_PAIR_CONSTANTS for the dedicated shard-vs-tile scan
 // (`PhysicsSystem.resolveShardTilePairs`).  That pass is opt-in via

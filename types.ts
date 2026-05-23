@@ -734,6 +734,8 @@ export interface PerfSnapshot {
   // Mobile shards currently offscreen (both-offscreen pairs resolve at
   // reduced cadence).  Set by the last resolveShardPairs grid build.
   perfOffscreenShards: number;
+  // Shards drawn via the LOD disc this frame (too small for full detail).
+  perfLodShards: number;
   // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
   // crowded > 1).  Separate from throttling — crowded fields merge/eat
   // faster to cull entities, sparse fields merge lazily.
@@ -803,6 +805,9 @@ export interface EngineStats {
   // Viewport-gated shard-pair cadence — both-offscreen pairs resolve
   // only on the catch-up phase.  DBG-toggleable; default ON.
   shardViewportCullEnabled?: boolean;
+  // Shard render LOD — tiny mobile shards blit a cached disc instead of
+  // their full polygon render.  DBG-toggleable; default ON.
+  shardLodEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
   // DBG outline overlay for outlineless variants (plastic-tile /

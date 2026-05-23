@@ -461,6 +461,16 @@ export class GameEngine {
   }
 
   /**
+   * Toggle shard render LOD.  When on, mobile shards too small for their
+   * polygon detail to read blit a cached solid disc instead of the full
+   * polygon fill+stroke+glow.  Purely visual; off restores the full
+   * per-vertex render for every shard.
+   */
+  public toggleShardLod() {
+    this.renderer.shardLodEnabled = !this.renderer.shardLodEnabled;
+  }
+
+  /**
    * Toggle the camera screen-shake effect on/off.  When off,
    * handleScreenShake early-returns and any in-flight shake decays
    * to zero on the next sim step (the existing decay logic clears
@@ -879,6 +889,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
+      shardLodEnabled: this.renderer.shardLodEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -1013,6 +1024,7 @@ export class GameEngine {
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
+      shardLodEnabled: this.renderer.shardLodEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -2964,6 +2976,7 @@ export class GameEngine {
           perfDynamicCount:  this.perfController.lastDynamicCount,
           perfAsleepCount:   this.physics.lastAsleepCount,
           perfOffscreenShards: this.physics.lastOffscreenShardCount,
+          perfLodShards:     this.renderer.lastLodShardCount,
           perfMergeRateMult: this.perfController.mergeRateMultiplier,
           // Fresh small array (9 tasks) per render frame — negligible vs.
           // the per-frame stats object the loop already builds, and keeps
