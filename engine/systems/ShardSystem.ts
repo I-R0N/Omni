@@ -2134,7 +2134,9 @@ export class ShardSystem {
     if (consumed.mergeFadeTimer !== undefined) return; // already being eaten
     const de = eater.size.x;
     const dc = consumed.size.x;
-    const newDiam = Math.sqrt(de * de + dc * dc);
+    // Add only GROWTH_AREA_FACTOR of the consumed area, so growing a
+    // given amount takes proportionally more eaten shards.
+    const newDiam = Math.sqrt(de * de + dc * dc * PLASTIC_EAT.GROWTH_AREA_FACTOR);
     // Regenerate the near-circular 16-gon collision polygon at the new
     // size (same params the asteroid-accretion path uses for plastic).
     eater.polygonPoints = this.generateShardPolygon((newDiam / 2) * 0.82, 16, 16, 0, 0.98, 0.04);

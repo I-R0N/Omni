@@ -286,6 +286,11 @@ export const PLASTIC_EAT = {
   // Metal is dense — multiply the eat time so it takes significantly
   // longer to consume than glass/rock (1.5 s × this).
   METAL_TIME_FACTOR: 6,
+  // Fraction of a consumed shard's area added to the eater on each
+  // eat.  <1 means it takes more shards to grow — at 0.2 a plastic
+  // shard must eat ~5× the area to grow the same amount as full
+  // (1.0) absorption would.
+  GROWTH_AREA_FACTOR: 0.2,
 } as const;
 
 /** Attract-strength steps for the PEat DBG cycle.  Index 1 (180) is
