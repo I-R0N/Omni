@@ -2210,26 +2210,23 @@ export class RenderSystem {
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                // ── LOD: tiny round mobile shards → cached solid disc ──────
-                // Below MIN_APPARENT_RADIUS_PX a roundish shard's polygon
-                // irregularity, edge stroke and bloom are sub-pixel, so a
-                // flat disc is indistinguishable from the full render at a
-                // fraction of the cost (one drawImage vs beginPath +
-                // per-vertex lineTo + fill + stroke).  Restricted to plain
-                // ROUND mobile shards — rock (5-9-gon, roundish) and metal
-                // (6-10-gon, near-circular).  EXCLUDED: glass-shard, whose
-                // 3-4-vertex sharp-splinter silhouette reads as angular even
-                // when small, so a circle is a visible mis-render (the
-                // splinter is the material's identity).  Also excluded:
-                // static tiles, plastic (already disc-cached), hit-flashing
-                // and power-up-glowing shards (those cues must still read).
+                // ── LOD: tiny metal shards → cached solid disc ─────────────
+                // Below MIN_APPARENT_RADIUS_PX a near-circular shard's polygon
+                // detail, edge stroke and bloom are sub-pixel, so a flat disc
+                // is indistinguishable from the full render at a fraction of
+                // the cost (one drawImage vs beginPath + per-vertex lineTo +
+                // fill + stroke).  Restricted to metal-shard ONLY: its
+                // 6-10-gon at radiusMin 0.88 / jitter 0.20 is already a near-
+                // perfect circle, so the disc is faithful.  Rock (irregular
+                // 5-9-gon) and glass (3-4-vertex sharp splinter) are EXCLUDED
+                // — their silhouette is part of the material's identity and a
+                // circle reads as a mis-render even when small.  Also excluded:
+                // hit-flashing and power-up-glowing shards (cues must read).
                 // Reset globalAlpha before the early return so a following
                 // fast-path tile blit isn't faded.
                 const lodR = entity.size.x * 0.5;
                 if (this.shardLodEnabled
-                    && entity.mass !== Infinity
-                    && !isPlasticShard
-                    && !isTileShard
+                    && entity.shardVariant === 'metal-shard'
                     && !isFlash
                     && glowColor === undefined
                     && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
