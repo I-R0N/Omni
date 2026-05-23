@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -152,6 +152,17 @@ export class PhysicsSystem {
   // narrow: nebula-vs-striker and nebula-vs-tile still honour
   // passThrough — only the same-variant pair is affected.
   public nebulaShardCollisionsEnabled: boolean = true;
+  // Debug toggle — collision-sleep for mobile shards.  When true,
+  // resolveShardPairs skips the SAT+impulse math for asleep↔asleep
+  // pairs (the bulk of a settled field).  Flip OFF to A/B-test the
+  // win and confirm sleeping never freezes a shard through a real
+  // collision.  Sleep bookkeeping in the integration loop still runs
+  // when off (the flag is just ignored by the pair skip), so toggling
+  // back on takes effect immediately without a settle delay.
+  public shardSleepEnabled: boolean = true;
+  // Count of shards flagged asleep as of the last resolveShardPairs
+  // call — exposed for the DBG perf readout so the win is visible.
+  public lastAsleepCount: number = 0;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -557,6 +568,28 @@ export class PhysicsSystem {
             // Snap to zero at very low speeds to prevent micro-drift calculations
             if (Math.abs(entity.velocity.x) < 0.01) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < 0.01) entity.velocity.y = 0;
+          }
+      }
+
+      // Collision-sleep bookkeeping — mobile shard-family entities only.
+      // Velocity / spin are final for this step here, so this is the one
+      // place that decides the sleep flag (resolveShardPairs reads it).
+      // Above-epsilon motion resets the dwell timer and wakes; otherwise
+      // the timer accrues until DELAY_SECONDS, then the shard sleeps.
+      // Collision wakes are stamped directly at the impulse sites, which
+      // also reset sleepTimer so a grazed shard re-earns its dwell.
+      if (entity.shardVariant !== undefined && entity.mass !== Infinity) {
+          const vsq = entity.velocity.x * entity.velocity.x
+                    + entity.velocity.y * entity.velocity.y;
+          const spin = entity.rotationSpeed ?? 0;
+          if (vsq > SHARD_SLEEP_CONSTANTS.SPEED_EPSILON_SQ
+              || (spin < 0 ? -spin : spin) > SHARD_SLEEP_CONSTANTS.SPIN_EPSILON) {
+              entity.sleepTimer = 0;
+              entity.asleep = false;
+          } else if (entity.asleep !== true) {
+              const t = (entity.sleepTimer ?? 0) + dt;
+              entity.sleepTimer = t;
+              if (t >= SHARD_SLEEP_CONSTANTS.DELAY_SECONDS) entity.asleep = true;
           }
       }
     }
@@ -1216,17 +1249,22 @@ export class PhysicsSystem {
 
     // Build the shard-only grid.  Same SPATIAL_GRID_SIZE as the main
     // dynamic grid so cell math and 3×3 scan radius are consistent
-    // with everything else in the broadphase.
+    // with everything else in the broadphase.  Asleep shards stay in
+    // the grid (an awake neighbour must still find and resolve against
+    // them); only the asleep↔asleep pair body is skipped below.
     this.shardGrid.clear();
+    let asleepCount = 0;
     for (let i = 0; i < shards.length; i++) {
         const e = shards[i];
         if (!e.active || e.isExploding) continue;
         if (e.mergeFadeTimer !== undefined) continue;
+        if (e.asleep === true) asleepCount++;
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
         if (!cell) { cell = []; this.shardGrid.set(key, cell); }
         cell.push(e);
     }
+    this.lastAsleepCount = asleepCount;
 
     // Walk the shard list and resolve pairs.  j > i ordering via
     // id comparison ensures each unordered pair is processed once.
@@ -1249,6 +1287,14 @@ export class PhysicsSystem {
                     const b = cell[j];
                     if (a === b) continue;
                     if (a.id > b.id) continue; // process each pair once
+                    // Sleep skip: two resting shards in contact are
+                    // stable — no separation or bounce to apply, so
+                    // skip the SAT+impulse math entirely.  A pair with
+                    // either party awake still resolves (and the
+                    // resolution wakes both), so a disturbance ripples
+                    // through the island over successive substeps.
+                    if (this.shardSleepEnabled
+                        && a.asleep === true && b.asleep === true) continue;
                     this.resolveAsteroidPair(a, b, onDeath);
                 }
             }
@@ -1574,6 +1620,15 @@ export class PhysicsSystem {
       a.position.y -= ny * pushA;
       b.position.x += nx * pushB;
       b.position.y += ny * pushB;
+
+      // Wake both ends.  Reaching here means a genuine contact cleared
+      // the passthrough + settled-pair early-outs, so neither shard is
+      // truly at rest any more — clear the flag and reset the dwell so
+      // they must re-earn sleep.  This is what propagates a disturbance
+      // through a resting island: an awake shard wakes the sleeper it
+      // hits, which next step wakes its own neighbours.
+      a.asleep = false; a.sleepTimer = 0;
+      b.asleep = false; b.sleepTimer = 0;
 
       // Velocity resolution — elastic bounce along the contact normal.
       const rvx = b.velocity.x - a.velocity.x;

@@ -157,6 +157,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
   };
 
+  const handleToggleShardSleep = () => {
+      if (engineRef.current) engineRef.current.toggleShardSleep();
+  };
+
   const handleToggleScreenShake = () => {
       if (engineRef.current) engineRef.current.toggleScreenShake();
   };
@@ -267,6 +271,7 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
+        onToggleShardSleep={handleToggleShardSleep}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}

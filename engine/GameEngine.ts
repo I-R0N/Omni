@@ -439,6 +439,17 @@ export class GameEngine {
   }
 
   /**
+   * Toggle collision-sleep for mobile shards.  When on, resolveShardPairs
+   * skips the SAT+impulse math for asleep↔asleep pairs (the bulk of a
+   * settled field).  Off restores resolving every pair every pass — used
+   * to A/B-test the win and confirm sleeping never freezes a shard
+   * through a real collision.
+   */
+  public toggleShardSleep() {
+    this.physics.shardSleepEnabled = !this.physics.shardSleepEnabled;
+  }
+
+  /**
    * Toggle the camera screen-shake effect on/off.  When off,
    * handleScreenShake early-returns and any in-flight shake decays
    * to zero on the next sim step (the existing decay logic clears
@@ -855,6 +866,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      shardSleepEnabled: this.physics.shardSleepEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -987,6 +999,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      shardSleepEnabled: this.physics.shardSleepEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -2930,6 +2943,7 @@ export class GameEngine {
           perfLoadLevel:     this.perfController.loadLevel,
           perfLoadTier:      this.perfController.tierName(),
           perfDynamicCount:  this.perfController.lastDynamicCount,
+          perfAsleepCount:   this.physics.lastAsleepCount,
           perfMergeRateMult: this.perfController.mergeRateMultiplier,
           // Fresh small array (9 tasks) per render frame — negligible vs.
           // the per-frame stats object the loop already builds, and keeps

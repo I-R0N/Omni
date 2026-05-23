@@ -19,6 +19,7 @@ interface UIOverlayProps {
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
+  onToggleShardSleep?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -66,6 +67,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardGravity,
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
+  onToggleShardSleep,
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticAutomata,
@@ -416,6 +418,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
                   </button>
                 </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sleep</span>
+                  <button
+                    onClick={onToggleShardSleep}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle collision-sleep for mobile shards.  When ON, resting shards stop resolving against each other (the bulk of a settled field) until disturbed by an awake body.  OFF resolves every pair every pass — use to A/B-test the win and confirm sleeping never freezes a shard through a real collision."
+                  >
+                    {stats.shardSleepEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —
                     off / soft / med / firm / stiff.  Rotation mode
                     is fixed to "free" (only squash axis aligns to
@@ -614,7 +626,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                         vs. total entities (which counts inert tiles). */}
                     <div className="flex justify-between">
                       <span>dyn ents</span>
-                      <span className="text-white">{perf.perfDynamicCount}</span>
+                      <span className="text-white">
+                        {perf.perfDynamicCount}
+                        {perf.perfAsleepCount > 0 && (
+                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp)</span>
+                        )}
+                      </span>
                     </div>
                     {/* Entity-count merge/eat rate multiplier (Goal 4). */}
                     <div className="flex justify-between">

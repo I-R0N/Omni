@@ -514,6 +514,18 @@ export interface GameEntity {
   // these so clusters effectively sleep unless directly disturbed.
   restSpeed?: number;
   restSpin?: number;
+  // Collision-sleep state (mobile shard-family entities only).  A shard
+  // that stays below SHARD_SLEEP_CONSTANTS speed/spin epsilon for
+  // DELAY_SECONDS sets `asleep = true`; resolveShardPairs then skips the
+  // SAT+impulse math for asleep↔asleep pairs (the dominant cost in a
+  // settled pile).  Any motion above epsilon, or a resolved collision
+  // with an awake body, wakes it — so disturbance ripples through a
+  // contact island over successive substeps.  Sleeping shards stay
+  // rendered, merge-eligible, and collidable against awake bodies; only
+  // the asleep↔asleep bounce is elided.  `sleepTimer` is the rest dwell
+  // accumulator (seconds).
+  asleep?: boolean;
+  sleepTimer?: number;
   // Plastic-shard "jiggle" state — set by collision impulses that
   // exceed restSpeed, ticked down each substep, consumed by
   // RenderSystem's plastic-shard branch to apply a damped-sinusoid
@@ -708,6 +720,9 @@ export interface PerfSnapshot {
   // Dynamic (mobile) entity count driving the throttle — the broadphase
   // cost driver, distinct from totalEntities (which counts inert tiles).
   perfDynamicCount: number;
+  // Mobile shards currently flagged asleep (skipped from asleep↔asleep
+  // pair resolution).  High in a settled field → the sleep win is live.
+  perfAsleepCount: number;
   // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
   // crowded > 1).  Separate from throttling — crowded fields merge/eat
   // faster to cull entities, sparse fields merge lazily.
@@ -771,6 +786,9 @@ export interface EngineStats {
   // Hard collisions between nebula-shard pairs (ignores their
   // passThrough flag).  DBG-toggleable; default OFF.
   nebulaShardCollisionsEnabled?: boolean;
+  // Collision-sleep for mobile shards — skips asleep↔asleep pair math
+  // in resolveShardPairs.  DBG-toggleable; default ON.
+  shardSleepEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
   // DBG outline overlay for outlineless variants (plastic-tile /

@@ -970,6 +970,30 @@ export const SHARD_PAIR_CONSTANTS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────
+// Collision-sleep for mobile shards.
+//
+// A shard whose speed² and |spin| both stay below the epsilons below
+// for DELAY_SECONDS is flagged `asleep`.  resolveShardPairs then skips
+// the SAT+impulse `resolveAsteroidPair` call for asleep↔asleep pairs —
+// the dominant cost in a settled field, where almost every pair is two
+// resting shards.  Pairs with at least one awake party always resolve,
+// and a resolved collision wakes both ends, so a disturbance ripples
+// through a contact island over successive substeps (no explicit
+// island bookkeeping needed).  Sleeping shards stay rendered,
+// merge-eligible, and collidable against awake bodies.
+//
+// Epsilons are deliberately small: rock/glass shards have no friction
+// (free-drift), so a moving one keeps its speed and stays awake until
+// it actually collides; only genuinely-at-rest shards (the bulk of an
+// undisturbed field) sleep.  DELAY_SECONDS adds hysteresis so a shard
+// grazed to a near-stop doesn't flicker asleep/awake at the threshold.
+export const SHARD_SLEEP_CONSTANTS = {
+  SPEED_EPSILON_SQ: 0.08 * 0.08,   // ≈ 0.08 vel-units; below this counts as still
+  SPIN_EPSILON: 0.03,              // radians/substep
+  DELAY_SECONDS: 0.4,              // rest dwell before sleeping
+};
+
+// ─────────────────────────────────────────────────────────────────────
 // Shard ↔ static-tile pair resolution.
 // Mirrors SHARD_PAIR_CONSTANTS for the dedicated shard-vs-tile scan
 // (`PhysicsSystem.resolveShardTilePairs`).  That pass is opt-in via
