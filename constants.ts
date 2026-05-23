@@ -1167,12 +1167,14 @@ export const LOCAL_MERGE_CONSTANTS = {
   // Local-density boost: a shard whose merge-grid cell holds DENSITY_LO
   // or fewer bodies gets no boost (sparse → 1.0×); at DENSITY_HI or more
   // it gets the full MAX_BOOST; linear between.  Cells are GRAVITY_RANGE
-  // (380) wide, so occupancy is a coarse "am I in a crowd" proxy.
+  // (380) wide, so occupancy is a coarse "am I in a crowd" proxy.  Tuned
+  // so even a modest huddle (DENSITY_HI) saturates the boost — once
+  // shards group up they consolidate quickly.
   DENSITY_LO: 3,
-  DENSITY_HI: 16,
-  MAX_BOOST: 3.0,
+  DENSITY_HI: 10,
+  MAX_BOOST: 6.0,
   // Size diminishing: a rock at/below SIZE_LO diameter absorbs at full
-  // rate; as it grows toward ROCK_TIER_DIAMETER the rate eases to
+  // rate; as it grows toward ROCK_MAX_DIAMETER the rate eases to
   // MIN_ABSORB so big rocks keep absorbing but slowly.
   SIZE_LO: 30,
   MIN_ABSORB: 0.3,
@@ -1180,7 +1182,7 @@ export const LOCAL_MERGE_CONSTANTS = {
   // .MAX_REMOVALS_PER_FRAME) when the rate feature is enabled — caps how
   // many merges fire per tick so a hotspot consolidates over several
   // frames instead of one spike.  1× when disabled.
-  BUDGET_MULT: 3,
+  BUDGET_MULT: 5,
 };
 
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
