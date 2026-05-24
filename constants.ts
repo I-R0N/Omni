@@ -2008,6 +2008,11 @@ export const DROP_CONFIG = {
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
   // General
   COLLECT_RADIUS:             30,   // world units
+  MAGNET_SPEED:                6,   // world-units/step pull toward the player
+                                    // (no range limit — drops always home in).
+                                    // Eased to `dist` within this radius so a
+                                    // drop lands on the player instead of
+                                    // overshooting.
   LIFETIME:                20.0, // seconds before drop despawns
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };

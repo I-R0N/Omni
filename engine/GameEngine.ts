@@ -1914,19 +1914,18 @@ export class GameEngine {
     }
 
     // Proximity collection + magnetic pull — single pass over activeDrops.
-    // Ammo shards get a magnet accelerator; health hearts collect on contact
-    // only (static pickup).  Skippable (PerfController `dropScan` task):
-    // collection has a generous radius so a few-step lag is imperceptible,
-    // and the magnet pull is dt-compensated by the effective interval so
-    // the integrated acceleration toward the player stays the same
-    // regardless of skip cadence.  The compaction below still runs every
-    // step so drops shot/expired elsewhere drop out promptly.
+    // Ammo shards home straight at the player from anywhere on the map (no
+    // range limit); health hearts collect on contact only (static pickup).
+    // Skippable (PerfController `dropScan` task): collection has a generous
+    // radius so a few-step lag is imperceptible, and the pull SETS velocity
+    // (units/step) rather than accumulating acceleration, so a skipped scan
+    // just lets the drop coast toward its last-aimed point until the next
+    // re-aim.  The compaction below still runs every step so drops
+    // expired elsewhere drop out promptly.
     const tDrops = performance.now();
     if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
-      const dropDt = dt * this.perfController.effectiveInterval('dropScan');
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
-      const MAGNET_RANGE_SQ = 150 * 150;
-      const MAGNET_ACCEL    = 7; // world-units/s² toward player; scales up as dist shrinks
+      const MAGNET_SPEED = DROP_CONFIG.MAGNET_SPEED;
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
         if (!drop.active) continue;
@@ -1940,12 +1939,14 @@ export class GameEngine {
         }
         // Health drops are static — skip the magnet pull.
         if (drop.dropType === 'health') continue;
-        if (distSq < MAGNET_RANGE_SQ) {
-          const dist = Math.sqrt(distSq);
-          const a    = MAGNET_ACCEL / dist; // inverse-linear: stronger when closer
-          drop.velocity.x += dx * a * dropDt;
-          drop.velocity.y += dy * a * dropDt;
-        }
+        // Direct homing pull: velocity points straight at the player at
+        // MAGNET_SPEED, eased to the exact remaining distance inside that
+        // radius so the drop settles on the player rather than overshooting.
+        const dist  = Math.sqrt(distSq);
+        const speed = Math.min(dist, MAGNET_SPEED);
+        const k     = speed / dist;
+        drop.velocity.x = dx * k;
+        drop.velocity.y = dy * k;
       }
     }
 
