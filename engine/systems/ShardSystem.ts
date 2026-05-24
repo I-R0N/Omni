@@ -1548,9 +1548,10 @@ export class ShardSystem {
             bondedThisFrame.add(a);
             bondedThisFrame.add(b);
 
-            // bondTimeSeconds === 0 (nebula's instant-merge case) →
-            // fire compose immediately so today's same-frame nebula
-            // merge timing is preserved.
+            // Zero-threshold guard: a variant configured with
+            // bondTimeSeconds 0 composes on contact in the same frame.
+            // No variant sets that today, but keep the path so such a
+            // config doesn't leave a permanently-unresolved bond.
             if (threshold <= 0) {
               this.composeEntities(a, b, entities, _physics);
               // Drop the just-pushed bond (it's already resolved).
