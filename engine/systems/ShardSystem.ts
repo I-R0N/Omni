@@ -967,15 +967,20 @@ export class ShardSystem {
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
       }
 
-      // Per-bond local rate: density boost only (denser pocket → faster),
+      // Per-bond local rate: density boost (denser pocket → faster),
       // neutral 1.0× when the DBG gate is off.  Big-shard slowdown is NOT
       // applied here — it lives solely in the bond *threshold* via the
-      // per-variant bondTimeSizePower (avoids double-counting size).
+      // per-variant bondTimeSizePower (avoids double-counting size).  The
+      // boost is then lerped DOWN toward MERGE_LOAD_SCALE_MIN as global
+      // load climbs (scaledMergeRate), so a heavy field stops merging
+      // itself back to comfort — keeping the high-load state alive for
+      // perf testing.  No-op at idle.
       let bondRate = 1;
       if (rateEnabled) {
         const cell = Math.max(a.mergeCellCount ?? 0, b.mergeCellCount ?? 0);
         bondRate = localDensityBoost(cell);
         if (bondRate > ratePeak) ratePeak = bondRate;
+        if (this.perfController) bondRate = this.perfController.scaledMergeRate(bondRate);
       }
       bond.timer += dt * bondRate;
 
@@ -1240,7 +1245,11 @@ export class ShardSystem {
           const baseEatTime = g.shardVariant === 'metal-shard'
             ? PLASTIC_EAT.SECONDS * PLASTIC_EAT.METAL_TIME_FACTOR
             : PLASTIC_EAT.SECONDS;
-          const eatBoost = eatRateEnabled ? localDensityBoost(g.mergeCellCount ?? 0) : 1;
+          // Density boost (faster digest in dense pockets), then lerped
+          // DOWN toward the floor under high load — same load-driven
+          // slowdown applied to bond merges (see tickBonds).
+          let eatBoost = eatRateEnabled ? localDensityBoost(g.mergeCellCount ?? 0) : 1;
+          if (eatRateEnabled && this.perfController) eatBoost = this.perfController.scaledMergeRate(eatBoost);
           const eatTime = baseEatTime / eatBoost;
           if (t >= eatTime) (eats ??= []).push({ eater: nearP, consumed: g });
         } else if (g.plasticEatTimer) {

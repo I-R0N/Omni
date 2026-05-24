@@ -252,4 +252,16 @@ export class PerfController {
   public tierName(): string {
     return PC.TIER_NAMES[this.loadTier] ?? String(this.loadTier);
   }
+
+  /** Apply the load-driven slowdown to a local-density merge/eat-rate
+   *  `boost` (>=1).  Lerps from the FULL boost at idle down to
+   *  MERGE_LOAD_SCALE_MIN at peak load, so the rate is dominated by load
+   *  (not density) once the field is heavy — it stops auto-culling itself
+   *  and the high-load state persists for perf testing.  At idle this is
+   *  a no-op (returns the boost unchanged). */
+  public scaledMergeRate(boost: number): number {
+    const min = PC.MERGE_LOAD_SCALE_MIN;
+    if (min >= 1) return boost; // feature disabled
+    return boost + (min - boost) * this.loadLevel;
+  }
 }

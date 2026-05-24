@@ -1105,6 +1105,15 @@ export const PERF_CONTROLLER_CONSTANTS = {
   TIER_HYSTERESIS: 0.06,
   // Human-readable tier names for the DBG load readout.
   TIER_NAMES: ['idle', 'light', 'med', 'heavy', 'max'] as const,
+  // ── Load-driven merge-rate floor ───────────────────────────────────
+  // The shard merge / plastic-eat RATE lerps from its full local-density
+  // boost at idle DOWN to this floor at peak load (loadLevel = 1).  The
+  // density boost speeds merging in crowded pockets, which auto-relieves
+  // load — counterproductive when you want to *observe* sustained high-
+  // load performance.  Flooring the rate under load (below 1.0× here, vs
+  // up to MAX_BOOST=6× at idle) makes the field stop culling itself, so
+  // the heavy state persists for testing.  Set to 1.0 to disable.
+  MERGE_LOAD_SCALE_MIN: 0.25,
 };
 
 // Per-task throttle profiles read by PerfController.registerDefaults().
