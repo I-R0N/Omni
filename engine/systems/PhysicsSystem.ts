@@ -802,6 +802,13 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
+        // Collectible ammo drops are non-physics bodies: magnet-pulled +
+        // proximity-collected only (see GameEngine drop scan).  Keeping
+        // them out of the dynamic grid removes their collision cost AND
+        // their contribution to lastMaxCellDensity / lastDynamicCount, so
+        // a lingering drop pile no longer pins the PerfController load.
+        if (e.type === EntityType.INTERACTABLE && e.dropType === 'ammo') continue;
+
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
 

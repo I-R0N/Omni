@@ -226,15 +226,6 @@ export class ShardSystem {
   private adapter: ShardAdapter | null = null;
 
   /**
-   * Active drops cache (set by GameEngine).  Used by the merge
-   * broadphase as additional candidates: today's stick-bond logic
-   * pairs ammo / health drops with each other and with asteroids,
-   * forming composite asteroids on cross-type drop merges.  The
-   * dropComposition payload threading lives in composeEntities.
-   */
-  private activeDrops: GameEntity[] = [];
-
-  /**
    * Caller-provided lookup for the current map type.  Used inside
    * composeEntities to read the asteroid-size cap from
    * MAP_POPULATION (today's mergeEntities call site
@@ -285,12 +276,10 @@ export class ShardSystem {
     this.setAdapter(adapter);
   }
 
-  /** Inject the active-drops cache + map type each frame.  Must be
-   *  called before update() so the merge broadphase sees the right
-   *  candidate set.  Cheap — passes a reference to the caller's
-   *  array, not a copy. */
-  public setMergeContext(activeDrops: GameEntity[], mapType: MapType): void {
-    this.activeDrops = activeDrops;
+  /** Inject the current map type each frame.  Must be called before
+   *  update() so the merge broadphase / free-spawn sizing read the
+   *  right per-map config. */
+  public setMergeContext(mapType: MapType): void {
     this.currentMapType = mapType;
   }
 
@@ -1100,10 +1089,9 @@ export class ShardSystem {
       }
       candidates.push(e);
     }
-    for (let i = 0; i < this.activeDrops.length; i++) {
-      const d = this.activeDrops[i];
-      if (d.active && d.dropType !== 'glass' && d.dropType !== 'health') candidates.push(d);
-    }
+    // Ammo drops are no longer merge candidates — they're inert
+    // collectibles (magnet-pull + proximity-collect only), so they
+    // neither bond with each other nor get absorbed by asteroids.
     if (candidates.length < 2) return;
 
     // Spatial hash — cell size matches the widest pull range across
@@ -1485,21 +1473,6 @@ export class ShardSystem {
             } else if (bVariant && bVariant.merge.bondsWith !== 'none' && aVariantId !== null
                 && this.selects(bVariant.merge.bondsWith, aVariantId, bVariantId)) {
               pullerVariant = bVariant;
-            } else if (a.type !== EntityType.STRUCTURE && b.type !== EntityType.STRUCTURE
-                && a.dropType && b.dropType) {
-              // Drop+drop bonding is variant-less today; preserve via
-              // a synthetic threshold (same-type 10s, cross-type 20s).
-              const sameType = a.dropType === b.dropType;
-              if (!sameType && Math.random() > 0.5) continue;
-              const SIZE_REF = 20, SIZE_POWER = 1.5;
-              const avgSize  = (a.size.x + b.size.x) * 0.5;
-              const sizeRatio = Math.max(1, avgSize / SIZE_REF);
-              const baseTime  = sameType ? 10.0 : 20.0;
-              const threshold = baseTime * Math.pow(sizeRatio, SIZE_POWER);
-              this.bonds.push({ a, b, timer: 0, threshold });
-              bondedThisFrame.add(a);
-              bondedThisFrame.add(b);
-              continue;
             } else {
               continue; // neither side wants the bond
             }
@@ -2051,50 +2024,9 @@ export class ShardSystem {
       // if (a.shardVariant === 'plastic-shard' && a.size.x >= PLASTIC_TIER_DIAMETER) {
       //   this.tryTransmuteShardToTile(a, 'plastic-shard', 'plastic', entities, physics);
       // }
-    } else if (!aIsAst && !bIsAst) {
-      // Drop + Drop.
-      if (a.dropType === b.dropType) {
-        // Same type — grow (area-conserving).
-        a.dropValue  = (a.dropValue ?? 0) + (b.dropValue ?? 0);
-        const rda    = a.size.x / 2;
-        const rdb    = b.size.x / 2;
-        const newR   = Math.sqrt(rda * rda + rdb * rdb) * 2;
-        a.size.x     = newR; a.size.y = newR;
-        a.position.x = nmx;  a.position.y = nmy;
-        a.velocity.x = nvx;  a.velocity.y = nvy;
-        b.active = false;
-      } else {
-        // Different types — collapse into a composite asteroid.
-        this.spawnCompositeAsteroid(a, b, nmx, nmy, nvx, nvy, entities);
-        a.active = false;
-        b.active = false;
-      }
-    } else {
-      // Asteroid + Drop — asteroid absorbs drop payload + glow.
-      const ast  = aIsAst ? a : b;
-      const drop = aIsAst ? b : a;
-      const comp: DropCompositionEntry[] = [...(ast.dropComposition ?? [])];
-
-      if (drop.dropType === 'ammo') {
-        comp.push({ type: 'ammo', value: drop.dropValue ?? 1 });
-        const wColor = drop.color || '#ffffff';
-        ast.powerupGlowColor = ast.powerupGlowColor
-          ? blendHex(ast.powerupGlowColor, wColor)
-          : wColor;
-      } else if (drop.dropType === 'health') {
-        comp.push({ type: 'health', value: drop.dropValue ?? 1 });
-        const dColor = '#4ade80';
-        ast.powerupGlowColor = ast.powerupGlowColor
-          ? blendHex(ast.powerupGlowColor, dColor)
-          : dColor;
-      }
-
-      ast.dropComposition = comp.length > 0 ? comp : undefined;
-      ast.velocity.x = nvx; ast.velocity.y = nvy;
-      drop.active = false;
     }
 
-    // Soft sparkle at the merge point for asteroid / drop merges.
+    // Soft sparkle at the merge point for shard merges.
     this.particles.spawn(entities, { x: nmx, y: nmy }, 5, '#fbbf24', {
       speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,
       lifetimeMin: 0.2, lifetimeMax: 0.4,
@@ -2210,57 +2142,6 @@ export class ShardSystem {
     // pair's midpoint; velocity is the mass-weighted average so a
     // resulting glass-shard inherits the cloud's drift.
     this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics);
-  }
-
-  /**
-   * Composite-asteroid spawn — port of GameEngine.spawnCompositeAsteroid.
-   * Fires only on cross-type drop+drop merges (e.g. ammo + health).
-   * Result is a rock-shard with a packed dropComposition
-   * carrying both drops' payloads.
-   */
-  private spawnCompositeAsteroid(
-    dropA: GameEntity, dropB: GameEntity,
-    mx: number, my: number, mvx: number, mvy: number,
-    entities: GameEntity[],
-  ): void {
-    const ra      = dropA.size.x / 2;
-    const rb      = dropB.size.x / 2;
-    // Area-conserving: new area = area_A + area_B → new_radius = sqrt(ra² + rb²)
-    const newSize = Math.sqrt(ra * ra + rb * rb) * 2;
-    const hp      = Math.max(1, Math.round(newSize / 20));
-
-    // Irregular polygon (same approach as normal asteroids).
-    const baseR   = (newSize / 2) * 0.82;
-    const points  = this.generateShardPolygon(baseR, 9, 12, 0.65, 0.75, 0.5);
-
-    entities.push({
-      id:            nextId('composite'),
-      type:          EntityType.STRUCTURE,
-      shardVariant:  'rock-shard',
-      position:      { x: mx, y: my },
-      velocity:      { x: mvx, y: mvy },
-      size:          { x: newSize, y: newSize },
-      rotation:      Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * (1.5 / (newSize / 20)),
-      color:         blendHex(dropA.color, dropB.color),
-      active:        true,
-      health:        hp,
-      maxHealth:     hp,
-      mass:          newSize,
-      polygonPoints: points,
-      dropComposition: [
-        ...(dropA.dropType === 'ammo'
-          ? [{ type: 'ammo' as const, value: dropA.dropValue ?? 1 }]
-          : dropA.dropType === 'health'
-          ? [{ type: 'health' as const, value: dropA.dropValue ?? 1 }]
-          : []),
-        ...(dropB.dropType === 'ammo'
-          ? [{ type: 'ammo' as const, value: dropB.dropValue ?? 1 }]
-          : dropB.dropType === 'health'
-          ? [{ type: 'health' as const, value: dropB.dropValue ?? 1 }]
-          : []),
-      ],
-    });
   }
 }
 

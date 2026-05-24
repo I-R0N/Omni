@@ -1329,12 +1329,8 @@ export class GameEngine {
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
-      // Drops are a subset of activeDrops that are ammo shards (not glass, not health).
-      for (let i = 0; i < this.activeDrops.length; i++) {
-          const d = this.activeDrops[i];
-          if (!d.active || !d.dropType || d.dropType === 'health') continue;
-          applyFlow(d);
-      }
+      // Ammo drops are non-physics: no flow-field pursuit, only the
+      // player magnet (see the drop scan in updateGameLogic).
 
 
       // Stage 4: stick-bond + nebula gravity-merge are owned by
@@ -1608,7 +1604,7 @@ export class GameEngine {
     // and NebulaSystem updateDynamics.  Variant config drives every
     // policy decision (delay / threshold / pull-range / etc.).
     if (this.currentMap) {
-        this.shards.setMergeContext(this.activeDrops, this.currentMap.type);
+        this.shards.setMergeContext(this.currentMap.type);
         // Pace the shard merge / cohesion passes to the same cadence
         // as PhysicsSystem.resolveShardPairs (computed inside the
         // physics.update call earlier this substep).  Without this,
