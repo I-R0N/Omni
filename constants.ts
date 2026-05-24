@@ -2008,8 +2008,11 @@ export const DROP_CONFIG = {
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
   // General
   COLLECT_RADIUS:             30,   // world units
-  MAGNET_SPEED:                6,   // world-units/step pull toward the player
-                                    // (no range limit — drops always home in).
+  MAGNET_RANGE:              150,   // world units — a drop only starts pulling
+                                    // once the player is this close.  Once it
+                                    // latches it homes to completion (see
+                                    // `magnetized`), even if the player leaves.
+  MAGNET_SPEED:                6,   // world-units/step pull toward the player.
                                     // Eased to `dist` within this radius so a
                                     // drop lands on the player instead of
                                     // overshooting.

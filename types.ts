@@ -318,6 +318,9 @@ export interface GameEntity {
   // Drop item fields
   dropType?: 'ammo' | 'health' | 'glass';
   dropValue?: number;
+  // Magnet latch: set once a drop first enters the player's pull range.
+  // Thereafter it homes to completion regardless of distance.
+  magnetized?: boolean;
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;

@@ -1914,17 +1914,20 @@ export class GameEngine {
     }
 
     // Proximity collection + magnetic pull — single pass over activeDrops.
-    // Ammo shards home straight at the player from anywhere on the map (no
-    // range limit); health hearts collect on contact only (static pickup).
-    // Skippable (PerfController `dropScan` task): collection has a generous
-    // radius so a few-step lag is imperceptible, and the pull SETS velocity
-    // (units/step) rather than accumulating acceleration, so a skipped scan
-    // just lets the drop coast toward its last-aimed point until the next
-    // re-aim.  The compaction below still runs every step so drops
-    // expired elsewhere drop out promptly.
+    // An ammo shard starts pulling only once the player comes within
+    // MAGNET_RANGE; from then on it's latched (`magnetized`) and homes to
+    // completion even if the player leaves.  Health hearts collect on
+    // contact only (static pickup).  Skippable (PerfController `dropScan`
+    // task): collection has a generous radius so a few-step lag is
+    // imperceptible, and the pull SETS velocity (units/step) rather than
+    // accumulating acceleration, so a skipped scan just lets the drop
+    // coast toward its last-aimed point until the next re-aim.  The
+    // compaction below still runs every step so drops expired elsewhere
+    // drop out promptly.
     const tDrops = performance.now();
     if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
+      const magnetRangeSq = DROP_CONFIG.MAGNET_RANGE * DROP_CONFIG.MAGNET_RANGE;
       const MAGNET_SPEED = DROP_CONFIG.MAGNET_SPEED;
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
@@ -1939,9 +1942,15 @@ export class GameEngine {
         }
         // Health drops are static — skip the magnet pull.
         if (drop.dropType === 'health') continue;
+        // Latch on first entry into pull range; once latched the drop
+        // keeps homing regardless of distance (guaranteed collection).
+        if (!drop.magnetized) {
+          if (distSq >= magnetRangeSq) continue;
+          drop.magnetized = true;
+        }
         // Direct homing pull: velocity points straight at the player at
-        // MAGNET_SPEED, eased to the exact remaining distance inside that
-        // radius so the drop settles on the player rather than overshooting.
+        // MAGNET_SPEED, eased to the exact remaining distance when close
+        // so the drop settles on the player rather than overshooting.
         const dist  = Math.sqrt(distSq);
         const speed = Math.min(dist, MAGNET_SPEED);
         const k     = speed / dist;
