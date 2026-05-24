@@ -37,6 +37,7 @@ interface UIOverlayProps {
   onCyclePlasticCoreRadius?: () => void;
   onCyclePlasticBlendRadius?: () => void;
   onCyclePlasticYield?: () => void;
+  onCycleShatterGrace?: () => void;
   onCyclePlasticStiffness?: () => void;
   onCyclePlasticDamping?: () => void;
   onCyclePlasticImpactCooldown?: () => void;
@@ -88,6 +89,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticCoreRadius,
   onCyclePlasticBlendRadius,
   onCyclePlasticYield,
+  onCycleShatterGrace,
   onCyclePlasticStiffness,
   onCyclePlasticDamping,
   onCyclePlasticImpactCooldown,
@@ -462,6 +464,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle the local-density merge/absorption rate.  When ON, shards in dense pockets (hotspots) merge & absorb faster while big absorbing rocks slow down, consolidating clusters into a few big rocks that condense to static tiles.  OFF holds the rate at a neutral 1.0x (base rate, base budget).  The 'merge rate' readout below shows the live peak local multiplier."
                   >
                     {stats.mergeRateEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                {/* Hot-spot-collapse grace delay — how long freshly-
+                    shattered rock/glass shards are exempt from the
+                    overlap-collapse pass (so debris scatters before it
+                    can re-condense).  0.6 → 3.6s in 0.6s steps. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grace</span>
+                  <button
+                    onClick={onCycleShatterGrace}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the hot-spot-collapse grace delay (0.6 → 3.6s, 0.6s steps).  Freshly-shattered rock/glass shards are exempt from the overlap-collapse pass for this long, so a just-destroyed tile's debris scatters instead of instantly re-condensing.  Applies to tiles destroyed after the change."
+                  >
+                    {stats.shatterGraceName ?? '0.6s'}
                   </button>
                 </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —

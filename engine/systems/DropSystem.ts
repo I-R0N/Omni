@@ -9,7 +9,7 @@ import {
   randomPlasticShade,
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
-  HOTSPOT_COLLAPSE,
+  getActiveShatterGraceDelay,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -324,8 +324,8 @@ export class DropSystem {
         mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
         // Let the debris scatter before the overlap-collapse pass can
-        // re-condense it into a tile.
-        collapseGraceTimer: HOTSPOT_COLLAPSE.SHATTER_DELAY,
+        // re-condense it into a tile (DBG-cyclable delay).
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 

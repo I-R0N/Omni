@@ -869,6 +869,9 @@ export interface EngineStats {
   // Smaller yield = more plastic (less spring-back); 'elastic' (∞)
   // is the original full-return spring.
   plasticYieldName?: string;
+  // DBG hot-spot-collapse grace delay for freshly-shattered shards
+  // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
+  shatterGraceName?: string;
   // DBG sticky-bond spring stiffness step name for plastic-shards
   // (PLASTIC_STIFFNESS_CYCLE, 0.01 … 4).  Lower k = gentler
   // recovery and more over-yield flow.

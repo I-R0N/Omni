@@ -33,6 +33,7 @@ import {
   PLASTIC_REACH,
   getActivePlasticYield,
   HOTSPOT_COLLAPSE,
+  getActiveShatterGraceDelay,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -701,8 +702,8 @@ export class ShardSystem {
         anchorX: isChildPlasticShard ? (parent.position.x + offsetX) : undefined,
         anchorY: isChildPlasticShard ? (parent.position.y + offsetY) : undefined,
         // Let the shatter debris fly apart before the overlap-collapse
-        // pass can re-condense it into a tile.
-        collapseGraceTimer: HOTSPOT_COLLAPSE.SHATTER_DELAY,
+        // pass can re-condense it into a tile (DBG-cyclable delay).
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 

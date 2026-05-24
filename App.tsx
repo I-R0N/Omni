@@ -229,6 +229,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticYield();
   };
 
+  const handleCycleShatterGrace = () => {
+      if (engineRef.current) engineRef.current.cycleShatterGrace();
+  };
+
   const handleCyclePlasticStiffness = () => {
       if (engineRef.current) engineRef.current.cyclePlasticStiffness();
   };
@@ -301,6 +305,7 @@ const App: React.FC = () => {
         onCyclePlasticCoreRadius={handleCyclePlasticCoreRadius}
         onCyclePlasticBlendRadius={handleCyclePlasticBlendRadius}
         onCyclePlasticYield={handleCyclePlasticYield}
+        onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}
         onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
