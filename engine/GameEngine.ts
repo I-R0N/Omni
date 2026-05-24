@@ -100,7 +100,7 @@ export class GameEngine {
   // nebula image renders out of the box; the DBG panel cycles through A
   // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
   // comparison.
-  private nebulaSet: NebulaSet = 'ALL';
+  private nebulaSet: NebulaSet = 'CURATED';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -265,18 +265,20 @@ export class GameEngine {
   }
 
   /**
-   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
-   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
-   * Updates the shared NEBULA_IMAGES array, reloads background textures,
-   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
-   * tile-cluster art swaps instantly without requiring a map reload.
+   * Cycle through nebula image sets: CURATED (the shipped subset) → ALL
+   * (all discovered) → A (baseline 00-08) → B (everything past 08) → N16
+   * (Nebula16 only) → CURATED.  Updates the shared NEBULA_IMAGES array,
+   * reloads background textures, and re-rolls the sprite on every live
+   * NEBULA / NEBULA_SHARD entity so tile-cluster art swaps instantly
+   * without requiring a map reload.
    */
   public toggleNebulaSet() {
     this.nebulaSet =
-        this.nebulaSet === 'ALL' ? 'A'
-      : this.nebulaSet === 'A'   ? 'B'
-      : this.nebulaSet === 'B'   ? 'N16'
-      : 'ALL';
+        this.nebulaSet === 'CURATED' ? 'ALL'
+      : this.nebulaSet === 'ALL'     ? 'A'
+      : this.nebulaSet === 'A'       ? 'B'
+      : this.nebulaSet === 'B'       ? 'N16'
+      : 'CURATED';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
 
@@ -2796,8 +2798,16 @@ export class GameEngine {
       // shard big enough to still shatter into children.
       if (e.size.x >= floor) continue;
       if (e.plasticBreakTimer === undefined) {
-        e.plasticBreakTimer = PLASTIC_SELF_BREAK.MIN_SECONDS
+        // Smaller chips expire sooner: scale the lifetime by the shard's
+        // size relative to the break floor (clamped so the tiniest still
+        // linger briefly rather than popping instantly).
+        const sizeFrac = Math.max(
+          PLASTIC_SELF_BREAK.SIZE_SCALE_FLOOR,
+          Math.min(1, e.size.x / floor),
+        );
+        const base = PLASTIC_SELF_BREAK.MIN_SECONDS
           + Math.random() * (PLASTIC_SELF_BREAK.MAX_SECONDS - PLASTIC_SELF_BREAK.MIN_SECONDS);
+        e.plasticBreakTimer = base * sizeFrac;
         continue;
       }
       e.plasticBreakTimer -= dt;

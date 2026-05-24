@@ -61,19 +61,32 @@ export const NEBULA_IMAGES_SET_A: readonly string[] =
 export const NEBULA_IMAGES_SET_B: readonly string[] =
   NEBULA_IMAGES_ALL.filter(url => !SET_A_BASENAMES.has(basenameOf(url)));
 
-export type NebulaSet = 'A' | 'B' | 'ALL' | 'N16';
+// Curated set — the only nebula textures the game uses by default.
+// Hand-picked (Nebula00, 06, 14-18); everything else is debug-only via
+// the DBG panel's nebula-set cycle.
+const CURATED_BASENAMES = new Set([
+  'Nebula00.png', 'Nebula06.png',
+  'Nebula14.png', 'Nebula15.png', 'Nebula16.png',
+  'Nebula17.png', 'Nebula18.png',
+]);
+export const NEBULA_IMAGES_CURATED: readonly string[] =
+  NEBULA_IMAGES_ALL.filter(url => CURATED_BASENAMES.has(basenameOf(url)));
+
+export type NebulaSet = 'CURATED' | 'A' | 'B' | 'ALL' | 'N16';
 
 // NEBULA_IMAGES is the currently-active list — swapped via
 // setActiveNebulaSet() (wired to the DBG panel).  Consumers read the same
 // array reference, so in-place mutation propagates to all of them.
-export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_ALL];
+// Defaults to the curated set so the game ships with only those textures.
+export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_CURATED];
 
 export function setActiveNebulaSet(set: NebulaSet): string[] {
   const n16 = NEBULA_IMAGES_ALL.filter(url => basenameOf(url) === 'Nebula16.png');
   const source =
-      set === 'A'   ? NEBULA_IMAGES_SET_A
-    : set === 'B'   ? NEBULA_IMAGES_SET_B
-    : set === 'N16' ? n16
+      set === 'CURATED' ? NEBULA_IMAGES_CURATED
+    : set === 'A'       ? NEBULA_IMAGES_SET_A
+    : set === 'B'       ? NEBULA_IMAGES_SET_B
+    : set === 'N16'     ? n16
     : NEBULA_IMAGES_ALL;
   NEBULA_IMAGES.length = 0;
   NEBULA_IMAGES.push(...source);

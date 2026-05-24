@@ -2226,12 +2226,12 @@ export class ShardSystem {
   }
 
   /**
-   * Plastic "eats" a metal shard — but metal isn't absorbed.  It's
-   * transmuted into PLASTIC_EAT.METAL_TO_ROCK.COUNT rock shards that are
-   * ejected away from the plastic (which does NOT grow — the metal's
-   * material leaves as rock debris).  The new rocks carry the shatter
-   * grace timer so they don't instantly re-condense, and the plastic
-   * repel pass then keeps shoving them clear.
+   * Plastic "eats" a metal shard — but metal isn't fully absorbed.  It's
+   * transmuted into PLASTIC_EAT.METAL_TO_ROCK.COUNT rock shards ejected
+   * away from the plastic; the plastic grows only SLIGHTLY (PLASTIC_GROWTH
+   * _FACTOR of the metal's area — most of the mass leaves as rock debris).
+   * The new rocks carry the shatter grace timer so they don't instantly
+   * re-condense, and the plastic repel pass then keeps shoving them clear.
    */
   private applyPlasticEatMetal(eater: GameEntity, consumed: GameEntity, entities: GameEntity[]): void {
     if (!eater.active || !consumed.active) return;
@@ -2255,7 +2255,20 @@ export class ShardSystem {
       const oy = consumed.position.y + uy * rockDiam * 0.5;
       this.spawnRockShard(entities, ox, oy, rockDiam, ux * speed, uy * speed);
     }
-    // Metal dissolves; eater is unchanged (no growth).
+    // The eater grows slightly — only PLASTIC_GROWTH_FACTOR of the
+    // metal's area (most of the mass left as the ejected rock debris).
+    const de = eater.size.x;
+    const dc = consumed.size.x;
+    const grown = Math.sqrt(de * de + dc * dc * PLASTIC_EAT.METAL_TO_ROCK.PLASTIC_GROWTH_FACTOR);
+    eater.polygonPoints = this.generateShardPolygon((grown / 2) * 0.82, 16, 16, 0, 0.98, 0.04);
+    eater.size.x = grown;
+    eater.size.y = grown;
+    eater.mass = SHARD_VARIANTS['plastic-shard'].spawn.sizeToMass(grown);
+    if (eater.anchorX !== undefined) {
+      eater.anchorX = eater.position.x;
+      eater.anchorY = eater.position.y;
+    }
+    // Metal dissolves.
     this.startMergeFadeOut(consumed);
     this.particles.spawn(entities, consumed.position, 4, COLORS.ASTEROID, {
       speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,

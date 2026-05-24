@@ -264,6 +264,11 @@ export function togglePlasticAutomataBrighten(): boolean {
 export const PLASTIC_SELF_BREAK = {
   MIN_SECONDS: 12.5,
   MAX_SECONDS: 30.0,
+  // The terminal-chip lifetime is scaled by the shard's size relative to
+  // the break floor (size / sizeMin), so the smallest chips expire much
+  // sooner than ones just under the floor.  Clamped to this floor so the
+  // tiniest still last a moment instead of vanishing instantly.
+  SIZE_SCALE_FLOOR: 0.2,
 } as const;
 
 // ── Plastic eats glass / rock ──────────────────────────────────────
@@ -296,12 +301,13 @@ export const PLASTIC_EAT = {
   // and fades with range, like the attract it replaces for rock).
   ROCK_REPEL_STRENGTH: 240,
   // Eating metal transmutes it into rock shards that are ejected away
-  // from the plastic (the plastic does NOT grow — the metal's mass
-  // leaves as rock debris).
+  // from the plastic.  The plastic grows only SLIGHTLY (PLASTIC_GROWTH_
+  // FACTOR of the metal's area — most of the mass leaves as rock debris).
   METAL_TO_ROCK: {
-    COUNT: 2,          // rock shards produced per consumed metal shard
-    SIZE_FACTOR: 0.7,  // each rock's diameter as a fraction of the metal's
-    EJECT_SPEED: 3,    // outward launch speed (world-units/step)
+    COUNT: 2,                  // rock shards produced per consumed metal shard
+    SIZE_FACTOR: 0.7,          // each rock's diameter as a fraction of the metal's
+    EJECT_SPEED: 3,            // outward launch speed (world-units/step)
+    PLASTIC_GROWTH_FACTOR: 0.08, // fraction of the metal's area added to the eater
   },
 } as const;
 
