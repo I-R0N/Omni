@@ -2706,12 +2706,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen: { kind: 'none' },
     merge: {
       attractedTo: 'none',                      // contact-stick only
-      bondsWith: { include: ['rock-shard', 'glass-shard'] },
+      bondsWith: 'self',                        // same-material only
       bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
-      rules: [
-        { partner: 'self',        outcome: 'compose' },
-        { partner: 'glass-shard', outcome: 'compose', thresholdScale: 2.0 },
-      ],
       defaultOutcome: 'compose',
     },
     shatter: {
@@ -2747,12 +2743,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen: { kind: 'none' },
     merge: {
       attractedTo: 'none',
-      bondsWith: { include: ['rock-shard', 'glass-shard'] },
+      bondsWith: 'self',                        // same-material only
       bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
-      rules: [
-        { partner: 'self',       outcome: 'compose' },
-        { partner: 'rock-shard', outcome: 'compose', thresholdScale: 2.0 },
-      ],
       defaultOutcome: 'compose',
     },
     shatter: {
@@ -2955,47 +2947,27 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     spawn: SHARD_SPAWN_SHAPE_NEBULA,
     regen: { kind: 'merge-only' },              // tiles regrow only via transmutation
     merge: {
-      // Stage 5b: cross-variant gravity pull from nebula-shards
-      // toward all mobile shard variants (self + rock-shard +
-      // glass-shard).  Pull is unilateral — only nebula-shards have
-      // attractedTo set; rock and glass shards are dragged toward
-      // nebulae but don't pull each other or pull toward nebulae.
-      attractedTo: { include: ['nebula-shard', 'rock-shard', 'glass-shard'] },
+      // Same-material only: nebula-shards pull toward and bond with
+      // other nebula-shards exclusively.  Pull is the self-coalesce
+      // gravity; bonds drive the pair-transmute self-merge below.
+      attractedTo: 'self',
       pullRange:    NEBULA_CONSTANTS.GRAVITY_RANGE,
       pullStrength: NEBULA_CONSTANTS.GRAVITY_STRENGTH,
       pullMinDist:  NEBULA_CONSTANTS.GRAVITY_MIN_DIST,
       // Stick-bonds: nebula self-coalesce runs on the standard
       // bondsWith pipeline (5 s contact timer; per-pair, pair-
-      // consuming).  Cross-variant glass-absorb still piggy-backs on
-      // bondsWith too — its threshold scale dominates via
-      // requirePartnerSizeFraction so it only fires at sizeMax.
-      bondsWith: { include: ['nebula-shard', 'glass-shard'] },
+      // consuming).
+      bondsWith: 'self',
       // Base bond time — multiplied by (avgSize / bondTimeSizeRef)
       // ^bondTimeSizePower per the resolver.  At ref-size shards
       // (≈20 diameter) the effective threshold ≈ 5 s; larger pairs
-      // wait proportionally longer.
+      // wait proportionally longer.  Self-bonds fire the dedicated
+      // pair-transmute path in ShardSystem.composeNebulaShards
+      // (50/50 nebula-tile vs glass-shard at the pair's midpoint),
+      // variant-routed inside composeEntities.
       bondTimeSeconds: 5,
       bondTimeSizeRef: 20,
       bondTimeSizePower: 1.5,
-      rules: [
-        // Self-bond fires the dedicated pair-transmute path in
-        // ShardSystem.composeNebulaShards (50/50 nebula-tile vs
-        // glass-shard at the pair's midpoint).  Listed as 'compose'
-        // because that's the dispatch keyword the bond resolver
-        // uses; the actual outcome is variant-routed inside
-        // composeEntities.
-        { partner: 'self', outcome: 'compose' },
-        {
-          partner: 'glass-shard',
-          outcome: 'absorb',
-          // The partner-size gate dominates: bonds persist
-          // (cohesion) and never fire the absorb until the glass-
-          // shard reaches sizeMax — a rare event regardless of
-          // timer.
-          thresholdScale: 5.0,
-          requirePartnerSizeFraction: 1.0,
-        },
-      ],
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },

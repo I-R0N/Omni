@@ -56,13 +56,11 @@ export type VariantSelector =
 
 // ── Merge outcomes ──────────────────────────────────────────────────
 // 'compose'  — both same variant: one larger entity of this variant.
-// 'absorb'   — smaller entity → inactive; larger entity logs a small
-//              visual side-effect (e.g. nebula-shard absorbed into a
-//              glass-shard sets the glass-shard's powerupGlowColor).
-//              Two flat entities merging via the standard stick-bond
-//              mechanism — no parenting, no passenger model.
+//              Merging is same-material only, so compose is the sole
+//              outcome today.  The field is kept as the extension seam
+//              for future per-pair outcomes.
 
-export type MergeOutcome = 'compose' | 'absorb';
+export type MergeOutcome = 'compose';
 
 // ── Per-pair merge rule ─────────────────────────────────────────────
 // The puller's merge.rules is walked by the resolver (see §3) to find
@@ -75,12 +73,6 @@ export interface MergeRule {
   outcome: MergeOutcome;
   /** Multiplier on the pair's bond seconds.  Defaults to 1. */
   thresholdScale?: number;
-  /** Optional gate: rule only fires once partner has grown to at least
-   *  this fraction of its variant's spawn.sizeMax.  Default 0 — no
-   *  gate.  Used by nebula-shard's absorb rule against glass-shard
-   *  (set to 1.0) to keep absorption a relatively unique event while
-   *  cohesion + floating-along stays common. */
-  requirePartnerSizeFraction?: number;
 }
 
 // ── Spawn shape (used by the shatter policy) ────────────────────────
