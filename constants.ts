@@ -1189,6 +1189,21 @@ export const LOCAL_MERGE_CONSTANTS = {
   BUDGET_MULT: 5,
 };
 
+// Blow-back shockwave emitted when shards condense into a tile (glass-
+// shard → glass-tile, rock-shard → rock-tile).  Reuses the Plasma Cannon
+// shockwave mechanism (an expanding isExplosionRing that pushes entities
+// the wavefront reaches) but smaller and NON-damaging — a satisfying
+// "pop" as the tile snaps into place that shoves nearby loose shards
+// clear without hurting them.  Cannon reference: radius 110, damage 10,
+// knockback 6, lifetime 0.35.
+export const MERGE_BLOWBACK = {
+  RADIUS: 55,        // world units (½ the cannon's reach)
+  DAMAGE: 0,         // non-damaging — pure knockback
+  KNOCKBACK: 4,      // shove impulse at centre, falls off to 0 at rim
+  LIFETIME: 0.22,    // seconds — snappier than the cannon's 0.35
+  COLOR: '#a855f7',  // purple — match the plasma cannon shock front
+};
+
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
 // Rock self-merges condense CONTINUOUSLY (any two shards, never refused)
 // through a discrete size × density grid, preferring density (denser-

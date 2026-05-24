@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -760,6 +760,17 @@ export class GameEngine {
     // pass can prefer offscreen candidates (graceful cleanup — never
     // pop a shard out of existence in the player's view).
     this.shards.setEntityIndex(this.entityIndex);
+    // Shard→tile condensation emits a small, non-damaging plasma-style
+    // shockwave that shoves nearby loose shards clear.
+    this.shards.setTileFormedHandler((x, y) => this.spawnShockwave({ x, y }, {
+        radius: MERGE_BLOWBACK.RADIUS,
+        damage: MERGE_BLOWBACK.DAMAGE,
+        knockback: MERGE_BLOWBACK.KNOCKBACK,
+        color: MERGE_BLOWBACK.COLOR,
+        lifetime: MERGE_BLOWBACK.LIFETIME,
+        // Environmental effect — shove loose shards, never the player.
+        excludeIds: ['player'],
+    }));
     this.flowField = new FlowFieldGrid();
 
     // Central performance controller — injected into every system that
@@ -2531,7 +2542,6 @@ export class GameEngine {
   // Player is also pre-populated to prevent self-damage.
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
       if (!this.currentMap) return;
-      const radius = proj.explosionRadius!;
 
       // Impact-frame visuals (instant): bright spark burst + screen shake.
       // These don't wait for the wavefront — the player should feel the
@@ -2544,60 +2554,76 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
 
-      // Spawn the damaging ring particle.  RenderSystem reads
-      // explosionRadius + lifetime to draw the expanding shock front;
-      // updateExplosionRings reads explosionDamage / explosionKnockback /
-      // hitEntityIds to apply the damage in lock-step with the visual.
-      const ringLifetime = 0.35;
+      // Spawn the damaging shockwave ring.  Direct-hit target is excluded
+      // (it already took config.damage from the projectile collision) along
+      // with the player (cannon is player-owned; the ring shouldn't
+      // self-damage).
+      this.spawnShockwave(impactPos, {
+          radius: proj.explosionRadius!,
+          damage: proj.explosionDamage ?? 0,
+          knockback: proj.explosionKnockback ?? 0,
+          color: WEAPONS[WeaponType.CANNON].color,
+          ownerType: proj.ownerType,
+          excludeIds: [directTarget.id, 'player'],
+      });
+  }
 
-      // Snapshot ids of eligible in-range entities at spawn time.  The
-      // wave only damages entities in this set, so freshly-spawned
-      // shards / drops that come from the wave's own kills (their ids
-      // didn't exist when the ring spawned) are naturally excluded.
-      // This is the fix for the "every cannon shot dumps a pile of
-      // ammo drops" bug — wave was killing newborn glass-/rock-shards,
-      // each of which rolled the 45 % asteroid ammo drop.
+  // ─── Reusable expanding shockwave ──────────────────────────────────────
+  //
+  // Spawns an `isExplosionRing` particle whose currentRadius grows 0 →
+  // radius across `lifetime`.  updateExplosionRings (each fixed step) ticks
+  // it, applying falloff damage + knockback to entities the wavefront
+  // reaches.  Powers both the Plasma Cannon AoE and the smaller shard→tile
+  // merge blow-back.  Only entities in range AT SPAWN are eligible
+  // (validHitIds snapshot), so entities born during the sweep are excluded.
+  private spawnShockwave(pos: Vector2, opts: {
+      radius: number;
+      damage: number;
+      knockback: number;
+      color: string;
+      lifetime?: number;
+      ownerType?: GameEntity['ownerType'];
+      excludeIds?: string[];
+  }) {
+      if (!this.currentMap) return;
+      const radius = opts.radius;
+      if (!radius || radius <= 0) return;
       const radiusSq = radius * radius;
+
       const validHitIds = new Set<string>();
-      const entitiesAtSpawn = this.currentMap.entities;
-      for (let i = 0; i < entitiesAtSpawn.length; i++) {
-          const e = entitiesAtSpawn[i];
+      const ents = this.currentMap.entities;
+      for (let i = 0; i < ents.length; i++) {
+          const e = ents[i];
           if (!e.active || e.isExploding) continue;
           if (e.type === EntityType.PROJECTILE) continue;
           if (e.type === EntityType.PARTICLE) continue;
           if (e.type === EntityType.INTERACTABLE) continue;
-          const dx = wrapDeltaX(impactPos.x, e.position.x);
-          const dy = wrapDeltaY(impactPos.y, e.position.y);
-          if (dx * dx + dy * dy <= radiusSq) {
-              validHitIds.add(e.id);
-          }
+          const dx = wrapDeltaX(pos.x, e.position.x);
+          const dy = wrapDeltaY(pos.y, e.position.y);
+          if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
       }
 
-      this.currentMap.entities.push({
+      const lifetime = opts.lifetime ?? 0.35;
+      ents.push({
           id: nextId('explosion-ring'),
           type: EntityType.PARTICLE,
-          position: { x: impactPos.x, y: impactPos.y },
+          position: { x: pos.x, y: pos.y },
           velocity: { x: 0, y: 0 },
           size: { x: 1, y: 1 },
           rotation: 0,
-          color: WEAPONS[WeaponType.CANNON].color, // purple — matches the weapon
+          color: opts.color,
           active: true,
           health: 1,
           maxHealth: 1,
-          lifetime: ringLifetime,
-          maxLifetime: ringLifetime,
+          lifetime,
+          maxLifetime: lifetime,
           mass: 0,
           isExplosionRing: true,
           explosionRadius: radius,
-          explosionDamage: proj.explosionDamage,
-          explosionKnockback: proj.explosionKnockback,
-          ownerType: proj.ownerType,
-          // Pre-populate with entities the ring should never damage:
-          // the projectile's direct-hit target (already took config.damage)
-          // and the player (cannon is player-owned today; ring shouldn't
-          // self-damage).  Future enemy cannons would still skip the
-          // shooter's own kind via ownerType in the per-frame tick.
-          hitEntityIds: [directTarget.id, 'player'],
+          explosionDamage: opts.damage,
+          explosionKnockback: opts.knockback,
+          ownerType: opts.ownerType,
+          hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
           validHitIds,
       });
   }

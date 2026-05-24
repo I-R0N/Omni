@@ -293,6 +293,14 @@ export class ShardSystem {
     this.entityIndex = index;
   }
 
+  /** Wire the shard→tile blow-back hook.  Invoked with the new tile's
+   *  centre whenever a shard cluster condenses into a static tile
+   *  (glass / rock); GameEngine emits the merge shockwave there. */
+  public setTileFormedHandler(fn: (x: number, y: number) => void): void {
+    this.onTileFormed = fn;
+  }
+  private onTileFormed: ((x: number, y: number) => void) | null = null;
+
   /**
    * Per-frame tick.  Called from GameEngine.updateGameLogic at the
    * fixed-step dt.  Stage 4: ticks regens + merges (existing bonds +
@@ -1799,6 +1807,10 @@ export class ShardSystem {
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
     entities.push(tile);
     physics.addStaticEntity(tile);
+
+    // Blow-back: the tile snapping into place shoves nearby loose shards
+    // clear (non-damaging shockwave — see MERGE_BLOWBACK).
+    this.onTileFormed?.(p.x, p.y);
 
     // Source shard fades out — the tile materialises while the shard
     // dissolves on top of it.
