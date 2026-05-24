@@ -1204,6 +1204,26 @@ export const MERGE_BLOWBACK = {
   COLOR: '#a855f7',  // purple — match the plasma cannon shock front
 };
 
+// Hot-spot collapse — cure for the overlapping-shard pile-up that the
+// throttled shard-pair separation can't disperse under load.  When
+// separation runs only every Nth frame, merge-pulled rock/glass shards
+// stack on top of each other and visibly pulse in phase with the skip
+// interval.  This pass buckets shards into a fine, tile-sized grid; any
+// cell holding >= MIN_COUNT shards of one material is a genuine overlap
+// stack (at low load separation keeps them touching-but-apart, so a cell
+// can't fill — the mechanism is self-gating to the pathology).  Each such
+// stack snaps into ONE static tile of that material at the nearest free
+// hex (surplus shards fade out), removing the whole pile from the dynamic
+// grid in one shot.  A field of stacks therefore condenses into a CLUSTER
+// of tiles.  Capped per pass so a big field clears over a few passes
+// instead of spiking (and so the per-tile merge blow-back stays sane).
+export const HOTSPOT_COLLAPSE = {
+  ENABLED: true,
+  CELL: 48,                // fine-grid cell ≈ one hex-tile footprint (2×HEX_SIZE=44)
+  MIN_COUNT: 4,            // same-material shards stacked in one cell ⇒ collapse
+  MAX_TILES_PER_PASS: 6,   // tiles spawned per merge pass (bounds cost + blow-backs)
+};
+
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
 // Rock self-merges condense CONTINUOUSLY (any two shards, never refused)
 // through a discrete size × density grid, preferring density (denser-

@@ -32,6 +32,7 @@ import {
   getActivePlasticEatAttract,
   PLASTIC_REACH,
   getActivePlasticYield,
+  HOTSPOT_COLLAPSE,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -1567,6 +1568,101 @@ export class ShardSystem {
         }
       }
     }
+
+    // Hot-spot collapse: snap overlapping rock/glass shard stacks (which
+    // the throttled separation can't disperse) into static tiles.  Runs
+    // last so shards consumed by the pull/bond passes above are already
+    // excluded.
+    if (HOTSPOT_COLLAPSE.ENABLED) this.collapseHotspots(entities, _physics, candidates);
+  }
+
+  /**
+   * Hot-spot collapse — cure for overlapping shard piles the throttled
+   * shard-pair separation can't keep apart (they stack and pulse in phase
+   * with the skip interval).  Buckets active rock-/glass-shards into a
+   * fine, tile-sized grid; any cell with >= MIN_COUNT shards of a material
+   * is a real overlap stack (self-gating: at low load separation keeps
+   * cells from filling).  Each stack condenses into ONE static tile at the
+   * nearest free hex (surplus shards fade out), so a field of stacks
+   * becomes a cluster of tiles and leaves the dynamic grid.  Capped at
+   * MAX_TILES_PER_PASS per pass so a big field clears over a few passes.
+   */
+  private collapseHotspots(
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+    candidates: GameEntity[],
+  ): void {
+    const { CELL, MIN_COUNT, MAX_TILES_PER_PASS } = HOTSPOT_COLLAPSE;
+    const COLS = Math.ceil(MAP_WIDTH  / CELL);
+    const ROWS = Math.ceil(MAP_HEIGHT / CELL);
+    const keyFor = (cx: number, cy: number) => {
+      const wx = ((cx % COLS) + COLS) % COLS;
+      const wy = ((cy % ROWS) + ROWS) % ROWS;
+      return (wx << 16) | (wy & 0xFFFF);
+    };
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      if (!c.active || c.mergeFadeTimer !== undefined) continue;
+      const v = c.shardVariant;
+      if (v !== 'rock-shard' && v !== 'glass-shard') continue;
+      const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));
+      let cell = grid.get(key);
+      if (!cell) { cell = []; grid.set(key, cell); }
+      cell.push(i);
+    }
+
+    let tilesMade = 0;
+    for (const idxs of grid.values()) {
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (idxs.length < MIN_COUNT) continue;
+      // Tally each material + remember its largest shard (the transmute host).
+      let rockCount = 0, glassCount = 0, rockHost = -1, glassHost = -1;
+      for (let k = 0; k < idxs.length; k++) {
+        const e = candidates[idxs[k]];
+        if (e.shardVariant === 'rock-shard') {
+          rockCount++;
+          if (rockHost < 0 || e.size.x > candidates[rockHost].size.x) rockHost = idxs[k];
+        } else {
+          glassCount++;
+          if (glassHost < 0 || e.size.x > candidates[glassHost].size.x) glassHost = idxs[k];
+        }
+      }
+      if (rockCount >= MIN_COUNT &&
+          this.collapseStack(candidates, idxs, rockHost, 'rock-shard', 'rock', entities, physics)) {
+        tilesMade++;
+      }
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (glassCount >= MIN_COUNT &&
+          this.collapseStack(candidates, idxs, glassHost, 'glass-shard', 'glass', entities, physics)) {
+        tilesMade++;
+      }
+    }
+  }
+
+  /** Condense one material's stack inside a fine cell into a single tile:
+   *  transmute the largest shard (host) to a tile at the nearest free hex,
+   *  then fade out the rest of that material in the cell.  Returns true
+   *  only when a tile was actually placed (a free hex was available). */
+  private collapseStack(
+    candidates: GameEntity[],
+    idxs: number[],
+    hostIdx: number,
+    variant: ShardVariantId,
+    material: StructureVariant,
+    entities: GameEntity[],
+    physics: PhysicsSystem,
+  ): boolean {
+    const host = hostIdx >= 0 ? candidates[hostIdx] : null;
+    if (!host || !host.active || host.mergeFadeTimer !== undefined) return false;
+    if (!this.tryTransmuteShardToTile(host, variant, material, entities, physics)) return false;
+    for (let k = 0; k < idxs.length; k++) {
+      if (idxs[k] === hostIdx) continue;
+      const e = candidates[idxs[k]];
+      if (e.shardVariant !== variant || !e.active || e.mergeFadeTimer !== undefined) continue;
+      this.startMergeFadeOut(e);
+    }
+    return true;
   }
 
   /**
