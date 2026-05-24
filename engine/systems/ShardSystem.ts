@@ -159,16 +159,6 @@ function localDensityBoost(cellCount: number): number {
   return 1 + (MAX_BOOST - 1) * (cellCount - DENSITY_LO) / (DENSITY_HI - DENSITY_LO);
 }
 
-/** Size diminishing for the absorbing rock: full rate at/under SIZE_LO,
- *  easing to MIN_ABSORB as it approaches ROCK_MAX_DIAMETER, so a big
- *  rock keeps absorbing but slowly (no vacuum spike). */
-function sizeDiminish(hostDiameter: number): number {
-  const { SIZE_LO, MIN_ABSORB } = LOCAL_MERGE_CONSTANTS;
-  if (hostDiameter <= SIZE_LO) return 1;
-  if (hostDiameter >= ROCK_MAX_DIAMETER) return MIN_ABSORB;
-  return 1 + (MIN_ABSORB - 1) * (hostDiameter - SIZE_LO) / (ROCK_MAX_DIAMETER - SIZE_LO);
-}
-
 /**
  * Stick-bond between two entities — replaces GameEngine.stickBonds.
  * `timer` accumulates contact dt; when it reaches `threshold` AND
@@ -945,11 +935,12 @@ export class ShardSystem {
     if (this.bonds.length === 0) return;
 
     // Merge RATE is now computed LOCALLY per bond (see below): a bond in
-    // a dense pocket matures faster (focus the cull on hotspots) and a
-    // bond whose absorbing rock has grown large matures slower (gradual
-    // consolidation).  The DBG MrgRt gate (perfController.mergeRateEnabled)
-    // holds it at a neutral 1.0× when off.  tickBonds runs EVERY sim step,
-    // so the bond timer needs no skip compensation.
+    // a dense pocket matures faster, focusing the cull on hotspots.
+    // Big-shard slowdown is handled by the bond *threshold* (per-variant
+    // bondTimeSizePower), not the rate.  The DBG MrgRt gate
+    // (perfController.mergeRateEnabled) holds the rate at a neutral 1.0×
+    // when off.  tickBonds runs EVERY sim step, so the bond timer needs
+    // no skip compensation.
     const rateEnabled = this.perfController ? this.perfController.mergeRateEnabled : true;
     let ratePeak = 1;
 
@@ -995,14 +986,14 @@ export class ShardSystem {
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
       }
 
-      // Per-bond local rate: density boost (denser pocket → faster) ×
-      // size diminish (bigger absorbing rock → slower).  Neutral 1.0×
-      // when the DBG gate is off.
+      // Per-bond local rate: density boost only (denser pocket → faster),
+      // neutral 1.0× when the DBG gate is off.  Big-shard slowdown is NOT
+      // applied here — it lives solely in the bond *threshold* via the
+      // per-variant bondTimeSizePower (avoids double-counting size).
       let bondRate = 1;
       if (rateEnabled) {
         const cell = Math.max(a.mergeCellCount ?? 0, b.mergeCellCount ?? 0);
-        const host = a.size.x >= b.size.x ? a : b;
-        bondRate = localDensityBoost(cell) * sizeDiminish(host.size.x);
+        bondRate = localDensityBoost(cell);
         if (bondRate > ratePeak) ratePeak = bondRate;
       }
       bond.timer += dt * bondRate;

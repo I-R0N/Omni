@@ -1173,11 +1173,6 @@ export const LOCAL_MERGE_CONSTANTS = {
   DENSITY_LO: 3,
   DENSITY_HI: 10,
   MAX_BOOST: 6.0,
-  // Size diminishing: a rock at/below SIZE_LO diameter absorbs at full
-  // rate; as it grows toward ROCK_MAX_DIAMETER the rate eases to
-  // MIN_ABSORB so big rocks keep absorbing but slowly.
-  SIZE_LO: 30,
-  MIN_ABSORB: 0.3,
   // Per-frame merge budget multiplier (× CLEANUP_CONSTANTS
   // .MAX_REMOVALS_PER_FRAME) when the rate feature is enabled — caps how
   // many merges fire per tick so a hotspot consolidates over several
