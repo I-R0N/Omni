@@ -475,6 +475,16 @@ export class PhysicsSystem {
               entity.nebulaMergeCooldown = undefined;
           }
       }
+      // Hot-spot-collapse grace — freshly-shattered rock/glass shards hold
+      // off the overlap-collapse pass while this counts down, so a
+      // destroyed tile's debris gets to scatter instead of snapping back
+      // into a tile on the next merge frame.
+      if (entity.collapseGraceTimer !== undefined && entity.collapseGraceTimer > 0) {
+          entity.collapseGraceTimer -= dt;
+          if (entity.collapseGraceTimer <= 0) {
+              entity.collapseGraceTimer = undefined;
+          }
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;

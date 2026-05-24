@@ -700,6 +700,9 @@ export class ShardSystem {
         // the cluster's new rest configuration.
         anchorX: isChildPlasticShard ? (parent.position.x + offsetX) : undefined,
         anchorY: isChildPlasticShard ? (parent.position.y + offsetY) : undefined,
+        // Let the shatter debris fly apart before the overlap-collapse
+        // pass can re-condense it into a tile.
+        collapseGraceTimer: HOTSPOT_COLLAPSE.SHATTER_DELAY,
       });
     }
 
@@ -1604,6 +1607,9 @@ export class ShardSystem {
     for (let i = 0; i < candidates.length; i++) {
       const c = candidates[i];
       if (!c.active || c.mergeFadeTimer !== undefined) continue;
+      // Freshly-shattered shards are off-limits until their grace timer
+      // expires — gives a destroyed tile's debris time to scatter.
+      if ((c.collapseGraceTimer ?? 0) > 0) continue;
       const v = c.shardVariant;
       if (v !== 'rock-shard' && v !== 'glass-shard') continue;
       const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));

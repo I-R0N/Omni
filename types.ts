@@ -377,6 +377,13 @@ export interface GameEntity {
   mergeFadeTimer?: number;
   mergeFadeDuration?: number;
 
+  // Hot-spot-collapse grace period (seconds): set on freshly-shattered
+  // rock/glass shards so the overlap-collapse pass leaves them alone long
+  // enough to scatter, instead of instantly re-condensing a just-destroyed
+  // tile.  Ticked down by PhysicsSystem; collapse ignores shards with this
+  // still positive.
+  collapseGraceTimer?: number;
+
   // Blended hex color of all absorbed power-up weapons; drives glow tinting
   // in the renderer.  Computed/blended in GameEngine when a power-up is
   // absorbed; undefined means no power-up content.

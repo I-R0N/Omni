@@ -1222,6 +1222,11 @@ export const HOTSPOT_COLLAPSE = {
   CELL: 48,                // fine-grid cell ≈ one hex-tile footprint (2×HEX_SIZE=44)
   MIN_COUNT: 4,            // same-material shards stacked in one cell ⇒ collapse
   MAX_TILES_PER_PASS: 6,   // tiles spawned per merge pass (bounds cost + blow-backs)
+  // Grace period (seconds) stamped on freshly-shattered rock/glass shards.
+  // The collapse ignores shards younger than this so a just-destroyed
+  // tile's debris scatters instead of instantly re-condensing.  Tuned so
+  // the scatter velocity carries siblings clear of a fine cell first.
+  SHATTER_DELAY: 0.6,
 };
 
 // ── Rock-shard condensation grid (5 sizes × 5 densities) ──────────────
