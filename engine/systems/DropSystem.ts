@@ -647,6 +647,9 @@ export class DropSystem {
         // the force releases.  Anchor sits at the spawn position.
         anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
         anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
+        // Let dent-break debris (rock-tile breakShards, etc.) scatter
+        // before the overlap-collapse pass can re-condense it.
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 
@@ -763,6 +766,8 @@ export class DropSystem {
       maxHealth:     1,
       mass,
       polygonPoints: shardPts,
+      // Freed corner — exempt from instant re-collapse.
+      collapseGraceTimer: getActiveShatterGraceDelay(),
     });
 
     // Small puff at the spawn point so the detach reads as a discrete
@@ -845,6 +850,8 @@ export class DropSystem {
       maxHealth:     1,
       mass,
       polygonPoints: shardPts,
+      // Per-hit chip — also exempt from instant re-collapse.
+      collapseGraceTimer: getActiveShatterGraceDelay(),
     });
 
     // Subtle puff at the chip-off point in the tile's colour.
