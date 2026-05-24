@@ -1237,9 +1237,23 @@ export class ShardSystem {
           if (g.plasticEatTimer) g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dtEat);
           continue;
         }
-        // Gentle attraction toward the nearest plastic (dx/dy already
-        // point g → p since wrapDelta is to − from).
         const dist = Math.sqrt(nearDistSq);
+        // Rock is no longer edible — plastic SHOVES it away instead.
+        // Same nearDx/nearDy (g → p), negated so the push is g away
+        // from p, with the same 1/dist falloff the attract used.
+        if (g.shardVariant === 'rock-shard') {
+          if (dist > 0.0001) {
+            const effDist = Math.max(dist, PLASTIC_EAT.ATTRACT_MIN_DIST);
+            const accel = (PLASTIC_EAT.ROCK_REPEL_STRENGTH * dt) / effDist;
+            const inv = 1 / dist;
+            g.velocity.x -= nearDx * inv * accel;
+            g.velocity.y -= nearDy * inv * accel;
+          }
+          if (g.plasticEatTimer) g.plasticEatTimer = Math.max(0, g.plasticEatTimer - dtEat);
+          continue;
+        }
+        // Glass + metal: gentle attraction toward the nearest plastic
+        // (dx/dy already point g → p since wrapDelta is to − from).
         if (dist > 0.0001) {
           const effDist = Math.max(dist, PLASTIC_EAT.ATTRACT_MIN_DIST);
           const accel = (attractStrength * dt) / effDist;
@@ -1271,7 +1285,14 @@ export class ShardSystem {
       }
       if (eats) {
         for (let i = 0; i < eats.length; i++) {
-          this.applyPlasticEat(eats[i].eater, eats[i].consumed);
+          const { eater, consumed } = eats[i];
+          if (consumed.shardVariant === 'metal-shard') {
+            // Metal isn't absorbed — it's transmuted into rock shards
+            // ejected away from the plastic.
+            this.applyPlasticEatMetal(eater, consumed, entities);
+          } else {
+            this.applyPlasticEat(eater, consumed);
+          }
         }
       }
     }
@@ -1301,7 +1322,9 @@ export class ShardSystem {
         const t = candidates[i];
         if (!t.active) continue;
         const tv = t.shardVariant;
-        const isDebris = tv === 'glass-shard' || tv === 'rock-shard' || tv === 'metal-shard';
+        // Rock is repelled, not eaten — don't reach for it (glass/metal
+        // are still grabbed + consumed).
+        const isDebris = tv === 'glass-shard' || tv === 'metal-shard';
         const isLoosePlastic = tv === 'plastic-shard' && !bonded.has(t);
         if (!isDebris && !isLoosePlastic) continue;
         const tcx = Math.floor(t.position.x / CELL);
@@ -2200,6 +2223,69 @@ export class ShardSystem {
     }
     // The consumed shard dissolves inside the eater rather than popping.
     this.startMergeFadeOut(consumed);
+  }
+
+  /**
+   * Plastic "eats" a metal shard — but metal isn't absorbed.  It's
+   * transmuted into PLASTIC_EAT.METAL_TO_ROCK.COUNT rock shards that are
+   * ejected away from the plastic (which does NOT grow — the metal's
+   * material leaves as rock debris).  The new rocks carry the shatter
+   * grace timer so they don't instantly re-condense, and the plastic
+   * repel pass then keeps shoving them clear.
+   */
+  private applyPlasticEatMetal(eater: GameEntity, consumed: GameEntity, entities: GameEntity[]): void {
+    if (!eater.active || !consumed.active) return;
+    if (consumed.mergeFadeTimer !== undefined) return; // already being eaten
+    const { COUNT, SIZE_FACTOR, EJECT_SPEED } = PLASTIC_EAT.METAL_TO_ROCK;
+    const rockDiam = Math.max(8, consumed.size.x * SIZE_FACTOR);
+    // Outward direction = eater → consumed (push the debris away from
+    // the plastic), toroidal-correct.
+    let bx = wrapDeltaX(eater.position.x, consumed.position.x);
+    let by = wrapDeltaY(eater.position.y, consumed.position.y);
+    const blen = Math.sqrt(bx * bx + by * by) || 1;
+    bx /= blen; by /= blen;
+    for (let i = 0; i < COUNT; i++) {
+      // Fan the ejected rocks around the outward direction.
+      const a  = (Math.random() - 0.5) * Math.PI * 0.6;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const ux = bx * ca - by * sa;
+      const uy = bx * sa + by * ca;
+      const speed = EJECT_SPEED * (0.7 + Math.random() * 0.6);
+      const ox = consumed.position.x + ux * rockDiam * 0.5;
+      const oy = consumed.position.y + uy * rockDiam * 0.5;
+      this.spawnRockShard(entities, ox, oy, rockDiam, ux * speed, uy * speed);
+    }
+    // Metal dissolves; eater is unchanged (no growth).
+    this.startMergeFadeOut(consumed);
+    this.particles.spawn(entities, consumed.position, 4, COLORS.ASTEROID, {
+      speedMin: 1, speedMax: 4, sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.2, lifetimeMax: 0.45,
+    });
+  }
+
+  /** Spawn a single free rock-shard at (x,y) with the given diameter and
+   *  velocity.  Carries the shatter grace timer so the overlap-collapse
+   *  pass leaves it alone long enough to scatter. */
+  private spawnRockShard(entities: GameEntity[], x: number, y: number, diameter: number, vx: number, vy: number): void {
+    const numPts = 7 + Math.floor(Math.random() * 4);
+    const pts = this.generateShardPolygon((diameter / 2) * 0.82, numPts, numPts, 0.7, 0.60, 0.65);
+    entities.push({
+      id:            nextId('shard'),
+      type:          EntityType.STRUCTURE,
+      shardVariant:  'rock-shard',
+      position:      { x, y },
+      velocity:      { x: vx, y: vy },
+      size:          { x: diameter, y: diameter },
+      rotation:      Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, diameter / 30)),
+      color:         COLORS.ASTEROID,
+      active:        true,
+      health:        1,
+      maxHealth:     1,
+      mass:          SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(diameter),
+      polygonPoints: pts,
+      collapseGraceTimer: getActiveShatterGraceDelay(),
+    });
   }
 
   private composeNebulaShards(

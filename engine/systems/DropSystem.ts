@@ -247,6 +247,10 @@ export class DropSystem {
         maxHealth:     1,
         mass:          SHARD_VARIANTS[variantId].spawn.sizeToMass(size),
         polygonPoints: pts,
+        // Enemy debris spawns stacked at the death point — give it the
+        // same grace as tile debris so it scatters before the overlap-
+        // collapse pass can condense it into a tile.
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
   }

@@ -284,13 +284,25 @@ export const PLASTIC_EAT = {
   ATTRACT_RANGE: 220,
   ATTRACT_MIN_DIST: 8,
   // Metal is dense — multiply the eat time so it takes significantly
-  // longer to consume than glass/rock (1.5 s × this).
+  // longer to consume than glass (1.5 s × this).
   METAL_TIME_FACTOR: 6,
   // Fraction of a consumed shard's area added to the eater on each
   // eat.  <1 means it takes more shards to grow — at 0.2 a plastic
   // shard must eat ~5× the area to grow the same amount as full
   // (1.0) absorption would.
   GROWTH_AREA_FACTOR: 0.2,
+  // Plastic no longer eats rock — it shoves rock shards away instead.
+  // Repel impulse magnitude (1/dist falloff, so it bites near contact
+  // and fades with range, like the attract it replaces for rock).
+  ROCK_REPEL_STRENGTH: 240,
+  // Eating metal transmutes it into rock shards that are ejected away
+  // from the plastic (the plastic does NOT grow — the metal's mass
+  // leaves as rock debris).
+  METAL_TO_ROCK: {
+    COUNT: 2,          // rock shards produced per consumed metal shard
+    SIZE_FACTOR: 0.7,  // each rock's diameter as a fraction of the metal's
+    EJECT_SPEED: 3,    // outward launch speed (world-units/step)
+  },
 } as const;
 
 /** Attract-strength steps for the PEat DBG cycle.  Index 1 (180) is
