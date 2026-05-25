@@ -100,7 +100,7 @@ export class GameEngine {
   // nebula image renders out of the box; the DBG panel cycles through A
   // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
   // comparison.
-  private nebulaSet: NebulaSet = 'CURATED';
+  private nebulaSet: NebulaSet = 'ALL';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -265,20 +265,18 @@ export class GameEngine {
   }
 
   /**
-   * Cycle through nebula image sets: CURATED (the shipped subset) → ALL
-   * (all discovered) → A (baseline 00-08) → B (everything past 08) → N16
-   * (Nebula16 only) → CURATED.  Updates the shared NEBULA_IMAGES array,
-   * reloads background textures, and re-rolls the sprite on every live
-   * NEBULA / NEBULA_SHARD entity so tile-cluster art swaps instantly
-   * without requiring a map reload.
+   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
+   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
+   * Updates the shared NEBULA_IMAGES array, reloads background textures,
+   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
+   * tile-cluster art swaps instantly without requiring a map reload.
    */
   public toggleNebulaSet() {
     this.nebulaSet =
-        this.nebulaSet === 'CURATED' ? 'ALL'
-      : this.nebulaSet === 'ALL'     ? 'A'
-      : this.nebulaSet === 'A'       ? 'B'
-      : this.nebulaSet === 'B'       ? 'N16'
-      : 'CURATED';
+        this.nebulaSet === 'ALL' ? 'A'
+      : this.nebulaSet === 'A'   ? 'B'
+      : this.nebulaSet === 'B'   ? 'N16'
+      : 'ALL';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
 
