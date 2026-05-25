@@ -1618,14 +1618,20 @@ export class ShardSystem {
         }
       }
 
-      // Apply pull force toward the chosen target (if any).  Metal
-      // composites (metalCells set) don't actively seek — only loose pieces
-      // are pulled in to snap — so formed shapes don't drift-pile onto each
-      // other before composite-composite merging exists.  Metal triangles
-      // still in their post-break grace also aren't pulled, so they float
-      // free for the delay before assembly begins.
+      // Apply pull force toward the chosen target (if any).  Both loose
+      // triangles AND composites seek now that composite ↔ composite merging
+      // exists: the pull target rule (bR ≥ aR) makes each piece drift toward
+      // a larger-or-equal metal body, so the biggest local cluster acts as an
+      // anchor and smaller pieces/clusters accrete onto it.  A composite that
+      // already has enough cells to crystallize stops actively seeking — it
+      // should turn into a tile (or be sought BY smaller clusters), not keep
+      // drifting, which also keeps it eligible to settle/sleep out of the
+      // dynamic-load signal.  Metal triangles still in their post-break grace
+      // aren't pulled, so they float free for the delay before assembly.
       const metalInGrace = a.shardVariant === 'metal-shard' && (a.collapseGraceTimer ?? 0) > 0;
-      if (bestPullTarget && wantsPull && a.metalCells === undefined && !metalInGrace) {
+      const compositeAtCrystalSize = a.metalCells !== undefined
+        && a.metalCells.length >= 6 + METAL_ASSEMBLY.HEX_MIN_OUTER;
+      if (bestPullTarget && wantsPull && !metalInGrace && !compositeAtCrystalSize) {
         const dx = wrapDeltaX(a.position.x, bestPullTarget.position.x);
         const dy = wrapDeltaY(a.position.y, bestPullTarget.position.y);
         const dist = Math.sqrt(bestPullDistSq);
@@ -2079,7 +2085,7 @@ export class ShardSystem {
         const dy = wrapDeltaY(comp.position.y, l.position.y);
         const reach = comp.size.x * 0.5 + SNAP;
         if (dx * dx + dy * dy > reach * reach) continue;
-        const t = this.nearestMetalFreeTarget(comp, l, SNAP);
+        const t = this.nearestMetalFreeTarget(comp, l.position.x, l.position.y, SNAP);
         if (t && (bestTarget === null || t.d2 < bestTarget.d2)) { best = comp; bestTarget = t; }
       }
       if (best && bestTarget) this.growMetalComposite(best, l, bestTarget);
@@ -2132,6 +2138,58 @@ export class ShardSystem {
       if (partner >= 0) {
         this.formMetalComposite(a, loose[partner]);
         composites.push(a);
+      }
+    }
+
+    // Pass 2b — composite + composite.  Absorb a smaller composite into a
+    // larger one whenever their bounds overlap, so clusters snap together
+    // into bigger clusters that can reach the hexagon threshold.  Coarse grid
+    // sized to the largest composite so the 3×3 neighbour scan can't miss an
+    // overlap.
+    let cMaxSize = 2 * R;
+    for (const c of composites) if (c.active && c.size.x > cMaxSize) cMaxSize = c.size.x;
+    const CCELL = cMaxSize;
+    const CCOLS = Math.max(1, Math.ceil(MAP_WIDTH / CCELL));
+    const CROWS = Math.max(1, Math.ceil(MAP_HEIGHT / CCELL));
+    const ckey = (cx: number, cy: number) => {
+      const x = ((cx % CCOLS) + CCOLS) % CCOLS;
+      const y = ((cy % CROWS) + CROWS) % CROWS;
+      return x * CROWS + y;
+    };
+    const cgrid = new Map<number, number[]>();
+    for (let i = 0; i < composites.length; i++) {
+      const c = composites[i];
+      if (!c.active || c.metalCells === undefined) continue;
+      const k = ckey(Math.floor(c.position.x / CCELL), Math.floor(c.position.y / CCELL));
+      let b = cgrid.get(k); if (!b) { b = []; cgrid.set(k, b); } b.push(i);
+    }
+    const OVERLAP = METAL_ASSEMBLY.MERGE_OVERLAP_FACTOR;
+    for (let i = 0; i < composites.length; i++) {
+      const a = composites[i];
+      if (!a.active || a.metalCells === undefined) continue;
+      const acx = Math.floor(a.position.x / CCELL);
+      const acy = Math.floor(a.position.y / CCELL);
+      for (let oy = -1; oy <= 1 && a.active; oy++) {
+        for (let ox = -1; ox <= 1 && a.active; ox++) {
+          const cell = cgrid.get(ckey(acx + ox, acy + oy));
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j === i) continue;
+            const b = composites[j];
+            if (!b.active || b.metalCells === undefined) continue;
+            const dx = wrapDeltaX(a.position.x, b.position.x);
+            const dy = wrapDeltaY(a.position.y, b.position.y);
+            const reach = (a.size.x + b.size.x) * 0.5 * OVERLAP;
+            if (dx * dx + dy * dy > reach * reach) continue;
+            // Larger is the host; smaller is absorbed.
+            if (a.metalCells.length >= b.metalCells.length) {
+              this.mergeMetalComposites(a, b);
+            } else {
+              this.mergeMetalComposites(b, a);
+              break; // `a` was consumed — stop scanning on its behalf
+            }
+          }
+        }
       }
     }
 
@@ -2280,11 +2338,15 @@ export class ShardSystem {
     return true;
   }
 
-  /** Nearest empty boundary cell of `comp` to loose triangle `l`, in the
-   *  composite's lattice frame, within `snap` world units — or null. */
+  /** Best empty boundary cell of `comp` for a piece at world `(wx, wy)`, in
+   *  the composite's lattice frame and within `snap` world units — or null.
+   *  Among in-range candidates it prefers the cell that most advances a
+   *  hexagon (so composites pack toward the 6-triangle hexagon that later
+   *  crystallizes), breaking ties by proximity to (wx, wy). */
   private nearestMetalFreeTarget(
     comp: GameEntity,
-    l: GameEntity,
+    wx: number,
+    wy: number,
     snap: number,
   ): { ix: number; iy: number; up: boolean; d2: number } | null {
     const R = comp.metalLatticeR!;
@@ -2296,38 +2358,68 @@ export class ShardSystem {
     for (const c of cells) { occ.add(c.ix + ',' + c.iy); cmx += c.ix * ux; cmy += c.iy * uy; }
     cmx /= cells.length; cmy /= cells.length;
 
-    // Loose triangle position in the composite's lattice frame (rotate the
-    // world delta by -rotation, then offset by the mass centroid).
-    const wdx = wrapDeltaX(comp.position.x, l.position.x);
-    const wdy = wrapDeltaY(comp.position.y, l.position.y);
+    // Piece position in the composite's lattice frame (rotate the world
+    // delta by -rotation, then offset by the mass centroid).
+    const wdx = wrapDeltaX(comp.position.x, wx);
+    const wdy = wrapDeltaY(comp.position.y, wy);
     const cos = Math.cos(comp.rotation);
     const sin = Math.sin(comp.rotation);
-    const looseLx = (wdx * cos + wdy * sin) + cmx;
-    const looseLy = (-wdx * sin + wdy * cos) + cmy;
+    const pieceLx = (wdx * cos + wdy * sin) + cmx;
+    const pieceLy = (-wdx * sin + wdy * cos) + cmy;
 
+    const snapSq = snap * snap;
     let best: { ix: number; iy: number; up: boolean; d2: number } | null = null;
-    let bestD2 = snap * snap;
+    let bestScore = -1;
+    let bestD2 = Infinity;
     for (const c of cells) {
       const offs = c.up ? METAL_UP_NEIGHBORS : METAL_DOWN_NEIGHBORS;
       for (const o of offs) {
         const tix = c.ix + o[0];
         const tiy = c.iy + o[1];
         if (occ.has(tix + ',' + tiy)) continue;
-        const dx = tix * ux - looseLx;
-        const dy = tiy * uy - looseLy;
+        const dx = tix * ux - pieceLx;
+        const dy = tiy * uy - pieceLy;
         const d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; best = { ix: tix, iy: tiy, up: !c.up, d2 }; }
+        if (d2 > snapSq) continue;
+        // Hexagon-packing bias: prefer the cell that brings a hexagon closest
+        // to completion; fall back to nearest when scores tie.
+        const score = this.hexFillScore(occ, tix, tiy, !c.up);
+        if (score > bestScore || (score === bestScore && d2 < bestD2)) {
+          bestScore = score; bestD2 = d2; best = { ix: tix, iy: tiy, up: !c.up, d2 };
+        }
       }
     }
     return best;
   }
 
-  /** Lock loose triangle `l` into composite `comp` at lattice cell `target`. */
-  private growMetalComposite(
-    comp: GameEntity,
-    l: GameEntity,
-    target: { ix: number; iy: number; up: boolean },
-  ): void {
+  /** How close adding cell (ix, iy) would bring `comp` to completing a
+   *  hexagon: the max, over the cell's 3 lattice vertices, of how many of
+   *  that vertex's 6 hexagon cells are already occupied (0–5).  Drives the
+   *  hexagon-packing bias in nearestMetalFreeTarget. */
+  private hexFillScore(occ: Set<string>, ix: number, iy: number, up: boolean): number {
+    const verts: ReadonlyArray<readonly [number, number]> = up
+      ? [[ix, iy - 2], [ix + 1, iy + 1], [ix - 1, iy + 1]]
+      : [[ix, iy + 2], [ix + 1, iy - 1], [ix - 1, iy - 1]];
+    let best = 0;
+    for (const v of verts) {
+      const m = v[0], n = v[1];
+      let cnt = 0;
+      if (occ.has(m + ',' + (n + 2))) cnt++;
+      if (occ.has((m - 1) + ',' + (n - 1))) cnt++;
+      if (occ.has((m + 1) + ',' + (n - 1))) cnt++;
+      if (occ.has(m + ',' + (n - 2))) cnt++;
+      if (occ.has((m - 1) + ',' + (n + 1))) cnt++;
+      if (occ.has((m + 1) + ',' + (n + 1))) cnt++;
+      if (cnt > best) best = cnt;
+    }
+    return best;
+  }
+
+  /** Append cell (ix, iy, up) to `comp`'s lattice, keeping the already-placed
+   *  cells fixed in the world (the entity origin tracks the shifting mass
+   *  centroid).  Geometry only — the caller blends mass/health and recomputes
+   *  bounds (batched so a multi-cell merge recomputes once). */
+  private addCellToComposite(comp: GameEntity, ix: number, iy: number, up: boolean): void {
     const R = comp.metalLatticeR!;
     const ux = (R * Math.sqrt(3)) / 2;
     const uy = R / 2;
@@ -2337,15 +2429,12 @@ export class ShardSystem {
     for (const c of cells) { cmx0 += c.ix * ux; cmy0 += c.iy * uy; }
     cmx0 /= cells.length; cmy0 /= cells.length;
 
-    cells.push({ ix: target.ix, iy: target.iy, up: target.up });
+    cells.push({ ix, iy, up });
 
     let cmx1 = 0, cmy1 = 0;
     for (const c of cells) { cmx1 += c.ix * ux; cmy1 += c.iy * uy; }
     cmx1 /= cells.length; cmy1 /= cells.length;
 
-    // Keep already-placed cells fixed in the world: when the mass centroid
-    // shifts in the lattice frame, move the entity origin by the same shift
-    // rotated into world space.
     const sx = cmx1 - cmx0;
     const sy = cmy1 - cmy0;
     const cos = Math.cos(comp.rotation);
@@ -2353,6 +2442,15 @@ export class ShardSystem {
     comp.position.x += sx * cos - sy * sin;
     comp.position.y += sx * sin + sy * cos;
     wrapPosition(comp.position);
+  }
+
+  /** Lock loose triangle `l` into composite `comp` at lattice cell `target`. */
+  private growMetalComposite(
+    comp: GameEntity,
+    l: GameEntity,
+    target: { ix: number; iy: number; up: boolean },
+  ): void {
+    this.addCellToComposite(comp, target.ix, target.iy, target.up);
 
     const tm = comp.mass + l.mass;
     comp.velocity.x = (comp.velocity.x * comp.mass + l.velocity.x * l.mass) / tm;
@@ -2363,6 +2461,50 @@ export class ShardSystem {
 
     this.metalRecomputeBounds(comp);
     l.active = false;
+  }
+
+  /** Absorb composite `other` into `host` (the ≥-sized one): blend momentum +
+   *  resources, then re-snap each of other's triangles onto host's boundary
+   *  (hexagon-biased, nearest cells first), and consume other.  This is the
+   *  composite ↔ composite "snap together" — loose-triangle accretion
+   *  generalised to whole clusters. */
+  private mergeMetalComposites(host: GameEntity, other: GameEntity): void {
+    const tm = host.mass + other.mass;
+    host.velocity.x = (host.velocity.x * host.mass + other.velocity.x * other.mass) / tm;
+    host.velocity.y = (host.velocity.y * host.mass + other.velocity.y * other.mass) / tm;
+    host.mass = tm;
+    host.health = (host.health ?? 0) + (other.health ?? 0);
+    host.maxHealth = (host.maxHealth ?? 0) + (other.maxHealth ?? 0);
+
+    // World position of each of other's cells (its own lattice → world).
+    const R = other.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const ocells = other.metalCells!;
+    let ocmx = 0, ocmy = 0;
+    for (const c of ocells) { ocmx += c.ix * ux; ocmy += c.iy * uy; }
+    ocmx /= ocells.length; ocmy /= ocells.length;
+    const ocos = Math.cos(other.rotation);
+    const osin = Math.sin(other.rotation);
+    const placements = ocells.map(c => {
+      const ex = c.ix * ux - ocmx, ey = c.iy * uy - ocmy;
+      const pwx = other.position.x + ex * ocos - ey * osin;
+      const pwy = other.position.y + ex * osin + ey * ocos;
+      const dx = wrapDeltaX(host.position.x, pwx);
+      const dy = wrapDeltaY(host.position.y, pwy);
+      return { pwx, pwy, d2: dx * dx + dy * dy };
+    });
+    // Nearest-to-host first so cells pack inward against the existing body.
+    placements.sort((a, b) => a.d2 - b.d2);
+    for (const p of placements) {
+      const t = this.nearestMetalFreeTarget(host, p.pwx, p.pwy, Infinity);
+      if (t) this.addCellToComposite(host, t.ix, t.iy, t.up);
+    }
+    this.metalRecomputeBounds(host);
+    // Shape changed — wake so the sleep/crystallization checks re-run.
+    host.asleep = false;
+    host.sleepTimer = 0;
+    other.active = false;
   }
 
   /** Fuse two loose triangles into a fresh 2-cell composite (rhombus).

@@ -1337,6 +1337,7 @@ export const METAL_ASSEMBLY = {
   BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
   HEX_MIN_OUTER: 3,     // outer faces that must be filled before a hexagon crystallizes
   RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on crystallization
+  MERGE_OVERLAP_FACTOR: 0.9, // composites merge when centroid gap < this × sum of bounding radii
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
