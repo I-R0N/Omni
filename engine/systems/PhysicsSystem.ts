@@ -242,6 +242,12 @@ export class PhysicsSystem {
   // produces exactly one console entry instead of spamming every frame.
   private warnedVertexOverflow = false;
 
+  // Scratch outputs for the parametric SAT test (satTest) — avoids
+  // allocating a result object on the per-cell composite collision path.
+  private satOverlap = 0;
+  private satAxisX = 0;
+  private satAxisY = 0;
+
   public setPerfController(pc: PerfController) {
       this.perfController = pc;
   }
@@ -1621,15 +1627,22 @@ export class PhysicsSystem {
           if (!bothComposite) return;
       }
 
-      // Collision radius factor: a metal COMPOSITE uses its bounding circle
-      // (size.x is the full envelope → 0.5); a loose metal triangle uses its
-      // INSCRIBED circle (size.x is the circumdiameter → 0.25 = inradius, so
-      // two triangles touch at the edge-sharing distance); other shards keep
-      // the 0.42 near-circumradius factor.
-      const fA = a.metalCells !== undefined ? 0.5 : aMetal ? 0.25 : 0.42;
-      const fB = b.metalCells !== undefined ? 0.5 : bMetal ? 0.25 : 0.42;
-      const rA = a.size.x * fA;
-      const rB = b.size.x * fB;
+      // A metal composite collides by its actual assembled shape (per-cell
+      // SAT), not a bounding circle — route any composite-involving pair to
+      // the polygon resolver and skip the circle math below.
+      if ((a.metalCells !== undefined && a.metalCells.length > 0)
+          || (b.metalCells !== undefined && b.metalCells.length > 0)) {
+          this.resolveCompositeShardPair(a, b, onDeath);
+          return;
+      }
+
+      // Collision radius factor: a loose metal triangle uses its INSCRIBED
+      // circle (size.x is the circumdiameter → 0.25 = inradius, so two
+      // triangles touch at the edge-sharing distance); other shards keep the
+      // 0.42 near-circumradius factor.  (Composites never reach here — they
+      // resolve per-cell above.)
+      const rA = a.size.x * (aMetal ? 0.25 : 0.42);
+      const rB = b.size.x * (bMetal ? 0.25 : 0.42);
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 
@@ -1796,8 +1809,13 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
-      // 1. SAT Collision Detection (Alloc-Free)
-      if (this.checkCollisionSAT(a, b)) {
+      // 1. SAT Collision Detection (Alloc-Free).  A metal composite collides
+      // by its actual assembled shape (per-cell SAT) rather than its convex-
+      // hull polygon, so contacts/hits match the connected triangles.
+      const composite = (a.metalCells !== undefined && a.metalCells.length > 0)
+                     || (b.metalCells !== undefined && b.metalCells.length > 0);
+      const hit = composite ? this.compositeSAT(a, b) : this.checkCollisionSAT(a, b);
+      if (hit) {
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
 
@@ -1873,6 +1891,171 @@ export class PhysicsSystem {
       this.bufferMtv.x = smallestAxisX * minOverlap;
       this.bufferMtv.y = smallestAxisY * minOverlap;
       return true;
+  }
+
+  // ── Metal composite per-cell collision ──────────────────────────────────
+  // A metal composite is a rigid union of triangle cells on a shared
+  // lattice; the union can be concave, so it can't be one SAT polygon.
+  // Instead each cell is treated as its own convex collider and the body
+  // collides as the union of cells — collision matches the actual connected
+  // shape rather than a convex hull or bounding circle.
+
+  /** Parametric SAT between two world-space vertex sets.  On overlap returns
+   *  true and writes penetration depth + axis into satOverlap / satAxis{X,Y}
+   *  (the minimum-translation axis); on a separating axis returns false. */
+  private satTest(vA: Vector2[], cA: number, vB: Vector2[], cB: number): boolean {
+      const axesCount = this.fillAxes(vA, cA, vB, cB, this.bufferAxes);
+      let minOverlap = Infinity, axX = 0, axY = 0;
+      for (let i = 0; i < axesCount; i++) {
+          const axis = this.bufferAxes[i];
+          let minA = Infinity, maxA = -Infinity;
+          for (let j = 0; j < cA; j++) {
+              const p = vA[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minA) minA = proj;
+              if (proj > maxA) maxA = proj;
+          }
+          let minB = Infinity, maxB = -Infinity;
+          for (let j = 0; j < cB; j++) {
+              const p = vB[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minB) minB = proj;
+              if (proj > maxB) maxB = proj;
+          }
+          if (maxA < minB || maxB < minA) return false;
+          const o = Math.min(maxA, maxB) - Math.max(minA, minB);
+          if (o < minOverlap) { minOverlap = o; axX = axis.x; axY = axis.y; }
+      }
+      this.satOverlap = minOverlap;
+      this.satAxisX = axX;
+      this.satAxisY = axY;
+      return true;
+  }
+
+  /** Fill `buffer` with the 3 world-space vertices of composite cell `idx`
+   *  (lattice-frame triangle → rotate by composite.rotation → translate). */
+  private fillMetalCellVerts(comp: GameEntity, idx: number, cmx: number, cmy: number, buffer: Vector2[]): number {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const c = comp.metalCells![idx];
+      const ccx = c.ix * ux - cmx;
+      const ccy = c.iy * uy - cmy;
+      const cos = Math.cos(comp.rotation);
+      const sin = Math.sin(comp.rotation);
+      const px = comp.position.x;
+      const py = comp.position.y;
+      const lx0 = ccx, ly0 = c.up ? ccy - R : ccy + R;
+      const lx1 = ccx + ux, ly1 = c.up ? ccy + uy : ccy - uy;
+      const lx2 = ccx - ux, ly2 = c.up ? ccy + uy : ccy - uy;
+      buffer[0].x = px + (lx0 * cos - ly0 * sin); buffer[0].y = py + (lx0 * sin + ly0 * cos);
+      buffer[1].x = px + (lx1 * cos - ly1 * sin); buffer[1].y = py + (lx1 * sin + ly1 * cos);
+      buffer[2].x = px + (lx2 * cos - ly2 * sin); buffer[2].y = py + (lx2 * sin + ly2 * cos);
+      return 3;
+  }
+
+  /** Mass centroid of a composite in its lattice frame. */
+  private metalCentroid(comp: GameEntity): { x: number; y: number } {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const cells = comp.metalCells!;
+      let cmx = 0, cmy = 0;
+      for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+      return { x: cmx / cells.length, y: cmy / cells.length };
+  }
+
+  /** Per-cell SAT between a and b where at least one is a metal composite.
+   *  Resolves against the deepest-penetrating cell pair; writes the MTV
+   *  (oriented a → b) into bufferMtv and returns true on contact. */
+  private compositeSAT(a: GameEntity, b: GameEntity): boolean {
+      const aComp = a.metalCells !== undefined && a.metalCells.length > 0;
+      const bComp = b.metalCells !== undefined && b.metalCells.length > 0;
+
+      let cmAx = 0, cmAy = 0, cmBx = 0, cmBy = 0;
+      let cA_poly = 0, cB_poly = 0;
+      if (aComp) { const c = this.metalCentroid(a); cmAx = c.x; cmAy = c.y; }
+      else cA_poly = this.fillVertices(a, this.bufferVerticesA);
+      if (bComp) { const c = this.metalCentroid(b); cmBx = c.x; cmBy = c.y; }
+      else cB_poly = this.fillVertices(b, this.bufferVerticesB);
+
+      const aSub = aComp ? a.metalCells!.length : 1;
+      const bSub = bComp ? b.metalCells!.length : 1;
+
+      let bestPen = -1, bestAxX = 0, bestAxY = 0;
+      for (let ai = 0; ai < aSub; ai++) {
+          const cA = aComp ? this.fillMetalCellVerts(a, ai, cmAx, cmAy, this.bufferVerticesA) : cA_poly;
+          for (let bi = 0; bi < bSub; bi++) {
+              const cB = bComp ? this.fillMetalCellVerts(b, bi, cmBx, cmBy, this.bufferVerticesB) : cB_poly;
+              if (this.satTest(this.bufferVerticesA, cA, this.bufferVerticesB, cB)
+                  && this.satOverlap > bestPen) {
+                  bestPen = this.satOverlap;
+                  bestAxX = this.satAxisX;
+                  bestAxY = this.satAxisY;
+              }
+          }
+      }
+      if (bestPen < 0) return false;
+
+      const dx = b.position.x - a.position.x;
+      const dy = b.position.y - a.position.y;
+      if (dx * bestAxX + dy * bestAxY < 0) { bestAxX = -bestAxX; bestAxY = -bestAxY; }
+      this.bufferMtv.x = bestAxX * bestPen;
+      this.bufferMtv.y = bestAxY * bestPen;
+      return true;
+  }
+
+  /** Shard-pair resolution where a metal composite is involved — per-cell
+   *  SAT bounce along the contact normal (replaces the bounding-circle path
+   *  in resolveAsteroidPair for composites). */
+  private resolveCompositeShardPair(a: GameEntity, b: GameEntity, onDeath?: (entity: GameEntity) => void): void {
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+
+      // Cheap bounding-circle reject (broadphase already culls roughly).
+      const rA = a.size.x / 2, rB = b.size.x / 2;
+      const wdx = wrapDeltaX(a.position.x, b.position.x);
+      const wdy = wrapDeltaY(a.position.y, b.position.y);
+      if (wdx * wdx + wdy * wdy > (rA + rB) * (rA + rB)) return;
+
+      // Shift b into a's frame so SAT (absolute vertices) is seam-correct.
+      const offX = (a.position.x + wdx) - b.position.x;
+      const offY = (a.position.y + wdy) - b.position.y;
+      const shifted = offX !== 0 || offY !== 0;
+      if (shifted) { b.position.x += offX; b.position.y += offY; }
+
+      if (this.compositeSAT(a, b)) {
+          const mx = this.bufferMtv.x, my = this.bufferMtv.y;
+          const overlap = Math.sqrt(mx * mx + my * my);
+          if (overlap > 1e-4) {
+              const nx = mx / overlap, ny = my / overlap; // a → b
+              const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
+              const invMassA = 1 / a.mass, invMassB = 1 / b.mass;
+              const totalInvMass = invMassA + invMassB;
+              if (totalInvMass > 0) {
+                  const MAX_SEPARATION_STEP = 2;
+                  const correction = Math.max(0, overlap - SLOP) * CORRECTION_PERCENT / totalInvMass;
+                  let pushA = correction * invMassA, pushB = correction * invMassB;
+                  if (pushA > MAX_SEPARATION_STEP) pushA = MAX_SEPARATION_STEP;
+                  if (pushB > MAX_SEPARATION_STEP) pushB = MAX_SEPARATION_STEP;
+                  a.position.x -= nx * pushA; a.position.y -= ny * pushA;
+                  b.position.x += nx * pushB; b.position.y += ny * pushB;
+                  a.asleep = false; a.sleepTimer = 0;
+                  b.asleep = false; b.sleepTimer = 0;
+                  const rvx = b.velocity.x - a.velocity.x;
+                  const rvy = b.velocity.y - a.velocity.y;
+                  const van = rvx * nx + rvy * ny;
+                  if (van <= 0) {
+                      const j = -(1 + ELASTICITY) * van / totalInvMass;
+                      a.velocity.x -= nx * j * invMassA; a.velocity.y -= ny * j * invMassA;
+                      b.velocity.x += nx * j * invMassB; b.velocity.y += ny * j * invMassB;
+                  }
+              }
+          }
+      }
+
+      if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
   }
 
   private resolveCollision(

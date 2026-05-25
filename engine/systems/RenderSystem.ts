@@ -222,28 +222,53 @@ export class RenderSystem {
 
   // DBG collision outline for metal shards (matches the nebula/plastic
   // overlays).  Assumes ctx is already translated to the entity centroid
-  // and rotated by entity.rotation.  A loose triangle shows its SAT polygon
-  // plus the inscribed collision circle (size.x*0.25 — the resolveAsteroid
-  // Pair radius); a composite shows its convex-hull SAT polygon plus the
-  // bounding collision circle (size.x*0.5).  Orange to distinguish from the
-  // cyan nebula/plastic strokes.
+  // and rotated by entity.rotation.  Shows the actual collision geometry:
+  // a composite outlines each lattice cell triangle (the per-cell SAT
+  // colliders, exactly the connected shape); a loose triangle shows its SAT
+  // polygon plus the inscribed shard-pair circle (size.x*0.25).  Orange to
+  // distinguish from the cyan nebula/plastic strokes.
   private drawMetalDebugOutline(ctx: CanvasRenderingContext2D, entity: GameEntity): void {
     if (!(this.debugMode || this.tileOutlinesEnabled)) return;
-    const isComposite = entity.metalCells !== undefined && entity.metalCells.length > 0;
     ctx.globalAlpha = 0.9;
     ctx.strokeStyle = '#f97316'; // orange-500
     ctx.lineWidth = 1;
-    const pts = entity.polygonPoints;
-    if (pts && pts.length > 0) {
+    if (entity.metalCells && entity.metalCells.length > 0 && entity.metalLatticeR) {
+      const R = entity.metalLatticeR;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const cells = entity.metalCells;
+      let cmx = 0, cmy = 0;
+      for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+      cmx /= cells.length; cmy /= cells.length;
+      for (const c of cells) {
+        const ccx = c.ix * ux - cmx;
+        const ccy = c.iy * uy - cmy;
+        ctx.beginPath();
+        if (c.up) {
+          ctx.moveTo(ccx, ccy - R);
+          ctx.lineTo(ccx + ux, ccy + uy);
+          ctx.lineTo(ccx - ux, ccy + uy);
+        } else {
+          ctx.moveTo(ccx, ccy + R);
+          ctx.lineTo(ccx + ux, ccy - uy);
+          ctx.lineTo(ccx - ux, ccy - uy);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    } else {
+      const pts = entity.polygonPoints;
+      if (pts && pts.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+      }
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.closePath();
+      ctx.arc(0, 0, entity.size.x * 0.25, 0, Math.PI * 2);
       ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.arc(0, 0, entity.size.x * (isComposite ? 0.5 : 0.25), 0, Math.PI * 2);
-    ctx.stroke();
     ctx.globalAlpha = 1.0;
   }
 
