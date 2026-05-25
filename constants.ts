@@ -2694,12 +2694,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // matches glass so dense mixed clusters present a single
     // coherent "stay-back" footprint rather than two nested shells.
     repel: { range: 200, strength: 0.06 },
-    // Saturated blue glow that reads as a cold "live field" against
-    // the slate-gray metal face — distinct from glass-tile's pale
-    // cyan (`#a5f3fc`) so the two materials never confuse at a
-    // glance.  Renders as a fill + thin edge stroke driven by
-    // `entity.repelImpulse` (RenderSystem material-tile branch).
-    glow:  { color: '#60a5fa', range: 250, peakAlpha: 0.75 },
+    // Purple-pink (fuchsia) glow — a vivid "live field" against the
+    // slate-gray metal face, distinct from glass-tile's pale cyan
+    // (`#a5f3fc`) and plastic-tile's green so the materials never
+    // confuse at a glance.  Renders as a fill + thin edge stroke driven
+    // by `entity.repelImpulse` (RenderSystem material-tile branch).
+    glow:  { color: '#d946ef', range: 250, peakAlpha: 0.75 },
     // Metal deforms subtly — each closest-to-impact vertex pulled
     // inward by up to 13 % per hit.  Same 24-hit lifetime as plastic
     // but the surface reads as harder via the smaller per-hit warp;
