@@ -100,7 +100,7 @@ export class GameEngine {
   // nebula image renders out of the box; the DBG panel cycles through A
   // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
   // comparison.
-  private nebulaSet: NebulaSet = 'ALL';
+  private nebulaSet: NebulaSet = 'CURATED';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -273,10 +273,11 @@ export class GameEngine {
    */
   public toggleNebulaSet() {
     this.nebulaSet =
-        this.nebulaSet === 'ALL' ? 'A'
-      : this.nebulaSet === 'A'   ? 'B'
-      : this.nebulaSet === 'B'   ? 'N16'
-      : 'ALL';
+        this.nebulaSet === 'CURATED' ? 'ALL'
+      : this.nebulaSet === 'ALL'     ? 'A'
+      : this.nebulaSet === 'A'       ? 'B'
+      : this.nebulaSet === 'B'       ? 'N16'
+      : 'CURATED';
     const active = setActiveNebulaSet(this.nebulaSet);
     this.renderer.setNebulaImages(active);
 
@@ -468,6 +469,38 @@ export class GameEngine {
    */
   public toggleShardLod() {
     this.renderer.shardLodEnabled = !this.renderer.shardLodEnabled;
+  }
+
+  /**
+   * Toggle content-fit nebula sizing — scales each nebula sprite up so its
+   * opaque content fills the draw box, normalising away per-texture
+   * padding so differently-cropped textures render at a consistent visible
+   * size.  Invalidates the nebula-tile render fast-path cache so live tiles
+   * pick up the new size immediately.
+   */
+  public toggleNebulaContentFit() {
+    this.renderer.nebulaContentFit = !this.renderer.nebulaContentFit;
+    this.invalidateNebulaTileCache();
+  }
+
+  /**
+   * Toggle oversize nebula sizing — multiplies the nebula draw size by
+   * NEBULA_CONSTANTS.SPRITE_OVERSIZE so clouds spill further past their hex
+   * footprint.  Composes with content-fit.  Invalidates the fast-path cache.
+   */
+  public toggleNebulaOversize() {
+    this.renderer.nebulaOversize = !this.renderer.nebulaOversize;
+    this.invalidateNebulaTileCache();
+  }
+
+  /** Drop the render fast-path cache on every live nebula tile so a sizing
+   *  toggle re-computes draw size/offset on the next frame. */
+  private invalidateNebulaTileCache() {
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+    for (let i = 0; i < ents.length; i++) {
+      if (ents[i].shardVariant === 'nebula-tile') ents[i].nebulaCachedTinted = undefined;
+    }
   }
 
   /**
@@ -922,6 +955,8 @@ export class GameEngine {
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
+      nebulaContentFit: this.renderer.nebulaContentFit,
+      nebulaOversize: this.renderer.nebulaOversize,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
@@ -1059,6 +1094,8 @@ export class GameEngine {
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
+      nebulaContentFit: this.renderer.nebulaContentFit,
+      nebulaOversize: this.renderer.nebulaOversize,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,

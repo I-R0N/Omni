@@ -822,6 +822,8 @@ export interface EngineStats {
   // Shard render LOD — tiny mobile shards blit a cached disc instead of
   // their full polygon render.  DBG-toggleable; default ON.
   shardLodEnabled?: boolean;
+  nebulaContentFit?: boolean;
+  nebulaOversize?: boolean;
   // Entity-count-driven merge/eat rate multiplier.  DBG-toggleable; when
   // off the multiplier holds at a neutral 1.0×.  Default ON.
   mergeRateEnabled?: boolean;

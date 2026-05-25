@@ -169,6 +169,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleShardLod();
   };
 
+  const handleToggleNebulaContentFit = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaContentFit();
+  };
+
+  const handleToggleNebulaOversize = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaOversize();
+  };
+
   const handleToggleMergeRate = () => {
       if (engineRef.current) engineRef.current.toggleMergeRate();
   };
@@ -290,6 +298,8 @@ const App: React.FC = () => {
         onToggleShardSleep={handleToggleShardSleep}
         onToggleShardViewportCull={handleToggleShardViewportCull}
         onToggleShardLod={handleToggleShardLod}
+        onToggleNebulaContentFit={handleToggleNebulaContentFit}
+        onToggleNebulaOversize={handleToggleNebulaOversize}
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}

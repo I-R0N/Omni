@@ -1623,6 +1623,13 @@ export const NEBULA_CONSTANTS = {
   // Tune this one number to make nebula tiles visually bigger or smaller;
   // shard sprites follow automatically.
   TILE_SPRITE_WORLD_SIZE: 120,
+  // DBG nebula-sizing toggles (RenderSystem.nebulaContentFit / Oversize).
+  //  - SPRITE_OVERSIZE: draw-size multiplier when the oversize toggle is
+  //    on (clouds spill further past their hex footprint).
+  //  - CONTENT_FIT_MAX_SCALE: cap on the content-fit upscale (1/coverage)
+  //    so a sparsely-filled texture can't blow up unboundedly.
+  SPRITE_OVERSIZE: 1.5,
+  CONTENT_FIT_MAX_SCALE: 3.0,
   // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
   // 'nebula-tile' tileCluster entries per map for cluster counts +
   // size ranges.  Inner / outer split lives on the per-map record.
