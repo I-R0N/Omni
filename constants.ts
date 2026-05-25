@@ -1258,6 +1258,14 @@ export const HOTSPOT_COLLAPSE = {
   CELL: 48,                // fine-grid cell ≈ one hex-tile footprint (2×HEX_SIZE=44)
   MIN_COUNT: 4,            // same-material shards stacked in one cell ⇒ collapse
   MAX_TILES_PER_PASS: 6,   // tiles spawned per merge pass (bounds cost + blow-backs)
+  // Plastic also condenses into tiles, but ONLY the smaller shards — the
+  // two largest size tiers (>= PLASTIC_MAX_SIZE, e.g. well-fed shards that
+  // grew by eating glass) only split/shatter and are excluded.  Plastic
+  // packs tighter than rock/glass (cohesion blobs), so it gets its own
+  // min-count.  PLASTIC_MAX_SIZE ≈ 60 % up the 20→120 plastic size range.
+  PLASTIC_ENABLED: true,
+  PLASTIC_MIN_COUNT: 4,
+  PLASTIC_MAX_SIZE: 80,
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:

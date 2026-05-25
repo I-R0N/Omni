@@ -1606,8 +1606,10 @@ export class ShardSystem {
   /**
    * Hot-spot collapse — cure for overlapping shard piles the throttled
    * shard-pair separation can't keep apart (they stack and pulse in phase
-   * with the skip interval).  Buckets active rock-/glass-shards into a
-   * fine, tile-sized grid; any cell with >= MIN_COUNT shards of a material
+   * with the skip interval).  Buckets active rock-/glass-shards (plus the
+   * SMALLER plastic-shards, < PLASTIC_MAX_SIZE — larger plastic only
+   * splits) into a fine, tile-sized grid; any cell with >= MIN_COUNT (or
+   * PLASTIC_MIN_COUNT) shards of a material
    * is a real overlap stack (self-gating: at low load separation keeps
    * cells from filling).  Each stack condenses into ONE static tile at the
    * nearest free hex (surplus shards fade out), so a field of stacks
@@ -1619,7 +1621,8 @@ export class ShardSystem {
     physics: PhysicsSystem,
     candidates: GameEntity[],
   ): void {
-    const { CELL, MIN_COUNT, MAX_TILES_PER_PASS } = HOTSPOT_COLLAPSE;
+    const { CELL, MIN_COUNT, MAX_TILES_PER_PASS,
+            PLASTIC_ENABLED, PLASTIC_MIN_COUNT, PLASTIC_MAX_SIZE } = HOTSPOT_COLLAPSE;
     const COLS = Math.ceil(MAP_WIDTH  / CELL);
     const ROWS = Math.ceil(MAP_HEIGHT / CELL);
     const keyFor = (cx: number, cy: number) => {
@@ -1635,31 +1638,46 @@ export class ShardSystem {
       // expires — gives a destroyed tile's debris time to scatter.
       if ((c.collapseGraceTimer ?? 0) > 0) continue;
       const v = c.shardVariant;
-      if (v !== 'rock-shard' && v !== 'glass-shard') continue;
+      const isRockGlass = v === 'rock-shard' || v === 'glass-shard';
+      // Plastic condenses too, but only the smaller shards — larger ones
+      // (>= PLASTIC_MAX_SIZE) only split/shatter, so they're excluded.
+      const isSmallPlastic = PLASTIC_ENABLED && v === 'plastic-shard' && c.size.x < PLASTIC_MAX_SIZE;
+      if (!isRockGlass && !isSmallPlastic) continue;
       const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
       cell.push(i);
     }
 
+    const minAny = PLASTIC_ENABLED ? Math.min(MIN_COUNT, PLASTIC_MIN_COUNT) : MIN_COUNT;
     let tilesMade = 0;
     for (const idxs of grid.values()) {
       if (tilesMade >= MAX_TILES_PER_PASS) break;
-      if (idxs.length < MIN_COUNT) continue;
+      if (idxs.length < minAny) continue;
       // Tally each material + remember its largest shard (the transmute host).
-      let rockCount = 0, glassCount = 0, rockHost = -1, glassHost = -1;
+      let rockCount = 0, glassCount = 0, plasticCount = 0;
+      let rockHost = -1, glassHost = -1, plasticHost = -1;
       for (let k = 0; k < idxs.length; k++) {
         const e = candidates[idxs[k]];
-        if (e.shardVariant === 'rock-shard') {
+        const sv = e.shardVariant;
+        if (sv === 'rock-shard') {
           rockCount++;
           if (rockHost < 0 || e.size.x > candidates[rockHost].size.x) rockHost = idxs[k];
-        } else {
+        } else if (sv === 'glass-shard') {
           glassCount++;
           if (glassHost < 0 || e.size.x > candidates[glassHost].size.x) glassHost = idxs[k];
+        } else {
+          plasticCount++;
+          if (plasticHost < 0 || e.size.x > candidates[plasticHost].size.x) plasticHost = idxs[k];
         }
       }
       if (rockCount >= MIN_COUNT &&
           this.collapseStack(candidates, idxs, rockHost, 'rock-shard', 'rock', entities, physics)) {
+        tilesMade++;
+      }
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (PLASTIC_ENABLED && plasticCount >= PLASTIC_MIN_COUNT &&
+          this.collapseStack(candidates, idxs, plasticHost, 'plastic-shard', 'plastic', entities, physics)) {
         tilesMade++;
       }
       if (tilesMade >= MAX_TILES_PER_PASS) break;
