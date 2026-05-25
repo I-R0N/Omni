@@ -1335,8 +1335,13 @@ export const METAL_ASSEMBLY = {
   SNAP_RANGE_R: 1.7,    // × R — loose locks to a composite's empty slot within this
   LINEAR_DAMPING: 0.99, // velocity retention/step (gentle bleed → drift then settle)
   ANGULAR_DAMPING: 0.99,
-  REST_SPEED: 0.08,     // below this a composite snaps to rest (→ sleeps)
-  REST_SPIN: 0.05,
+  // No hard rest-snap (0 = disabled, like rock / glass / plastic shards): a
+  // composite coasts to a stop under its damping instead of freezing the
+  // instant it dips below a floor.  It still reaches the shard sleep
+  // thresholds (SHARD_SLEEP_CONSTANTS), so a completed hexagon still settles
+  // and snaps to a tile — just more smoothly.
+  REST_SPEED: 0,
+  REST_SPIN: 0,
   BREAK_SPEED_MULT: 2.0, // × normal dent-debris speed for metal-tile shards
   HEX_FLOAT_SECONDS: 3.0, // a completed hexagon free-floats this long before snapping to grid
   RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on merge overflow
