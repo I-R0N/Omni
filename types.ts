@@ -352,6 +352,19 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // ── Metal rigid-composite assembly ──────────────────────────────────────
+  // A metal-shard entity carrying `metalCells` is a rigid composite: a set
+  // of equilateral-triangle cells locked to a shared triangular lattice.
+  // Each cell is an integer lattice key (ix,iy) + up/down orientation;
+  // its lattice-frame centroid is (ix·R·√3/2, iy·R/2) where R =
+  // `metalLatticeR` (the constituent triangle's circumradius).  The entity's
+  // `position` is the composite's mass centroid and `rotation` orients the
+  // lattice; the body drifts/spins as one via velocity + rotationSpeed.
+  // Loose metal triangles snap onto the composite's free faces (see
+  // ShardSystem.tickMetalAssembly), growing the cell set.
+  metalCells?: Array<{ ix: number; iy: number; up: boolean }>;
+  metalLatticeR?: number;
+
   // ── Density compaction state ────────────────────────────────────────────
   // Tracks how many density-merge steps a shard has accumulated.  0 (or
   // unset) = baseline visual; tier N renders proportionally darker via

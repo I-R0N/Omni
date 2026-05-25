@@ -1292,10 +1292,28 @@ export const HOTSPOT_COLLAPSE = {
   PLASTIC_ENABLED: true,
   PLASTIC_MIN_COUNT: 4,
   PLASTIC_MAX_SIZE: 80,
-  // Metal triangle shards reassemble into a metal-tile once a hex's
-  // worth (≈6 triangles, since a hex divides into 6) packs into a cell.
-  METAL_ENABLED: true,
+  // Metal triangle reassembly into tiles is PAUSED — metal triangles now
+  // snap into free-form rigid structures instead (see ShardSystem).  Flip
+  // back to true to restore the hex-tile collapse.
+  METAL_ENABLED: false,
   METAL_MIN_COUNT: 6,
+};
+
+// ── Metal rigid-composite assembly ──────────────────────────────────────
+// Loose metal triangles snap into rigid composites on a shared triangular
+// lattice (ShardSystem.tickMetalAssembly).  `FORM_RANGE` is the centroid
+// distance at which two loose triangles fuse into a 2-cell composite;
+// `SNAP_RANGE` is how close a loose triangle's centroid must come to a
+// composite's empty boundary cell to lock into it.  Both are multiples of
+// a triangle's circumradius R (≈ HEX_SIZE/√3 ≈ 12.7), so they scale with
+// the piece size.  DAMPING values keep a formed composite drifting/spinning
+// freely (low bleed) rather than coasting to a halt like loose debris.
+export const METAL_ASSEMBLY = {
+  ENABLED: true,
+  FORM_RANGE_R: 1.6,   // × R — loose+loose fuse within this centroid distance
+  SNAP_RANGE_R: 1.7,   // × R — loose locks to a composite's empty cell within this
+  LINEAR_DAMPING: 0.0, // per-second velocity bleed for composites (0 = inertial)
+  ANGULAR_DAMPING: 0.0,
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
@@ -3028,22 +3046,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
     merge: {
-      // Cohesion-only: metal triangles STICK on contact (and align edge-
-      // to-edge — see ShardSystem bond tick) but never compose into
-      // bigger shards.  A dense pack reassembles into a metal-tile via
-      // the hot-spot collapse instead.  bondTimeSeconds: Infinity keeps
-      // the compose timer from ever maturing.
-      //
-      // A gentle short-range pull draws nearby triangles together so they
-      // actually reach edge-contact (the incircle collision radius lets
-      // them nestle that close — see PhysicsSystem.resolveAsteroidPair).
-      // pullMinDist ≈ the edge-sharing centroid distance so the pull eases
-      // as they meet rather than fighting the collision floor.
+      // Metal triangles assemble into RIGID COMPOSITES (see
+      // ShardSystem.tickMetalAssembly), not soft cohesion bonds — so
+      // bondsWith is 'none' here and the assembly pass owns all metal-
+      // metal locking.  A gentle short-range pull still draws loose
+      // triangles toward each other / toward existing composites so they
+      // reach snapping range.
       attractedTo: { include: ['metal-shard'] },
-      pullRange: 120, pullStrength: 140, pullMinDist: 12,
-      bondsWith: { include: ['metal-shard'] },
-      bondTimeSeconds: Infinity,
-      defaultOutcome: 'compose',
+      pullRange: 140, pullStrength: 120, pullMinDist: 12,
+      bondsWith: 'none',
     },
     // Metal shards are dent-driven: deform per hit, destroyed cleanly
     // on health = 0 with drops + particles.  No recursive sub-shards.

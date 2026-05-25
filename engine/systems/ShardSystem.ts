@@ -33,6 +33,7 @@ import {
   PLASTIC_REACH,
   getActivePlasticYield,
   HOTSPOT_COLLAPSE,
+  METAL_ASSEMBLY,
   getActiveShatterGraceDelay,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
@@ -169,6 +170,39 @@ interface BondEntry {
   b: GameEntity;
   timer: number;
   threshold: number;
+}
+
+// ── Metal triangular-lattice constants ──────────────────────────────────
+// An UP cell (apex toward local -y) shares its 3 edges with DOWN cells at
+// these integer key offsets; a DOWN cell mirrors them.  Cell key (ix,iy)
+// maps to lattice-frame centroid (ix·R·√3/2, iy·R/2).  Neighbours always
+// flip orientation, so the lattice is bipartite and every key has a fixed
+// up/down parity once a seed is placed.
+const METAL_UP_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, 2], [-1, -1], [1, -1]];
+const METAL_DOWN_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, -2], [-1, 1], [1, 1]];
+
+// Andrew's monotone-chain convex hull (CCW).  Used to give a metal
+// composite a convex collision polygon (SAT) that bounds its triangle
+// cells — render uses the exact cells, collision uses this hull.
+function metalConvexHull(points: Vector2[]): Vector2[] {
+  if (points.length < 3) return points.slice();
+  const pts = points.slice().sort((p, q) => (p.x === q.x ? p.y - q.y : p.x - q.x));
+  const cross = (o: Vector2, a: Vector2, b: Vector2) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Vector2[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: Vector2[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
 }
 
 export class ShardSystem {
@@ -336,6 +370,7 @@ export class ShardSystem {
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
       this.runLargeShardCollapse(entities);
+      if (METAL_ASSEMBLY.ENABLED) this.tickMetalAssembly(entities);
     }
     this.lastUpdateMs = performance.now() - t0;
   }
@@ -940,7 +975,6 @@ export class ShardSystem {
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
-    const ALIGN_RATE   = 3.0;   // metal-triangle rotation-snap rate (per second)
     // Per-frame merge budget — caps how many merges may fire this tick so
     // a freshly-shattered or hotspot cluster (whose bond timers elapse
     // together) compacts over several frames instead of one spike.  Once
@@ -979,34 +1013,6 @@ export class ShardSystem {
         a.velocity.y   += (sharedVy - a.velocity.y) * blend;
         b.velocity.x   += (sharedVx - b.velocity.x) * blend;
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
-
-        // Metal triangles soft-snap edge-to-edge: ease each bonded
-        // shard's rotation toward the nearest 60° grid step (an
-        // equilateral triangle's edges repeat every 60°, so a shared
-        // lattice orientation makes neighbours' edges parallel and they
-        // tile) and bleed off spin so they settle aligned.  Gentle, so a
-        // hard knock can still break the bond above.
-        if (a.shardVariant === 'metal-shard' && b.shardVariant === 'metal-shard') {
-          // Rotate so the SHARED edge faces the neighbour: 'a' presents an
-          // edge toward 'b', and 'b' presents its opposing edge back.  An
-          // equilateral triangle's edge-normals sit 90° off a vertex and
-          // repeat every 120°; for the apex-up spawn polygon they point at
-          // (rotation + 90° + k·120°).  So aim each shard's rotation at the
-          // value whose edge-normal lies along the inter-centroid line, then
-          // ease toward it (and bleed off spin) so the pair settles edge-on.
-          // (dx, dy) already points a → b.
-          const MOD = (2 * Math.PI) / 3;
-          const alignBlend = Math.min(1, ALIGN_RATE * dt);
-          const phi = Math.atan2(dy, dx);
-          const baseA = phi - Math.PI / 2;
-          const baseB = phi + Math.PI / 2;
-          const targetA = baseA + Math.round((a.rotation - baseA) / MOD) * MOD;
-          const targetB = baseB + Math.round((b.rotation - baseB) / MOD) * MOD;
-          a.rotation += (targetA - a.rotation) * alignBlend;
-          b.rotation += (targetB - b.rotation) * alignBlend;
-          if (a.rotationSpeed !== undefined) a.rotationSpeed *= (1 - alignBlend);
-          if (b.rotationSpeed !== undefined) b.rotationSpeed *= (1 - alignBlend);
-        }
       }
 
       // Per-bond local rate: density boost (denser pocket → faster),
@@ -1608,8 +1614,11 @@ export class ShardSystem {
         }
       }
 
-      // Apply pull force toward the chosen target (if any).
-      if (bestPullTarget && wantsPull) {
+      // Apply pull force toward the chosen target (if any).  Metal
+      // composites (metalCells set) don't actively seek — only loose pieces
+      // are pulled in to snap — so formed shapes don't drift-pile onto each
+      // other before composite-composite merging exists.
+      if (bestPullTarget && wantsPull && a.metalCells === undefined) {
         const dx = wrapDeltaX(a.position.x, bestPullTarget.position.x);
         const dy = wrapDeltaY(a.position.y, bestPullTarget.position.y);
         const dist = Math.sqrt(bestPullDistSq);
@@ -2002,6 +2011,251 @@ export class ShardSystem {
     // dissolves on top of it.
     this.startMergeFadeOut(shard);
     return true;
+  }
+
+  // ── Metal rigid-composite assembly ──────────────────────────────────────
+  // Two passes per merge tick:
+  //   1. snap each loose triangle onto the nearest composite's empty
+  //      boundary cell (growing the composite);
+  //   2. fuse any remaining close loose-loose pairs into a fresh 2-cell
+  //      composite.
+  // The attraction pull (runMergeBroadphase, metal-shard.merge.attractedTo)
+  // brings pieces into range; this pass does the rigid locking.
+  private tickMetalAssembly(entities: GameEntity[]): void {
+    const composites: GameEntity[] = [];
+    const loose: GameEntity[] = [];
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active || e.shardVariant !== 'metal-shard') continue;
+      if (e.metalCells !== undefined) composites.push(e); else loose.push(e);
+    }
+    if (loose.length === 0) return;
+
+    const R = HEX_SIZE / Math.sqrt(3);
+    const SNAP = METAL_ASSEMBLY.SNAP_RANGE_R * R;
+    const FORM = METAL_ASSEMBLY.FORM_RANGE_R * R;
+
+    // Pass 1 — loose → composite.
+    for (let i = 0; i < loose.length; i++) {
+      const l = loose[i];
+      if (!l.active || l.metalCells !== undefined) continue;
+      let best: GameEntity | null = null;
+      let bestTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+      for (let c = 0; c < composites.length; c++) {
+        const comp = composites[c];
+        if (!comp.active) continue;
+        const dx = wrapDeltaX(comp.position.x, l.position.x);
+        const dy = wrapDeltaY(comp.position.y, l.position.y);
+        const reach = comp.size.x * 0.5 + SNAP;
+        if (dx * dx + dy * dy > reach * reach) continue;
+        const t = this.nearestMetalFreeTarget(comp, l, SNAP);
+        if (t && (bestTarget === null || t.d2 < bestTarget.d2)) { best = comp; bestTarget = t; }
+      }
+      if (best && bestTarget) this.growMetalComposite(best, l, bestTarget);
+    }
+
+    // Pass 2 — loose + loose → new composite, bucketed into a coarse grid
+    // so the pair search stays local.
+    const CELL = Math.max(FORM, 2 * R);
+    const COLS = Math.max(1, Math.ceil(MAP_WIDTH / CELL));
+    const ROWS = Math.max(1, Math.ceil(MAP_HEIGHT / CELL));
+    const gkey = (cx: number, cy: number) => {
+      const wx = ((cx % COLS) + COLS) % COLS;
+      const wy = ((cy % ROWS) + ROWS) % ROWS;
+      return wx * ROWS + wy;
+    };
+    const grid = new Map<number, number[]>();
+    for (let i = 0; i < loose.length; i++) {
+      const l = loose[i];
+      if (!l.active || l.metalCells !== undefined) continue;
+      const k = gkey(Math.floor(l.position.x / CELL), Math.floor(l.position.y / CELL));
+      let b = grid.get(k);
+      if (!b) { b = []; grid.set(k, b); }
+      b.push(i);
+    }
+    const FORM2 = FORM * FORM;
+    for (let i = 0; i < loose.length; i++) {
+      const a = loose[i];
+      if (!a.active || a.metalCells !== undefined) continue;
+      const cx = Math.floor(a.position.x / CELL);
+      const cy = Math.floor(a.position.y / CELL);
+      let partner = -1;
+      let bestD2 = FORM2;
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const cell = grid.get(gkey(cx + ox, cy + oy));
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j <= i) continue;
+            const b2 = loose[j];
+            if (!b2.active || b2.metalCells !== undefined) continue;
+            const dx = wrapDeltaX(a.position.x, b2.position.x);
+            const dy = wrapDeltaY(a.position.y, b2.position.y);
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) { bestD2 = d2; partner = j; }
+          }
+        }
+      }
+      if (partner >= 0) {
+        this.formMetalComposite(a, loose[partner]);
+        composites.push(a);
+      }
+    }
+  }
+
+  /** Nearest empty boundary cell of `comp` to loose triangle `l`, in the
+   *  composite's lattice frame, within `snap` world units — or null. */
+  private nearestMetalFreeTarget(
+    comp: GameEntity,
+    l: GameEntity,
+    snap: number,
+  ): { ix: number; iy: number; up: boolean; d2: number } | null {
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const cells = comp.metalCells!;
+    const occ = new Set<string>();
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { occ.add(c.ix + ',' + c.iy); cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+
+    // Loose triangle position in the composite's lattice frame (rotate the
+    // world delta by -rotation, then offset by the mass centroid).
+    const wdx = wrapDeltaX(comp.position.x, l.position.x);
+    const wdy = wrapDeltaY(comp.position.y, l.position.y);
+    const cos = Math.cos(comp.rotation);
+    const sin = Math.sin(comp.rotation);
+    const looseLx = (wdx * cos + wdy * sin) + cmx;
+    const looseLy = (-wdx * sin + wdy * cos) + cmy;
+
+    let best: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+    let bestD2 = snap * snap;
+    for (const c of cells) {
+      const offs = c.up ? METAL_UP_NEIGHBORS : METAL_DOWN_NEIGHBORS;
+      for (const o of offs) {
+        const tix = c.ix + o[0];
+        const tiy = c.iy + o[1];
+        if (occ.has(tix + ',' + tiy)) continue;
+        const dx = tix * ux - looseLx;
+        const dy = tiy * uy - looseLy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) { bestD2 = d2; best = { ix: tix, iy: tiy, up: !c.up, d2 }; }
+      }
+    }
+    return best;
+  }
+
+  /** Lock loose triangle `l` into composite `comp` at lattice cell `target`. */
+  private growMetalComposite(
+    comp: GameEntity,
+    l: GameEntity,
+    target: { ix: number; iy: number; up: boolean },
+  ): void {
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const cells = comp.metalCells!;
+
+    let cmx0 = 0, cmy0 = 0;
+    for (const c of cells) { cmx0 += c.ix * ux; cmy0 += c.iy * uy; }
+    cmx0 /= cells.length; cmy0 /= cells.length;
+
+    cells.push({ ix: target.ix, iy: target.iy, up: target.up });
+
+    let cmx1 = 0, cmy1 = 0;
+    for (const c of cells) { cmx1 += c.ix * ux; cmy1 += c.iy * uy; }
+    cmx1 /= cells.length; cmy1 /= cells.length;
+
+    // Keep already-placed cells fixed in the world: when the mass centroid
+    // shifts in the lattice frame, move the entity origin by the same shift
+    // rotated into world space.
+    const sx = cmx1 - cmx0;
+    const sy = cmy1 - cmy0;
+    const cos = Math.cos(comp.rotation);
+    const sin = Math.sin(comp.rotation);
+    comp.position.x += sx * cos - sy * sin;
+    comp.position.y += sx * sin + sy * cos;
+    wrapPosition(comp.position);
+
+    const tm = comp.mass + l.mass;
+    comp.velocity.x = (comp.velocity.x * comp.mass + l.velocity.x * l.mass) / tm;
+    comp.velocity.y = (comp.velocity.y * comp.mass + l.velocity.y * l.mass) / tm;
+    comp.mass = tm;
+    comp.health = (comp.health ?? 0) + (l.health ?? 0);
+    comp.maxHealth = (comp.maxHealth ?? 0) + (l.maxHealth ?? 0);
+
+    this.metalRecomputeBounds(comp);
+    l.active = false;
+  }
+
+  /** Fuse two loose triangles into a fresh 2-cell composite (rhombus).
+   *  `a` becomes the composite; `b` is consumed. */
+  private formMetalComposite(a: GameEntity, b: GameEntity): void {
+    const R = a.size.x / 2;
+    const wdx = wrapDeltaX(a.position.x, b.position.x);
+    const wdy = wrapDeltaY(a.position.y, b.position.y);
+
+    // Orient the lattice so cell (0,2) (local +y) lies along a→b, then drop
+    // the origin at the pair's mass centroid (midpoint of equal masses).
+    a.rotation = Math.atan2(wdy, wdx) - Math.PI / 2;
+    a.position.x += wdx * 0.5;
+    a.position.y += wdy * 0.5;
+    wrapPosition(a.position);
+
+    const tm = a.mass + b.mass;
+    a.velocity.x = (a.velocity.x * a.mass + b.velocity.x * b.mass) / tm;
+    a.velocity.y = (a.velocity.y * a.mass + b.velocity.y * b.mass) / tm;
+    a.mass = tm;
+    a.health = (a.health ?? 0) + (b.health ?? 0);
+    a.maxHealth = (a.maxHealth ?? 0) + (b.maxHealth ?? 0);
+
+    a.metalLatticeR = R;
+    a.metalCells = [{ ix: 0, iy: 0, up: true }, { ix: 0, iy: 2, up: false }];
+    a.rotationSpeed = 0;
+    a.linearDamping = METAL_ASSEMBLY.LINEAR_DAMPING;
+    a.angularDamping = METAL_ASSEMBLY.ANGULAR_DAMPING;
+    this.metalRecomputeBounds(a);
+    b.active = false;
+  }
+
+  /** Recompute a composite's bounding size + convex collision polygon from
+   *  its cells (all in the lattice frame, relative to the mass centroid). */
+  private metalRecomputeBounds(comp: GameEntity): void {
+    const R = comp.metalLatticeR!;
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    const cells = comp.metalCells!;
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+
+    const pts: Vector2[] = [];
+    let maxR2 = 0;
+    for (const c of cells) {
+      const ccx = c.ix * ux - cmx;
+      const ccy = c.iy * uy - cmy;
+      const verts: ReadonlyArray<readonly [number, number]> = c.up
+        ? [[0, -R], [ux, uy], [-ux, uy]]
+        : [[0, R], [ux, -uy], [-ux, -uy]];
+      for (const v of verts) {
+        const x = ccx + v[0];
+        const y = ccy + v[1];
+        pts.push({ x, y });
+        const r2 = x * x + y * y;
+        if (r2 > maxR2) maxR2 = r2;
+      }
+    }
+    const diam = 2 * Math.sqrt(maxR2);
+    comp.size = { x: diam, y: diam };
+
+    let hull = metalConvexHull(pts);
+    if (hull.length > 24) {
+      const out: Vector2[] = [];
+      const step = hull.length / 24;
+      for (let i = 0; i < 24; i++) out.push(hull[Math.floor(i * step)]);
+      hull = out;
+    }
+    comp.polygonPoints = hull;
   }
 
   private composeEntities(

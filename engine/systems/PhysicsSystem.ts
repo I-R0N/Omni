@@ -1607,14 +1607,29 @@ export class PhysicsSystem {
       // here before paying any further work.
 
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
-      // Metal shards are equilateral triangles: collide on their INSCRIBED
-      // circle (inradius = size.x * 0.25), not the bounding circle.  Two
-      // incircles touch at centroid distance = 2·inradius = the edge-
-      // sharing distance, so aligned triangles settle edge-to-edge instead
-      // of being shoved ~2× too far apart by an excircle radius.  Other
-      // shards keep the 0.42 near-circumradius factor.
-      const rA = a.size.x * (a.shardVariant === 'metal-shard' ? 0.25 : 0.42);
-      const rB = b.size.x * (b.shardVariant === 'metal-shard' ? 0.25 : 0.42);
+
+      // Metal assembly: don't bounce metal triangles off each other when a
+      // loose piece is involved — the ShardSystem assembly pass needs them
+      // to interpenetrate so a loose triangle can reach a composite's free
+      // face (or another loose triangle) and snap/lock.  Two formed
+      // composites DO collide (so they rest against each other rather than
+      // overlapping).  Metal-vs-other-shard falls through normally.
+      const aMetal = a.shardVariant === 'metal-shard';
+      const bMetal = b.shardVariant === 'metal-shard';
+      if (aMetal && bMetal) {
+          const bothComposite = a.metalCells !== undefined && b.metalCells !== undefined;
+          if (!bothComposite) return;
+      }
+
+      // Collision radius factor: a metal COMPOSITE uses its bounding circle
+      // (size.x is the full envelope → 0.5); a loose metal triangle uses its
+      // INSCRIBED circle (size.x is the circumdiameter → 0.25 = inradius, so
+      // two triangles touch at the edge-sharing distance); other shards keep
+      // the 0.42 near-circumradius factor.
+      const fA = a.metalCells !== undefined ? 0.5 : aMetal ? 0.25 : 0.42;
+      const fB = b.metalCells !== undefined ? 0.5 : bMetal ? 0.25 : 0.42;
+      const rA = a.size.x * fA;
+      const rB = b.size.x * fB;
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 

@@ -2220,6 +2220,42 @@ export class RenderSystem {
                 // policy.  Dispatch by mass: static (Infinity) →
                 // tile, finite → mobile shard.
                 const isFlash   = entity.mass !== Infinity && !!entity.hitFlash && entity.hitFlash > 0;
+
+                // ── Metal rigid composite — draw each lattice cell ─────────
+                // The ctx is already translated to the composite centroid and
+                // rotated by entity.rotation, so cells render in the lattice
+                // frame.  Adjacent cells' fills meet exactly, reading as one
+                // solid metal shape.
+                if (entity.metalCells && entity.metalCells.length > 0 && entity.metalLatticeR) {
+                    const R = entity.metalLatticeR;
+                    const ux = (R * Math.sqrt(3)) / 2;
+                    const uy = R / 2;
+                    const cells = entity.metalCells;
+                    let cmx = 0, cmy = 0;
+                    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+                    cmx /= cells.length; cmy /= cells.length;
+                    ctx.globalAlpha = shardMergeFadeAlpha(entity);
+                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, entity.color);
+                    for (const c of cells) {
+                        const ccx = c.ix * ux - cmx;
+                        const ccy = c.iy * uy - cmy;
+                        ctx.beginPath();
+                        if (c.up) {
+                            ctx.moveTo(ccx, ccy - R);
+                            ctx.lineTo(ccx + ux, ccy + uy);
+                            ctx.lineTo(ccx - ux, ccy + uy);
+                        } else {
+                            ctx.moveTo(ccx, ccy + R);
+                            ctx.lineTo(ccx + ux, ccy - uy);
+                            ctx.lineTo(ccx - ux, ccy - uy);
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    ctx.globalAlpha = 1.0;
+                    return;
+                }
+
                 const isTileShard = entity.shardVariant === 'glass-shard';
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
