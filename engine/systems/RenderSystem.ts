@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -94,7 +94,7 @@ function densityTintForRender(entity: GameEntity, baseHex: string): string {
  * the soft-disc bitmap cache stays warm.
  */
 function plasticAutomataHex(neighborCount: number): string {
-    const base = getActivePlasticBaseShade();
+    const base = getPlasticShardBaseShade();
     if (neighborCount <= 0) return base;
     const t = Math.min(1, neighborCount / PLASTIC_SHARD_AUTOMATA.MAX_NEIGHBORS);
     const target = isPlasticAutomataBrighten()
@@ -2020,6 +2020,12 @@ export class RenderSystem {
                         ctx.lineWidth = 1;
                         ctx.stroke();
                     }
+
+                    // Proximity glow — the tile face brightens as the
+                    // player nears (player-distance driven, like the
+                    // glass / indestructible blooms).  Painted last so it
+                    // sits over the fill.
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
 
             } else if (isMaterialTile) {
@@ -2363,12 +2369,6 @@ export class RenderSystem {
                         ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                         ctx.fill();
                     }
-
-                    // Proximity glow — brighten the shard as the player
-                    // nears (player-distance driven, like the glass/metal
-                    // tile glow) so plastic shards read distinctly from
-                    // nebula.  Painted last, over the disc.
-                    this.renderProximityBloom(ctx, entity, playerPos);
 
                 } else if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow

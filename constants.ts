@@ -120,6 +120,18 @@ export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
   '#e5e5e5',  // Neutral 200
 ] as const;
 
+/** Orange shades — fixed palette used ONLY by plastic-SHARDS (tiles keep
+ *  the cyclable PLASTIC_PALETTES family).  The tile/shard colour split
+ *  gives plastic a two-tone read (purple tiles + orange shards) that
+ *  distinguishes it from nebula. */
+export const PLASTIC_ORANGE_SHADES: ReadonlyArray<string> = [
+  '#fdba74',  // Orange 300
+  '#fb923c',  // Orange 400
+  '#f97316',  // Orange 500
+  '#ea580c',  // Orange 600
+  '#c2410c',  // Orange 700
+] as const;
+
 interface PlasticPalette {
   readonly name: string;
   readonly shades: ReadonlyArray<string>;
@@ -205,14 +217,20 @@ export function randomPlasticShade(): string {
   return palette[Math.floor(Math.random() * palette.length)];
 }
 
-/** Single representative shade of the ACTIVE palette — the constant
- *  base colour used by the plastic-shard neighbour-brightness automata
- *  (PAuto), so every plastic-shard reads as the same colour and only
- *  its brightness encodes local cluster density.  shades[0] is the
- *  brightest stop of each palette, giving the most headroom to darken
- *  toward the cluster interior. */
-export function getActivePlasticBaseShade(): string {
-  return PLASTIC_PALETTES[activePlasticPaletteIndex].shades[0];
+/** Pick a random orange shade for a plastic-SHARD spawn.  Shards use a
+ *  fixed orange family (not the cyclable palette) so they contrast with
+ *  the purple tiles — see PLASTIC_ORANGE_SHADES. */
+export function randomPlasticShardShade(): string {
+  return PLASTIC_ORANGE_SHADES[Math.floor(Math.random() * PLASTIC_ORANGE_SHADES.length)];
+}
+
+/** Constant base colour used by the plastic-shard neighbour-brightness
+ *  automata (PAuto), so every plastic-shard reads as the same orange and
+ *  only its brightness encodes local cluster density.  A mid orange
+ *  (Orange 500) so the automata reads clearly whether it brightens or
+ *  darkens toward the cluster interior. */
+export function getPlasticShardBaseShade(): string {
+  return PLASTIC_ORANGE_SHADES[2];
 }
 
 // ── Plastic-shard neighbour-brightness automata (PAuto) ────────────
@@ -2870,12 +2888,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Proximity glow — the shard brightens as the player nears (player-
-    // distance driven, like the plastic-tile bloom and the glass/metal
-    // tile glow), painted by RenderSystem.renderProximityBloom.  Helps
-    // plastic shards read distinctly from nebula shards/clouds.  Matches
-    // the plastic-tile fuchsia so tile + shard glow as one substance.
-    glow: { color: '#fbcfe8', range: 250, peakAlpha: 0.5 },
     // Plastic-softbody retrofit, v8: attraction + cohesion bonding
     // are back (they were never meant to be dropped), but bonds are
     // cohesion-ONLY.  bondTimeSeconds: Infinity means the compose

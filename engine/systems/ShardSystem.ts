@@ -24,7 +24,7 @@ import {
   StructureVariant,
   getRockShardFreeSpawn,
   nebulaFadeRateScale,
-  randomPlasticShade,
+  randomPlasticShardShade,
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
   PLASTIC_SHARD_AUTOMATA,
@@ -652,7 +652,7 @@ export class ShardSystem {
       // the parent's colour.  Reused for both `color` and (plastic
       // only) `wigglePhase`.
       const childColor = childVariant.id === 'plastic-shard'
-        ? randomPlasticShade()
+        ? randomPlasticShardShade()
         : (isTile ? parent.color : (parent.color || COLORS.ASTEROID));
       // Spawn-time shape variance for plastic-shard sub-shards
       // (option B) — gives shatter-spawned children their own

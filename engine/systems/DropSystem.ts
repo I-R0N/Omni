@@ -6,7 +6,7 @@ import {
   DROP_CONFIG,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
-  randomPlasticShade,
+  randomPlasticShardShade,
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
   getActiveShatterGraceDelay,
@@ -585,7 +585,7 @@ export class DropSystem {
       // shard, everything else inherits from the tile.  Reused below
       // for both `color` and (plastic only) `wigglePhase`.
       const shardColor = spec.variant === 'plastic-shard'
-        ? randomPlasticShade()
+        ? randomPlasticShardShade()
         : tile.color;
       // Spawn-time shape variance for plastic-shards — per-axis
       // random scale in [1 − V, 1 + V] so each shard reads as its
