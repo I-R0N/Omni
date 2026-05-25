@@ -2213,16 +2213,17 @@ export class ShardSystem {
     }
 
     // Pass 3 — completed hexagons float, then snap.  Start the free-float
-    // countdown the first tick a composite reaches 6 cells; once PhysicsSystem
-    // has ticked it to 0, snap the hexagon onto the nearest free grid hex as a
-    // static metal tile.
+    // countdown the first tick a composite reaches 6 cells; snap it onto the
+    // nearest free grid hex as a static metal tile only once the timer has
+    // elapsed AND the hexagon has come to rest (asleep).  A hexagon that's
+    // still drifting/spinning keeps floating instead of freezing mid-motion.
     for (let c = 0; c < composites.length; c++) {
       const comp = composites[c];
       if (!comp.active || comp.metalCells === undefined) continue;
       if (comp.metalCells.length < METAL_HEX_SIZE) continue;
       if (comp.metalFloatTimer === undefined) {
         comp.metalFloatTimer = METAL_ASSEMBLY.HEX_FLOAT_SECONDS;
-      } else if (comp.metalFloatTimer <= 0) {
+      } else if (comp.metalFloatTimer <= 0 && comp.asleep === true) {
         this.snapHexagonToGrid(comp, entities, physics);
       }
     }
