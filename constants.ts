@@ -120,10 +120,11 @@ export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
   '#e5e5e5',  // Neutral 200
 ] as const;
 
-/** Yellow / gold shades — fixed family used ONLY by plastic-SHARDS (tiles
- *  use the cyclable PLASTIC_PALETTES family, default cyan).  The tile/shard
- *  colour split gives plastic a two-tone read (cyan tiles + yellow shards)
- *  that distinguishes it from nebula. */
+/** Yellow / gold + cyan shades — the fixed families plastic-SHARDS draw
+ *  from (an equal 50/50 mix, see PLASTIC_SHARD_SHADES).  Tiles use the
+ *  cyclable PLASTIC_PALETTES family (default green).  The tile/shard
+ *  colour split gives plastic a multi-tone read that sets it apart from
+ *  nebula. */
 export const PLASTIC_YELLOW_SHADES: ReadonlyArray<string> = [
   '#fde047',  // Yellow 300
   '#facc15',  // Yellow 400
@@ -132,13 +133,29 @@ export const PLASTIC_YELLOW_SHADES: ReadonlyArray<string> = [
   '#f59e0b',  // Amber 500 (amber-gold)
 ] as const;
 
-/** Cyan / light-blue shades — the default plastic-TILE palette. */
+/** Cyan / light-blue shades — second plastic-SHARD family. */
 export const PLASTIC_CYAN_SHADES: ReadonlyArray<string> = [
   '#a5f3fc',  // Cyan 200
   '#67e8f9',  // Cyan 300
   '#22d3ee',  // Cyan 400
   '#7dd3fc',  // Sky 300
   '#38bdf8',  // Sky 400
+] as const;
+
+/** Plastic-SHARD shade pool — equal mix of yellow and cyan (the two
+ *  arrays are the same length, so a uniform pick is a 50/50 blend). */
+export const PLASTIC_SHARD_SHADES: ReadonlyArray<string> = [
+  ...PLASTIC_YELLOW_SHADES,
+  ...PLASTIC_CYAN_SHADES,
+] as const;
+
+/** Bright green / emerald shades — the default plastic-TILE palette. */
+export const PLASTIC_LIGHT_GREEN_SHADES: ReadonlyArray<string> = [
+  '#86efac',  // Green 300
+  '#4ade80',  // Green 400
+  '#22c55e',  // Green 500
+  '#34d399',  // Emerald 400
+  '#10b981',  // Emerald 500
 ] as const;
 
 interface PlasticPalette {
@@ -164,7 +181,7 @@ interface PlasticPalette {
 /** Cycle order for cyclePlasticPalette().  First entry is the
  *  startup default. */
 export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
-  { name: 'cyan',        shades: PLASTIC_CYAN_SHADES        },
+  { name: 'litegreen',   shades: PLASTIC_LIGHT_GREEN_SHADES },
   { name: 'amber',       shades: PLASTIC_AMBER_SHADES       },
   // Solid black with a glowing white halo — hard-edge silhouette
   // against a soft bloom.  Single shade, single bitmap.
@@ -184,7 +201,7 @@ export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
   { name: 'white+glow',  shades: ['#ffffff'], outline: '#000000' },
 ] as const;
 
-let activePlasticPaletteIndex = 0; // cyan
+let activePlasticPaletteIndex = 0; // litegreen
 
 /** Index of the active palette in PLASTIC_PALETTES.  Exposed for
  *  the DBG panel via EngineStats. */
@@ -227,18 +244,17 @@ export function randomPlasticShade(): string {
   return palette[Math.floor(Math.random() * palette.length)];
 }
 
-/** Pick a random yellow/gold shade for a plastic-SHARD spawn.  Shards use
- *  a fixed yellow family (not the cyclable palette) so they contrast with
- *  the cyan tiles — see PLASTIC_YELLOW_SHADES. */
+/** Pick a random shade for a plastic-SHARD spawn — an equal mix of the
+ *  yellow and cyan families (PLASTIC_SHARD_SHADES), independent of the
+ *  cyclable tile palette so shards contrast with the green tiles. */
 export function randomPlasticShardShade(): string {
-  return PLASTIC_YELLOW_SHADES[Math.floor(Math.random() * PLASTIC_YELLOW_SHADES.length)];
+  return PLASTIC_SHARD_SHADES[Math.floor(Math.random() * PLASTIC_SHARD_SHADES.length)];
 }
 
-/** Constant base colour used by the plastic-shard neighbour-brightness
- *  automata (PAuto), so every plastic-shard reads as the same yellow and
- *  only its brightness encodes local cluster density.  A mid yellow
- *  (Yellow 500) so the automata reads clearly whether it brightens or
- *  darkens toward the cluster interior. */
+/** Constant base colour for the plastic-shard neighbour-brightness
+ *  automata (PAuto, off by default).  When PAuto is on every shard reads
+ *  as this single yellow (only brightness encodes density); the 50/50
+ *  yellow/cyan mix above only applies on the per-instance PAuto-off path. */
 export function getPlasticShardBaseShade(): string {
   return PLASTIC_YELLOW_SHADES[2];
 }
@@ -2625,12 +2641,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
-    // Soft light-blue proximity glow — the tile FACE brightens as the
+    // Soft light-green proximity glow — the tile FACE brightens as the
     // player passes, drawn by RenderSystem.renderProximityBloom (fill-
     // only radial bloom from the player-facing edge, no edge stroke).
-    // Matches the cyan tile fill so the brighten reads as the tile
+    // Matches the green tile fill so the brighten reads as the tile
     // lighting up rather than a clashing tint.
-    glow: { color: '#bae6fd', range: 250, peakAlpha: 0.33 },
+    glow: { color: '#bbf7d0', range: 250, peakAlpha: 0.33 },
     // Plastic-softbody retrofit (decision #15b, follow-up tweak):
     // tile face is now glass-brittle (STRUCTURE_VARIANTS.plastic.
     // health = 1 → dies in one hit, same as glass) but releases a
