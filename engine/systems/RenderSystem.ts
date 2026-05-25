@@ -1348,8 +1348,7 @@ export class RenderSystem {
       let inGlowRange = false;
       if (isGlassFamilyStaticTile && entity.shardVariant !== undefined) {
           if (entity.shardVariant === 'glass-tile') {
-              const minI = SHARD_VARIANTS['glass-tile'].glow?.minImpulse ?? 0;
-              inGlowRange = (entity.repelImpulse ?? 0) > minI;
+              inGlowRange = (entity.repelImpulse ?? 0) > 0;
           } else if (playerPos) {
               const fpGlow = SHARD_VARIANTS[entity.shardVariant].glow;
               if (fpGlow !== undefined) {
@@ -1930,13 +1929,9 @@ export class RenderSystem {
                 // bloom drawn after the cracks below.
                 if (!isFlash && entity.shardVariant === 'glass-tile') {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
-                    const minI = glow?.minImpulse ?? 0;
                     const impulse = entity.repelImpulse ?? 0;
-                    if (glow !== undefined && impulse > minI) {
-                        // Ramp intensity from the floor so the glow eases
-                        // in on close contact instead of popping on at any
-                        // ambient touch.
-                        const intensityG = repelGlowIntensity(impulse - minI);
+                    if (glow !== undefined && impulse > 0) {
+                        const intensityG = repelGlowIntensity(impulse);
                         ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
                         ctx.fillStyle = glow.color;
                         ctx.fill();

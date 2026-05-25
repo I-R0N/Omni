@@ -2634,12 +2634,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // outer ring covers it.
     repel: { range: 200, strength: 0.04 },
     // Cyan-200 face + edge-stroke glow paired 1:1 with the repel field
-    // — same range, intensity follows the per-tile repelImpulse.  The
-    // minImpulse floor keeps ambient/distant shard contact from
-    // flickering the glow on; it only lights for close/strong contact
-    // (≈ a body within ~27 u, or several near bodies).  repel.strength
-    // 0.04 = one body dead-centre, so 0.03 ≈ near-touch.
-    glow:  { color: '#a5f3fc', range: 250, peakAlpha: 0.85, minImpulse: 0.03 },
+    // — same range, intensity follows the per-tile repelImpulse, which
+    // (see PhysicsSystem) accumulates only from the player / enemies so
+    // the glow tracks the player's repel field, not passing shards.
+    glow:  { color: '#a5f3fc', range: 250, peakAlpha: 0.85 },
   },
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
