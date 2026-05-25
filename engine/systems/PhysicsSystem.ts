@@ -803,6 +803,13 @@ export class PhysicsSystem {
     // so inserting them wastes grid memory and forces O(particles) extra
     // inner-loop iterations on every neighbour scan for no effect.
     let maxDensity = 0;
+    // Awake-only count drives the PerfController throttle: an asleep shard
+    // skips pair-resolution math (resolveShardPairs bails on asleep↔asleep),
+    // so a field of settled bodies costs almost nothing and must NOT pin the
+    // load — same principle as the ammo-drop exclusion below.  Without this,
+    // never-sleeping metal composites accumulate on mixed maps and throttle
+    // shared passes (shardPair/colorBlend/…), starving nebula collisions.
+    let awakeCount = 0;
     const dynamicEntities: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
@@ -838,6 +845,7 @@ export class PhysicsSystem {
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
+        if (!e.asleep) awakeCount++;
 
         const key = cellKey(e.position.x, e.position.y);
 
@@ -850,7 +858,7 @@ export class PhysicsSystem {
         if (cell.length > maxDensity) maxDensity = cell.length;
     }
     this.lastMaxCellDensity = maxDensity;
-    this.lastDynamicCount = dynamicEntities.length;
+    this.lastDynamicCount = awakeCount;
 
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary
     //    subjects, AND skip shards as outer-loop subjects entirely.

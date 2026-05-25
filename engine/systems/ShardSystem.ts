@@ -2236,12 +2236,13 @@ export class ShardSystem {
     a.metalLatticeR = R;
     a.metalCells = [{ ix: 0, iy: 0, up: true }, { ix: 0, iy: 2, up: false }];
     a.rotationSpeed = spin;
-    // Inertial free-floater: full retention + zero rest-snap floor so the
-    // composite keeps drifting/spinning rather than coasting to a halt.
+    // Gentle free-floater: drifts/spins visibly, then bleeds to rest and
+    // sleeps — so settled composites drop out of the dynamic-load signal
+    // instead of throttling shared passes forever (see METAL_ASSEMBLY).
     a.linearDamping = METAL_ASSEMBLY.LINEAR_DAMPING;
     a.angularDamping = METAL_ASSEMBLY.ANGULAR_DAMPING;
-    a.restSpeed = 0;
-    a.restSpin = 0;
+    a.restSpeed = METAL_ASSEMBLY.REST_SPEED;
+    a.restSpin = METAL_ASSEMBLY.REST_SPIN;
     this.metalRecomputeBounds(a);
     b.active = false;
   }

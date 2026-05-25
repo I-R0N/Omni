@@ -1310,18 +1310,23 @@ export const HOTSPOT_COLLAPSE = {
 //
 // DAMPING values are velocity/spin RETENTION factors per 60 Hz step
 // (applied as Math.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
-// inertial drift (the body keeps floating/spinning forever), < 1.0 bleeds
-// motion.  Paired with restSpeed/restSpin = 0 on the composite so tiny
-// drifts aren't snapped to a halt — that's what makes assembled shapes
-// float freely in space.  BREAK_SPEED_MULT pumps extra ejection velocity
-// into triangles when a metal tile shatters (more energy "stored" in the
-// bonds), so they fly apart and float before the pull draws them back.
+// inertial drift, < 1.0 bleeds motion.  A gentle bleed (≈0.99 ≈ 30 %/s) lets
+// a freed composite drift visibly for several seconds, then coast to rest
+// and SLEEP — so it stops driving the PerfController's dynamic-load signal
+// (asleep shards are excluded from it).  Without this, never-sleeping
+// composites accumulate on metal maps and throttle shared passes (which
+// starves nebula collision resolution).  REST_SPEED/REST_SPIN snap a
+// near-stopped composite to a hard rest so it sleeps cleanly.
+// BREAK_SPEED_MULT pumps extra ejection velocity into triangles when a
+// metal tile shatters (more energy "stored" in the bonds).
 export const METAL_ASSEMBLY = {
   ENABLED: true,
   FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
   SNAP_RANGE_R: 1.7,    // × R — loose locks to a composite's empty cell within this
-  LINEAR_DAMPING: 1.0,  // velocity retention/step (1 = inertial, no drag)
-  ANGULAR_DAMPING: 1.0,
+  LINEAR_DAMPING: 0.99, // velocity retention/step (gentle bleed → drift then settle)
+  ANGULAR_DAMPING: 0.99,
+  REST_SPEED: 0.08,     // below this a composite snaps to rest (→ sleeps)
+  REST_SPIN: 0.05,
   BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
 };
 
