@@ -341,6 +341,12 @@ export interface ShardVariantDef {
     /** Quadratic-falloff peak alpha (0..1) — multiplied by the
      *  per-tile intensity to produce the rendered alpha. */
     peakAlpha: number;
+    /** Optional minimum `repelImpulse` before a repel-driven glow
+     *  (glass-tile layer 2b) lights up — so ambient/distant contact
+     *  from passing shards doesn't keep the glow flickering on.  The
+     *  rendered intensity ramps from this floor.  Ignored by
+     *  player-distance glows (renderProximityBloom). */
+    minImpulse?: number;
     /** Optional second "hot core" layer painted ON TOP of the base
      *  layer once the base intensity (the quadratic falloff value,
      *  0..1) climbs past `threshold` — mimics metal heating: orange
