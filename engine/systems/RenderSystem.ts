@@ -220,6 +220,33 @@ export class RenderSystem {
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
 
+  // DBG collision outline for metal shards (matches the nebula/plastic
+  // overlays).  Assumes ctx is already translated to the entity centroid
+  // and rotated by entity.rotation.  A loose triangle shows its SAT polygon
+  // plus the inscribed collision circle (size.x*0.25 — the resolveAsteroid
+  // Pair radius); a composite shows its convex-hull SAT polygon plus the
+  // bounding collision circle (size.x*0.5).  Orange to distinguish from the
+  // cyan nebula/plastic strokes.
+  private drawMetalDebugOutline(ctx: CanvasRenderingContext2D, entity: GameEntity): void {
+    if (!(this.debugMode || this.tileOutlinesEnabled)) return;
+    const isComposite = entity.metalCells !== undefined && entity.metalCells.length > 0;
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = '#f97316'; // orange-500
+    ctx.lineWidth = 1;
+    const pts = entity.polygonPoints;
+    if (pts && pts.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, entity.size.x * (isComposite ? 0.5 : 0.25), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+  }
+
   // Optional PhysicsSystem reference for spatial queries — today only the
   // material-tile branch uses it (to suppress edge strokes on edges that
   // are cleanly butted against a neighbour tile).  Null is treated as "no
@@ -2253,6 +2280,7 @@ export class RenderSystem {
                         ctx.fill();
                     }
                     ctx.globalAlpha = 1.0;
+                    this.drawMetalDebugOutline(ctx, entity);
                     return;
                 }
 
@@ -2284,6 +2312,7 @@ export class RenderSystem {
                     ctx.globalAlpha = shardMergeFadeAlpha(entity);
                     ctx.drawImage(tri, -lodR, -lodR, lodR * 2, lodR * 2);
                     ctx.globalAlpha = 1.0;
+                    this.drawMetalDebugOutline(ctx, entity);
                     this.lastLodShardCount++;
                     return;
                 }
@@ -2519,6 +2548,10 @@ export class RenderSystem {
                 // hundreds of times per frame.
                 if (entity.mass === Infinity) {
                     this.timedTileBloom(ctx, entity, playerPos);
+                }
+
+                if (entity.shardVariant === 'metal-shard') {
+                    this.drawMetalDebugOutline(ctx, entity);
                 }
             }
 
