@@ -1292,6 +1292,10 @@ export const HOTSPOT_COLLAPSE = {
   PLASTIC_ENABLED: true,
   PLASTIC_MIN_COUNT: 4,
   PLASTIC_MAX_SIZE: 80,
+  // Metal triangle shards reassemble into a metal-tile once a hex's
+  // worth (≈6 triangles, since a hex divides into 6) packs into a cell.
+  METAL_ENABLED: true,
+  METAL_MIN_COUNT: 6,
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
@@ -2708,16 +2712,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
-      // Release ONE metal-shard that IS the deformed tile: sizeFraction
-      // 1.0 → shard diameter == deformed-tile diameter, and per
-      // ShardVariantDef.dent.breakShards the shard inherits the dented
-      // polygon scaled 1× — so the freed shard's silhouette matches
-      // the tile's broken outline exactly (no chunkier "polygon"
-      // fragments).  The generic SHARD_SPAWN_SHAPE_METAL polygon
-      // (6/8/10 vertices) is retained for metal-shards spawned outside
-      // the tile-detach path (e.g. free-spawn on future map variants).
+      // On detach the tile breaks into 3-4 equilateral triangle shards
+      // (each 1/6 of a hex tile, side = HEX_SIZE).  They keep metal-shard
+      // health, snap edge-to-edge as they collide (see ShardSystem bond
+      // alignment), and a dense pack reassembles into a metal-tile via
+      // the hot-spot collapse.
       breakShards: [
-        { variant: 'metal-shard', sizeFraction: 1.0, inheritParentPolygon: true },
+        { variant: 'metal-shard', sizeFraction: 1.0, equilateralTriangle: true, countMin: 3, countMax: 4 },
       ],
     },
   },
@@ -3027,12 +3028,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     spawn: SHARD_SPAWN_SHAPE_METAL,
     regen: { kind: 'none' },
     merge: {
+      // Cohesion-only: metal triangles STICK on contact (and align edge-
+      // to-edge — see ShardSystem bond tick) but never compose into
+      // bigger shards.  A dense pack reassembles into a metal-tile via
+      // the hot-spot collapse instead.  bondTimeSeconds: Infinity keeps
+      // the compose timer from ever maturing.
       attractedTo: 'none',
       bondsWith: { include: ['metal-shard'] },
-      bondTimeSeconds: 10, bondTimeSizeRef: 20, bondTimeSizePower: 1.5,
-      rules: [
-        { partner: 'self', outcome: 'compose' },
-      ],
+      bondTimeSeconds: Infinity,
       defaultOutcome: 'compose',
     },
     // Metal shards are dent-driven: deform per hit, destroyed cleanly

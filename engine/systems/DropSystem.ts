@@ -13,6 +13,7 @@ import {
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
+import { HEX_SIZE } from '../maps/TileGenerator';
 import { NEBULA_IMAGES, ASSETS } from '../../assets';
 import {
   blendCompositionToHex,
@@ -399,6 +400,7 @@ export class DropSystem {
       countMax?: number;
       sizeFractionMin?: number;
       sizeFractionMax?: number;
+      equilateralTriangle?: boolean;
     }>,
     shardHealthOverride?: number,
   ) {
@@ -414,6 +416,7 @@ export class DropSystem {
       variant: ShardVariantId;
       sizeFraction: number;
       inheritParentPolygon?: boolean;
+      equilateralTriangle?: boolean;
     };
     const expanded: ExpandedSpec[] = [];
     for (let s = 0; s < breakShards.length; s++) {
@@ -431,6 +434,7 @@ export class DropSystem {
           variant: spec.variant,
           sizeFraction,
           inheritParentPolygon: spec.inheritParentPolygon,
+          equilateralTriangle: spec.equilateralTriangle,
         });
       }
     }
@@ -509,7 +513,20 @@ export class DropSystem {
       //   silhouette extent.
       let scaledPts: Vector2[];
       let targetSize: number;
-      if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
+      if (spec.equilateralTriangle) {
+        // Fixed equilateral triangle, 1/6 of a hex tile (side = HEX_SIZE).
+        // Circumradius R = side/√3; vertices 120° apart.  size = 2R (the
+        // bounding circle).  Orientation is left at the base here; the
+        // entity's random spawn rotation (below) turns it, and the bond
+        // alignment later snaps it to the 60° tiling grid.
+        const R = HEX_SIZE / Math.sqrt(3);
+        scaledPts = [
+          { x: R * Math.cos(-Math.PI / 2),               y: R * Math.sin(-Math.PI / 2) },
+          { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+          { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+        ];
+        targetSize = 2 * R;
+      } else if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
         const s = spec.sizeFraction;
         scaledPts = new Array(tile.polygonPoints.length);
         let maxR2 = 0;

@@ -940,6 +940,7 @@ export class ShardSystem {
 
     const COHESION     = 4.0;   // fraction of velocity delta corrected per second
     const BREAK_FACTOR = 1.5;   // bond breaks when dist > contactDist * this
+    const ALIGN_RATE   = 3.0;   // metal-triangle rotation-snap rate (per second)
     // Per-frame merge budget — caps how many merges may fire this tick so
     // a freshly-shattered or hotspot cluster (whose bond timers elapse
     // together) compacts over several frames instead of one spike.  Once
@@ -978,6 +979,23 @@ export class ShardSystem {
         a.velocity.y   += (sharedVy - a.velocity.y) * blend;
         b.velocity.x   += (sharedVx - b.velocity.x) * blend;
         b.velocity.y   += (sharedVy - b.velocity.y) * blend;
+
+        // Metal triangles soft-snap edge-to-edge: ease each bonded
+        // shard's rotation toward the nearest 60° grid step (an
+        // equilateral triangle's edges repeat every 60°, so a shared
+        // lattice orientation makes neighbours' edges parallel and they
+        // tile) and bleed off spin so they settle aligned.  Gentle, so a
+        // hard knock can still break the bond above.
+        if (a.shardVariant === 'metal-shard' && b.shardVariant === 'metal-shard') {
+          const STEP = Math.PI / 3;
+          const alignBlend = Math.min(1, ALIGN_RATE * dt);
+          const ta = Math.round(a.rotation / STEP) * STEP;
+          a.rotation += (ta - a.rotation) * alignBlend;
+          if (a.rotationSpeed !== undefined) a.rotationSpeed *= (1 - alignBlend);
+          const tb = Math.round(b.rotation / STEP) * STEP;
+          b.rotation += (tb - b.rotation) * alignBlend;
+          if (b.rotationSpeed !== undefined) b.rotationSpeed *= (1 - alignBlend);
+        }
       }
 
       // Per-bond local rate: density boost (denser pocket → faster),
@@ -1622,7 +1640,8 @@ export class ShardSystem {
     candidates: GameEntity[],
   ): void {
     const { CELL, MIN_COUNT, MAX_TILES_PER_PASS,
-            PLASTIC_ENABLED, PLASTIC_MIN_COUNT, PLASTIC_MAX_SIZE } = HOTSPOT_COLLAPSE;
+            PLASTIC_ENABLED, PLASTIC_MIN_COUNT, PLASTIC_MAX_SIZE,
+            METAL_ENABLED, METAL_MIN_COUNT } = HOTSPOT_COLLAPSE;
     const COLS = Math.ceil(MAP_WIDTH  / CELL);
     const ROWS = Math.ceil(MAP_HEIGHT / CELL);
     const keyFor = (cx: number, cy: number) => {
@@ -1642,21 +1661,25 @@ export class ShardSystem {
       // Plastic condenses too, but only the smaller shards — larger ones
       // (>= PLASTIC_MAX_SIZE) only split/shatter, so they're excluded.
       const isSmallPlastic = PLASTIC_ENABLED && v === 'plastic-shard' && c.size.x < PLASTIC_MAX_SIZE;
-      if (!isRockGlass && !isSmallPlastic) continue;
+      // Metal triangles reassemble into a metal-tile once enough pack a cell.
+      const isMetal = METAL_ENABLED && v === 'metal-shard';
+      if (!isRockGlass && !isSmallPlastic && !isMetal) continue;
       const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
       cell.push(i);
     }
 
-    const minAny = PLASTIC_ENABLED ? Math.min(MIN_COUNT, PLASTIC_MIN_COUNT) : MIN_COUNT;
+    let minAny = MIN_COUNT;
+    if (PLASTIC_ENABLED) minAny = Math.min(minAny, PLASTIC_MIN_COUNT);
+    if (METAL_ENABLED) minAny = Math.min(minAny, METAL_MIN_COUNT);
     let tilesMade = 0;
     for (const idxs of grid.values()) {
       if (tilesMade >= MAX_TILES_PER_PASS) break;
       if (idxs.length < minAny) continue;
       // Tally each material + remember its largest shard (the transmute host).
-      let rockCount = 0, glassCount = 0, plasticCount = 0;
-      let rockHost = -1, glassHost = -1, plasticHost = -1;
+      let rockCount = 0, glassCount = 0, plasticCount = 0, metalCount = 0;
+      let rockHost = -1, glassHost = -1, plasticHost = -1, metalHost = -1;
       for (let k = 0; k < idxs.length; k++) {
         const e = candidates[idxs[k]];
         const sv = e.shardVariant;
@@ -1666,6 +1689,9 @@ export class ShardSystem {
         } else if (sv === 'glass-shard') {
           glassCount++;
           if (glassHost < 0 || e.size.x > candidates[glassHost].size.x) glassHost = idxs[k];
+        } else if (sv === 'metal-shard') {
+          metalCount++;
+          if (metalHost < 0 || e.size.x > candidates[metalHost].size.x) metalHost = idxs[k];
         } else {
           plasticCount++;
           if (plasticHost < 0 || e.size.x > candidates[plasticHost].size.x) plasticHost = idxs[k];
@@ -1673,6 +1699,11 @@ export class ShardSystem {
       }
       if (rockCount >= MIN_COUNT &&
           this.collapseStack(candidates, idxs, rockHost, 'rock-shard', 'rock', entities, physics)) {
+        tilesMade++;
+      }
+      if (tilesMade >= MAX_TILES_PER_PASS) break;
+      if (METAL_ENABLED && metalCount >= METAL_MIN_COUNT &&
+          this.collapseStack(candidates, idxs, metalHost, 'metal-shard', 'metal', entities, physics)) {
         tilesMade++;
       }
       if (tilesMade >= MAX_TILES_PER_PASS) break;

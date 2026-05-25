@@ -525,6 +525,13 @@ export interface ShardVariantDef {
        *  `countMin/countMax`. */
       sizeFractionMin?: number;
       sizeFractionMax?: number;
+      /** When true, the shard spawns as a fixed-size equilateral
+       *  triangle (side = HEX_SIZE, i.e. 1/6 of a hex tile) at a random
+       *  orientation, rather than the variant's silhouette or the parent
+       *  polygon.  Used by metal-tile so it breaks into triangular
+       *  pieces that snap edge-to-edge.  Overrides sizeFraction /
+       *  inheritParentPolygon. */
+      equilateralTriangle?: boolean;
     }>;
     /** Optional override for the HP assigned to spawned shards.
      *  When unset, shards inherit `tile.maxHealth` (today's
