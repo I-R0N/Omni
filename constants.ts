@@ -667,9 +667,9 @@ export const PLASTIC_DAMPING_CYCLE: ReadonlyArray<number> = [
   0.95, 0.97, 0.99, 0.995, 0.999, 1.0,
 ] as const;
 
-// Default index 0 (0.95) — heaviest friction in the cycle, so shards
-// settle quickly; cycle up toward 1.0 for slippery, long-coasting feel.
-let activePlasticDampingIndex = 0;
+// Default index 4 (0.999) — light friction, long-coasting feel; cycle
+// down toward 0.95 for heavier friction (shards settle quickly).
+let activePlasticDampingIndex = 4;
 
 export function getActivePlasticDamping(): number {
   return PLASTIC_DAMPING_CYCLE[activePlasticDampingIndex];
@@ -1267,7 +1267,7 @@ export const HOTSPOT_COLLAPSE = {
 export const SHATTER_GRACE_CYCLE: ReadonlyArray<number> = [
   0.6, 1.2, 1.8, 2.4, 3.0, 3.6,
 ] as const;
-let activeShatterGraceIndex = 0;
+let activeShatterGraceIndex = 4; // 3.0s
 export function getActiveShatterGraceDelay(): number {
   return SHATTER_GRACE_CYCLE[activeShatterGraceIndex];
 }

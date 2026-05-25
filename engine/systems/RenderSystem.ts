@@ -176,7 +176,7 @@ export class RenderSystem {
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
   // false, they keep their per-instance random shade.  Default ON.
-  public plasticAutomataEnabled: boolean = true;
+  public plasticAutomataEnabled: boolean = false;
   // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
   // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
   // solid disc instead of their full polygon render.  Default ON.
