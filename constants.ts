@@ -3033,7 +3033,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // bigger shards.  A dense pack reassembles into a metal-tile via
       // the hot-spot collapse instead.  bondTimeSeconds: Infinity keeps
       // the compose timer from ever maturing.
-      attractedTo: 'none',
+      //
+      // A gentle short-range pull draws nearby triangles together so they
+      // actually reach edge-contact (the incircle collision radius lets
+      // them nestle that close — see PhysicsSystem.resolveAsteroidPair).
+      // pullMinDist ≈ the edge-sharing centroid distance so the pull eases
+      // as they meet rather than fighting the collision floor.
+      attractedTo: { include: ['metal-shard'] },
+      pullRange: 120, pullStrength: 140, pullMinDist: 12,
       bondsWith: { include: ['metal-shard'] },
       bondTimeSeconds: Infinity,
       defaultOutcome: 'compose',

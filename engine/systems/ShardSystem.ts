@@ -987,13 +987,24 @@ export class ShardSystem {
         // tile) and bleed off spin so they settle aligned.  Gentle, so a
         // hard knock can still break the bond above.
         if (a.shardVariant === 'metal-shard' && b.shardVariant === 'metal-shard') {
-          const STEP = Math.PI / 3;
+          // Rotate so the SHARED edge faces the neighbour: 'a' presents an
+          // edge toward 'b', and 'b' presents its opposing edge back.  An
+          // equilateral triangle's edge-normals sit 90° off a vertex and
+          // repeat every 120°; for the apex-up spawn polygon they point at
+          // (rotation + 90° + k·120°).  So aim each shard's rotation at the
+          // value whose edge-normal lies along the inter-centroid line, then
+          // ease toward it (and bleed off spin) so the pair settles edge-on.
+          // (dx, dy) already points a → b.
+          const MOD = (2 * Math.PI) / 3;
           const alignBlend = Math.min(1, ALIGN_RATE * dt);
-          const ta = Math.round(a.rotation / STEP) * STEP;
-          a.rotation += (ta - a.rotation) * alignBlend;
+          const phi = Math.atan2(dy, dx);
+          const baseA = phi - Math.PI / 2;
+          const baseB = phi + Math.PI / 2;
+          const targetA = baseA + Math.round((a.rotation - baseA) / MOD) * MOD;
+          const targetB = baseB + Math.round((b.rotation - baseB) / MOD) * MOD;
+          a.rotation += (targetA - a.rotation) * alignBlend;
+          b.rotation += (targetB - b.rotation) * alignBlend;
           if (a.rotationSpeed !== undefined) a.rotationSpeed *= (1 - alignBlend);
-          const tb = Math.round(b.rotation / STEP) * STEP;
-          b.rotation += (tb - b.rotation) * alignBlend;
           if (b.rotationSpeed !== undefined) b.rotationSpeed *= (1 - alignBlend);
         }
       }

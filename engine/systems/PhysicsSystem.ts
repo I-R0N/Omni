@@ -1607,8 +1607,14 @@ export class PhysicsSystem {
       // here before paying any further work.
 
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
-      const rA = a.size.x * 0.42;
-      const rB = b.size.x * 0.42;
+      // Metal shards are equilateral triangles: collide on their INSCRIBED
+      // circle (inradius = size.x * 0.25), not the bounding circle.  Two
+      // incircles touch at centroid distance = 2·inradius = the edge-
+      // sharing distance, so aligned triangles settle edge-to-edge instead
+      // of being shoved ~2× too far apart by an excircle radius.  Other
+      // shards keep the 0.42 near-circumradius factor.
+      const rA = a.size.x * (a.shardVariant === 'metal-shard' ? 0.25 : 0.42);
+      const rB = b.size.x * (b.shardVariant === 'metal-shard' ? 0.25 : 0.42);
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 
