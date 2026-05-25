@@ -10,6 +10,7 @@ import {
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
   getActiveShatterGraceDelay,
+  METAL_ASSEMBLY,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -581,7 +582,10 @@ export class DropSystem {
       // a bit faster (lighter, gets a stronger kick from the same
       // impact).  Multiplier 1.0 at full size, 1.3 at 1/6 size.
       const speedScale = 1 + (1 - spec.sizeFraction) * 0.5;
-      const launchSpeed = baseSpeed * speedScale;
+      // Metal-tile shards eject faster (BREAK_SPEED_MULT) so they pop apart
+      // before the assembly pull reels them into a hexagon.
+      const metalMult = spec.variant === 'metal-shard' ? METAL_ASSEMBLY.BREAK_SPEED_MULT : 1;
+      const launchSpeed = baseSpeed * speedScale * metalMult;
 
       // Dent-policy shards take exactly as many hits to destroy as
       // the parent tile they came from — by default inherit

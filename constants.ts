@@ -1317,8 +1317,10 @@ export const HOTSPOT_COLLAPSE = {
 // composites accumulate on metal maps and throttle shared passes (which
 // starves nebula collision resolution).  REST_SPEED/REST_SPIN snap a
 // near-stopped composite to a hard rest so it sleeps cleanly.
-// BREAK_SPEED_MULT pumps extra ejection velocity into triangles when a
-// metal tile shatters (more energy "stored" in the bonds).
+// BREAK_SPEED_MULT scales the ejection velocity of the triangle shards a
+// metal tile releases when it breaks (applied on the dent-break path in
+// DropSystem.spawnDentShard), so the pieces pop apart energetically before
+// the assembly pull reels them into a hexagon.
 //
 // Hexagon lifecycle: every composite builds exactly ONE hexagon (6 triangle
 // slots).  Loose triangles snap into its empty slots and partial composites
@@ -1335,7 +1337,7 @@ export const METAL_ASSEMBLY = {
   ANGULAR_DAMPING: 0.99,
   REST_SPEED: 0.08,     // below this a composite snaps to rest (→ sleeps)
   REST_SPIN: 0.05,
-  BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
+  BREAK_SPEED_MULT: 2.0, // × normal dent-debris speed for metal-tile shards
   HEX_FLOAT_SECONDS: 3.0, // a completed hexagon free-floats this long before snapping to grid
   RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on merge overflow
   MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
@@ -2755,13 +2757,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     regen: { kind: 'none' },
     dent: {
       vertexJitter: 0.13,
-      // On detach the tile breaks into 3-4 equilateral triangle shards
-      // (each 1/6 of a hex tile, side = HEX_SIZE).  They keep metal-shard
-      // health, snap edge-to-edge as they collide (see ShardSystem bond
-      // alignment), and a dense pack reassembles into a metal-tile via
-      // the hot-spot collapse.
+      // On detach the tile breaks into 5-6 equilateral triangle shards
+      // (each 1/6 of a hex tile, side = HEX_SIZE) ejected at BREAK_SPEED_MULT ×
+      // the normal dent-debris speed.  They keep metal-shard health and
+      // assemble into a fresh hexagon (see ShardSystem.tickMetalAssembly).
       breakShards: [
-        { variant: 'metal-shard', sizeFraction: 1.0, equilateralTriangle: true, countMin: 3, countMax: 4 },
+        { variant: 'metal-shard', sizeFraction: 1.0, equilateralTriangle: true, countMin: 5, countMax: 6 },
       ],
     },
   },

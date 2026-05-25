@@ -676,11 +676,6 @@ export class ShardSystem {
         scatterAngle = Math.random() * Math.PI * 2;
         scatterSpeed = 1 + Math.random() * 2;
       }
-      // Metal shatter debris carries extra energy — the triangles eject
-      // fast and float apart (it reads as energy that was holding the
-      // assembled shape together) before the assembly pull reels them in.
-      if (childVariant.id === 'metal-shard') scatterSpeed *= METAL_ASSEMBLY.BREAK_SPEED_MULT;
-
       const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
       const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
 
