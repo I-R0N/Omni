@@ -34,7 +34,7 @@ export const COLORS = {
   STRUCTURE_PLASTIC: '#b45309',           // Amber 700 — fallback shade
   // Metal — cool steel-blue with a brighter edge, so silhouettes pop
   // against the indigo glass tiles.
-  STRUCTURE_METAL: '#64748b',             // Slate 500 — gunmetal body
+  STRUCTURE_METAL: '#5b8499',             // blue-cyan gunmetal body (slate shifted toward blue/cyan)
   STRUCTURE_INDESTRUCTIBLE: '#475569',    // Slate 600 — dull steel
 };
 
