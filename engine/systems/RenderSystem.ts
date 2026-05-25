@@ -1390,18 +1390,6 @@ export class RenderSystem {
       // shape, same cache invalidation sites.  Only the nebula-tile
       // variant populates the per-entity tinted-canvas cache —
       // future variants can opt in via SHARD_VARIANTS[v].renderCache.
-      // Skip the nebula fast path while the player is inside the tile's
-      // glow range, so the slow path can paint the proximity brighten
-      // (the fast path is a single drawImage with no glow pass).
-      let inNebGlowRange = false;
-      if (entity.shardVariant === 'nebula-tile' && playerPos) {
-          const nebGlow = SHARD_VARIANTS['nebula-tile'].glow;
-          if (nebGlow !== undefined) {
-              const ngdx = wrapDeltaX(entity.position.x, playerPos.x);
-              const ngdy = wrapDeltaY(entity.position.y, playerPos.y);
-              inNebGlowRange = ngdx * ngdx + ngdy * ngdy < nebGlow.range * nebGlow.range;
-          }
-      }
       if (entity.shardVariant === 'nebula-tile'
           && entity.active
           && !entity.hitFlash
@@ -1409,7 +1397,6 @@ export class RenderSystem {
           && entity.nebulaSpawnTimer === undefined
           && entity.regenPopTimer === undefined
           && entity.nebulaCachedTinted !== undefined
-          && !inNebGlowRange
           && entity.nebulaTwinkleNextAt !== undefined
           && perfNowSec < entity.nebulaTwinkleNextAt) {
           ctx.globalAlpha = 0.55;
@@ -1634,29 +1621,6 @@ export class RenderSystem {
                   ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
-                  // Proximity glow (nebula-tile) — additively re-draw the
-                  // tinted sprite so the cloud brightens as the player
-                  // nears, distinguishing interactive tiles from the
-                  // static background nebulae.  Player-distance driven
-                  // (nebula has no repel field); not baked into the cache,
-                  // so it only paints on this slow path while in range.
-                  if (isTile && playerPos) {
-                      const nebGlow = SHARD_VARIANTS['nebula-tile'].glow;
-                      if (nebGlow !== undefined) {
-                          const gdx = wrapDeltaX(playerPos.x, entity.position.x);
-                          const gdy = wrapDeltaY(playerPos.y, entity.position.y);
-                          const gDistSq = gdx * gdx + gdy * gdy;
-                          const gRangeSq = nebGlow.range * nebGlow.range;
-                          if (gDistSq < gRangeSq) {
-                              const prox = 1 - Math.sqrt(gDistSq) / nebGlow.range;
-                              ctx.globalCompositeOperation = 'lighter';
-                              ctx.globalAlpha = nebGlow.peakAlpha * prox * fadeMul * spawnMul;
-                              ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
-                              ctx.globalCompositeOperation = 'source-over';
-                              ctx.globalAlpha = 1.0;
-                          }
-                      }
-                  }
                   // Populate the nebula fast-path cache while we have
                   // every input on hand.  See the fast-path block above
                   // renderEntities()'s slow body — once these four
@@ -2399,6 +2363,12 @@ export class RenderSystem {
                         ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                         ctx.fill();
                     }
+
+                    // Proximity glow — brighten the shard as the player
+                    // nears (player-distance driven, like the glass/metal
+                    // tile glow) so plastic shards read distinctly from
+                    // nebula.  Painted last, over the disc.
+                    this.renderProximityBloom(ctx, entity, playerPos);
 
                 } else if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow

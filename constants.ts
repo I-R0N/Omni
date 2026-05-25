@@ -2784,14 +2784,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // strikers fly through and shatter on contact while the tile
     // keeps its static-grid placement.  See docs/SHARD_SYSTEM.md §6.C.
     passThrough: true,
-    // Proximity glow — the cloud brightens as the player approaches.
-    // Nebula has no repel field (passThrough), so unlike glass/metal
-    // (repel-driven) this is player-distance driven, like the
-    // indestructible-tile bloom.  RenderSystem paints it as an additive
-    // re-draw of the tinted sprite scaled by proximity; `color` is
-    // unused by that brighten (kept for schema parity).  Distinguishes
-    // interactive nebula tiles from the static background nebulae.
-    glow: { color: '#ffffff', range: 220, peakAlpha: 0.7 },
     // Slow-path tint compute is expensive enough to merit caching.
     renderCache: 'composition',
     spawnsDropsOnDeath: false,                  // NebulaSystem handles its own ammo roll
@@ -2878,6 +2870,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
+    // Proximity glow — the shard brightens as the player nears (player-
+    // distance driven, like the plastic-tile bloom and the glass/metal
+    // tile glow), painted by RenderSystem.renderProximityBloom.  Helps
+    // plastic shards read distinctly from nebula shards/clouds.  Matches
+    // the plastic-tile fuchsia so tile + shard glow as one substance.
+    glow: { color: '#fbcfe8', range: 250, peakAlpha: 0.5 },
     // Plastic-softbody retrofit, v8: attraction + cohesion bonding
     // are back (they were never meant to be dropped), but bonds are
     // cohesion-ONLY.  bondTimeSeconds: Infinity means the compose
