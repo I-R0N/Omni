@@ -1320,24 +1320,25 @@ export const HOTSPOT_COLLAPSE = {
 // BREAK_SPEED_MULT pumps extra ejection velocity into triangles when a
 // metal tile shatters (more energy "stored" in the bonds).
 //
-// Crystallization: a composite that grows to contain a complete 6-triangle
-// hexagon WITH at least HEX_MIN_OUTER of the hexagon's 6 outer faces also
-// filled snaps that hexagon onto the nearest free grid hex as a static metal
-// tile; the leftover (outer) triangles pop off as fresh loose shards at
-// RELEASE_POP_SPEED.  So the metal cycle closes: tile -> shatter -> triangles
-// -> free-float assembly -> hexagon -> tile (+ released seed triangles).
+// Hexagon lifecycle: every composite builds exactly ONE hexagon (6 triangle
+// slots).  Loose triangles snap into its empty slots and partial composites
+// pour their triangles into a larger one's empty slots (overflow released as
+// loose at RELEASE_POP_SPEED).  Once all 6 slots are filled the composite is
+// a complete floating hexagon: it free-floats for HEX_FLOAT_SECONDS, then
+// snaps onto the nearest free grid hex as a static metal tile.  So the metal
+// cycle closes: tile -> shatter -> triangles -> hexagon -> float -> tile.
 export const METAL_ASSEMBLY = {
   ENABLED: true,
   FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
-  SNAP_RANGE_R: 1.7,    // × R — loose locks to a composite's empty cell within this
+  SNAP_RANGE_R: 1.7,    // × R — loose locks to a composite's empty slot within this
   LINEAR_DAMPING: 0.99, // velocity retention/step (gentle bleed → drift then settle)
   ANGULAR_DAMPING: 0.99,
   REST_SPEED: 0.08,     // below this a composite snaps to rest (→ sleeps)
   REST_SPIN: 0.05,
   BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
-  HEX_MIN_OUTER: 3,     // outer faces that must be filled before a hexagon crystallizes
-  RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on crystallization
-  MERGE_OVERLAP_FACTOR: 0.9, // composites merge when centroid gap < this × sum of bounding radii
+  HEX_FLOAT_SECONDS: 3.0, // a completed hexagon free-floats this long before snapping to grid
+  RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on merge overflow
+  MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:

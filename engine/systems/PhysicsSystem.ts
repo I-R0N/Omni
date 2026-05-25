@@ -491,6 +491,14 @@ export class PhysicsSystem {
               entity.collapseGraceTimer = undefined;
           }
       }
+      // Metal hexagon free-float — a completed composite floats while this
+      // counts down, then ShardSystem snaps it to the grid as a tile.  Held
+      // at 0 (not cleared) so ShardSystem can tell "ready" from "still
+      // floating"; only the assembly pass clears it.
+      if (entity.metalFloatTimer !== undefined && entity.metalFloatTimer > 0) {
+          entity.metalFloatTimer -= dt;
+          if (entity.metalFloatTimer < 0) entity.metalFloatTimer = 0;
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;

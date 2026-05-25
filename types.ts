@@ -360,10 +360,15 @@ export interface GameEntity {
   // `metalLatticeR` (the constituent triangle's circumradius).  The entity's
   // `position` is the composite's mass centroid and `rotation` orients the
   // lattice; the body drifts/spins as one via velocity + rotationSpeed.
-  // Loose metal triangles snap onto the composite's free faces (see
-  // ShardSystem.tickMetalAssembly), growing the cell set.
+  // Loose metal triangles snap into the composite's empty hexagon slots
+  // (see ShardSystem.tickMetalAssembly); a composite only ever fills the 6
+  // cells of one hexagon.  Once all 6 are filled the composite is a complete
+  // floating hexagon: `metalFloatTimer` counts down a brief free-float, and
+  // when it elapses the hexagon snaps onto the nearest free grid hex as a
+  // static metal tile.
   metalCells?: Array<{ ix: number; iy: number; up: boolean }>;
   metalLatticeR?: number;
+  metalFloatTimer?: number;
 
   // ── Density compaction state ────────────────────────────────────────────
   // Tracks how many density-merge steps a shard has accumulated.  0 (or

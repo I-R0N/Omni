@@ -181,6 +181,23 @@ interface BondEntry {
 const METAL_UP_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, 2], [-1, -1], [1, -1]];
 const METAL_DOWN_NEIGHBORS: ReadonlyArray<readonly [number, number]> = [[0, -2], [-1, 1], [1, 1]];
 
+// The 6 cells of the single hexagon every composite builds, centred on the
+// lattice vertex (1,1).  formMetalComposite seeds the canonical rhombus
+// (0,0)+(0,2) — both members of this set — so every composite shares this
+// frame: it fills these 6 slots, and the hexagon centroid is the vertex
+// (1,1) → lattice point (R·√3/2, R/2), which is also the mass centroid once
+// all 6 are present (so a completed composite's `position` IS the hexagon
+// centre).  METAL_HEX_SIZE = 6 is "complete".
+const METAL_HEX_SIZE = 6;
+const METAL_HEX_CELLS: ReadonlyArray<{ ix: number; iy: number; up: boolean }> = [
+  { ix: 0, iy: 0, up: true },
+  { ix: 2, iy: 0, up: true },
+  { ix: 1, iy: 3, up: true },
+  { ix: 0, iy: 2, up: false },
+  { ix: 2, iy: 2, up: false },
+  { ix: 1, iy: -1, up: false },
+];
+
 // Andrew's monotone-chain convex hull (CCW).  Used to give a metal
 // composite a convex collision polygon (SAT) that bounds its triangle
 // cells — render uses the exact cells, collision uses this hull.
@@ -1527,8 +1544,12 @@ export class ShardSystem {
               const matchesPull = aVariant!.merge.attractedTo !== 'none'
                 && this.selects(aVariant!.merge.attractedTo, bVariantId, aVariantId!);
               // Today's nebula gravity targets nearest LARGER-OR-EQUAL
-              // neighbour.  Preserve.
-              if (matchesPull && targetCooldownOk && bR >= aR
+              // neighbour.  Preserve.  A completed metal hexagon can't accept
+              // more triangles, so don't let pieces home onto it (they'd just
+              // pile up unable to join until it snaps to a tile).
+              const targetIsFullHexagon = b.metalCells !== undefined
+                && b.metalCells.length >= METAL_HEX_SIZE;
+              if (matchesPull && targetCooldownOk && bR >= aR && !targetIsFullHexagon
                   && distSq <= pullRangeSq && distSq < bestPullDistSq) {
                 bestPullDistSq = distSq;
                 bestPullTarget = b;
@@ -1622,16 +1643,16 @@ export class ShardSystem {
       // triangles AND composites seek now that composite ↔ composite merging
       // exists: the pull target rule (bR ≥ aR) makes each piece drift toward
       // a larger-or-equal metal body, so the biggest local cluster acts as an
-      // anchor and smaller pieces/clusters accrete onto it.  A composite that
-      // already has enough cells to crystallize stops actively seeking — it
-      // should turn into a tile (or be sought BY smaller clusters), not keep
-      // drifting, which also keeps it eligible to settle/sleep out of the
-      // dynamic-load signal.  Metal triangles still in their post-break grace
-      // aren't pulled, so they float free for the delay before assembly.
+      // anchor and smaller pieces/clusters accrete onto it.  A COMPLETED
+      // hexagon (6 cells) stops actively seeking — it's floating toward its
+      // grid snap, not still assembling, which also keeps it eligible to
+      // settle/sleep out of the dynamic-load signal.  Metal triangles still in
+      // their post-break grace aren't pulled, so they float free for the delay
+      // before assembly.
       const metalInGrace = a.shardVariant === 'metal-shard' && (a.collapseGraceTimer ?? 0) > 0;
-      const compositeAtCrystalSize = a.metalCells !== undefined
-        && a.metalCells.length >= 6 + METAL_ASSEMBLY.HEX_MIN_OUTER;
-      if (bestPullTarget && wantsPull && !metalInGrace && !compositeAtCrystalSize) {
+      const completedHexagon = a.metalCells !== undefined
+        && a.metalCells.length >= METAL_HEX_SIZE;
+      if (bestPullTarget && wantsPull && !metalInGrace && !completedHexagon) {
         const dx = wrapDeltaX(a.position.x, bestPullTarget.position.x);
         const dy = wrapDeltaY(a.position.y, bestPullTarget.position.y);
         const dist = Math.sqrt(bestPullDistSq);
@@ -2080,12 +2101,12 @@ export class ShardSystem {
       let bestTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
       for (let c = 0; c < composites.length; c++) {
         const comp = composites[c];
-        if (!comp.active) continue;
+        if (!comp.active || comp.metalCells!.length >= METAL_HEX_SIZE) continue;
         const dx = wrapDeltaX(comp.position.x, l.position.x);
         const dy = wrapDeltaY(comp.position.y, l.position.y);
         const reach = comp.size.x * 0.5 + SNAP;
         if (dx * dx + dy * dy > reach * reach) continue;
-        const t = this.nearestMetalFreeTarget(comp, l.position.x, l.position.y, SNAP);
+        const t = this.nearestMetalHexSlot(comp, l.position.x, l.position.y);
         if (t && (bestTarget === null || t.d2 < bestTarget.d2)) { best = comp; bestTarget = t; }
       }
       if (best && bestTarget) this.growMetalComposite(best, l, bestTarget);
@@ -2141,11 +2162,12 @@ export class ShardSystem {
       }
     }
 
-    // Pass 2b — composite + composite.  Absorb a smaller composite into a
-    // larger one whenever their bounds overlap, so clusters snap together
-    // into bigger clusters that can reach the hexagon threshold.  Coarse grid
-    // sized to the largest composite so the 3×3 neighbour scan can't miss an
-    // overlap.
+    // Pass 2b — composite + composite.  When two INCOMPLETE composites'
+    // bounds overlap, pour the smaller's triangles into the larger's empty
+    // hexagon slots (overflow released as loose), so partial hexagons snap
+    // together.  Completed hexagons (floating, about to snap) sit out.
+    // Coarse grid sized to the largest composite so the 3×3 neighbour scan
+    // can't miss an overlap.
     let cMaxSize = 2 * R;
     for (const c of composites) if (c.active && c.size.x > cMaxSize) cMaxSize = c.size.x;
     const CCELL = cMaxSize;
@@ -2156,36 +2178,38 @@ export class ShardSystem {
       const y = ((cy % CROWS) + CROWS) % CROWS;
       return x * CROWS + y;
     };
+    const incomplete = (e: GameEntity) =>
+      e.active && e.metalCells !== undefined && e.metalCells.length < METAL_HEX_SIZE;
     const cgrid = new Map<number, number[]>();
     for (let i = 0; i < composites.length; i++) {
       const c = composites[i];
-      if (!c.active || c.metalCells === undefined) continue;
+      if (!incomplete(c)) continue;
       const k = ckey(Math.floor(c.position.x / CCELL), Math.floor(c.position.y / CCELL));
       let b = cgrid.get(k); if (!b) { b = []; cgrid.set(k, b); } b.push(i);
     }
     const OVERLAP = METAL_ASSEMBLY.MERGE_OVERLAP_FACTOR;
     for (let i = 0; i < composites.length; i++) {
       const a = composites[i];
-      if (!a.active || a.metalCells === undefined) continue;
+      if (!incomplete(a)) continue;
       const acx = Math.floor(a.position.x / CCELL);
       const acy = Math.floor(a.position.y / CCELL);
-      for (let oy = -1; oy <= 1 && a.active; oy++) {
-        for (let ox = -1; ox <= 1 && a.active; ox++) {
+      for (let oy = -1; oy <= 1 && incomplete(a); oy++) {
+        for (let ox = -1; ox <= 1 && incomplete(a); ox++) {
           const cell = cgrid.get(ckey(acx + ox, acy + oy));
           if (!cell) continue;
           for (const j of cell) {
             if (j === i) continue;
             const b = composites[j];
-            if (!b.active || b.metalCells === undefined) continue;
+            if (!incomplete(b)) continue;
             const dx = wrapDeltaX(a.position.x, b.position.x);
             const dy = wrapDeltaY(a.position.y, b.position.y);
             const reach = (a.size.x + b.size.x) * 0.5 * OVERLAP;
             if (dx * dx + dy * dy > reach * reach) continue;
             // Larger is the host; smaller is absorbed.
-            if (a.metalCells.length >= b.metalCells.length) {
-              this.mergeMetalComposites(a, b);
+            if (a.metalCells!.length >= b.metalCells!.length) {
+              this.mergeMetalComposites(a, b, entities);
             } else {
-              this.mergeMetalComposites(b, a);
+              this.mergeMetalComposites(b, a, entities);
               break; // `a` was consumed — stop scanning on its behalf
             }
           }
@@ -2193,166 +2217,97 @@ export class ShardSystem {
       }
     }
 
-    // Pass 3 — crystallize any composite that now holds a complete hexagon
-    // with ≥ HEX_MIN_OUTER outer faces filled.  Runs after growth so a
-    // hexagon completed this tick snaps immediately, and covers composites
-    // formed in Pass 2 as well.
+    // Pass 3 — completed hexagons float, then snap.  Start the free-float
+    // countdown the first tick a composite reaches 6 cells; once PhysicsSystem
+    // has ticked it to 0, snap the hexagon onto the nearest free grid hex as a
+    // static metal tile.
     for (let c = 0; c < composites.length; c++) {
       const comp = composites[c];
-      if (comp.active && comp.metalCells !== undefined) {
-        this.tryCrystallizeMetalHexagon(comp, entities, physics);
+      if (!comp.active || comp.metalCells === undefined) continue;
+      if (comp.metalCells.length < METAL_HEX_SIZE) continue;
+      if (comp.metalFloatTimer === undefined) {
+        comp.metalFloatTimer = METAL_ASSEMBLY.HEX_FLOAT_SECONDS;
+      } else if (comp.metalFloatTimer <= 0) {
+        this.snapHexagonToGrid(comp, entities, physics);
       }
     }
   }
 
   /**
-   * If composite `comp` contains a complete 6-triangle hexagon with at least
-   * METAL_ASSEMBLY.HEX_MIN_OUTER of that hexagon's 6 outer faces also filled,
-   * crystallize it: snap the hexagon onto the nearest free grid hex as a
-   * static metal tile, release every leftover triangle as a fresh loose
-   * metal-shard (popped outward), and consume the composite.  Returns true if
-   * it crystallized.
-   *
-   * Lattice math: a hexagon is the 6 cells sharing a lattice vertex (m, n).
-   * For that vertex the 6 hexagon cells and 6 outer-face cells are fixed
-   * integer offsets, so detection is pure occupancy lookups — no geometry.
+   * Snap a complete (6-cell) floating hexagon onto the nearest free grid hex
+   * as a static metal tile and consume the composite.  A completed hexagon's
+   * mass centroid is the hexagon centre, so `comp.position` is the tile
+   * centre.  If every candidate grid cell is occupied the snap is deferred
+   * (the hexagon keeps floating and retries on a later tick).
    */
-  private tryCrystallizeMetalHexagon(
+  private snapHexagonToGrid(
     comp: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
-  ): boolean {
-    const cells = comp.metalCells!;
-    // Need at least a full hexagon (6) plus HEX_MIN_OUTER outer triangles.
-    if (cells.length < 6 + METAL_ASSEMBLY.HEX_MIN_OUTER) return false;
-
-    const R = comp.metalLatticeR!;
-    const ux = (R * Math.sqrt(3)) / 2;
-    const uy = R / 2;
-
-    const occ = new Set<string>();
-    for (const c of cells) occ.add(c.ix + ',' + c.iy);
-    const has = (ix: number, iy: number) => occ.has(ix + ',' + iy);
-
-    // Scan candidate hexagon centres (every distinct vertex of every cell).
-    // Keep the qualifying hexagon with the most filled outer faces.
-    const seen = new Set<string>();
-    let bestM = 0, bestN = 0, bestOuter = -1;
-    for (const c of cells) {
-      const verts: ReadonlyArray<readonly [number, number]> = c.up
-        ? [[c.ix, c.iy - 2], [c.ix + 1, c.iy + 1], [c.ix - 1, c.iy + 1]]
-        : [[c.ix, c.iy + 2], [c.ix + 1, c.iy - 1], [c.ix - 1, c.iy - 1]];
-      for (const v of verts) {
-        const m = v[0], n = v[1];
-        const vk = m + ',' + n;
-        if (seen.has(vk)) continue;
-        seen.add(vk);
-        // The 6 cells of the hexagon centred at vertex (m, n).
-        if (!(has(m, n + 2) && has(m - 1, n - 1) && has(m + 1, n - 1)
-           && has(m, n - 2) && has(m - 1, n + 1) && has(m + 1, n + 1))) continue;
-        // The 6 outer-face cells (one across each hexagon perimeter edge).
-        let outer = 0;
-        if (has(m, n + 4)) outer++;
-        if (has(m - 2, n - 2)) outer++;
-        if (has(m + 2, n - 2)) outer++;
-        if (has(m, n - 4)) outer++;
-        if (has(m - 2, n + 2)) outer++;
-        if (has(m + 2, n + 2)) outer++;
-        if (outer >= METAL_ASSEMBLY.HEX_MIN_OUTER && outer > bestOuter) {
-          bestOuter = outer; bestM = m; bestN = n;
-        }
-      }
+  ): void {
+    if (this.buildTileAtNearestFreeHex(comp.position.x, comp.position.y, 'metal', entities, physics)) {
+      comp.active = false;
     }
-    if (bestOuter < 0) return false;
-
-    // Mass centroid in the lattice frame (comp.position sits here), and a
-    // lattice→world transform (rotate by comp.rotation, offset by position).
-    let cmx = 0, cmy = 0;
-    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
-    cmx /= cells.length; cmy /= cells.length;
-    const cos = Math.cos(comp.rotation);
-    const sin = Math.sin(comp.rotation);
-    const toWorldX = (lx: number, ly: number) =>
-      comp.position.x + (lx - cmx) * cos - (ly - cmy) * sin;
-    const toWorldY = (lx: number, ly: number) =>
-      comp.position.y + (lx - cmx) * sin + (ly - cmy) * cos;
-
-    // Snap the hexagon centre onto the nearest free grid hex as a metal tile.
-    const hexWx = toWorldX(bestM * ux, bestN * uy);
-    const hexWy = toWorldY(bestM * ux, bestN * uy);
-    if (!this.buildTileAtNearestFreeHex(hexWx, hexWy, 'metal', entities, physics)) {
-      return false; // every candidate cell occupied — retry on a later tick
-    }
-
-    // The 6 cells consumed by the tile; everything else is released.
-    const hexSet = new Set<string>([
-      bestM + ',' + (bestN + 2), (bestM - 1) + ',' + (bestN - 1), (bestM + 1) + ',' + (bestN - 1),
-      bestM + ',' + (bestN - 2), (bestM - 1) + ',' + (bestN + 1), (bestM + 1) + ',' + (bestN + 1),
-    ]);
-
-    // Released triangles match a freshly-shattered loose metal-shard: an
-    // equilateral triangle (circumradius R), conserved per-cell health, and
-    // a post-break grace so they float before re-snapping.
-    const triPts: Vector2[] = [
-      { x: R * Math.cos(-Math.PI / 2),                   y: R * Math.sin(-Math.PI / 2) },
-      { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
-      { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
-    ];
-    const triSize = 2 * R;
-    const triMass = SHARD_VARIANTS['metal-shard'].spawn.sizeToMass(triSize);
-    const perMax = Math.max(1, Math.round((comp.maxHealth ?? cells.length) / cells.length));
-    const perCur = Math.max(1, Math.round((comp.health ?? cells.length) / cells.length));
-    const POP = METAL_ASSEMBLY.RELEASE_POP_SPEED;
-
-    for (const c of cells) {
-      if (hexSet.has(c.ix + ',' + c.iy)) continue;
-      const wx = toWorldX(c.ix * ux, c.iy * uy);
-      const wy = toWorldY(c.ix * ux, c.iy * uy);
-      // Pop outward from the hexagon centre.
-      const dx = wrapDeltaX(hexWx, wx);
-      const dy = wrapDeltaY(hexWy, wy);
-      const d = Math.sqrt(dx * dx + dy * dy) || 1;
-      const pos = { x: wx, y: wy };
-      wrapPosition(pos);
-      entities.push({
-        id: nextId('metal_shard'),
-        type: EntityType.STRUCTURE,
-        shardVariant: 'metal-shard',
-        position: pos,
-        velocity: { x: comp.velocity.x + (dx / d) * POP, y: comp.velocity.y + (dy / d) * POP },
-        size: { x: triSize, y: triSize },
-        rotation: comp.rotation + (c.up ? 0 : Math.PI),
-        rotationSpeed: (Math.random() - 0.5) * 1.0,
-        color: comp.color,
-        active: true,
-        health: perCur,
-        maxHealth: perMax,
-        mass: triMass,
-        polygonPoints: triPts.map(p => ({ x: p.x, y: p.y })),
-        sprite: comp.sprite,
-        collapseGraceTimer: getActiveShatterGraceDelay(),
-      });
-    }
-
-    comp.active = false;
-    return true;
   }
 
-  /** Best empty boundary cell of `comp` for a piece at world `(wx, wy)`, in
-   *  the composite's lattice frame and within `snap` world units — or null.
-   *  Among in-range candidates it prefers the cell that most advances a
-   *  hexagon (so composites pack toward the 6-triangle hexagon that later
-   *  crystallizes), breaking ties by proximity to (wx, wy). */
-  private nearestMetalFreeTarget(
+  /** Spawn a single loose metal-shard triangle at world `(wx, wy)` drifting
+   *  away from `(fromX, fromY)`.  Used for triangles that overflow a hexagon
+   *  when two composites merge — they re-enter the assembly cycle. */
+  private spawnLooseMetalTriangle(
+    entities: GameEntity[],
+    wx: number, wy: number,
+    fromX: number, fromY: number,
+    R: number,
+    color: string | undefined,
+    sprite: string | undefined,
+    health: number,
+    vx: number, vy: number,
+  ): void {
+    const triSize = 2 * R;
+    const dx = wrapDeltaX(fromX, wx);
+    const dy = wrapDeltaY(fromY, wy);
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const POP = METAL_ASSEMBLY.RELEASE_POP_SPEED;
+    const pos = { x: wx, y: wy };
+    wrapPosition(pos);
+    entities.push({
+      id: nextId('metal_shard'),
+      type: EntityType.STRUCTURE,
+      shardVariant: 'metal-shard',
+      position: pos,
+      velocity: { x: vx + (dx / d) * POP, y: vy + (dy / d) * POP },
+      size: { x: triSize, y: triSize },
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 1.0,
+      color: color,
+      active: true,
+      health,
+      maxHealth: health,
+      mass: SHARD_VARIANTS['metal-shard'].spawn.sizeToMass(triSize),
+      polygonPoints: [
+        { x: R * Math.cos(-Math.PI / 2),                   y: R * Math.sin(-Math.PI / 2) },
+        { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+        { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+      ],
+      sprite,
+      collapseGraceTimer: getActiveShatterGraceDelay(),
+    });
+  }
+
+  /** Nearest EMPTY hexagon slot of `comp` to a piece at world `(wx, wy)` — or
+   *  null if the hexagon is already full.  Every composite fills the same 6
+   *  slots (METAL_HEX_CELLS), so growth is constrained to a single hexagon
+   *  rather than an open-ended polyiamond. */
+  private nearestMetalHexSlot(
     comp: GameEntity,
     wx: number,
     wy: number,
-    snap: number,
   ): { ix: number; iy: number; up: boolean; d2: number } | null {
+    const cells = comp.metalCells!;
+    if (cells.length >= METAL_HEX_SIZE) return null;
     const R = comp.metalLatticeR!;
     const ux = (R * Math.sqrt(3)) / 2;
     const uy = R / 2;
-    const cells = comp.metalCells!;
     const occ = new Set<string>();
     let cmx = 0, cmy = 0;
     for (const c of cells) { occ.add(c.ix + ',' + c.iy); cmx += c.ix * ux; cmy += c.iy * uy; }
@@ -2367,50 +2322,14 @@ export class ShardSystem {
     const pieceLx = (wdx * cos + wdy * sin) + cmx;
     const pieceLy = (-wdx * sin + wdy * cos) + cmy;
 
-    const snapSq = snap * snap;
     let best: { ix: number; iy: number; up: boolean; d2: number } | null = null;
-    let bestScore = -1;
     let bestD2 = Infinity;
-    for (const c of cells) {
-      const offs = c.up ? METAL_UP_NEIGHBORS : METAL_DOWN_NEIGHBORS;
-      for (const o of offs) {
-        const tix = c.ix + o[0];
-        const tiy = c.iy + o[1];
-        if (occ.has(tix + ',' + tiy)) continue;
-        const dx = tix * ux - pieceLx;
-        const dy = tiy * uy - pieceLy;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > snapSq) continue;
-        // Hexagon-packing bias: prefer the cell that brings a hexagon closest
-        // to completion; fall back to nearest when scores tie.
-        const score = this.hexFillScore(occ, tix, tiy, !c.up);
-        if (score > bestScore || (score === bestScore && d2 < bestD2)) {
-          bestScore = score; bestD2 = d2; best = { ix: tix, iy: tiy, up: !c.up, d2 };
-        }
-      }
-    }
-    return best;
-  }
-
-  /** How close adding cell (ix, iy) would bring `comp` to completing a
-   *  hexagon: the max, over the cell's 3 lattice vertices, of how many of
-   *  that vertex's 6 hexagon cells are already occupied (0–5).  Drives the
-   *  hexagon-packing bias in nearestMetalFreeTarget. */
-  private hexFillScore(occ: Set<string>, ix: number, iy: number, up: boolean): number {
-    const verts: ReadonlyArray<readonly [number, number]> = up
-      ? [[ix, iy - 2], [ix + 1, iy + 1], [ix - 1, iy + 1]]
-      : [[ix, iy + 2], [ix + 1, iy - 1], [ix - 1, iy - 1]];
-    let best = 0;
-    for (const v of verts) {
-      const m = v[0], n = v[1];
-      let cnt = 0;
-      if (occ.has(m + ',' + (n + 2))) cnt++;
-      if (occ.has((m - 1) + ',' + (n - 1))) cnt++;
-      if (occ.has((m + 1) + ',' + (n - 1))) cnt++;
-      if (occ.has(m + ',' + (n - 2))) cnt++;
-      if (occ.has((m - 1) + ',' + (n + 1))) cnt++;
-      if (occ.has((m + 1) + ',' + (n + 1))) cnt++;
-      if (cnt > best) best = cnt;
+    for (const s of METAL_HEX_CELLS) {
+      if (occ.has(s.ix + ',' + s.iy)) continue;
+      const dx = s.ix * ux - pieceLx;
+      const dy = s.iy * uy - pieceLy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; best = { ix: s.ix, iy: s.iy, up: s.up, d2 }; }
     }
     return best;
   }
@@ -2463,19 +2382,12 @@ export class ShardSystem {
     l.active = false;
   }
 
-  /** Absorb composite `other` into `host` (the ≥-sized one): blend momentum +
-   *  resources, then re-snap each of other's triangles onto host's boundary
-   *  (hexagon-biased, nearest cells first), and consume other.  This is the
-   *  composite ↔ composite "snap together" — loose-triangle accretion
-   *  generalised to whole clusters. */
-  private mergeMetalComposites(host: GameEntity, other: GameEntity): void {
-    const tm = host.mass + other.mass;
-    host.velocity.x = (host.velocity.x * host.mass + other.velocity.x * other.mass) / tm;
-    host.velocity.y = (host.velocity.y * host.mass + other.velocity.y * other.mass) / tm;
-    host.mass = tm;
-    host.health = (host.health ?? 0) + (other.health ?? 0);
-    host.maxHealth = (host.maxHealth ?? 0) + (other.maxHealth ?? 0);
-
+  /** Pour composite `other`'s triangles into `host`'s empty hexagon slots
+   *  (host is the ≥-sized one).  Triangles that fit fill the hexagon
+   *  (nearest-to-host first); any that overflow the 6 slots are released as
+   *  loose metal-shards so they rejoin the assembly cycle.  This is the
+   *  composite ↔ composite "snap together", capped at one hexagon. */
+  private mergeMetalComposites(host: GameEntity, other: GameEntity, entities: GameEntity[]): void {
     // World position of each of other's cells (its own lattice → world).
     const R = other.metalLatticeR!;
     const ux = (R * Math.sqrt(3)) / 2;
@@ -2496,12 +2408,30 @@ export class ShardSystem {
     });
     // Nearest-to-host first so cells pack inward against the existing body.
     placements.sort((a, b) => a.d2 - b.d2);
+
+    const perOtherMass = other.mass / ocells.length;
+    const perOtherHealth = Math.max(1, Math.round((other.health ?? ocells.length) / ocells.length));
     for (const p of placements) {
-      const t = this.nearestMetalFreeTarget(host, p.pwx, p.pwy, Infinity);
-      if (t) this.addCellToComposite(host, t.ix, t.iy, t.up);
+      const slot = this.nearestMetalHexSlot(host, p.pwx, p.pwy);
+      if (slot) {
+        this.addCellToComposite(host, slot.ix, slot.iy, slot.up);
+        const tm = host.mass + perOtherMass;
+        host.velocity.x = (host.velocity.x * host.mass + other.velocity.x * perOtherMass) / tm;
+        host.velocity.y = (host.velocity.y * host.mass + other.velocity.y * perOtherMass) / tm;
+        host.mass = tm;
+        host.health = (host.health ?? 0) + perOtherHealth;
+        host.maxHealth = (host.maxHealth ?? 0) + perOtherHealth;
+      } else {
+        // Host hexagon is full — this triangle overflows back to loose.
+        this.spawnLooseMetalTriangle(
+          entities, p.pwx, p.pwy, host.position.x, host.position.y,
+          R, other.color, other.sprite, perOtherHealth,
+          other.velocity.x, other.velocity.y,
+        );
+      }
     }
     this.metalRecomputeBounds(host);
-    // Shape changed — wake so the sleep/crystallization checks re-run.
+    // Shape changed — wake so the float/snap checks re-run from awake.
     host.asleep = false;
     host.sleepTimer = 0;
     other.active = false;
