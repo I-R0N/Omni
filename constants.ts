@@ -1319,6 +1319,13 @@ export const HOTSPOT_COLLAPSE = {
 // near-stopped composite to a hard rest so it sleeps cleanly.
 // BREAK_SPEED_MULT pumps extra ejection velocity into triangles when a
 // metal tile shatters (more energy "stored" in the bonds).
+//
+// Crystallization: a composite that grows to contain a complete 6-triangle
+// hexagon WITH at least HEX_MIN_OUTER of the hexagon's 6 outer faces also
+// filled snaps that hexagon onto the nearest free grid hex as a static metal
+// tile; the leftover (outer) triangles pop off as fresh loose shards at
+// RELEASE_POP_SPEED.  So the metal cycle closes: tile -> shatter -> triangles
+// -> free-float assembly -> hexagon -> tile (+ released seed triangles).
 export const METAL_ASSEMBLY = {
   ENABLED: true,
   FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
@@ -1328,6 +1335,8 @@ export const METAL_ASSEMBLY = {
   REST_SPEED: 0.08,     // below this a composite snaps to rest (→ sleeps)
   REST_SPIN: 0.05,
   BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
+  HEX_MIN_OUTER: 3,     // outer faces that must be filled before a hexagon crystallizes
+  RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on crystallization
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
