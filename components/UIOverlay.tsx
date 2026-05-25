@@ -22,8 +22,6 @@ interface UIOverlayProps {
   onToggleShardSleep?: () => void;
   onToggleShardViewportCull?: () => void;
   onToggleShardLod?: () => void;
-  onToggleNebulaContentFit?: () => void;
-  onToggleNebulaOversize?: () => void;
   onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
@@ -76,8 +74,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardSleep,
   onToggleShardViewportCull,
   onToggleShardLod,
-  onToggleNebulaContentFit,
-  onToggleNebulaOversize,
   onToggleMergeRate,
   onToggleScreenShake,
   onToggleTileOutlines,
@@ -458,29 +454,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle shard render LOD.  When ON, mobile shards too small for their polygon detail to read blit a cached solid disc instead of the full polygon fill+stroke+glow.  Purely visual — collision/physics unaffected.  OFF renders every shard at full per-vertex detail."
                   >
                     {stats.shardLodEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                {/* Nebula sizing: content-fit scales each sprite so its
-                    opaque blob fills the draw box (normalises padding);
-                    oversize enlarges past the hex.  Both compose. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NbFit</span>
-                  <button
-                    onClick={onToggleNebulaContentFit}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle content-fit nebula sizing.  ON scales each nebula sprite up so its opaque cloud fills the draw box — normalises away per-texture transparent padding so differently-cropped textures render at a consistent visible size instead of fitting to the collision outline.  OFF draws at the raw sprite size."
-                  >
-                    {stats.nebulaContentFit ? 'On' : 'Off'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NbBig</span>
-                  <button
-                    onClick={onToggleNebulaOversize}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle oversize nebula sizing.  ON multiplies the nebula draw size by NEBULA_CONSTANTS.SPRITE_OVERSIZE so clouds spill further past their hex footprint.  Composes with NbFit (fit-then-enlarge).  OFF leaves the base size."
-                  >
-                    {stats.nebulaOversize ? 'On' : 'Off'}
                   </button>
                 </div>
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">

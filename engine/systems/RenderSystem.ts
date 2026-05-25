@@ -181,15 +181,6 @@ export class RenderSystem {
   // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
   // solid disc instead of their full polygon render.  Default ON.
   public shardLodEnabled: boolean = true;
-  // DBG toggles for nebula sprite sizing (both default OFF → legacy draw).
-  //  - nebulaContentFit: scale each sprite up so its opaque content fills
-  //    the draw box, so differently-cropped/padded textures render at a
-  //    consistent visible size instead of fitting to the collision outline.
-  //  - nebulaOversize: multiply the nebula draw size by a fixed factor
-  //    (NEBULA_CONSTANTS.SPRITE_OVERSIZE) so clouds spill past their hex.
-  // They compose: enabling both fits-then-enlarges.
-  public nebulaContentFit: boolean = false;
-  public nebulaOversize: boolean = false;
   // Count of shards drawn via the LOD disc this frame — DBG perf readout.
   public lastLodShardCount: number = 0;
 
@@ -255,7 +246,7 @@ export class RenderSystem {
   // per source URL at first draw, then reused to shift drawImage so the
   // content's visual centre lands on the rotation pivot.  Prevents
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
-  private _spriteCentroids: Map<string, { dx: number, dy: number, coverage: number }> = new Map();
+  private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
   // Render buffers.  Each entry carries the entity AND its camera-local
   // render coords (rx, ry) — computed once at cull time so the draw pass
   // can translate to the right shifted position without recomputing.
@@ -468,28 +459,24 @@ export class RenderSystem {
   }
 
   /**
-   * Return the image's visible-content descriptor, computed once per
-   * source URL and cached:
-   *  - dx, dy:   normalized [-0.5, 0.5] alpha-weighted centroid offset of
-   *              the content from the bitmap centre.  The nebula draw path
-   *              shifts drawImage by this so the cloud's visual centre
-   *              lands on the rotation pivot (no "orbit around an off-
-   *              centre point" artefact on asymmetric PNGs).
-   *  - coverage: the larger of the content bounding box's width/height as
-   *              a fraction of the frame (0..1).  Drives the content-fit
-   *              sizing toggle: scaling by 1/coverage makes the visible
-   *              cloud fill the draw box regardless of the texture's
-   *              built-in transparent padding.
+   * Return the normalized (range [-0.5, 0.5]) alpha-weighted centroid
+   * offset of the image's visible content from its bitmap centre.
+   * Computed once per source URL on first call, then cached.
    *
-   * Falls back to { dx: 0, dy: 0, coverage: 1 } if the image hasn't
-   * loaded yet or getImageData is blocked (cross-origin taint) — i.e. no
-   * centroid shift and no fit rescale, same as the legacy draw.
+   * Used by the nebula draw path to shift drawImage so the cloud
+   * content's visual centre lands on the rotation pivot, eliminating
+   * the "orbit around an off-centre point" artefact you'd otherwise
+   * see when rotating PNGs whose visible pixels aren't centred.
+   *
+   * Returns (0, 0) if the image hasn't loaded yet or if getImageData
+   * is blocked (e.g. cross-origin canvas taint).  Both cases just fall
+   * back to drawing at the geometric bitmap centre — same as before.
    */
-  private getSpriteContent(src: string): { dx: number, dy: number, coverage: number } {
+  private getSpriteCentroid(src: string): { dx: number, dy: number } {
       const cached = this._spriteCentroids.get(src);
       if (cached) return cached;
       const img = this.getImage(src);
-      if (!img.complete || img.naturalWidth === 0) return { dx: 0, dy: 0, coverage: 1 };
+      if (!img.complete || img.naturalWidth === 0) return { dx: 0, dy: 0 };
 
       // Scan a fixed 256-square render of the source image so the
       // centroid is independent of the natural resolution.  Matches
@@ -499,22 +486,19 @@ export class RenderSystem {
       tmp.width = size;
       tmp.height = size;
       const tctx = tmp.getContext('2d');
-      if (!tctx) return { dx: 0, dy: 0, coverage: 1 };
+      if (!tctx) return { dx: 0, dy: 0 };
       tctx.drawImage(img, 0, 0, size, size);
 
       let imageData: ImageData;
       try {
           imageData = tctx.getImageData(0, 0, size, size);
       } catch {
-          // Canvas tainted — skip adjustment, fall back to centre + full size.
-          return { dx: 0, dy: 0, coverage: 1 };
+          // Canvas tainted — skip centroid adjustment, fall back to centre.
+          return { dx: 0, dy: 0 };
       }
 
       const data = imageData.data;
       let sumX = 0, sumY = 0, sumA = 0;
-      // Content bounding box (alpha above a small floor to ignore faint
-      // anti-aliased fringe that would otherwise inflate the box).
-      let minX = size, minY = size, maxX = -1, maxY = -1;
       for (let y = 0; y < size; y++) {
           for (let x = 0; x < size; x++) {
               const a = data[(y * size + x) * 4 + 3];
@@ -523,25 +507,16 @@ export class RenderSystem {
                   sumY += y * a;
                   sumA += a;
               }
-              if (a > 16) {
-                  if (x < minX) minX = x;
-                  if (x > maxX) maxX = x;
-                  if (y < minY) minY = y;
-                  if (y > maxY) maxY = y;
-              }
           }
       }
-      if (sumA === 0 || maxX < 0) return { dx: 0, dy: 0, coverage: 1 };
+      if (sumA === 0) return { dx: 0, dy: 0 };
 
-      const boxW = (maxX - minX + 1) / size;
-      const boxH = (maxY - minY + 1) / size;
-      const content = {
+      const offset = {
           dx: (sumX / sumA / size) - 0.5,
           dy: (sumY / sumA / size) - 0.5,
-          coverage: Math.max(boxW, boxH),
       };
-      this._spriteCentroids.set(src, content);
-      return content;
+      this._spriteCentroids.set(src, offset);
+      return offset;
   }
 
   /**
@@ -1592,24 +1567,14 @@ export class RenderSystem {
                   // tile sprite.
                   const effArea = entity.nebulaTileArea ?? HEX_AREA;
                   const areaRatio = Math.max(0, Math.min(1, effArea / HEX_AREA));
+                  const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
+                      * Math.sqrt(areaRatio);
                   // Content-centroid correction: shift the draw so the
                   // sprite's visible-pixel centroid lands on the pivot.
                   // Without this, asymmetric source PNGs appear to orbit
                   // around their bitmap centre when rotated.  Fallback is
-                  // (0, 0, 1) if the content isn't computable yet.
-                  const content = this.getSpriteContent(spriteSrc);
-                  const centroid = content;
-                  // Sizing toggles (DBG): content-fit scales the sprite up
-                  // so its opaque blob fills the draw box (normalises away
-                  // per-texture padding); oversize then enlarges past the
-                  // hex by a fixed factor.  Both off → legacy size.
-                  let sizeScale = 1;
-                  if (this.nebulaContentFit && content.coverage > 0.01) {
-                      sizeScale = Math.min(NEBULA_CONSTANTS.CONTENT_FIT_MAX_SCALE, 1 / content.coverage);
-                  }
-                  if (this.nebulaOversize) sizeScale *= NEBULA_CONSTANTS.SPRITE_OVERSIZE;
-                  const drawSize = NEBULA_CONSTANTS.TILE_SPRITE_WORLD_SIZE
-                      * Math.sqrt(areaRatio) * sizeScale;
+                  // (0, 0) if the centroid isn't computable yet.
+                  const centroid = this.getSpriteCentroid(spriteSrc);
                   const dOffset = -(drawSize / 2);
                   const dx = dOffset - centroid.dx * drawSize;
                   const dy = dOffset - centroid.dy * drawSize;
