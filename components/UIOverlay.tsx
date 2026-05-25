@@ -2,6 +2,27 @@
 import React, { useState } from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
 
+// Map menu is split into two labeled groups: the full-game "Maps" and the
+// single-element "Test Maps" showcases (plus the multi-material Tile Heavy
+// stress map).  Both the main menu and the pause screen render the same
+// groups via renderMapGroup().
+const REAL_MAPS: { type: MapType; label: string }[] = [
+  { type: MapType.UNIVERSE,    label: 'Deep Space' },
+  { type: MapType.RING,        label: 'Ring World' },
+  { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
+  { type: MapType.POCKET,      label: 'Pocket' },
+];
+const TEST_MAPS: { type: MapType; label: string }[] = [
+  { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
+  { type: MapType.GLASS_FIELD,          label: 'Glass Field' },
+  { type: MapType.PLASTIC_FIELD,        label: 'Plastic Field' },
+  { type: MapType.METAL_FIELD,          label: 'Metal Field' },
+  { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
+  { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
+  { type: MapType.ROCK_FIELD,           label: 'Rock Field' },
+  { type: MapType.TILE_HEAVY,           label: 'Tile Heavy' },
+];
+
 interface UIOverlayProps {
   stats: EngineStats;
   onCycleWeapon?: () => void;
@@ -125,6 +146,30 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
+
+  // Labeled grid of map buttons, shared by the main menu and the pause
+  // screen.  Selecting one routes through onSetMapType — a no-op-style
+  // backdrop swap on the menu, a live switch-and-play mid-game.
+  const renderMapGroup = (heading: string, maps: { type: MapType; label: string }[]) => (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>
+      <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+        {maps.map(opt => (
+          <button
+            key={opt.type}
+            onClick={() => onSetMapType && onSetMapType(opt.type)}
+            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+              mapType === opt.type
+                ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
   // Human label for the cycling blend-alpha buttons.  Mirrors the
   // four-step cycle Off / Slow / Med / Fast across both Tile and
   // Shard blend knobs; the underlying values differ per cycle (see
@@ -897,36 +942,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               ))}
             </div>
           </div>
-          <div className="mb-8 flex flex-col items-center gap-3">
-            <span className="text-slate-200 text-sm tracking-wide">Map</span>
-            <div className="flex flex-wrap justify-center gap-2 max-w-xl">
-              {[
-                { type: MapType.UNIVERSE,             label: 'Deep Space' },
-                { type: MapType.RING,                 label: 'Ring World' },
-                { type: MapType.SEVEN_RINGS,          label: 'Seven Rings' },
-                { type: MapType.POCKET,               label: 'Pocket' },
-                { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
-                { type: MapType.GLASS_FIELD,          label: 'Glass Field' },
-                { type: MapType.PLASTIC_FIELD,        label: 'Plastic Field' },
-                { type: MapType.METAL_FIELD,          label: 'Metal Field' },
-                { type: MapType.INDESTRUCTIBLE_FIELD, label: 'Indestructible' },
-                { type: MapType.NEBULA_FIELD,         label: 'Nebula Field' },
-                { type: MapType.ROCK_FIELD,           label: 'Rock Field' },
-                { type: MapType.TILE_HEAVY,           label: 'Tile Heavy' },
-              ].map(opt => (
-                <button
-                  key={opt.type}
-                  onClick={() => onSetMapType && onSetMapType(opt.type)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-                    mapType === opt.type
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+          <div className="mb-8 flex flex-col items-center gap-5">
+            {renderMapGroup('Maps', REAL_MAPS)}
+            {renderMapGroup('Test Maps', TEST_MAPS)}
           </div>
           <button
             onClick={onStart}
@@ -961,6 +979,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </svg>
               RESTART
             </button>
+          </div>
+          {/* Live map picker — selecting one switches maps and drops
+              straight into a fresh run (switch-and-play). */}
+          <div className="mt-10 flex flex-col items-center gap-5">
+            {renderMapGroup('Maps', REAL_MAPS)}
+            {renderMapGroup('Test Maps', TEST_MAPS)}
           </div>
         </div>
       )}

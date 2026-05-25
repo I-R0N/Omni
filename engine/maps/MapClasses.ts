@@ -545,7 +545,7 @@ function concentricRingFlow(wx: number, wy: number): FlowVector {
  * never materialises inside a tile/asteroid regardless of which element
  * is selected.
  */
-const SINGLE_ELEMENT_MAP_SIZE   = 12000;
+const SINGLE_ELEMENT_MAP_SIZE   = 6000;
 const SINGLE_ELEMENT_SPAWN_CLEAR = 350;
 // Cluster zone shrinks by the same 5 % safe-fraction used on the
 // UniverseMap so clusters never crowd the wrap seam.

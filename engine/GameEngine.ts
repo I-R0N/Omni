@@ -1041,9 +1041,11 @@ export class GameEngine {
     }
   }
 
-  /** Set the map style that the next restart / startGame will use.
-   *  Called from the main menu.  No-op mid-game; the next restart
-   *  (triggered by the UI) will pick up the new selection. */
+  /** Select the active map.  From the main menu this just swaps the
+   *  backdrop the next startGame() will use.  Mid-game (paused or
+   *  playing) it performs a full switch-and-play: reset the run, load
+   *  the chosen map, and drop straight back into PLAYING so the map
+   *  grid in the pause screen acts as a live map picker. */
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
@@ -1052,6 +1054,11 @@ export class GameEngine {
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
       this.player.position = { ...this.currentMap!.playerSpawn };
+      this.prepareFrameEntities();
+    } else {
+      this.resetAndLoadSelectedMap();
+      this.gameState = GameState.PLAYING;
+      this.initWaveSystem();
       this.prepareFrameEntities();
     }
   }
@@ -1164,7 +1171,11 @@ export class GameEngine {
     }
   }
 
-  public restartGame() {
+  /** Reset all run state and load a fresh copy of `selectedMapType`.
+   *  Shared by restartGame() (→ MENU) and the mid-game map switch in
+   *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
+   *  decides the target state and pushes the frame. */
+  private resetAndLoadSelectedMap() {
       this.shards.reset();
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
@@ -1188,12 +1199,15 @@ export class GameEngine {
       this.chainBreakPending = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
-      
+
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
       this.camera.position = { x: 0, y: 0 };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
+  }
 
+  public restartGame() {
+      this.resetAndLoadSelectedMap();
       this.gameState = GameState.MENU;
       this.prepareFrameEntities();
   }
