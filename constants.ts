@@ -2784,6 +2784,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // strikers fly through and shatter on contact while the tile
     // keeps its static-grid placement.  See docs/SHARD_SYSTEM.md §6.C.
     passThrough: true,
+    // Proximity glow — the cloud brightens as the player approaches.
+    // Nebula has no repel field (passThrough), so unlike glass/metal
+    // (repel-driven) this is player-distance driven, like the
+    // indestructible-tile bloom.  RenderSystem paints it as an additive
+    // re-draw of the tinted sprite scaled by proximity; `color` is
+    // unused by that brighten (kept for schema parity).  Distinguishes
+    // interactive nebula tiles from the static background nebulae.
+    glow: { color: '#ffffff', range: 220, peakAlpha: 0.7 },
     // Slow-path tint compute is expensive enough to merit caching.
     renderCache: 'composition',
     spawnsDropsOnDeath: false,                  // NebulaSystem handles its own ammo roll
