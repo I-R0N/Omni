@@ -1625,6 +1625,10 @@ export class PhysicsSystem {
       b: GameEntity,
       onDeath?: (entity: GameEntity) => void,
   ) {
+      // Non-nebula shards (metal / rock / glass, loose or composite) never
+      // collide with nebula shards — skip before any routing / SAT work.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
       // Cheapest possible early-outs first — most pair calls discard
       // here before paying any further work.
 
@@ -1789,6 +1793,29 @@ export class PhysicsSystem {
       maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
+  /**
+   * Nebula isolation rule: a nebula tile/shard physically interacts ONLY with
+   * nebula shards (nebula-shard ↔ nebula-shard and nebula-shard ↔ nebula-tile)
+   * plus player/enemy/projectile strikers (which shatter tiles / fly through).
+   * Every other shard family — metal / rock / glass, loose OR composite —
+   * passes through nebula entirely.  Returns true when the pair must be
+   * skipped (no collision response).  This is the single explicit gate for
+   * the rule; the per-variant passThrough flag still backs it up.
+   */
+  private nebulaPassThroughPair(a: GameEntity, b: GameEntity): boolean {
+      const av = a.shardVariant;
+      const bv = b.shardVariant;
+      const aNeb = av === 'nebula-tile' || av === 'nebula-shard';
+      const bNeb = bv === 'nebula-tile' || bv === 'nebula-shard';
+      // Both nebula → allowed (handled by the nebula pair paths).  Neither
+      // nebula → not our concern.
+      if (aNeb === bNeb) return false;
+      // Exactly one side is nebula.  The OTHER side passes through unless it
+      // is itself a shard/tile (has a shardVariant) — strikers have none, so
+      // the tile-shatter path keeps working for player/enemy/projectiles.
+      return (aNeb ? bv : av) !== undefined;
+  }
+
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
@@ -1797,6 +1824,9 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
+      // Non-nebula shards (metal / rock / glass) never collide with nebula.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.

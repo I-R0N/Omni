@@ -3169,6 +3169,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // The flag is the cleanest fix and matches today's "shards are
     // INDESTRUCTIBLE — they pass through unchanged" behaviour.
     passThrough: true,
+    // Nebula shards interact ONLY with other nebula entities, so they ignore
+    // the metal-tile / glass-tile repel fields too (those would otherwise
+    // shove a passing nebula shard — the one cross-family push that bypasses
+    // passThrough).
+    repelImmune: true,
     spawnsDropsOnDeath: false,
     // Density compaction: nebula shards already grow toward
     // transmutation (HEX_AREA accumulation).  Density layers a
