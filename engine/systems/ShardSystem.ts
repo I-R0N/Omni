@@ -659,6 +659,10 @@ export class ShardSystem {
         scatterAngle = Math.random() * Math.PI * 2;
         scatterSpeed = 1 + Math.random() * 2;
       }
+      // Metal shatter debris carries extra energy — the triangles eject
+      // fast and float apart (it reads as energy that was holding the
+      // assembled shape together) before the assembly pull reels them in.
+      if (childVariant.id === 'metal-shard') scatterSpeed *= METAL_ASSEMBLY.BREAK_SPEED_MULT;
 
       const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
       const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
@@ -1617,8 +1621,11 @@ export class ShardSystem {
       // Apply pull force toward the chosen target (if any).  Metal
       // composites (metalCells set) don't actively seek — only loose pieces
       // are pulled in to snap — so formed shapes don't drift-pile onto each
-      // other before composite-composite merging exists.
-      if (bestPullTarget && wantsPull && a.metalCells === undefined) {
+      // other before composite-composite merging exists.  Metal triangles
+      // still in their post-break grace also aren't pulled, so they float
+      // free for the delay before assembly begins.
+      const metalInGrace = a.shardVariant === 'metal-shard' && (a.collapseGraceTimer ?? 0) > 0;
+      if (bestPullTarget && wantsPull && a.metalCells === undefined && !metalInGrace) {
         const dx = wrapDeltaX(a.position.x, bestPullTarget.position.x);
         const dy = wrapDeltaY(a.position.y, bestPullTarget.position.y);
         const dist = Math.sqrt(bestPullDistSq);
@@ -2035,10 +2042,13 @@ export class ShardSystem {
     const SNAP = METAL_ASSEMBLY.SNAP_RANGE_R * R;
     const FORM = METAL_ASSEMBLY.FORM_RANGE_R * R;
 
-    // Pass 1 — loose → composite.
+    // Pass 1 — loose → composite.  A freshly-shattered triangle is left to
+    // float free until its post-break grace (collapseGraceTimer) expires —
+    // that's the delay before it starts snapping onto anything.
     for (let i = 0; i < loose.length; i++) {
       const l = loose[i];
       if (!l.active || l.metalCells !== undefined) continue;
+      if ((l.collapseGraceTimer ?? 0) > 0) continue;
       let best: GameEntity | null = null;
       let bestTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
       for (let c = 0; c < composites.length; c++) {
@@ -2068,6 +2078,7 @@ export class ShardSystem {
     for (let i = 0; i < loose.length; i++) {
       const l = loose[i];
       if (!l.active || l.metalCells !== undefined) continue;
+      if ((l.collapseGraceTimer ?? 0) > 0) continue;
       const k = gkey(Math.floor(l.position.x / CELL), Math.floor(l.position.y / CELL));
       let b = grid.get(k);
       if (!b) { b = []; grid.set(k, b); }
@@ -2077,6 +2088,7 @@ export class ShardSystem {
     for (let i = 0; i < loose.length; i++) {
       const a = loose[i];
       if (!a.active || a.metalCells !== undefined) continue;
+      if ((a.collapseGraceTimer ?? 0) > 0) continue;
       const cx = Math.floor(a.position.x / CELL);
       const cy = Math.floor(a.position.y / CELL);
       let partner = -1;
@@ -2198,6 +2210,18 @@ export class ShardSystem {
     // Orient the lattice so cell (0,2) (local +y) lies along a→b, then drop
     // the origin at the pair's mass centroid (midpoint of equal masses).
     a.rotation = Math.atan2(wdy, wdx) - Math.PI / 2;
+
+    // Approximate angular-momentum transfer about the new centroid: an
+    // off-centre approach (the pair's relative velocity has a tangential
+    // component) spins the composite, so it rotates as one body.  Equal
+    // masses sit at ±(b-a)/2 from the centroid; L = Σ m(r × v), I = Σ m|r|².
+    const rax = -wdx * 0.5, ray = -wdy * 0.5;
+    const rbx = wdx * 0.5, rby = wdy * 0.5;
+    const L = a.mass * (rax * a.velocity.y - ray * a.velocity.x)
+            + b.mass * (rbx * b.velocity.y - rby * b.velocity.x);
+    const I = a.mass * (rax * rax + ray * ray) + b.mass * (rbx * rbx + rby * rby);
+    const spin = I > 1e-6 ? Math.max(-2.5, Math.min(2.5, L / I)) : 0;
+
     a.position.x += wdx * 0.5;
     a.position.y += wdy * 0.5;
     wrapPosition(a.position);
@@ -2211,9 +2235,13 @@ export class ShardSystem {
 
     a.metalLatticeR = R;
     a.metalCells = [{ ix: 0, iy: 0, up: true }, { ix: 0, iy: 2, up: false }];
-    a.rotationSpeed = 0;
+    a.rotationSpeed = spin;
+    // Inertial free-floater: full retention + zero rest-snap floor so the
+    // composite keeps drifting/spinning rather than coasting to a halt.
     a.linearDamping = METAL_ASSEMBLY.LINEAR_DAMPING;
     a.angularDamping = METAL_ASSEMBLY.ANGULAR_DAMPING;
+    a.restSpeed = 0;
+    a.restSpin = 0;
     this.metalRecomputeBounds(a);
     b.active = false;
   }

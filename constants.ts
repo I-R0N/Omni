@@ -1306,14 +1306,23 @@ export const HOTSPOT_COLLAPSE = {
 // `SNAP_RANGE` is how close a loose triangle's centroid must come to a
 // composite's empty boundary cell to lock into it.  Both are multiples of
 // a triangle's circumradius R (≈ HEX_SIZE/√3 ≈ 12.7), so they scale with
-// the piece size.  DAMPING values keep a formed composite drifting/spinning
-// freely (low bleed) rather than coasting to a halt like loose debris.
+// the piece size.
+//
+// DAMPING values are velocity/spin RETENTION factors per 60 Hz step
+// (applied as Math.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
+// inertial drift (the body keeps floating/spinning forever), < 1.0 bleeds
+// motion.  Paired with restSpeed/restSpin = 0 on the composite so tiny
+// drifts aren't snapped to a halt — that's what makes assembled shapes
+// float freely in space.  BREAK_SPEED_MULT pumps extra ejection velocity
+// into triangles when a metal tile shatters (more energy "stored" in the
+// bonds), so they fly apart and float before the pull draws them back.
 export const METAL_ASSEMBLY = {
   ENABLED: true,
-  FORM_RANGE_R: 1.6,   // × R — loose+loose fuse within this centroid distance
-  SNAP_RANGE_R: 1.7,   // × R — loose locks to a composite's empty cell within this
-  LINEAR_DAMPING: 0.0, // per-second velocity bleed for composites (0 = inertial)
-  ANGULAR_DAMPING: 0.0,
+  FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
+  SNAP_RANGE_R: 1.7,    // × R — loose locks to a composite's empty cell within this
+  LINEAR_DAMPING: 1.0,  // velocity retention/step (1 = inertial, no drag)
+  ANGULAR_DAMPING: 1.0,
+  BREAK_SPEED_MULT: 3.0, // extra ejection speed for metal-tile shatter debris
 };
 
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
