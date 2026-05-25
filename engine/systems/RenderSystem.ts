@@ -323,32 +323,40 @@ export class RenderSystem {
   // stays small (typically 4-7 bitmaps across an active map).
   private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
 
-  // LOD solid-disc cache (Step 4).  Keyed by fill colour; a flat
-  // opaque filled circle blitted for mobile shards too small for their
-  // polygon detail to read.  Bounded like the tinted-sprite cache —
-  // the rock/glass/metal palette + density-tier darkening yields only a
-  // handful of distinct colours in practice.
-  private _solidDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+  // LOD solid-triangle cache (Step 4).  Keyed by fill colour; a flat
+  // opaque filled equilateral triangle blitted for metal shards too small
+  // for their polygon detail to read.  Metal shards are equilateral
+  // triangles, so the cached silhouette is a triangle (apex-up in local
+  // space, matching their spawn polygon) — the per-entity ctx transform
+  // applies entity.rotation, so the blit lands at the correct orientation.
+  // Bounded like the tinted-sprite cache — the metal palette + density-
+  // tier darkening yields only a handful of distinct colours in practice.
+  private _solidTriangleBitmaps: Map<string, HTMLCanvasElement> = new Map();
 
-  private getSolidDiscBitmap(hex: string): HTMLCanvasElement {
-      const cached = this._solidDiscBitmaps.get(hex);
+  private getSolidTriangleBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._solidTriangleBitmaps.get(hex);
       if (cached) return cached;
       const size = SHARD_LOD_CONSTANTS.DISC_BITMAP_SIZE;
       const c = document.createElement('canvas');
       c.width = size; c.height = size;
       const cx = c.getContext('2d')!;
       const center = size / 2;
+      // Inset by 1px so the triangle's anti-aliased edges aren't clipped
+      // by the bitmap bounds when blitted.  Vertices at -90° / 30° / 150°
+      // (apex up) match DropSystem's equilateral-triangle spawn polygon.
+      const R = center - 1;
       cx.fillStyle = hex;
       cx.beginPath();
-      // Inset by 1px so the disc's anti-aliased rim isn't clipped by the
-      // bitmap edge when blitted.
-      cx.arc(center, center, center - 1, 0, Math.PI * 2);
+      cx.moveTo(center, center - R);
+      cx.lineTo(center + R * Math.cos(Math.PI / 6), center + R * Math.sin(Math.PI / 6));
+      cx.lineTo(center + R * Math.cos(5 * Math.PI / 6), center + R * Math.sin(5 * Math.PI / 6));
+      cx.closePath();
       cx.fill();
-      if (this._solidDiscBitmaps.size >= 64) {
-          const firstKey = this._solidDiscBitmaps.keys().next().value;
-          if (firstKey !== undefined) this._solidDiscBitmaps.delete(firstKey);
+      if (this._solidTriangleBitmaps.size >= 64) {
+          const firstKey = this._solidTriangleBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._solidTriangleBitmaps.delete(firstKey);
       }
-      this._solidDiscBitmaps.set(hex, c);
+      this._solidTriangleBitmaps.set(hex, c);
       return c;
   }
 
@@ -2216,29 +2224,29 @@ export class RenderSystem {
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
 
-                // ── LOD: tiny metal shards → cached solid disc ─────────────
-                // Below MIN_APPARENT_RADIUS_PX a near-circular shard's polygon
-                // detail, edge stroke and bloom are sub-pixel, so a flat disc
-                // is indistinguishable from the full render at a fraction of
-                // the cost (one drawImage vs beginPath + per-vertex lineTo +
-                // fill + stroke).  Restricted to metal-shard ONLY: its
-                // 6-10-gon at radiusMin 0.88 / jitter 0.20 is already a near-
-                // perfect circle, so the disc is faithful.  Rock (irregular
-                // 5-9-gon) and glass (3-4-vertex sharp splinter) are EXCLUDED
-                // — their silhouette is part of the material's identity and a
-                // circle reads as a mis-render even when small.  Also excluded:
-                // hit-flashing and power-up-glowing shards (cues must read).
-                // Reset globalAlpha before the early return so a following
-                // fast-path tile blit isn't faded.
+                // ── LOD: tiny metal shards → cached solid triangle ─────────
+                // Below MIN_APPARENT_RADIUS_PX the equilateral-triangle metal
+                // shard's edge stroke and bloom are sub-pixel, so a flat
+                // filled triangle is indistinguishable from the full render at
+                // a fraction of the cost (one drawImage vs beginPath +
+                // per-vertex lineTo + fill + stroke).  The cached bitmap is a
+                // triangle (NOT a disc) so the silhouette stays faithful —
+                // metal shards read as triangles, and a circle here was a
+                // mis-render.  Restricted to metal-shard; rock (irregular
+                // 5-9-gon) and glass (sharp splinter) are EXCLUDED — their
+                // silhouette is part of the material's identity.  Also
+                // excluded: hit-flashing and power-up-glowing shards (cues
+                // must read).  Reset globalAlpha before the early return so a
+                // following fast-path tile blit isn't faded.
                 const lodR = entity.size.x * 0.5;
                 if (this.shardLodEnabled
                     && entity.shardVariant === 'metal-shard'
                     && !isFlash
                     && glowColor === undefined
                     && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
-                    const disc = this.getSolidDiscBitmap(densityTintForRender(entity, entity.color));
+                    const tri = this.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
                     ctx.globalAlpha = shardMergeFadeAlpha(entity);
-                    ctx.drawImage(disc, -lodR, -lodR, lodR * 2, lodR * 2);
+                    ctx.drawImage(tri, -lodR, -lodR, lodR * 2, lodR * 2);
                     ctx.globalAlpha = 1.0;
                     this.lastLodShardCount++;
                     return;
