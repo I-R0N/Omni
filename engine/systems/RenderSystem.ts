@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getActivePlasticBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -113,7 +113,7 @@ function densityTintForRender(entity: GameEntity, baseHex: string): string {
  * the soft-disc bitmap cache stays warm.
  */
 function plasticAutomataHex(neighborCount: number): string {
-    const base = getActivePlasticBaseShade();
+    const base = getPlasticShardBaseShade();
     if (neighborCount <= 0) return base;
     const t = Math.min(1, neighborCount / PLASTIC_SHARD_AUTOMATA.MAX_NEIGHBORS);
     const target = isPlasticAutomataBrighten()
@@ -195,7 +195,13 @@ export class RenderSystem {
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
   // false, they keep their per-instance random shade.  Default ON.
-  public plasticAutomataEnabled: boolean = true;
+  public plasticAutomataEnabled: boolean = false;
+  // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
+  // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
+  // solid disc instead of their full polygon render.  Default ON.
+  public shardLodEnabled: boolean = true;
+  // Count of shards drawn via the LOD disc this frame — DBG perf readout.
+  public lastLodShardCount: number = 0;
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -232,6 +238,58 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
+
+  // DBG collision outline for metal shards (matches the nebula/plastic
+  // overlays).  Assumes ctx is already translated to the entity centroid
+  // and rotated by entity.rotation.  Shows the actual collision geometry:
+  // a composite outlines each lattice cell triangle (the per-cell SAT
+  // colliders, exactly the connected shape); a loose triangle shows its SAT
+  // polygon plus the inscribed shard-pair circle (size.x*0.25).  Orange to
+  // distinguish from the cyan nebula/plastic strokes.
+  private drawMetalDebugOutline(ctx: CanvasRenderingContext2D, entity: GameEntity): void {
+    if (!(this.debugMode || this.tileOutlinesEnabled)) return;
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = '#f97316'; // orange-500
+    ctx.lineWidth = 1;
+    if (entity.metalCells && entity.metalCells.length > 0 && entity.metalLatticeR) {
+      const R = entity.metalLatticeR;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const cells = entity.metalCells;
+      let cmx = 0, cmy = 0;
+      for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+      cmx /= cells.length; cmy /= cells.length;
+      for (const c of cells) {
+        const ccx = c.ix * ux - cmx;
+        const ccy = c.iy * uy - cmy;
+        ctx.beginPath();
+        if (c.up) {
+          ctx.moveTo(ccx, ccy - R);
+          ctx.lineTo(ccx + ux, ccy + uy);
+          ctx.lineTo(ccx - ux, ccy + uy);
+        } else {
+          ctx.moveTo(ccx, ccy + R);
+          ctx.lineTo(ccx + ux, ccy - uy);
+          ctx.lineTo(ccx - ux, ccy - uy);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    } else {
+      const pts = entity.polygonPoints;
+      if (pts && pts.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, entity.size.x * 0.25, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+  }
 
   // Optional PhysicsSystem reference for spatial queries — today only the
   // material-tile branch uses it (to suppress edge strokes on edges that
@@ -341,6 +399,43 @@ export class RenderSystem {
   // lives in a cache instead of being computed inline.  Cache size
   // stays small (typically 4-7 bitmaps across an active map).
   private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  // LOD solid-triangle cache (Step 4).  Keyed by fill colour; a flat
+  // opaque filled equilateral triangle blitted for metal shards too small
+  // for their polygon detail to read.  Metal shards are equilateral
+  // triangles, so the cached silhouette is a triangle (apex-up in local
+  // space, matching their spawn polygon) — the per-entity ctx transform
+  // applies entity.rotation, so the blit lands at the correct orientation.
+  // Bounded like the tinted-sprite cache — the metal palette + density-
+  // tier darkening yields only a handful of distinct colours in practice.
+  private _solidTriangleBitmaps: Map<string, HTMLCanvasElement> = new Map();
+
+  private getSolidTriangleBitmap(hex: string): HTMLCanvasElement {
+      const cached = this._solidTriangleBitmaps.get(hex);
+      if (cached) return cached;
+      const size = SHARD_LOD_CONSTANTS.DISC_BITMAP_SIZE;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const cx = c.getContext('2d')!;
+      const center = size / 2;
+      // Inset by 1px so the triangle's anti-aliased edges aren't clipped
+      // by the bitmap bounds when blitted.  Vertices at -90° / 30° / 150°
+      // (apex up) match DropSystem's equilateral-triangle spawn polygon.
+      const R = center - 1;
+      cx.fillStyle = hex;
+      cx.beginPath();
+      cx.moveTo(center, center - R);
+      cx.lineTo(center + R * Math.cos(Math.PI / 6), center + R * Math.sin(Math.PI / 6));
+      cx.lineTo(center + R * Math.cos(5 * Math.PI / 6), center + R * Math.sin(5 * Math.PI / 6));
+      cx.closePath();
+      cx.fill();
+      if (this._solidTriangleBitmaps.size >= 64) {
+          const firstKey = this._solidTriangleBitmaps.keys().next().value;
+          if (firstKey !== undefined) this._solidTriangleBitmaps.delete(firstKey);
+      }
+      this._solidTriangleBitmaps.set(hex, c);
+      return c;
+  }
 
   private getSoftDiscBitmap(
       hex: string,
@@ -769,6 +864,7 @@ export class RenderSystem {
     // indestructible path, asteroid/shard branch's rock-tile path).
     this.lastTileLightingMs = 0;
     this.lastTileLightingCount = 0;
+    this.lastLodShardCount = 0;
 
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
@@ -2198,6 +2294,12 @@ export class RenderSystem {
                         ctx.lineWidth = 1;
                         ctx.stroke();
                     }
+
+                    // Proximity glow — the tile face brightens as the
+                    // player nears (player-distance driven, like the
+                    // glass / indestructible blooms).  Painted last so it
+                    // sits over the fill.
+                    this.timedTileBloom(ctx, entity, playerPos);
                 }
 
             } else if (isMaterialTile) {
@@ -2384,9 +2486,75 @@ export class RenderSystem {
                 // policy.  Dispatch by mass: static (Infinity) →
                 // tile, finite → mobile shard.
                 const isFlash   = entity.mass !== Infinity && !!entity.hitFlash && entity.hitFlash > 0;
+
+                // ── Metal rigid composite — draw each lattice cell ─────────
+                // The ctx is already translated to the composite centroid and
+                // rotated by entity.rotation, so cells render in the lattice
+                // frame.  Adjacent cells' fills meet exactly, reading as one
+                // solid metal shape.
+                if (entity.metalCells && entity.metalCells.length > 0 && entity.metalLatticeR) {
+                    const R = entity.metalLatticeR;
+                    const ux = (R * Math.sqrt(3)) / 2;
+                    const uy = R / 2;
+                    const cells = entity.metalCells;
+                    let cmx = 0, cmy = 0;
+                    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+                    cmx /= cells.length; cmy /= cells.length;
+                    ctx.globalAlpha = shardMergeFadeAlpha(entity);
+                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, entity.color);
+                    for (const c of cells) {
+                        const ccx = c.ix * ux - cmx;
+                        const ccy = c.iy * uy - cmy;
+                        ctx.beginPath();
+                        if (c.up) {
+                            ctx.moveTo(ccx, ccy - R);
+                            ctx.lineTo(ccx + ux, ccy + uy);
+                            ctx.lineTo(ccx - ux, ccy + uy);
+                        } else {
+                            ctx.moveTo(ccx, ccy + R);
+                            ctx.lineTo(ccx + ux, ccy - uy);
+                            ctx.lineTo(ccx - ux, ccy - uy);
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    ctx.globalAlpha = 1.0;
+                    this.drawMetalDebugOutline(ctx, entity);
+                    return;
+                }
+
                 const isTileShard = entity.shardVariant === 'glass-shard';
                 const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
+
+                // ── LOD: tiny metal shards → cached solid triangle ─────────
+                // Below MIN_APPARENT_RADIUS_PX the equilateral-triangle metal
+                // shard's edge stroke and bloom are sub-pixel, so a flat
+                // filled triangle is indistinguishable from the full render at
+                // a fraction of the cost (one drawImage vs beginPath +
+                // per-vertex lineTo + fill + stroke).  The cached bitmap is a
+                // triangle (NOT a disc) so the silhouette stays faithful —
+                // metal shards read as triangles, and a circle here was a
+                // mis-render.  Restricted to metal-shard; rock (irregular
+                // 5-9-gon) and glass (sharp splinter) are EXCLUDED — their
+                // silhouette is part of the material's identity.  Also
+                // excluded: hit-flashing and power-up-glowing shards (cues
+                // must read).  Reset globalAlpha before the early return so a
+                // following fast-path tile blit isn't faded.
+                const lodR = entity.size.x * 0.5;
+                if (this.shardLodEnabled
+                    && entity.shardVariant === 'metal-shard'
+                    && !isFlash
+                    && glowColor === undefined
+                    && lodR * camera.zoom < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) {
+                    const tri = this.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
+                    ctx.globalAlpha = shardMergeFadeAlpha(entity);
+                    ctx.drawImage(tri, -lodR, -lodR, lodR * 2, lodR * 2);
+                    ctx.globalAlpha = 1.0;
+                    this.drawMetalDebugOutline(ctx, entity);
+                    this.lastLodShardCount++;
+                    return;
+                }
 
                 if (isPlasticShard) {
                     // ── Plastic shard — soft-edge disc + wiggle ────────────
@@ -2619,6 +2787,10 @@ export class RenderSystem {
                 // hundreds of times per frame.
                 if (entity.mass === Infinity) {
                     this.timedTileBloom(ctx, entity, playerPos);
+                }
+
+                if (entity.shardVariant === 'metal-shard') {
+                    this.drawMetalDebugOutline(ctx, entity);
                 }
             }
 

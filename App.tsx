@@ -141,6 +141,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleShardTilePairInterval();
   };
 
+  const handleTogglePerfAuto = () => {
+      if (engineRef.current) engineRef.current.togglePerfAuto();
+  };
+
   const handleToggleShardGravity = () => {
       if (engineRef.current) engineRef.current.toggleShardGravity();
   };
@@ -151,6 +155,22 @@ const App: React.FC = () => {
 
   const handleToggleNebulaShardCollisions = () => {
       if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
+  };
+
+  const handleToggleShardSleep = () => {
+      if (engineRef.current) engineRef.current.toggleShardSleep();
+  };
+
+  const handleToggleShardViewportCull = () => {
+      if (engineRef.current) engineRef.current.toggleShardViewportCull();
+  };
+
+  const handleToggleShardLod = () => {
+      if (engineRef.current) engineRef.current.toggleShardLod();
+  };
+
+  const handleToggleMergeRate = () => {
+      if (engineRef.current) engineRef.current.toggleMergeRate();
   };
 
   const handleToggleScreenShake = () => {
@@ -207,6 +227,10 @@ const App: React.FC = () => {
 
   const handleCyclePlasticYield = () => {
       if (engineRef.current) engineRef.current.cyclePlasticYield();
+  };
+
+  const handleCycleShatterGrace = () => {
+      if (engineRef.current) engineRef.current.cycleShatterGrace();
   };
 
   const handleCyclePlasticStiffness = () => {
@@ -307,9 +331,14 @@ const App: React.FC = () => {
         onToggleShardTileCollisions={handleToggleShardTileCollisions}
         onCycleShardPairInterval={handleCycleShardPairInterval}
         onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
+        onTogglePerfAuto={handleTogglePerfAuto}
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
+        onToggleShardSleep={handleToggleShardSleep}
+        onToggleShardViewportCull={handleToggleShardViewportCull}
+        onToggleShardLod={handleToggleShardLod}
+        onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
@@ -324,6 +353,7 @@ const App: React.FC = () => {
         onCyclePlasticCoreRadius={handleCyclePlasticCoreRadius}
         onCyclePlasticBlendRadius={handleCyclePlasticBlendRadius}
         onCyclePlasticYield={handleCyclePlasticYield}
+        onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}
         onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}

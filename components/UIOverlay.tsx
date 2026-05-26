@@ -40,6 +40,10 @@ interface UIOverlayProps {
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
+  onToggleShardSleep?: () => void;
+  onToggleShardViewportCull?: () => void;
+  onToggleShardLod?: () => void;
+  onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
@@ -54,6 +58,7 @@ interface UIOverlayProps {
   onCyclePlasticCoreRadius?: () => void;
   onCyclePlasticBlendRadius?: () => void;
   onCyclePlasticYield?: () => void;
+  onCycleShatterGrace?: () => void;
   onCyclePlasticStiffness?: () => void;
   onCyclePlasticDamping?: () => void;
   onCyclePlasticImpactCooldown?: () => void;
@@ -74,6 +79,7 @@ interface UIOverlayProps {
   onCycleFFBreathe?: () => void;
   onCycleFFLaneJitter?: () => void;
   onCycleFFPattern?: () => void;
+  onTogglePerfAuto?: () => void;
   onSkipWave?: () => void;
   difficulty?: number;
   onSetDifficulty?: (level: number) => void;
@@ -98,6 +104,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardGravity,
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
+  onToggleShardSleep,
+  onToggleShardViewportCull,
+  onToggleShardLod,
+  onToggleMergeRate,
   onToggleScreenShake,
   onToggleTileOutlines,
   onTogglePlasticAutomata,
@@ -112,6 +122,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticCoreRadius,
   onCyclePlasticBlendRadius,
   onCyclePlasticYield,
+  onCycleShatterGrace,
   onCyclePlasticStiffness,
   onCyclePlasticDamping,
   onCyclePlasticImpactCooldown,
@@ -132,6 +143,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleFFBreathe,
   onCycleFFLaneJitter,
   onCycleFFPattern,
+  onTogglePerfAuto,
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
@@ -481,6 +493,60 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
                   >
                     {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sleep</span>
+                  <button
+                    onClick={onToggleShardSleep}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle collision-sleep for mobile shards.  When ON, resting shards stop resolving against each other (the bulk of a settled field) until disturbed by an awake body.  OFF resolves every pair every pass — use to A/B-test the win and confirm sleeping never freezes a shard through a real collision."
+                  >
+                    {stats.shardSleepEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">VpCull</span>
+                  <button
+                    onClick={onToggleShardViewportCull}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle viewport-gated shard-pair cadence.  When ON, two shards that are both offscreen resolve their collision only on a periodic catch-up pass (~8x less often); any pair with a shard on/near the camera resolves every pass.  OFF resolves every pair regardless of visibility — use to confirm no visible pop when off-screen piles scroll into view."
+                  >
+                    {stats.shardViewportCullEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShLOD</span>
+                  <button
+                    onClick={onToggleShardLod}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle shard render LOD.  When ON, mobile shards too small for their polygon detail to read blit a cached solid disc instead of the full polygon fill+stroke+glow.  Purely visual — collision/physics unaffected.  OFF renders every shard at full per-vertex detail."
+                  >
+                    {stats.shardLodEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">MrgRt</span>
+                  <button
+                    onClick={onToggleMergeRate}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Toggle the local-density merge/absorption rate.  When ON, shards in dense pockets (hotspots) merge & absorb faster while big absorbing rocks slow down, consolidating clusters into a few big rocks that condense to static tiles.  OFF holds the rate at a neutral 1.0x (base rate, base budget).  The 'merge rate' readout below shows the live peak local multiplier."
+                  >
+                    {stats.mergeRateEnabled === false ? 'Off' : 'On'}
+                  </button>
+                </div>
+                {/* Hot-spot-collapse grace delay — how long freshly-
+                    shattered rock/glass shards are exempt from the
+                    overlap-collapse pass (so debris scatters before it
+                    can re-condense).  0.6 → 3.6s in 0.6s steps. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grace</span>
+                  <button
+                    onClick={onCycleShatterGrace}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the hot-spot-collapse grace delay (0.6 → 3.6s, 0.6s steps).  Freshly-shattered rock/glass shards are exempt from the overlap-collapse pass for this long, so a just-destroyed tile's debris scatters instead of instantly re-condensing.  Applies to tiles destroyed after the change."
+                  >
+                    {stats.shatterGraceName ?? '0.6s'}
                   </button>
                 </div>
                 {/* Nebula-shard velocity-stretch stiffness cycle —
@@ -833,6 +899,58 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {!collapsed.broadphase && (
                     <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
                   )}
+
+                  {/* ── Perf controller (central frame-skip coordinator) ── */}
+                  {renderSectionHeader('perfctl', 'Perf')}
+                  {!collapsed.perfctl && (<>
+                    {/* Master AUTO toggle — OFF disables all auto frame-
+                        skipping (manual pins still apply). */}
+                    <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                      <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Auto</span>
+                      <button
+                        onClick={onTogglePerfAuto}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                        title="Master AUTO toggle for the central performance controller.  ON: skippable passes self-throttle from the load signal.  OFF: every AUTO task runs every step (manual ShPair / Sh↔Tl / ColorBlend pins still apply)."
+                      >
+                        {stats.perfAutoEnabled === false ? 'Off' : 'On'}
+                      </button>
+                    </div>
+                    {/* Load tier + smoothed level driving the throttle. */}
+                    <div className="flex justify-between">
+                      <span>load</span>
+                      <span className={perf.perfLoadLevel >= 0.82 ? 'text-red-400' : perf.perfLoadLevel >= 0.38 ? 'text-amber-300' : 'text-white'}>
+                        {perf.perfLoadTier} ({Math.round(perf.perfLoadLevel * 100)}%)
+                      </span>
+                    </div>
+                    {/* Dynamic (mobile) entity count — the throttle driver,
+                        vs. total entities (which counts inert tiles). */}
+                    <div className="flex justify-between">
+                      <span>dyn ents</span>
+                      <span className="text-white">
+                        {perf.perfDynamicCount}
+                        {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0 || perf.perfLodShards > 0) && (
+                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''}{perf.perfLodShards > 0 ? `, ${perf.perfLodShards} lod` : ''})</span>
+                        )}
+                      </span>
+                    </div>
+                    {/* Peak local merge/absorption rate multiplier this frame. */}
+                    <div className="flex justify-between">
+                      <span>merge rate{stats.mergeRateEnabled === false ? ' (off)' : ''}</span>
+                      <span className={stats.mergeRateEnabled === false ? 'text-slate-500' : perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
+                        {perf.perfMergeRateMult.toFixed(2)}×
+                      </span>
+                    </div>
+                    {/* Per-task effective frame-skip intervals.  "·N" = AUTO
+                        effective N; "·N!" = manual pin.  1 = runs every step. */}
+                    {perf.perfTasks?.map(t => (
+                      <div key={t.id} className="flex justify-between">
+                        <span>&nbsp;·{t.id}</span>
+                        <span className={t.eff >= 8 ? 'text-amber-300' : 'text-white'}>
+                          {t.eff}{t.manual >= 1 ? '!' : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </>)}
 
                   {renderSectionHeader('timing', 'Timing (ms)')}
                   {!collapsed.timing && (<>
