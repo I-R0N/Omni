@@ -318,6 +318,9 @@ export interface GameEntity {
   // Drop item fields
   dropType?: 'ammo' | 'health' | 'glass';
   dropValue?: number;
+  // Magnet latch: set once a drop first enters the player's pull range.
+  // Thereafter it homes to completion regardless of distance.
+  magnetized?: boolean;
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
@@ -349,6 +352,24 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // ── Metal rigid-composite assembly ──────────────────────────────────────
+  // A metal-shard entity carrying `metalCells` is a rigid composite: a set
+  // of equilateral-triangle cells locked to a shared triangular lattice.
+  // Each cell is an integer lattice key (ix,iy) + up/down orientation;
+  // its lattice-frame centroid is (ix·R·√3/2, iy·R/2) where R =
+  // `metalLatticeR` (the constituent triangle's circumradius).  The entity's
+  // `position` is the composite's mass centroid and `rotation` orients the
+  // lattice; the body drifts/spins as one via velocity + rotationSpeed.
+  // Loose metal triangles snap into the composite's empty hexagon slots
+  // (see ShardSystem.tickMetalAssembly); a composite only ever fills the 6
+  // cells of one hexagon.  Once all 6 are filled the composite is a complete
+  // floating hexagon: `metalFloatTimer` counts down a brief free-float, and
+  // when it elapses the hexagon snaps onto the nearest free grid hex as a
+  // static metal tile.
+  metalCells?: Array<{ ix: number; iy: number; up: boolean }>;
+  metalLatticeR?: number;
+  metalFloatTimer?: number;
+
   // ── Density compaction state ────────────────────────────────────────────
   // Tracks how many density-merge steps a shard has accumulated.  0 (or
   // unset) = baseline visual; tier N renders proportionally darker via
@@ -373,6 +394,13 @@ export interface GameEntity {
   // alpha by timer / duration, hitting 0 flips active = false.
   mergeFadeTimer?: number;
   mergeFadeDuration?: number;
+
+  // Hot-spot-collapse grace period (seconds): set on freshly-shattered
+  // rock/glass shards so the overlap-collapse pass leaves them alone long
+  // enough to scatter, instead of instantly re-condensing a just-destroyed
+  // tile.  Ticked down by PhysicsSystem; collapse ignores shards with this
+  // still positive.
+  collapseGraceTimer?: number;
 
   // Blended hex color of all absorbed power-up weapons; drives glow tinting
   // in the renderer.  Computed/blended in GameEngine when a power-up is
@@ -514,6 +542,30 @@ export interface GameEntity {
   // these so clusters effectively sleep unless directly disturbed.
   restSpeed?: number;
   restSpin?: number;
+  // Collision-sleep state (mobile shard-family entities only).  A shard
+  // that stays below SHARD_SLEEP_CONSTANTS speed/spin epsilon for
+  // DELAY_SECONDS sets `asleep = true`; resolveShardPairs then skips the
+  // SAT+impulse math for asleep↔asleep pairs (the dominant cost in a
+  // settled pile).  Any motion above epsilon, or a resolved collision
+  // with an awake body, wakes it — so disturbance ripples through a
+  // contact island over successive substeps.  Sleeping shards stay
+  // rendered, merge-eligible, and collidable against awake bodies; only
+  // the asleep↔asleep bounce is elided.  `sleepTimer` is the rest dwell
+  // accumulator (seconds).
+  asleep?: boolean;
+  sleepTimer?: number;
+  // Transient local-crowd signal for the merge system: occupancy of this
+  // shard's merge-grid cell, stamped each merge-broadphase pass and read
+  // by tickBonds to focus absorption acceleration on dense pockets.
+  mergeCellCount?: number;
+  // Transient per-pass visibility flag for the collision viewport gate.
+  // Recomputed each resolveShardPairs grid build (torus-aware): true when
+  // the shard sits outside the CULL_MARGIN-padded camera rect.  A pair
+  // where both ends are offscreen resolves only on the catch-up phase
+  // (SHARD_PAIR_CONSTANTS.OFFSCREEN_RESOLVE_DIVISOR); on/near-screen
+  // pairs always resolve.  Not gameplay state — never persisted, only
+  // read within the same pass it's written.
+  offscreen?: boolean;
   // Plastic-shard "jiggle" state — set by collision impulses that
   // exceed restSpeed, ticked down each substep, consumed by
   // RenderSystem's plastic-shard branch to apply a damped-sinusoid
@@ -701,6 +753,34 @@ export interface PerfSnapshot {
   projectileCount: number;
   particleCount: number;
   interactableCount: number; // Drops, portals, POIs
+  // ── PerfController readouts (central frame-skip coordinator) ──
+  // Smoothed load level [0,1] and its quantised tier name (idle … max).
+  perfLoadLevel: number;
+  perfLoadTier: string;
+  // Dynamic (mobile) entity count driving the throttle — the broadphase
+  // cost driver, distinct from totalEntities (which counts inert tiles).
+  perfDynamicCount: number;
+  // Mobile shards currently flagged asleep (skipped from asleep↔asleep
+  // pair resolution).  High in a settled field → the sleep win is live.
+  perfAsleepCount: number;
+  // Mobile shards currently offscreen (both-offscreen pairs resolve at
+  // reduced cadence).  Set by the last resolveShardPairs grid build.
+  perfOffscreenShards: number;
+  // Shards drawn via the LOD disc this frame (too small for full detail).
+  perfLodShards: number;
+  // Entity-count-driven merge/eat RATE multiplier (sparse fields < 1,
+  // crowded > 1).  Separate from throttling — crowded fields merge/eat
+  // faster to cull entities, sparse fields merge lazily.
+  perfMergeRateMult: number;
+  // Per-task effective frame-skip intervals (+ manual pin, 0 = AUTO).
+  perfTasks: PerfTaskStat[];
+}
+
+// One row of the PerfController per-task readout in the DBG panel.
+export interface PerfTaskStat {
+  id: string;
+  eff: number;     // effective frame-skip interval this step
+  manual: number;  // manual override (0 = AUTO)
 }
 
 export interface EngineStats {
@@ -751,6 +831,18 @@ export interface EngineStats {
   // Hard collisions between nebula-shard pairs (ignores their
   // passThrough flag).  DBG-toggleable; default OFF.
   nebulaShardCollisionsEnabled?: boolean;
+  // Collision-sleep for mobile shards — skips asleep↔asleep pair math
+  // in resolveShardPairs.  DBG-toggleable; default ON.
+  shardSleepEnabled?: boolean;
+  // Viewport-gated shard-pair cadence — both-offscreen pairs resolve
+  // only on the catch-up phase.  DBG-toggleable; default ON.
+  shardViewportCullEnabled?: boolean;
+  // Shard render LOD — tiny mobile shards blit a cached disc instead of
+  // their full polygon render.  DBG-toggleable; default ON.
+  shardLodEnabled?: boolean;
+  // Entity-count-driven merge/eat rate multiplier.  DBG-toggleable; when
+  // off the multiplier holds at a neutral 1.0×.  Default ON.
+  mergeRateEnabled?: boolean;
   // Camera screen-shake on impacts.  Default true.  DBG-toggleable.
   screenShakeEnabled?: boolean;
   // DBG outline overlay for outlineless variants (plastic-tile /
@@ -795,6 +887,9 @@ export interface EngineStats {
   // Smaller yield = more plastic (less spring-back); 'elastic' (∞)
   // is the original full-return spring.
   plasticYieldName?: string;
+  // DBG hot-spot-collapse grace delay for freshly-shattered shards
+  // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
+  shatterGraceName?: string;
   // DBG sticky-bond spring stiffness step name for plastic-shards
   // (PLASTIC_STIFFNESS_CYCLE, 0.01 … 4).  Lower k = gentler
   // recovery and more over-yield flow.
@@ -825,6 +920,9 @@ export interface EngineStats {
   // colorBlendFrameInterval in manual mode; tracks the density-
   // selected value in AUTO mode.
   colorBlendEffectiveInterval?: number;
+  // Master AUTO toggle for the central PerfController.  When false all
+  // automatic frame-skipping is disabled (manual pins still apply).
+  perfAutoEnabled?: boolean;
   weaponCount?: number;
   shield?: number;
   maxShield?: number;

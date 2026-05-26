@@ -14,10 +14,11 @@ import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
+import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
@@ -48,7 +49,11 @@ export class GameEngine {
   private shards: ShardSystem;
   private entityIndex: EntityIndex;
   private flowField: FlowFieldGrid;
-  
+  // Central performance controller — samples load each sim step and
+  // hands every skippable pass an effective frame-skip interval.  See
+  // engine/systems/PerfController.ts.
+  private perfController: PerfController;
+
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
   private lastTime: number = 0;
@@ -402,6 +407,17 @@ export class GameEngine {
   }
 
   /**
+   * Master AUTO toggle for the central performance controller.  When
+   * off, every AUTO task (manual interval 0) runs every step — i.e. all
+   * automatic frame-skipping is disabled — while explicit manual pins
+   * (set via the ShPair / Sh↔Tl int / ColorBlend int buttons) still
+   * apply.  Lets a dev A/B the whole throttling system in one click.
+   */
+  public togglePerfAuto() {
+    this.perfController.autoEnabled = !this.perfController.autoEnabled;
+  }
+
+  /**
    * Toggle shard ↔ shard bond formation + cohesion.  When off, any
    * existing bonds drop on the next ShardSystem.update() tick and
    * no new bonds form.  Nebula self-compose (which fires via the
@@ -420,6 +436,49 @@ export class GameEngine {
    */
   public toggleNebulaShardCollisions() {
     this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
+  }
+
+  /**
+   * Toggle collision-sleep for mobile shards.  When on, resolveShardPairs
+   * skips the SAT+impulse math for asleep↔asleep pairs (the bulk of a
+   * settled field).  Off restores resolving every pair every pass — used
+   * to A/B-test the win and confirm sleeping never freezes a shard
+   * through a real collision.
+   */
+  public toggleShardSleep() {
+    this.physics.shardSleepEnabled = !this.physics.shardSleepEnabled;
+  }
+
+  /**
+   * Toggle viewport-gated shard-pair cadence.  When on, both-offscreen
+   * shard pairs resolve only on the catch-up phase (every Nth pass);
+   * on/near-screen pairs always resolve.  Off resolves every pair
+   * regardless of visibility — used to A/B the win and confirm no
+   * visible pop when off-screen piles scroll into view.
+   */
+  public toggleShardViewportCull() {
+    this.physics.shardViewportCullEnabled = !this.physics.shardViewportCullEnabled;
+  }
+
+  /**
+   * Toggle shard render LOD.  When on, mobile shards too small for their
+   * polygon detail to read blit a cached solid disc instead of the full
+   * polygon fill+stroke+glow.  Purely visual; off restores the full
+   * per-vertex render for every shard.
+   */
+  public toggleShardLod() {
+    this.renderer.shardLodEnabled = !this.renderer.shardLodEnabled;
+  }
+
+  /**
+   * Toggle the local-density-driven merge/absorption rate.  When off, the
+   * rate holds at a neutral 1.0× (base merge rate, no acceleration, base
+   * per-frame budget) — used to A/B the consolidation feature.  When on,
+   * shards in dense pockets merge/absorb faster and big absorbing rocks
+   * slow down (see ShardSystem.tickBonds + LOCAL_MERGE_CONSTANTS).
+   */
+  public toggleMergeRate() {
+    this.perfController.mergeRateEnabled = !this.perfController.mergeRateEnabled;
   }
 
   /**
@@ -508,9 +567,13 @@ export class GameEngine {
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
       if (e.shardVariant !== 'plastic-tile' && e.shardVariant !== 'plastic-shard') continue;
-      e.color = randomPlasticShade();
+      // Shards stay on the fixed orange family (contrast vs the cyclable
+      // purple tiles); only tiles follow the palette cycle.
       if (e.shardVariant === 'plastic-shard') {
+        e.color = randomPlasticShardShade();
         e.wigglePhase = colorToWigglePhase(e.color);
+      } else {
+        e.color = randomPlasticShade();
       }
     }
   }
@@ -628,6 +691,16 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the hot-spot-collapse grace delay through SHATTER_GRACE_CYCLE
+   * (0.6 → 3.6s).  Freshly-shattered rock/glass shards read
+   * getActiveShatterGraceDelay() at spawn, so the new value applies to
+   * tiles destroyed after the cycle.
+   */
+  public cycleShatterGrace() {
+    cycleShatterGrace();
+  }
+
+  /**
    * Cycle the nebula tile→tile color-equilibration alpha through
    * NEBULA_CONSTANTS.BLEND_TILE_ALPHA_CYCLE (Off → Slow → Med →
    * Fast).  Anchors the cluster's structural hue — tiles drift
@@ -701,7 +774,27 @@ export class GameEngine {
     // pass can prefer offscreen candidates (graceful cleanup — never
     // pop a shard out of existence in the player's view).
     this.shards.setEntityIndex(this.entityIndex);
+    // Shard→tile condensation emits a small, non-damaging plasma-style
+    // shockwave that shoves nearby loose shards clear.
+    this.shards.setTileFormedHandler((x, y) => this.spawnShockwave({ x, y }, {
+        radius: MERGE_BLOWBACK.RADIUS,
+        damage: MERGE_BLOWBACK.DAMAGE,
+        knockback: MERGE_BLOWBACK.KNOCKBACK,
+        color: MERGE_BLOWBACK.COLOR,
+        lifetime: MERGE_BLOWBACK.LIFETIME,
+        // Environmental effect — shove loose shards, never the player.
+        excludeIds: ['player'],
+    }));
     this.flowField = new FlowFieldGrid();
+
+    // Central performance controller — injected into every system that
+    // owns a skippable pass.  It samples load in beginStep() (called
+    // once per sim substep in the loop) and precomputes each task's
+    // run decision; the systems just query shouldRun()/effectiveInterval().
+    this.perfController = new PerfController();
+    this.physics.setPerfController(this.perfController);
+    this.shards.setPerfController(this.perfController);
+    this.nebulas.setPerfController(this.perfController);
 
     this.player = {
       id: 'player',
@@ -830,6 +923,10 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      shardSleepEnabled: this.physics.shardSleepEnabled,
+      shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
+      shardLodEnabled: this.renderer.shardLodEnabled,
+      mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -842,6 +939,7 @@ export class GameEngine {
       nebulaStretchName:   getActiveNebulaStretchName(),
       plasticOpacity:     getActivePlasticOpacityName(),
       plasticYieldName:   getActivePlasticYieldName(),
+      shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
@@ -851,6 +949,7 @@ export class GameEngine {
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
+      perfAutoEnabled: this.perfController.autoEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       perf: this.buildPerfSnapshot(),
     });
@@ -872,6 +971,7 @@ export class GameEngine {
 
   public restartGame() {
       this.shards.reset();
+      this.perfController.reset();
       this.activeDrops = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -960,6 +1060,10 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      shardSleepEnabled: this.physics.shardSleepEnabled,
+      shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
+      shardLodEnabled: this.renderer.shardLodEnabled,
+      mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
@@ -972,6 +1076,7 @@ export class GameEngine {
       nebulaStretchName:   getActiveNebulaStretchName(),
       plasticOpacity:     getActivePlasticOpacityName(),
       plasticYieldName:   getActivePlasticYieldName(),
+      shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
@@ -981,6 +1086,7 @@ export class GameEngine {
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
       colorBlendEffectiveInterval: this.nebulas.lastEffectiveColorBlendInterval,
+      perfAutoEnabled: this.perfController.autoEnabled,
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
@@ -1012,6 +1118,21 @@ export class GameEngine {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
         this.prepareFrameEntities();
+        // Sample load + precompute every skippable task's run decision
+        // for this substep.  Manual DBG overrides (which still live on
+        // the systems that own their cycle buttons) are synced in first
+        // so `0 = AUTO` delegates to the controller and a manual pin
+        // wins.  Signals: current total entities, previous step's peak
+        // collision-cell density, and the previous substep's sim time.
+        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
+        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
+        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
+        this.perfController.beginStep(
+            this.perfCounts.totalEntities,
+            this.physics.lastDynamicCount,
+            this.physics.lastMaxCellDensity,
+            this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
+        );
         // Wall-clock the two top-level sim phases so the perf overlay
         // can show the gap between summed sub-timers and total sim
         // time.  Untimed work (entity compaction, flow-field nudge,
@@ -1076,6 +1197,12 @@ export class GameEngine {
       this._viewportRect.top    = this.camera.position.y - halfH - margin;
       this._viewportRect.bottom = this.camera.position.y + halfH + margin;
       this.entityIndex.setViewportRect(this._viewportRect);
+      // Feed the same rect to PhysicsSystem so the shard-pair pass can
+      // run both-offscreen pairs at a reduced cadence (Step 3).
+      this.physics.setViewportRect(
+          this._viewportRect.left, this._viewportRect.right,
+          this._viewportRect.top, this._viewportRect.bottom,
+      );
 
       // Mirror the latest entity-type counts into the perf snapshot — the
       // index just walked the full list anyway, so this is O(0) extra work.
@@ -1109,10 +1236,30 @@ export class GameEngine {
       const allEntities = this.frameEntities;
 
       // Rebuild the enemy pursuit field if the player changed grid cells.
+      // The rebuild is already dirty-gated (only when the player crosses a
+      // cell), but the PerfController's `flowField` task throttles the
+      // flush itself so a player oscillating on a cell boundary under load
+      // can't thrash the BFS every step.  When skipped the field holds its
+      // last state (enemies pursue the last-known cell — no snap) and the
+      // dirty flag stays set so the next allowed step rebuilds it.
       this.flowField.scheduleEnemyRebuild(this.player.position.x, this.player.position.y);
-      this.flowField.flushEnemyField();
+      if (this.perfController.shouldRun('flowField')) {
+          this.flowField.flushEnemyField();
+      } else {
+          this.flowField.lastFlushMs = 0;
+      }
 
-      this.ai.update(dt, this.entityIndex.enemies, this.player, this.flowField);
+      // Enemy AI state machine — skippable.  When throttled we dt-compensate
+      // (multiply dt by the effective interval) so acceleration impulses and
+      // reaction/idle/chase timers integrate to the same per-second behaviour
+      // regardless of skip cadence; physics still integrates velocity every
+      // step, so enemies coast smoothly between AI updates (no snap).
+      if (this.perfController.shouldRun('ai')) {
+          const aiDt = dt * this.perfController.effectiveInterval('ai');
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField);
+      } else {
+          this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
+      }
       this.handleEnemyShooting(dt);
 
       this.physics.update(
@@ -1209,12 +1356,8 @@ export class GameEngine {
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
-      // Drops are a subset of activeDrops that are ammo shards (not glass, not health).
-      for (let i = 0; i < this.activeDrops.length; i++) {
-          const d = this.activeDrops[i];
-          if (!d.active || !d.dropType || d.dropType === 'health') continue;
-          applyFlow(d);
-      }
+      // Ammo drops are non-physics: no flow-field pursuit, only the
+      // player magnet (see the drop scan in updateGameLogic).
 
 
       // Stage 4: stick-bond + nebula gravity-merge are owned by
@@ -1488,7 +1631,7 @@ export class GameEngine {
     // and NebulaSystem updateDynamics.  Variant config drives every
     // policy decision (delay / threshold / pull-range / etc.).
     if (this.currentMap) {
-        this.shards.setMergeContext(this.activeDrops, this.currentMap.type);
+        this.shards.setMergeContext(this.currentMap.type);
         // Pace the shard merge / cohesion passes to the same cadence
         // as PhysicsSystem.resolveShardPairs (computed inside the
         // physics.update call earlier this substep).  Without this,
@@ -1501,8 +1644,12 @@ export class GameEngine {
     // Plastic self-break (v7): plastic-shards no longer merge — each
     // counts down a per-shard timer and self-shatters when it expires,
     // cascading down to chips that explode on their own.  Drops are
-    // suppressed for these self-triggered breaks.
-    this.tickPlasticSelfBreak(dt);
+    // suppressed for these self-triggered breaks.  Skippable: the timers
+    // are long (12.5–30 s) so dt-compensating the decrement on the steps
+    // it does run keeps the self-break cadence frame-skip-independent.
+    if (this.perfController.shouldRun('plasticSelfBreak')) {
+        this.tickPlasticSelfBreak(dt * this.perfController.effectiveInterval('plasticSelfBreak'));
+    }
 
     // Tick down regenPopTimer on tiles
     if (this.currentMap) {
@@ -1794,13 +1941,21 @@ export class GameEngine {
     }
 
     // Proximity collection + magnetic pull — single pass over activeDrops.
-    // Ammo shards get a magnet accelerator; health hearts collect on contact
-    // only (static pickup).
+    // An ammo shard starts pulling only once the player comes within
+    // MAGNET_RANGE; from then on it's latched (`magnetized`) and homes to
+    // completion even if the player leaves.  Health hearts collect on
+    // contact only (static pickup).  Skippable (PerfController `dropScan`
+    // task): collection has a generous radius so a few-step lag is
+    // imperceptible, and the pull SETS velocity (units/step) rather than
+    // accumulating acceleration, so a skipped scan just lets the drop
+    // coast toward its last-aimed point until the next re-aim.  The
+    // compaction below still runs every step so drops expired elsewhere
+    // drop out promptly.
     const tDrops = performance.now();
-    if (!this.player.isExploding) {
+    if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
-      const MAGNET_RANGE_SQ = 150 * 150;
-      const MAGNET_ACCEL    = 7; // world-units/s² toward player; scales up as dist shrinks
+      const magnetRangeSq = DROP_CONFIG.MAGNET_RANGE * DROP_CONFIG.MAGNET_RANGE;
+      const MAGNET_SPEED = DROP_CONFIG.MAGNET_SPEED;
       for (let i = 0; i < this.activeDrops.length; i++) {
         const drop = this.activeDrops[i];
         if (!drop.active) continue;
@@ -1814,12 +1969,20 @@ export class GameEngine {
         }
         // Health drops are static — skip the magnet pull.
         if (drop.dropType === 'health') continue;
-        if (distSq < MAGNET_RANGE_SQ) {
-          const dist = Math.sqrt(distSq);
-          const a    = MAGNET_ACCEL / dist; // inverse-linear: stronger when closer
-          drop.velocity.x += dx * a * dt;
-          drop.velocity.y += dy * a * dt;
+        // Latch on first entry into pull range; once latched the drop
+        // keeps homing regardless of distance (guaranteed collection).
+        if (!drop.magnetized) {
+          if (distSq >= magnetRangeSq) continue;
+          drop.magnetized = true;
         }
+        // Direct homing pull: velocity points straight at the player at
+        // MAGNET_SPEED, eased to the exact remaining distance when close
+        // so the drop settles on the player rather than overshooting.
+        const dist  = Math.sqrt(distSq);
+        const speed = Math.min(dist, MAGNET_SPEED);
+        const k     = speed / dist;
+        drop.velocity.x = dx * k;
+        drop.velocity.y = dy * k;
       }
     }
 
@@ -2395,7 +2558,6 @@ export class GameEngine {
   // Player is also pre-populated to prevent self-damage.
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
       if (!this.currentMap) return;
-      const radius = proj.explosionRadius!;
 
       // Impact-frame visuals (instant): bright spark burst + screen shake.
       // These don't wait for the wavefront — the player should feel the
@@ -2408,60 +2570,76 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
 
-      // Spawn the damaging ring particle.  RenderSystem reads
-      // explosionRadius + lifetime to draw the expanding shock front;
-      // updateExplosionRings reads explosionDamage / explosionKnockback /
-      // hitEntityIds to apply the damage in lock-step with the visual.
-      const ringLifetime = 0.35;
+      // Spawn the damaging shockwave ring.  Direct-hit target is excluded
+      // (it already took config.damage from the projectile collision) along
+      // with the player (cannon is player-owned; the ring shouldn't
+      // self-damage).
+      this.spawnShockwave(impactPos, {
+          radius: proj.explosionRadius!,
+          damage: proj.explosionDamage ?? 0,
+          knockback: proj.explosionKnockback ?? 0,
+          color: WEAPONS[WeaponType.CANNON].color,
+          ownerType: proj.ownerType,
+          excludeIds: [directTarget.id, 'player'],
+      });
+  }
 
-      // Snapshot ids of eligible in-range entities at spawn time.  The
-      // wave only damages entities in this set, so freshly-spawned
-      // shards / drops that come from the wave's own kills (their ids
-      // didn't exist when the ring spawned) are naturally excluded.
-      // This is the fix for the "every cannon shot dumps a pile of
-      // ammo drops" bug — wave was killing newborn glass-/rock-shards,
-      // each of which rolled the 45 % asteroid ammo drop.
+  // ─── Reusable expanding shockwave ──────────────────────────────────────
+  //
+  // Spawns an `isExplosionRing` particle whose currentRadius grows 0 →
+  // radius across `lifetime`.  updateExplosionRings (each fixed step) ticks
+  // it, applying falloff damage + knockback to entities the wavefront
+  // reaches.  Powers both the Plasma Cannon AoE and the smaller shard→tile
+  // merge blow-back.  Only entities in range AT SPAWN are eligible
+  // (validHitIds snapshot), so entities born during the sweep are excluded.
+  private spawnShockwave(pos: Vector2, opts: {
+      radius: number;
+      damage: number;
+      knockback: number;
+      color: string;
+      lifetime?: number;
+      ownerType?: GameEntity['ownerType'];
+      excludeIds?: string[];
+  }) {
+      if (!this.currentMap) return;
+      const radius = opts.radius;
+      if (!radius || radius <= 0) return;
       const radiusSq = radius * radius;
+
       const validHitIds = new Set<string>();
-      const entitiesAtSpawn = this.currentMap.entities;
-      for (let i = 0; i < entitiesAtSpawn.length; i++) {
-          const e = entitiesAtSpawn[i];
+      const ents = this.currentMap.entities;
+      for (let i = 0; i < ents.length; i++) {
+          const e = ents[i];
           if (!e.active || e.isExploding) continue;
           if (e.type === EntityType.PROJECTILE) continue;
           if (e.type === EntityType.PARTICLE) continue;
           if (e.type === EntityType.INTERACTABLE) continue;
-          const dx = wrapDeltaX(impactPos.x, e.position.x);
-          const dy = wrapDeltaY(impactPos.y, e.position.y);
-          if (dx * dx + dy * dy <= radiusSq) {
-              validHitIds.add(e.id);
-          }
+          const dx = wrapDeltaX(pos.x, e.position.x);
+          const dy = wrapDeltaY(pos.y, e.position.y);
+          if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
       }
 
-      this.currentMap.entities.push({
+      const lifetime = opts.lifetime ?? 0.35;
+      ents.push({
           id: nextId('explosion-ring'),
           type: EntityType.PARTICLE,
-          position: { x: impactPos.x, y: impactPos.y },
+          position: { x: pos.x, y: pos.y },
           velocity: { x: 0, y: 0 },
           size: { x: 1, y: 1 },
           rotation: 0,
-          color: WEAPONS[WeaponType.CANNON].color, // purple — matches the weapon
+          color: opts.color,
           active: true,
           health: 1,
           maxHealth: 1,
-          lifetime: ringLifetime,
-          maxLifetime: ringLifetime,
+          lifetime,
+          maxLifetime: lifetime,
           mass: 0,
           isExplosionRing: true,
           explosionRadius: radius,
-          explosionDamage: proj.explosionDamage,
-          explosionKnockback: proj.explosionKnockback,
-          ownerType: proj.ownerType,
-          // Pre-populate with entities the ring should never damage:
-          // the projectile's direct-hit target (already took config.damage)
-          // and the player (cannon is player-owned today; ring shouldn't
-          // self-damage).  Future enemy cannons would still skip the
-          // shooter's own kind via ownerType in the per-frame tick.
-          hitEntityIds: [directTarget.id, 'player'],
+          explosionDamage: opts.damage,
+          explosionKnockback: opts.knockback,
+          ownerType: opts.ownerType,
+          hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
           validHitIds,
       });
   }
@@ -2622,8 +2800,16 @@ export class GameEngine {
       // shard big enough to still shatter into children.
       if (e.size.x >= floor) continue;
       if (e.plasticBreakTimer === undefined) {
-        e.plasticBreakTimer = PLASTIC_SELF_BREAK.MIN_SECONDS
+        // Smaller chips expire sooner: scale the lifetime by the shard's
+        // size relative to the break floor (clamped so the tiniest still
+        // linger briefly rather than popping instantly).
+        const sizeFrac = Math.max(
+          PLASTIC_SELF_BREAK.SIZE_SCALE_FLOOR,
+          Math.min(1, e.size.x / floor),
+        );
+        const base = PLASTIC_SELF_BREAK.MIN_SECONDS
           + Math.random() * (PLASTIC_SELF_BREAK.MAX_SECONDS - PLASTIC_SELF_BREAK.MIN_SECONDS);
+        e.plasticBreakTimer = base * sizeFrac;
         continue;
       }
       e.plasticBreakTimer -= dt;
@@ -2854,6 +3040,17 @@ export class GameEngine {
           projectileCount:   this.perfCounts.projectileCount,
           particleCount:     this.perfCounts.particleCount,
           interactableCount: this.perfCounts.interactableCount,
+          perfLoadLevel:     this.perfController.loadLevel,
+          perfLoadTier:      this.perfController.tierName(),
+          perfDynamicCount:  this.perfController.lastDynamicCount,
+          perfAsleepCount:   this.physics.lastAsleepCount,
+          perfOffscreenShards: this.physics.lastOffscreenShardCount,
+          perfLodShards:     this.renderer.lastLodShardCount,
+          perfMergeRateMult: this.shards.lastMergeRatePeak,
+          // Fresh small array (9 tasks) per render frame — negligible vs.
+          // the per-frame stats object the loop already builds, and keeps
+          // the controller's internal `run` flag out of the snapshot.
+          perfTasks: this.perfController.debug.map(t => ({ id: t.id, eff: t.eff, manual: t.manual })),
       };
   }
 }

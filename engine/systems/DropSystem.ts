@@ -6,12 +6,15 @@ import {
   DROP_CONFIG,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
-  randomPlasticShade,
+  randomPlasticShardShade,
   colorToWigglePhase,
   PLASTIC_DEFORM_CONSTANTS,
+  getActiveShatterGraceDelay,
+  METAL_ASSEMBLY,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
+import { HEX_SIZE } from '../maps/TileGenerator';
 import { NEBULA_IMAGES, ASSETS } from '../../assets';
 import {
   blendCompositionToHex,
@@ -246,6 +249,10 @@ export class DropSystem {
         maxHealth:     1,
         mass:          SHARD_VARIANTS[variantId].spawn.sizeToMass(size),
         polygonPoints: pts,
+        // Enemy debris spawns stacked at the death point — give it the
+        // same grace as tile debris so it scatters before the overlap-
+        // collapse pass can condense it into a tile.
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
   }
@@ -322,6 +329,9 @@ export class DropSystem {
         maxHealth:      1,
         mass:           SHARD_VARIANTS['glass-shard'].spawn.sizeToMass(size),
         polygonPoints:  pts,
+        // Let the debris scatter before the overlap-collapse pass can
+        // re-condense it into a tile (DBG-cyclable delay).
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 
@@ -391,6 +401,7 @@ export class DropSystem {
       countMax?: number;
       sizeFractionMin?: number;
       sizeFractionMax?: number;
+      equilateralTriangle?: boolean;
     }>,
     shardHealthOverride?: number,
   ) {
@@ -406,6 +417,7 @@ export class DropSystem {
       variant: ShardVariantId;
       sizeFraction: number;
       inheritParentPolygon?: boolean;
+      equilateralTriangle?: boolean;
     };
     const expanded: ExpandedSpec[] = [];
     for (let s = 0; s < breakShards.length; s++) {
@@ -423,6 +435,7 @@ export class DropSystem {
           variant: spec.variant,
           sizeFraction,
           inheritParentPolygon: spec.inheritParentPolygon,
+          equilateralTriangle: spec.equilateralTriangle,
         });
       }
     }
@@ -501,7 +514,20 @@ export class DropSystem {
       //   silhouette extent.
       let scaledPts: Vector2[];
       let targetSize: number;
-      if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
+      if (spec.equilateralTriangle) {
+        // Fixed equilateral triangle, 1/6 of a hex tile (side = HEX_SIZE).
+        // Circumradius R = side/√3; vertices 120° apart.  size = 2R (the
+        // bounding circle).  Orientation is left at the base here; the
+        // entity's random spawn rotation (below) turns it, and the bond
+        // alignment later snaps it to the 60° tiling grid.
+        const R = HEX_SIZE / Math.sqrt(3);
+        scaledPts = [
+          { x: R * Math.cos(-Math.PI / 2),               y: R * Math.sin(-Math.PI / 2) },
+          { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+          { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+        ];
+        targetSize = 2 * R;
+      } else if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
         const s = spec.sizeFraction;
         scaledPts = new Array(tile.polygonPoints.length);
         let maxR2 = 0;
@@ -556,7 +582,10 @@ export class DropSystem {
       // a bit faster (lighter, gets a stronger kick from the same
       // impact).  Multiplier 1.0 at full size, 1.3 at 1/6 size.
       const speedScale = 1 + (1 - spec.sizeFraction) * 0.5;
-      const launchSpeed = baseSpeed * speedScale;
+      // Metal-tile shards eject faster (BREAK_SPEED_MULT) so they pop apart
+      // before the assembly pull reels them into a hexagon.
+      const metalMult = spec.variant === 'metal-shard' ? METAL_ASSEMBLY.BREAK_SPEED_MULT : 1;
+      const launchSpeed = baseSpeed * speedScale * metalMult;
 
       // Dent-policy shards take exactly as many hits to destroy as
       // the parent tile they came from — by default inherit
@@ -577,7 +606,7 @@ export class DropSystem {
       // shard, everything else inherits from the tile.  Reused below
       // for both `color` and (plastic only) `wigglePhase`.
       const shardColor = spec.variant === 'plastic-shard'
-        ? randomPlasticShade()
+        ? randomPlasticShardShade()
         : tile.color;
       // Spawn-time shape variance for plastic-shards — per-axis
       // random scale in [1 − V, 1 + V] so each shard reads as its
@@ -643,6 +672,9 @@ export class DropSystem {
         // the force releases.  Anchor sits at the spawn position.
         anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
         anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
+        // Let dent-break debris (rock-tile breakShards, etc.) scatter
+        // before the overlap-collapse pass can re-condense it.
+        collapseGraceTimer: getActiveShatterGraceDelay(),
       });
     }
 
@@ -759,6 +791,8 @@ export class DropSystem {
       maxHealth:     1,
       mass,
       polygonPoints: shardPts,
+      // Freed corner — exempt from instant re-collapse.
+      collapseGraceTimer: getActiveShatterGraceDelay(),
     });
 
     // Small puff at the spawn point so the detach reads as a discrete
@@ -841,6 +875,8 @@ export class DropSystem {
       maxHealth:     1,
       mass,
       polygonPoints: shardPts,
+      // Per-hit chip — also exempt from instant re-collapse.
+      collapseGraceTimer: getActiveShatterGraceDelay(),
     });
 
     // Subtle puff at the chip-off point in the tile's colour.

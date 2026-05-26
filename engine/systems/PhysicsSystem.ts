@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
 
 /** Set wiggle + dent state on a plastic-shard whose post-impulse
  *  speed has crossed restSpeed — wakes the shard out of its sleep
@@ -53,7 +53,8 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCo
     e.dentX = newDX;
     e.dentY = newDY;
 }
-import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged } from '../toroidal';
+import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
+import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
 // broadphase keys pack (col, row) into a single int using `(cx << 16) |
@@ -151,6 +152,38 @@ export class PhysicsSystem {
   // narrow: nebula-vs-striker and nebula-vs-tile still honour
   // passThrough — only the same-variant pair is affected.
   public nebulaShardCollisionsEnabled: boolean = true;
+  // Debug toggle — collision-sleep for mobile shards.  When true,
+  // resolveShardPairs skips the SAT+impulse math for asleep↔asleep
+  // pairs (the bulk of a settled field).  Flip OFF to A/B-test the
+  // win and confirm sleeping never freezes a shard through a real
+  // collision.  Sleep bookkeeping in the integration loop still runs
+  // when off (the flag is just ignored by the pair skip), so toggling
+  // back on takes effect immediately without a settle delay.
+  public shardSleepEnabled: boolean = true;
+  // Count of shards flagged asleep as of the last resolveShardPairs
+  // call — exposed for the DBG perf readout so the win is visible.
+  public lastAsleepCount: number = 0;
+  // Debug toggle — viewport-gated shard-pair cadence.  When true,
+  // both-offscreen shard pairs resolve only on the catch-up phase
+  // (every OFFSCREEN_RESOLVE_DIVISOR passes); on/near-screen pairs
+  // always resolve.  Off restores resolving every pair regardless of
+  // visibility.
+  public shardViewportCullEnabled: boolean = true;
+  // Camera-aligned viewport rect (world coords, CULL_MARGIN-padded),
+  // set per sim frame by GameEngine.  Null until the first set — then
+  // resolveShardPairs treats all shards as on-screen (conservative).
+  private viewportLeft: number = 0;
+  private viewportRight: number = 0;
+  private viewportTop: number = 0;
+  private viewportBottom: number = 0;
+  private hasViewportRect: boolean = false;
+  // Monotonic resolveShardPairs call counter — drives the off-screen
+  // catch-up phase (every OFFSCREEN_RESOLVE_DIVISOR-th call resolves
+  // both-offscreen pairs too).
+  private shardPairCallCount: number = 0;
+  // Count of shards flagged offscreen in the last resolveShardPairs
+  // grid build — exposed for the DBG perf readout.
+  public lastOffscreenShardCount: number = 0;
   // Shard ↔ shard pair resolution runs every Nth physics step.
   // 0 = AUTO (scaled by maxCellDensity); ≥1 = manual override.
   // Cycled via DBG panel; default from constants.
@@ -167,9 +200,6 @@ export class PhysicsSystem {
   // while separation runs only every Nth, and dense clusters
   // collapse to a single point.
   public lastRunShardPair: boolean = true;
-  // Internal counter, ticked once per handleEntityCollisions call.
-  // Used as `counter % interval === 0` to gate shard-shard pairs.
-  private shardPairTick: number = 0;
   // Shard ↔ static-tile pair resolution interval.  Mirrors the
   // shard-pair knobs above but gates resolveShardTilePairs.  Only
   // meaningful when shardTileCollisionsEnabled is true; cycled via
@@ -177,11 +207,23 @@ export class PhysicsSystem {
   public shardTilePairFrameInterval: number = SHARD_TILE_PAIR_CONSTANTS.FRAME_INTERVAL;
   public lastEffectiveShardTilePairInterval: number = 1;
   public lastRunShardTilePair: boolean = true;
-  private shardTilePairTick: number = 0;
+  // Central performance controller (engine/systems/PerfController.ts).
+  // The shard-pair / shard-tile-pair gates delegate to it; the per-step
+  // run decision + effective interval are precomputed there each substep.
+  // Null only in the (unused) bare-instantiation path; GameEngine always
+  // wires it before the first update.
+  private perfController: PerfController | null = null;
   // Peak dynamic-grid cell population seen during this step's broadphase.
   // Tracked as the grid is populated; the 3×3 neighbourhood check is
   // quadratic per cell, so this is the direct signal for dense-cluster stalls.
   public lastMaxCellDensity: number = 0;
+  // Count of entities inserted into the dynamic grid this step — i.e. the
+  // exact set the collision broadphase outer loop iterates (mobile shards,
+  // projectiles, enemies, drops, player; particles + mass=∞ tiles
+  // excluded).  This is the true per-frame collision cost driver, unlike
+  // total entity count which is dominated by inert static tiles.  Read by
+  // PerfController as the throttle's entity-load signal.
+  public lastDynamicCount: number = 0;
 
   // HOT MEMORY BUFFERS (Pre-allocated to prevent GC)
   //
@@ -199,6 +241,16 @@ export class PhysicsSystem {
   // One-shot warning guard so a new polygon source that exceeds the cap
   // produces exactly one console entry instead of spamming every frame.
   private warnedVertexOverflow = false;
+
+  // Scratch outputs for the parametric SAT test (satTest) — avoids
+  // allocating a result object on the per-cell composite collision path.
+  private satOverlap = 0;
+  private satAxisX = 0;
+  private satAxisY = 0;
+
+  public setPerfController(pc: PerfController) {
+      this.perfController = pc;
+  }
 
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
@@ -236,6 +288,17 @@ export class PhysicsSystem {
               this.attractorsCache.push(e);
           }
       }
+  }
+
+  /** Per-frame camera-aligned viewport rect (world coords, already
+   *  CULL_MARGIN-padded by the caller).  Drives the both-offscreen
+   *  shard-pair cadence gate in resolveShardPairs. */
+  public setViewportRect(left: number, right: number, top: number, bottom: number): void {
+      this.viewportLeft = left;
+      this.viewportRight = right;
+      this.viewportTop = top;
+      this.viewportBottom = bottom;
+      this.hasViewportRect = true;
   }
 
   public update(
@@ -418,6 +481,24 @@ export class PhysicsSystem {
               entity.nebulaMergeCooldown = undefined;
           }
       }
+      // Hot-spot-collapse grace — freshly-shattered rock/glass shards hold
+      // off the overlap-collapse pass while this counts down, so a
+      // destroyed tile's debris gets to scatter instead of snapping back
+      // into a tile on the next merge frame.
+      if (entity.collapseGraceTimer !== undefined && entity.collapseGraceTimer > 0) {
+          entity.collapseGraceTimer -= dt;
+          if (entity.collapseGraceTimer <= 0) {
+              entity.collapseGraceTimer = undefined;
+          }
+      }
+      // Metal hexagon free-float — a completed composite floats while this
+      // counts down, then ShardSystem snaps it to the grid as a tile.  Held
+      // at 0 (not cleared) so ShardSystem can tell "ready" from "still
+      // floating"; only the assembly pass clears it.
+      if (entity.metalFloatTimer !== undefined && entity.metalFloatTimer > 0) {
+          entity.metalFloatTimer -= dt;
+          if (entity.metalFloatTimer < 0) entity.metalFloatTimer = 0;
+      }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
           entity.shieldHitFlash -= dt;
@@ -543,6 +624,28 @@ export class PhysicsSystem {
             // Snap to zero at very low speeds to prevent micro-drift calculations
             if (Math.abs(entity.velocity.x) < 0.01) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < 0.01) entity.velocity.y = 0;
+          }
+      }
+
+      // Collision-sleep bookkeeping — mobile shard-family entities only.
+      // Velocity / spin are final for this step here, so this is the one
+      // place that decides the sleep flag (resolveShardPairs reads it).
+      // Above-epsilon motion resets the dwell timer and wakes; otherwise
+      // the timer accrues until DELAY_SECONDS, then the shard sleeps.
+      // Collision wakes are stamped directly at the impulse sites, which
+      // also reset sleepTimer so a grazed shard re-earns its dwell.
+      if (entity.shardVariant !== undefined && entity.mass !== Infinity) {
+          const vsq = entity.velocity.x * entity.velocity.x
+                    + entity.velocity.y * entity.velocity.y;
+          const spin = entity.rotationSpeed ?? 0;
+          if (vsq > SHARD_SLEEP_CONSTANTS.SPEED_EPSILON_SQ
+              || (spin < 0 ? -spin : spin) > SHARD_SLEEP_CONSTANTS.SPIN_EPSILON) {
+              entity.sleepTimer = 0;
+              entity.asleep = false;
+          } else if (entity.asleep !== true) {
+              const t = (entity.sleepTimer ?? 0) + dt;
+              entity.sleepTimer = t;
+              if (t >= SHARD_SLEEP_CONSTANTS.DELAY_SECONDS) entity.asleep = true;
           }
       }
     }
@@ -708,6 +811,13 @@ export class PhysicsSystem {
     // so inserting them wastes grid memory and forces O(particles) extra
     // inner-loop iterations on every neighbour scan for no effect.
     let maxDensity = 0;
+    // Awake-only count drives the PerfController throttle: an asleep shard
+    // skips pair-resolution math (resolveShardPairs bails on asleep↔asleep),
+    // so a field of settled bodies costs almost nothing and must NOT pin the
+    // load — same principle as the ammo-drop exclusion below.  Without this,
+    // never-sleeping metal composites accumulate on mixed maps and throttle
+    // shared passes (shardPair/colorBlend/…), starving nebula collisions.
+    let awakeCount = 0;
     const dynamicEntities: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
@@ -723,6 +833,13 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
+        // Collectible ammo drops are non-physics bodies: magnet-pulled +
+        // proximity-collected only (see GameEngine drop scan).  Keeping
+        // them out of the dynamic grid removes their collision cost AND
+        // their contribution to lastMaxCellDensity / lastDynamicCount, so
+        // a lingering drop pile no longer pins the PerfController load.
+        if (e.type === EntityType.INTERACTABLE && e.dropType === 'ammo') continue;
+
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
 
@@ -736,6 +853,7 @@ export class PhysicsSystem {
         // still pass-through (no impulse), so they never exchange momentum
         // with anything — only the shatter side-effect fires.
         dynamicEntities.push(e);
+        if (!e.asleep) awakeCount++;
 
         const key = cellKey(e.position.x, e.position.y);
 
@@ -748,6 +866,7 @@ export class PhysicsSystem {
         if (cell.length > maxDensity) maxDensity = cell.length;
     }
     this.lastMaxCellDensity = maxDensity;
+    this.lastDynamicCount = awakeCount;
 
     // 3. Check Collisions: Only iterate DYNAMIC entities as primary
     //    subjects, AND skip shards as outer-loop subjects entirely.
@@ -821,12 +940,16 @@ export class PhysicsSystem {
                             const inv = 1 / dist;
                             a.velocity.x += dx * inv * accel;
                             a.velocity.y += dy * inv * accel;
-                            // Accumulate on BOTH sides — scanner reads
-                            // it for fade fx; emitter (b, the static
-                            // tile) reads it in RenderSystem to drive
-                            // proximity glow off any repellable body.
+                            // Scanner reads its own accumulator for fade fx.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
-                            b.repelImpulse = (b.repelImpulse ?? 0) + accel;
+                            // The tile's glow tracks ONLY the player / enemies,
+                            // not the many mobile shards drifting through its
+                            // field — otherwise ambient shard contact keeps the
+                            // glow lit constantly.  Lighting up to the player's
+                            // repel field is the primary intent.
+                            if (a.type === EntityType.PLAYER || a.type === EntityType.ENEMY) {
+                                b.repelImpulse = (b.repelImpulse ?? 0) + accel;
+                            }
                         }
                     }
                 }
@@ -1139,21 +1262,22 @@ export class PhysicsSystem {
    * climb so settled piles don't eat the frame budget.
    */
   public shouldRunShardPairsThisStep(): boolean {
-    let interval = this.shardPairFrameInterval | 0;
-    if (interval <= 0) {
-        const density = this.lastMaxCellDensity;
-        const table = SHARD_PAIR_CONSTANTS.AUTO_THRESHOLDS;
-        let auto = table[table.length - 1].interval;
-        for (let i = 0; i < table.length; i++) {
-            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
-        }
-        interval = auto;
+    const pc = this.perfController;
+    if (pc) {
+        // The controller already folded `lastMaxCellDensity` (+ entity
+        // count + sim time) into the load level and precomputed this
+        // task's interval / run flag in beginStep().  The manual DBG
+        // override (shardPairFrameInterval) was synced into the
+        // controller before beginStep, so 0 = AUTO delegates here and
+        // a manual pin still wins.
+        this.lastEffectiveShardPairInterval = pc.effectiveInterval('shardPair');
+        this.lastRunShardPair = pc.shouldRun('shardPair');
+        return this.lastRunShardPair;
     }
-    this.lastEffectiveShardPairInterval = interval;
-    const run = (this.shardPairTick % interval) === 0;
-    this.shardPairTick++;
-    this.lastRunShardPair = run;
-    return run;
+    // Fallback (no controller wired): run every step.
+    this.lastEffectiveShardPairInterval = 1;
+    this.lastRunShardPair = true;
+    return true;
   }
 
   /**
@@ -1167,21 +1291,15 @@ export class PhysicsSystem {
    * frame.
    */
   public shouldRunShardTilePairsThisStep(): boolean {
-    let interval = this.shardTilePairFrameInterval | 0;
-    if (interval <= 0) {
-        const density = this.lastMaxCellDensity;
-        const table = SHARD_TILE_PAIR_CONSTANTS.AUTO_THRESHOLDS;
-        let auto = table[table.length - 1].interval;
-        for (let i = 0; i < table.length; i++) {
-            if (density <= table[i].maxDensity) { auto = table[i].interval; break; }
-        }
-        interval = auto;
+    const pc = this.perfController;
+    if (pc) {
+        this.lastEffectiveShardTilePairInterval = pc.effectiveInterval('shardTilePair');
+        this.lastRunShardTilePair = pc.shouldRun('shardTilePair');
+        return this.lastRunShardTilePair;
     }
-    this.lastEffectiveShardTilePairInterval = interval;
-    const run = (this.shardTilePairTick % interval) === 0;
-    this.shardTilePairTick++;
-    this.lastRunShardTilePair = run;
-    return run;
+    this.lastEffectiveShardTilePairInterval = 1;
+    this.lastRunShardTilePair = true;
+    return true;
   }
 
   /**
@@ -1206,17 +1324,44 @@ export class PhysicsSystem {
 
     // Build the shard-only grid.  Same SPATIAL_GRID_SIZE as the main
     // dynamic grid so cell math and 3×3 scan radius are consistent
-    // with everything else in the broadphase.
+    // with everything else in the broadphase.  Asleep shards stay in
+    // the grid (an awake neighbour must still find and resolve against
+    // them); only the asleep↔asleep pair body is skipped below.
+    // Viewport-gated cadence: this pass resolves both-offscreen pairs
+    // only on the catch-up phase (every Nth call); on/near-screen pairs
+    // resolve every call.  Compute the flags here (once per shard) so
+    // the inner pair loop is a single bool read.  When no rect is set
+    // or the gate is off, treat every shard as on-screen (offscreen=
+    // false) so behaviour is identical to ungated resolution.
+    this.shardPairCallCount++;
+    const viewportGate = this.shardViewportCullEnabled && this.hasViewportRect;
+    const catchUpPhase = (this.shardPairCallCount
+        % SHARD_PAIR_CONSTANTS.OFFSCREEN_RESOLVE_DIVISOR) === 0;
+    const vl = this.viewportLeft, vr = this.viewportRight;
+    const vt = this.viewportTop, vb = this.viewportBottom;
+
     this.shardGrid.clear();
+    let asleepCount = 0;
+    let offscreenCount = 0;
     for (let i = 0; i < shards.length; i++) {
         const e = shards[i];
         if (!e.active || e.isExploding) continue;
         if (e.mergeFadeTimer !== undefined) continue;
+        if (e.asleep === true) asleepCount++;
+        if (viewportGate) {
+            const r = (e.size.x > e.size.y ? e.size.x : e.size.y) * 0.5;
+            e.offscreen = !isVisibleOnTorus(e.position.x, e.position.y, r, vl, vr, vt, vb);
+            if (e.offscreen) offscreenCount++;
+        } else {
+            e.offscreen = false;
+        }
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
         if (!cell) { cell = []; this.shardGrid.set(key, cell); }
         cell.push(e);
     }
+    this.lastAsleepCount = asleepCount;
+    this.lastOffscreenShardCount = offscreenCount;
 
     // Walk the shard list and resolve pairs.  j > i ordering via
     // id comparison ensures each unordered pair is processed once.
@@ -1239,6 +1384,23 @@ export class PhysicsSystem {
                     const b = cell[j];
                     if (a === b) continue;
                     if (a.id > b.id) continue; // process each pair once
+                    // Sleep skip: two resting shards in contact are
+                    // stable — no separation or bounce to apply, so
+                    // skip the SAT+impulse math entirely.  A pair with
+                    // either party awake still resolves (and the
+                    // resolution wakes both), so a disturbance ripples
+                    // through the island over successive substeps.
+                    if (this.shardSleepEnabled
+                        && a.asleep === true && b.asleep === true) continue;
+                    // Viewport gate: both shards offscreen → resolve
+                    // only on the catch-up phase.  Either shard on/near
+                    // screen → resolve every pass (full fidelity where
+                    // the player can see it).  Bounded catch-up keeps
+                    // off-screen piles from interpenetrating without
+                    // limit; entering the padded viewport restores full
+                    // rate before the shard is visible.
+                    if (viewportGate && !catchUpPhase
+                        && a.offscreen === true && b.offscreen === true) continue;
                     this.resolveAsteroidPair(a, b, onDeath);
                 }
             }
@@ -1463,12 +1625,44 @@ export class PhysicsSystem {
       b: GameEntity,
       onDeath?: (entity: GameEntity) => void,
   ) {
+      // Non-nebula shards (metal / rock / glass, loose or composite) never
+      // collide with nebula shards — skip before any routing / SAT work.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
       // Cheapest possible early-outs first — most pair calls discard
       // here before paying any further work.
 
       const MAX_SEPARATION_STEP = 2;  // world units per entity per frame
-      const rA = a.size.x * 0.42;
-      const rB = b.size.x * 0.42;
+
+      // Metal assembly: don't bounce metal triangles off each other when a
+      // loose piece is involved — the ShardSystem assembly pass needs them
+      // to interpenetrate so a loose triangle can reach a composite's free
+      // face (or another loose triangle) and snap/lock.  Two formed
+      // composites DO collide (so they rest against each other rather than
+      // overlapping).  Metal-vs-other-shard falls through normally.
+      const aMetal = a.shardVariant === 'metal-shard';
+      const bMetal = b.shardVariant === 'metal-shard';
+      if (aMetal && bMetal) {
+          const bothComposite = a.metalCells !== undefined && b.metalCells !== undefined;
+          if (!bothComposite) return;
+      }
+
+      // A metal composite collides by its actual assembled shape (per-cell
+      // SAT), not a bounding circle — route any composite-involving pair to
+      // the polygon resolver and skip the circle math below.
+      if ((a.metalCells !== undefined && a.metalCells.length > 0)
+          || (b.metalCells !== undefined && b.metalCells.length > 0)) {
+          this.resolveCompositeShardPair(a, b, onDeath);
+          return;
+      }
+
+      // Collision radius factor: a loose metal triangle uses its INSCRIBED
+      // circle (size.x is the circumdiameter → 0.25 = inradius, so two
+      // triangles touch at the edge-sharing distance); other shards keep the
+      // 0.42 near-circumradius factor.  (Composites never reach here — they
+      // resolve per-cell above.)
+      const rA = a.size.x * (aMetal ? 0.25 : 0.42);
+      const rB = b.size.x * (bMetal ? 0.25 : 0.42);
       const sumR = rA + rB;
       const sumRSq = sumR * sumR;
 
@@ -1565,6 +1759,15 @@ export class PhysicsSystem {
       b.position.x += nx * pushB;
       b.position.y += ny * pushB;
 
+      // Wake both ends.  Reaching here means a genuine contact cleared
+      // the passthrough + settled-pair early-outs, so neither shard is
+      // truly at rest any more — clear the flag and reset the dwell so
+      // they must re-earn sleep.  This is what propagates a disturbance
+      // through a resting island: an awake shard wakes the sleeper it
+      // hits, which next step wakes its own neighbours.
+      a.asleep = false; a.sleepTimer = 0;
+      b.asleep = false; b.sleepTimer = 0;
+
       // Velocity resolution — elastic bounce along the contact normal.
       const rvx = b.velocity.x - a.velocity.x;
       const rvy = b.velocity.y - a.velocity.y;
@@ -1590,6 +1793,29 @@ export class PhysicsSystem {
       maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
+  /**
+   * Nebula isolation rule: a nebula tile/shard physically interacts ONLY with
+   * nebula shards (nebula-shard ↔ nebula-shard and nebula-shard ↔ nebula-tile)
+   * plus player/enemy/projectile strikers (which shatter tiles / fly through).
+   * Every other shard family — metal / rock / glass, loose OR composite —
+   * passes through nebula entirely.  Returns true when the pair must be
+   * skipped (no collision response).  This is the single explicit gate for
+   * the rule; the per-variant passThrough flag still backs it up.
+   */
+  private nebulaPassThroughPair(a: GameEntity, b: GameEntity): boolean {
+      const av = a.shardVariant;
+      const bv = b.shardVariant;
+      const aNeb = av === 'nebula-tile' || av === 'nebula-shard';
+      const bNeb = bv === 'nebula-tile' || bv === 'nebula-shard';
+      // Both nebula → allowed (handled by the nebula pair paths).  Neither
+      // nebula → not our concern.
+      if (aNeb === bNeb) return false;
+      // Exactly one side is nebula.  The OTHER side passes through unless it
+      // is itself a shard/tile (has a shardVariant) — strikers have none, so
+      // the tile-shatter path keeps working for player/enemy/projectiles.
+      return (aNeb ? bv : av) !== undefined;
+  }
+
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
@@ -1598,6 +1824,9 @@ export class PhysicsSystem {
     onShake?: (amount: number) => void,
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void
   ) {
+      // Non-nebula shards (metal / rock / glass) never collide with nebula.
+      if (this.nebulaPassThroughPair(a, b)) return;
+
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
@@ -1626,8 +1855,13 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
-      // 1. SAT Collision Detection (Alloc-Free)
-      if (this.checkCollisionSAT(a, b)) {
+      // 1. SAT Collision Detection (Alloc-Free).  A metal composite collides
+      // by its actual assembled shape (per-cell SAT) rather than its convex-
+      // hull polygon, so contacts/hits match the connected triangles.
+      const composite = (a.metalCells !== undefined && a.metalCells.length > 0)
+                     || (b.metalCells !== undefined && b.metalCells.length > 0);
+      const hit = composite ? this.compositeSAT(a, b) : this.checkCollisionSAT(a, b);
+      if (hit) {
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
 
@@ -1703,6 +1937,171 @@ export class PhysicsSystem {
       this.bufferMtv.x = smallestAxisX * minOverlap;
       this.bufferMtv.y = smallestAxisY * minOverlap;
       return true;
+  }
+
+  // ── Metal composite per-cell collision ──────────────────────────────────
+  // A metal composite is a rigid union of triangle cells on a shared
+  // lattice; the union can be concave, so it can't be one SAT polygon.
+  // Instead each cell is treated as its own convex collider and the body
+  // collides as the union of cells — collision matches the actual connected
+  // shape rather than a convex hull or bounding circle.
+
+  /** Parametric SAT between two world-space vertex sets.  On overlap returns
+   *  true and writes penetration depth + axis into satOverlap / satAxis{X,Y}
+   *  (the minimum-translation axis); on a separating axis returns false. */
+  private satTest(vA: Vector2[], cA: number, vB: Vector2[], cB: number): boolean {
+      const axesCount = this.fillAxes(vA, cA, vB, cB, this.bufferAxes);
+      let minOverlap = Infinity, axX = 0, axY = 0;
+      for (let i = 0; i < axesCount; i++) {
+          const axis = this.bufferAxes[i];
+          let minA = Infinity, maxA = -Infinity;
+          for (let j = 0; j < cA; j++) {
+              const p = vA[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minA) minA = proj;
+              if (proj > maxA) maxA = proj;
+          }
+          let minB = Infinity, maxB = -Infinity;
+          for (let j = 0; j < cB; j++) {
+              const p = vB[j];
+              const proj = p.x * axis.x + p.y * axis.y;
+              if (proj < minB) minB = proj;
+              if (proj > maxB) maxB = proj;
+          }
+          if (maxA < minB || maxB < minA) return false;
+          const o = Math.min(maxA, maxB) - Math.max(minA, minB);
+          if (o < minOverlap) { minOverlap = o; axX = axis.x; axY = axis.y; }
+      }
+      this.satOverlap = minOverlap;
+      this.satAxisX = axX;
+      this.satAxisY = axY;
+      return true;
+  }
+
+  /** Fill `buffer` with the 3 world-space vertices of composite cell `idx`
+   *  (lattice-frame triangle → rotate by composite.rotation → translate). */
+  private fillMetalCellVerts(comp: GameEntity, idx: number, cmx: number, cmy: number, buffer: Vector2[]): number {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const c = comp.metalCells![idx];
+      const ccx = c.ix * ux - cmx;
+      const ccy = c.iy * uy - cmy;
+      const cos = Math.cos(comp.rotation);
+      const sin = Math.sin(comp.rotation);
+      const px = comp.position.x;
+      const py = comp.position.y;
+      const lx0 = ccx, ly0 = c.up ? ccy - R : ccy + R;
+      const lx1 = ccx + ux, ly1 = c.up ? ccy + uy : ccy - uy;
+      const lx2 = ccx - ux, ly2 = c.up ? ccy + uy : ccy - uy;
+      buffer[0].x = px + (lx0 * cos - ly0 * sin); buffer[0].y = py + (lx0 * sin + ly0 * cos);
+      buffer[1].x = px + (lx1 * cos - ly1 * sin); buffer[1].y = py + (lx1 * sin + ly1 * cos);
+      buffer[2].x = px + (lx2 * cos - ly2 * sin); buffer[2].y = py + (lx2 * sin + ly2 * cos);
+      return 3;
+  }
+
+  /** Mass centroid of a composite in its lattice frame. */
+  private metalCentroid(comp: GameEntity): { x: number; y: number } {
+      const R = comp.metalLatticeR!;
+      const ux = (R * Math.sqrt(3)) / 2;
+      const uy = R / 2;
+      const cells = comp.metalCells!;
+      let cmx = 0, cmy = 0;
+      for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+      return { x: cmx / cells.length, y: cmy / cells.length };
+  }
+
+  /** Per-cell SAT between a and b where at least one is a metal composite.
+   *  Resolves against the deepest-penetrating cell pair; writes the MTV
+   *  (oriented a → b) into bufferMtv and returns true on contact. */
+  private compositeSAT(a: GameEntity, b: GameEntity): boolean {
+      const aComp = a.metalCells !== undefined && a.metalCells.length > 0;
+      const bComp = b.metalCells !== undefined && b.metalCells.length > 0;
+
+      let cmAx = 0, cmAy = 0, cmBx = 0, cmBy = 0;
+      let cA_poly = 0, cB_poly = 0;
+      if (aComp) { const c = this.metalCentroid(a); cmAx = c.x; cmAy = c.y; }
+      else cA_poly = this.fillVertices(a, this.bufferVerticesA);
+      if (bComp) { const c = this.metalCentroid(b); cmBx = c.x; cmBy = c.y; }
+      else cB_poly = this.fillVertices(b, this.bufferVerticesB);
+
+      const aSub = aComp ? a.metalCells!.length : 1;
+      const bSub = bComp ? b.metalCells!.length : 1;
+
+      let bestPen = -1, bestAxX = 0, bestAxY = 0;
+      for (let ai = 0; ai < aSub; ai++) {
+          const cA = aComp ? this.fillMetalCellVerts(a, ai, cmAx, cmAy, this.bufferVerticesA) : cA_poly;
+          for (let bi = 0; bi < bSub; bi++) {
+              const cB = bComp ? this.fillMetalCellVerts(b, bi, cmBx, cmBy, this.bufferVerticesB) : cB_poly;
+              if (this.satTest(this.bufferVerticesA, cA, this.bufferVerticesB, cB)
+                  && this.satOverlap > bestPen) {
+                  bestPen = this.satOverlap;
+                  bestAxX = this.satAxisX;
+                  bestAxY = this.satAxisY;
+              }
+          }
+      }
+      if (bestPen < 0) return false;
+
+      const dx = b.position.x - a.position.x;
+      const dy = b.position.y - a.position.y;
+      if (dx * bestAxX + dy * bestAxY < 0) { bestAxX = -bestAxX; bestAxY = -bestAxY; }
+      this.bufferMtv.x = bestAxX * bestPen;
+      this.bufferMtv.y = bestAxY * bestPen;
+      return true;
+  }
+
+  /** Shard-pair resolution where a metal composite is involved — per-cell
+   *  SAT bounce along the contact normal (replaces the bounding-circle path
+   *  in resolveAsteroidPair for composites). */
+  private resolveCompositeShardPair(a: GameEntity, b: GameEntity, onDeath?: (entity: GameEntity) => void): void {
+      if (this.tryPassthroughShatter(a, b, onDeath)) return;
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return;
+
+      // Cheap bounding-circle reject (broadphase already culls roughly).
+      const rA = a.size.x / 2, rB = b.size.x / 2;
+      const wdx = wrapDeltaX(a.position.x, b.position.x);
+      const wdy = wrapDeltaY(a.position.y, b.position.y);
+      if (wdx * wdx + wdy * wdy > (rA + rB) * (rA + rB)) return;
+
+      // Shift b into a's frame so SAT (absolute vertices) is seam-correct.
+      const offX = (a.position.x + wdx) - b.position.x;
+      const offY = (a.position.y + wdy) - b.position.y;
+      const shifted = offX !== 0 || offY !== 0;
+      if (shifted) { b.position.x += offX; b.position.y += offY; }
+
+      if (this.compositeSAT(a, b)) {
+          const mx = this.bufferMtv.x, my = this.bufferMtv.y;
+          const overlap = Math.sqrt(mx * mx + my * my);
+          if (overlap > 1e-4) {
+              const nx = mx / overlap, ny = my / overlap; // a → b
+              const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
+              const invMassA = 1 / a.mass, invMassB = 1 / b.mass;
+              const totalInvMass = invMassA + invMassB;
+              if (totalInvMass > 0) {
+                  const MAX_SEPARATION_STEP = 2;
+                  const correction = Math.max(0, overlap - SLOP) * CORRECTION_PERCENT / totalInvMass;
+                  let pushA = correction * invMassA, pushB = correction * invMassB;
+                  if (pushA > MAX_SEPARATION_STEP) pushA = MAX_SEPARATION_STEP;
+                  if (pushB > MAX_SEPARATION_STEP) pushB = MAX_SEPARATION_STEP;
+                  a.position.x -= nx * pushA; a.position.y -= ny * pushA;
+                  b.position.x += nx * pushB; b.position.y += ny * pushB;
+                  a.asleep = false; a.sleepTimer = 0;
+                  b.asleep = false; b.sleepTimer = 0;
+                  const rvx = b.velocity.x - a.velocity.x;
+                  const rvy = b.velocity.y - a.velocity.y;
+                  const van = rvx * nx + rvy * ny;
+                  if (van <= 0) {
+                      const j = -(1 + ELASTICITY) * van / totalInvMass;
+                      a.velocity.x -= nx * j * invMassA; a.velocity.y -= ny * j * invMassA;
+                      b.velocity.x += nx * j * invMassB; b.velocity.y += ny * j * invMassB;
+                  }
+              }
+          }
+      }
+
+      if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
   }
 
   private resolveCollision(
