@@ -1052,16 +1052,22 @@ export class GameEngine {
     // pop a shard out of existence in the player's view).
     this.shards.setEntityIndex(this.entityIndex);
     // Shard→tile condensation emits a small, non-damaging plasma-style
-    // shockwave that shoves nearby loose shards clear.
-    this.shards.setTileFormedHandler((x, y) => this.spawnShockwave({ x, y }, {
-        radius: MERGE_BLOWBACK.RADIUS,
-        damage: MERGE_BLOWBACK.DAMAGE,
-        knockback: MERGE_BLOWBACK.KNOCKBACK,
-        color: MERGE_BLOWBACK.COLOR,
-        lifetime: MERGE_BLOWBACK.LIFETIME,
-        // Environmental effect — shove loose shards, never the player.
-        excludeIds: ['player'],
-    }));
+    // shockwave that shoves nearby loose shards clear, and patches the
+    // flow field so the new tile registers as an obstacle (the merge
+    // rules build large tile clusters at runtime — without this enemies
+    // path through walls that post-date map load).
+    this.shards.setTileFormedHandler((x, y) => {
+        this.spawnShockwave({ x, y }, {
+            radius: MERGE_BLOWBACK.RADIUS,
+            damage: MERGE_BLOWBACK.DAMAGE,
+            knockback: MERGE_BLOWBACK.KNOCKBACK,
+            color: MERGE_BLOWBACK.COLOR,
+            lifetime: MERGE_BLOWBACK.LIFETIME,
+            // Environmental effect — shove loose shards, never the player.
+            excludeIds: ['player'],
+        });
+        this.flowField.onTileCreated(x, y);
+    });
     this.flowField = new FlowFieldGrid();
     // Hand the renderer a reference to the flow field so the DBG
     // asteroid/shard FF overlays (vectors / cells / obstacles /

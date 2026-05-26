@@ -521,6 +521,52 @@ export class FlowFieldGrid {
     this.blocked[idx] = 0;
 
     // Asteroid field — recompute the kernel neighbourhood
+    this._rebakeAsteroidKernel(idx);
+
+    // Enemy field — BFS patch
+    this._patchField(idx, this.eneDist, this.eneFlowX, this.eneFlowY);
+  }
+
+  /**
+   * Notify the grid that a static obstacle tile was created at world
+   * position (wx, wy) — e.g. by a shard-merge / hot-spot collapse under
+   * the new merge rules, which condense loose shards into large tile
+   * clusters at runtime.  Without this the `blocked` bitmap stays stale
+   * and enemies path straight through walls that didn't exist at map
+   * load.
+   *
+   * Asteroid field: the new wall must repel nearby streamlines, so
+   * recompute the (2R+1)² kernel neighbourhood centred on the now-blocked
+   * cell — the mirror of onTileDestroyed.
+   *
+   * Enemy field: blocking a cell *raises* BFS distances across a region,
+   * which the cell-opening _patchField() (it only relaxes distances
+   * downward) cannot patch incrementally.  Mark the field dirty instead
+   * and let the throttled flushEnemyField() do one full range-capped
+   * rebuild — i.e. recalculate occasionally in these areas rather than
+   * per tile, so a burst of merges coalesces into a single recompute.
+   *
+   * Callers only fire this for obstacle-forming material tiles; nebula
+   * tiles are pass-through and excluded from the obstacle bitmap, so they
+   * never reach here.
+   */
+  onTileCreated(wx: number, wy: number): void {
+    const idx = this.worldToCell(wx, wy);
+    if (idx < 0 || this.blocked[idx]) return; // off-grid or already blocked
+    this.blocked[idx] = 1;
+
+    this._rebakeAsteroidKernel(idx);
+    this.enemyDirty = true;
+  }
+
+  /**
+   * Recompute the asteroid-flow vectors for the kernel neighbourhood
+   * centred on `idx`: the (2R+1)² block at R = kernelR, or self + the 4
+   * cardinals in legacy R=0 mode.  Shared by the tile destroy/create
+   * patch hooks — both flip the obstacle bitmap and must refresh
+   * wall-repulsion in the surrounding cells.
+   */
+  private _rebakeAsteroidKernel(idx: number): void {
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
     const R = this.kernelR;
@@ -540,9 +586,6 @@ export class FlowFieldGrid {
         }
       }
     }
-
-    // Enemy field — BFS patch
-    this._patchField(idx, this.eneDist, this.eneFlowX, this.eneFlowY);
   }
 
   // ─── sampling ────────────────────────────────────────────────────────────
