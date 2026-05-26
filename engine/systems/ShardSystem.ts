@@ -2453,7 +2453,12 @@ export class ShardSystem {
     const L = a.mass * (rax * a.velocity.y - ray * a.velocity.x)
             + b.mass * (rbx * b.velocity.y - rby * b.velocity.x);
     const I = a.mass * (rax * rax + ray * ray) + b.mass * (rbx * rbx + rby * rby);
-    const spin = I > 1e-6 ? Math.max(-2.5, Math.min(2.5, L / I)) : 0;
+    const momentumSpin = I > 1e-6 ? L / I : 0;
+    // Add a baseline random spin so every composite tumbles like a loose
+    // shard, not just off-centre merges.  Damping bleeds it off as the
+    // composite settles (see METAL_ASSEMBLY); the clamp caps total spin.
+    const spin = Math.max(-2.5, Math.min(2.5,
+      momentumSpin + (Math.random() - 0.5) * 2 * METAL_ASSEMBLY.SPAWN_SPIN));
 
     a.position.x += wdx * 0.5;
     a.position.y += wdy * 0.5;

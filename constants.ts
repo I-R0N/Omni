@@ -1343,6 +1343,7 @@ export const METAL_ASSEMBLY = {
   REST_SPEED: 0,
   REST_SPIN: 0,
   BREAK_SPEED_MULT: 2.0, // × normal dent-debris speed for metal-tile shards
+  SPAWN_SPIN: 1.0,       // ± baseline random spin (rad/s) a composite gets on formation, like loose shards
   HEX_FLOAT_SECONDS: 3.0, // a completed hexagon free-floats this long before snapping to grid
   RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on merge overflow
   MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
