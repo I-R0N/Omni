@@ -663,9 +663,9 @@ export const PLASTIC_STIFFNESS_CYCLE: ReadonlyArray<number> = [
   0.01, 0.05, 0.1, 0.5, 1, 2, 4,
 ] as const;
 
-// Default index 2 (k = 0.1) — soft/flowy; cycle down to 0.01 for
-// near-zero recovery or up to 4 for the previous firmer feel.
-let activePlasticStiffnessIndex = 2;
+// Default index 4 (k = 1) — firm recovery; cycle down toward 0.01 for
+// soft/flowy near-zero recovery or up to 4 for the firmest feel.
+let activePlasticStiffnessIndex = 4;
 
 export function getActivePlasticStiffness(): number {
   return PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex];
@@ -1488,13 +1488,13 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 // raises everyday top speed; the SPEED cycle only bites once the cap
 // drops below (or thrust pushes cruise above) that terminal velocity.
 export const PLAYER_THRUST_CYCLE: ReadonlyArray<number> = [
-  0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+  0.75, 1.0, 1.25, 1.5,
 ] as const;
 export const PLAYER_SPEED_CYCLE: ReadonlyArray<number> = [
   0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
 ] as const;
 
-let activePlayerThrustIndex = 2; // 1.0× — base config feel
+let activePlayerThrustIndex = 0; // 0.75× — default a touch below base, room to ramp up
 let activePlayerSpeedIndex = 2;  // 1.0× — base config cap
 
 export function getActivePlayerThrustMult(): number {

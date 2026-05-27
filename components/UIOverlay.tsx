@@ -616,9 +616,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   <button
                     onClick={onCyclePlayerThrust}
                     className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the player THRUST multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map acceleration.  Terminal cruise is friction-limited at acceleration/(1−friction), so this is the knob that actually changes everyday top speed."
+                    title="Cycle the player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration.  Terminal cruise is friction-limited at acceleration/(1−friction), so this is the knob that actually changes everyday top speed."
                   >
-                    {stats.playerThrustName ?? '1×'}
+                    {stats.playerThrustName ?? '0.75×'}
                   </button>
                 </div>
                 {/* Player speed multiplier — scales the per-map maxSpeed

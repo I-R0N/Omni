@@ -193,7 +193,7 @@ export class GameEngine {
   // production stays at the default 256.
   private static readonly FF_DENSITY_CYCLE: readonly number[] =
     [256, 192, 128, 96, 64, 48, 32] as const;
-  private ffCellSize: number = 256;
+  private ffCellSize: number = 48;
   // Wall-repulsion kernel radius for the asteroid field, in cells.
   // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
   // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
@@ -201,7 +201,7 @@ export class GameEngine {
   // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
   private static readonly FF_KERNEL_R_CYCLE: readonly number[] =
     [0, 1, 2, 3, 4, 5] as const;
-  private ffKernelR: number = 3;
+  private ffKernelR: number = 5;
   // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
   // radial (push perpendicular away from walls — current behaviour
   // produces opposing vectors on opposite sides of a long wall and
@@ -232,7 +232,7 @@ export class GameEngine {
   // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
   private static readonly FF_LANE_JITTER_CYCLE: readonly number[] =
     [0, 0.1, 0.2, 0.35] as const;
-  private ffLaneJitter: number = 0;
+  private ffLaneJitter: number = 0.2;
   // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
   // the active map's own sampleFlow(); the rest swap in an analytical
   // field (circular / spiral / gravity well / directional / wavy …).
@@ -3283,11 +3283,18 @@ export class GameEngine {
       // are effectively static geometry (stellar POIs), so a one-shot
       // cache matches their lifecycle.
       this.physics.initializeAttractors(map.entities);
+      // Apply the active flow-field tuning (density / kernel / tangent)
+      // so the configured defaults — and any values cycled before a
+      // restart — take effect at load instead of the grid's internal
+      // defaults.  Mirrors cycleFFDensity's reconfigure ordering.
+      this.flowField.setCellSize(this.ffCellSize);
       this.flowField.initObstacles(map.entities);
       // Bake under the active DBG pattern (DEFAULT = the map's own
       // sampler) so a selected pattern persists across map loads /
       // restarts.
       this.flowField.buildAsteroidField(this.flowSamplerFor(map));
+      this.flowField.setKernelR(this.ffKernelR);
+      this.flowField.setTangentMix(this.ffTangentMix);
       this.renderer.setMapType(map.type);
       // Forward the map's recorded nebula cluster-center positions to
       // the background layer so its puffs render at the same world
