@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -773,6 +773,26 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the DBG player-thrust multiplier (PLAYER_THRUST_CYCLE) applied
+   * live to the per-map acceleration.  This is the knob that actually
+   * raises everyday top speed, since terminal cruise is
+   * acceleration/(1−friction).
+   */
+  public cyclePlayerThrust() {
+    cyclePlayerThrust();
+  }
+
+  /**
+   * Cycle the DBG player-speed multiplier (PLAYER_SPEED_CYCLE) applied
+   * live to the per-map maxSpeed cap.  Only bites once the cap drops
+   * below the friction-limited terminal velocity (or thrust pushes
+   * cruise above it).
+   */
+  public cyclePlayerSpeed() {
+    cyclePlayerSpeed();
+  }
+
+  /**
    * Cycle the plastic-shard impact-stamp cooldown through
    * PLASTIC_IMPACT_COOLDOWN_CYCLE (0.2 / 0.4 / 0.8 / 1.5 / off).
    * Longer = the collision-driven wiggle/dent deformation axis
@@ -1237,6 +1257,8 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
+      playerThrustName: getActivePlayerThrustName(),
+      playerSpeedName: getActivePlayerSpeedName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
@@ -1393,6 +1415,8 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
+      playerThrustName: getActivePlayerThrustName(),
+      playerSpeedName: getActivePlayerSpeedName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
@@ -2100,8 +2124,8 @@ export class GameEngine {
     this.player.inputVector = moveDir; // Debug visualization assignment
     
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
-    const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult();
+    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult();
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt

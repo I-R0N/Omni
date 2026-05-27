@@ -61,6 +61,8 @@ interface UIOverlayProps {
   onCycleShatterGrace?: () => void;
   onCyclePlasticStiffness?: () => void;
   onCyclePlasticDamping?: () => void;
+  onCyclePlayerThrust?: () => void;
+  onCyclePlayerSpeed?: () => void;
   onCyclePlasticImpactCooldown?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
@@ -125,6 +127,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShatterGrace,
   onCyclePlasticStiffness,
   onCyclePlasticDamping,
+  onCyclePlayerThrust,
+  onCyclePlayerSpeed,
   onCyclePlasticImpactCooldown,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
@@ -602,6 +606,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     title="Cycle plastic-shard linear damping (per-substep velocity multiplier).  0.95 / 0.97 / 0.99 / 0.995 / 0.999 / 1.0.  At 120 Hz the per-second retention is value^120, so 0.95 ≈ 0.2 % (heavy) and 0.999 ≈ 89 % (very light); 1.0 is frictionless.  Applies live to all active plastic-shards."
                   >
                     {stats.plasticDampingName ?? '0.99'}
+                  </button>
+                </div>
+                {/* Player thrust multiplier — scales per-map acceleration
+                    live.  This is the knob that raises everyday top speed
+                    (terminal cruise = acceleration/(1−friction)). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PThr</span>
+                  <button
+                    onClick={onCyclePlayerThrust}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the player THRUST multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map acceleration.  Terminal cruise is friction-limited at acceleration/(1−friction), so this is the knob that actually changes everyday top speed."
+                  >
+                    {stats.playerThrustName ?? '1×'}
+                  </button>
+                </div>
+                {/* Player speed multiplier — scales the per-map maxSpeed
+                    cap live.  Only bites once the cap drops below (or
+                    thrust pushes cruise above) the friction terminal. */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PSpd</span>
+                  <button
+                    onClick={onCyclePlayerSpeed}
+                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                    title="Cycle the player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap.  Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it)."
+                  >
+                    {stats.playerSpeedName ?? '1×'}
                   </button>
                 </div>
                 {/* Plastic-shard impact-deformation cooldown — gates

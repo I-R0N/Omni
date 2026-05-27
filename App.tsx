@@ -241,6 +241,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticDamping();
   };
 
+  const handleCyclePlayerThrust = () => {
+      if (engineRef.current) engineRef.current.cyclePlayerThrust();
+  };
+
+  const handleCyclePlayerSpeed = () => {
+      if (engineRef.current) engineRef.current.cyclePlayerSpeed();
+  };
+
   const handleCyclePlasticImpactCooldown = () => {
       if (engineRef.current) engineRef.current.cyclePlasticImpactCooldown();
   };
@@ -356,6 +364,8 @@ const App: React.FC = () => {
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}
+        onCyclePlayerThrust={handleCyclePlayerThrust}
+        onCyclePlayerSpeed={handleCyclePlayerSpeed}
         onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}

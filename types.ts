@@ -902,6 +902,10 @@ export interface EngineStats {
   // DBG linear-damping step name for plastic-shards
   // (PLASTIC_DAMPING_CYCLE, 0.95 … 1.0).  Lower = heavier friction.
   plasticDampingName?: string;
+  // DBG player-thrust / player-speed multiplier step names
+  // (PLAYER_THRUST_CYCLE / PLAYER_SPEED_CYCLE, e.g. "1×").
+  playerThrustName?: string;
+  playerSpeedName?: string;
   // DBG impact-stamp cooldown step name for plastic-shards
   // (PLASTIC_IMPACT_COOLDOWN_CYCLE, 0.2 … 1.5 / off).  Longer =
   // calmer deformation; 'off' disables collision-driven deformation.

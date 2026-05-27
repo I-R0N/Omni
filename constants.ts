@@ -1417,67 +1417,107 @@ export const SHOOTING_STAR_CONSTANTS = {
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.RING]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.SEVEN_RINGS]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.POCKET]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   // Single-element 6k showcase maps — keep movement identical to the
   // other full-size maps so the element under test is the only variable.
   [MapType.ASTEROID_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.GLASS_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.PLASTIC_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.METAL_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.NEBULA_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.ROCK_FIELD]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.TILE_HEAVY]: {
     maxSpeed: 120,
-    acceleration: 0.066,
+    acceleration: 0.085,
     friction: 0.998
   },
 };
+
+// DBG runtime multipliers on the per-map player movement config so the
+// PThr / PSpd buttons can A/B-test feel without a rebuild.  Both read
+// live in GameEngine.updatePlayerMovement(): effective acceleration =
+// config.acceleration × thrust-mult, effective maxSpeed = config.maxSpeed
+// × speed-mult.  Note the coupling: terminal cruise is friction-limited
+// at acceleration/(1−friction), so the THRUST cycle is what actually
+// raises everyday top speed; the SPEED cycle only bites once the cap
+// drops below (or thrust pushes cruise above) that terminal velocity.
+export const PLAYER_THRUST_CYCLE: ReadonlyArray<number> = [
+  0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+] as const;
+export const PLAYER_SPEED_CYCLE: ReadonlyArray<number> = [
+  0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+] as const;
+
+let activePlayerThrustIndex = 2; // 1.0× — base config feel
+let activePlayerSpeedIndex = 2;  // 1.0× — base config cap
+
+export function getActivePlayerThrustMult(): number {
+  return PLAYER_THRUST_CYCLE[activePlayerThrustIndex];
+}
+export function getActivePlayerThrustName(): string {
+  return `${PLAYER_THRUST_CYCLE[activePlayerThrustIndex]}×`;
+}
+export function cyclePlayerThrust(): number {
+  activePlayerThrustIndex = (activePlayerThrustIndex + 1) % PLAYER_THRUST_CYCLE.length;
+  return activePlayerThrustIndex;
+}
+
+export function getActivePlayerSpeedMult(): number {
+  return PLAYER_SPEED_CYCLE[activePlayerSpeedIndex];
+}
+export function getActivePlayerSpeedName(): string {
+  return `${PLAYER_SPEED_CYCLE[activePlayerSpeedIndex]}×`;
+}
+export function cyclePlayerSpeed(): number {
+  activePlayerSpeedIndex = (activePlayerSpeedIndex + 1) % PLAYER_SPEED_CYCLE.length;
+  return activePlayerSpeedIndex;
+}
 
 export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
