@@ -1920,6 +1920,15 @@ export const PROJECTILE_CONSTANTS = {
   COLOR: '#facc15', // Yellow
   LIFETIME: 1.5, // Seconds
   MASS: 1, // Light projectile
+  // Fraction of the shooter's velocity added to the muzzle velocity at
+  // spawn (1.0 = full inheritance).  Keeps a moving shooter from
+  // outrunning its own shots: forward shots lead the ship and strafing
+  // shots drift with it.  A per-weapon muzzle-speed floor (config.speed
+  // along the aim direction) still applies on top, so a fast retreat
+  // can't fire a backward-drifting shot.  Weapon `speed` values were
+  // rescaled (~2.4x) alongside this so standstill shots stay punchy on
+  // the larger maps.
+  INHERIT_SHOOTER_VELOCITY: 1.0,
 };
 
 // ── Global entity caps ───────────────────────────────────────────────────────
@@ -1962,7 +1971,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BLASTER,
     name: 'Blaster',
     cooldown: 0.14,    // 7 shots/s — all-rounder cadence
-    speed: 9,
+    speed: 22,
     damage: 4,
     lifetime: 1.5,
     color: '#ef4444', // Red — infinite ammo starter
@@ -1978,7 +1987,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BURST,
     name: 'Burst Rifle',
     cooldown: 0.45,    // ~2.2 bursts/s
-    speed: 12,
+    speed: 28,
     damage: 5,
     lifetime: 3.0,
     color: '#f97316', // Orange
@@ -1996,7 +2005,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.SHOTGUN,
     name: 'Shotgun',
     cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
-    speed: 12,
+    speed: 28,
     damage: 3,
     lifetime: 0.8,     // doubled — pellets reach further before fading
     color: '#facc15', // Yellow
@@ -2012,7 +2021,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BOUNCER,
     name: 'Pierce Beam',
     cooldown: 0.40,    // 2.5 shots/s
-    speed: 18,         // ~2× Blaster — fast straight beam
+    speed: 40,         // fast straight beam — stays the quickest projectile
     damage: 5,
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
     color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
@@ -2029,7 +2038,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.50,    // 2 shots/s
-    speed: 16,         // gravity pull curves the projectile toward targets
+    speed: 36,         // gravity pull curves the projectile toward targets
     damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
@@ -2045,7 +2054,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
     cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
-    speed: 7,
+    speed: 16,
     damage: 6,
     lifetime: 3.0,
     color: '#3b82f6', // Blue
@@ -2062,7 +2071,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.CANNON,
     name: 'Plasma Cannon',
     cooldown: 1.40,    // ~0.7 shots/s — heavy artillery
-    speed: 10,
+    speed: 24,
     damage: 18,
     lifetime: 2.5,
     color: '#a855f7', // Purple
@@ -2103,7 +2112,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
-  speed: 5.0,
+  speed: 12,
   damage: 10,
   lifetime: 3.5,
   color: '#f97316',

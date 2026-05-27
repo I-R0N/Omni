@@ -72,8 +72,31 @@ export class ProjectileSystem {
         currentAngle += (Math.random() - 0.5) * (config.spread * (Math.PI / 180));
       }
 
-      const vx = Math.cos(currentAngle) * config.speed;
-      const vy = Math.sin(currentAngle) * config.speed;
+      const ax = Math.cos(currentAngle);
+      const ay = Math.sin(currentAngle);
+      let vx = ax * config.speed;
+      let vy = ay * config.speed;
+
+      // Inherit the shooter's velocity so a moving shooter doesn't outrun
+      // its own shots: forward shots lead the ship, strafing shots drift
+      // with it.  Applies to player and enemy alike (enemies aim at the
+      // player's current position with no lead, so this doesn't disturb
+      // their targeting).
+      const inherit = PROJECTILE_CONSTANTS.INHERIT_SHOOTER_VELOCITY;
+      if (inherit > 0 && shooter.velocity) {
+        vx += shooter.velocity.x * inherit;
+        vy += shooter.velocity.y * inherit;
+        // Muzzle-speed floor: guarantee at least config.speed of velocity
+        // ALONG the aim direction so a shooter retreating faster than the
+        // muzzle speed can't fire a shot that drifts backward.  Lateral
+        // inheritance (the strafe carry) is preserved.
+        const forward = vx * ax + vy * ay;
+        if (forward < config.speed) {
+          const deficit = config.speed - forward;
+          vx += ax * deficit;
+          vy += ay * deficit;
+        }
+      }
 
       const pSize = {
         x: config.size * 2.5,
@@ -83,8 +106,8 @@ export class ProjectileSystem {
       // Spawn slightly forward from the ship nose based on entity size
       const muzzleBase = Math.max(shooter.size?.x || SPRITE_CONSTANTS.PLAYER_BASE_SIZE, shooter.size?.y || SPRITE_CONSTANTS.PLAYER_BASE_SIZE);
       const muzzleOffset = muzzleBase * 0.6;
-      const startX = shooter.position.x + Math.cos(currentAngle) * muzzleOffset;
-      const startY = shooter.position.y + Math.sin(currentAngle) * muzzleOffset;
+      const startX = shooter.position.x + ax * muzzleOffset;
+      const startY = shooter.position.y + ay * muzzleOffset;
 
       entities.push({
         id: nextId('proj'),
@@ -92,7 +115,10 @@ export class ProjectileSystem {
         position: { x: startX, y: startY },
         velocity: { x: vx, y: vy },
         size: pSize,
-        rotation: currentAngle,
+        // Orient along actual travel (inherited velocity may diverge from
+        // the aim direction when strafing) so the sprite points where it
+        // flies; muzzle spawn offset still uses the aim direction.
+        rotation: Math.atan2(vy, vx),
         color: config.color,
         active: true,
         health: 1,
