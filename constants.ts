@@ -1416,65 +1416,65 @@ export const SHOOTING_STAR_CONSTANTS = {
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.RING]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.SEVEN_RINGS]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.POCKET]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   // Single-element 6k showcase maps — keep movement identical to the
   // other full-size maps so the element under test is the only variable.
   [MapType.ASTEROID_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.GLASS_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.PLASTIC_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.METAL_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.NEBULA_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.ROCK_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
   [MapType.TILE_HEAVY]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.066,
     friction: 0.998
   },
 };
@@ -1926,8 +1926,9 @@ export const PROJECTILE_CONSTANTS = {
   // shots drift with it.  A per-weapon muzzle-speed floor (config.speed
   // along the aim direction) still applies on top, so a fast retreat
   // can't fire a backward-drifting shot.  Weapon `speed` values were
-  // rescaled (~2.4x) alongside this so standstill shots stay punchy on
-  // the larger maps.
+  // rescaled (~1.8x over the pre-inheritance values) alongside this so
+  // standstill shots stay punchy on the larger maps without imparting so
+  // much momentum that hits blow shards across the field.
   INHERIT_SHOOTER_VELOCITY: 1.0,
 };
 
@@ -1971,7 +1972,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BLASTER,
     name: 'Blaster',
     cooldown: 0.14,    // 7 shots/s — all-rounder cadence
-    speed: 22,
+    speed: 16,
     damage: 4,
     lifetime: 1.5,
     color: '#ef4444', // Red — infinite ammo starter
@@ -1987,7 +1988,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BURST,
     name: 'Burst Rifle',
     cooldown: 0.45,    // ~2.2 bursts/s
-    speed: 28,
+    speed: 20,
     damage: 5,
     lifetime: 3.0,
     color: '#f97316', // Orange
@@ -2005,7 +2006,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.SHOTGUN,
     name: 'Shotgun',
     cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
-    speed: 28,
+    speed: 20,
     damage: 3,
     lifetime: 0.8,     // doubled — pellets reach further before fading
     color: '#facc15', // Yellow
@@ -2021,7 +2022,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BOUNCER,
     name: 'Pierce Beam',
     cooldown: 0.40,    // 2.5 shots/s
-    speed: 40,         // fast straight beam — stays the quickest projectile
+    speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
     color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
@@ -2038,7 +2039,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.50,    // 2 shots/s
-    speed: 36,         // gravity pull curves the projectile toward targets
+    speed: 26,         // gravity pull curves the projectile toward targets
     damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
@@ -2054,7 +2055,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
     cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
-    speed: 16,
+    speed: 12,
     damage: 6,
     lifetime: 3.0,
     color: '#3b82f6', // Blue
@@ -2071,7 +2072,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.CANNON,
     name: 'Plasma Cannon',
     cooldown: 1.40,    // ~0.7 shots/s — heavy artillery
-    speed: 24,
+    speed: 18,
     damage: 18,
     lifetime: 2.5,
     color: '#a855f7', // Purple
@@ -2112,7 +2113,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
-  speed: 12,
+  speed: 9,
   damage: 10,
   lifetime: 3.5,
   color: '#f97316',
