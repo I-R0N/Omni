@@ -2586,7 +2586,14 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
 // metal's even counts (6/8/10) so a player can tell rock from metal
 // at a glance.
 const SHARD_SPAWN_SHAPE_ROCK = {
-  sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
+  // sizeMin doubles as the asteroid-shatter chunk floor (ShardSystem
+  // MIN_SIZE): shatter children below it are dropped, and a parent
+  // without room for two of them stops shattering.  Raised above the
+  // free-spawn floor (MAP_POPULATION rock-shard minSize = 20, a separate
+  // knob) so asteroid breaks yield fewer, chunkier shards and the
+  // recursive re-shatter swarm terminates a generation sooner — shards
+  // below ~42 diameter no longer split.
+  sizeMin: 30, sizeMax: 200,
   polyVerticesMin: 5, polyVerticesMax: 9,
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
@@ -2906,7 +2913,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     shatter: {
       kind: 'powerlaw',
       style: 'asteroid',
-      countMin: 2, countMax: 5,
+      // countMax lowered 5 → 3: an asteroid break yields 2–3 chunky
+      // mass-conserving pieces instead of a 2–5 spray, so the field
+      // doesn't flood with chips when a cluster is shot apart.
+      countMin: 2, countMax: 3,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
       forwardDrag: 0.35, perpScatter: 0.0,
