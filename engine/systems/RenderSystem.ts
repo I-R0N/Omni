@@ -331,12 +331,17 @@ export class RenderSystem {
   // must render at position ±MAP_WIDTH / ±MAP_HEIGHT from its canonical
   // coord to appear in the right on-screen spot.
   private _visibleEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
-  // Separate render bucket for nebula tiles and shards so they always
+  // Separate render buckets for nebula tiles and shards so they always
   // render BELOW asteroids / actors / other entities regardless of their
-  // order in currentMap.entities.  Runtime-spawned nebula tiles (from
-  // shard transmutation) get pushed to the end of the entities array, so
-  // a naive single-pass loop would render them on top of asteroids.
-  private _nebulaEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  // order in currentMap.entities.  Tiles are static (mass = Infinity) and
+  // would otherwise take the STRUCTURE fast-path into _visibleEntities;
+  // shards are mobile.  Kept in two buckets so the draw order is strictly
+  // background-nebula → nebula tiles → nebula shards → everything else.
+  // Runtime-spawned nebula tiles (from shard transmutation) get pushed to
+  // the end of the entities array, so a naive single-pass loop would
+  // render them on top of asteroids.
+  private _nebulaTileEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _nebulaShardEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -760,7 +765,8 @@ export class RenderSystem {
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
-    this._nebulaEntities.length = 0;
+    this._nebulaTileEntities.length = 0;
+    this._nebulaShardEntities.length = 0;
     this._trailEntities.length = 0;
     this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
@@ -800,7 +806,13 @@ export class RenderSystem {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
-            this._visibleEntities.push({ entity, rx, ry });
+            // Nebula tiles are static (mass = Infinity) but must render in
+            // the dedicated bottom layer, not the main entity layer.
+            if (entity.shardVariant === 'nebula-tile') {
+                this._nebulaTileEntities.push({ entity, rx, ry });
+            } else {
+                this._visibleEntities.push({ entity, rx, ry });
+            }
             continue;
         }
 
@@ -836,11 +848,16 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push({ entity, rx, ry });
-        } else if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
-            // Nebula entities render as a dedicated bottom layer so
-            // asteroids / actors / projectiles always draw on top of
-            // them, regardless of entity array order.
-            this._nebulaEntities.push({ entity, rx, ry });
+        } else if (entity.shardVariant === 'nebula-shard') {
+            // Mobile nebula shards render in the dedicated bottom layer,
+            // above nebula tiles but below all other entities.  (Static
+            // nebula tiles are routed to their own bucket in the
+            // STRUCTURE fast-path above.)
+            this._nebulaShardEntities.push({ entity, rx, ry });
+        } else if (entity.shardVariant === 'nebula-tile') {
+            // Defensive: a nebula tile that ever has finite mass still
+            // belongs in the tile layer, never the main entity layer.
+            this._nebulaTileEntities.push({ entity, rx, ry });
         } else {
             this._visibleEntities.push({ entity, rx, ry });
         }
@@ -854,7 +871,7 @@ export class RenderSystem {
 
     // Snapshot the visible-nebula count after the cull bucket is built
     // so the dev overlay can report it alongside the nebula sub-timer.
-    this.lastNebulaVisible = this._nebulaEntities.length;
+    this.lastNebulaVisible = this._nebulaTileEntities.length + this._nebulaShardEntities.length;
     // Reset the per-frame fast/slow split — incremented inside
     // renderEntities below as each nebula entity is dispatched.
     this.lastNebulaFastCount = 0;
@@ -889,16 +906,21 @@ export class RenderSystem {
         );
     }
 
-    // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities, camera);
-
-    // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
-    // asteroids and everything else render on top of the nebula cloud.
-    // Wrapped in its own performance.now() bracket so the dev overlay
-    // can show nebula-pass cost separately from the total render time.
+    // 3. Render Nebulas (bottom layer).  Strict order: nebula tiles
+    // first, then nebula shards on top of them, so the whole cloud sits
+    // behind every other entity type (and their trails) regardless of
+    // entity array order.  Wrapped in its own performance.now() bracket
+    // so the dev overlay can show nebula-pass cost separately from total
+    // render time.
     const tNebula0 = performance.now();
-    this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+    this.renderEntities(ctx, this._nebulaTileEntities, camera, playerPos);
+    this.renderEntities(ctx, this._nebulaShardEntities, camera, playerPos);
     this.lastNebulaMs = performance.now() - tNebula0;
+
+    // 4. Render Trails — above the nebula layer but behind the main
+    // entities, so a ship/projectile trail crossing a nebula cloud stays
+    // visible on top of it instead of vanishing underneath.
+    this.renderTrails(ctx, this._trailEntities, camera);
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
