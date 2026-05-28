@@ -159,9 +159,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // DBG-panel section collapse state.  Each named section has its
   // own bool; default expanded.  Local-only (no persistence — page
   // refresh resets), which is fine for a dev panel.
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
+    // 'stats' stays open by default; every other section starts collapsed.
+    player: true, visual: true, shardsphys: true, flowfield: true,
+    perf: true, timing: true,
+  }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
+  // Read-only filter for the top 'Entities' readout: total / active
+  // (awake) / asleep (dynamic-sleeping).  Display only — does not change
+  // sleeping behaviour (that's the Shards & Physics ▸ Sleep toggle).
+  const [entityCountMode, setEntityCountMode] = useState<'total' | 'active' | 'asleep'>('total');
 
   // Labeled grid of map buttons, shared by the main menu and the pause
   // screen.  Selecting one routes through onSetMapType — a no-op-style
@@ -220,6 +228,40 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     if (ms < 10) return ms.toFixed(2);
     return ms.toFixed(1);
   };
+  // Plain JSX helpers (functions, NOT components — same inlining
+  // rationale as renderSectionHeader) for the two repeated DBG row
+  // shapes: a labelled cycle/toggle button, and a labelled readonly
+  // value.  Collapsing every hand-rolled row to one of these is most of
+  // the panel cleanup.
+  const ctrlRow = (
+    label: string,
+    onClick: (() => void) | undefined,
+    value: React.ReactNode,
+    title: string,
+  ) => (
+    <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+      <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
+      <button
+        onClick={onClick}
+        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+        title={title}
+      >
+        {value}
+      </button>
+    </div>
+  );
+  const statRow = (label: string, value: React.ReactNode, valueClass = 'text-white') => (
+    // whitespace-pre keeps the leading spaces some labels use to show
+    // the timing-breakdown hierarchy (updPhys ▸ ·physics ▸ ··grav).
+    <div className="flex justify-between"><span className="whitespace-pre">{label}</span><span className={valueClass}>{value}</span></div>
+  );
+  // Top 'Entities' count under the active display filter.
+  const totalEntities = perf ? perf.totalEntities : stats.entityCount;
+  const asleepEntities = perf ? perf.perfAsleepCount : 0;
+  const entityCountValue =
+    entityCountMode === 'asleep' ? asleepEntities
+    : entityCountMode === 'active' ? Math.max(0, totalEntities - asleepEntities)
+    : totalEntities;
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
@@ -248,769 +290,294 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
               <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
 
+              {/* ── Stats (top of menu — default open) ─────────────── */}
+              {renderSectionHeader('stats', 'Stats')}
+              {!collapsed.stats && (<>
+                {statRow('FPS', stats.fps)}
+                {statRow('Wave', stats.waveNumber ?? 1)}
+                {statRow('State', stats.waveStatus ?? '—')}
+                {/* Total entity count with a display-only filter:
+                    total / active (awake) / asleep (dynamic-sleeping). */}
+                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Entities</span>
+                  <span className="flex items-center gap-1">
+                    <span className="text-white">{entityCountValue}</span>
+                    <select
+                      value={entityCountMode}
+                      onChange={e => setEntityCountMode(e.target.value as 'total' | 'active' | 'asleep')}
+                      className="pointer-events-auto bg-slate-800/70 border border-slate-600/60 rounded text-[8px] font-bold text-slate-200 px-0.5 outline-none hover:border-amber-400/70"
+                      title="Entity-count filter (display only): total = all entities, active = awake, asleep = dynamic-sleeping (count of resting shards). Sleeping behaviour itself is the Shards & Physics ▸ Sleep toggle."
+                    >
+                      <option value="total">total</option>
+                      <option value="active">active</option>
+                      <option value="asleep">asleep</option>
+                    </select>
+                  </span>
+                </div>
+              </>)}
+
+              {/* ── Player ─────────────────────────────────────────── */}
+              {renderSectionHeader('player', 'Player')}
+              {!collapsed.player && (<>
+                {ctrlRow('Thrust', onCyclePlayerThrust, stats.playerThrustName ?? '0.75×',
+                  'Player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration. Terminal cruise = acceleration/(1−friction), so this is the knob that actually changes everyday top speed.')}
+                {ctrlRow('Speed', onCyclePlayerSpeed, stats.playerSpeedName ?? '1×',
+                  'Player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap. Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it).')}
+              </>)}
+
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Trail</span>
-                  <button
-                    onClick={onCycleTrailShape}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle CIRCLE → SQUARE → TRIANGLE → LINE → PATH → DOTS → NONE"
-                  >
-                    {stats.trailShape === TrailShape.SQUARE ? 'Square'
-                      : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'
-                      : stats.trailShape === TrailShape.LINE ? 'Line'
-                      : stats.trailShape === TrailShape.PATH ? 'Path'
-                      : stats.trailShape === TrailShape.DOTS ? 'Dots'
-                      : stats.trailShape === TrailShape.NONE ? 'None'
-                      : 'Circle'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Dir</span>
-                  <button
-                    onClick={onCycleTrailEmitMode}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle trail direction: VELOCITY vs THRUST"
-                  >
-                    {stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity'}
-                  </button>
-                </div>
-                {/* Camera screen-shake on impacts.  OFF keeps the
-                    camera anchored regardless of impact magnitude;
-                    in-flight shakes cancel immediately. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Shake</span>
-                  <button
-                    onClick={onToggleScreenShake}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle camera screen-shake on impacts."
-                  >
-                    {stats.screenShakeEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                {/* Collision-shape outlines on otherwise-outlineless
-                    variants (plastic-tile / plastic-shard soft
-                    gradient + nebula-tile / nebula-shard cloud).
-                    Default OFF; flip ON to see the SAT footprint
-                    against the soft fill. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Outline</span>
-                  <button
-                    onClick={onToggleTileOutlines}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle collision outlines on plastic + nebula tiles/shards (soft-gradient variants).  Shows the SAT polygon shape against the gradient fill."
-                  >
-                    {stats.tileOutlinesEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* Plastic-shard neighbour-brightness automata — On =
-                    constant palette base shade darkened by contact
-                    count; Off = per-instance random shades. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PAuto</span>
-                  <button
-                    onClick={onTogglePlasticAutomata}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Plastic-shard neighbour-brightness automata.  On: all shards use the palette's constant base shade, darkened by how many plastic-shards each is in contact with (like nebula interior-darkening).  Off: per-instance random shades."
-                  >
-                    {stats.plasticAutomataEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* PAuto direction — darken vs. brighten dense
-                    interiors.  Only meaningful while PAuto is On. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PADIR</span>
-                  <button
-                    onClick={onTogglePlasticAutomataDirection}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="PAuto automata direction: Darken dense cluster interiors (default, like nebula) or Brighten them.  Only affects rendering while PAuto is On."
-                  >
-                    {stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark'}
-                  </button>
-                </div>
-                {/* Plastic-eat attraction strength — how hard plastic
-                    pulls nearby glass/rock debris in to be eaten. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PEat</span>
-                  <button
-                    onClick={onCyclePlasticEatAttract}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed.  90 (gentle default) → 1440.  Nebula self-gravity is 380 for reference."
-                  >
-                    {stats.plasticEatAttractName ?? '180'}
-                  </button>
-                </div>
-                {/* Plastic "reach" pseudopod — plastic stretches toward
-                    loose plastic/glass/rock, grabs, and reels it in. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRch</span>
-                  <button
-                    onClick={onTogglePlasticReach}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Plastic 'reach' pseudopod: the nearest plastic shard leads its anchor toward a loose plastic/glass/rock target so the spring stretches it out, grabs on contact, then retracts to reel it in.  Off = passive cohesive cluster."
-                  >
-                    {stats.plasticReachEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* Plastic palette cycle — amber → black → green →
-                    purple → gray → blue.  Re-rolls every active
-                    plastic-tile and plastic-shard's colour on toggle. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Plastic</span>
-                  <button
-                    onClick={onCyclePlasticPalette}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the plastic palette family.  Re-rolls every active plastic-tile and plastic-shard's colour on toggle."
-                  >
-                    {stats.plasticPaletteName ?? 'amber'}
-                  </button>
-                </div>
-                {/* Plastic composite-op cycle — source-over → multiply →
-                    darken → screen → lighter.  Controls how overlapping
-                    plastic-shards blend in clusters. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Blend</span>
-                  <button
-                    onClick={onCyclePlasticBlendMode}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the globalCompositeOperation used by the plastic-shard render — controls how overlapping shards in a cluster combine.  source-over (default normal blend), multiply (darken overlap), darken (pixel-min), screen (lighten overlap), lighter (additive)."
-                  >
-                    {stats.plasticBlendMode ?? 'source-over'}
-                  </button>
-                </div>
-                {/* Plastic opacity cycle — 25 % → 50 % → 75 % → 100 %.
-                    Applied to both plastic-tile and plastic-shard. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Opacity</span>
-                  <button
-                    onClick={onCyclePlasticOpacity}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the globalAlpha used by plastic-tile and plastic-shard renders.  25 % is ghostly translucent, 100 % is fully opaque.  Default 75 %."
-                  >
-                    {stats.plasticOpacity ?? '75%'}
-                  </button>
-                </div>
-                {/* Plastic disc blend depth — PCore is the opaque-core
-                    radius fraction (smaller = longer fade = deeper
-                    blend); PBlnd is the disc draw radius (larger =
-                    more overlap).  Both shape plastic-SHARD discs. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PCore</span>
-                  <button
-                    onClick={onCyclePlasticCoreRadius}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the plastic-shard disc's opaque-core radius (fraction of disc radius).  Smaller core = longer alpha fade = deeper blend between overlapping shards."
-                  >
-                    {stats.plasticCoreRadiusName ?? '0.15'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlnd</span>
-                  <button
-                    onClick={onCyclePlasticBlendRadius}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the plastic-shard disc draw radius (× collision radius).  Larger spreads the disc further past its collision footprint so neighbouring discs overlap and blend more."
-                  >
-                    {stats.plasticBlendRadiusName ?? '2.0'}
-                  </button>
-                </div>
-                {/* Plastic colour-equilibration toggle — independent
-                    of the nebula tile/shard blend alphas.  When off,
-                    plastic colours stay at spawn / shatter values. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PBlend</span>
-                  <button
-                    onClick={onTogglePlasticBlend}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle plastic colour equilibration (NebulaSystem plastic block).  Off freezes plastic tiles + shards at their spawn / shatter colours; nebula blending unaffected.  Uses the same tileBlendAlpha / shardBlendAlpha as nebula when on."
-                  >
-                    {stats.plasticBlendEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
+                {ctrlRow('Trail', onCycleTrailShape,
+                  stats.trailShape === TrailShape.SQUARE ? 'Square'
+                    : stats.trailShape === TrailShape.TRIANGLE ? 'Triangle'
+                    : stats.trailShape === TrailShape.LINE ? 'Line'
+                    : stats.trailShape === TrailShape.PATH ? 'Path'
+                    : stats.trailShape === TrailShape.DOTS ? 'Dots'
+                    : stats.trailShape === TrailShape.NONE ? 'None'
+                    : 'Circle',
+                  'Cycle the player trail shape: Circle → Square → Triangle → Line → Path → Dots → None.')}
+                {ctrlRow('Trail dir', onCycleTrailEmitMode,
+                  stats.trailEmitMode === TrailEmitMode.THRUST ? 'Thrust' : 'Velocity',
+                  'Trail emit direction: Velocity vs Thrust.')}
+                {ctrlRow('Screen shake', onToggleScreenShake,
+                  stats.screenShakeEnabled === false ? 'Off' : 'On',
+                  'Camera screen-shake on impacts. Off keeps the camera anchored and cancels in-flight shakes immediately.')}
+                {ctrlRow('Outlines', onToggleTileOutlines,
+                  stats.tileOutlinesEnabled === true ? 'On' : 'Off',
+                  'Collision-shape outlines on plastic + nebula tiles/shards (soft-gradient variants). Shows the SAT polygon against the gradient fill.')}
+                {ctrlRow('Pl shade', onTogglePlasticAutomata,
+                  stats.plasticAutomataEnabled === true ? 'On' : 'Off',
+                  'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}
+                {ctrlRow('Shade dir', onTogglePlasticAutomataDirection,
+                  stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark',
+                  'Plastic automata direction: Darken dense cluster interiors (default) or Brighten. Only affects rendering while Pl shade is On.')}
+                {ctrlRow('Palette', onCyclePlasticPalette,
+                  stats.plasticPaletteName ?? 'amber',
+                  'Cycle the plastic palette family. Re-rolls every active plastic-tile and plastic-shard colour on toggle.')}
+                {ctrlRow('Blend op', onCyclePlasticBlendMode,
+                  stats.plasticBlendMode ?? 'source-over',
+                  'Cycle the globalCompositeOperation for the plastic-shard render — how overlapping shards combine: source-over / multiply / darken / screen / lighter.')}
+                {ctrlRow('Opacity', onCyclePlasticOpacity,
+                  stats.plasticOpacity ?? '75%',
+                  'Cycle plastic tile/shard globalAlpha: 25 / 50 / 75 / 100 %. Default 75 %.')}
+                {ctrlRow('Disc core', onCyclePlasticCoreRadius,
+                  stats.plasticCoreRadiusName ?? '0.15',
+                  'Cycle the plastic-shard disc opaque-core radius (fraction of disc radius). Smaller core = longer alpha fade = deeper blend between overlapping shards.')}
+                {ctrlRow('Disc size', onCyclePlasticBlendRadius,
+                  stats.plasticBlendRadiusName ?? '2.0',
+                  'Cycle the plastic-shard disc draw radius (× collision radius). Larger spreads the disc past its footprint so neighbours overlap and blend more.')}
+                {ctrlRow('Recolor', onTogglePlasticBlend,
+                  stats.plasticBlendEnabled === false ? 'Off' : 'On',
+                  'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
               </>)}
 
-              {/* ── Physics ────────────────────────────────────────── */}
-              {renderSectionHeader('physics', 'Physics')}
-              {!collapsed.physics && (<>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">LGrav</span>
-                  <button
-                    onClick={onToggleLocalGravity}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity)"
-                  >
-                    {stats.localGravityEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grav</span>
-                  <button
-                    onClick={onToggleAttractorGravity}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle attractor gravity scan (PhysicsSystem.applyGravity)"
-                  >
-                    {stats.attractorGravityEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Coll</span>
-                  <button
-                    onClick={onToggleCollisions}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle SAT collision broadphase.  OFF is game-breaking — measurement aid only."
-                  >
-                    {stats.collisionsEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
+              {/* ── Shards & Physics ───────────────────────────────── */}
+              {renderSectionHeader('shardsphys', 'Shards & Physics')}
+              {!collapsed.shardsphys && (<>
+                {ctrlRow('Local grav', onToggleLocalGravity,
+                  stats.localGravityEnabled === false ? 'Off' : 'On',
+                  'Toggle player↔asteroid local-gravity scan (PhysicsSystem.applyLocalGravity).')}
+                {ctrlRow('Attract grav', onToggleAttractorGravity,
+                  stats.attractorGravityEnabled === false ? 'Off' : 'On',
+                  'Toggle attractor gravity scan (PhysicsSystem.applyGravity).')}
+                {ctrlRow('Collisions', onToggleCollisions,
+                  stats.collisionsEnabled === false ? 'Off' : 'On',
+                  'Toggle the SAT collision broadphase. OFF is game-breaking — measurement aid only.')}
+                {ctrlRow('Shard grav', onToggleShardGravity,
+                  stats.shardGravityEnabled === false ? 'Off' : 'On',
+                  'Toggle shard↔shard gravity pull (attractedTo pass in ShardSystem.runMergeBroadphase). Today only nebula-shard has a non-none attractedTo.')}
+                {ctrlRow('Bonding', onToggleShardBonding,
+                  stats.shardBondingEnabled === false ? 'Off' : 'On',
+                  'Toggle shard↔shard bond formation + cohesion. OFF drops existing bonds and prevents new ones — nebula self-compose and cross-variant absorb stop.')}
+                {ctrlRow('Neb collide', onToggleNebulaShardCollisions,
+                  stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off',
+                  'Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag). Default OFF. A/B-test whether forcing nebula pairs to bounce breaks up large gather-piles.')}
+                {ctrlRow('Sleep', onToggleShardSleep,
+                  stats.shardSleepEnabled === false ? 'Off' : 'On',
+                  'Toggle collision-sleep for mobile shards. ON: resting shards stop resolving against each other (the bulk of a settled field) until disturbed by an awake body. OFF resolves every pair every pass.')}
+                {ctrlRow('Vp cull', onToggleShardViewportCull,
+                  stats.shardViewportCullEnabled === false ? 'Off' : 'On',
+                  'Toggle viewport-gated shard-pair cadence. ON: two offscreen shards resolve only on a periodic catch-up pass (~8× less often); any pair near the camera resolves every pass.')}
+                {ctrlRow('Shard LOD', onToggleShardLod,
+                  stats.shardLodEnabled === false ? 'Off' : 'On',
+                  'Toggle shard render LOD. ON: shards too small for their polygon detail to read blit a cached solid disc instead of the full polygon. Purely visual — collision/physics unaffected.')}
+                {ctrlRow('Merge rate', onToggleMergeRate,
+                  stats.mergeRateEnabled === false ? 'Off' : 'On',
+                  'Toggle the local-density merge/absorption rate. ON: shards in dense pockets merge & absorb faster, consolidating clusters into big rocks that condense to tiles. OFF holds a neutral 1.0×. See the merge-rate readout in Perf.')}
+                {ctrlRow('Grace', onCycleShatterGrace,
+                  stats.shatterGraceName ?? '0.6s',
+                  'Cycle the hot-spot-collapse grace delay (0.6 → 3.6s, 0.6s steps). Freshly-shattered rock/glass shards are exempt from the overlap-collapse pass for this long so debris scatters instead of re-condensing. Applies to tiles destroyed after the change.')}
+                {ctrlRow('Neb stretch', onCycleNebulaStretch,
+                  stats.nebulaStretchName ?? '0.07',
+                  'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10. The squash axis aligns to velocity while the sprite keeps its own rotation.')}
+                {ctrlRow('Shard↔tile', onToggleShardTileCollisions,
+                  stats.shardTileCollisionsEnabled === true ? 'On' : 'Off',
+                  'Toggle the mobile-shard ↔ static-tile collision pass.')}
+                {ctrlRow('Pair int', onCycleShardPairInterval,
+                  stats.shardPairInterval === 0
+                    ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
+                    : `every ${stats.shardPairInterval ?? 1}`,
+                  'Cycle the shard-pair resolution interval. AUTO scales N with shard-cell density; manual pins it.')}
+                {ctrlRow('S↔T int', onCycleShardTilePairInterval,
+                  stats.shardTilePairInterval === 0
+                    ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
+                    : `every ${stats.shardTilePairInterval ?? 1}`,
+                  'Cycle the shard ↔ static-tile interval. Only fires when Shard↔tile is ON.')}
+                {ctrlRow('Eat pull', onCyclePlasticEatAttract,
+                  stats.plasticEatAttractName ?? '180',
+                  'Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed. 90 → 1440 (nebula self-gravity is 380 for reference).')}
+                {ctrlRow('Reach', onTogglePlasticReach,
+                  stats.plasticReachEnabled === true ? 'On' : 'Off',
+                  'Plastic reach pseudopod: the nearest plastic shard leads its anchor toward a loose plastic/glass/rock target, stretches, grabs on contact, then retracts to reel it in. Off = passive cohesive cluster.')}
+                {ctrlRow('Yield', onCyclePlasticYield,
+                  stats.plasticYieldName ?? '5',
+                  'Cycle plastic-shard elastoplastic yield distance (world units): 2 / 5 / 10 / 25 / 60. Within yield the spring returns the shard; past it the anchor permanently migrates (plastic). Smaller = yields more easily; 60 is near-elastic.')}
+                {ctrlRow('Stiffness', onCyclePlasticStiffness,
+                  stats.plasticStiffnessName ?? '1',
+                  'Cycle plastic-shard sticky-bond spring stiffness k: 0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4. Lower k = gentler in-zone recovery and weaker over-yield cap, so kicks carry shards further past the yield point (more flow).')}
+                {ctrlRow('Damping', onCyclePlasticDamping,
+                  stats.plasticDampingName ?? '0.99',
+                  'Cycle plastic-shard linear damping (per-substep velocity multiplier): 0.95 … 1.0. At 120 Hz retention is value^120, so 0.95 ≈ 0.2 % (heavy), 0.999 ≈ 89 % (light); 1.0 frictionless. Applies live to all active plastic-shards.')}
+                {ctrlRow('Impact cd', onCyclePlasticImpactCooldown,
+                  stats.plasticImpactCooldownName ?? 'off',
+                  'Cycle plastic-shard collision-deformation cooldown (seconds): 0.2 / 0.4 / 0.8 / 1.5 / off. Caps how often a collision re-orients the squash axis. off disables collision-driven deformation entirely; projectile hits still wiggle.')}
+                {ctrlRow('Tile blend', onCycleTileBlendAlpha,
+                  blendLabel(stats.tileBlendAlpha),
+                  'Cycle nebula tile→tile colour blend (tiles drift toward neighbour-hex weighted hue average each frame): Off / Slow / Med / Fast.')}
+                {ctrlRow('Shard blend', onCycleShardBlendAlpha,
+                  blendLabel(stats.shardBlendAlpha),
+                  'Cycle nebula shard→nearest-tile colour blend (shards drift toward the nearest tile hue each frame): Off / Slow / Med / Fast.')}
+                {ctrlRow('Blend int', onCycleColorBlendInterval,
+                  stats.colorBlendFrameInterval === 0
+                    ? `auto (${stats.colorBlendEffectiveInterval ?? 1})`
+                    : `every ${stats.colorBlendFrameInterval ?? 1}`,
+                  'Cycle the colour-equilibration cadence. AUTO scales with active-nebula count; manual values pin the interval. Higher = cheaper but slower visual blend.')}
               </>)}
 
-              {/* ── Shards ─────────────────────────────────────────── */}
-              {renderSectionHeader('shards', 'Shards')}
-              {!collapsed.shards && (<>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShGrav</span>
-                  <button
-                    onClick={onToggleShardGravity}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle shard ↔ shard gravity pull (attractedTo pass in ShardSystem.runMergeBroadphase).  Today only nebula-shard has non-'none' attractedTo."
-                  >
-                    {stats.shardGravityEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShBond</span>
-                  <button
-                    onClick={onToggleShardBonding}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle shard ↔ shard bond formation + cohesion.  OFF drops existing bonds and prevents new ones — nebula self-compose and cross-variant absorb stop."
-                  >
-                    {stats.shardBondingEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Neb↔Neb</span>
-                  <button
-                    onClick={onToggleNebulaShardCollisions}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag).  Default OFF.  Use to A/B-test whether forcing nebula pairs to bounce off each other breaks up large gather-piles."
-                  >
-                    {stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sleep</span>
-                  <button
-                    onClick={onToggleShardSleep}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle collision-sleep for mobile shards.  When ON, resting shards stop resolving against each other (the bulk of a settled field) until disturbed by an awake body.  OFF resolves every pair every pass — use to A/B-test the win and confirm sleeping never freezes a shard through a real collision."
-                  >
-                    {stats.shardSleepEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">VpCull</span>
-                  <button
-                    onClick={onToggleShardViewportCull}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle viewport-gated shard-pair cadence.  When ON, two shards that are both offscreen resolve their collision only on a periodic catch-up pass (~8x less often); any pair with a shard on/near the camera resolves every pass.  OFF resolves every pair regardless of visibility — use to confirm no visible pop when off-screen piles scroll into view."
-                  >
-                    {stats.shardViewportCullEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShLOD</span>
-                  <button
-                    onClick={onToggleShardLod}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle shard render LOD.  When ON, mobile shards too small for their polygon detail to read blit a cached solid disc instead of the full polygon fill+stroke+glow.  Purely visual — collision/physics unaffected.  OFF renders every shard at full per-vertex detail."
-                  >
-                    {stats.shardLodEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">MrgRt</span>
-                  <button
-                    onClick={onToggleMergeRate}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle the local-density merge/absorption rate.  When ON, shards in dense pockets (hotspots) merge & absorb faster while big absorbing rocks slow down, consolidating clusters into a few big rocks that condense to static tiles.  OFF holds the rate at a neutral 1.0x (base rate, base budget).  The 'merge rate' readout below shows the live peak local multiplier."
-                  >
-                    {stats.mergeRateEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                {/* Hot-spot-collapse grace delay — how long freshly-
-                    shattered rock/glass shards are exempt from the
-                    overlap-collapse pass (so debris scatters before it
-                    can re-condense).  0.6 → 3.6s in 0.6s steps. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Grace</span>
-                  <button
-                    onClick={onCycleShatterGrace}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the hot-spot-collapse grace delay (0.6 → 3.6s, 0.6s steps).  Freshly-shattered rock/glass shards are exempt from the overlap-collapse pass for this long, so a just-destroyed tile's debris scatters instead of instantly re-condensing.  Applies to tiles destroyed after the change."
-                  >
-                    {stats.shatterGraceName ?? '0.6s'}
-                  </button>
-                </div>
-                {/* Nebula-shard velocity-stretch stiffness cycle —
-                    off / soft / med / firm / stiff.  Rotation mode
-                    is fixed to "free" (only squash axis aligns to
-                    velocity, sprite stays at its own rotation). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">NStr</span>
-                  <button
-                    onClick={onCycleNebulaStretch}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle nebula-shard velocity-stretch stiffness (K multiplier on speed → stretch).  off / 0.05 / 0.07 / 0.085 / 0.10.  At any K > 0 the squash axis aligns to velocity while the sprite keeps its own rotation."
-                  >
-                    {stats.nebulaStretchName ?? '0.07'}
-                  </button>
-                </div>
-                {/* Plastic-shard elastoplastic yield cycle — yield
-                    distance in world units (2 / 5 / 10 / 25 / 60).
-                    Smaller = more plastic: the anchor permanently
-                    migrates once displacement exceeds the yield, so
-                    less of a shove springs back. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PYld</span>
-                  <button
-                    onClick={onCyclePlasticYield}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard elastoplastic yield distance (world units).  2 / 5 / 10 / 25 / 60.  Within the yield the spring returns the shard; past it the anchor permanently migrates so the over-yield motion stays deformed (lossy/plastic).  Smaller = yields more easily; 60 is a near-elastic full-return reference."
-                  >
-                    {stats.plasticYieldName ?? '5'}
-                  </button>
-                </div>
-                {/* Plastic-shard sticky-bond spring stiffness cycle —
-                    k from 0.01 to 4.  Lower k = gentler in-zone
-                    recovery and weaker over-yield cap (more flow). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PStf</span>
-                  <button
-                    onClick={onCyclePlasticStiffness}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard sticky-bond spring stiffness k.  0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4.  Lower k = gentler recovery within the yield zone and a weaker over-yield cap, so kicks carry shards further past the yield point (more flow / deformation)."
-                  >
-                    {stats.plasticStiffnessName ?? '0.5'}
-                  </button>
-                </div>
-                {/* Plastic-shard linear damping cycle — per-substep
-                    velocity multiplier 0.95 … 1.0.  Lower = heavier
-                    friction (shards stop sooner); 1.0 frictionless. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PDmp</span>
-                  <button
-                    onClick={onCyclePlasticDamping}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard linear damping (per-substep velocity multiplier).  0.95 / 0.97 / 0.99 / 0.995 / 0.999 / 1.0.  At 120 Hz the per-second retention is value^120, so 0.95 ≈ 0.2 % (heavy) and 0.999 ≈ 89 % (very light); 1.0 is frictionless.  Applies live to all active plastic-shards."
-                  >
-                    {stats.plasticDampingName ?? '0.99'}
-                  </button>
-                </div>
-                {/* Player thrust multiplier — scales per-map acceleration
-                    live.  This is the knob that raises everyday top speed
-                    (terminal cruise = acceleration/(1−friction)). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PThr</span>
-                  <button
-                    onClick={onCyclePlayerThrust}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration.  Terminal cruise is friction-limited at acceleration/(1−friction), so this is the knob that actually changes everyday top speed."
-                  >
-                    {stats.playerThrustName ?? '0.75×'}
-                  </button>
-                </div>
-                {/* Player speed multiplier — scales the per-map maxSpeed
-                    cap live.  Only bites once the cap drops below (or
-                    thrust pushes cruise above) the friction terminal. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PSpd</span>
-                  <button
-                    onClick={onCyclePlayerSpeed}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap.  Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it)."
-                  >
-                    {stats.playerSpeedName ?? '1×'}
-                  </button>
-                </div>
-                {/* Plastic-shard impact-deformation cooldown — gates
-                    how often a collision can re-orient the wiggle/dent
-                    squash axis.  Longer = calmer; 'off' disables
-                    collision-driven deformation (projectile hits still
-                    wiggle). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">PRot</span>
-                  <button
-                    onClick={onCyclePlasticImpactCooldown}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle plastic-shard collision-deformation cooldown (seconds).  0.2 / 0.4 / 0.8 / 1.5 / off.  Caps how often a collision re-orients the wiggle/dent squash axis — longer stops the rapid axis-flip 'twitch' when shards are packed together.  'off' disables collision-driven deformation entirely; projectile hits still wiggle."
-                  >
-                    {stats.plasticImpactCooldownName ?? 'off'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl</span>
-                  <button
-                    onClick={onToggleShardTileCollisions}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle mobile-shard ↔ static-tile collision pass."
-                  >
-                    {stats.shardTileCollisionsEnabled === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShPair</span>
-                  <button
-                    onClick={onCycleShardPairInterval}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle shard-pair resolution interval.  AUTO scales N with shard-cell density; manual pins it."
-                  >
-                    {stats.shardPairInterval === 0
-                      ? `auto (${stats.shardPairEffectiveInterval ?? 1})`
-                      : `every ${stats.shardPairInterval ?? 1}`}
-                  </button>
-                </div>
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Sh↔Tl int</span>
-                  <button
-                    onClick={onCycleShardTilePairInterval}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle shard ↔ static-tile interval.  Only fires when Sh↔Tl is ON."
-                  >
-                    {stats.shardTilePairInterval === 0
-                      ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
-                      : `every ${stats.shardTilePairInterval ?? 1}`}
-                  </button>
-                </div>
-                {/* Nebula color equilibration — tiles drift toward
-                    their 6-hex-neighbour weighted average.  Cycle
-                    Off → Slow → Med → Fast (per-frame alpha 0 →
-                    0.005 → 0.02 → 0.08).  Tiles are anchors; shards
-                    have no influence on tiles. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">TileBlend</span>
-                  <button
-                    onClick={onCycleTileBlendAlpha}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle nebula tile→tile color blend.  Tiles drift toward neighbour-hex weighted hue average each frame.  Off / Slow / Med / Fast."
-                  >
-                    {blendLabel(stats.tileBlendAlpha)}
-                  </button>
-                </div>
-                {/* Shard → nearest-tile color blend.  Catch-up alpha
-                    is set higher than tile→tile because shards are
-                    transient and should integrate visibly. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ShardBlend</span>
-                  <button
-                    onClick={onCycleShardBlendAlpha}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle nebula shard→nearest-tile color blend.  Shards drift toward the nearest tile's hue each frame.  Off / Slow / Med / Fast."
-                  >
-                    {blendLabel(stats.shardBlendAlpha)}
-                  </button>
-                </div>
-                {/* Cadence interval for the color-equilibration pass.
-                    Trades smoothness for perf — higher = fires less
-                    often.  Only meaningful when TileBlend or
-                    ShardBlend is non-Off. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">ColorBlend int</span>
-                  <button
-                    onClick={onCycleColorBlendInterval}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the color-equilibration cadence.  AUTO scales with active-nebula count; manual values pin the interval.  Higher = cheaper but slower visual blend."
-                  >
-                    {stats.colorBlendFrameInterval === 0
-                      ? `auto (${stats.colorBlendEffectiveInterval ?? 1})`
-                      : `every ${stats.colorBlendFrameInterval ?? 1}`}
-                  </button>
-                </div>
-              </>)}
-
-              {/* ── FlowField (asteroid/shard FF — DBG only) ───────── */}
-              {renderSectionHeader('flowfield', 'FlowField')}
+              {/* ── Flow Field (asteroid/shard FF — DBG only) ──────── */}
+              {renderSectionHeader('flowfield', 'Flow Field')}
               {!collapsed.flowfield && (<>
-                {/* Base-flow pattern.  Swaps the analytical field the
-                    grid bakes from — map default / meander / circular /
-                    spiral / gravity well / wavy well / outward /
-                    directional + wavy.  Re-bakes on each cycle; kernel /
-                    tangent / breathing all still apply on top. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Pattern</span>
-                  <button
-                    onClick={onCycleFFPattern}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the base-flow pattern: Map (default) → Meander → Circular → Spiral → Well → WavyWell → Outward → Horiz → Vert → WavyH → WavyV.  Re-bakes the asteroid field; kernel / tangent / breathing apply on top."
-                  >
-                    {stats.ffPatternName ?? 'Map'}
-                  </button>
-                </div>
-                {/* Asteroid FF behaviour toggle.  OFF skips the per-
-                    asteroid / per-ammo-drop velocity nudge entirely;
-                    asteroids decay toward zero velocity over a few
-                    seconds and from then on move only via collisions
-                    or gravity.  Rotation still integrates. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">AstFF</span>
-                  <button
-                    onClick={onToggleAsteroidFlow}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle the asteroid/shard flow-field velocity nudge.  OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity."
-                  >
-                    {stats.asteroidFlowEnabled === false ? 'Off' : 'On'}
-                  </button>
-                </div>
-                {/* Grid density — cell size in world units.  Cycles
-                    256 → 192 → 128 → 96 → 64 → 48 → 32.  Each step
-                    reallocates both grids' typed-array buffers, re-
-                    bakes the asteroid field from the analytical
-                    formula + wall repulsion, and dirties the enemy
-                    pursuit field for the next sample.  Note: enemy
-                    pursuit range is measured in cells, so finer
-                    densities also shrink the BFS reach in world
-                    units. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Density</span>
-                  <button
-                    onClick={onCycleFFDensity}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the FF cell size (world units): 256 → 192 → 128 → 96 → 64 → 48 → 32.  Each step rebuilds both flow grids.  Pursuit-field BFS range is in cells, so finer densities reduce enemy long-range pathfinding."
-                  >
-                    {stats.ffCellSize ?? 256}u
-                  </button>
-                </div>
-                {/* Wall-repulsion kernel radius.  R=0 reproduces the
-                    legacy 4-cardinal-only scan for A/B comparison;
-                    R≥1 enables the (2R+1)² kernel with 1/d² falloff
-                    so cells several positions away from a wall start
-                    curving the flow gradually instead of staying
-                    straight until impact.  Each step re-bakes the
-                    asteroid field (sub-ms). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF KernelR</span>
-                  <button
-                    onClick={onCycleFFKernelR}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the wall-repulsion kernel radius (cells): 0 → 1 → 2 → 3 → 4 → 5.  R=0 is the legacy 4-cardinal-only scan (A/B baseline).  R≥1 enables the (2R+1)² kernel with 1/d² falloff — wider kernels curve the flow earlier."
-                  >
-                    R={stats.ffKernelR ?? 3}
-                  </button>
-                </div>
-                {/* Tangent-mix factor.  Blends radial (push away from
-                    wall, current behaviour — creates opposing vectors
-                    on opposite sides of long walls) with tangent
-                    (slide along wall in the base-flow direction).
-                    At mix=1, both sides of a wall flow in the same
-                    along-wall direction → no saddle, shards escape. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Tangent</span>
-                  <button
-                    onClick={onCycleFFTangentMix}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the tangent-mix factor: 0.00 → 0.25 → 0.50 → 0.75 → 1.00.  0 = pure radial repulsion (opposing vectors at long walls, saddle dead-zones).  1 = pure tangent (slide along walls, both sides flow the same way — no saddle)."
-                  >
-                    {(stats.ffTangentMix ?? 0.5).toFixed(2)}
-                  </button>
-                </div>
-                {/* Breathing field — slow undulation that migrates
-                    convergence zones over time so shard piles
-                    dissolve.  Off = static field. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Breathe</span>
-                  <button
-                    onClick={onCycleFFBreathe}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the breathing scroll rate (off / slow / med / fast).  Slowly undulates the asteroid flow so convergence/saddle zones drift over time and shard piles get walked out from under them.  Re-bakes on a throttled cadence."
-                  >
-                    {!stats.ffBreatheRate ? 'Off'
-                      : stats.ffBreatheRate < 0.2 ? 'Slow'
-                      : stats.ffBreatheRate < 0.6 ? 'Med'
-                      : 'Fast'}
-                  </button>
-                </div>
-                {/* Per-shard lane jitter — stable perpendicular offset
-                    so shards ride parallel lanes instead of one line. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Lane</span>
-                  <button
-                    onClick={onCycleFFLaneJitter}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle per-shard lane jitter (off / low / med / high).  Each shard gets a stable perpendicular offset to its flow target so shards ride parallel lanes instead of collapsing onto the same streamline."
-                  >
-                    {!stats.ffLaneJitter ? 'Off'
-                      : stats.ffLaneJitter < 0.15 ? 'Low'
-                      : stats.ffLaneJitter < 0.3 ? 'Med'
-                      : 'High'}
-                  </button>
-                </div>
-                {/* Per-cell arrow overlay.  Magnitude → color (cool→hot). */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Vec</span>
-                  <button
-                    onClick={onToggleFFOverlayVectors}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle asteroid/shard FF vector arrows.  Per-cell unit vector, sampled at stride N (see FF SampleN).  Pursuit field is intentionally not drawn."
-                  >
-                    {stats.ffOverlayVectors === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* Sample stride for the vector overlay only.  Cells /
-                    obstacles / rebuilds overlays always render every
-                    cell — only the vector arrows downsample. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF SampleN</span>
-                  <button
-                    onClick={onCycleFFOverlaySampleN}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Cycle the vector-overlay sample stride 1 → 2 → 4 → 8 → 16.  Stride 1 draws every cell."
-                  >
-                    every {stats.ffOverlaySampleN ?? 1}
-                  </button>
-                </div>
-                {/* Cell grid outlines — every cell, no downsampling. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Cells</span>
-                  <button
-                    onClick={onToggleFFOverlayCells}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle asteroid/shard FF cell outlines.  Draws every cell so the grid resolution and seam are visible."
-                  >
-                    {stats.ffOverlayCells === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* Obstacle tint — verifies the PR #54 obstacle filter
-                    (mass === Infinity && shardVariant !== 'nebula-tile')
-                    in practice.  Nebula tiles SHOULD NOT show as blocked. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Obs</span>
-                  <button
-                    onClick={onToggleFFOverlayObstacles}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle asteroid/shard FF obstacle bitmap tint.  Red cells are blocked.  Nebula tiles should NOT appear as obstacles (PR #54 filter)."
-                  >
-                    {stats.ffOverlayObstacles === true ? 'On' : 'Off'}
-                  </button>
-                </div>
-                {/* Rebuild flash — cells light up amber when re-baked
-                    by onTileDestroyed (the destroyed cell + 4 cardinal
-                    neighbours).  Fades over ~0.6 s. */}
-                <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                  <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">FF Reb</span>
-                  <button
-                    onClick={onToggleFFOverlayRebuilds}
-                    className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                    title="Toggle FF Rebuilds overlay.  Cells flash amber when re-baked by onTileDestroyed (destroyed cell + 4 cardinal neighbours).  Fades over ~0.6 s."
-                  >
-                    {stats.ffOverlayRebuilds === true ? 'On' : 'Off'}
-                  </button>
-                </div>
+                {ctrlRow('Pattern', onCycleFFPattern,
+                  stats.ffPatternName ?? 'Map',
+                  'Cycle the base-flow pattern: Map (default) → Meander → Circular → Spiral → Well → WavyWell → Outward → Horiz → Vert → WavyH → WavyV. Re-bakes the asteroid field; kernel / tangent / breathing apply on top.')}
+                {ctrlRow('Ast flow', onToggleAsteroidFlow,
+                  stats.asteroidFlowEnabled === false ? 'Off' : 'On',
+                  'Toggle the asteroid/shard flow-field velocity nudge. OFF: asteroids decay to zero velocity and from then on only move via collisions / gravity.')}
+                {ctrlRow('Density', onCycleFFDensity,
+                  `${stats.ffCellSize ?? 256}u`,
+                  'Cycle the FF cell size (world units): 256 → 192 → 128 → 96 → 64 → 48 → 32. Each step rebuilds both flow grids. Pursuit-field BFS range is in cells, so finer densities reduce enemy long-range pathfinding.')}
+                {ctrlRow('Kernel R', onCycleFFKernelR,
+                  `R=${stats.ffKernelR ?? 3}`,
+                  'Cycle the wall-repulsion kernel radius (cells): 0 → 1 → 2 → 3 → 4 → 5. R=0 is the legacy 4-cardinal scan (A/B baseline); R≥1 enables the (2R+1)² kernel with 1/d² falloff — wider kernels curve the flow earlier.')}
+                {ctrlRow('Tangent', onCycleFFTangentMix,
+                  (stats.ffTangentMix ?? 0.5).toFixed(2),
+                  'Cycle the tangent-mix factor: 0.00 → 0.25 → 0.50 → 0.75 → 1.00. 0 = pure radial repulsion (saddle dead-zones at long walls); 1 = pure tangent (slide along walls, both sides flow the same way — no saddle).')}
+                {ctrlRow('Breathe', onCycleFFBreathe,
+                  !stats.ffBreatheRate ? 'Off'
+                    : stats.ffBreatheRate < 0.2 ? 'Slow'
+                    : stats.ffBreatheRate < 0.6 ? 'Med'
+                    : 'Fast',
+                  'Cycle the breathing scroll rate (off / slow / med / fast). Slowly undulates the asteroid flow so convergence/saddle zones drift over time and shard piles dissolve. Re-bakes on a throttled cadence.')}
+                {ctrlRow('Lane', onCycleFFLaneJitter,
+                  !stats.ffLaneJitter ? 'Off'
+                    : stats.ffLaneJitter < 0.15 ? 'Low'
+                    : stats.ffLaneJitter < 0.3 ? 'Med'
+                    : 'High',
+                  'Cycle per-shard lane jitter (off / low / med / high). Each shard gets a stable perpendicular offset to its flow target so shards ride parallel lanes instead of collapsing onto one streamline.')}
+                {ctrlRow('Vec overlay', onToggleFFOverlayVectors,
+                  stats.ffOverlayVectors === true ? 'On' : 'Off',
+                  'Toggle asteroid/shard FF vector arrows. Per-cell unit vector, sampled at the Sample N stride. Pursuit field is intentionally not drawn.')}
+                {ctrlRow('Sample N', onCycleFFOverlaySampleN,
+                  `every ${stats.ffOverlaySampleN ?? 1}`,
+                  'Cycle the vector-overlay sample stride: 1 → 2 → 4 → 8 → 16. Stride 1 draws every cell.')}
+                {ctrlRow('Cells', onToggleFFOverlayCells,
+                  stats.ffOverlayCells === true ? 'On' : 'Off',
+                  'Toggle asteroid/shard FF cell outlines. Draws every cell so the grid resolution and seam are visible.')}
+                {ctrlRow('Obstacles', onToggleFFOverlayObstacles,
+                  stats.ffOverlayObstacles === true ? 'On' : 'Off',
+                  'Toggle the FF obstacle bitmap tint. Red cells are blocked. Nebula tiles should NOT appear as obstacles (PR #54 filter).')}
+                {ctrlRow('Rebuilds', onToggleFFOverlayRebuilds,
+                  stats.ffOverlayRebuilds === true ? 'On' : 'Off',
+                  'Toggle the FF Rebuilds overlay. Cells flash amber when re-baked by onTileDestroyed (destroyed cell + 4 cardinal neighbours). Fades over ~0.6 s.')}
               </>)}
 
-              {/* ── Stats (always visible — tiny + always useful) ──── */}
-              <div className="mt-1 flex justify-between"><span>FPS</span><span className="text-white">{stats.fps}</span></div>
-              <div className="flex justify-between"><span>Wave</span><span className="text-white">{stats.waveNumber ?? 1}</span></div>
-              <div className="flex justify-between"><span>State</span><span className="text-white">{stats.waveStatus ?? '—'}</span></div>
-
-              {perf ? (
-                <>
-                  {renderSectionHeader('entities', 'Entities')}
-                  {!collapsed.entities && (<>
-                    <div className="flex justify-between"><span>total</span><span className="text-white">{perf.totalEntities}</span></div>
-                    <div className="flex justify-between"><span>enemies</span><span className="text-white">{perf.enemyCount}</span></div>
-                    <div className="flex justify-between"><span>asteroids</span><span className="text-white">{perf.asteroidCount}</span></div>
-                    <div className="flex justify-between"><span>projectiles</span><span className="text-white">{perf.projectileCount}</span></div>
-                    <div className="flex justify-between"><span>particles</span><span className="text-white">{perf.particleCount}</span></div>
-                    <div className="flex justify-between"><span>drops/POI</span><span className="text-white">{perf.interactableCount}</span></div>
-                  </>)}
-
-                  {renderSectionHeader('broadphase', 'Broadphase')}
-                  {!collapsed.broadphase && (
-                    <div className="flex justify-between"><span>max cell</span><span className={perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white'}>{perf.maxCellDensity}</span></div>
-                  )}
-
-                  {/* ── Perf controller (central frame-skip coordinator) ── */}
-                  {renderSectionHeader('perfctl', 'Perf')}
-                  {!collapsed.perfctl && (<>
-                    {/* Master AUTO toggle — OFF disables all auto frame-
-                        skipping (manual pins still apply). */}
-                    <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
-                      <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Auto</span>
-                      <button
-                        onClick={onTogglePerfAuto}
-                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
-                        title="Master AUTO toggle for the central performance controller.  ON: skippable passes self-throttle from the load signal.  OFF: every AUTO task runs every step (manual ShPair / Sh↔Tl / ColorBlend pins still apply)."
-                      >
-                        {stats.perfAutoEnabled === false ? 'Off' : 'On'}
-                      </button>
-                    </div>
-                    {/* Load tier + smoothed level driving the throttle. */}
-                    <div className="flex justify-between">
-                      <span>load</span>
-                      <span className={perf.perfLoadLevel >= 0.82 ? 'text-red-400' : perf.perfLoadLevel >= 0.38 ? 'text-amber-300' : 'text-white'}>
-                        {perf.perfLoadTier} ({Math.round(perf.perfLoadLevel * 100)}%)
+              {perf && (<>
+                {/* ── Perf (entity counts + frame-skip controller) ──── */}
+                {renderSectionHeader('perf', 'Perf')}
+                {!collapsed.perf && (<>
+                  {statRow('enemies', perf.enemyCount)}
+                  {statRow('asteroids', perf.asteroidCount)}
+                  {statRow('projectiles', perf.projectileCount)}
+                  {statRow('particles', perf.particleCount)}
+                  {statRow('drops/POI', perf.interactableCount)}
+                  {statRow('max cell', perf.maxCellDensity,
+                    perf.maxCellDensity >= 20 ? 'text-red-400' : perf.maxCellDensity >= 10 ? 'text-amber-300' : 'text-white')}
+                  {ctrlRow('Auto', onTogglePerfAuto,
+                    stats.perfAutoEnabled === false ? 'Off' : 'On',
+                    'Master AUTO toggle for the performance controller. ON: skippable passes self-throttle from the load signal. OFF: every AUTO task runs every step (manual Pair int / S↔T int / Blend int pins still apply).')}
+                  <div className="flex justify-between">
+                    <span>load</span>
+                    <span className={perf.perfLoadLevel >= 0.82 ? 'text-red-400' : perf.perfLoadLevel >= 0.38 ? 'text-amber-300' : 'text-white'}>
+                      {perf.perfLoadTier} ({Math.round(perf.perfLoadLevel * 100)}%)
+                    </span>
+                  </div>
+                  {/* Dynamic (mobile) entity count — the throttle driver,
+                      with the asleep / offscreen / LOD breakdown. */}
+                  <div className="flex justify-between">
+                    <span>dyn ents</span>
+                    <span className="text-white">
+                      {perf.perfDynamicCount}
+                      {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0 || perf.perfLodShards > 0) && (
+                        <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''}{perf.perfLodShards > 0 ? `, ${perf.perfLodShards} lod` : ''})</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>merge rate{stats.mergeRateEnabled === false ? ' (off)' : ''}</span>
+                    <span className={stats.mergeRateEnabled === false ? 'text-slate-500' : perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
+                      {perf.perfMergeRateMult.toFixed(2)}×
+                    </span>
+                  </div>
+                  {/* Per-task effective frame-skip intervals.  "·N" = AUTO
+                      effective N; "·N!" = manual pin.  1 = runs every step. */}
+                  {perf.perfTasks?.map(t => (
+                    <div key={t.id} className="flex justify-between">
+                      <span>&nbsp;·{t.id}</span>
+                      <span className={t.eff >= 8 ? 'text-amber-300' : 'text-white'}>
+                        {t.eff}{t.manual >= 1 ? '!' : ''}
                       </span>
                     </div>
-                    {/* Dynamic (mobile) entity count — the throttle driver,
-                        vs. total entities (which counts inert tiles). */}
-                    <div className="flex justify-between">
-                      <span>dyn ents</span>
-                      <span className="text-white">
-                        {perf.perfDynamicCount}
-                        {(perf.perfAsleepCount > 0 || perf.perfOffscreenShards > 0 || perf.perfLodShards > 0) && (
-                          <span className="text-slate-500"> ({perf.perfAsleepCount} slp{perf.perfOffscreenShards > 0 ? `, ${perf.perfOffscreenShards} off` : ''}{perf.perfLodShards > 0 ? `, ${perf.perfLodShards} lod` : ''})</span>
-                        )}
-                      </span>
-                    </div>
-                    {/* Peak local merge/absorption rate multiplier this frame. */}
-                    <div className="flex justify-between">
-                      <span>merge rate{stats.mergeRateEnabled === false ? ' (off)' : ''}</span>
-                      <span className={stats.mergeRateEnabled === false ? 'text-slate-500' : perf.perfMergeRateMult >= 2 ? 'text-emerald-400' : perf.perfMergeRateMult >= 1.3 ? 'text-amber-300' : 'text-white'}>
-                        {perf.perfMergeRateMult.toFixed(2)}×
-                      </span>
-                    </div>
-                    {/* Per-task effective frame-skip intervals.  "·N" = AUTO
-                        effective N; "·N!" = manual pin.  1 = runs every step. */}
-                    {perf.perfTasks?.map(t => (
-                      <div key={t.id} className="flex justify-between">
-                        <span>&nbsp;·{t.id}</span>
-                        <span className={t.eff >= 8 ? 'text-amber-300' : 'text-white'}>
-                          {t.eff}{t.manual >= 1 ? '!' : ''}
-                        </span>
-                      </div>
-                    ))}
-                  </>)}
+                  ))}
+                </>)}
 
-                  {renderSectionHeader('timing', 'Timing (ms)')}
-                  {!collapsed.timing && (<>
-                    <div className="flex justify-between"><span>updPhys</span><span className="text-white">{fmtMs(perf.updatePhysicsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·physics</span><span className="text-white">{fmtMs(perf.physicsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;&nbsp;·grav</span><span className="text-white">{fmtMs(perf.gravityMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;&nbsp;·lgrv</span><span className="text-white">{fmtMs(perf.localGravityMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;&nbsp;·coll</span><span className="text-white">{fmtMs(perf.collisionsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·ai</span><span className="text-white">{fmtMs(perf.aiMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·flow</span><span className="text-white">{fmtMs(perf.flowFieldMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.physMiscMs)}</span></div>
-                    <div className="flex justify-between"><span>updLogic</span><span className="text-white">{fmtMs(perf.updateLogicMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·shards</span><span className="text-white">{fmtMs(perf.shardSysMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·rings</span><span className="text-white">{fmtMs(perf.explosionRingsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·weapons</span><span className="text-white">{fmtMs(perf.weaponsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·drops</span><span className="text-white">{fmtMs(perf.dropsMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·homing</span><span className="text-white">{fmtMs(perf.homingMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·lightn</span><span className="text-white">{fmtMs(perf.lightningMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·misc</span><span className="text-white">{fmtMs(perf.logicMiscMs)}</span></div>
-                    <div className="flex justify-between"><span>render</span><span className="text-white">{fmtMs(perf.renderMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·neb</span><span className="text-white">{fmtMs(perf.nebulaMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·vis-neb</span><span className="text-white">{perf.nebulaVisible}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·neb fast/slow</span><span className="text-white">{perf.nebulaFast}/{perf.nebulaSlow}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·tLit</span><span className="text-white">{fmtMs(perf.tileLightingMs)}</span></div>
-                    <div className="flex justify-between"><span>&nbsp;·tLit-N</span><span className="text-white">{perf.tileLightingCount}</span></div>
-                  </>)}
-                </>
-              ) : (
-                <div className="flex justify-between"><span>Ents</span><span className="text-white">{stats.entityCount}</span></div>
-              )}
+                {/* ── Timing (ms) ──────────────────────────────────── */}
+                {renderSectionHeader('timing', 'Timing (ms)')}
+                {!collapsed.timing && (<>
+                  {statRow('updPhys', fmtMs(perf.updatePhysicsMs))}
+                  {statRow(' ·physics', fmtMs(perf.physicsMs))}
+                  {statRow('  ·grav', fmtMs(perf.gravityMs))}
+                  {statRow('  ·lgrv', fmtMs(perf.localGravityMs))}
+                  {statRow('  ·coll', fmtMs(perf.collisionsMs))}
+                  {statRow(' ·ai', fmtMs(perf.aiMs))}
+                  {statRow(' ·flow', fmtMs(perf.flowFieldMs))}
+                  {statRow(' ·misc', fmtMs(perf.physMiscMs))}
+                  {statRow('updLogic', fmtMs(perf.updateLogicMs))}
+                  {statRow(' ·shards', fmtMs(perf.shardSysMs))}
+                  {statRow(' ·rings', fmtMs(perf.explosionRingsMs))}
+                  {statRow(' ·weapons', fmtMs(perf.weaponsMs))}
+                  {statRow(' ·drops', fmtMs(perf.dropsMs))}
+                  {statRow(' ·homing', fmtMs(perf.homingMs))}
+                  {statRow(' ·lightn', fmtMs(perf.lightningMs))}
+                  {statRow(' ·misc', fmtMs(perf.logicMiscMs))}
+                  {statRow('render', fmtMs(perf.renderMs))}
+                  {statRow(' ·neb', fmtMs(perf.nebulaMs))}
+                  {statRow(' ·vis-neb', perf.nebulaVisible)}
+                  {statRow(' ·neb fast/slow', `${perf.nebulaFast}/${perf.nebulaSlow}`)}
+                  {statRow(' ·tLit', fmtMs(perf.tileLightingMs))}
+                  {statRow(' ·tLit-N', perf.tileLightingCount)}
+                </>)}
+              </>)}
             </div>
           )}
         </div>

@@ -801,7 +801,6 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
-  nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   // ── Performance toggle state (debug menu) ─────────────────────

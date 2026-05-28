@@ -19,7 +19,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
-import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
+import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import type { FlowSampler } from './systems/FlowFieldGrid';
@@ -98,11 +98,6 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Which nebula image set is active.  Defaults to ALL so every discovered
-  // nebula image renders out of the box; the DBG panel cycles through A
-  // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
-  // comparison.
-  private nebulaSet: NebulaSet = 'ALL';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -368,31 +363,6 @@ export class GameEngine {
     // Fill the shared ammo pool when entering debug mode
     if (this.debugMode) {
       this.player.ammo = AMMO_CONSTANTS.MAX_POOL;
-    }
-  }
-
-  /**
-   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
-   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
-   * Updates the shared NEBULA_IMAGES array, reloads background textures,
-   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
-   * tile-cluster art swaps instantly without requiring a map reload.
-   */
-  public toggleNebulaSet() {
-    this.nebulaSet =
-        this.nebulaSet === 'ALL' ? 'A'
-      : this.nebulaSet === 'A'   ? 'B'
-      : this.nebulaSet === 'B'   ? 'N16'
-      : 'ALL';
-    const active = setActiveNebulaSet(this.nebulaSet);
-    this.renderer.setNebulaImages(active);
-
-    if (active.length > 0 && this.currentMap) {
-      for (const e of this.currentMap.entities) {
-        if (e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') {
-          e.sprite = active[Math.floor(Math.random() * active.length)];
-        }
-      }
     }
   }
 
@@ -1224,7 +1194,6 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
-      nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       localGravityEnabled: this.localGravityEnabled,
@@ -1382,7 +1351,6 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
-      nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       localGravityEnabled: this.localGravityEnabled,
