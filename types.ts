@@ -871,6 +871,8 @@ export interface EngineStats {
   // used by randomPlasticShade() and re-rolls every active plastic
   // entity's colour on toggle.
   plasticPaletteName?: string;
+  glassGlowColorName?: string;
+  nebulaPaletteName?: string;
   // Active globalCompositeOperation used by the plastic-shard render
   // branch.  Cycled via the DBG Blend button (source-over / multiply
   // / darken / screen / lighter).  Live — next-frame effect.

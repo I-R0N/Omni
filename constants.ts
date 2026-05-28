@@ -236,6 +236,77 @@ export function cyclePlasticPalette(): number {
   return activePlasticPaletteIndex;
 }
 
+// ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
+// The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
+// .glow.color (#a5f3fc); the cycle adds a yellow family so we can A/B
+// the warm-vs-cool feel.  RenderSystem reads the active colour through
+// getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
+export interface GlassGlowColor { name: string; hex: string; }
+export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
+  { name: 'cyan',     hex: '#a5f3fc' }, // default
+  { name: 'yellow',   hex: '#fde047' }, // Tailwind yellow-300
+  { name: 'lt-yel',   hex: '#fef08a' }, // yellow-200
+  { name: 'amber',    hex: '#fbbf24' }, // amber-400
+  { name: 'gold',     hex: '#eab308' }, // yellow-500
+  { name: 'warm-yel', hex: '#fcd34d' }, // amber-300, between yellow and amber
+] as const;
+
+let activeGlassGlowIndex = 0;
+
+export function getActiveGlassGlowColor(): string {
+  return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
+}
+export function getActiveGlassGlowColorName(): string {
+  return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
+}
+export function cycleGlassGlowColor(): number {
+  activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
+  return activeGlassGlowIndex;
+}
+
+// ── Nebula palette cycle (DBG-only) ─────────────────────────────────
+// Each preset re-parameterises the HSL arc the nebula colour generator
+// samples: hueMin/hueRange (in degrees) plus saturation/lightness.
+// Default reproduces the legacy cyan→red arc; the yellow presets exist
+// so the warm palettes can be tested live.  NebulaColor.ts reads the
+// active preset through getActiveNebulaPalette() each call so the cycle
+// takes effect on the next sampled tile/shard; existing tiles get
+// re-rolled by GameEngine.cycleNebulaPalette().
+export interface NebulaPalette {
+  name: string;
+  hueMin: number;     // degrees, start of the arc
+  hueRange: number;   // degrees, arc width (wraps past 360)
+  saturation: number; // 0..100
+  lightness: number;  // 0..100
+}
+export const NEBULA_PALETTES: ReadonlyArray<NebulaPalette> = [
+  // Legacy default — cyan (165°) wrapping past 360° into red (15°).
+  { name: 'default',  hueMin: 165, hueRange: 210, saturation: 100, lightness: 62 },
+  // Pure yellow band, narrow.
+  { name: 'yellow',   hueMin: 48,  hueRange: 12,  saturation: 100, lightness: 60 },
+  // Pale, low-saturation yellows.
+  { name: 'lt-yel',   hueMin: 50,  hueRange: 20,  saturation: 70,  lightness: 78 },
+  // Warm amber — deeper, redder yellows.
+  { name: 'amber',    hueMin: 30,  hueRange: 20,  saturation: 100, lightness: 52 },
+  // Saturated golden band, wider for tile-to-tile variety.
+  { name: 'gold',     hueMin: 38,  hueRange: 32,  saturation: 100, lightness: 56 },
+  // Wider yellow→green-yellow spread for varied dust-like clusters.
+  { name: 'yel-mix',  hueMin: 35,  hueRange: 60,  saturation: 90,  lightness: 60 },
+] as const;
+
+let activeNebulaPaletteIndex = 0;
+
+export function getActiveNebulaPalette(): NebulaPalette {
+  return NEBULA_PALETTES[activeNebulaPaletteIndex];
+}
+export function getActiveNebulaPaletteName(): string {
+  return NEBULA_PALETTES[activeNebulaPaletteIndex].name;
+}
+export function cycleNebulaPalette(): number {
+  activeNebulaPaletteIndex = (activeNebulaPaletteIndex + 1) % NEBULA_PALETTES.length;
+  return activeNebulaPaletteIndex;
+}
+
 /** Pick a random shade from the ACTIVE plastic palette.  Called at
  *  every plastic-tile / plastic-shard spawn site so cluster colour
  *  reads as "different shades" within the chosen family. */

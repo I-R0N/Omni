@@ -51,6 +51,8 @@ interface UIOverlayProps {
   onCyclePlasticEatAttract?: () => void;
   onTogglePlasticReach?: () => void;
   onCyclePlasticPalette?: () => void;
+  onCycleGlassGlowColor?: () => void;
+  onCycleNebulaPalette?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
@@ -117,6 +119,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticEatAttract,
   onTogglePlasticReach,
   onCyclePlasticPalette,
+  onCycleGlassGlowColor,
+  onCycleNebulaPalette,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
@@ -370,6 +374,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
+                {ctrlRow('Glass glow', onCycleGlassGlowColor,
+                  stats.glassGlowColorName ?? 'cyan',
+                  'Cycle the glass-tile proximity-glow colour: cyan (default) → yellow → light-yellow → amber → gold → warm-yellow. Glow intensity and range stay the same; only the hex colour changes. Visible whenever the player or another repellable body comes close to a glass tile.')}
+                {ctrlRow('Neb palette', onCycleNebulaPalette,
+                  stats.nebulaPaletteName ?? 'default',
+                  'Cycle the nebula colour palette (HSL arc + saturation + lightness): default cyan→red, yellow, lt-yel, amber, gold, yel-mix. Active nebula tiles + shards are re-rolled immediately so the new palette is visible right away; newly spawned nebulae also draw from the active preset.')}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}

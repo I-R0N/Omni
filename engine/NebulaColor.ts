@@ -13,7 +13,7 @@
 // merges concatenate + dedupe rather than averaging-then-storing.
 
 import { NebulaColorStop } from '../types';
-import { NEBULA_CONSTANTS } from '../constants';
+import { NEBULA_CONSTANTS, getActiveNebulaPalette } from '../constants';
 
 // ── sRGB ↔ hex helpers ───────────────────────────────────────────────────
 function hexToRgb01(hex: string): [number, number, number] {
@@ -166,10 +166,12 @@ export function hexToHueDeg(hex: string): number {
     return h;
 }
 
-// Convert a hue (degrees) to a palette-standard hex using the configured
-// saturation and lightness from NEBULA_CONSTANTS.
+// Convert a hue (degrees) to a palette-standard hex using the active
+// nebula palette's saturation + lightness.  Read each call so the DBG
+// 'Nebula palette' cycle takes effect on the next sample.
 export function paletteHueToHex(hueDeg: number): string {
-    return hslToHex(hueDeg, NEBULA_CONSTANTS.PALETTE_SATURATION, NEBULA_CONSTANTS.PALETTE_LIGHTNESS);
+    const p = getActiveNebulaPalette();
+    return hslToHex(hueDeg, p.saturation, p.lightness);
 }
 
 // Normalize an arbitrary hue to the standard [0, 360) range.  Renamed
@@ -227,10 +229,12 @@ export function circularLerpHue(
     return clampHueToPalette(Math.atan2(y, x) * RAD_TO_DEG);
 }
 
-// Pick a random hue uniformly from the allowed 210° arc (cyan → blue →
-// purple → pink → red), skipping the orange/yellow/green band.
+// Pick a random hue uniformly from the active palette's arc.  Reads
+// the live preset so the DBG 'Nebula palette' cycle takes effect on
+// the next sample.
 export function randomPaletteHueDeg(): number {
-    return (NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE) % 360;
+    const p = getActiveNebulaPalette();
+    return (p.hueMin + Math.random() * p.hueRange) % 360;
 }
 
 // ── Material-specific palette sub-arcs ─────────────────────────────

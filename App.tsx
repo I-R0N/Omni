@@ -201,6 +201,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
 
+  const handleCycleGlassGlowColor = () => {
+      if (engineRef.current) engineRef.current.cycleGlassGlowColor();
+  };
+
+  const handleCycleNebulaPalette = () => {
+      if (engineRef.current) engineRef.current.cycleNebulaPalette();
+  };
+
   const handleCyclePlasticBlendMode = () => {
       if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
   };
@@ -354,6 +362,8 @@ const App: React.FC = () => {
         onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
         onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}
+        onCycleGlassGlowColor={handleCycleGlassGlowColor}
+        onCycleNebulaPalette={handleCycleNebulaPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
