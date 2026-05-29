@@ -379,7 +379,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Cycle the glass palette through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Governs BOTH the glass-tile proximity glow (live, no entity touch-up) AND the dust released when glass tiles shatter (randomGlassNebulaComposition samples the entry\'s companion HSL preset). Default sky.')}
                 {ctrlRow('Nebula', onCycleNebulaPalette,
                   stats.nebulaPaletteName ?? 'white',
-                  'Cycle the nebula palette through the same 11-entry list as Glass. Governs rock-shatter / rock-merge dust (randomRockNebulaComposition) and main background nebula clusters (randomNebulaComposition / re-rolled on cycle). Default white (deliberate neutral so rock dust reads as cool debris unless you opt in to a colour family).')}
+                  'Cycle the nebula palette through the same 11-entry list as Glass. Governs main background nebula clusters only (randomNebulaComposition + re-rolled active nebula tiles + shards). Rock-shatter / rock-merge dust is fixed at white and NOT affected by this cycle — restore the getActiveNebulaPalette read in randomRockNebulaComposition if a cyclable rock palette is wanted later. Default white.')}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}

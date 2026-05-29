@@ -240,16 +240,18 @@ export function randomPaletteHueDeg(): number {
 /**
  * Random single-stop composition for nebula-style dust puffs spawned
  * by glass / rock tile or shard events (shatter AND shard→tile merge
- * transmutation).  The two helpers draw from independent DBG-cyclable
- * palettes so glass-derived dust (default sky) and rock-derived dust
- * (default white) can be tuned to taste without affecting each other:
+ * transmutation).  The two helpers are deliberately split:
  *
  *   - randomGlassNebulaComposition uses getActiveGlassPalette, which
  *     mirrors the glass-tile glow selection (Glass cycle in the DBG
- *     panel) so glow + glass dust share one palette.
- *   - randomRockNebulaComposition uses getActiveNebulaPalette, the
- *     "Nebula" cycle, which also governs main background nebula
- *     clusters spawned by maps.
+ *     panel) so glow + glass dust share one palette.  Default sky.
+ *   - randomRockNebulaComposition is *fixed* at the 'white' preset
+ *     (hue irrelevant when sat = 0) so cycling the Nebula knob no
+ *     longer recolours rock dust — that knob now only affects the
+ *     main background nebula clusters (randomNebulaComposition).  If
+ *     a cyclable rock palette is ever wanted, restore the
+ *     getActiveNebulaPalette read here and split it into its own
+ *     accessor.
  */
 export function randomGlassNebulaComposition(): NebulaColorStop[] {
     const p = getActiveGlassPalette();
@@ -257,7 +259,7 @@ export function randomGlassNebulaComposition(): NebulaColorStop[] {
     return [{ hex: hslToHex(hue, p.saturation, p.lightness), weight: 1 }];
 }
 export function randomRockNebulaComposition(): NebulaColorStop[] {
-    return [{ hex: paletteHueToHex(randomPaletteHueDeg()), weight: 1 }];
+    return [{ hex: hslToHex(0, 0, 90), weight: 1 }];
 }
 
 /**
