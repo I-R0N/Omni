@@ -669,13 +669,16 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the standalone NEBULA_PALETTES preset (default cyan→red arc
-   * + yellow variants).  No-op visual change while 'Neb follows glow' is
-   * ON (the follow toggle wins and reads from GLASS_GLOW_COLORS instead),
-   * but the index still advances so flipping the toggle off restores the
-   * cycled preset.  When follow is OFF we re-roll active nebulae for an
-   * immediate visual change + invalidate the cached blended-hex / tinted
-   * bitmaps so RenderSystem rebuilds them.
+   * Cycle the nebula palette selection.  The cycle now indexes into
+   * GLASS_GLOW_COLORS so both knobs offer the exact same 11 colour
+   * families; each entry's companion preset (HSL arc + sat + light,
+   * tuned for clouds) is what the sampler reads.  No-op visual change
+   * while 'Neb follows glow' is ON (the toggle wins and reads the
+   * *glow* index instead), but the nebula index still advances so
+   * flipping the toggle off restores the cycled selection.  When
+   * follow is OFF we re-roll active nebulae for an immediate visual
+   * change + invalidate the cached blended-hex / tinted bitmaps so
+   * RenderSystem rebuilds them.
    */
   public cycleNebulaPalette() {
     cycleNebulaPalette();
@@ -696,9 +699,9 @@ export class GameEngine {
   /**
    * Shared helper used by both nebula-palette knobs: re-roll every
    * active nebula tile/shard's composition from the *currently active*
-   * palette (which may be either the standalone NEBULA_PALETTES entry
-   * or a glow-derived preset, depending on isNebulaFollowingGlow()),
-   * then invalidate the blended-hex / tinted-bitmap caches.
+   * palette (either index into GLASS_GLOW_COLORS, depending on
+   * isNebulaFollowingGlow()), then invalidate the blended-hex /
+   * tinted-bitmap caches.
    */
   private rerollActiveNebulae() {
     if (!this.currentMap) return;

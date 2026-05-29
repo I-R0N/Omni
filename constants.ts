@@ -282,18 +282,18 @@ export function cycleGlassGlowColor(): number {
 }
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
-// Each preset re-parameterises the HSL arc the nebula colour generator
-// samples: hueMin/hueRange (in degrees) plus saturation/lightness.
-// Default reproduces the legacy cyan→red arc; the yellow presets exist
-// so the warm palettes can be tested live.  NebulaColor.ts reads the
-// active preset through getActiveNebulaPalette() each call so the cycle
-// takes effect on the next sampled tile/shard; existing tiles get
-// re-rolled by GameEngine.cycleNebulaPalette().
+// The nebula cycle now reuses GLASS_GLOW_COLORS as its source list so
+// both knobs offer the exact same 11 colour families.  Each entry's
+// `nebulaPalette` companion (HSL arc + sat + light, tuned for clouds)
+// is what the nebula sampler reads from.  NebulaColor.ts reads the
+// active preset through getActiveNebulaPalette() each call so the
+// cycle takes effect on the next sampled tile/shard; existing tiles
+// get re-rolled by GameEngine.cycleNebulaPalette().
 //
 // 'Neb follows glow' (default OFF) overrides this cycle while ON,
-// returning the active GLASS_GLOW_COLORS entry's companion palette
-// instead — kept as a toggle so we can A/B "shared palette" vs the
-// current independent-cycle behaviour.
+// returning the *glow* entry's companion preset instead — kept as a
+// toggle so we can A/B "shared selection" vs the independent-cycle
+// behaviour, even though both cycles draw from the same list.
 export interface NebulaPalette {
   name: string;
   hueMin: number;     // degrees, start of the arc
@@ -301,20 +301,6 @@ export interface NebulaPalette {
   saturation: number; // 0..100
   lightness: number;  // 0..100
 }
-export const NEBULA_PALETTES: ReadonlyArray<NebulaPalette> = [
-  // Legacy default — cyan (165°) wrapping past 360° into red (15°).
-  { name: 'default',  hueMin: 165, hueRange: 210, saturation: 100, lightness: 62 },
-  // Pure yellow band, narrow.
-  { name: 'yellow',   hueMin: 48,  hueRange: 12,  saturation: 100, lightness: 60 },
-  // Pale, low-saturation yellows.
-  { name: 'lt-yel',   hueMin: 50,  hueRange: 20,  saturation: 70,  lightness: 78 },
-  // Warm amber — deeper, redder yellows.
-  { name: 'amber',    hueMin: 30,  hueRange: 20,  saturation: 100, lightness: 52 },
-  // Saturated golden band, wider for tile-to-tile variety.
-  { name: 'gold',     hueMin: 38,  hueRange: 32,  saturation: 100, lightness: 56 },
-  // Wider yellow→green-yellow spread for varied dust-like clusters.
-  { name: 'yel-mix',  hueMin: 35,  hueRange: 60,  saturation: 90,  lightness: 60 },
-] as const;
 
 let activeNebulaPaletteIndex = 0;
 let nebulaFollowsGlow = false;
@@ -328,18 +314,16 @@ export function toggleNebulaFollowGlow(): boolean {
 }
 
 export function getActiveNebulaPalette(): NebulaPalette {
-  if (nebulaFollowsGlow) {
-    const g = GLASS_GLOW_COLORS[activeGlassGlowIndex];
-    return { name: g.name, ...g.nebulaPalette };
-  }
-  return NEBULA_PALETTES[activeNebulaPaletteIndex];
+  const idx = nebulaFollowsGlow ? activeGlassGlowIndex : activeNebulaPaletteIndex;
+  const g = GLASS_GLOW_COLORS[idx];
+  return { name: g.name, ...g.nebulaPalette };
 }
 export function getActiveNebulaPaletteName(): string {
   if (nebulaFollowsGlow) return `↔${GLASS_GLOW_COLORS[activeGlassGlowIndex].name}`;
-  return NEBULA_PALETTES[activeNebulaPaletteIndex].name;
+  return GLASS_GLOW_COLORS[activeNebulaPaletteIndex].name;
 }
 export function cycleNebulaPalette(): number {
-  activeNebulaPaletteIndex = (activeNebulaPaletteIndex + 1) % NEBULA_PALETTES.length;
+  activeNebulaPaletteIndex = (activeNebulaPaletteIndex + 1) % GLASS_GLOW_COLORS.length;
   return activeNebulaPaletteIndex;
 }
 

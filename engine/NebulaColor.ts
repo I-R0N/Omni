@@ -237,38 +237,22 @@ export function randomPaletteHueDeg(): number {
     return (p.hueMin + Math.random() * p.hueRange) % 360;
 }
 
-// ── Material-specific palette sub-arcs ─────────────────────────────
-// Split the 210° nebula arc into two non-overlapping sub-arcs so
-// nebula-style dust puffs spawned from breaking glass vs. rock tiles
-// carry visibly distinct hues.  15° dead zone between them keeps the
-// two families perceptually separable.
-//
-//   Glass: 165° (cyan) → 270° (indigo/violet)  — cool half
-//   Rock:  285° (purple-magenta) → 375° (red)  — warm half, wraps past 360°
-export const MATERIAL_GLASS_HUE_MIN = 165;
-export const MATERIAL_GLASS_HUE_MAX = 270;
-export const MATERIAL_ROCK_HUE_MIN  = 285;
-export const MATERIAL_ROCK_HUE_MAX  = 375;
-
 /**
- * Random single-stop composition from the glass sub-arc (cyan →
- * indigo).  Used for nebula-style dust puffs released by glass-tile
- * shatter so the cloud reads as glass-derived material instead of a
- * neutral light-blue.
+ * Random single-stop composition for nebula-style dust puffs spawned
+ * by glass / rock tile or shard events (shatter AND shard→tile merge
+ * transmutation).  Both helpers now draw from the *active* nebula
+ * palette so dust colours track the DBG palette cycle — the legacy
+ * cool-glass / warm-rock sub-arc split was abandoned (it only made
+ * sense under the original cyan→red default palette, and produced
+ * mis-coloured dust under narrower presets like 'yellow' or 'gold').
+ * Kept as two named functions so future callers can re-introduce a
+ * material distinction without touching every call site.
  */
 export function randomGlassNebulaComposition(): NebulaColorStop[] {
-    const hue = MATERIAL_GLASS_HUE_MIN + Math.random() * (MATERIAL_GLASS_HUE_MAX - MATERIAL_GLASS_HUE_MIN);
-    return [{ hex: paletteHueToHex(hue), weight: 1 }];
+    return [{ hex: paletteHueToHex(randomPaletteHueDeg()), weight: 1 }];
 }
-
-/**
- * Random single-stop composition from the rock sub-arc (purple →
- * red, wrapping past 360°).  Used for rock-tile / rock-shard dust
- * puffs.
- */
 export function randomRockNebulaComposition(): NebulaColorStop[] {
-    const hue = (MATERIAL_ROCK_HUE_MIN + Math.random() * (MATERIAL_ROCK_HUE_MAX - MATERIAL_ROCK_HUE_MIN)) % 360;
-    return [{ hex: paletteHueToHex(hue), weight: 1 }];
+    return [{ hex: paletteHueToHex(randomPaletteHueDeg()), weight: 1 }];
 }
 
 /**

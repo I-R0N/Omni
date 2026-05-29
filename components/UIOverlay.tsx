@@ -380,8 +380,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.glassGlowColorName ?? 'cyan',
                   'Cycle the glass-tile proximity-glow colour: cyan (default) → yellow → light-yellow → amber → gold → warm-yellow. Glow intensity and range stay the same; only the hex colour changes. Visible whenever the player or another repellable body comes close to a glass tile.')}
                 {ctrlRow('Neb palette', onCycleNebulaPalette,
-                  stats.nebulaPaletteName ?? 'default',
-                  'Cycle the nebula colour palette (HSL arc + saturation + lightness): default cyan→red, yellow, lt-yel, amber, gold, yel-mix. Active nebula tiles + shards are re-rolled immediately so the new palette is visible right away; newly spawned nebulae also draw from the active preset. While Neb↔glow is ON this cycle still advances but is overridden by the glow-derived preset — a "↔name" prefix in the label indicates the override.')}
+                  stats.nebulaPaletteName ?? 'cyan',
+                  'Cycle the nebula colour family — same 11-entry list as Glass glow (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white), each with a companion HSL preset (arc + sat + light) tuned for clouds. Active nebula tiles + shards (and dust puffs released by glass/rock shatter and shard→tile merges) re-roll immediately. While Neb↔glow is ON this cycle still advances but is overridden by the glow selection — a "↔name" prefix in the label indicates the override.')}
                 {ctrlRow('Neb↔glow', onToggleNebulaFollowGlow,
                   stats.nebulaFollowsGlow === true ? 'On' : 'Off',
                   'Toggle the nebula→glass-glow palette link. ON: nebula palette mirrors the active Glass-glow entry\'s companion preset (cycling Glass glow also re-rolls the nebula). OFF: the two cycles are independent — nebula uses the standalone Neb palette selection. Either flip immediately re-rolls active nebula tiles + shards.')}
