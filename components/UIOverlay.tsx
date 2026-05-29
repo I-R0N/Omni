@@ -53,7 +53,6 @@ interface UIOverlayProps {
   onCyclePlasticPalette?: () => void;
   onCycleGlassGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
-  onToggleNebulaFollowGlow?: () => void;
   onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
@@ -122,7 +121,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticPalette,
   onCycleGlassGlowColor,
   onCycleNebulaPalette,
-  onToggleNebulaFollowGlow,
   onCyclePlasticBlendMode,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
@@ -376,15 +374,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
-                {ctrlRow('Glass glow', onCycleGlassGlowColor,
-                  stats.glassGlowColorName ?? 'cyan',
-                  'Cycle the glass-tile proximity-glow colour: cyan (default) → yellow → light-yellow → amber → gold → warm-yellow. Glow intensity and range stay the same; only the hex colour changes. Visible whenever the player or another repellable body comes close to a glass tile.')}
-                {ctrlRow('Neb palette', onCycleNebulaPalette,
-                  stats.nebulaPaletteName ?? 'cyan',
-                  'Cycle the nebula colour family — same 11-entry list as Glass glow (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white), each with a companion HSL preset (arc + sat + light) tuned for clouds. Active nebula tiles + shards (and dust puffs released by glass/rock shatter and shard→tile merges) re-roll immediately. While Neb↔glow is ON this cycle still advances but is overridden by the glow selection — a "↔name" prefix in the label indicates the override.')}
-                {ctrlRow('Neb↔glow', onToggleNebulaFollowGlow,
-                  stats.nebulaFollowsGlow === true ? 'On' : 'Off',
-                  'Toggle the nebula→glass-glow palette link. ON: nebula palette mirrors the active Glass-glow entry\'s companion preset (cycling Glass glow also re-rolls the nebula). OFF: the two cycles are independent — nebula uses the standalone Neb palette selection. Either flip immediately re-rolls active nebula tiles + shards.')}
+                {ctrlRow('Glass', onCycleGlassGlowColor,
+                  stats.glassGlowColorName ?? 'sky',
+                  'Cycle the glass palette through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Governs BOTH the glass-tile proximity glow (live, no entity touch-up) AND the dust released when glass tiles shatter (randomGlassNebulaComposition samples the entry\'s companion HSL preset). Default sky.')}
+                {ctrlRow('Nebula', onCycleNebulaPalette,
+                  stats.nebulaPaletteName ?? 'white',
+                  'Cycle the nebula palette through the same 11-entry list as Glass. Governs rock-shatter / rock-merge dust (randomRockNebulaComposition) and main background nebula clusters (randomNebulaComposition / re-rolled on cycle). Default white (deliberate neutral so rock dust reads as cool debris unless you opt in to a colour family).')}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}

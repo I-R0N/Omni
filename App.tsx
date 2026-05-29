@@ -209,10 +209,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleNebulaPalette();
   };
 
-  const handleToggleNebulaFollowGlow = () => {
-      if (engineRef.current) engineRef.current.toggleNebulaFollowGlow();
-  };
-
   const handleCyclePlasticBlendMode = () => {
       if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
   };
@@ -368,7 +364,6 @@ const App: React.FC = () => {
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCycleGlassGlowColor={handleCycleGlassGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
-        onToggleNebulaFollowGlow={handleToggleNebulaFollowGlow}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}

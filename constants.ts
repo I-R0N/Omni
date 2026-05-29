@@ -268,7 +268,7 @@ export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
   { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
 ] as const;
 
-let activeGlassGlowIndex = 0;
+let activeGlassGlowIndex = 8; // default 'sky' — covers glass-tile glow + glass dust
 
 export function getActiveGlassGlowColor(): string {
   return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
@@ -276,24 +276,31 @@ export function getActiveGlassGlowColor(): string {
 export function getActiveGlassGlowColorName(): string {
   return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
 }
+/** Companion HSL preset for the active glass glow entry — used by the
+ *  glass-side nebula dust sampler (randomGlassNebulaComposition) so the
+ *  glow colour, the glass-tile shatter dust, and any future glass-
+ *  derived nebula entity share one selection. */
+export function getActiveGlassPalette(): NebulaPalette {
+  const g = GLASS_GLOW_COLORS[activeGlassGlowIndex];
+  return { name: g.name, ...g.nebulaPalette };
+}
 export function cycleGlassGlowColor(): number {
   activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
   return activeGlassGlowIndex;
 }
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
-// The nebula cycle now reuses GLASS_GLOW_COLORS as its source list so
-// both knobs offer the exact same 11 colour families.  Each entry's
-// `nebulaPalette` companion (HSL arc + sat + light, tuned for clouds)
-// is what the nebula sampler reads from.  NebulaColor.ts reads the
-// active preset through getActiveNebulaPalette() each call so the
-// cycle takes effect on the next sampled tile/shard; existing tiles
-// get re-rolled by GameEngine.cycleNebulaPalette().
-//
-// 'Neb follows glow' (default OFF) overrides this cycle while ON,
-// returning the *glow* entry's companion preset instead — kept as a
-// toggle so we can A/B "shared selection" vs the independent-cycle
-// behaviour, even though both cycles draw from the same list.
+// Independent cycle into the same GLASS_GLOW_COLORS list, governing
+// every nebula entity that ISN'T glass-derived: rock-shatter / rock-
+// merge dust (randomRockNebulaComposition) plus main background
+// nebula clusters (randomNebulaComposition + rerollActiveNebulae).
+// Default 'white' is a deliberate neutral so rock dust reads as cool
+// debris rather than coloured cloud unless the user opts in.  Each
+// entry's `nebulaPalette` companion (HSL arc + sat + light, tuned for
+// clouds) is what the sampler reads.  NebulaColor.ts reads the active
+// preset through getActiveNebulaPalette() each call so the cycle
+// takes effect on the next sampled tile/shard; existing tiles get re-
+// rolled by GameEngine.cycleNebulaPalette().
 export interface NebulaPalette {
   name: string;
   hueMin: number;     // degrees, start of the arc
@@ -302,24 +309,13 @@ export interface NebulaPalette {
   lightness: number;  // 0..100
 }
 
-let activeNebulaPaletteIndex = 0;
-let nebulaFollowsGlow = false;
-
-export function isNebulaFollowingGlow(): boolean {
-  return nebulaFollowsGlow;
-}
-export function toggleNebulaFollowGlow(): boolean {
-  nebulaFollowsGlow = !nebulaFollowsGlow;
-  return nebulaFollowsGlow;
-}
+let activeNebulaPaletteIndex = 10; // default 'white' — rock dust + main nebulae
 
 export function getActiveNebulaPalette(): NebulaPalette {
-  const idx = nebulaFollowsGlow ? activeGlassGlowIndex : activeNebulaPaletteIndex;
-  const g = GLASS_GLOW_COLORS[idx];
+  const g = GLASS_GLOW_COLORS[activeNebulaPaletteIndex];
   return { name: g.name, ...g.nebulaPalette };
 }
 export function getActiveNebulaPaletteName(): string {
-  if (nebulaFollowsGlow) return `↔${GLASS_GLOW_COLORS[activeGlassGlowIndex].name}`;
   return GLASS_GLOW_COLORS[activeNebulaPaletteIndex].name;
 }
 export function cycleNebulaPalette(): number {
