@@ -873,6 +873,7 @@ export interface EngineStats {
   plasticPaletteName?: string;
   glassGlowColorName?: string;
   nebulaPaletteName?: string;
+  nebulaFollowsGlow?: boolean;
   // Active globalCompositeOperation used by the plastic-shard render
   // branch.  Cycled via the DBG Blend button (source-over / multiply
   // / darken / screen / lighter).  Live — next-frame effect.

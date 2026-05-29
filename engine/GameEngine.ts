@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, toggleNebulaFollowGlow, isNebulaFollowingGlow, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -656,25 +656,51 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the DBG glass-tile glow colour (cyan default + four yellow
-   * shades).  Render pulls the colour live per frame from
-   * getActiveGlassGlowColor, so flipping is instant — no entity touch-up
-   * required (range + peakAlpha stay with the SHARD_VARIANTS entry).
+   * Cycle the DBG glass-tile glow colour through the GLASS_GLOW_COLORS
+   * list (cyan default + warm + diverse variants).  Render pulls the
+   * colour live per frame from getActiveGlassGlowColor, so flipping is
+   * instant for the glow itself.  When 'Neb follows glow' is ON the
+   * nebula palette derives from this glow entry, so we also re-roll
+   * active nebula tiles/shards here to make that link visible.
    */
   public cycleGlassGlowColor() {
     cycleGlassGlowColor();
+    if (isNebulaFollowingGlow()) this.rerollActiveNebulae();
   }
 
   /**
-   * Cycle the DBG nebula palette (default cyan→red arc + five yellow
-   * variants).  The sampler in NebulaColor.ts reads the active preset
-   * each call, but existing tiles + shards already hold compositions
-   * rolled from the previous palette — re-roll every active nebula
-   * entity here so the visual change is immediate, and invalidate the
-   * blended-hex / tinted-bitmap caches so RenderSystem rebuilds them.
+   * Cycle the standalone NEBULA_PALETTES preset (default cyan→red arc
+   * + yellow variants).  No-op visual change while 'Neb follows glow' is
+   * ON (the follow toggle wins and reads from GLASS_GLOW_COLORS instead),
+   * but the index still advances so flipping the toggle off restores the
+   * cycled preset.  When follow is OFF we re-roll active nebulae for an
+   * immediate visual change + invalidate the cached blended-hex / tinted
+   * bitmaps so RenderSystem rebuilds them.
    */
   public cycleNebulaPalette() {
     cycleNebulaPalette();
+    if (!isNebulaFollowingGlow()) this.rerollActiveNebulae();
+  }
+
+  /**
+   * Toggle the DBG 'nebula follows glow' link.  When ON, the nebula
+   * palette mirrors the active glass-glow entry's companion preset.
+   * Flipping it (either direction) re-rolls active nebulae so the
+   * effective palette is applied immediately.
+   */
+  public toggleNebulaFollowGlow() {
+    toggleNebulaFollowGlow();
+    this.rerollActiveNebulae();
+  }
+
+  /**
+   * Shared helper used by both nebula-palette knobs: re-roll every
+   * active nebula tile/shard's composition from the *currently active*
+   * palette (which may be either the standalone NEBULA_PALETTES entry
+   * or a glow-derived preset, depending on isNebulaFollowingGlow()),
+   * then invalidate the blended-hex / tinted-bitmap caches.
+   */
+  private rerollActiveNebulae() {
     if (!this.currentMap) return;
     const ents = this.currentMap.entities;
     for (let i = 0; i < ents.length; i++) {
@@ -1253,6 +1279,7 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       glassGlowColorName: getActiveGlassGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
+      nebulaFollowsGlow: isNebulaFollowingGlow(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
@@ -1412,6 +1439,7 @@ export class GameEngine {
       plasticPaletteName: getActivePlasticPaletteName(),
       glassGlowColorName: getActiveGlassGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
+      nebulaFollowsGlow: isNebulaFollowingGlow(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),

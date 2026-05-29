@@ -238,17 +238,34 @@ export function cyclePlasticPalette(): number {
 
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
 // The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
-// .glow.color (#a5f3fc); the cycle adds a yellow family so we can A/B
-// the warm-vs-cool feel.  RenderSystem reads the active colour through
+// .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
+// can A/B the look.  RenderSystem reads the active hex through
 // getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
-export interface GlassGlowColor { name: string; hex: string; }
+//
+// Each entry ALSO bundles a `nebulaPalette` — when the DBG 'Neb follows
+// glow' toggle is on, getActiveNebulaPalette() returns this companion
+// preset so the nebula cloud tracks the glow family (e.g. yellow glow ↔
+// yellow nebula).  Off restores the independent NEBULA_PALETTES cycle.
+export interface GlassGlowColor {
+  name: string;
+  hex: string;
+  // Companion nebula HSL preset used while 'Neb follows glow' is ON.
+  // Same shape as NebulaPalette below; duplicated to keep the two
+  // cycles' configs co-located + co-edited.
+  nebulaPalette: { hueMin: number; hueRange: number; saturation: number; lightness: number; };
+}
 export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
-  { name: 'cyan',     hex: '#a5f3fc' }, // default
-  { name: 'yellow',   hex: '#fde047' }, // Tailwind yellow-300
-  { name: 'lt-yel',   hex: '#fef08a' }, // yellow-200
-  { name: 'amber',    hex: '#fbbf24' }, // amber-400
-  { name: 'gold',     hex: '#eab308' }, // yellow-500
-  { name: 'warm-yel', hex: '#fcd34d' }, // amber-300, between yellow and amber
+  { name: 'cyan',    hex: '#a5f3fc', nebulaPalette: { hueMin: 175, hueRange: 50, saturation: 100, lightness: 62 } }, // default
+  { name: 'yellow',  hex: '#fde047', nebulaPalette: { hueMin: 48,  hueRange: 14, saturation: 100, lightness: 60 } },
+  { name: 'amber',   hex: '#fbbf24', nebulaPalette: { hueMin: 38,  hueRange: 18, saturation: 100, lightness: 55 } },
+  { name: 'gold',    hex: '#eab308', nebulaPalette: { hueMin: 42,  hueRange: 18, saturation: 100, lightness: 50 } },
+  { name: 'magenta', hex: '#e879f9', nebulaPalette: { hueMin: 295, hueRange: 25, saturation: 95,  lightness: 65 } },
+  { name: 'rose',    hex: '#fb7185', nebulaPalette: { hueMin: 345, hueRange: 25, saturation: 95,  lightness: 65 } },
+  { name: 'lime',    hex: '#a3e635', nebulaPalette: { hueMin: 75,  hueRange: 25, saturation: 90,  lightness: 60 } },
+  { name: 'emerald', hex: '#34d399', nebulaPalette: { hueMin: 150, hueRange: 25, saturation: 80,  lightness: 55 } },
+  { name: 'sky',     hex: '#7dd3fc', nebulaPalette: { hueMin: 198, hueRange: 22, saturation: 95,  lightness: 70 } },
+  { name: 'violet',  hex: '#a78bfa', nebulaPalette: { hueMin: 260, hueRange: 25, saturation: 90,  lightness: 70 } },
+  { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
 ] as const;
 
 let activeGlassGlowIndex = 0;
@@ -272,6 +289,11 @@ export function cycleGlassGlowColor(): number {
 // active preset through getActiveNebulaPalette() each call so the cycle
 // takes effect on the next sampled tile/shard; existing tiles get
 // re-rolled by GameEngine.cycleNebulaPalette().
+//
+// 'Neb follows glow' (default OFF) overrides this cycle while ON,
+// returning the active GLASS_GLOW_COLORS entry's companion palette
+// instead — kept as a toggle so we can A/B "shared palette" vs the
+// current independent-cycle behaviour.
 export interface NebulaPalette {
   name: string;
   hueMin: number;     // degrees, start of the arc
@@ -295,11 +317,25 @@ export const NEBULA_PALETTES: ReadonlyArray<NebulaPalette> = [
 ] as const;
 
 let activeNebulaPaletteIndex = 0;
+let nebulaFollowsGlow = false;
+
+export function isNebulaFollowingGlow(): boolean {
+  return nebulaFollowsGlow;
+}
+export function toggleNebulaFollowGlow(): boolean {
+  nebulaFollowsGlow = !nebulaFollowsGlow;
+  return nebulaFollowsGlow;
+}
 
 export function getActiveNebulaPalette(): NebulaPalette {
+  if (nebulaFollowsGlow) {
+    const g = GLASS_GLOW_COLORS[activeGlassGlowIndex];
+    return { name: g.name, ...g.nebulaPalette };
+  }
   return NEBULA_PALETTES[activeNebulaPaletteIndex];
 }
 export function getActiveNebulaPaletteName(): string {
+  if (nebulaFollowsGlow) return `↔${GLASS_GLOW_COLORS[activeGlassGlowIndex].name}`;
   return NEBULA_PALETTES[activeNebulaPaletteIndex].name;
 }
 export function cycleNebulaPalette(): number {
