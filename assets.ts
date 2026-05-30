@@ -26,6 +26,10 @@ export type AssetManifest = {
   HEX_STRUCTURE_METAL: string;
   HEX_STRUCTURE_INDESTRUCTIBLE: string;
   NEBULA_PUFF: string;
+  // Seamless rock surface textures, drawn polygon-clipped onto rock-shard
+  // and rock-tile silhouettes (see RenderSystem rocky-asteroid branch).
+  ROCK_TEXTURE_1: string;
+  ROCK_TEXTURE_2: string;
 };
 
 // Placeholder path used for assets that have no real image yet.
@@ -39,8 +43,21 @@ const PLACEHOLDER = '/assets/placeholder.png';
 // next dev reload / build — no code changes required.
 import NEBULA_MANIFEST from 'virtual:nebula-manifest';
 
-// All discovered nebula image URLs, sorted by filename.
-export const NEBULA_IMAGES_ALL: readonly string[] = NEBULA_MANIFEST;
+const basenameOf = (url: string) => url.slice(url.lastIndexOf('/') + 1);
+
+// TEST MODE: restrict the active manifest to a hand-picked subset of textures
+// so we can evaluate just this curated palette in isolation.  Remove this
+// filter (revert NEBULA_IMAGES_ALL to `NEBULA_MANIFEST`) to use every
+// discovered Nebula##.png again.
+const TEST_SUBSET_BASENAMES = new Set([
+  'Nebula00.png', 'Nebula06.png', 'Nebula14.png',
+  'Nebula15.png', 'Nebula16.png', 'Nebula17.png',
+  'Nebula18.png',
+]);
+
+// All nebula image URLs the game is allowed to use, sorted by filename.
+export const NEBULA_IMAGES_ALL: readonly string[] =
+  NEBULA_MANIFEST.filter(url => TEST_SUBSET_BASENAMES.has(basenameOf(url)));
 
 // Historical baseline: the original nine nebula images (00-08).  Kept as a
 // named subset so the DBG panel can A/B compare "old art" vs "everything".
@@ -51,7 +68,6 @@ const SET_A_BASENAMES = new Set([
   'Nebula03.png', 'Nebula04.png', 'Nebula05.png',
   'Nebula06.png', 'Nebula07.png', 'Nebula08.png',
 ]);
-const basenameOf = (url: string) => url.slice(url.lastIndexOf('/') + 1);
 
 export const NEBULA_IMAGES_SET_A: readonly string[] =
   NEBULA_IMAGES_ALL.filter(url => SET_A_BASENAMES.has(basenameOf(url)));
@@ -108,4 +124,6 @@ export const ASSETS: AssetManifest = {
   HEX_STRUCTURE_PLASTIC:        PLACEHOLDER,
   HEX_STRUCTURE_METAL:          PLACEHOLDER,
   HEX_STRUCTURE_INDESTRUCTIBLE: PLACEHOLDER,
+  ROCK_TEXTURE_1: '/assets/Rock00.png',
+  ROCK_TEXTURE_2: '/assets/Rock01.png',
 };

@@ -2849,10 +2849,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // mechanic landed.  Matches plastic / metal / rock / nebula —
     // glass was the last variant on the timer-regen path.
     regen: { kind: 'none' },
-    // Light hint-level repel — a soft outward nudge that reads as
-    // "the tile is alive" without actually blocking the player.
-    // Range ≤ 2 × SPATIAL_GRID_SIZE (240) so the broadphase 5×5
-    // outer ring covers it.
+    // Outward repel field — pushes player / enemies / non-immune mobile
+    // shards away before the SAT collision fires.  PhysicsSystem's
+    // repel scan widens the static-grid broadphase to 5×5 cells for
+    // the repel pass only (collision SAT stays at 3×3), so range can
+    // run up to 2 × SPATIAL_GRID_SIZE (240).  Strength is per-substep
+    // velocity delta at the tile centre, falling off linearly to zero
+    // at `range`; for reference applyGravity caps non-player accel at
+    // 5.0 and player accel at 0.2.  A soft hint-level nudge that reads
+    // as "the tile is alive" without actually blocking the player; the
+    // DBG Repel stepper overrides this live.
     repel: { range: 200, strength: 0.04 },
     // Cyan-200 face + edge-stroke glow paired 1:1 with the repel field
     // — same range, intensity follows the per-tile repelImpulse, which

@@ -230,6 +230,13 @@ export interface GameEntity {
   friction?: number; // Per-entity friction override
   gravityRange?: number; // Radius of gravitational influence
   gravityStrength?: number; // Force multiplier (G * Mass)
+  // Sum of per-substep repel impulse magnitudes from all glass-tile (or
+  // future repel-emitter) tiles in range, written by PhysicsSystem each
+  // substep and read by RenderSystem for the player opacity fade.
+  // Reset to 0 at the start of each substep; only the last substep's
+  // value is rendered (substeps are constant-FIXED_DT so any one of
+  // them is a fair proxy for the current force).
+  repelImpulse?: number;
 
   // AI
   enemySubtype?: EnemySubtype;
@@ -535,6 +542,16 @@ export interface GameEntity {
   nebulaCachedDx?: number;
   nebulaCachedDy?: number;
   nebulaCachedSize?: number;
+  // ── Render cache (rock-shard / rock-tile) ───────────────────────────────
+  // Per-entity offscreen canvas holding the polygon-clipped rock texture.
+  // Baked lazily by RenderSystem on first draw; reused every subsequent
+  // frame so the hot path is one `drawImage` instead of clip + drawImage.
+  // Invalidated implicitly by reference: `rockBakedFor` snapshots the
+  // polygon array used for the bake, so when ShardSystem reassigns
+  // `polygonPoints` on merge (a new array), the next render rebuilds.
+  rockBakedCanvas?: HTMLCanvasElement;
+  rockBakedFor?: Vector2[];
+  rockBakedTexSrc?: string;
   // Per-entity linear and angular damping factors (applied per-frame at 60Hz).
   // Used by NEBULA_SHARD to fake cloud-like drag on both translation and spin.
   linearDamping?: number;
@@ -788,6 +805,13 @@ export interface PerfTaskStat {
   manual: number;  // manual override (0 = AUTO)
 }
 
+// Rock-texture debug selector.  MIX cycles per-shard (default — hash
+// picks Rock00 or Rock01); ROCK00 / ROCK01 force every rocky entity
+// onto a single texture for A/B comparison.  SOLID skips the texture
+// path entirely and falls back to entity.color (slate, the look
+// before the rock textures landed).
+export type RockTextureMode = 'MIX' | 'ROCK00' | 'ROCK01' | 'SOLID';
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
@@ -801,6 +825,11 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
+  nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
+  rockTextureMode?: RockTextureMode;
+  // Live glass-tile repel strength (DBG slider override).  Default
+  // mirrors the SHARD_VARIANTS glass-tile config.
+  repelStrength?: number;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   // ── Performance toggle state (debug menu) ─────────────────────

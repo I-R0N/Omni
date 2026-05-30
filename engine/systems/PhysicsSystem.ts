@@ -112,6 +112,14 @@ export class PhysicsSystem {
   // at access time so a destroyed attractor stops contributing mid-game.
   private attractorsCache: GameEntity[] = [];
 
+  // Debug-only override for the glass-tile repel strength.  When set,
+  // it replaces `SHARD_VARIANTS[v].repel.strength` at every emitter
+  // site; null means "use the variant config".  Driven by the DBG
+  // panel's REPEL slider.  Today glass-tile is the only emitter, so
+  // a single global override is sufficient — if we add more emitters
+  // later, this becomes a per-variant table.
+  public repelStrengthOverride: number | null = null;
+
   // ── Perf instrumentation ──────────────────────────────────────────────────
   // Last-step wall time (ms) for the main update phases.  Written once per
   // update() call and read by GameEngine for the dev perf overlay.  Kept as
@@ -921,6 +929,11 @@ export class PhysicsSystem {
         dynamicEntities.push(e);
         if (!e.asleep) awakeCount++;
 
+        // Reset per-substep repel impulse accumulator before the broadphase
+        // pass writes into it.  Read by RenderSystem (player only today)
+        // for the opacity fade while traversing a glass-tile field.
+        e.repelImpulse = 0;
+
         const key = cellKey(e.position.x, e.position.y);
 
         let cell = this.dynamicGrid.get(key);
@@ -1083,7 +1096,77 @@ export class PhysicsSystem {
                         const b = staticCandidates[j];
                         if (!b.active) continue;
 
+                        // Outward repel field emitted by static tiles
+                        // whose variant declares one (today: glass-tile).
+                        // Rides on the broadphase pair we're already
+                        // visiting — adds one variant lookup + one
+                        // distance check + (when in range) a single
+                        // sqrt and velocity nudge per pair.
+                        if (aRepellable && b.shardVariant !== undefined) {
+                            const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                            if (repel !== undefined) {
+                                const dx = wrapDeltaX(b.position.x, a.position.x);
+                                const dy = wrapDeltaY(b.position.y, a.position.y);
+                                const distSq = dx * dx + dy * dy;
+                                const rangeSq = repel.range * repel.range;
+                                if (distSq > 1 && distSq < rangeSq) {
+                                    const dist = Math.sqrt(distSq);
+                                    // Quadratic falloff — peaks at centre,
+                                    // zero at the range edge.  Steeper
+                                    // outer ramp than linear (force ~0.25
+                                    // at half-range vs 0.5 linear) so the
+                                    // outer field is a soft hint and most
+                                    // of the push comes near the tile.
+                                    const t = 1 - dist / repel.range;
+                                    const strength = this.repelStrengthOverride ?? repel.strength;
+                                    const accel = strength * t * t * timeScale;
+                                    a.velocity.x += (dx / dist) * accel;
+                                    a.velocity.y += (dy / dist) * accel;
+                                    a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                                }
+                            }
+                        }
+
                         this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
+                    }
+                }
+            }
+        }
+
+        // Outer-ring repel-only scan — cells in the 5×5 box around the
+        // scanner that the inner 3×3 didn't reach (16 cells).  Lets
+        // glass-tile (and any future variant declaring `repel`) push
+        // out to ranges between SPATIAL_GRID_SIZE and 2× it without
+        // widening the costly SAT broadphase above.  Per cell: a Map
+        // lookup + variant-emitter check; per repel-emitting tile: a
+        // single distance compare and (when in range) one sqrt + one
+        // velocity nudge.  Skipped wholesale for projectiles, particles,
+        // and immune mobile shards.
+        if (aRepellable) {
+            for (let x = -2; x <= 2; x++) {
+                for (let y = -2; y <= 2; y++) {
+                    if (x >= -1 && x <= 1 && y >= -1 && y <= 1) continue;
+                    const key = cellKeyFromCell(cx + x, cy + y);
+                    const cell = this.staticGrid.get(key);
+                    if (!cell) continue;
+                    for (let j = 0; j < cell.length; j++) {
+                        const b = cell[j];
+                        if (!b.active || b.shardVariant === undefined) continue;
+                        const repel = SHARD_VARIANTS[b.shardVariant].repel;
+                        if (repel === undefined) continue;
+                        const dx = wrapDeltaX(b.position.x, a.position.x);
+                        const dy = wrapDeltaY(b.position.y, a.position.y);
+                        const distSq = dx * dx + dy * dy;
+                        const rangeSq = repel.range * repel.range;
+                        if (distSq > 1 && distSq < rangeSq) {
+                            const dist = Math.sqrt(distSq);
+                            const t = 1 - dist / repel.range;
+                            const strength = this.repelStrengthOverride ?? repel.strength;
+                            const accel = strength * t * t * timeScale;
+                            a.velocity.x += (dx / dist) * accel;
+                            a.velocity.y += (dy / dist) * accel;
+                            a.repelImpulse = (a.repelImpulse ?? 0) + accel;
+                        }
                     }
                 }
             }

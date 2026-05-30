@@ -109,6 +109,18 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.setMapType(type);
   };
 
+  const handleToggleNebulaSet = () => {
+      if (engineRef.current) engineRef.current.toggleNebulaSet();
+  };
+
+  const handleToggleRockTextureMode = () => {
+      if (engineRef.current) engineRef.current.toggleRockTextureMode();
+  };
+
+  const handleSetRepelStrength = (v: number) => {
+      if (engineRef.current) engineRef.current.setRepelStrength(v);
+  };
+
   const handleCycleTrailShape = () => {
       if (engineRef.current) engineRef.current.cycleTrailShape();
   };
@@ -339,6 +351,9 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onToggleDebug={handleToggleDebug}
+        onToggleNebulaSet={handleToggleNebulaSet}
+        onToggleRockTextureMode={handleToggleRockTextureMode}
+        onSetRepelStrength={handleSetRepelStrength}
         onCycleTrailShape={handleCycleTrailShape}
         onCycleTrailEmitMode={handleCycleTrailEmitMode}
         onToggleLocalGravity={handleToggleLocalGravity}

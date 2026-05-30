@@ -31,6 +31,9 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onToggleDebug?: () => void;
+  onToggleNebulaSet?: () => void;
+  onToggleRockTextureMode?: () => void;
+  onSetRepelStrength?: (v: number) => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
   onToggleLocalGravity?: () => void;
@@ -99,6 +102,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onToggleDebug,
+  onToggleNebulaSet,
+  onToggleRockTextureMode,
+  onSetRepelStrength,
   onCycleTrailShape,
   onCycleTrailEmitMode,
   onToggleLocalGravity,
@@ -380,6 +386,59 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Nebula', onCycleNebulaPalette,
                   stats.nebulaPaletteName ?? 'sky',
                   'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}
+                {ctrlRow('Neb set', onToggleNebulaSet,
+                  stats.nebulaSet === 'A' ? 'A (baseline)'
+                    : stats.nebulaSet === 'B' ? 'B (new art)'
+                    : stats.nebulaSet === 'N16' ? 'N16 only'
+                    : 'ALL',
+                  'Cycle the active nebula image set: ALL → A (baseline 00-08) → B (new art) → N16 (16 only). Lets the DBG panel compare old art against the test subset.')}
+                {ctrlRow('Rocks', onToggleRockTextureMode,
+                  stats.rockTextureMode === 'ROCK00' ? 'Rock00 only'
+                    : stats.rockTextureMode === 'ROCK01' ? 'Rock01 only'
+                    : stats.rockTextureMode === 'SOLID' ? 'SOLID'
+                    : 'MIX',
+                  'Cycle the rock-shard / rock-tile texture: MIX (per-shard) → Rock00 only → Rock01 only → SOLID (no texture).')}
+                {/* Glass-tile repel-strength stepper — linear 0.01 increments
+                    in [0.01, 0.15].  Boundary buttons grey out at the ends. */}
+                {(() => {
+                  const REPEL_MIN = 0.01;
+                  const REPEL_MAX = 0.15;
+                  const REPEL_STEP = 0.01;
+                  const repelStrength = stats.repelStrength ?? REPEL_MIN;
+                  // Snap to step grid so click-to-step lands on clean values
+                  // even if the live value drifted by floating-point noise.
+                  const snap = (v: number) =>
+                    Math.max(REPEL_MIN, Math.min(REPEL_MAX,
+                      Math.round(v / REPEL_STEP) * REPEL_STEP));
+                  const stepTo = (delta: number) =>
+                    onSetRepelStrength?.(snap(repelStrength + delta * REPEL_STEP));
+                  return (
+                    <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                      <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">Repel</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => stepTo(-1)}
+                          disabled={repelStrength <= REPEL_MIN + 1e-6}
+                          className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
+                          title="Step down 0.01"
+                        >
+                          −
+                        </button>
+                        <span className="text-slate-200 font-bold text-[8px] min-w-[2.25rem] text-center tabular-nums">
+                          {repelStrength.toFixed(2)}
+                        </span>
+                        <button
+                          onClick={() => stepTo(+1)}
+                          disabled={repelStrength >= REPEL_MAX - 1e-6}
+                          className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-slate-600/60 disabled:hover:text-slate-200"
+                          title="Step up 0.01"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}

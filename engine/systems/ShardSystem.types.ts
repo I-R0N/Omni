@@ -312,6 +312,19 @@ export interface ShardVariantDef {
    *  contact; the variant still takes damage and may shatter.  Only
    *  the nebula-tile variant uses this. */
   passThrough?: boolean;
+  /** Outward repel field emitted by this variant.  When set, dynamic
+   *  entities (player / enemies / mobile shards) within `range` get
+   *  pushed away with a linear-falloff impulse peaking at `strength`
+   *  per-substep at zero distance.  Variants whose `repelImmune` is
+   *  true (today: glass-shard) are exempt; projectiles and particles
+   *  are exempt regardless.  Range MUST stay below SPATIAL_GRID_SIZE
+   *  (120) so the static-grid 3×3 broadphase reaches every affected
+   *  pair without a wider scan. */
+  repel?: { range: number; strength: number };
+  /** When true, this variant ignores any `repel` field emitted by
+   *  static tiles.  Today: glass-shard.  Future shard variants that
+   *  should also drift through glass-tile fields opt in here. */
+  repelImmune?: boolean;
   /** Render fast-path opt-in.  Today only nebula-tile populates the
    *  per-entity tinted-canvas cache (`nebulaCachedTinted`); the
    *  RenderSystem fast-path gating flips from EntityType-keyed to

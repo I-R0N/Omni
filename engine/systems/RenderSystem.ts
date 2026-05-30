@@ -1,6 +1,6 @@
 
 
-import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
+import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape, RockTextureMode } from '../../types';
 import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
@@ -202,6 +202,11 @@ export class RenderSystem {
   public shardLodEnabled: boolean = true;
   // Count of shards drawn via the LOD disc this frame — DBG perf readout.
   public lastLodShardCount: number = 0;
+  // Rock-texture debug selector.  MIX = per-shard hash pick (default,
+  // production look); ROCK00 / ROCK01 force every rocky entity onto a
+  // single texture for A/B comparison.  Cache invalidates automatically
+  // because entity.rockBakedTexSrc no longer matches the picked src.
+  private rockTextureMode: RockTextureMode = 'MIX';
 
   // Perf instrumentation — wall time (ms) of the most recent render() call.
   // Written at the end of render() and read by GameEngine for the dev perf
@@ -238,6 +243,7 @@ export class RenderSystem {
 
   public setDebugMode(v: boolean) { this.debugMode = v; }
   public setTrailShape(s: TrailShape) { this.trailShape = s; }
+  public setRockTextureMode(m: RockTextureMode) { this.rockTextureMode = m; }
 
   // DBG collision outline for metal shards (matches the nebula/plastic
   // overlays).  Assumes ctx is already translated to the entity centroid
@@ -650,6 +656,82 @@ export class RenderSystem {
           if (firstKey !== undefined) this._tintedSprites.delete(firstKey);
       }
       this._tintedSprites.set(key, c);
+      return c;
+  }
+
+  // Deterministic per-shard rock texture pick + sub-rotation + UV
+  // offset (fractional, in [-1, +1]).  Uses a cheap djb2-ish string
+  // hash so the same shard id always yields the same sample across
+  // frames (no allocation, no GameEntity field).  Static rock-tiles
+  // otherwise share rotation=0 and would sample the texture's center
+  // identically; the offset breaks repetition once the texture is
+  // zoomed past 1×.
+  private rockTextureFor(id: string): { src: string; angle: number; ox: number; oy: number } {
+      let h = 5381 | 0;
+      for (let i = 0; i < id.length; i++) h = (((h << 5) + h) ^ id.charCodeAt(i)) | 0;
+      const u = (h >>> 0);
+      // Mode override pins all shards to one texture for A/B comparison.
+      // Per-shard angle/offset still come from the hash so individual
+      // shards stay visually distinct.
+      const src =
+          this.rockTextureMode === 'ROCK00' ? ASSETS.ROCK_TEXTURE_1
+        : this.rockTextureMode === 'ROCK01' ? ASSETS.ROCK_TEXTURE_2
+        : ((u & 1) === 0 ? ASSETS.ROCK_TEXTURE_1 : ASSETS.ROCK_TEXTURE_2);
+      const angle = ((u >>> 1) / 0x7fffffff) * Math.PI * 2;
+      // Two more decorrelated axes from cheap LCG steps over the same hash.
+      const a = Math.imul(h, 1103515245) + 12345 | 0;
+      const b = Math.imul(h, 134775813)  + 1     | 0;
+      const ox = ((a >>> 0) / 0xffffffff) * 2 - 1;
+      const oy = ((b >>> 0) / 0xffffffff) * 2 - 1;
+      return { src, angle, ox, oy };
+  }
+
+  // Bake the polygon-clipped rock texture once into an offscreen canvas
+  // sized to the entity's bounding box.  The per-frame draw becomes a
+  // single drawImage of this bake, no clip().  Bake is invalidated by
+  // reference: ShardSystem reassigns `polygonPoints` to a new array on
+  // merge, which triggers a rebuild on the next render.
+  private bakeRockTexture(
+      entity: GameEntity,
+      rockImg: HTMLImageElement,
+      angle: number,
+      ox: number,
+      oy: number,
+  ): HTMLCanvasElement {
+      const ZOOM = 3.0;
+      const maxDim = Math.max(entity.size.x, entity.size.y);
+      const cover = maxDim * 1.5 * ZOOM;
+      const maxOff = (cover - maxDim) / (2 * Math.SQRT2);
+
+      // Bake-canvas size = polygon bounding box, rounded up.  Per-frame
+      // draw places the canvas at (-w/2, -h/2) so its centre lines up
+      // with the entity origin (where polygonPoints are expressed).
+      const bakeSize = Math.max(2, Math.ceil(maxDim));
+      const c = document.createElement('canvas');
+      c.width = bakeSize;
+      c.height = bakeSize;
+      const cx = c.getContext('2d')!;
+
+      // Move to canvas centre — polygonPoints are entity-local, centred at 0.
+      cx.translate(bakeSize / 2, bakeSize / 2);
+
+      // Polygon clip (mirrors buildPath() in the slow render path).
+      cx.beginPath();
+      const pts = entity.polygonPoints;
+      if (pts && pts.length > 0) {
+          cx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i].x, pts[i].y);
+      } else {
+          cx.arc(0, 0, maxDim / 2, 0, Math.PI * 2);
+      }
+      cx.closePath();
+      cx.clip();
+
+      // Same per-shard rotation + UV offset as the live path.
+      cx.rotate(angle);
+      cx.translate(ox * maxOff, oy * maxOff);
+      cx.drawImage(rockImg, -cover / 2, -cover / 2, cover, cover);
+
       return c;
   }
 
@@ -2748,27 +2830,71 @@ export class RenderSystem {
                     ctx.stroke();
 
                 } else {
-                    // ── Rocky asteroid — solid fill with optional non-opaque powerup overlay
-                    // Density tier darkens the base colour; merge-fade alpha
-                    // multiplies every layer so the dissolve is uniform.
-                    // Per-variant tweaks so dent shards look identical
-                    // to their parent tile:
-                    //  - metal-shard stays on the gray palette even on
-                    //    hit flash (no white) to match metal-tile.
-                    //  - Other rocky shards (rock-shard, rock-tile)
-                    //    keep their fully-opaque default.
+                    // ── Rocky asteroid / metal shard.
+                    // Density tier darkens the base colour; merge-fade
+                    // alpha multiplies every layer so the dissolve is
+                    // uniform.  Per-variant rendering:
+                    //  - metal-shard stays on the gray palette (solid
+                    //    fill, no texture) even on hit flash to match
+                    //    metal-tile.
+                    //  - rock-shard / rock-tile use the polygon-clipped
+                    //    rock texture (PR #45) with solid-color fallbacks
+                    //    for hit-flash, the DBG SOLID mode, or a texture
+                    //    that hasn't loaded yet.
                     //  - plastic-shard takes the dedicated soft-gradient
                     //    branch above (decision #15b).
                     const densityHex = densityTintForRender(entity, entity.color);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
-                    const flashColor = entity.shardVariant === 'metal-shard'
-                        ? '#cbd5e1'
-                        : '#ffffff';
-                    const baseAlpha = 1.0;
-                    buildPath();
-                    ctx.globalAlpha = (isFlash ? 0.95 : baseAlpha) * fadeAlpha;
-                    ctx.fillStyle   = isFlash ? flashColor : densityHex;
-                    ctx.fill();
+                    if (entity.shardVariant === 'metal-shard') {
+                        // Metal keeps its gray solid fill — no rock
+                        // texture, gray (not white) on hit flash.
+                        buildPath();
+                        ctx.globalAlpha = (isFlash ? 0.95 : 1.0) * fadeAlpha;
+                        ctx.fillStyle   = isFlash ? '#cbd5e1' : densityHex;
+                        ctx.fill();
+                    } else if (isFlash) {
+                        buildPath();
+                        ctx.globalAlpha = 1.0 * fadeAlpha;
+                        ctx.fillStyle   = '#ffffff';
+                        ctx.fill();
+                    } else if (this.rockTextureMode === 'SOLID') {
+                        // Forced solid-color fallback — the pre-texture look,
+                        // exposed via the DBG ROCKS cycle for A/B comparison.
+                        buildPath();
+                        ctx.globalAlpha = 1.0 * fadeAlpha;
+                        ctx.fillStyle   = densityHex;
+                        ctx.fill();
+                    } else {
+                        const tex = this.rockTextureFor(entity.id);
+                        const rockImg = this.getImage(tex.src);
+                        const haveTexture = rockImg.complete && rockImg.naturalWidth > 0;
+
+                        if (haveTexture) {
+                            // Polygon-clipped texture is baked into a per-
+                            // entity offscreen canvas on first draw and
+                            // reused every frame after.  Eliminates the
+                            // costly per-frame ctx.clip() — Canvas2D's
+                            // typical hot-path bottleneck — at the price
+                            // of one bake per merge (polygon ref change).
+                            if (!entity.rockBakedCanvas
+                                || entity.rockBakedFor !== entity.polygonPoints
+                                || entity.rockBakedTexSrc !== tex.src) {
+                                entity.rockBakedCanvas = this.bakeRockTexture(
+                                    entity, rockImg, tex.angle, tex.ox, tex.oy,
+                                );
+                                entity.rockBakedFor = entity.polygonPoints;
+                                entity.rockBakedTexSrc = tex.src;
+                            }
+                            const baked = entity.rockBakedCanvas;
+                            ctx.globalAlpha = 1.0 * fadeAlpha;
+                            ctx.drawImage(baked, -baked.width / 2, -baked.height / 2);
+                        } else {
+                            buildPath();
+                            ctx.globalAlpha = 1.0 * fadeAlpha;
+                            ctx.fillStyle   = densityHex;
+                            ctx.fill();
+                        }
+                    }
 
                     if (glowColor && !isFlash) {
                         // Subtle powerup color overlay — semi-transparent, mixes with rock color
