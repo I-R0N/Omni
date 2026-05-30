@@ -759,6 +759,14 @@ export class PhysicsSystem {
           const spinSign = (lastChar & 1) ? 1 : -1;
           const nextSpin = (e.rotationSpeed ?? 0) + spinSign * spinKick * fall * timeScale;
           e.rotationSpeed = Math.max(-maxSpin, Math.min(maxSpin, nextSpin));
+          // Stamp the same cooldown a freshly-spawned shard carries
+          // (postShatterMergeCooldown = MERGE_COOLDOWN) so the pull
+          // fires once per cycle rather than every step the player is
+          // in range — turns continuous proximity into a pulse so the
+          // shard doesn't accumulate velocity / spin without bound.
+          // The same field gates shard↔shard merging while it's hot,
+          // which keeps the rest-beat consistent across interactions.
+          e.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
       }
   }
 
