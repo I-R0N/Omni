@@ -2136,23 +2136,31 @@ export class PhysicsSystem {
       // shoved aside" feel without a per-EntityType skip.
       // DBG override mirrors the fast-path gate above — nebula-pair
       // hard collisions when the toggle is on.
-      // nebula-pair hard collisions.  Two cases skip the passThrough
+      // nebula-pair hard collisions.  Three cases skip the passThrough
       // gate so the standard SAT impulse runs:
       //   - nebula-shard ↔ nebula-shard, DBG-toggled by
       //     nebulaShardCollisionsEnabled (A/B-test for the gather-
       //     pile fix).
       //   - nebula-shard ↔ nebula-tile, unconditional — shards
       //     should bounce off cloud tiles instead of drifting
-      //     through them.  Strikers (player/enemy/projectile) still
-      //     pass through because they don't have shardVariant set,
-      //     so the conditions below evaluate false for them.
+      //     through them.
+      //   - PLAYER ↔ nebula-shard, unconditional — the player ship
+      //     should physically shove nebula shards aside on contact;
+      //     the mass-ratio (player ≫ 0.01) keeps the player's
+      //     velocity change negligible while the shard takes the
+      //     impulse and damping bleeds it off.  Enemies / projectiles
+      //     still pass through.  Nebula tiles still keep their
+      //     pass-through-with-shatter so the player flies through the
+      //     cloud and detonates tiles as before.
       const aIsNebShard = a.shardVariant === 'nebula-shard';
       const bIsNebShard = b.shardVariant === 'nebula-shard';
       const aIsNebTile  = a.shardVariant === 'nebula-tile';
       const bIsNebTile  = b.shardVariant === 'nebula-tile';
       const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
       const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
-      const nebPairCollides = nebShardPair || nebShardTilePair;
+      const playerVsNebShard = (a.type === EntityType.PLAYER && bIsNebShard)
+                            || (b.type === EntityType.PLAYER && aIsNebShard);
+      const nebPairCollides = nebShardPair || nebShardTilePair || playerVsNebShard;
       const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
       const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       // Shatter trigger is independent of pass-through — a nebula
