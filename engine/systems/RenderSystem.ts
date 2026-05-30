@@ -767,40 +767,60 @@ export class RenderSystem {
   }
 
   /**
-   * True for tile variants whose fast-path appearance can be pre-baked
-   * into the static-tile world canvas.  Glass and indestructible tiles
-   * share the same hex-sprite fast path used by renderEntities, so they
-   * stamp identically into the cache.  Nebula tiles already have a
-   * per-tile cached tinted sprite + complex twinkle/spawn animation;
-   * caching them at world-canvas resolution would lose fidelity and is
-   * redundant with the existing fast path.  Plastic / metal / rock tiles
-   * have no hex-sprite fast path today, so they always render via the
-   * slow path and skip the cache entirely.
+   * True for tile variants whose appearance can be pre-baked into the
+   * static-tile world canvas.
+   *  - glass-tile + indestructible-tile: share the hex-sprite fast path
+   *    in renderEntities — cache stamps the same drawImage.
+   *  - rock-tile: polygon fill in entity.color (no outline).  Stamped by
+   *    walking the entity's polygonPoints into the cache context.  Dent
+   *    jitter mutates polygonPoints on hits; the cache is erased on the
+   *    next visit via the slide-out logic in renderEntities and re-
+   *    stamped with the dented polygon on the next pre-pass.
+   *
+   * Excluded:
+   *  - nebula-tile: already cached per-entity (tinted sprite cache + the
+   *    nebula fast path); world-canvas caching would lose fidelity.
+   *  - plastic-tile / metal-tile: selective neighbour-aware outline
+   *    rendering requires the spatial-grid neighbour lookup; not worth
+   *    the extra complexity for the smaller marginal gain.
    */
   private isStaticTileCacheable(e: GameEntity): boolean {
       return e.type === EntityType.STRUCTURE
           && e.mass === Infinity
           && (e.shardVariant === 'glass-tile'
-              || e.shardVariant === 'indestructible-tile');
+              || e.shardVariant === 'indestructible-tile'
+              || e.shardVariant === 'rock-tile');
   }
 
   /**
-   * Stamp a single cache-eligible tile into the world-tile canvas using
-   * the same hex-sprite drawImage the per-entity fast path would have
-   * issued.  Called both at map load (initial population) and on slow→
-   * fast transitions (tile leaves a glow / hit flash / regen state).
-   * Marks `_staticCached = true` so renderEntities skips the per-entity
-   * draw on subsequent frames.
+   * Variant dispatch for the cache stamp.  Glass-family tiles stamp via
+   * the shared hex sprite (matches their renderEntities fast path);
+   * rock-tile stamps via a polygon-fill replay of its slow-path base
+   * (matches the slow-path branch that draws `polygonPoints` filled
+   * with entity.color, sans outline).  Caller has already guaranteed
+   * the variant is cache-eligible.
    */
   private stampStaticTileToCache(e: GameEntity): void {
       const cx = this._staticTileCanvasCtx;
       if (!cx) return;
+      if (e.shardVariant === 'rock-tile') {
+          this.stampRockTileToCache(cx, e);
+      } else {
+          this.stampHexSpriteTileToCache(cx, e);
+      }
+  }
+
+  /**
+   * Glass/indestructible stamp — the hex sprite drawImage that the
+   * per-entity fast path uses, ported to the cache canvas's coordinate
+   * system (1 canvas px = 1/scale world units).
+   */
+  private stampHexSpriteTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
       const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
       if (!hexSprite.complete || hexSprite.naturalWidth === 0) return;
       const s = this._staticTileScale;
       const halfMapW = this._staticTileMapW / 2;
       const halfMapH = this._staticTileMapH / 2;
-      // Map world (-halfMapW, +halfMapW] → canvas [0, canvasW).
       const wx = (e.position.x + halfMapW) * s;
       const wy = (e.position.y + halfMapH) * s;
       const maxDim = Math.max(e.size.x, e.size.y);
@@ -812,16 +832,51 @@ export class RenderSystem {
   }
 
   /**
-   * Erase a tile's pre-baked appearance from the world-tile canvas via
-   * destination-out compositing.  Called on fast→slow transitions
-   * (tile enters glow / hit flash / regen) and on tile destruction
-   * (active flips false).  The cleared rect is sized slightly larger
-   * than the tile's draw extent so the hex sprite's anti-aliased edges
-   * fully erase without ringing.
+   * Rock-tile stamp — replicates the slow-path "polygon fill in
+   * entity.color, no outline" branch at the tile's canvas position.
+   * Mirrors the densityHex-tinted fill that renderEntities would draw
+   * on the main ctx; for cache purposes we use entity.color directly
+   * since densityTier transitions invalidate the cache via dent /
+   * shatter paths anyway.
+   */
+  private stampRockTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
+      const pts = e.polygonPoints;
+      if (!pts || pts.length === 0) return;
+      const s = this._staticTileScale;
+      const halfMapW = this._staticTileMapW / 2;
+      const halfMapH = this._staticTileMapH / 2;
+      const cxPos = (e.position.x + halfMapW) * s;
+      const cyPos = (e.position.y + halfMapH) * s;
+      cx.save();
+      cx.translate(cxPos, cyPos);
+      cx.beginPath();
+      cx.moveTo(pts[0].x * s, pts[0].y * s);
+      for (let i = 1; i < pts.length; i++) {
+          cx.lineTo(pts[i].x * s, pts[i].y * s);
+      }
+      cx.closePath();
+      cx.fillStyle = e.color;
+      cx.fill();
+      cx.restore();
+      e._staticCached = true;
+      this._staticTileCacheSet.add(e);
+  }
+
+  /**
+   * Erase a tile's stamped rect from the world-tile canvas via
+   * destination-out compositing.  Always clears the rect regardless of
+   * the tile's current `_staticCached` flag — used in three situations:
+   *  - fast→slow transitions (tile entered glow / hit flash / regen);
+   *  - tile destruction (active flipped false);
+   *  - pre-stamp scrub on a transition where polygonPoints may have
+   *    been mutated since the last stamp (rock-tile dent).
+   * Static tiles never move, so the erase rect (computed from current
+   * position + bounding diameter + 10 % margin) covers the original
+   * stamp's footprint even after multiple dent passes.
    */
   private eraseStaticTileFromCache(e: GameEntity): void {
       const cx = this._staticTileCanvasCtx;
-      if (!cx || e._staticCached !== true) return;
+      if (!cx) return;
       const s = this._staticTileScale;
       const halfMapW = this._staticTileMapW / 2;
       const halfMapH = this._staticTileMapH / 2;
@@ -953,6 +1008,11 @@ export class RenderSystem {
               && entity.regenPopTimer === undefined
               && !inGlowRange;
           if (wantsCache && entity._staticCached !== true) {
+              // Pre-scrub the stamp area in case polygonPoints was
+              // mutated since the last stamp (rock-tile dent) — without
+              // this the new (smaller) polygon paints inside the old
+              // outline, leaving a halo of stale pixels around the dent.
+              this.eraseStaticTileFromCache(entity);
               this.stampStaticTileToCache(entity);
           } else if (!wantsCache && entity._staticCached === true) {
               this.eraseStaticTileFromCache(entity);
@@ -1879,6 +1939,15 @@ export class RenderSystem {
       // Particles are handled separately in renderParticles() — skip here
       if (entity.type === EntityType.PARTICLE) return;
 
+      // ── Static-tile cache skip ─────────────────────────────────────
+      // Cacheable static tiles whose pre-blit prepare pass stamped them
+      // into the world-tile canvas this frame are already painted by
+      // the blit — no per-entity draw needed.  The prepare pass already
+      // erased any tile that has slow-path overlays active (glow / hit
+      // flash / regen) so reaching the per-entity path means the tile
+      // legitimately needs the slow-path render below.
+      if (entity._staticCached === true) return;
+
       // ── Fast-path STRUCTURE sprite render ───────────────────────────
       // Structures have rotation = 0, no per-entity ctx state changes,
       // and almost always render as a single drawImage call.  Skipping
@@ -1920,35 +1989,17 @@ export class RenderSystem {
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
           && !inGlowRange) {
-          // Static-tile cache: when the pre-baked world canvas already
-          // holds this tile's appearance, the per-frame blit (step 4a₀
-          // in render()) painted it for us — skip the per-tile drawImage
-          // entirely.  If the tile isn't currently cached, lazily stamp
-          // it so subsequent frames take the cache-skip fast path; the
-          // direct drawImage below covers the current frame either way.
-          if (entity._staticCached === true) return;
-          if (this._staticTileCanvas !== null) {
-              this.stampStaticTileToCache(entity);
-              // We just painted the tile into the cache; the canvas blit
-              // ran BEFORE this loop this frame, so the on-screen pixels
-              // still need to come from the per-entity drawImage below.
-          }
+          // Fallback fast path for tiles not currently in the static
+          // canvas (e.g. world-canvas allocation failed, hex sprite was
+          // still loading at map load, or pre-blit prepare missed an
+          // off-screen→on-screen transition this frame).  Cached tiles
+          // are short-circuited by the early-return at the top of this
+          // forEach so they never reach here.
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
           ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           return;
-      }
-
-      // Slow-path slide-out from cache: when a cacheable tile reaches the
-      // generic per-entity render path it means the fast-path conditions
-      // no longer hold (glow, hit flash, regen, etc.).  Erase its stamp
-      // from the pre-baked canvas so the slow path's pixels aren't
-      // composited over a stale base appearance.  Re-cached automatically
-      // by the fast-path branch above on the next frame the conditions
-      // clear.
-      if (isGlassFamilyStaticTile && entity._staticCached === true) {
-          this.eraseStaticTileFromCache(entity);
       }
 
       // ── Fast-path NEBULA tile render ───────────────────────────────

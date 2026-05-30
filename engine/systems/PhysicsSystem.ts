@@ -1232,6 +1232,13 @@ export class PhysicsSystem {
           pts[idx].x *= k;
           pts[idx].y *= k;
       }
+
+      // polygonPoints mutated → invalidate any cached SAT axes (the
+      // edge normals derived from those points are now stale) AND the
+      // static-tile world-canvas stamp (which baked the old polygon
+      // outline).  Both caches re-populate lazily on next use.
+      tile._satCacheAxes = undefined;
+      if (tile._staticCached === true) tile._staticCached = false;
   }
 
   // Returns true if world-space point (x, y) with radius r is clear of all
