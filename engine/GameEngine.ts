@@ -1987,19 +1987,20 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
-    // Update Shake
+    // Update Shake.  Mutate shakeOffset in place rather than replacing the
+    // object — the field is read by reference downstream and a fresh object
+    // every active-shake frame is wasted GC pressure.
     if (this.shakeTimer > 0) {
         this.shakeTimer -= dt;
         const decay = Math.max(0, this.shakeTimer / CAMERA_CONSTANTS.SHAKE_DECAY); // Linear falloff
         const mag = this.shakeIntensity * decay;
-        
-        this.camera.shakeOffset = {
-            x: (Math.random() - 0.5) * mag * 2,
-            y: (Math.random() - 0.5) * mag * 2
-        };
 
         if (this.shakeTimer <= 0) {
-            this.camera.shakeOffset = { x: 0, y: 0 };
+            this.camera.shakeOffset.x = 0;
+            this.camera.shakeOffset.y = 0;
+        } else {
+            this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
+            this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
         }
     }
 

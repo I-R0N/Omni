@@ -2249,6 +2249,18 @@ export const WEAPON_LIST = [
   WeaponType.CANNON,
 ];
 
+// Pre-computed slot abbreviations for the ammo HUD (initials of each word in
+// the weapon's display name, capped at 3 chars).  Built once on module init
+// so the HUD render path avoids per-frame split/map/join string churn for
+// every visible weapon slot.
+export const WEAPON_SLOT_LABELS: Record<WeaponType, string> = (() => {
+  const out = {} as Record<WeaponType, string>;
+  for (const wt of WEAPON_LIST) {
+    out[wt] = WEAPONS[wt].name.split(' ').map(w => w[0]).join('').substring(0, 3);
+  }
+  return out;
+})();
+
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
 export const ENEMY_BURST_CONFIG = {

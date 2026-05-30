@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1315,16 +1315,22 @@ export class RenderSystem {
       }
   }
 
-  // Reusable scratch buffer for shifted trail coordinates — keeps the
-  // trail path tool allocation-free even when every projectile in the
-  // scene is rendering a 30-point trail.
+  // Reusable scratch buffers for shifted trail coordinates and per-point
+  // edge normals — keeps trail rendering allocation-free even when every
+  // projectile in the scene is drawing a 30-point trail.  The normal
+  // buffers eliminate the duplicate sqrt+div pair that the forward and
+  // backward strip passes previously each performed on the same data.
   private _trailShiftedX: Float32Array = new Float32Array(64);
   private _trailShiftedY: Float32Array = new Float32Array(64);
+  private _trailNX: Float32Array = new Float32Array(64);
+  private _trailNY: Float32Array = new Float32Array(64);
   private _ensureTrailScratch(n: number) {
       if (this._trailShiftedX.length < n) {
           const next = Math.max(n, this._trailShiftedX.length * 2);
           this._trailShiftedX = new Float32Array(next);
           this._trailShiftedY = new Float32Array(next);
+          this._trailNX = new Float32Array(next);
+          this._trailNY = new Float32Array(next);
       }
   }
 
@@ -1352,56 +1358,50 @@ export class RenderSystem {
       // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
       ctx.beginPath();
 
+      // Pre-compute per-point normals once.  The forward and backward
+      // strip passes below use identical normals (they only differ in
+      // the sign of the width offset), so doing this in one pass replaces
+      // 2N sqrt+div pairs with N — eliminating ~half the trig cost on
+      // every visible projectile trail.
+      const nxBuf = this._trailNX;
+      const nyBuf = this._trailNY;
+      const n = t.length;
+      for (let i = 0; i < n; i++) {
+          let dx = 0, dy = 0;
+          if (i < n - 1) {
+              dx = sx[i+1] - sx[i];
+              dy = sy[i+1] - sy[i];
+          } else if (i > 0) {
+              dx = sx[i] - sx[i-1];
+              dy = sy[i] - sy[i-1];
+          }
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              nxBuf[i] = -dy * inv;
+              nyBuf[i] = dx * inv;
+          } else {
+              nxBuf[i] = 0;
+              nyBuf[i] = 0;
+          }
+      }
+
       // Forward pass: Right side of trail
-      for (let i = 0; i < t.length; i++) {
+      for (let i = 0; i < n; i++) {
           const p = t[i];
           const ratio = p.lifetime / p.maxLifetime;
           if (ratio <= 0) continue;
           const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
-
-          // Simple normal calculation (perpendicular to velocity approximation)
-          // For first point, use next point. For last, use prev.
-          let nx = 0, ny = 0;
-          if (i < t.length - 1) {
-              const dx = sx[i+1] - sx[i];
-              const dy = sy[i+1] - sy[i];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          } else if (i > 0) {
-              const dx = sx[i] - sx[i-1];
-              const dy = sy[i] - sy[i-1];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          }
-
-          ctx.lineTo(sx[i] + nx * width, sy[i] + ny * width);
+          ctx.lineTo(sx[i] + nxBuf[i] * width, sy[i] + nyBuf[i] * width);
       }
 
-      // Backward pass: Left side of trail
-      for (let i = t.length - 1; i >= 0; i--) {
+      // Backward pass: Left side of trail (same normals, negated width).
+      for (let i = n - 1; i >= 0; i--) {
           const p = t[i];
           const ratio = p.lifetime / p.maxLifetime;
           if (ratio <= 0) continue;
           const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
-
-          let nx = 0, ny = 0;
-          if (i < t.length - 1) {
-              const dx = sx[i+1] - sx[i];
-              const dy = sy[i+1] - sy[i];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          } else if (i > 0) {
-              const dx = sx[i] - sx[i-1];
-              const dy = sy[i] - sy[i-1];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          }
-
-          ctx.lineTo(sx[i] - nx * width, sy[i] - ny * width);
+          ctx.lineTo(sx[i] - nxBuf[i] * width, sy[i] - nyBuf[i] * width);
       }
 
       ctx.closePath();
@@ -2189,11 +2189,17 @@ export class RenderSystem {
 
                 // Proximity tint: edge shifts from cool blue-white → bright cyan.
                 // Toroidal delta so tiles across a seam reveal the same tint
-                // treatment as tiles on the same side of the map.
+                // treatment as tiles on the same side of the map.  Squared
+                // early-out skips the sqrt for tiles outside the prox range
+                // (the vast majority on densely-tiled maps).
                 const PROX_RANGE = 120;
+                const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
-                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const pdistSq = pdx * pdx + pdy * pdy;
+                const prox = pdistSq >= PROX_RANGE_SQ
+                    ? 0
+                    : Math.max(0, 1 - Math.sqrt(pdistSq) / PROX_RANGE);
 
                 const edgeR = Math.round(186 - prox * 83);
                 const edgeG = Math.round(230 + prox * 2);
@@ -2964,11 +2970,16 @@ export class RenderSystem {
                     ctx.closePath();
                 };
 
-                // Proximity tint — same formula as full tile (toroidal)
+                // Proximity tint — same formula as full tile (toroidal).
+                // Squared early-out skips the sqrt for tiles outside range.
                 const PROX_RANGE = 120;
+                const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
-                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const pdistSq = pdx * pdx + pdy * pdy;
+                const prox = pdistSq >= PROX_RANGE_SQ
+                    ? 0
+                    : Math.max(0, 1 - Math.sqrt(pdistSq) / PROX_RANGE);
                 const edgeR = Math.round(186 - prox * 83);
                 const edgeG = Math.round(230 + prox * 2);
                 const edgeB = Math.round(253 - prox * 4);
@@ -3495,8 +3506,12 @@ export class RenderSystem {
           const dy = wrapDeltaY(playerPos.y, t.position.y);
           const angle = Math.atan2(dy, dx);
 
+          // One sqrt per indicator instead of two — the distance-text
+          // branch below would otherwise recompute it.
+          const dist = Math.sqrt(item.distSq);
+
           // Skip if the enemy is already closer than the indicator ring
-          const screenDist = Math.sqrt(item.distSq) * camera.zoom;
+          const screenDist = dist * camera.zoom;
           if (t.type === EntityType.ENEMY && screenDist < RADIUS) continue;
 
           const ix = cx + Math.cos(angle) * RADIUS;
@@ -3534,12 +3549,12 @@ export class RenderSystem {
           // Distance Text (only if far)
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
 
-          if (item.distSq > threshold) { 
+          if (item.distSq > threshold) {
                ctx.rotate(-angle);
                ctx.fillStyle = 'rgba(255,255,255,0.7)';
                ctx.font = '10px monospace';
                ctx.textAlign = 'center';
-               const d = Math.round(Math.sqrt(item.distSq));
+               const d = Math.round(dist);
                ctx.fillText(`${d}m`, 0, 24);
           }
 
@@ -3635,7 +3650,9 @@ export class RenderSystem {
           ctx.fill();
 
           if (slotW >= 28) {
-              const label = wCfg.name.split(' ').map((w: string) => w[0]).join('').substring(0, 3);
+              // Pre-computed at module init in constants.ts — saves per-frame
+              // split/map/join string allocation for every visible weapon slot.
+              const label = WEAPON_SLOT_LABELS[wCfg.type] ?? '';
               ctx.font        = `bold ${Math.max(7, Math.min(8, slotW * 0.19))}px monospace`;
               ctx.globalAlpha = canFire ? 0.7 : 0.2;
               ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';

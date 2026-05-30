@@ -8,6 +8,7 @@ import {
   MAX_PROJECTILES,
 } from '../../constants';
 import { nextId } from './IdAllocator';
+import { enforceTypeCap } from './enforceCap';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /**
@@ -161,22 +162,10 @@ export class ProjectileSystem {
    * Hard cap on live projectiles.  If exceeded, deactivates the oldest
    * projectiles first (FIFO by entity-list order).  Physics / render passes
    * skip inactive entities and the cleanup pass removes them next frame.
+   * Implementation in `enforceCap.ts` — shared with ParticleSystem.
    */
   public enforceCap(entities: GameEntity[]) {
-    let count = 0;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PROJECTILE) count++;
-    }
-    if (count <= MAX_PROJECTILES) return;
-    let toDrop = count - MAX_PROJECTILES;
-    for (let i = 0; i < entities.length && toDrop > 0; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PROJECTILE) {
-        e.active = false;
-        toDrop--;
-      }
-    }
+    enforceTypeCap(entities, EntityType.PROJECTILE, MAX_PROJECTILES);
   }
 
   /**
@@ -200,6 +189,9 @@ export class ProjectileSystem {
 
       let target: GameEntity | null = null;
       let minDist = acquireRangeSq;
+      // Capture the winning delta inside the inner loop so we don't pay
+      // a second wrapDelta pair to recompute it on the steer below.
+      let targetDx = 0, targetDy = 0;
 
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
@@ -209,13 +201,13 @@ export class ProjectileSystem {
         if (d2 < minDist) {
           minDist = d2;
           target = e;
+          targetDx = dx;
+          targetDy = dy;
         }
       }
 
       if (target) {
-        const tdx = wrapDeltaX(p.position.x, target.position.x);
-        const tdy = wrapDeltaY(p.position.y, target.position.y);
-        const desiredAngle = Math.atan2(tdy, tdx);
+        const desiredAngle = Math.atan2(targetDy, targetDx);
         let angleDiff = desiredAngle - p.rotation;
 
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -270,15 +262,18 @@ export class ProjectileSystem {
       // Find nearest enemy or asteroid within gravity range.
       // Sweep both filtered lists; isExploding is still checked since
       // exploding targets remain in the index but shouldn't attract.
+      // Capture the winning delta so the steer below skips a second
+      // wrapDelta pair.
       let target: GameEntity | null = null;
       let minD2 = rangeSq;
+      let targetDx = 0, targetDy = 0;
       for (let j = 0; j < enemies.length; j++) {
         const e = enemies[j];
         if (e.isExploding) continue;
         const dx = wrapDeltaX(p.position.x, e.position.x);
         const dy = wrapDeltaY(p.position.y, e.position.y);
         const d2 = dx * dx + dy * dy;
-        if (d2 < minD2) { minD2 = d2; target = e; }
+        if (d2 < minD2) { minD2 = d2; target = e; targetDx = dx; targetDy = dy; }
       }
       for (let j = 0; j < asteroids.length; j++) {
         const e = asteroids[j];
@@ -286,18 +281,17 @@ export class ProjectileSystem {
         const dx = wrapDeltaX(p.position.x, e.position.x);
         const dy = wrapDeltaY(p.position.y, e.position.y);
         const d2 = dx * dx + dy * dy;
-        if (d2 < minD2) { minD2 = d2; target = e; }
+        if (d2 < minD2) { minD2 = d2; target = e; targetDx = dx; targetDy = dy; }
       }
 
       if (target) {
-        const dx = wrapDeltaX(p.position.x, target.position.x);
-        const dy = wrapDeltaY(p.position.y, target.position.y);
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dist = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
         if (dist > 1) {
-          // Gravity-like acceleration: stronger when closer
-          const accel = LIGHTNING_GRAVITY_STRENGTH / Math.max(dist, 30);
-          p.velocity.x += (dx / dist) * accel * dt;
-          p.velocity.y += (dy / dist) * accel * dt;
+          // Gravity-like acceleration: stronger when closer.  Hoist the
+          // per-axis scalar out of two divisions into one inverse-multiply.
+          const k = (LIGHTNING_GRAVITY_STRENGTH / Math.max(dist, 30)) * dt / dist;
+          p.velocity.x += targetDx * k;
+          p.velocity.y += targetDy * k;
         }
       }
 

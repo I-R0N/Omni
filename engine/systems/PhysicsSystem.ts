@@ -786,19 +786,21 @@ export class PhysicsSystem {
           const distSq = dx*dx + dy*dy;
 
           if (distSq < rangeSq && distSq > minDistSq) {
-              const dist = Math.sqrt(distSq);
-              const forceMag = (STRENGTH / dist) * timeScale; // Normalize force by time
-              const ndx = dx / dist;
-              const ndy = dy / dist;
+              // Fold the 1/dist normalisation into the force scalar so
+              // each velocity axis is one mul instead of one div + one mul.
+              const invDist = 1 / Math.sqrt(distSq);
+              const forceMag = (STRENGTH * invDist) * timeScale; // Normalize force by time
+              const kx = dx * invDist * forceMag;
+              const ky = dy * invDist * forceMag;
 
               // Pull Asteroid
-              e.velocity.x += ndx * forceMag;
-              e.velocity.y += ndy * forceMag;
+              e.velocity.x += kx;
+              e.velocity.y += ky;
 
               // Pull Player
-              const accelPlayer = forceMag * (e.mass / player.mass) * PLAYER_INFLUENCE;
-              player.velocity.x -= ndx * accelPlayer;
-              player.velocity.y -= ndy * accelPlayer;
+              const playerScale = (e.mass / player.mass) * PLAYER_INFLUENCE;
+              player.velocity.x -= kx * playerScale;
+              player.velocity.y -= ky * playerScale;
           }
       }
   }
@@ -839,18 +841,17 @@ export class PhysicsSystem {
             }
 
             if (distSq < rangeSq) {
-                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000); 
+                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
-                
+
                 // Scale force by time step so higher framerates don't increase gravity strength
                 const clampedForce = Math.min(force, maxAccel) * timeScale;
 
-                const dist = Math.sqrt(distSq);
-                const ax = (dx / dist) * clampedForce;
-                const ay = (dy / dist) * clampedForce;
-
-                entity.velocity.x += ax;
-                entity.velocity.y += ay;
+                // One reciprocal-sqrt for two normalised axes — one div instead
+                // of two.  Same math, half the per-pair division cost.
+                const k = clampedForce / Math.sqrt(distSq);
+                entity.velocity.x += dx * k;
+                entity.velocity.y += dy * k;
             }
         }
     }
@@ -2929,18 +2930,22 @@ export class PhysicsSystem {
 
   private fillAxes(vertsA: Vector2[], countA: number, vertsB: Vector2[], countB: number, bufferAxes: Vector2[]): number {
       let axisIdx = 0;
-      
-      // Axes for A
+
+      // Axes for A.  Replace two per-edge divisions with one reciprocal
+      // and two multiplications — IEEE division is ~5× slower than
+      // multiplication on most x86/ARM cores, so this halves the per-axis
+      // hot-path cost in the SAT broadphase.
       for (let i = 0; i < countA; i++) {
           if (axisIdx >= bufferAxes.length) break;
           const p1 = vertsA[i];
           const p2 = vertsA[(i + 1) % countA];
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              bufferAxes[axisIdx].x = -dy * inv;
+              bufferAxes[axisIdx].y = dx * inv;
               axisIdx++;
           }
       }
@@ -2951,10 +2956,11 @@ export class PhysicsSystem {
           const p2 = vertsB[(i + 1) % countB];
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              bufferAxes[axisIdx].x = -dy * inv;
+              bufferAxes[axisIdx].y = dx * inv;
               axisIdx++;
           }
       }

@@ -1,6 +1,7 @@
 import { GameEntity, EntityType, Vector2 } from '../../types';
 import { GLITTER_TRAIL_CONSTANTS, MAX_PARTICLES } from '../../constants';
 import { nextId } from './IdAllocator';
+import { enforceTypeCap } from './enforceCap';
 
 /**
  * ParticleSystem — spawns and manages decorative particle entities.
@@ -154,21 +155,9 @@ export class ParticleSystem {
    * Hard cap on live particles.  If exceeded, deactivates the oldest
    * particles first (FIFO by entity-list order).  Safe because particles are
    * purely decorative — dropping old ones has no gameplay effect.
+   * Implementation in `enforceCap.ts` — shared with ProjectileSystem.
    */
   public enforceCap(entities: GameEntity[]) {
-    let count = 0;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PARTICLE) count++;
-    }
-    if (count <= MAX_PARTICLES) return;
-    let toDrop = count - MAX_PARTICLES;
-    for (let i = 0; i < entities.length && toDrop > 0; i++) {
-      const e = entities[i];
-      if (e.active && e.type === EntityType.PARTICLE) {
-        e.active = false;
-        toDrop--;
-      }
-    }
+    enforceTypeCap(entities, EntityType.PARTICLE, MAX_PARTICLES);
   }
 }

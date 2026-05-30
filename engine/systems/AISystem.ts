@@ -17,6 +17,11 @@ export class AISystem {
   private stuckTimers: Map<string, number> = new Map();
   private lastPositions: Map<string, Vector2> = new Map();
 
+  // Reused scratch buffer for the 5%-frame GC sweep that drops aim/reaction
+  // state for dead enemies.  Cleared and refilled in-place each sweep so we
+  // don't allocate a fresh Set per call.
+  private _liveIdScratch: Set<string> = new Set();
+
   // Perf instrumentation — wall-time (ms) of the most recent update() call.
   // Written by update() and read by GameEngine for the dev perf overlay.
   public lastUpdateMs: number = 0;
@@ -45,7 +50,7 @@ export class AISystem {
       // Init Reaction Timer if missing
       if (!this.reactionTimers.has(enemy.id)) {
           this.reactionTimers.set(enemy.id, 0);
-          this.laggedTargets.set(enemy.id, { ...player.position });
+          this.laggedTargets.set(enemy.id, { x: player.position.x, y: player.position.y });
       }
 
       // Decay aggro boost each frame
@@ -93,8 +98,10 @@ export class AISystem {
 
     // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically.
     // `enemies` only contains live entities, so build the live set directly.
+    // Scratch Set is reused across sweeps to avoid per-frame allocation.
     if (Math.random() < 0.05) {
-        const liveIds = new Set<string>();
+        const liveIds = this._liveIdScratch;
+        liveIds.clear();
         for (let i = 0; i < enemies.length; i++) {
             liveIds.add(enemies[i].id);
         }
@@ -204,7 +211,12 @@ export class AISystem {
       reaction -= dt;
 
       if (reaction <= 0) {
-          this.laggedTargets.set(enemy.id, { ...player.position });
+          // Mutate the existing Vector2 in place — the laggedTargets entry
+          // is created once at enemy init (above) and lives for the enemy's
+          // lifetime, so we never need to allocate a fresh object here.
+          const lt = this.laggedTargets.get(enemy.id)!;
+          lt.x = player.position.x;
+          lt.y = player.position.y;
           reaction = AI_CONFIG.REACTION_TIME_BASE + Math.random() * AI_CONFIG.REACTION_TIME_VAR;
       }
       this.reactionTimers.set(enemy.id, reaction);
@@ -317,7 +329,15 @@ export class AISystem {
                   enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
               }
           }
-          this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          // Reuse the existing Vector2 when one already exists for this
+          // enemy; only allocate on first sample.
+          const existing = this.lastPositions.get(enemy.id);
+          if (existing) {
+              existing.x = enemy.position.x;
+              existing.y = enemy.position.y;
+          } else {
+              this.lastPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+          }
           stuckTimer = AI_CONFIG.STUCK_CHECK_INTERVAL;
       }
       this.stuckTimers.set(enemy.id, stuckTimer);
