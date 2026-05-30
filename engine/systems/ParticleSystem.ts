@@ -27,10 +27,31 @@ export class ParticleSystem {
    * Called by the GameEngine compaction pass when it would otherwise
    * have left an inactive particle for the GC.  Type-checked here so a
    * mistaken call on a non-particle is a silent no-op.
+   *
+   * Special-subtype particles (explosion-ring spawned by GameEngine
+   * .spawnExplosionRingParticle, lightning-arc spawned by the chain
+   * routing) ride on EntityType.PARTICLE but carry render flags
+   * (`isExplosionRing`, `isLightningArc`, `arcPoints`, …) that the
+   * renderer dispatches on.  Without clearing those flags here, the
+   * next normal particle that reuses this slot would render as an
+   * explosion ring or arc — visible as stray annular shapes wherever
+   * sparkle / glitter / debris bursts spawn.
    */
   public releaseToPool(e: GameEntity): void {
     if (e.type !== EntityType.PARTICLE) return;
     if (this._pool.length >= this.POOL_CAP) return;
+    // Clear special-subtype flags so the next reuse starts as a plain
+    // particle.  Cheap (~6 undefined writes) compared to the dispatch
+    // cost of one frame's mis-render.
+    e.isExplosionRing = undefined;
+    e.isLightningArc = undefined;
+    e.arcPoints = undefined;
+    e.explosionRadius = undefined;
+    e.explosionDamage = undefined;
+    e.explosionKnockback = undefined;
+    e.ownerType = undefined;
+    e.hitEntityIds = undefined;
+    e.validHitIds = undefined;
     this._pool.push(e);
   }
 

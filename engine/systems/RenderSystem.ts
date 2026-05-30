@@ -863,16 +863,27 @@ export class RenderSystem {
   }
 
   /**
-   * Erase a tile's stamped rect from the world-tile canvas via
-   * destination-out compositing.  Always clears the rect regardless of
-   * the tile's current `_staticCached` flag — used in three situations:
+   * Erase a tile's stamped pixels from the world-tile canvas via
+   * destination-out compositing.  Always clears regardless of the
+   * tile's current `_staticCached` flag — used in three situations:
    *  - fast→slow transitions (tile entered glow / hit flash / regen);
    *  - tile destruction (active flipped false);
    *  - pre-stamp scrub on a transition where polygonPoints may have
    *    been mutated since the last stamp (rock-tile dent).
-   * Static tiles never move, so the erase rect (computed from current
-   * position + bounding diameter + 10 % margin) covers the original
-   * stamp's footprint even after multiple dent passes.
+   *
+   * Erases along the polygon outline (scaled 1.15× from the stamped
+   * polygon to cover any anti-aliased edge, sprite footprint, or
+   * post-dent shrinkage) rather than a bounding-box rect.  A rect
+   * erase of a hex polygon sized to cover the vertices necessarily
+   * extends past the hex's inscribed circle by the corner overhang,
+   * and on tightly-packed hex grids that overhang would bite into
+   * adjacent cached tiles — leaving transparent rectangles ("black
+   * squares") in the surrounding tile fills.  Polygon-fill erase has
+   * no corners and stays inside the tile's own footprint.
+   *
+   * Tiles without polygonPoints (none today, but the fallback keeps
+   * the helper safe if any new variant joins the cache) still use the
+   * rect path with a small margin.
    */
   private eraseStaticTileFromCache(e: GameEntity): void {
       const cx = this._staticTileCanvasCtx;
@@ -882,14 +893,32 @@ export class RenderSystem {
       const halfMapH = this._staticTileMapH / 2;
       const wx = (e.position.x + halfMapW) * s;
       const wy = (e.position.y + halfMapH) * s;
-      const maxDim = Math.max(e.size.x, e.size.y);
-      // Erase a hair larger than the stamp to cover the sprite's soft edge.
-      const eraseSize = maxDim * 1.1 * s;
-      const eHalf = eraseSize / 2;
       const prevOp = cx.globalCompositeOperation;
       cx.globalCompositeOperation = 'destination-out';
       cx.fillStyle = '#000';
-      cx.fillRect(wx - eHalf, wy - eHalf, eraseSize, eraseSize);
+      const pts = e.polygonPoints;
+      if (pts && pts.length > 0) {
+          // Polygon-fill erase, 1.15× expansion covers sprite anti-alias
+          // ringing and ~13 % per-hit dent shrinkage (rock-tile's
+          // vertexJitter cap).  Stays inside the tile's hex footprint so
+          // adjacent cached tiles are unaffected.
+          const grow = 1.15;
+          cx.save();
+          cx.translate(wx, wy);
+          cx.beginPath();
+          cx.moveTo(pts[0].x * s * grow, pts[0].y * s * grow);
+          for (let i = 1; i < pts.length; i++) {
+              cx.lineTo(pts[i].x * s * grow, pts[i].y * s * grow);
+          }
+          cx.closePath();
+          cx.fill();
+          cx.restore();
+      } else {
+          const maxDim = Math.max(e.size.x, e.size.y);
+          const eraseSize = maxDim * 1.1 * s;
+          const eHalf = eraseSize / 2;
+          cx.fillRect(wx - eHalf, wy - eHalf, eraseSize, eraseSize);
+      }
       cx.globalCompositeOperation = prevOp;
       e._staticCached = false;
       this._staticTileCacheSet.delete(e);
