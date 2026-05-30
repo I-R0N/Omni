@@ -27,6 +27,52 @@ export class ProjectileSystem {
   public lastHomingMs: number = 0;
   public lastLightningMs: number = 0;
 
+  // Object pool — projectiles spawn in bursts (shotgun = 6/shot, omni
+  // nova = 12+) and despawn on lifetime expiry, collision, or the
+  // MAX_PROJECTILES cap.  Reusing entity objects across the spawn /
+  // despawn cycle removes ~all transient GC pressure for this entity
+  // class — at ~150 projectiles/sec that's ~150 saved allocations/sec
+  // plus the matching GC scan work.  Pool bounded so a quiet period
+  // after a heavy fight doesn't pin a huge heap.
+  private _pool: GameEntity[] = [];
+  private readonly POOL_CAP = 256;
+
+  /**
+   * Return a deactivated projectile entity to the pool for later
+   * reuse.  Called by the GameEngine compaction pass when it would
+   * otherwise have left an inactive projectile for the GC.  Type-checked
+   * here so a mistaken call on a non-projectile is a silent no-op.
+   * Optional-only fields are cleared so stale data (homing target id,
+   * pierce-hit list, lightning arc state) from a prior life can't bleed
+   * into the next projectile that reuses this slot.
+   */
+  public releaseToPool(e: GameEntity): void {
+    if (e.type !== EntityType.PROJECTILE) return;
+    if (this._pool.length >= this.POOL_CAP) return;
+    // Clear optional projectile-only fields so the next spawn's reuse
+    // path starts from a clean slate — spawn() re-sets the fields it
+    // cares about, but a config-mismatched leftover (e.g. previous shot
+    // was lightning chain with chainBranches set, next shot is a plain
+    // bouncer) would otherwise carry stale config through.
+    e.targetEntityId = undefined;
+    e.hitEntityIds = undefined;
+    e.arcPoints = undefined;
+    e.isLightningProjectile = undefined;
+    e.isBouncer = undefined;
+    e.isLightningArc = undefined;
+    e.bouncesRemaining = undefined;
+    e.explosionRadius = undefined;
+    e.explosionDamage = undefined;
+    e.explosionKnockback = undefined;
+    e.chainCount = undefined;
+    e.chainRange = undefined;
+    e.chainBranches = undefined;
+    e.isCharged = undefined;
+    e.homing = undefined;
+    e.homingStrength = undefined;
+    this._pool.push(e);
+  }
+
   /**
    * Spawn `config.count` projectile entities from `shooter` toward `target`.
    * Returns the number spawned so callers can update recoil / muzzle state.
@@ -110,49 +156,81 @@ export class ProjectileSystem {
       const startX = shooter.position.x + ax * muzzleOffset;
       const startY = shooter.position.y + ay * muzzleOffset;
 
-      entities.push({
-        id: nextId('proj'),
-        type: EntityType.PROJECTILE,
-        position: { x: startX, y: startY },
-        velocity: { x: vx, y: vy },
-        size: pSize,
-        // Orient along actual travel (inherited velocity may diverge from
-        // the aim direction when strafing) so the sprite points where it
-        // flies; muzzle spawn offset still uses the aim direction.
-        rotation: Math.atan2(vy, vx),
-        color: config.color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: config.lifetime,
-        maxLifetime: config.lifetime,
-        mass: PROJECTILE_CONSTANTS.MASS,
-        damage: config.damage,
-        homing: config.homing,
-        homingStrength: config.homingStrength,
-        ownerType,
-        pierceCount: config.pierce,
-        trail: [],
-        isLightningProjectile: config.type === WeaponType.LIGHTNING || undefined,
-        isBouncer: config.type === WeaponType.BOUNCER || undefined,
-        // Bouncer projectiles carry a remaining-bounces counter so they
-        // dissipate after `bounceCount` reflections.  Other projectile
-        // types ignore this field.
-        bouncesRemaining: config.type === WeaponType.BOUNCER ? config.bounceCount : undefined,
-        // Explosion-AoE primitive (Cannon).  PhysicsSystem dispatches an
-        // onExplosion callback when these are set on a projectile that
-        // resolves a direct hit.
-        explosionRadius: config.explosionRadius,
-        explosionDamage: config.explosionDamage,
-        explosionKnockback: config.explosionKnockback,
-        // Lightning chain overrides (charged Lightning).  GameEngine
-        // .fireLightningChainFromImpact reads these and falls back to
-        // the LIGHTNING_CHAIN_* constants when undefined.
-        chainCount: config.chainCount,
-        chainRange: config.chainRange,
-        chainBranches: config.chainBranches,
-        isCharged: config.isCharged,
-      });
+      const rotation = Math.atan2(vy, vx);
+      const isLight = config.type === WeaponType.LIGHTNING || undefined;
+      const isBnc   = config.type === WeaponType.BOUNCER || undefined;
+      const bouncesRem = config.type === WeaponType.BOUNCER ? config.bounceCount : undefined;
+      const pooled = this._pool.pop();
+      if (pooled) {
+        // Reuse path: in-place reset.  Optional fields the pool's
+        // releaseToPool() didn't already clear are reset here so the
+        // hidden class stays stable across spawn shapes.
+        pooled.id = nextId('proj');
+        pooled.type = EntityType.PROJECTILE;
+        pooled.position.x = startX; pooled.position.y = startY;
+        pooled.velocity.x = vx;     pooled.velocity.y = vy;
+        pooled.size = pSize;
+        pooled.rotation = rotation;
+        pooled.color = config.color;
+        pooled.active = true;
+        pooled.health = 1;
+        pooled.maxHealth = 1;
+        pooled.lifetime = config.lifetime;
+        pooled.maxLifetime = config.lifetime;
+        pooled.mass = PROJECTILE_CONSTANTS.MASS;
+        pooled.damage = config.damage;
+        pooled.homing = config.homing;
+        pooled.homingStrength = config.homingStrength;
+        pooled.ownerType = ownerType;
+        pooled.pierceCount = config.pierce;
+        if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
+        pooled.isLightningProjectile = isLight;
+        pooled.isBouncer = isBnc;
+        pooled.bouncesRemaining = bouncesRem;
+        pooled.explosionRadius = config.explosionRadius;
+        pooled.explosionDamage = config.explosionDamage;
+        pooled.explosionKnockback = config.explosionKnockback;
+        pooled.chainCount = config.chainCount;
+        pooled.chainRange = config.chainRange;
+        pooled.chainBranches = config.chainBranches;
+        pooled.isCharged = config.isCharged;
+        entities.push(pooled);
+      } else {
+        entities.push({
+          id: nextId('proj'),
+          type: EntityType.PROJECTILE,
+          position: { x: startX, y: startY },
+          velocity: { x: vx, y: vy },
+          size: pSize,
+          // Orient along actual travel (inherited velocity may diverge from
+          // the aim direction when strafing) so the sprite points where it
+          // flies; muzzle spawn offset still uses the aim direction.
+          rotation,
+          color: config.color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: config.lifetime,
+          maxLifetime: config.lifetime,
+          mass: PROJECTILE_CONSTANTS.MASS,
+          damage: config.damage,
+          homing: config.homing,
+          homingStrength: config.homingStrength,
+          ownerType,
+          pierceCount: config.pierce,
+          trail: [],
+          isLightningProjectile: isLight,
+          isBouncer: isBnc,
+          bouncesRemaining: bouncesRem,
+          explosionRadius: config.explosionRadius,
+          explosionDamage: config.explosionDamage,
+          explosionKnockback: config.explosionKnockback,
+          chainCount: config.chainCount,
+          chainRange: config.chainRange,
+          chainBranches: config.chainBranches,
+          isCharged: config.isCharged,
+        });
+      }
     }
 
     this.enforceCap(entities);

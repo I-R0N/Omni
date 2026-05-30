@@ -13,6 +13,27 @@ import { enforceTypeCap } from './enforceCap';
  * so FIFO dropping is safe.
  */
 export class ParticleSystem {
+  // Object pool — particles churn through tens of thousands of spawn/
+  // despawn cycles per minute on active play.  Reusing entity objects
+  // here eliminates ~all transient GC pressure for particles, which
+  // smooths out frame times (no periodic 1-2 ms GC pauses) and saves
+  // the literal-allocation cost on every spawn.  Pool is bounded so a
+  // long quiet period after a burst doesn't pin a huge heap.
+  private _pool: GameEntity[] = [];
+  private readonly POOL_CAP = 512;
+
+  /**
+   * Return a deactivated particle entity to the pool for later reuse.
+   * Called by the GameEngine compaction pass when it would otherwise
+   * have left an inactive particle for the GC.  Type-checked here so a
+   * mistaken call on a non-particle is a silent no-op.
+   */
+  public releaseToPool(e: GameEntity): void {
+    if (e.type !== EntityType.PARTICLE) return;
+    if (this._pool.length >= this.POOL_CAP) return;
+    this._pool.push(e);
+  }
+
   /**
    * Push `count` particle entities into `entities` around `position`.
    * Options mirror the previous GameEngine helper so all existing call sites
@@ -66,24 +87,44 @@ export class ParticleSystem {
         py += Math.sin(jAngle) * jDist;
       }
 
-      entities.push({
-        id: nextId('part'),
-        type: EntityType.PARTICLE,
-        position: { x: px, y: py },
-        velocity: {
-          x: Math.cos(angle) * speed + (baseVelocity?.x ?? 0),
-          y: Math.sin(angle) * speed + (baseVelocity?.y ?? 0),
-        },
-        size:      { x: size, y: size },
-        rotation:  0,
-        color,
-        active:    true,
-        health:    1,
-        maxHealth: 1,
-        lifetime:  life,
-        maxLifetime: life,
-        mass:      0.1,
-      });
+      const vx = Math.cos(angle) * speed + (baseVelocity?.x ?? 0);
+      const vy = Math.sin(angle) * speed + (baseVelocity?.y ?? 0);
+      const pooled = this._pool.pop();
+      if (pooled) {
+        // Reuse path: mutate the pooled entity in place.  Field order
+        // and set is identical to the literal path below so v8 keeps
+        // the hidden class stable across both forms.
+        pooled.id = nextId('part');
+        pooled.type = EntityType.PARTICLE;
+        pooled.position.x = px; pooled.position.y = py;
+        pooled.velocity.x = vx; pooled.velocity.y = vy;
+        pooled.size.x = size; pooled.size.y = size;
+        pooled.rotation = 0;
+        pooled.color = color;
+        pooled.active = true;
+        pooled.health = 1;
+        pooled.maxHealth = 1;
+        pooled.lifetime = life;
+        pooled.maxLifetime = life;
+        pooled.mass = 0.1;
+        entities.push(pooled);
+      } else {
+        entities.push({
+          id: nextId('part'),
+          type: EntityType.PARTICLE,
+          position: { x: px, y: py },
+          velocity: { x: vx, y: vy },
+          size:      { x: size, y: size },
+          rotation:  0,
+          color,
+          active:    true,
+          health:    1,
+          maxHealth: 1,
+          lifetime:  life,
+          maxLifetime: life,
+          mass:      0.1,
+        });
+      }
     }
 
     this.enforceCap(entities);
@@ -130,24 +171,41 @@ export class ParticleSystem {
       const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
       const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
 
-      entities.push({
-        id: nextId('glit'),
-        type: EntityType.PARTICLE,
-        position: {
-          x: cx + fx * along + perpX * jitter,
-          y: cy + fy * along + perpY * jitter,
-        },
-        velocity: { x: 0, y: 0 },
-        size: { x: size, y: size },
-        rotation: 0,
-        color,
-        active: true,
-        health: 1,
-        maxHealth: 1,
-        lifetime: life,
-        maxLifetime: life,
-        mass: 0.01,
-      });
+      const gpx = cx + fx * along + perpX * jitter;
+      const gpy = cy + fy * along + perpY * jitter;
+      const pooled = this._pool.pop();
+      if (pooled) {
+        pooled.id = nextId('glit');
+        pooled.type = EntityType.PARTICLE;
+        pooled.position.x = gpx; pooled.position.y = gpy;
+        pooled.velocity.x = 0; pooled.velocity.y = 0;
+        pooled.size.x = size; pooled.size.y = size;
+        pooled.rotation = 0;
+        pooled.color = color;
+        pooled.active = true;
+        pooled.health = 1;
+        pooled.maxHealth = 1;
+        pooled.lifetime = life;
+        pooled.maxLifetime = life;
+        pooled.mass = 0.01;
+        entities.push(pooled);
+      } else {
+        entities.push({
+          id: nextId('glit'),
+          type: EntityType.PARTICLE,
+          position: { x: gpx, y: gpy },
+          velocity: { x: 0, y: 0 },
+          size: { x: size, y: size },
+          rotation: 0,
+          color,
+          active: true,
+          health: 1,
+          maxHealth: 1,
+          lifetime: life,
+          maxLifetime: life,
+          mass: 0.01,
+        });
+      }
     }
   }
 

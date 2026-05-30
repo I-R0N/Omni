@@ -71,6 +71,12 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  // Damage-text object pool — see ParticleSystem._pool for the same
+  // pattern in entity-space.  Damage texts spawn a few per impact and
+  // expire on lifetime; reusing the objects across the spawn/despawn
+  // cycle removes the literal-allocation cost from the hot combat path.
+  private _damageTextPool: DamageText[] = [];
+  private readonly DAMAGE_TEXT_POOL_CAP = 64;
   private playerMessages: PlayerHUDMessage[] = [];
   private readonly MAX_PLAYER_MESSAGES = 6;
   private currentWeaponIndex: number = 0;
@@ -1755,11 +1761,20 @@ export class GameEngine {
 
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
+      // Inactive particles + projectiles are routed back to their owning
+      // system's object pool for reuse on the next spawn — saves the
+      // per-spawn allocation and the matching GC scan work.  All other
+      // inactive entity types just fall out of the array and let the GC
+      // collect them on the next sweep.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
           if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
               this.currentMap.entities[writeIdx++] = ent;
+          } else if (ent.type === EntityType.PARTICLE) {
+              this.particles.releaseToPool(ent);
+          } else if (ent.type === EntityType.PROJECTILE) {
+              this.projectiles.releaseToPool(ent);
           }
       }
       this.currentMap.entities.length = writeIdx;
@@ -2297,7 +2312,8 @@ export class GameEngine {
     this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
 
-    // Damage Text cleanup
+    // Damage Text cleanup.  Expired texts return to the pool for reuse
+    // by the next spawnDamageText call instead of being dropped to GC.
     let dTextIdx = 0;
     for (let i = 0; i < this.damageTexts.length; i++) {
         const t = this.damageTexts[i];
@@ -2306,6 +2322,8 @@ export class GameEngine {
         t.position.y += t.velocity.y * dt;
         if (t.lifetime > 0) {
             this.damageTexts[dTextIdx++] = t;
+        } else if (this._damageTextPool.length < this.DAMAGE_TEXT_POOL_CAP) {
+            this._damageTextPool.push(t);
         }
     }
     this.damageTexts.length = dTextIdx;
@@ -2520,19 +2538,32 @@ export class GameEngine {
           return;
       }
       const isCrit = amount > 3;
-      this.damageTexts.push({
-          id: nextId('dmg'),
-          position: { ...pos },
-          text: Math.round(amount).toString(),
-          velocity: {
-              x: (Math.random() - 0.5) * 10,
-              y: -DAMAGE_TEXT_CONSTANTS.SPEED
-          },
-          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          color: isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR,
-          active: true
-      });
+      const vx = (Math.random() - 0.5) * 10;
+      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+      const color = isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR;
+      const pooled = this._damageTextPool.pop();
+      if (pooled) {
+          pooled.id = nextId('dmg');
+          pooled.position.x = pos.x; pooled.position.y = pos.y;
+          pooled.text = Math.round(amount).toString();
+          pooled.velocity.x = vx; pooled.velocity.y = vy;
+          pooled.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          pooled.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          pooled.color = color;
+          pooled.active = true;
+          this.damageTexts.push(pooled);
+      } else {
+          this.damageTexts.push({
+              id: nextId('dmg'),
+              position: { x: pos.x, y: pos.y },
+              text: Math.round(amount).toString(),
+              velocity: { x: vx, y: vy },
+              lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+              maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+              color,
+              active: true,
+          });
+      }
 
       // Dent-policy post-damage hooks — fire only while the tile is
       // still alive (target.health > 0).  Killing hits route through
