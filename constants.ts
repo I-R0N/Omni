@@ -1833,9 +1833,16 @@ export const NEBULA_CONSTANTS = {
   // the entity id so the cloud reads as varied swirls.  The shatter
   // path is independent — shards in range still shatter on direct
   // contact via the standard nebula pass-through trigger.
+  //
+  // Both the pull AND the shatter check skip shards whose
+  // `nebulaMergeCooldown` is active — the same field already gates
+  // shard↔shard merging, so freshly-spawned shatter children (which
+  // carry the post-shatter cooldown) sit out the player interaction
+  // until the cooldown elapses.  Single field gates all three nebula-
+  // shard interactions: pull, shatter, merge.
   PLAYER_PULL_RANGE: 220,
-  PLAYER_PULL_STRENGTH: 220,
-  PLAYER_PULL_SPIN: 2.5,
+  PLAYER_PULL_STRENGTH: 60,
+  PLAYER_PULL_SPIN: 1.5,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
   // shards must substantially OVERLAP, not merely touch, before a merge

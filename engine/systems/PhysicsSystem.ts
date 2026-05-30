@@ -739,6 +739,11 @@ export class PhysicsSystem {
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (!e.active || e.shardVariant !== 'nebula-shard') continue;
+          // Skip shards on a cooldown — same field that gates shard↔shard
+          // merging.  Freshly-spawned shatter children carry the cooldown
+          // from postShatterMergeCooldown, so they "rest" for a beat
+          // before the pull picks them up again.
+          if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
           const dx = wrapDeltaX(e.position.x, px);
           const dy = wrapDeltaY(e.position.y, py);
           const distSq = dx * dx + dy * dy;
@@ -2218,11 +2223,18 @@ export class PhysicsSystem {
           // power-law breakage produces 2-3 generations of smaller
           // shards before the MIN_SHATTER_DIAMETER floor below stops
           // further breakage and contacts just pass through.
+          //
+          // The shard target ALSO needs a clear nebulaMergeCooldown —
+          // freshly-spawned shatter children carry that cooldown so the
+          // player can't immediately re-shatter the next generation in
+          // the same fly-through.  (Tiles never carry the field, so the
+          // gate is a no-op for them.)
           const isShatterable = nebula.shardVariant === 'nebula-tile'
                              || nebula.shardVariant === 'nebula-shard';
           const shatters = isShatterable
                             && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
-                            && (other.nebulaImpactCooldown ?? 0) <= 0;
+                            && (other.nebulaImpactCooldown ?? 0) <= 0
+                            && (nebula.nebulaMergeCooldown ?? 0) <= 0;
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
