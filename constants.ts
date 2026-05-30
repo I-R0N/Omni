@@ -1841,7 +1841,7 @@ export const NEBULA_CONSTANTS = {
   // until the cooldown elapses.  Single field gates all three nebula-
   // shard interactions: pull, shatter, merge.
   PLAYER_PULL_RANGE: 220,
-  PLAYER_PULL_STRENGTH: 60,
+  PLAYER_PULL_STRENGTH: 1,
   PLAYER_PULL_SPIN: 1.5,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
