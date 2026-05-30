@@ -24,7 +24,7 @@ import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import type { FlowSampler } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
-import { randomRockNebulaComposition, randomNebulaComposition } from './NebulaColor';
+import { randomRockNebulaComposition } from './NebulaColor';
 
 /** Average two 6-digit hex colours component-wise. */
 function blendHexColors(hexA: string, hexB: string): string {
@@ -667,37 +667,19 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Governs
-   * glass-tile shatter dust (randomGlassNebulaComposition) AND main
-   * background nebula clusters (randomNebulaComposition).  Default
-   * 'sky'.  Rock-side dust (randomRockNebulaComposition) is fixed at
-   * white and unaffected.  Re-rolls active nebula tiles + shards so
-   * the change is immediate, and invalidates the cached blended-hex /
-   * tinted bitmaps so RenderSystem rebuilds them.
+   * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Now
+   * narrowly governs glass-tile shatter / merge dust ONLY
+   * (randomGlassNebulaComposition).  Default 'sky'.  Main background
+   * nebula clusters, nebula tiles, nebula shards, and BG puffs all
+   * stay on the legacy default palette regardless of this cycle, and
+   * rock-side dust is fixed at white.  Glass dust is ephemeral
+   * (spawned per shatter event), so no entity re-roll is needed — the
+   * next dust spawn picks up the new selection.
    */
   public cycleNebulaPalette() {
     cycleNebulaPalette();
-    this.rerollActiveNebulae();
   }
 
-  /**
-   * Re-roll every active nebula tile/shard's composition from the
-   * active nebula palette, then invalidate the blended-hex / tinted-
-   * bitmap caches so RenderSystem rebuilds them on the next draw.
-   */
-  private rerollActiveNebulae() {
-    if (!this.currentMap) return;
-    const ents = this.currentMap.entities;
-    for (let i = 0; i < ents.length; i++) {
-      const e = ents[i];
-      if (e.shardVariant !== 'nebula-tile' && e.shardVariant !== 'nebula-shard') continue;
-      e.nebulaColorComposition = randomNebulaComposition();
-      e.color = e.nebulaColorComposition[0].hex;
-      e.nebulaBlendedHex = undefined;
-      e.nebulaTintedKey = undefined;
-      e.nebulaCachedTinted = undefined;
-    }
-  }
 
   /**
    * Cycle the active globalCompositeOperation used by the plastic-

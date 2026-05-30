@@ -283,19 +283,19 @@ export function cycleGlassGlowColor(): number {
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
-// every nebula composition EXCEPT rock-side dust: glass-tile shatter
-// dust (randomGlassNebulaComposition) and main background nebula
-// clusters (randomNebulaComposition + rerollActiveNebulae).  Default
-// 'sky' matches the Glass-glow default so glow + glass nebula read as
-// a coherent family out of the box.  Each entry's `nebulaPalette`
-// companion (HSL arc + sat + light, tuned for clouds) is what the
-// sampler reads.  NebulaColor.ts reads the active preset through
-// getActiveNebulaPalette() each call so the cycle takes effect on the
-// next sampled tile/shard; existing tiles get re-rolled by
-// GameEngine.cycleNebulaPalette().
+// glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition).
+// Default 'sky' matches the Glass-glow default so glow + glass-side
+// dust read as a coherent family out of the box.
 //
-// Rock-side dust (randomRockNebulaComposition) is *fixed* at white —
-// see NebulaColor.ts for the rationale and the restore path.
+// Explicitly NOT affected by this cycle (all stay on the legacy
+// cyan→red palette):
+//   - main background nebula tiles + shards (randomNebulaComposition)
+//   - BG nebula puffs (BackgroundManager via randomPaletteHueDeg)
+//   - NebulaSystem colour equilibration (paletteHueToHex drift)
+//
+// And rock-side dust (randomRockNebulaComposition) is fixed at white —
+// see NebulaColor.ts for both restore paths if either invariant is
+// wanted as a cyclable knob later.
 export interface NebulaPalette {
   name: string;
   hueMin: number;     // degrees, start of the arc

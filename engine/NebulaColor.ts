@@ -166,12 +166,16 @@ export function hexToHueDeg(hex: string): number {
     return h;
 }
 
-// Convert a hue (degrees) to a palette-standard hex using the active
-// nebula palette's saturation + lightness.  Read each call so the DBG
-// 'Nebula palette' cycle takes effect on the next sample.
+// Convert a hue (degrees) to a palette-standard hex using the legacy
+// nebula saturation + lightness from NEBULA_CONSTANTS.  Pinned to the
+// legacy values (NOT the DBG-cyclable palette) so background nebula
+// puffs, NebulaSystem colour equilibration, and main nebula tiles +
+// shards stay on the default cyan→red palette regardless of where the
+// Nebula DBG knob points.  The Nebula knob only affects glass-tile
+// shatter dust, which samples the active palette directly in
+// randomGlassNebulaComposition.
 export function paletteHueToHex(hueDeg: number): string {
-    const p = getActiveNebulaPalette();
-    return hslToHex(hueDeg, p.saturation, p.lightness);
+    return hslToHex(hueDeg, NEBULA_CONSTANTS.PALETTE_SATURATION, NEBULA_CONSTANTS.PALETTE_LIGHTNESS);
 }
 
 // Normalize an arbitrary hue to the standard [0, 360) range.  Renamed
@@ -229,33 +233,38 @@ export function circularLerpHue(
     return clampHueToPalette(Math.atan2(y, x) * RAD_TO_DEG);
 }
 
-// Pick a random hue uniformly from the active palette's arc.  Reads
-// the live preset so the DBG 'Nebula palette' cycle takes effect on
-// the next sample.
+// Pick a random hue uniformly from the legacy 210° nebula arc (cyan
+// → blue → purple → pink → red).  Pinned to the legacy bounds so
+// background nebula puffs + main nebula tiles + shards stay on the
+// default palette regardless of the DBG cycle — see paletteHueToHex
+// above for the rationale.
 export function randomPaletteHueDeg(): number {
-    const p = getActiveNebulaPalette();
-    return (p.hueMin + Math.random() * p.hueRange) % 360;
+    return (NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE) % 360;
 }
 
 /**
  * Random single-stop composition for nebula-style dust puffs spawned
  * by glass / rock tile or shard events (shatter AND shard→tile merge
- * transmutation).  Split by material:
+ * transmutation).  Material split:
  *
- *   - randomGlassNebulaComposition follows the "Nebula" DBG cycle
- *     (getActiveNebulaPalette) — that knob now owns every glass-tile-
- *     released nebula composition + main background nebula clusters.
- *     Default sky.  The glass-tile *glow* is still on its own Glass
- *     cycle (getActiveGlassGlowColor) so the rim and the dust can be
- *     tuned independently.
- *   - randomRockNebulaComposition is *fixed* at the 'white' preset
+ *   - randomGlassNebulaComposition samples the active Nebula DBG
+ *     palette directly (getActiveNebulaPalette) — the *only* path
+ *     that follows that knob.  Default sky.
+ *   - randomRockNebulaComposition is fixed at the 'white' preset
  *     (hue irrelevant when sat = 0) for every rock-side event —
  *     original tiles, regenerated tiles, and shards — so no DBG cycle
  *     ever recolours rock dust.  If a cyclable rock palette is wanted
  *     later, route this through its own accessor.
+ *
+ * Note: paletteHueToHex / randomPaletteHueDeg are pinned to the
+ * legacy palette (so main nebula tiles + shards + BG puffs +
+ * NebulaSystem colour equilibration stay on the default scheme).  We
+ * intentionally do NOT use them here for the glass dust sampler.
  */
 export function randomGlassNebulaComposition(): NebulaColorStop[] {
-    return [{ hex: paletteHueToHex(randomPaletteHueDeg()), weight: 1 }];
+    const p = getActiveNebulaPalette();
+    const hue = (p.hueMin + Math.random() * p.hueRange) % 360;
+    return [{ hex: hslToHex(hue, p.saturation, p.lightness), weight: 1 }];
 }
 export function randomRockNebulaComposition(): NebulaColorStop[] {
     return [{ hex: hslToHex(0, 0, 90), weight: 1 }];
