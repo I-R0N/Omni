@@ -106,6 +106,15 @@ export class PhysicsSystem {
   // were inline in the main collision pass.
   private shardGrid: Map<number, GameEntity[]> = new Map();
 
+  // True if any static tile on the current map emits a repel field
+  // (glass-tile / metal-tile today).  Set in initializeStaticGrid by
+  // walking the entity list once.  When false, the 5×5 repel-cell scan
+  // inside handleEntityCollisions can short-circuit entirely — saves
+  // ~25 Map lookups per dynamic entity per frame on maps with no repel
+  // emitters (most showcase maps, plus any natural map composed only of
+  // indestructible / plastic / rock / nebula tiles).
+  private _anyRepelTilesPresent: boolean = false;
+
   // Cached list of gravitational attractors (planets/stars — entities with
   // `gravityRange > 0`).  Populated once per map via initializeAttractors()
   // instead of being rebuilt every sim substep by scanning the full ~22k
@@ -256,6 +265,7 @@ export class PhysicsSystem {
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
+      this._anyRepelTilesPresent = false;
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
@@ -269,6 +279,14 @@ export class PhysicsSystem {
                    this.staticGrid.set(key, cell);
                }
                cell.push(e);
+               // While we're walking the static set anyway, note whether
+               // any tile emits a repel field — used to short-circuit the
+               // 5×5 repel-cell scan in handleEntityCollisions on maps
+               // where no tile pushes back.
+               if (e.shardVariant !== undefined
+                   && SHARD_VARIANTS[e.shardVariant].repel !== undefined) {
+                   this._anyRepelTilesPresent = true;
+               }
           }
       }
   }
@@ -970,8 +988,12 @@ export class PhysicsSystem {
         // distance compare and (when in range) one sqrt + one
         // velocity nudge.  No allocations on the hot path.
         const aVariantDef = a.shardVariant !== undefined ? SHARD_VARIANTS[a.shardVariant] : undefined;
+        // Map-level short-circuit: when the current map has zero static
+        // tiles emitting a repel field, the 5×5 cell scan below will
+        // find no emitters in any cell, so skip the walk entirely.
         const aRepellable =
-            a.type !== EntityType.PROJECTILE
+            this._anyRepelTilesPresent
+            && a.type !== EntityType.PROJECTILE
             && a.type !== EntityType.PARTICLE
             && aVariantDef?.repelImmune !== true;
         // Hoisted per-emitter immunity list — metal-shard ignores
