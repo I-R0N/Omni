@@ -342,6 +342,11 @@ export class PhysicsSystem {
     }
     this.lastLocalGravityMs = performance.now() - tLocal;
 
+    // Player → nebula-shard pull (independent of local gravity toggle
+    // — this is the only interaction the player gets with nebula
+    // shards now that SAT impulse is gated off by passThrough).
+    this.applyNebulaPlayerPull(entities, player, timeScale);
+
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
       if (!entity.active) continue;
@@ -704,6 +709,67 @@ export class PhysicsSystem {
    * Each asteroid still gets an `isExploding` skip since the index is
    * filtered by `active` alone and can hold mid-explosion entries.
    */
+  /**
+   * Player → nebula-shard gravity pull.  Nebula shards keep their
+   * passThrough flag so the player ship glides through them without
+   * an SAT impulse; this pass replaces the bounce with a soft pull
+   * (velocity nudge toward the player + a stable rotational kick) so
+   * the cloud appears to swirl in the ship's wake instead of just
+   * sliding past.  Shatter still triggers on direct contact via the
+   * standard nebula pass-through path in resolveCollision.
+   *
+   * - Linear falloff: full strength at the centre, zero at the range
+   *   edge, no pull past the edge.
+   * - Spin sign is deterministic per shard (id last-char parity) so a
+   *   given shard always swirls the same way; the field as a whole
+   *   reads as varied vortices rather than a uniform pinwheel.
+   * - rotationSpeed is capped at NEBULA_CONSTANTS.MAX_SPIN so a long-
+   *   lingering shard doesn't spin up to absurd rates.
+   */
+  private applyNebulaPlayerPull(entities: GameEntity[], player: GameEntity, timeScale: number) {
+      if (!player.active || player.isExploding) return;
+      const range = NEBULA_CONSTANTS.PLAYER_PULL_RANGE;
+      const rangeSq = range * range;
+      const strength = NEBULA_CONSTANTS.PLAYER_PULL_STRENGTH;
+      const spinKick = NEBULA_CONSTANTS.PLAYER_PULL_SPIN;
+      const maxSpin = NEBULA_CONSTANTS.MAX_SPIN;
+      const px = player.position.x;
+      const py = player.position.y;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || e.shardVariant !== 'nebula-shard') continue;
+          // Skip shards on a cooldown — same field that gates shard↔shard
+          // merging.  Freshly-spawned shatter children carry the cooldown
+          // from postShatterMergeCooldown, so they "rest" for a beat
+          // before the pull picks them up again.
+          if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
+          const dx = wrapDeltaX(e.position.x, px);
+          const dy = wrapDeltaY(e.position.y, py);
+          const distSq = dx * dx + dy * dy;
+          if (distSq > rangeSq || distSq < 1) continue;
+          const dist = Math.sqrt(distSq);
+          const fall = 1 - dist / range; // 1 at centre → 0 at edge
+          const invDist = 1 / dist;
+          const deltaV = strength * fall * timeScale;
+          e.velocity.x += dx * invDist * deltaV;
+          e.velocity.y += dy * invDist * deltaV;
+          // Stable per-shard spin direction.
+          const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
+          const spinSign = (lastChar & 1) ? 1 : -1;
+          const nextSpin = (e.rotationSpeed ?? 0) + spinSign * spinKick * fall * timeScale;
+          e.rotationSpeed = Math.max(-maxSpin, Math.min(maxSpin, nextSpin));
+          // Stamp the same cooldown a freshly-spawned shard carries
+          // (postShatterMergeCooldown = MERGE_COOLDOWN) so the pull
+          // fires once per cycle rather than every step the player is
+          // in range — turns continuous proximity into a pulse so the
+          // shard doesn't accumulate velocity / spin without bound.
+          // The same field gates shard↔shard merging while it's hot,
+          // which keeps the rest-beat consistent across interactions.
+          e.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
+      }
+  }
+
   private applyLocalGravity(asteroids: GameEntity[], player: GameEntity, timeScale: number) {
       if (!player.active) return;
 
@@ -2126,26 +2192,22 @@ export class PhysicsSystem {
       if (this.tryPassthroughShatter(a, b, onDeath)) return;
 
       // ── NEBULA: pass-through with conditional shatter ──────────────────
-      // Stage 5: per-variant passThrough flag drives the impulse skip
-      // (only nebula-tile sets it today).  Nebula-shards now go
-      // through standard collision impulse; their mass = 0.01 keeps
-      // the striker velocity change negligible (~3 orders of
-      // magnitude smaller than today's mass=size shards) while the
-      // shard itself takes a strong kick that the existing
-      // linearDamping = 0.97 bleeds off in <1s — the same "cloud
-      // shoved aside" feel without a per-EntityType skip.
+      // Stage 5: per-variant passThrough flag drives the impulse skip.
+      // Nebula tiles AND nebula shards both set passThrough=true, so
+      // strikers (player / enemy / projectile) glide through both with
+      // no SAT impulse.  Player→shard motion is instead driven by the
+      // PhysicsSystem.applyNebulaPlayerPull gravity field; contact
+      // still triggers a shatter via the path below.
+      //
       // DBG override mirrors the fast-path gate above — nebula-pair
-      // hard collisions when the toggle is on.
-      // nebula-pair hard collisions.  Two cases skip the passThrough
-      // gate so the standard SAT impulse runs:
+      // hard collisions when the toggle is on.  Two cases skip the
+      // passThrough gate so the standard SAT impulse runs:
       //   - nebula-shard ↔ nebula-shard, DBG-toggled by
       //     nebulaShardCollisionsEnabled (A/B-test for the gather-
       //     pile fix).
       //   - nebula-shard ↔ nebula-tile, unconditional — shards
       //     should bounce off cloud tiles instead of drifting
-      //     through them.  Strikers (player/enemy/projectile) still
-      //     pass through because they don't have shardVariant set,
-      //     so the conditions below evaluate false for them.
+      //     through them.
       const aIsNebShard = a.shardVariant === 'nebula-shard';
       const bIsNebShard = b.shardVariant === 'nebula-shard';
       const aIsNebTile  = a.shardVariant === 'nebula-tile';
@@ -2155,10 +2217,6 @@ export class PhysicsSystem {
       const nebPairCollides = nebShardPair || nebShardTilePair;
       const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
       const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
-      // Shatter trigger is independent of pass-through — a nebula
-      // tile shatters on PLAYER/ENEMY contact regardless.
-      const aIsNebulaTile = a.shardVariant === 'nebula-tile';
-      const bIsNebulaTile = b.shardVariant === 'nebula-tile';
       if (aPassThrough || bPassThrough) {
           // Both sides pass-through (e.g. tile-vs-tile in some future
           // configuration) — no impulse, no shatter.
@@ -2168,8 +2226,13 @@ export class PhysicsSystem {
           const other  = aPassThrough ? b : a;
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not
-          // be in the post-shatter cooldown window.
-          const shatters = (aIsNebulaTile || bIsNebulaTile)
+          // be in the post-shatter cooldown window.  Only nebula-tiles
+          // shatter on contact — nebula-shards interact with the
+          // player exclusively through the applyNebulaPlayerPull
+          // gravity field; contact alone is a pure pass-through with
+          // no destruction.
+          const isShatterable = nebula.shardVariant === 'nebula-tile';
+          const shatters = isShatterable
                             && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
                             && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {

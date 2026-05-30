@@ -201,6 +201,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
 
+  const handleCycleGlassGlowColor = () => {
+      if (engineRef.current) engineRef.current.cycleGlassGlowColor();
+  };
+
+  const handleCycleNebulaPalette = () => {
+      if (engineRef.current) engineRef.current.cycleNebulaPalette();
+  };
+
   const handleCyclePlasticBlendMode = () => {
       if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
   };
@@ -241,6 +249,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticDamping();
   };
 
+  const handleCyclePlayerThrust = () => {
+      if (engineRef.current) engineRef.current.cyclePlayerThrust();
+  };
+
+  const handleCyclePlayerSpeed = () => {
+      if (engineRef.current) engineRef.current.cyclePlayerSpeed();
+  };
+
   const handleCyclePlasticImpactCooldown = () => {
       if (engineRef.current) engineRef.current.cyclePlasticImpactCooldown();
   };
@@ -255,6 +271,54 @@ const App: React.FC = () => {
 
   const handleCycleColorBlendInterval = () => {
       if (engineRef.current) engineRef.current.cycleColorBlendInterval();
+  };
+
+  const handleToggleAsteroidFlow = () => {
+      if (engineRef.current) engineRef.current.toggleAsteroidFlow();
+  };
+
+  const handleToggleFFOverlayVectors = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
+  };
+
+  const handleToggleFFOverlayCells = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayCells();
+  };
+
+  const handleToggleFFOverlayObstacles = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayObstacles();
+  };
+
+  const handleToggleFFOverlayRebuilds = () => {
+      if (engineRef.current) engineRef.current.toggleFFOverlayRebuilds();
+  };
+
+  const handleCycleFFOverlaySampleN = () => {
+      if (engineRef.current) engineRef.current.cycleFFOverlaySampleN();
+  };
+
+  const handleCycleFFDensity = () => {
+      if (engineRef.current) engineRef.current.cycleFFDensity();
+  };
+
+  const handleCycleFFKernelR = () => {
+      if (engineRef.current) engineRef.current.cycleFFKernelR();
+  };
+
+  const handleCycleFFTangentMix = () => {
+      if (engineRef.current) engineRef.current.cycleFFTangentMix();
+  };
+
+  const handleCycleFFBreathe = () => {
+      if (engineRef.current) engineRef.current.cycleFFBreathe();
+  };
+
+  const handleCycleFFLaneJitter = () => {
+      if (engineRef.current) engineRef.current.cycleFFLaneJitter();
+  };
+
+  const handleCycleFFPattern = () => {
+      if (engineRef.current) engineRef.current.cycleFFPattern();
   };
 
   const handleSkipWave = () => {
@@ -298,6 +362,8 @@ const App: React.FC = () => {
         onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
         onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}
+        onCycleGlassGlowColor={handleCycleGlassGlowColor}
+        onCycleNebulaPalette={handleCycleNebulaPalette}
         onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
@@ -308,10 +374,24 @@ const App: React.FC = () => {
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlasticStiffness={handleCyclePlasticStiffness}
         onCyclePlasticDamping={handleCyclePlasticDamping}
+        onCyclePlayerThrust={handleCyclePlayerThrust}
+        onCyclePlayerSpeed={handleCyclePlayerSpeed}
         onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
+        onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
+        onToggleFFOverlayCells={handleToggleFFOverlayCells}
+        onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
+        onToggleFFOverlayRebuilds={handleToggleFFOverlayRebuilds}
+        onCycleFFOverlaySampleN={handleCycleFFOverlaySampleN}
+        onCycleFFDensity={handleCycleFFDensity}
+        onCycleFFKernelR={handleCycleFFKernelR}
+        onCycleFFTangentMix={handleCycleFFTangentMix}
+        onCycleFFBreathe={handleCycleFFBreathe}
+        onCycleFFLaneJitter={handleCycleFFLaneJitter}
+        onCycleFFPattern={handleCycleFFPattern}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}

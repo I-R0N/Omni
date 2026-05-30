@@ -18,9 +18,11 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName } from '../constants';
-import { ASSETS, setActiveNebulaSet, NebulaSet } from '../assets';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, colorToWigglePhase, cyclePlasticPalette, getActivePlasticPaletteName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cyclePlasticBlendMode, getActivePlasticBlendModeName, cyclePlasticOpacity, getActivePlasticOpacityName, cycleNebulaStretch, getActiveNebulaStretchName, cyclePlasticYield, getActivePlasticYieldName, cyclePlasticStiffness, getActivePlasticStiffnessName, cyclePlasticDamping, getActivePlasticDampingName, cyclePlasticImpactCooldown, getActivePlasticImpactCooldownName, cyclePlasticCoreRadius, getActivePlasticCoreRadiusName, cyclePlasticBlendRadius, getActivePlasticBlendRadiusName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SELF_BREAK, cyclePlasticEatAttract, getActivePlasticEatAttractName, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { FlowPattern, samplePattern } from './systems/FlowField';
+import type { FlowSampler } from './systems/FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT, setMapDimensions } from './toroidal';
 import { randomRockNebulaComposition } from './NebulaColor';
 
@@ -96,11 +98,6 @@ export class GameEngine {
   // Debug mode
   private debugMode: boolean = false;
 
-  // Which nebula image set is active.  Defaults to ALL so every discovered
-  // nebula image renders out of the box; the DBG panel cycles through A
-  // (baseline 00-08), B (everything past 08), ALL, and N16 for quick
-  // comparison.
-  private nebulaSet: NebulaSet = 'ALL';
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   private trailShape: TrailShape = TrailShape.CIRCLE;
@@ -160,6 +157,111 @@ export class GameEngine {
   // DBG toggle — when false, handleScreenShake early-returns and
   // the camera stays anchored regardless of impact magnitude.
   private screenShakeEnabled: boolean = false;
+
+  // ── Asteroid/shard flow-field DBG state ──────────────────────────────
+  // When `asteroidFlowEnabled` is false, the per-asteroid / per-ammo-drop
+  // velocity nudge in updatePhysics is skipped entirely.  Asteroids that
+  // were moving keep their current velocity but receive no further
+  // streamline correction; combined with `linearDamping` they decay
+  // toward zero velocity over a few seconds and then only move when
+  // collided with or pulled by gravity.  Default true.
+  private asteroidFlowEnabled: boolean = true;
+  // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
+  // pass on/off independently.  All default OFF; debug-only.
+  private ffOverlayVectors:   boolean = false;
+  private ffOverlayCells:     boolean = false;
+  private ffOverlayObstacles: boolean = false;
+  private ffOverlayRebuilds:  boolean = false;
+  // Vector overlay stride — cycles through SAMPLE_N_CYCLE so a coarser
+  // sweep doesn't bury detail on dense maps.  Cells/obstacles/rebuild
+  // overlays always render every cell.
+  private static readonly FF_SAMPLE_N_CYCLE: readonly number[] = [1, 2, 4, 8, 16] as const;
+  private ffOverlaySampleN: number = 1;
+  // Cycle of cell sizes for the DBG "FF Density" toggle.  Coarsest
+  // first (matches the existing default).  Each step rebuilds both
+  // grids — asteroid field via the analytical formula + repulsion,
+  // pursuit field lazily on the next sample.  Note: pursuit-field
+  // range (MAX_ENEMY_RANGE) is measured in cells, so shrinking the
+  // cell size also shrinks the world-units range — at 32 / 6 ≈ 50 %
+  // of the default the BFS only fans out ~350 units, leaving enemies
+  // outside that radius to rely on direct steering.  DBG-only knob;
+  // production stays at the default 256.
+  private static readonly FF_DENSITY_CYCLE: readonly number[] =
+    [256, 192, 128, 96, 64, 48, 32] as const;
+  private ffCellSize: number = 48;
+  // Wall-repulsion kernel radius for the asteroid field, in cells.
+  // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
+  // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
+  // tile clusters from several cells away.  Default 3 — matches the
+  // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
+  private static readonly FF_KERNEL_R_CYCLE: readonly number[] =
+    [0, 1, 2, 3, 4, 5] as const;
+  private ffKernelR: number = 5;
+  // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
+  // radial (push perpendicular away from walls — current behaviour
+  // produces opposing vectors on opposite sides of a long wall and
+  // traps shards in the saddle along the boundary).  1 = pure tangent
+  // (slide along the wall in the direction of the base flow — both
+  // sides of the wall now point the same way along the wall, no
+  // saddle).  Default 0.5 — meaningful tangent contribution while
+  // still preserving some push-away behaviour.  DBG-cycle.
+  private static readonly FF_TANGENT_MIX_CYCLE: readonly number[] =
+    [0.0, 0.25, 0.5, 0.75, 1.0] as const;
+  private ffTangentMix: number = 0.5;
+  // Breathing field — scroll rate (rad/s) for the slow undulation
+  // that migrates convergence zones so shard piles dissolve.  0 = off
+  // (static field, no periodic re-bake).  DBG-cycle "FF Breathe":
+  // off / slow / med / fast.
+  private static readonly FF_BREATHE_RATE_CYCLE: readonly number[] =
+    [0, 0.15, 0.4, 0.9] as const;
+  private ffBreatheRate: number = 0;
+  private ffBreathePhase: number = 0;
+  private ffBreatheRebakeTimer: number = 0;
+  // Seconds between breathing re-bakes.  ~3 Hz: smooth enough for a
+  // slow drift, cheap enough that the per-bake cost (sub-ms at default
+  // density) is negligible.
+  private static readonly FF_BREATHE_REBAKE_INTERVAL = 0.33;
+  // Per-shard lane jitter — strength of the persistent perpendicular
+  // offset added to each shard's flow target so shards ride slightly
+  // different parallel lanes instead of collapsing onto one streamline.
+  // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
+  private static readonly FF_LANE_JITTER_CYCLE: readonly number[] =
+    [0, 0.1, 0.2, 0.35] as const;
+  private ffLaneJitter: number = 0.2;
+  // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
+  // the active map's own sampleFlow(); the rest swap in an analytical
+  // field (circular / spiral / gravity well / directional / wavy …).
+  // Persists across map loads so a pattern can be compared on different
+  // maps.  Cycling re-bakes the asteroid field with the chosen sampler;
+  // kernel / tangent / breathing all still apply on top.
+  private static readonly FF_PATTERN_CYCLE: readonly FlowPattern[] = [
+    FlowPattern.DEFAULT,
+    FlowPattern.MEANDER,
+    FlowPattern.CIRCULAR,
+    FlowPattern.SPIRAL,
+    FlowPattern.GRAVITY_WELL,
+    FlowPattern.WAVY_GRAVITY_WELL,
+    FlowPattern.OUTWARD,
+    FlowPattern.HORIZONTAL,
+    FlowPattern.VERTICAL,
+    FlowPattern.WAVY_HORIZONTAL,
+    FlowPattern.WAVY_VERTICAL,
+  ];
+  // Short DBG-button labels per pattern (compact for the panel chip).
+  private static readonly FF_PATTERN_LABELS: Record<FlowPattern, string> = {
+    [FlowPattern.DEFAULT]:           'Map',
+    [FlowPattern.MEANDER]:           'Meander',
+    [FlowPattern.CIRCULAR]:          'Circular',
+    [FlowPattern.SPIRAL]:            'Spiral',
+    [FlowPattern.GRAVITY_WELL]:      'Well',
+    [FlowPattern.WAVY_GRAVITY_WELL]: 'WavyWell',
+    [FlowPattern.OUTWARD]:           'Outward',
+    [FlowPattern.HORIZONTAL]:        'Horiz',
+    [FlowPattern.VERTICAL]:          'Vert',
+    [FlowPattern.WAVY_HORIZONTAL]:   'WavyH',
+    [FlowPattern.WAVY_VERTICAL]:     'WavyV',
+  };
+  private ffPattern: FlowPattern = FlowPattern.DEFAULT;
 
   // Tile regeneration is owned by ShardSystem (Stage 2 of shard-system
   // overhaul).  GameEngine.handleEntityDeath calls
@@ -261,31 +363,6 @@ export class GameEngine {
     // Fill the shared ammo pool when entering debug mode
     if (this.debugMode) {
       this.player.ammo = AMMO_CONSTANTS.MAX_POOL;
-    }
-  }
-
-  /**
-   * Cycle through nebula image sets: ALL (all discovered) → A (baseline
-   * 00-08) → B (everything past 08, dynamic) → N16 (Nebula16 only) → ALL.
-   * Updates the shared NEBULA_IMAGES array, reloads background textures,
-   * and re-rolls the sprite on every live NEBULA / NEBULA_SHARD entity so
-   * tile-cluster art swaps instantly without requiring a map reload.
-   */
-  public toggleNebulaSet() {
-    this.nebulaSet =
-        this.nebulaSet === 'ALL' ? 'A'
-      : this.nebulaSet === 'A'   ? 'B'
-      : this.nebulaSet === 'B'   ? 'N16'
-      : 'ALL';
-    const active = setActiveNebulaSet(this.nebulaSet);
-    this.renderer.setNebulaImages(active);
-
-    if (active.length > 0 && this.currentMap) {
-      for (const e of this.currentMap.entities) {
-        if (e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') {
-          e.sprite = active[Math.floor(Math.random() * active.length)];
-        }
-      }
     }
   }
 
@@ -579,6 +656,32 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the DBG glass palette through GLASS_GLOW_COLORS.  Governs
+   * the glass-tile proximity glow ONLY (RenderSystem reads the hex
+   * live per draw).  Glass-shatter dust + main background nebula
+   * clusters live on the Nebula cycle (see cycleNebulaPalette).
+   * Default 'sky'.  No entity re-roll needed — the glow is read live.
+   */
+  public cycleGlassGlowColor() {
+    cycleGlassGlowColor();
+  }
+
+  /**
+   * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Now
+   * narrowly governs glass-tile shatter / merge dust ONLY
+   * (randomGlassNebulaComposition).  Default 'sky'.  Main background
+   * nebula clusters, nebula tiles, nebula shards, and BG puffs all
+   * stay on the legacy default palette regardless of this cycle, and
+   * rock-side dust is fixed at white.  Glass dust is ephemeral
+   * (spawned per shatter event), so no entity re-roll is needed — the
+   * next dust spawn picks up the new selection.
+   */
+  public cycleNebulaPalette() {
+    cycleNebulaPalette();
+  }
+
+
+  /**
    * Cycle the active globalCompositeOperation used by the plastic-
    * shard render branch (source-over → multiply → darken → screen →
    * lighter → source-over).  Live — takes effect on the next frame
@@ -666,6 +769,26 @@ export class GameEngine {
   }
 
   /**
+   * Cycle the DBG player-thrust multiplier (PLAYER_THRUST_CYCLE) applied
+   * live to the per-map acceleration.  This is the knob that actually
+   * raises everyday top speed, since terminal cruise is
+   * acceleration/(1−friction).
+   */
+  public cyclePlayerThrust() {
+    cyclePlayerThrust();
+  }
+
+  /**
+   * Cycle the DBG player-speed multiplier (PLAYER_SPEED_CYCLE) applied
+   * live to the per-map maxSpeed cap.  Only bites once the cap drops
+   * below the friction-limited terminal velocity (or thrust pushes
+   * cruise above it).
+   */
+  public cyclePlayerSpeed() {
+    cyclePlayerSpeed();
+  }
+
+  /**
    * Cycle the plastic-shard impact-stamp cooldown through
    * PLASTIC_IMPACT_COOLDOWN_CYCLE (0.2 / 0.4 / 0.8 / 1.5 / off).
    * Longer = the collision-driven wiggle/dent deformation axis
@@ -688,6 +811,176 @@ export class GameEngine {
    */
   public cyclePlasticYield() {
     cyclePlasticYield();
+  }
+
+  /**
+   * Toggle the per-asteroid / per-ammo-drop flow-field velocity nudge
+   * in updatePhysics.  When OFF, the `applyFlow` step early-exits after
+   * the rotation update — asteroids retain whatever velocity they had
+   * but receive no streamline correction.  Combined with linearDamping
+   * they decay toward zero velocity over a few seconds; from then on
+   * they only move when collided with or pulled by gravity.  Surfaced
+   * in the DBG panel for A/B-testing the contribution of the flow nudge
+   * to the asteroid-field "feel".
+   */
+  public toggleAsteroidFlow() {
+    this.asteroidFlowEnabled = !this.asteroidFlowEnabled;
+  }
+
+  /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
+  public toggleFFOverlayVectors() {
+    this.ffOverlayVectors = !this.ffOverlayVectors;
+  }
+  /** Toggle the FF Cells overlay (per-cell grid outlines). */
+  public toggleFFOverlayCells() {
+    this.ffOverlayCells = !this.ffOverlayCells;
+  }
+  /** Toggle the FF Obstacles overlay (blocked-cell tint). */
+  public toggleFFOverlayObstacles() {
+    this.ffOverlayObstacles = !this.ffOverlayObstacles;
+  }
+  /** Toggle the FF Rebuilds overlay (flash recently-rebaked cells). */
+  public toggleFFOverlayRebuilds() {
+    this.ffOverlayRebuilds = !this.ffOverlayRebuilds;
+  }
+  /**
+   * Cycle the vector-overlay sample stride through 1 → 2 → 4 → 8 → 16.
+   * Coarser strides reduce arrow density on whichever map is loaded;
+   * stride 1 draws every cell.  Cells / obstacles / rebuilds overlays
+   * always render every cell — only the vector overlay uses this.
+   */
+  public cycleFFOverlaySampleN() {
+    const order = GameEngine.FF_SAMPLE_N_CYCLE;
+    const idx = order.indexOf(this.ffOverlaySampleN);
+    this.ffOverlaySampleN = order[(idx + 1) % order.length];
+  }
+
+  /**
+   * Cycle the flow-field cell size through `FF_DENSITY_CYCLE` (256 →
+   * 192 → 128 → 96 → 64 → 48 → 32 → 256).  Each step reallocates the
+   * grid's typed-array buffers at the new resolution, rebuilds the
+   * obstacle bitmap from the live entity list, and re-bakes the
+   * asteroid field with the active map's sampleFlow.  The enemy
+   * pursuit field is marked dirty so the next `flushEnemyField()`
+   * rebuilds it for the new resolution.  All of this happens
+   * synchronously inside the cycle — at the highest density (32-unit
+   * cells on a 6 k map) the bake is still sub-millisecond.
+   *
+   * No-op when no map is loaded.
+   */
+  public cycleFFDensity() {
+    if (!this.currentMap) return;
+    const order = GameEngine.FF_DENSITY_CYCLE;
+    const idx = order.indexOf(this.ffCellSize);
+    const next = order[(idx + 1) % order.length];
+    this.ffCellSize = next;
+    this.flowField.setCellSize(next);
+    this.flowField.initObstacles(this.currentMap.entities);
+    // Re-bake under the active pattern selection (not necessarily the
+    // map's own sampler) so the chosen pattern survives density changes.
+    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
+    // The new grid starts with defaults; push the current cycled
+    // values back so they survive density changes.
+    this.flowField.setKernelR(this.ffKernelR);
+    this.flowField.setTangentMix(this.ffTangentMix);
+  }
+
+  /**
+   * Cycle the asteroid-field wall-repulsion kernel radius through
+   * `FF_KERNEL_R_CYCLE` (0 → 1 → 2 → 3 → 4 → 5).  R = 0 is the legacy
+   * 4-cardinal-only scan kept for A/B testing; R ≥ 1 enables the
+   * (2R+1)² kernel with 1/d² falloff so cells several positions away
+   * from a wall already start curving the flow.  Each step re-bakes
+   * the asteroid field in-place (sub-ms even at the finest density).
+   */
+  public cycleFFKernelR() {
+    const order = GameEngine.FF_KERNEL_R_CYCLE;
+    const idx = order.indexOf(this.ffKernelR);
+    const next = order[(idx + 1) % order.length];
+    this.ffKernelR = next;
+    this.flowField.setKernelR(next);
+  }
+
+  /**
+   * Cycle the wall-repulsion tangent-mix factor through
+   * `FF_TANGENT_MIX_CYCLE` (0.00 → 0.25 → 0.50 → 0.75 → 1.00).  At 0
+   * the kernel pushes purely perpendicular away from walls (creates
+   * opposing vectors on either side of a long wall — the saddle
+   * dead-zone failure mode).  At 1 each blocked-neighbour
+   * contribution is rotated 90° so the flow slides ALONG the wall
+   * (both sides flow in the same direction along the wall, no
+   * saddle).  Re-bakes the asteroid field in-place.
+   */
+  public cycleFFTangentMix() {
+    const order = GameEngine.FF_TANGENT_MIX_CYCLE;
+    const idx = order.indexOf(this.ffTangentMix);
+    const next = order[(idx + 1) % order.length];
+    this.ffTangentMix = next;
+    this.flowField.setTangentMix(next);
+  }
+
+  /**
+   * Cycle the breathing scroll rate through `FF_BREATHE_RATE_CYCLE`
+   * (off → slow → med → fast).  When non-zero, the asteroid field's
+   * base direction undulates over time (re-baked on a throttled
+   * cadence in updatePhysics) so convergence zones drift and shard
+   * piles dissolve.  Cycling to a non-zero rate immediately re-bakes
+   * at the current phase so the undulation appears; cycling back to
+   * off re-bakes once with amplitude 0 to restore the static field.
+   */
+  public cycleFFBreathe() {
+    const order = GameEngine.FF_BREATHE_RATE_CYCLE;
+    const idx = order.indexOf(this.ffBreatheRate);
+    const next = order[(idx + 1) % order.length];
+    this.ffBreatheRate = next;
+    const amp = next > 0 ? FlowFieldGrid.BREATHE_AMP : 0;
+    this.flowField.setBreathe(amp, this.ffBreathePhase);
+  }
+
+  /**
+   * Cycle the per-shard lane-jitter strength through
+   * `FF_LANE_JITTER_CYCLE` (off → low → med → high).  Adds a stable
+   * per-shard perpendicular offset to the flow target so shards ride
+   * slightly different parallel lanes instead of collapsing onto one
+   * streamline.  Live — no re-bake (applied at sample time in the
+   * per-shard flow nudge).
+   */
+  public cycleFFLaneJitter() {
+    const order = GameEngine.FF_LANE_JITTER_CYCLE;
+    const idx = order.indexOf(this.ffLaneJitter);
+    this.ffLaneJitter = order[(idx + 1) % order.length];
+  }
+
+  /**
+   * Resolve the base-flow sampler for the given map under the current
+   * DBG pattern selection.  DEFAULT uses the map's own sampleFlow();
+   * any other pattern swaps in the corresponding analytical field.
+   * Used at map load and at every re-bake (density / pattern cycle)
+   * so the selection sticks.
+   */
+  private flowSamplerFor(map: BaseMapLayer): FlowSampler {
+    if (this.ffPattern === FlowPattern.DEFAULT) {
+      return (x, y) => map.sampleFlow(x, y);
+    }
+    const p = this.ffPattern;
+    return (x, y) => samplePattern(p, x, y);
+  }
+
+  /**
+   * Cycle the base-flow pattern through `FF_PATTERN_CYCLE` (map default
+   * → meander → circular → spiral → gravity well → wavy well → outward
+   * → horizontal → vertical → wavy-H → wavy-V).  Re-bakes the asteroid
+   * field with the new sampler; current kernel / tangent / breathing
+   * settings still apply on top.  The map's spawn-time seeding is
+   * unaffected — existing shards re-settle onto the new pattern over a
+   * second or two via the per-frame flow nudge.
+   */
+  public cycleFFPattern() {
+    if (!this.currentMap) return;
+    const order = GameEngine.FF_PATTERN_CYCLE;
+    const idx = order.indexOf(this.ffPattern);
+    this.ffPattern = order[(idx + 1) % order.length];
+    this.flowField.buildAsteroidField(this.flowSamplerFor(this.currentMap));
   }
 
   /**
@@ -775,17 +1068,28 @@ export class GameEngine {
     // pop a shard out of existence in the player's view).
     this.shards.setEntityIndex(this.entityIndex);
     // Shard→tile condensation emits a small, non-damaging plasma-style
-    // shockwave that shoves nearby loose shards clear.
-    this.shards.setTileFormedHandler((x, y) => this.spawnShockwave({ x, y }, {
-        radius: MERGE_BLOWBACK.RADIUS,
-        damage: MERGE_BLOWBACK.DAMAGE,
-        knockback: MERGE_BLOWBACK.KNOCKBACK,
-        color: MERGE_BLOWBACK.COLOR,
-        lifetime: MERGE_BLOWBACK.LIFETIME,
-        // Environmental effect — shove loose shards, never the player.
-        excludeIds: ['player'],
-    }));
+    // shockwave that shoves nearby loose shards clear, and patches the
+    // flow field so the new tile registers as an obstacle (the merge
+    // rules build large tile clusters at runtime — without this enemies
+    // path through walls that post-date map load).
+    this.shards.setTileFormedHandler((x, y) => {
+        this.spawnShockwave({ x, y }, {
+            radius: MERGE_BLOWBACK.RADIUS,
+            damage: MERGE_BLOWBACK.DAMAGE,
+            knockback: MERGE_BLOWBACK.KNOCKBACK,
+            color: MERGE_BLOWBACK.COLOR,
+            lifetime: MERGE_BLOWBACK.LIFETIME,
+            // Environmental effect — shove loose shards, never the player.
+            excludeIds: ['player'],
+        });
+        this.flowField.onTileCreated(x, y);
+    });
     this.flowField = new FlowFieldGrid();
+    // Hand the renderer a reference to the flow field so the DBG
+    // asteroid/shard FF overlays (vectors / cells / obstacles /
+    // rebuilds) can read per-cell state directly without going
+    // through allocation-heavy `sampleAsteroidFlow()` calls.
+    this.renderer.setFlowField(this.flowField);
 
     // Central performance controller — injected into every system that
     // owns a skippable pass.  It samples load in beginStep() (called
@@ -852,9 +1156,11 @@ export class GameEngine {
     }
   }
 
-  /** Set the map style that the next restart / startGame will use.
-   *  Called from the main menu.  No-op mid-game; the next restart
-   *  (triggered by the UI) will pick up the new selection. */
+  /** Select the active map.  From the main menu this just swaps the
+   *  backdrop the next startGame() will use.  Mid-game (paused or
+   *  playing) it performs a full switch-and-play: reset the run, load
+   *  the chosen map, and drop straight back into PLAYING so the map
+   *  grid in the pause screen acts as a live map picker. */
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
@@ -863,6 +1169,11 @@ export class GameEngine {
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
       this.player.position = { ...this.currentMap!.playerSpawn };
+      this.prepareFrameEntities();
+    } else {
+      this.resetAndLoadSelectedMap();
+      this.gameState = GameState.PLAYING;
+      this.initWaveSystem();
       this.prepareFrameEntities();
     }
   }
@@ -909,7 +1220,6 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       debugMode: this.debugMode,
-      nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       localGravityEnabled: this.localGravityEnabled,
@@ -934,6 +1244,8 @@ export class GameEngine {
       plasticEatAttractName: getActivePlasticEatAttractName(),
       plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
+      glassGlowColorName: getActiveGlassGlowColorName(),
+      nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
@@ -942,9 +1254,23 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
+      playerThrustName: getActivePlayerThrustName(),
+      playerSpeedName: getActivePlayerSpeedName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
+      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      ffOverlayVectors:   this.ffOverlayVectors,
+      ffOverlayCells:     this.ffOverlayCells,
+      ffOverlayObstacles: this.ffOverlayObstacles,
+      ffOverlayRebuilds:  this.ffOverlayRebuilds,
+      ffOverlaySampleN:   this.ffOverlaySampleN,
+      ffCellSize:         this.ffCellSize,
+      ffKernelR:          this.ffKernelR,
+      ffTangentMix:       this.ffTangentMix,
+      ffBreatheRate:      this.ffBreatheRate,
+      ffLaneJitter:       this.ffLaneJitter,
+      ffPatternName:      GameEngine.FF_PATTERN_LABELS[this.ffPattern],
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -969,7 +1295,11 @@ export class GameEngine {
     }
   }
 
-  public restartGame() {
+  /** Reset all run state and load a fresh copy of `selectedMapType`.
+   *  Shared by restartGame() (→ MENU) and the mid-game map switch in
+   *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
+   *  decides the target state and pushes the frame. */
+  private resetAndLoadSelectedMap() {
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
@@ -994,12 +1324,15 @@ export class GameEngine {
       this.chainBreakPending = false;
       this.damageTexts = [];
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
-      
+
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
       this.camera.position = { x: 0, y: 0 };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
+  }
 
+  public restartGame() {
+      this.resetAndLoadSelectedMap();
       this.gameState = GameState.MENU;
       this.prepareFrameEntities();
   }
@@ -1046,7 +1379,6 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       debugMode: this.debugMode,
-      nebulaSet: this.nebulaSet,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
       localGravityEnabled: this.localGravityEnabled,
@@ -1071,6 +1403,8 @@ export class GameEngine {
       plasticEatAttractName: getActivePlasticEatAttractName(),
       plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
+      glassGlowColorName: getActiveGlassGlowColorName(),
+      nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendMode:   getActivePlasticBlendModeName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
       nebulaStretchName:   getActiveNebulaStretchName(),
@@ -1079,9 +1413,23 @@ export class GameEngine {
       shatterGraceName:   getActiveShatterGraceName(),
       plasticStiffnessName: getActivePlasticStiffnessName(),
       plasticDampingName: getActivePlasticDampingName(),
+      playerThrustName: getActivePlayerThrustName(),
+      playerSpeedName: getActivePlayerSpeedName(),
       plasticImpactCooldownName: getActivePlasticImpactCooldownName(),
       plasticCoreRadiusName: getActivePlasticCoreRadiusName(),
       plasticBlendRadiusName: getActivePlasticBlendRadiusName(),
+      asteroidFlowEnabled: this.asteroidFlowEnabled,
+      ffOverlayVectors:   this.ffOverlayVectors,
+      ffOverlayCells:     this.ffOverlayCells,
+      ffOverlayObstacles: this.ffOverlayObstacles,
+      ffOverlayRebuilds:  this.ffOverlayRebuilds,
+      ffOverlaySampleN:   this.ffOverlaySampleN,
+      ffCellSize:         this.ffCellSize,
+      ffKernelR:          this.ffKernelR,
+      ffTangentMix:       this.ffTangentMix,
+      ffBreatheRate:      this.ffBreatheRate,
+      ffLaneJitter:       this.ffLaneJitter,
+      ffPatternName:      GameEngine.FF_PATTERN_LABELS[this.ffPattern],
       tileBlendAlpha: this.nebulas.tileBlendAlpha,
       shardBlendAlpha: this.nebulas.shardBlendAlpha,
       colorBlendFrameInterval: this.nebulas.colorBlendFrameInterval,
@@ -1249,6 +1597,19 @@ export class GameEngine {
           this.flowField.lastFlushMs = 0;
       }
 
+      // Breathing field: advance the scroll phase and re-bake the
+      // asteroid field on a throttled cadence so convergence zones
+      // migrate over time (shard piles dissolve).  No-op when the
+      // breathing rate is off.
+      if (this.ffBreatheRate > 0) {
+          this.ffBreatheRebakeTimer += dt;
+          if (this.ffBreatheRebakeTimer >= GameEngine.FF_BREATHE_REBAKE_INTERVAL) {
+              this.ffBreathePhase += this.ffBreatheRate * this.ffBreatheRebakeTimer;
+              this.ffBreatheRebakeTimer = 0;
+              this.flowField.setBreathe(FlowFieldGrid.BREATHE_AMP, this.ffBreathePhase);
+          }
+      }
+
       // Enemy AI state machine — skippable.  When throttled we dt-compensate
       // (multiply dt by the effective interval) so acceleration impulses and
       // reaction/idle/chase timers integrate to the same per-second behaviour
@@ -1330,6 +1691,8 @@ export class GameEngine {
       const FLOW_CORRECTION  = 0.08;
       const FLOW_TARGET_SPEED = config.speedMultiplier;
       const asteroids = this.entityIndex.asteroids;
+      const flowEnabled = this.asteroidFlowEnabled;
+      const laneJitter = this.ffLaneJitter;
       const applyFlow = (e: GameEntity) => {
           // Nebula shards anchor in place — flow correction is
           // skipped so the field can't drag them around the map.
@@ -1341,10 +1704,34 @@ export class GameEngine {
               if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
               return;
           }
+          // DBG: when the asteroid-flow toggle is OFF, skip the
+          // velocity nudge entirely.  Rotation still integrates so
+          // existing tumble is preserved; existing velocity is left
+          // untouched (only damping + collisions modify it).
+          if (!flowEnabled) {
+              if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
+              return;
+          }
           const flow = this.flowField.sampleAsteroidFlow(e.position.x, e.position.y);
-          const tx = flow.x * FLOW_TARGET_SPEED;
-          const ty = flow.y * FLOW_TARGET_SPEED;
-          const vAlongFlow = e.velocity.x * flow.x + e.velocity.y * flow.y;
+          // Per-shard lane jitter: nudge the target slightly
+          // perpendicular to the flow by a STABLE per-shard amount so
+          // shards ride parallel lanes instead of collapsing onto one
+          // streamline.  Lazily seeded once per entity (stable
+          // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
+          let fxDir = flow.x, fyDir = flow.y;
+          if (laneJitter > 0) {
+              if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+              const off = e.flowLane * laneJitter;
+              const px = -flow.y, py = flow.x;
+              let nx = flow.x + px * off;
+              let ny = flow.y + py * off;
+              const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+              fxDir = nx / nmag;
+              fyDir = ny / nmag;
+          }
+          const tx = fxDir * FLOW_TARGET_SPEED;
+          const ty = fyDir * FLOW_TARGET_SPEED;
+          const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
           const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
           const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
           const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
@@ -1735,8 +2122,8 @@ export class GameEngine {
     this.player.inputVector = moveDir; // Debug visualization assignment
     
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
-    const maxSpeed = moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult();
+    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult();
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -2894,8 +3281,18 @@ export class GameEngine {
       // are effectively static geometry (stellar POIs), so a one-shot
       // cache matches their lifecycle.
       this.physics.initializeAttractors(map.entities);
+      // Apply the active flow-field tuning (density / kernel / tangent)
+      // so the configured defaults — and any values cycled before a
+      // restart — take effect at load instead of the grid's internal
+      // defaults.  Mirrors cycleFFDensity's reconfigure ordering.
+      this.flowField.setCellSize(this.ffCellSize);
       this.flowField.initObstacles(map.entities);
-      this.flowField.buildAsteroidField((x, y) => map.sampleFlow(x, y));
+      // Bake under the active DBG pattern (DEFAULT = the map's own
+      // sampler) so a selected pattern persists across map loads /
+      // restarts.
+      this.flowField.buildAsteroidField(this.flowSamplerFor(map));
+      this.flowField.setKernelR(this.ffKernelR);
+      this.flowField.setTangentMix(this.ffTangentMix);
       this.renderer.setMapType(map.type);
       // Forward the map's recorded nebula cluster-center positions to
       // the background layer so its puffs render at the same world
@@ -2921,7 +3318,14 @@ export class GameEngine {
           this.player.position,
           this.playerMessages,
           this.player,
-          this.waveAnnouncements
+          this.waveAnnouncements,
+          {
+              vectors:   this.ffOverlayVectors,
+              cells:     this.ffOverlayCells,
+              obstacles: this.ffOverlayObstacles,
+              rebuilds:  this.ffOverlayRebuilds,
+              sampleN:   this.ffOverlaySampleN,
+          },
       );
   }
 

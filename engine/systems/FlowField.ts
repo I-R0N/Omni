@@ -67,3 +67,111 @@ export function sampleFlow(wx: number, wy: number): FlowVector {
               + AMP_Y * Math.cos(TWO_PI_OVER_H * wy);
   return { x: Math.cos(theta), y: Math.sin(theta) };
 }
+
+// ─── selectable flow patterns (DBG) ─────────────────────────────────────────
+//
+// A bank of analytical unit-vector fields the DBG "FF Pattern" cycle can
+// swap in over a map's own flow.  All are pure functions of world position
+// (no time/state), so the baked grid can sample them exactly like the map
+// sampler.  DEFAULT is sentinel-only — GameEngine routes it to the active
+// map's own sampleFlow() rather than this function.
+//
+// Gravity-well / spiral / outward patterns reference the map centre (0,0)
+// and are NOT seam-continuous (opposite sides of the wrap point opposite
+// ways); that's inherent to a radial field on a torus and acceptable for a
+// debug pattern.  The directional + wavy-directional patterns use an
+// integer number of waves per axis so they DO stay continuous across the
+// seam.
+
+export enum FlowPattern {
+  DEFAULT           = 'DEFAULT',            // map's own sampleFlow()
+  MEANDER           = 'MEANDER',            // golden-ratio meander (universe default)
+  CIRCULAR          = 'CIRCULAR',           // CCW vortex about centre
+  SPIRAL            = 'SPIRAL',             // inward + CCW swirl
+  GRAVITY_WELL      = 'GRAVITY_WELL',       // radial inward to centre
+  WAVY_GRAVITY_WELL = 'WAVY_GRAVITY_WELL',  // inward + radial-wave wobble
+  OUTWARD           = 'OUTWARD',            // radial outward (source)
+  HORIZONTAL        = 'HORIZONTAL',         // constant +x
+  VERTICAL          = 'VERTICAL',           // constant +y
+  WAVY_HORIZONTAL   = 'WAVY_HORIZONTAL',    // +x snaking with y
+  WAVY_VERTICAL     = 'WAVY_VERTICAL',      // +y snaking with x
+}
+
+// Angle swing (radians) for the "wavy" variants, and the number of full
+// wave cycles across each map axis.  Integer wave count keeps the wavy-
+// directional fields continuous across the wrap seam.
+const PATTERN_WAVE_AMP = 0.6;   // ≈ 34°
+const PATTERN_WAVES    = 2;
+
+/**
+ * Sample one of the selectable DBG flow patterns at world position
+ * (wx, wy).  Always returns a unit vector.  DEFAULT falls back to the
+ * meander here, but callers should special-case it to the map sampler.
+ */
+export function samplePattern(pattern: FlowPattern, wx: number, wy: number): FlowVector {
+  switch (pattern) {
+    case FlowPattern.HORIZONTAL:
+      return { x: 1, y: 0 };
+
+    case FlowPattern.VERTICAL:
+      return { x: 0, y: 1 };
+
+    case FlowPattern.WAVY_HORIZONTAL: {
+      const a = PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_H * PATTERN_WAVES * wy);
+      return { x: Math.cos(a), y: Math.sin(a) };
+    }
+
+    case FlowPattern.WAVY_VERTICAL: {
+      const a = Math.PI / 2 + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * wx);
+      return { x: Math.cos(a), y: Math.sin(a) };
+    }
+
+    case FlowPattern.CIRCULAR: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) return { x: 1, y: 0 };
+      const inv = 1 / Math.sqrt(r2);
+      return { x: -wy * inv, y: wx * inv };   // CCW tangent
+    }
+
+    case FlowPattern.SPIRAL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) return { x: 1, y: 0 };
+      const inv = 1 / Math.sqrt(r2);
+      // 70 % tangential (CCW) + 30 % inward → an in-drawing swirl.
+      const sx = (-wy * inv) * 0.7 + (-wx * inv) * 0.3;
+      const sy = ( wx * inv) * 0.7 + (-wy * inv) * 0.3;
+      const m = Math.sqrt(sx * sx + sy * sy) || 1;
+      return { x: sx / m, y: sy / m };
+    }
+
+    case FlowPattern.GRAVITY_WELL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) return { x: 1, y: 0 };
+      const inv = 1 / Math.sqrt(r2);
+      return { x: -wx * inv, y: -wy * inv };  // inward
+    }
+
+    case FlowPattern.WAVY_GRAVITY_WELL: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) return { x: 1, y: 0 };
+      const r = Math.sqrt(r2);
+      // Inward angle, wobbled by a radial wave so the inflow snakes
+      // through concentric "wavy" rings on its way to the centre.
+      const baseA = Math.atan2(-wy, -wx);
+      const a = baseA + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * r);
+      return { x: Math.cos(a), y: Math.sin(a) };
+    }
+
+    case FlowPattern.OUTWARD: {
+      const r2 = wx * wx + wy * wy;
+      if (r2 < 1e-6) return { x: 1, y: 0 };
+      const inv = 1 / Math.sqrt(r2);
+      return { x: wx * inv, y: wy * inv };    // outward
+    }
+
+    case FlowPattern.MEANDER:
+    case FlowPattern.DEFAULT:
+    default:
+      return sampleFlow(wx, wy);
+  }
+}

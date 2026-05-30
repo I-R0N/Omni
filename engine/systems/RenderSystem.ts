@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -30,6 +30,25 @@ function shiftY(camY: number, wy: number): number {
     if (d < -HALF_MAP_HEIGHT) return wy + MAP_HEIGHT;
     return wy;
 }
+
+/**
+ * DBG-only asteroid/shard flow-field overlay toggle state.  Passed in
+ * from GameEngine.draw() each frame; all default off when the panel is
+ * collapsed.  See `renderFlowFieldOverlay` for the per-overlay draw
+ * paths.  Pursuit-field overlays are intentionally out of scope here.
+ */
+export interface FlowOverlayState {
+    vectors:   boolean;
+    cells:     boolean;
+    obstacles: boolean;
+    rebuilds:  boolean;
+    sampleN:   number;
+}
+
+// Per-cell flash window for the FF Rebuilds overlay (ms).  Long enough
+// that a single tile destruction is visible at 60 Hz (~36 frames); short
+// enough that rapid destruction events don't smear into one big blob.
+const FF_REBUILD_FLASH_MS = 600;
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
 const SHIELD_HIT_FLASH_DURATION = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
@@ -279,6 +298,12 @@ export class RenderSystem {
   private physics: import('./PhysicsSystem').PhysicsSystem | null = null;
   public setPhysics(p: import('./PhysicsSystem').PhysicsSystem) { this.physics = p; }
 
+  // Optional FlowFieldGrid reference — wired by GameEngine once on
+  // construction.  Null until then; the DBG asteroid/shard FF overlays
+  // gracefully no-op without a flow field.
+  private flowField: import('./FlowFieldGrid').FlowFieldGrid | null = null;
+  public setFlowField(f: import('./FlowFieldGrid').FlowFieldGrid) { this.flowField = f; }
+
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
   private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
@@ -306,12 +331,17 @@ export class RenderSystem {
   // must render at position ±MAP_WIDTH / ±MAP_HEIGHT from its canonical
   // coord to appear in the right on-screen spot.
   private _visibleEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
-  // Separate render bucket for nebula tiles and shards so they always
+  // Separate render buckets for nebula tiles and shards so they always
   // render BELOW asteroids / actors / other entities regardless of their
-  // order in currentMap.entities.  Runtime-spawned nebula tiles (from
-  // shard transmutation) get pushed to the end of the entities array, so
-  // a naive single-pass loop would render them on top of asteroids.
-  private _nebulaEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  // order in currentMap.entities.  Tiles are static (mass = Infinity) and
+  // would otherwise take the STRUCTURE fast-path into _visibleEntities;
+  // shards are mobile.  Kept in two buckets so the draw order is strictly
+  // background-nebula → nebula tiles → nebula shards → everything else.
+  // Runtime-spawned nebula tiles (from shard transmutation) get pushed to
+  // the end of the entities array, so a naive single-pass loop would
+  // render them on top of asteroids.
+  private _nebulaTileEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _nebulaShardEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _trailEntities: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _particleBuffer: { entity: GameEntity, rx: number, ry: number }[] = [];
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
@@ -716,7 +746,8 @@ export class RenderSystem {
     playerPos?: Vector2,
     playerMessages?: PlayerHUDMessage[],
     player?: GameEntity,
-    waveAnnouncements?: WaveAnnouncement[]
+    waveAnnouncements?: WaveAnnouncement[],
+    flowOverlay?: FlowOverlayState,
   ) {
     const t0 = performance.now();
     if (!this.ctx) { this.lastRenderMs = performance.now() - t0; return; }
@@ -734,7 +765,8 @@ export class RenderSystem {
     // Build per-frame buckets in a single pass
     this._attractors.length = 0;
     this._visibleEntities.length = 0;
-    this._nebulaEntities.length = 0;
+    this._nebulaTileEntities.length = 0;
+    this._nebulaShardEntities.length = 0;
     this._trailEntities.length = 0;
     this._particleBuffer.length = 0;
     this._indicatorBuffer.length = 0;
@@ -774,7 +806,13 @@ export class RenderSystem {
             const isRegen = entity.regenProgress !== undefined;
             if (!entity.active && !isRegen) continue;
             if (rx < left || rx > right || ry < top || ry > bottom) continue;
-            this._visibleEntities.push({ entity, rx, ry });
+            // Nebula tiles are static (mass = Infinity) but must render in
+            // the dedicated bottom layer, not the main entity layer.
+            if (entity.shardVariant === 'nebula-tile') {
+                this._nebulaTileEntities.push({ entity, rx, ry });
+            } else {
+                this._visibleEntities.push({ entity, rx, ry });
+            }
             continue;
         }
 
@@ -810,11 +848,16 @@ export class RenderSystem {
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
             this._particleBuffer.push({ entity, rx, ry });
-        } else if (entity.shardVariant === 'nebula-tile' || entity.shardVariant === 'nebula-shard') {
-            // Nebula entities render as a dedicated bottom layer so
-            // asteroids / actors / projectiles always draw on top of
-            // them, regardless of entity array order.
-            this._nebulaEntities.push({ entity, rx, ry });
+        } else if (entity.shardVariant === 'nebula-shard') {
+            // Mobile nebula shards render in the dedicated bottom layer,
+            // above nebula tiles but below all other entities.  (Static
+            // nebula tiles are routed to their own bucket in the
+            // STRUCTURE fast-path above.)
+            this._nebulaShardEntities.push({ entity, rx, ry });
+        } else if (entity.shardVariant === 'nebula-tile') {
+            // Defensive: a nebula tile that ever has finite mass still
+            // belongs in the tile layer, never the main entity layer.
+            this._nebulaTileEntities.push({ entity, rx, ry });
         } else {
             this._visibleEntities.push({ entity, rx, ry });
         }
@@ -828,7 +871,7 @@ export class RenderSystem {
 
     // Snapshot the visible-nebula count after the cull bucket is built
     // so the dev overlay can report it alongside the nebula sub-timer.
-    this.lastNebulaVisible = this._nebulaEntities.length;
+    this.lastNebulaVisible = this._nebulaTileEntities.length + this._nebulaShardEntities.length;
     // Reset the per-frame fast/slow split — incremented inside
     // renderEntities below as each nebula entity is dispatched.
     this.lastNebulaFastCount = 0;
@@ -863,16 +906,21 @@ export class RenderSystem {
         );
     }
 
-    // 3. Render Trails (Behind Entities)
-    this.renderTrails(ctx, this._trailEntities, camera);
-
-    // 4. Render Nebulas (bottom layer) — tiles + shards draw first so
-    // asteroids and everything else render on top of the nebula cloud.
-    // Wrapped in its own performance.now() bracket so the dev overlay
-    // can show nebula-pass cost separately from the total render time.
+    // 3. Render Nebulas (bottom layer).  Strict order: nebula tiles
+    // first, then nebula shards on top of them, so the whole cloud sits
+    // behind every other entity type (and their trails) regardless of
+    // entity array order.  Wrapped in its own performance.now() bracket
+    // so the dev overlay can show nebula-pass cost separately from total
+    // render time.
     const tNebula0 = performance.now();
-    this.renderEntities(ctx, this._nebulaEntities, camera, playerPos);
+    this.renderEntities(ctx, this._nebulaTileEntities, camera, playerPos);
+    this.renderEntities(ctx, this._nebulaShardEntities, camera, playerPos);
     this.lastNebulaMs = performance.now() - tNebula0;
+
+    // 4. Render Trails — above the nebula layer but behind the main
+    // entities, so a ship/projectile trail crossing a nebula cloud stays
+    // visible on top of it instead of vanishing underneath.
+    this.renderTrails(ctx, this._trailEntities, camera);
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -883,6 +931,15 @@ export class RenderSystem {
     // 5. Render Damage Text (World Space)
     if (damageTexts) {
         this.renderDamageTexts(ctx, damageTexts, camera);
+    }
+
+    // 5b. DBG asteroid/shard FF overlays — world-space, gated on the
+    // toggles passed in from GameEngine.draw().  All cheap no-ops when
+    // every toggle is off (the common case during normal play).
+    if (flowOverlay && this.flowField &&
+        (flowOverlay.vectors || flowOverlay.cells ||
+         flowOverlay.obstacles || flowOverlay.rebuilds)) {
+        this.renderFlowFieldOverlay(ctx, camera, flowOverlay);
     }
 
     ctx.restore();
@@ -909,6 +966,185 @@ export class RenderSystem {
     }
 
     this.lastRenderMs = performance.now() - t0;
+  }
+
+  /**
+   * Draw the DBG asteroid/shard FF overlays inside the world-space
+   * camera transform.  Three independent layers (cells / obstacles /
+   * rebuilds) plus the vector arrow pass — each gated on its own
+   * toggle so the user can isolate the view.
+   *
+   * Allocation discipline: no per-cell object creation; all draws go
+   * through ctx primitives + per-cell scalar reads from typed arrays.
+   * Cell count is small (576 on the default 6 k map), so iterating
+   * every cell every frame is cheap even before frustum culling.
+   *
+   * Pursuit-field overlays are intentionally not rendered — this pass
+   * only reads asteroid-flow state.
+   */
+  private renderFlowFieldOverlay(
+      ctx: CanvasRenderingContext2D,
+      camera: CameraState,
+      state: FlowOverlayState,
+  ) {
+      const f = this.flowField;
+      if (!f) return;
+      const cellSize = f.cellSize;
+      const cols = f.cols;
+      const rows = f.rows;
+      const minX = f.minX;
+      const minY = f.minY;
+      const blocked = f.blockedView;
+      const flowX = f.astFlowXView;
+      const flowY = f.astFlowYView;
+      const rebuildTs = f.astRebuildTsView;
+      const now = performance.now();
+      const camX = camera.position.x;
+      const camY = camera.position.y;
+
+      // Frustum bounds in world coords — used to skip cells fully off-
+      // screen and avoid drawing the whole grid every frame on small
+      // viewports.  Half-extents include a one-cell margin so cells
+      // straddling the edge still draw.
+      const zoom = camera.zoom || 1;
+      const halfW = (ctx.canvas.width  / (window.devicePixelRatio || 1)) / 2 / zoom;
+      const halfH = (ctx.canvas.height / (window.devicePixelRatio || 1)) / 2 / zoom;
+      const viewMargin = cellSize;
+      const viewLeft   = camX - halfW - viewMargin;
+      const viewRight  = camX + halfW + viewMargin;
+      const viewTop    = camY - halfH - viewMargin;
+      const viewBottom = camY + halfH + viewMargin;
+
+      ctx.save();
+      // Thin strokes scale to roughly 1 px regardless of zoom so cell
+      // outlines stay legible at any zoom level.
+      const stroke = 1 / zoom;
+
+      // ── Obstacle tint (drawn first so cell/arrow layers overlay it)
+      if (state.obstacles) {
+          ctx.fillStyle = 'rgba(248, 113, 113, 0.22)'; // red-400 @ ~22 %
+          for (let row = 0; row < rows; row++) {
+              const cy = minY + (row + 0.5) * cellSize;
+              const sy = shiftY(camY, cy);
+              if (sy < viewTop || sy > viewBottom) continue;
+              for (let col = 0; col < cols; col++) {
+                  const idx = row * cols + col;
+                  if (!blocked[idx]) continue;
+                  const cx = minX + (col + 0.5) * cellSize;
+                  const sx = shiftX(camX, cx);
+                  if (sx < viewLeft || sx > viewRight) continue;
+                  ctx.fillRect(
+                      sx - cellSize / 2, sy - cellSize / 2,
+                      cellSize, cellSize,
+                  );
+              }
+          }
+      }
+
+      // ── Rebuild flash (decays linearly over FF_REBUILD_FLASH_MS)
+      if (state.rebuilds) {
+          for (let row = 0; row < rows; row++) {
+              const cy = minY + (row + 0.5) * cellSize;
+              const sy = shiftY(camY, cy);
+              if (sy < viewTop || sy > viewBottom) continue;
+              for (let col = 0; col < cols; col++) {
+                  const idx = row * cols + col;
+                  const age = now - rebuildTs[idx];
+                  if (age < 0 || age > FF_REBUILD_FLASH_MS) continue;
+                  const cx = minX + (col + 0.5) * cellSize;
+                  const sx = shiftX(camX, cx);
+                  if (sx < viewLeft || sx > viewRight) continue;
+                  const alpha = 0.55 * (1 - age / FF_REBUILD_FLASH_MS);
+                  ctx.fillStyle = `rgba(250, 204, 21, ${alpha.toFixed(3)})`; // amber-400
+                  ctx.fillRect(
+                      sx - cellSize / 2, sy - cellSize / 2,
+                      cellSize, cellSize,
+                  );
+              }
+          }
+      }
+
+      // ── Cell outlines
+      if (state.cells) {
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.30)'; // slate-400 @ 30 %
+          ctx.lineWidth = stroke;
+          ctx.beginPath();
+          for (let row = 0; row < rows; row++) {
+              const cy = minY + (row + 0.5) * cellSize;
+              const sy = shiftY(camY, cy);
+              if (sy < viewTop || sy > viewBottom) continue;
+              for (let col = 0; col < cols; col++) {
+                  const cx = minX + (col + 0.5) * cellSize;
+                  const sx = shiftX(camX, cx);
+                  if (sx < viewLeft || sx > viewRight) continue;
+                  ctx.rect(
+                      sx - cellSize / 2, sy - cellSize / 2,
+                      cellSize, cellSize,
+                  );
+              }
+          }
+          ctx.stroke();
+      }
+
+      // ── Vector arrows.  Arrow length = ~70 % of cell size; head is
+      // 2 short strokes off the tip.  Per-arrow `strokeStyle` updates
+      // are unavoidable for the magnitude tint, but the underlying draw
+      // is just lineTo / stroke — no allocations.
+      if (state.vectors) {
+          const stride = Math.max(1, state.sampleN | 0);
+          const armLen = cellSize * 0.35;
+          const headLen = cellSize * 0.12;
+          ctx.lineWidth = stroke * 1.4;
+          ctx.lineCap = 'round';
+          for (let row = 0; row < rows; row += stride) {
+              const cy = minY + (row + 0.5) * cellSize;
+              const sy = shiftY(camY, cy);
+              if (sy < viewTop || sy > viewBottom) continue;
+              for (let col = 0; col < cols; col += stride) {
+                  const idx = row * cols + col;
+                  if (blocked[idx]) continue;
+                  const vx = flowX[idx];
+                  const vy = flowY[idx];
+                  const mag = Math.sqrt(vx * vx + vy * vy);
+                  if (mag < 0.001) continue;
+                  const cx = minX + (col + 0.5) * cellSize;
+                  const sx = shiftX(camX, cx);
+                  if (sx < viewLeft || sx > viewRight) continue;
+                  // Vectors should always be unit length out of the
+                  // grid, so `mag` is ~1 in practice; we still gate
+                  // the colour ramp on `mag` so any future non-unit
+                  // values still render usefully.  Cool→hot tint:
+                  // sky-300 → amber-300.
+                  const t = Math.min(1, mag);
+                  const r = Math.round(125 + (252 - 125) * t);
+                  const g = Math.round(211 + (211 - 211) * t);
+                  const b = Math.round(252 + ( 77 - 252) * t);
+                  ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.85)`;
+                  const tipX = sx + (vx / mag) * armLen;
+                  const tipY = sy + (vy / mag) * armLen;
+                  ctx.beginPath();
+                  ctx.moveTo(sx - (vx / mag) * armLen * 0.4, sy - (vy / mag) * armLen * 0.4);
+                  ctx.lineTo(tipX, tipY);
+                  // Head: two short strokes at ±35° off the tail vector
+                  const hx = vx / mag;
+                  const hy = vy / mag;
+                  // Rotate (hx, hy) by ±150° to get the head barbs.
+                  // cos(150) ≈ -0.866, sin(150) = 0.5
+                  const cosA = -0.866, sinA = 0.5;
+                  const bx1 = hx * cosA - hy * sinA;
+                  const by1 = hx * sinA + hy * cosA;
+                  const bx2 = hx * cosA - hy * -sinA;
+                  const by2 = hx * -sinA + hy * cosA;
+                  ctx.moveTo(tipX, tipY);
+                  ctx.lineTo(tipX + bx1 * headLen, tipY + by1 * headLen);
+                  ctx.moveTo(tipX, tipY);
+                  ctx.lineTo(tipX + bx2 * headLen, tipY + by2 * headLen);
+                  ctx.stroke();
+              }
+          }
+      }
+
+      ctx.restore();
   }
 
   private renderTrails(
@@ -1991,12 +2227,16 @@ export class RenderSystem {
                     const glow = SHARD_VARIANTS[entity.shardVariant].glow;
                     const impulse = entity.repelImpulse ?? 0;
                     if (glow !== undefined && impulse > 0) {
+                        // Glow colour is DBG-cyclable (warm yellow A/Bs)
+                        // through getActiveGlassGlowColor; range +
+                        // peakAlpha stay with the SHARD_VARIANTS entry.
+                        const glowColor = getActiveGlassGlowColor();
                         const intensityG = repelGlowIntensity(impulse);
                         ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
-                        ctx.fillStyle = glow.color;
+                        ctx.fillStyle = glowColor;
                         ctx.fill();
                         ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG));
-                        ctx.strokeStyle = glow.color;
+                        ctx.strokeStyle = glowColor;
                         ctx.lineWidth = 3.0;
                         ctx.stroke();
                     }

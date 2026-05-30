@@ -236,6 +236,88 @@ export function cyclePlasticPalette(): number {
   return activePlasticPaletteIndex;
 }
 
+// ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
+// The default is the cool cyan baked into SHARD_VARIANTS['glass-tile']
+// .glow.color (#a5f3fc); the cycle adds warm + diverse families so we
+// can A/B the look.  RenderSystem reads the active hex through
+// getActiveGlassGlowColor() (range + peakAlpha stay with the variant).
+//
+// Each entry ALSO bundles a `nebulaPalette` — when the DBG 'Neb follows
+// glow' toggle is on, getActiveNebulaPalette() returns this companion
+// preset so the nebula cloud tracks the glow family (e.g. yellow glow ↔
+// yellow nebula).  Off restores the independent NEBULA_PALETTES cycle.
+export interface GlassGlowColor {
+  name: string;
+  hex: string;
+  // Companion nebula HSL preset used while 'Neb follows glow' is ON.
+  // Same shape as NebulaPalette below; duplicated to keep the two
+  // cycles' configs co-located + co-edited.
+  nebulaPalette: { hueMin: number; hueRange: number; saturation: number; lightness: number; };
+}
+export const GLASS_GLOW_COLORS: ReadonlyArray<GlassGlowColor> = [
+  { name: 'cyan',    hex: '#a5f3fc', nebulaPalette: { hueMin: 175, hueRange: 50, saturation: 100, lightness: 62 } }, // default
+  { name: 'yellow',  hex: '#fde047', nebulaPalette: { hueMin: 48,  hueRange: 14, saturation: 100, lightness: 60 } },
+  { name: 'amber',   hex: '#fbbf24', nebulaPalette: { hueMin: 38,  hueRange: 18, saturation: 100, lightness: 55 } },
+  { name: 'gold',    hex: '#eab308', nebulaPalette: { hueMin: 42,  hueRange: 18, saturation: 100, lightness: 50 } },
+  { name: 'magenta', hex: '#e879f9', nebulaPalette: { hueMin: 295, hueRange: 25, saturation: 95,  lightness: 65 } },
+  { name: 'rose',    hex: '#fb7185', nebulaPalette: { hueMin: 345, hueRange: 25, saturation: 95,  lightness: 65 } },
+  { name: 'lime',    hex: '#a3e635', nebulaPalette: { hueMin: 75,  hueRange: 25, saturation: 90,  lightness: 60 } },
+  { name: 'emerald', hex: '#34d399', nebulaPalette: { hueMin: 150, hueRange: 25, saturation: 80,  lightness: 55 } },
+  { name: 'sky',     hex: '#7dd3fc', nebulaPalette: { hueMin: 198, hueRange: 22, saturation: 95,  lightness: 70 } },
+  { name: 'violet',  hex: '#a78bfa', nebulaPalette: { hueMin: 260, hueRange: 25, saturation: 90,  lightness: 70 } },
+  { name: 'white',   hex: '#f8fafc', nebulaPalette: { hueMin: 0,   hueRange: 360, saturation: 0,  lightness: 90 } },
+] as const;
+
+let activeGlassGlowIndex = 8; // default 'sky' — covers glass-tile glow + glass dust
+
+export function getActiveGlassGlowColor(): string {
+  return GLASS_GLOW_COLORS[activeGlassGlowIndex].hex;
+}
+export function getActiveGlassGlowColorName(): string {
+  return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
+}
+export function cycleGlassGlowColor(): number {
+  activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
+  return activeGlassGlowIndex;
+}
+
+// ── Nebula palette cycle (DBG-only) ─────────────────────────────────
+// Independent cycle into the same GLASS_GLOW_COLORS list, governing
+// glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition).
+// Default 'sky' matches the Glass-glow default so glow + glass-side
+// dust read as a coherent family out of the box.
+//
+// Explicitly NOT affected by this cycle (all stay on the legacy
+// cyan→red palette):
+//   - main background nebula tiles + shards (randomNebulaComposition)
+//   - BG nebula puffs (BackgroundManager via randomPaletteHueDeg)
+//   - NebulaSystem colour equilibration (paletteHueToHex drift)
+//
+// And rock-side dust (randomRockNebulaComposition) is fixed at white —
+// see NebulaColor.ts for both restore paths if either invariant is
+// wanted as a cyclable knob later.
+export interface NebulaPalette {
+  name: string;
+  hueMin: number;     // degrees, start of the arc
+  hueRange: number;   // degrees, arc width (wraps past 360)
+  saturation: number; // 0..100
+  lightness: number;  // 0..100
+}
+
+let activeNebulaPaletteIndex = 8; // default 'sky' — glass dust + main nebulae
+
+export function getActiveNebulaPalette(): NebulaPalette {
+  const g = GLASS_GLOW_COLORS[activeNebulaPaletteIndex];
+  return { name: g.name, ...g.nebulaPalette };
+}
+export function getActiveNebulaPaletteName(): string {
+  return GLASS_GLOW_COLORS[activeNebulaPaletteIndex].name;
+}
+export function cycleNebulaPalette(): number {
+  activeNebulaPaletteIndex = (activeNebulaPaletteIndex + 1) % GLASS_GLOW_COLORS.length;
+  return activeNebulaPaletteIndex;
+}
+
 /** Pick a random shade from the ACTIVE plastic palette.  Called at
  *  every plastic-tile / plastic-shard spawn site so cluster colour
  *  reads as "different shades" within the chosen family. */
@@ -663,9 +745,9 @@ export const PLASTIC_STIFFNESS_CYCLE: ReadonlyArray<number> = [
   0.01, 0.05, 0.1, 0.5, 1, 2, 4,
 ] as const;
 
-// Default index 2 (k = 0.1) — soft/flowy; cycle down to 0.01 for
-// near-zero recovery or up to 4 for the previous firmer feel.
-let activePlasticStiffnessIndex = 2;
+// Default index 4 (k = 1) — firm recovery; cycle down toward 0.01 for
+// soft/flowy near-zero recovery or up to 4 for the firmest feel.
+let activePlasticStiffnessIndex = 4;
 
 export function getActivePlasticStiffness(): number {
   return PLASTIC_STIFFNESS_CYCLE[activePlasticStiffnessIndex];
@@ -1416,68 +1498,108 @@ export const SHOOTING_STAR_CONSTANTS = {
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
   [MapType.UNIVERSE]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.RING]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.SEVEN_RINGS]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.POCKET]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   // Single-element 6k showcase maps — keep movement identical to the
   // other full-size maps so the element under test is the only variable.
   [MapType.ASTEROID_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.GLASS_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.PLASTIC_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.METAL_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.INDESTRUCTIBLE_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.NEBULA_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.ROCK_FIELD]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
   [MapType.TILE_HEAVY]: {
-    maxSpeed: 140,
-    acceleration: 0.077,
+    maxSpeed: 120,
+    acceleration: 0.085,
     friction: 0.998
   },
 };
+
+// DBG runtime multipliers on the per-map player movement config so the
+// PThr / PSpd buttons can A/B-test feel without a rebuild.  Both read
+// live in GameEngine.updatePlayerMovement(): effective acceleration =
+// config.acceleration × thrust-mult, effective maxSpeed = config.maxSpeed
+// × speed-mult.  Note the coupling: terminal cruise is friction-limited
+// at acceleration/(1−friction), so the THRUST cycle is what actually
+// raises everyday top speed; the SPEED cycle only bites once the cap
+// drops below (or thrust pushes cruise above) that terminal velocity.
+export const PLAYER_THRUST_CYCLE: ReadonlyArray<number> = [
+  0.75, 1.0, 1.25, 1.5,
+] as const;
+export const PLAYER_SPEED_CYCLE: ReadonlyArray<number> = [
+  0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+] as const;
+
+let activePlayerThrustIndex = 0; // 0.75× — default a touch below base, room to ramp up
+let activePlayerSpeedIndex = 2;  // 1.0× — base config cap
+
+export function getActivePlayerThrustMult(): number {
+  return PLAYER_THRUST_CYCLE[activePlayerThrustIndex];
+}
+export function getActivePlayerThrustName(): string {
+  return `${PLAYER_THRUST_CYCLE[activePlayerThrustIndex]}×`;
+}
+export function cyclePlayerThrust(): number {
+  activePlayerThrustIndex = (activePlayerThrustIndex + 1) % PLAYER_THRUST_CYCLE.length;
+  return activePlayerThrustIndex;
+}
+
+export function getActivePlayerSpeedMult(): number {
+  return PLAYER_SPEED_CYCLE[activePlayerSpeedIndex];
+}
+export function getActivePlayerSpeedName(): string {
+  return `${PLAYER_SPEED_CYCLE[activePlayerSpeedIndex]}×`;
+}
+export function cyclePlayerSpeed(): number {
+  activePlayerSpeedIndex = (activePlayerSpeedIndex + 1) % PLAYER_SPEED_CYCLE.length;
+  return activePlayerSpeedIndex;
+}
 
 export const STRUCTURE_CONSTANTS = {
   SIZE: 30,
@@ -1698,6 +1820,25 @@ export const NEBULA_CONSTANTS = {
   GRAVITY_RANGE: 380,
   GRAVITY_STRENGTH: 380,
   GRAVITY_MIN_DIST: 15,
+  // Player→nebula-shard pull (PhysicsSystem.applyNebulaPlayerPull).
+  // Active when a player ship passes within PLAYER_PULL_RANGE of a
+  // nebula-shard; falloff is linear (full at the centre, zero at the
+  // range edge).  STRENGTH is the velocity nudge (units/s) added each
+  // step at the centre.  SPIN_KICK is the rad/s nudge added per shard
+  // per second of being in range — stable per-shard sign drawn from
+  // the entity id so the cloud reads as varied swirls.  The shatter
+  // path is independent — shards in range still shatter on direct
+  // contact via the standard nebula pass-through trigger.
+  //
+  // Both the pull AND the shatter check skip shards whose
+  // `nebulaMergeCooldown` is active — the same field already gates
+  // shard↔shard merging, so freshly-spawned shatter children (which
+  // carry the post-shatter cooldown) sit out the player interaction
+  // until the cooldown elapses.  Single field gates all three nebula-
+  // shard interactions: pull, shatter, merge.
+  PLAYER_PULL_RANGE: 60,
+  PLAYER_PULL_STRENGTH: 1,
+  PLAYER_PULL_SPIN: 1.5,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
   // shards must substantially OVERLAP, not merely touch, before a merge
@@ -1705,11 +1846,19 @@ export const NEBULA_CONSTANTS = {
   MERGE_PROXIMITY_K: 0.55,
   // Per-shard merge cooldown — a freshly-spawned shard (from a tile
   // shatter OR a recent merge) cannot participate in another merge for
-  // this many seconds.  Prevents the cascade where 4–6 shards spawn
-  // together and all collapse into one circle on frame 1–2.  The
-  // cooldown is ticked each substep by PhysicsSystem and consulted by
-  // NebulaSystem.updateDynamics before considering any merge pair.
-  MERGE_COOLDOWN: 1.8,
+  // this many seconds.  Also stamped on shards just touched by the
+  // player→shard pull (PhysicsSystem.applyNebulaPlayerPull) so the
+  // same value gates pull, shatter, and merge.  Kept ≤ the high-load
+  // bond-timer floor (5 s / LOCAL_MERGE_CONSTANTS.MAX_BOOST = 0.83 s
+  // at 6× boost, ~ 1 s here) so the cooldown reliably expires between
+  // back-to-back merges in dense clusters — otherwise every shard in
+  // a hotspot would spend more time on cooldown than off, and the
+  // player pull would almost never find an eligible target.  Prevents
+  // the cascade where 4–6 shards spawn together and all collapse into
+  // one circle on frame 1–2.  Ticked each substep by PhysicsSystem
+  // and consulted by NebulaSystem.updateDynamics before considering
+  // any merge pair.
+  MERGE_COOLDOWN: 1.0,
   // Tile regeneration toggle.  When false, shattered tiles are gone
   // forever (no respawn at their original grid cell) and the ONLY way
   // new tiles appear is via shard → tile transmutation.  Combined with
@@ -1920,6 +2069,16 @@ export const PROJECTILE_CONSTANTS = {
   COLOR: '#facc15', // Yellow
   LIFETIME: 1.5, // Seconds
   MASS: 1, // Light projectile
+  // Fraction of the shooter's velocity added to the muzzle velocity at
+  // spawn (1.0 = full inheritance).  Keeps a moving shooter from
+  // outrunning its own shots: forward shots lead the ship and strafing
+  // shots drift with it.  A per-weapon muzzle-speed floor (config.speed
+  // along the aim direction) still applies on top, so a fast retreat
+  // can't fire a backward-drifting shot.  Weapon `speed` values were
+  // rescaled (~1.8x over the pre-inheritance values) alongside this so
+  // standstill shots stay punchy on the larger maps without imparting so
+  // much momentum that hits blow shards across the field.
+  INHERIT_SHOOTER_VELOCITY: 1.0,
 };
 
 // ── Global entity caps ───────────────────────────────────────────────────────
@@ -1962,7 +2121,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BLASTER,
     name: 'Blaster',
     cooldown: 0.14,    // 7 shots/s — all-rounder cadence
-    speed: 9,
+    speed: 16,
     damage: 4,
     lifetime: 1.5,
     color: '#ef4444', // Red — infinite ammo starter
@@ -1978,7 +2137,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BURST,
     name: 'Burst Rifle',
     cooldown: 0.45,    // ~2.2 bursts/s
-    speed: 12,
+    speed: 20,
     damage: 5,
     lifetime: 3.0,
     color: '#f97316', // Orange
@@ -1996,7 +2155,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.SHOTGUN,
     name: 'Shotgun',
     cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
-    speed: 12,
+    speed: 20,
     damage: 3,
     lifetime: 0.8,     // doubled — pellets reach further before fading
     color: '#facc15', // Yellow
@@ -2012,7 +2171,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.BOUNCER,
     name: 'Pierce Beam',
     cooldown: 0.40,    // 2.5 shots/s
-    speed: 18,         // ~2× Blaster — fast straight beam
+    speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
     color: '#22c55e',  // Green — beam that pierces enemies + bounces off tiles
@@ -2029,7 +2188,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
     cooldown: 0.50,    // 2 shots/s
-    speed: 16,         // gravity pull curves the projectile toward targets
+    speed: 26,         // gravity pull curves the projectile toward targets
     damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
     color: '#22d3ee',  // Cyan — projectile that chains on impact
@@ -2045,7 +2204,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
     cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
-    speed: 7,
+    speed: 12,
     damage: 6,
     lifetime: 3.0,
     color: '#3b82f6', // Blue
@@ -2062,7 +2221,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     type: WeaponType.CANNON,
     name: 'Plasma Cannon',
     cooldown: 1.40,    // ~0.7 shots/s — heavy artillery
-    speed: 10,
+    speed: 18,
     damage: 18,
     lifetime: 2.5,
     color: '#a855f7', // Purple
@@ -2103,7 +2262,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
   name: 'Enemy Blaster',
   cooldown: 1.2,
-  speed: 5.0,
+  speed: 9,
   damage: 10,
   lifetime: 3.5,
   color: '#f97316',
@@ -2586,7 +2745,14 @@ const STRUCTURE_TILE_BASE: Omit<ShardVariantDef, 'id'> = {
 // metal's even counts (6/8/10) so a player can tell rock from metal
 // at a glance.
 const SHARD_SPAWN_SHAPE_ROCK = {
-  sizeMin: 20, sizeMax: 200,                  // matches MAP_POPULATION rock-shard minSize
+  // sizeMin doubles as the asteroid-shatter chunk floor (ShardSystem
+  // MIN_SIZE): shatter children below it are dropped, and a parent
+  // without room for two of them stops shattering.  Raised above the
+  // free-spawn floor (MAP_POPULATION rock-shard minSize = 20, a separate
+  // knob) so asteroid breaks yield fewer, chunkier shards and the
+  // recursive re-shatter swarm terminates a generation sooner — shards
+  // below ~42 diameter no longer split.
+  sizeMin: 30, sizeMax: 200,
   polyVerticesMin: 5, polyVerticesMax: 9,
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
@@ -2906,7 +3072,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     shatter: {
       kind: 'powerlaw',
       style: 'asteroid',
-      countMin: 2, countMax: 5,
+      // countMax lowered 5 → 3: an asteroid break yields 2–3 chunky
+      // mass-conserving pieces instead of a 2–5 spray, so the field
+      // doesn't flood with chips when a cluster is shot apart.
+      countMin: 2, countMax: 3,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
       forwardDrag: 0.35, perpScatter: 0.0,
@@ -3166,6 +3335,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },
+    // No-op shatter: nebula-shards are indestructible from the
+    // player's perspective.  They glide past the ship under the
+    // applyNebulaPlayerPull gravity field; contact does not destroy
+    // them.  They still merge / transmute into nebula-tiles through
+    // the standard ShardSystem self-coalesce path above.
     shatter: { kind: 'none', countMin: 0, countMax: 0, alphaMin: 1, alphaMax: 1, childVariant: 'nebula-shard', forwardDrag: 0, perpScatter: 0, scatterHalfCone: 0 },
     // passThrough = true so shard-vs-shard and shard-vs-striker
     // contacts skip collision impulse entirely.  Mass = 0.01 alone
@@ -3212,7 +3386,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   [MapType.UNIVERSE]: {
-    'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 3000 } },
+    'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },
     'plastic-tile':        { tileCluster: { clusterCount:  5, minClusterSize:  8, maxClusterSize: 22 } },
     'metal-tile':          { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
@@ -3234,13 +3408,13 @@ export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerM
     },
   },
   [MapType.RING]: {
-    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
+    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
   },
   [MapType.SEVEN_RINGS]: {
-    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
+    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
   },
   [MapType.POCKET]: {
-    'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 800 } },
+    'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 1600 } },
     'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
     'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
     'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },

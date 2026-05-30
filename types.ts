@@ -238,7 +238,12 @@ export interface GameEntity {
   visionRange?: number;
   maxSpeed?: number;    // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
   aggroTimer?: number;  // Remaining seconds of post-kill aggro boost (speed + shorter idle)
-  
+  // Stable per-shard lane bias in [-1, 1] for the asteroid-flow lane
+  // jitter (DBG "FF Lane").  Lazily seeded the first time the flow
+  // nudge processes the entity; constant thereafter so the shard
+  // keeps the same offset lane instead of jittering frame-to-frame.
+  flowLane?: number;
+
   // AI Specific Params (Orbiter/Skirmisher)
   orbitRadius?: number;
   orbitSpin?: number; // 1 or -1
@@ -796,7 +801,6 @@ export interface EngineStats {
   waveStatus?: 'active' | 'cleared' | 'complete';
   waveGraceTimer?: number;
   debugMode?: boolean;
-  nebulaSet?: 'A' | 'B' | 'ALL' | 'N16';
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
   // ── Performance toggle state (debug menu) ─────────────────────
@@ -867,6 +871,8 @@ export interface EngineStats {
   // used by randomPlasticShade() and re-rolls every active plastic
   // entity's colour on toggle.
   plasticPaletteName?: string;
+  glassGlowColorName?: string;
+  nebulaPaletteName?: string;
   // Active globalCompositeOperation used by the plastic-shard render
   // branch.  Cycled via the DBG Blend button (source-over / multiply
   // / darken / screen / lighter).  Live — next-frame effect.
@@ -897,6 +903,10 @@ export interface EngineStats {
   // DBG linear-damping step name for plastic-shards
   // (PLASTIC_DAMPING_CYCLE, 0.95 … 1.0).  Lower = heavier friction.
   plasticDampingName?: string;
+  // DBG player-thrust / player-speed multiplier step names
+  // (PLAYER_THRUST_CYCLE / PLAYER_SPEED_CYCLE, e.g. "1×").
+  playerThrustName?: string;
+  playerSpeedName?: string;
   // DBG impact-stamp cooldown step name for plastic-shards
   // (PLASTIC_IMPACT_COOLDOWN_CYCLE, 0.2 … 1.5 / off).  Longer =
   // calmer deformation; 'off' disables collision-driven deformation.
@@ -907,6 +917,52 @@ export interface EngineStats {
   // CYCLE).  Smaller core / larger blend = deeper inter-shard blend.
   plasticCoreRadiusName?: string;
   plasticBlendRadiusName?: string;
+  // ── Asteroid/shard flow-field DBG state ───────────────────────
+  // Enables the per-asteroid / per-ammo-drop velocity nudge toward
+  // the baked asteroid-flow vector.  Default true (production);
+  // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
+  // (asteroids decay toward zero velocity over a few seconds; only
+  // collisions / gravity move them after that).
+  asteroidFlowEnabled?: boolean;
+  // Overlay toggles — all DBG-only renderer gating.  Default false.
+  // FF Vectors: per-cell arrows colored by magnitude.
+  // FF Cells:   faint cell-grid outlines.
+  // FF Obs:     tint over cells flagged as obstacles.
+  // FF Rebuilds: flash cells briefly when re-baked by onTileDestroyed.
+  ffOverlayVectors?: boolean;
+  ffOverlayCells?: boolean;
+  ffOverlayObstacles?: boolean;
+  ffOverlayRebuilds?: boolean;
+  // Sampling stride for the vector overlay — 1, 2, 4, 8, or 16.
+  // Cycled via the DBG "FF SampleN" button.  The cells/obstacles/
+  // rebuilds overlays always render every cell.
+  ffOverlaySampleN?: number;
+  // Active flow-field cell size in world units.  Cycled by the DBG
+  // "FF Density" button through the FF_DENSITY_CYCLE values.  Default
+  // 256 (production); finer values rebuild both the asteroid and
+  // pursuit fields at higher resolution.
+  ffCellSize?: number;
+  // Asteroid-field wall-repulsion kernel radius (cells).  Cycled by
+  // the DBG "FF KernelR" button.  0 = legacy 4-cardinal-only scan;
+  // 1..5 = (2R+1)² extended kernel with 1/d² falloff.  Default 3.
+  ffKernelR?: number;
+  // Tangent-mix factor in [0, 1] for the wall-repulsion contribution.
+  // 0 = pure radial (current behaviour, opposing vectors at long
+  // walls); 1 = pure tangent (slide along walls — eliminates the
+  // saddle dead-zone failure mode).  Default 0.5.  DBG-cycle.
+  ffTangentMix?: number;
+  // Breathing-field scroll rate (rad/s).  0 = off (static field);
+  // > 0 = the asteroid field undulates over time so convergence zones
+  // drift and shard piles dissolve.  DBG-cycle "FF Breathe".
+  ffBreatheRate?: number;
+  // Per-shard flow lane-jitter strength.  0 = off; > 0 = shards ride
+  // parallel offset lanes instead of one streamline.  DBG-cycle
+  // "FF Lane".
+  ffLaneJitter?: number;
+  // Short label of the active base-flow pattern (DBG "FF Pattern":
+  // Map / Meander / Circular / Spiral / Well / WavyWell / Outward /
+  // Horiz / Vert / WavyH / WavyV).
+  ffPatternName?: string;
   // Nebula color-equilibration alphas (per-frame circular-hue lerp).
   // Tiles drift toward neighbour average; shards drift toward
   // nearest tile.  Cycled via DBG TileBlend / ShardBlend buttons.
