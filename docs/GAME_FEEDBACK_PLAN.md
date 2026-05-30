@@ -377,34 +377,70 @@ k. After N waves, spawn a portal to a new map.
     `this.regenAdapter` (silent no-op on nebula-tile regen
     colour rewrite). Tracked in the side-cleanup punch list.
 
-19. **plastic-revert (micro session).** Scope:
+19. **plastic-revert (micro session) — scope revised this
+    turn.** User direction: keep colour-facing affordances
+    (DBG palette/colour cycles + the nebula-blend hook on
+    plastic shards); strip only the perf-heavy structural
+    divergence. Scope:
     a. Restore plastic-shard to standard polygon-shard render
        and behaviour (mirror glass / rock / metal shard
-       treatment). Default colour: current plastic-tile fuchsia
-       `#e879f9`; implementing session asks the user if the
-       original amber `#d97706` is preferred.
-    b. Drop the plastic-softbody divergence: elasticBond
-       schema field if dead, palette / opacity / composite-op
-       DBG cycles, polymer-chain bond model, sleep gate
+       treatment). Drop the soft-radial-gradient render.
+       Default colour: current plastic-tile fuchsia `#e879f9`;
+       implementing session asks the user if the original
+       amber `#d97706` is preferred.
+    b. **Keep** the DBG palette / colour-cycle controls for
+       plastic tiles and shards (the per-instance palette
+       cycle, the plastic-specific colour picker if any).
+       These let the user iterate plastic colours without a
+       code change.
+    c. **Keep** the nebula-based shard colour blending that
+       plastic shards currently use — the PR #54
+       cellular-automata equilibration hook applied to plastic
+       (plastic-only at this time; see decision #21 for the
+       deferred rock/metal extension).
+    d. **Drop** the rest of the plastic-softbody divergence:
+       opacity cycle, composite-op cycle, stretch-stiffness
+       cycle, snap/free toggle, plastic-specific outline
+       toggle, polymer-chain bond model, sleep gate
        (restSpeed / restSpin), hex-shape tile render diff
-       (revert to standard tile rendering), color-blend hook
-       into nebula equilibration, plastic-cosmetic perf gate
-       (if no longer needed once render path is standard).
-    c. Add bondsWith behaviour: plastic-shard sticks
+       (revert plastic-tile to the standard tile render
+       path), `elasticBond` schema field if no longer
+       referenced anywhere.
+    e. Add bondsWith behaviour: plastic-shard sticks
        (cohesion-only, NOT pair-consume transmute) to every
        variant EXCEPT `nebula-tile` and `nebula-shard`.
        Implementing session picks the schema expression — a
        new `cohesionOnly: true` flag on the bond entry, or
        reuse existing fields with a very long bondTime so the
        compose step never triggers. Whichever is cleaner.
-    d. Verify PerfController tasks tied to plastic
+    f. Verify PerfController tasks tied to plastic
        (`plastic-cosmetic`, `plastic-self-break`,
        `plastic-eat`) still make sense after the revert; drop
-       any that are obviated.
-    e. No behaviour changes to non-plastic variants.
+       any whose body becomes empty / no-op. The
+       `plastic-cosmetic` gate likely stays alive because the
+       kept colour-blend hook still needs pacing.
+    g. No behaviour changes to non-plastic variants.
     Out of scope: redesigning plastic from scratch, changing
-    HP, changing spawn rules. This is a revert + a new bond
-    rule, nothing more.
+    HP, changing spawn rules, extending the colour-blend
+    system to other variants (see decision #21).
+
+21. **Cellular-automata colour equilibration extension to
+    rock + metal (deferred follow-up).** User flagged
+    interest this turn in extending the PR #54-style
+    nebula-based colour blending — the lerp-toward-neighbours
+    equilibration in `NebulaSystem.equilibrateColors` — to
+    rock and metal shard families. Explicitly deferred to a
+    later session ("only plastic at this time"). Queued in
+    the side-cleanup punch list as a real follow-up, not a
+    trivial one. When the time comes, the brief should
+    cover: per-material palette sub-arcs (the dust-puff
+    palette split from PR #54 already established
+    non-overlapping sub-arcs of the nebula range for glass
+    and rock — extend the same concept to metal); whether
+    rock and metal tiles act as anchor cells the way nebula
+    tiles do; performance budget (the equilibration pass is
+    a PerfController-gated task — adding rock + metal
+    materially increases the active-shard count it walks).
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
@@ -507,8 +543,8 @@ Run when convenient; can run in parallel with Phase 2.
 | g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | shipped (PR #55, merged into plan branch) | `claude/plastic-softbody-retrofit-sTxYR` | Metal piece landed per spec (`passthroughShatter: { targets: ['glass-tile', 'glass-shard'] }` on existing metal-shard). Plastic piece **drifted heavily** from the brief (see decision #17): elasticBond schema added then scrapped mid-session in favor of bondsWith + nebula-level damping; ~30 follow-up tuning commits; ended with hex-tile render, radial-gradient shards, palette/opacity/composite-op DBG cycles, polymer-chain bond, sleep gate, color-blend hook into nebula equilibration. Visual asymmetry between polygon-rendered plastic-tile and gradient-rendered plastic-shard. Known perf cost. **To be reverted** by `plastic-revert` task below. |
 | ff-review | Asteroid/shard flow field audit + debug tooling | shipped (PR #56, merged into plan branch) | `claude/flow-field-debug-audit-IcwCq` | Audit doc at `docs/FLOW_FIELD_AUDIT.md` — 10 findings (4 L1 / 3 L2 / 3 L3). Consolidation answer: **don't consolidate** — analytical `FlowField.ts` is load-bearing for map-load streamline integration + per-respawn velocity bias before the grid exists; baked grid adds wall-repulsion the analytical formula can't provide. DBG overlays added: `AstFF` toggle, `FF Vec` arrows with sample-N cycle, `FF Cells` outlines, `FF Obs` obstacle tint, `FF Reb` rebuild flash. Three follow-ups deferred (#FF-1 obstacle-aware fallback, #FF-2 obstacle filter re-examination, #FF-3 asteroid-bake perf timer). One trivial doc fix in passing. |
 | perf-controller | Unified frame-skipping `PerfController` | shipped unplanned (PR #57, merged into plan branch) | `claude/omni-perf-controller-6ScG1` | **Not in original plan — user-initiated infra add (see decision #18).** New `engine/systems/PerfController.ts` replaces scattered AUTO interval tables with one coordinator. Each substep samples a load signal (entity count + collision-cell density + EWMA sim time), quantises to tiers with hysteresis, schedules tasks with phase offsets. Migrated gates: shard-pair, shard-tile-pair, color-blend, plastic-cosmetic. Newly skippable: AI state machine, flow-field pursuit flush, nebula neighbour recompute, drop-collection scan, plastic self-break. Dynamic merge-rate ladder by entity count (0.6× sparse → 3.5× crowded). New DBG "Perf" section. New constants: `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS`, `MERGE_RATE_CONSTANTS`. Pre-existing bug flagged but not fixed: `ShardSystem.completeRegen` references nonexistent `this.regenAdapter`. |
-| plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session.** Revert plastic-shard to standard polygon-shard render and behavior (mirror glass/rock/metal shard treatment). Keep plastic-tile color scheme on the shards (default: current fuchsia `#e879f9`, confirm with user). Drop elasticBond schema field if dead, drop palette/opacity/composite-op DBG cycles, drop polymer-chain bond, drop sleep gate, drop hex-shape tile render diff, drop color-blend hook. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. Use the existing bondsWith pipeline or add a `cohesionOnly` flag if needed — implementing session picks. Goal: kill the per-frame plastic perf cost while preserving the "plastic sticks to things" feel. See decision #19. |
-| living-entity | New non-threatening grazer entity | pending | `claude/living-entity-<suffix>` | New `EntityType` (default: `EntityType.CREATURE` — implementing session may rename). Spawns in small numbers (~2–5), wanders the map, consumes glass / rock / metal shards on contact (not plastic, not nebula), grows with consumption, splits at a size threshold into multiple offspring. Non-threatening: doesn't damage player, isn't damaged by player (or has very high HP — design phase question). New AI states (`wander` / `pursue` / `eat`). New render style (organic / blob — design phase picks; nebula-style soft texture is a candidate). Substantial design surface — expect an `AskUserQuestion` round inside the session for spawn count, growth/split thresholds, eat radius, player interaction model, visual treatment. See decision #20. |
+| plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session, scope revised this turn.** Revert plastic-shard to standard polygon-shard render and behavior. Keep plastic-tile color scheme. **Keep** the DBG palette / color-cycle controls for plastic tiles and shards. **Keep** the nebula-based color-blend hook that plastic shards currently use (PR #54-style cellular-automata equilibration, plastic-only for now). **Drop** the soft-radial-gradient render, opacity cycle, composite-op cycle, polymer-chain bond, sleep gate, hex-shape tile render diff, stretch-stiffness cycle, snap/free toggle. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. See decision #19. |
+| living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction this turn. Decision #20 captures the design surface for whenever this resumes. |
 
 ---
 
@@ -585,6 +621,26 @@ These are not full tasks — fold into a relevant PR when convenient.
       not just a comment fix — flip the natural maps to read from
       MAP_POPULATION. Bigger than a punch-list item; queue as a small
       named task if it bites.
+- [ ] PR #57 introduced `PerfController` as load-bearing infra; not
+      yet documented in CLAUDE.md (§2 directory layout, §3 per-frame
+      order, §5 constants list, §8 conventions). Real follow-up.
+- [ ] `ShardSystem.completeRegen` references nonexistent
+      `this.regenAdapter` (field is `adapter`). `tsc --noEmit` flags
+      it; `vite build` ignores it. Silent no-op on nebula-tile regen
+      colour rewrite (off by default). Trivial fix.
+- [ ] FF audit follow-ups #FF-1 (asteroid obstacle-aware fallback +
+      diagonal wall-repulsion), #FF-2 (re-examine obstacle filter
+      once any finite-mass wall-like variants ship), #FF-3 (perf
+      timer for asteroid-bake path). Track via the audit doc
+      `docs/FLOW_FIELD_AUDIT.md`.
+- [ ] **Cellular-automata colour equilibration extension to rock +
+      metal shard families** (decision #21). User-flagged future
+      work to extend the PR #54 `NebulaSystem.equilibrateColors`
+      hue-lerp behaviour beyond plastic (which keeps it after
+      `plastic-revert`). Per-material palette sub-arcs; whether
+      rock / metal tiles act as anchor cells; PerfController budget
+      impact. Real task, not a punch-list one — queue as a small
+      named task when ready.
 
 ---
 
