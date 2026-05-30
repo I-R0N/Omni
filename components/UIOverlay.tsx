@@ -376,10 +376,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
                 {ctrlRow('Glass', onCycleGlassGlowColor,
                   stats.glassGlowColorName ?? 'sky',
-                  'Cycle the glass palette through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Governs BOTH the glass-tile proximity glow (live, no entity touch-up) AND the dust released when glass tiles shatter (randomGlassNebulaComposition samples the entry\'s companion HSL preset). Default sky.')}
+                  'Cycle the glass-tile proximity glow ONLY through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Glass shatter dust + main background nebula clusters now live on the Nebula cycle. Default sky.')}
                 {ctrlRow('Nebula', onCycleNebulaPalette,
-                  stats.nebulaPaletteName ?? 'white',
-                  'Cycle the nebula palette through the same 11-entry list as Glass. Governs main background nebula clusters only (randomNebulaComposition + re-rolled active nebula tiles + shards). Rock-shatter / rock-merge dust is fixed at white and NOT affected by this cycle — restore the getActiveNebulaPalette read in randomRockNebulaComposition if a cyclable rock palette is wanted later. Default white.')}
+                  stats.nebulaPaletteName ?? 'sky',
+                  'Cycle the nebula palette through the same 11-entry list. Governs glass-tile shatter dust (randomGlassNebulaComposition) AND main background nebula clusters (randomNebulaComposition + re-rolled active nebula tiles + shards). Rock-side dust (rock tile original + regenerated + shards, randomRockNebulaComposition) is fixed at white and NOT affected — restore an active read there if a cyclable rock palette is wanted later. Default sky.')}
               </>)}
 
               {/* ── Shards & Physics ───────────────────────────────── */}

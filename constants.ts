@@ -276,14 +276,6 @@ export function getActiveGlassGlowColor(): string {
 export function getActiveGlassGlowColorName(): string {
   return GLASS_GLOW_COLORS[activeGlassGlowIndex].name;
 }
-/** Companion HSL preset for the active glass glow entry — used by the
- *  glass-side nebula dust sampler (randomGlassNebulaComposition) so the
- *  glow colour, the glass-tile shatter dust, and any future glass-
- *  derived nebula entity share one selection. */
-export function getActiveGlassPalette(): NebulaPalette {
-  const g = GLASS_GLOW_COLORS[activeGlassGlowIndex];
-  return { name: g.name, ...g.nebulaPalette };
-}
 export function cycleGlassGlowColor(): number {
   activeGlassGlowIndex = (activeGlassGlowIndex + 1) % GLASS_GLOW_COLORS.length;
   return activeGlassGlowIndex;
@@ -291,16 +283,19 @@ export function cycleGlassGlowColor(): number {
 
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
-// every nebula entity that ISN'T glass-derived: rock-shatter / rock-
-// merge dust (randomRockNebulaComposition) plus main background
-// nebula clusters (randomNebulaComposition + rerollActiveNebulae).
-// Default 'white' is a deliberate neutral so rock dust reads as cool
-// debris rather than coloured cloud unless the user opts in.  Each
-// entry's `nebulaPalette` companion (HSL arc + sat + light, tuned for
-// clouds) is what the sampler reads.  NebulaColor.ts reads the active
-// preset through getActiveNebulaPalette() each call so the cycle
-// takes effect on the next sampled tile/shard; existing tiles get re-
-// rolled by GameEngine.cycleNebulaPalette().
+// every nebula composition EXCEPT rock-side dust: glass-tile shatter
+// dust (randomGlassNebulaComposition) and main background nebula
+// clusters (randomNebulaComposition + rerollActiveNebulae).  Default
+// 'sky' matches the Glass-glow default so glow + glass nebula read as
+// a coherent family out of the box.  Each entry's `nebulaPalette`
+// companion (HSL arc + sat + light, tuned for clouds) is what the
+// sampler reads.  NebulaColor.ts reads the active preset through
+// getActiveNebulaPalette() each call so the cycle takes effect on the
+// next sampled tile/shard; existing tiles get re-rolled by
+// GameEngine.cycleNebulaPalette().
+//
+// Rock-side dust (randomRockNebulaComposition) is *fixed* at white —
+// see NebulaColor.ts for the rationale and the restore path.
 export interface NebulaPalette {
   name: string;
   hueMin: number;     // degrees, start of the arc
@@ -309,7 +304,7 @@ export interface NebulaPalette {
   lightness: number;  // 0..100
 }
 
-let activeNebulaPaletteIndex = 10; // default 'white' — rock dust + main nebulae
+let activeNebulaPaletteIndex = 8; // default 'sky' — glass dust + main nebulae
 
 export function getActiveNebulaPalette(): NebulaPalette {
   const g = GLASS_GLOW_COLORS[activeNebulaPaletteIndex];

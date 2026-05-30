@@ -657,11 +657,10 @@ export class GameEngine {
 
   /**
    * Cycle the DBG glass palette through GLASS_GLOW_COLORS.  Governs
-   * both the glass-tile proximity glow (RenderSystem reads the hex
-   * live per draw) and the glass-shatter dust composition
-   * (randomGlassNebulaComposition uses the entry's companion preset).
-   * Default 'sky'.  Glow updates are instant and glass dust is
-   * ephemeral, so no entity re-roll is needed here.
+   * the glass-tile proximity glow ONLY (RenderSystem reads the hex
+   * live per draw).  Glass-shatter dust + main background nebula
+   * clusters live on the Nebula cycle (see cycleNebulaPalette).
+   * Default 'sky'.  No entity re-roll needed — the glow is read live.
    */
   public cycleGlassGlowColor() {
     cycleGlassGlowColor();
@@ -669,10 +668,11 @@ export class GameEngine {
 
   /**
    * Cycle the DBG nebula palette through GLASS_GLOW_COLORS.  Governs
-   * rock-shatter / rock-merge dust (randomRockNebulaComposition) and
-   * main background nebula clusters (randomNebulaComposition).
-   * Default 'white'.  Re-rolls active nebula tiles + shards so the
-   * change is immediate, and invalidates the cached blended-hex /
+   * glass-tile shatter dust (randomGlassNebulaComposition) AND main
+   * background nebula clusters (randomNebulaComposition).  Default
+   * 'sky'.  Rock-side dust (randomRockNebulaComposition) is fixed at
+   * white and unaffected.  Re-rolls active nebula tiles + shards so
+   * the change is immediate, and invalidates the cached blended-hex /
    * tinted bitmaps so RenderSystem rebuilds them.
    */
   public cycleNebulaPalette() {

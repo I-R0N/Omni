@@ -13,7 +13,7 @@
 // merges concatenate + dedupe rather than averaging-then-storing.
 
 import { NebulaColorStop } from '../types';
-import { NEBULA_CONSTANTS, getActiveNebulaPalette, getActiveGlassPalette } from '../constants';
+import { NEBULA_CONSTANTS, getActiveNebulaPalette } from '../constants';
 
 // ── sRGB ↔ hex helpers ───────────────────────────────────────────────────
 function hexToRgb01(hex: string): [number, number, number] {
@@ -240,23 +240,22 @@ export function randomPaletteHueDeg(): number {
 /**
  * Random single-stop composition for nebula-style dust puffs spawned
  * by glass / rock tile or shard events (shatter AND shard→tile merge
- * transmutation).  The two helpers are deliberately split:
+ * transmutation).  Split by material:
  *
- *   - randomGlassNebulaComposition uses getActiveGlassPalette, which
- *     mirrors the glass-tile glow selection (Glass cycle in the DBG
- *     panel) so glow + glass dust share one palette.  Default sky.
+ *   - randomGlassNebulaComposition follows the "Nebula" DBG cycle
+ *     (getActiveNebulaPalette) — that knob now owns every glass-tile-
+ *     released nebula composition + main background nebula clusters.
+ *     Default sky.  The glass-tile *glow* is still on its own Glass
+ *     cycle (getActiveGlassGlowColor) so the rim and the dust can be
+ *     tuned independently.
  *   - randomRockNebulaComposition is *fixed* at the 'white' preset
- *     (hue irrelevant when sat = 0) so cycling the Nebula knob no
- *     longer recolours rock dust — that knob now only affects the
- *     main background nebula clusters (randomNebulaComposition).  If
- *     a cyclable rock palette is ever wanted, restore the
- *     getActiveNebulaPalette read here and split it into its own
- *     accessor.
+ *     (hue irrelevant when sat = 0) for every rock-side event —
+ *     original tiles, regenerated tiles, and shards — so no DBG cycle
+ *     ever recolours rock dust.  If a cyclable rock palette is wanted
+ *     later, route this through its own accessor.
  */
 export function randomGlassNebulaComposition(): NebulaColorStop[] {
-    const p = getActiveGlassPalette();
-    const hue = (p.hueMin + Math.random() * p.hueRange) % 360;
-    return [{ hex: hslToHex(hue, p.saturation, p.lightness), weight: 1 }];
+    return [{ hex: paletteHueToHex(randomPaletteHueDeg()), weight: 1 }];
 }
 export function randomRockNebulaComposition(): NebulaColorStop[] {
     return [{ hex: hslToHex(0, 0, 90), weight: 1 }];
