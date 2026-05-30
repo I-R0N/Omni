@@ -1846,11 +1846,19 @@ export const NEBULA_CONSTANTS = {
   MERGE_PROXIMITY_K: 0.55,
   // Per-shard merge cooldown — a freshly-spawned shard (from a tile
   // shatter OR a recent merge) cannot participate in another merge for
-  // this many seconds.  Prevents the cascade where 4–6 shards spawn
-  // together and all collapse into one circle on frame 1–2.  The
-  // cooldown is ticked each substep by PhysicsSystem and consulted by
-  // NebulaSystem.updateDynamics before considering any merge pair.
-  MERGE_COOLDOWN: 1.8,
+  // this many seconds.  Also stamped on shards just touched by the
+  // player→shard pull (PhysicsSystem.applyNebulaPlayerPull) so the
+  // same value gates pull, shatter, and merge.  Kept ≤ the high-load
+  // bond-timer floor (5 s / LOCAL_MERGE_CONSTANTS.MAX_BOOST = 0.83 s
+  // at 6× boost, ~ 1 s here) so the cooldown reliably expires between
+  // back-to-back merges in dense clusters — otherwise every shard in
+  // a hotspot would spend more time on cooldown than off, and the
+  // player pull would almost never find an eligible target.  Prevents
+  // the cascade where 4–6 shards spawn together and all collapse into
+  // one circle on frame 1–2.  Ticked each substep by PhysicsSystem
+  // and consulted by NebulaSystem.updateDynamics before considering
+  // any merge pair.
+  MERGE_COOLDOWN: 1.0,
   // Tile regeneration toggle.  When false, shattered tiles are gone
   // forever (no respawn at their original grid cell) and the ONLY way
   // new tiles appear is via shard → tile transmutation.  Combined with
