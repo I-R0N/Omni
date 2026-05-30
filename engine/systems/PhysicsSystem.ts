@@ -2218,23 +2218,15 @@ export class PhysicsSystem {
           const other  = aPassThrough ? b : a;
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not
-          // be in the post-shatter cooldown window.  Nebula-shards
-          // shatter on the same trigger as nebula-tiles — recursive
-          // power-law breakage produces 2-3 generations of smaller
-          // shards before the MIN_SHATTER_DIAMETER floor below stops
-          // further breakage and contacts just pass through.
-          //
-          // The shard target ALSO needs a clear nebulaMergeCooldown —
-          // freshly-spawned shatter children carry that cooldown so the
-          // player can't immediately re-shatter the next generation in
-          // the same fly-through.  (Tiles never carry the field, so the
-          // gate is a no-op for them.)
-          const isShatterable = nebula.shardVariant === 'nebula-tile'
-                             || nebula.shardVariant === 'nebula-shard';
+          // be in the post-shatter cooldown window.  Only nebula-tiles
+          // shatter on contact — nebula-shards interact with the
+          // player exclusively through the applyNebulaPlayerPull
+          // gravity field; contact alone is a pure pass-through with
+          // no destruction.
+          const isShatterable = nebula.shardVariant === 'nebula-tile';
           const shatters = isShatterable
                             && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
-                            && (other.nebulaImpactCooldown ?? 0) <= 0
-                            && (nebula.nebulaMergeCooldown ?? 0) <= 0;
+                            && (other.nebulaImpactCooldown ?? 0) <= 0;
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.

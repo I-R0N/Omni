@@ -244,16 +244,6 @@ export interface ShardShatterPolicy {
    *  Only meaningful when `kind === 'powerlaw'`.  Variants with
    *  `kind === 'none'` ignore this field. */
   style?: 'asteroid' | 'nebula';
-  /** Nebula-style only.  When true, shatterNebulaStyle uses the
-   *  parent's actual half-size² as the area budget instead of the
-   *  default GLASS_TILE_HALF² constant — so child diameter scales
-   *  with parent diameter (count=3 → child ≈ parent × 0.58).  Lets
-   *  the same shatter pipeline produce visibly tiered children for
-   *  variants that recursively shatter (today: nebula-shard).
-   *  Tile→shard breaks leave this off so glass-sized children stay
-   *  the same regardless of parent tile size, matching the legacy
-   *  "shards are glass-scale" rule. */
-  parentSizeAreaBudget?: boolean;
 }
 
 // ── Density compaction policy ───────────────────────────────────────

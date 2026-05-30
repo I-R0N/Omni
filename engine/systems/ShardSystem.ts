@@ -794,18 +794,12 @@ export class ShardSystem {
     parentVariant: ShardVariantDef,
     entities: GameEntity[],
   ): void {
-    // Parent area budget for the shard power-law distribution.
-    // Default: glass-shard convention (TILE_HALF² = 121 for TILE_HALF
-    // = 11) — children stay the same SCALE as glass shards regardless
-    // of the actual nebula tile size.  When the variant opts in via
-    // `parentSizeAreaBudget`, switch to the parent's actual half-size²
-    // so child diameter scales with parent (count=3 → child ≈ parent
-    // × 0.58).  Lets recursive shatter (nebula-shard) tier visibly.
+    // Parent area budget for the shard power-law distribution.  We
+    // intentionally use the glass-shard convention (TILE_HALF² = 121
+    // for TILE_HALF = 11) regardless of the actual nebula tile size
+    // so the resulting shards are the SAME scale as glass shards.
     const GLASS_TILE_HALF = 11;
-    const halfSize = parentVariant.shatter.parentSizeAreaBudget === true
-      ? parent.size.x * 0.5
-      : GLASS_TILE_HALF;
-    const parentArea = halfSize * halfSize;
+    const parentArea = GLASS_TILE_HALF * GLASS_TILE_HALF;
     const childVariant = SHARD_VARIANTS[parentVariant.shatter.childVariant];
     const MIN_RADIUS = 2; // don't spawn sub-pixel shards
 
