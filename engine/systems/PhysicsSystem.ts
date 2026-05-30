@@ -54,6 +54,7 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCo
     e.dentY = newDY;
 }
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
+import { getCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -1897,8 +1898,10 @@ export class PhysicsSystem {
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
-      let rA = Math.max(a.size.x, a.size.y) / 2;
-      let rB = Math.max(b.size.x, b.size.y) / 2;
+      // Cached bounding-radius lookup — getCollisionR() is a 1-field read
+      // on cache hit (vast majority of frames) vs. Math.max + division.
+      let rA = getCollisionR(a);
+      let rB = getCollisionR(b);
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
@@ -1951,8 +1954,9 @@ export class PhysicsSystem {
       const countA = this.fillVertices(a, this.bufferVerticesA);
       const countB = this.fillVertices(b, this.bufferVerticesB);
       
-      // Calculate Axes into buffer
-      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes);
+      // Calculate Axes into buffer.  Pass entity refs so static-entity
+      // axes are pulled from cache instead of recomputed every pair.
+      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes, a, b);
 
       let minOverlap = Infinity;
       let smallestAxisX = 0;
@@ -2892,8 +2896,23 @@ export class PhysicsSystem {
           ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
 
       if (e.polygonPoints && e.polygonPoints.length > 0) {
-          const cos = Math.cos(e.rotation);
-          const sin = Math.sin(e.rotation);
+          // Static entities (mass === Infinity) never rotate after spawn, so
+          // their cos/sin are cached on first use and re-used across every
+          // future collision pair the entity participates in.  Dynamic
+          // entities take the trig path normally — their rotation can change
+          // each substep so caching would be unsafe.
+          let cos: number, sin: number;
+          if (e.mass === Infinity && e._satCacheCos !== undefined) {
+              cos = e._satCacheCos;
+              sin = e._satCacheSin!;
+          } else {
+              cos = Math.cos(e.rotation);
+              sin = Math.sin(e.rotation);
+              if (e.mass === Infinity) {
+                  e._satCacheCos = cos;
+                  e._satCacheSin = sin;
+              }
+          }
 
           // Warn once if an entity ever exceeds the vertex cap — the break
           // below still protects against buffer overrun, but a truncated
@@ -2928,42 +2947,68 @@ export class PhysicsSystem {
       return count;
   }
 
-  private fillAxes(vertsA: Vector2[], countA: number, vertsB: Vector2[], countB: number, bufferAxes: Vector2[]): number {
+  private fillAxes(
+      vertsA: Vector2[], countA: number,
+      vertsB: Vector2[], countB: number,
+      bufferAxes: Vector2[],
+      eA?: GameEntity, eB?: GameEntity,
+  ): number {
       let axisIdx = 0;
-
-      // Axes for A.  Replace two per-edge divisions with one reciprocal
-      // and two multiplications — IEEE division is ~5× slower than
-      // multiplication on most x86/ARM cores, so this halves the per-axis
-      // hot-path cost in the SAT broadphase.
-      for (let i = 0; i < countA; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsA[i];
-          const p2 = vertsA[(i + 1) % countA];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const lenSq = dx*dx + dy*dy;
-          if (lenSq > 0.000001) {
-              const inv = 1 / Math.sqrt(lenSq);
-              bufferAxes[axisIdx].x = -dy * inv;
-              bufferAxes[axisIdx].y = dx * inv;
-              axisIdx++;
-          }
-      }
-      // Axes for B
-      for (let i = 0; i < countB; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsB[i];
-          const p2 = vertsB[(i + 1) % countB];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const lenSq = dx*dx + dy*dy;
-          if (lenSq > 0.000001) {
-              const inv = 1 / Math.sqrt(lenSq);
-              bufferAxes[axisIdx].x = -dy * inv;
-              bufferAxes[axisIdx].y = dx * inv;
-              axisIdx++;
-          }
-      }
+      axisIdx = this.fillEntityAxes(vertsA, countA, bufferAxes, axisIdx, eA);
+      axisIdx = this.fillEntityAxes(vertsB, countB, bufferAxes, axisIdx, eB);
       return axisIdx;
+  }
+
+  /**
+   * Append normalised edge normals for ONE entity to bufferAxes.  Static
+   * entities (mass === Infinity) get a permanent cached axis list stamped
+   * onto the entity on first use — their polygon shape and rotation are
+   * frozen at spawn, so the world-space axes never change.  Subsequent
+   * collisions involving the same static entity skip the sqrt+inverse-
+   * multiply per edge entirely and only pay a memcpy.
+   *
+   * Dynamic entities (and callers that don't pass an entity ref) take the
+   * compute path, identical to the original fillAxes loop.
+   */
+  private fillEntityAxes(
+      verts: Vector2[], count: number,
+      bufferAxes: Vector2[], startIdx: number,
+      e: GameEntity | undefined,
+  ): number {
+      // Fast path: cached world-space axes for static entities.
+      if (e && e.mass === Infinity && e._satCacheAxes !== undefined) {
+          const cache = e._satCacheAxes;
+          let idx = startIdx;
+          for (let i = 0; i < cache.length && idx < bufferAxes.length; i++) {
+              bufferAxes[idx].x = cache[i].x;
+              bufferAxes[idx].y = cache[i].y;
+              idx++;
+          }
+          return idx;
+      }
+      const wantCache = e !== undefined && e.mass === Infinity;
+      const newCache: Vector2[] | null = wantCache ? [] : null;
+      let idx = startIdx;
+      for (let i = 0; i < count; i++) {
+          if (idx >= bufferAxes.length) break;
+          const p1 = verts[i];
+          const p2 = verts[(i + 1) % count];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              const ax = -dy * inv;
+              const ay = dx * inv;
+              bufferAxes[idx].x = ax;
+              bufferAxes[idx].y = ay;
+              idx++;
+              if (newCache) newCache.push({ x: ax, y: ay });
+          }
+      }
+      if (wantCache && e) {
+          e._satCacheAxes = newCache!;
+      }
+      return idx;
   }
 }

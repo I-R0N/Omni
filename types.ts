@@ -675,6 +675,24 @@ export interface GameEntity {
   nebulaTwinkleNextAt?: number;
   nebulaTwinkleX?: number;
   nebulaTwinkleY?: number;
+
+  // ── Physics SAT caches ─────────────────────────────────────────────────
+  // Populated lazily on first collision involving the entity.  For static
+  // entities (mass === Infinity) these never invalidate — rotation and
+  // polygonPoints are frozen at spawn — so cache hits are 100 % after the
+  // first collision pair.  Dynamic entities bypass the cache entirely.
+  // _satCacheCos / _satCacheSin replace per-pair Math.cos / Math.sin in
+  // fillVertices; _satCacheAxes replaces the per-pair sqrt + inverse-multiply
+  // axis normalisation in fillAxes.
+  _satCacheCos?: number;
+  _satCacheSin?: number;
+  _satCacheAxes?: Vector2[];
+  // Cached `Math.max(size.x, size.y) / 2` — the bounding-circle radius used
+  // by the broadphase pre-check, render layout, and many distance scans
+  // across PhysicsSystem / ShardSystem / NebulaSystem / RenderSystem.
+  // Lazily computed on first read; invalidated (set undefined) at the few
+  // sites that mutate `size` so stale values are impossible.
+  _collisionR?: number;
 }
 
 export interface CameraState {

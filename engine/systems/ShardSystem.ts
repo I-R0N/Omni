@@ -13,6 +13,7 @@
 // (Stage 5).  See docs/SHARD_SYSTEM.md.
 
 import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry } from '../../types';
+import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import {
   SHARD_VARIANTS,
   REGEN_POP_CONSTANTS,
@@ -311,6 +312,15 @@ export class ShardSystem {
    * merge pass exactly like the old SHPAIR-paced cadence.
    */
   private plasticCosmeticTick: number = 0;
+
+  // ── Per-merge-pass scratch buffers ──────────────────────────────────────
+  // runMergeBroadphase() used to instantiate a fresh Set + Map per call;
+  // both are cleared in place each pass now so the only persistent cost
+  // is the inner number[] cell arrays themselves.  At 60 fps on a dense
+  // shard map that saves ~120 allocations / sec without any change to the
+  // broadphase's behaviour.
+  private _mergeBondedScratch: Set<GameEntity> = new Set();
+  private _mergeGridScratch: Map<number, number[]> = new Map();
 
   constructor(private particles: ParticleSystem) {}
 
@@ -842,7 +852,7 @@ export class ShardSystem {
     const fan  = parentVariant.shatter.scatterHalfCone;
     const shardCount = radii.length;
     const step = shardCount > 1 ? (2 * fan) / (shardCount - 1) : 0;
-    const parentRadius = Math.max(parent.size.x, parent.size.y) / 2;
+    const parentRadius = getCollisionR(parent);
     const offsetMag = parentRadius * NEBULA_CONSTANTS.SHARD_SPAWN_OFFSET_RATIO;
 
     const childSpawn = childVariant.spawn;
@@ -1124,8 +1134,10 @@ export class ShardSystem {
     // digests faster inside a dense pocket; neutral when the gate is off.
     const eatRateEnabled = this.perfController ? this.perfController.mergeRateEnabled : true;
     // Track which entities are currently in active stick-bonds so
-    // the bond-formation pass doesn't double-bond.
-    const bonded = new Set<GameEntity>();
+    // the bond-formation pass doesn't double-bond.  Scratch Set is reused
+    // across passes — cleared in place — to skip a per-frame allocation.
+    const bonded = this._mergeBondedScratch;
+    bonded.clear();
     for (let i = 0; i < this.bonds.length; i++) {
       bonded.add(this.bonds[i].a);
       bonded.add(this.bonds[i].b);
@@ -1175,7 +1187,13 @@ export class ShardSystem {
       const wy = ((cy % ROWS) + ROWS) % ROWS;
       return (wx << 16) | (wy & 0xFFFF);
     };
-    const grid = new Map<number, number[]>();
+    // Scratch grid is reused across passes.  Inner cell arrays are
+    // cleared in place rather than dropped so successive frames retain
+    // their array backing storage — the Map only carries the dense
+    // header.  At ~1k cells/frame on the densest tile maps this skips
+    // ~1k inner-array allocations per call.
+    const grid = this._mergeGridScratch;
+    for (const cell of grid.values()) cell.length = 0;
     for (let i = 0; i < candidates.length; i++) {
       const c  = candidates[i];
       const cx = Math.floor(c.position.x / CELL);
@@ -1206,7 +1224,7 @@ export class ShardSystem {
         if (a.shardVariant !== 'plastic-shard' || !a.active) continue;
         const acx = Math.floor(a.position.x / CELL);
         const acy = Math.floor(a.position.y / CELL);
-        const aR = Math.max(a.size.x, a.size.y) / 2;
+        const aR = getCollisionR(a);
         let count = 0;
         for (let ncx = acx - 1; ncx <= acx + 1; ncx++) {
           for (let ncy = acy - 1; ncy <= acy + 1; ncy++) {
@@ -1219,7 +1237,7 @@ export class ShardSystem {
               if (b.shardVariant !== 'plastic-shard' || !b.active) continue;
               const dx = wrapDeltaX(a.position.x, b.position.x);
               const dy = wrapDeltaY(a.position.y, b.position.y);
-              const bR = Math.max(b.size.x, b.size.y) / 2;
+              const bR = getCollisionR(b);
               const reach = (aR + bR) * buf;
               if (dx * dx + dy * dy <= reach * reach) count++;
             }
@@ -1260,7 +1278,7 @@ export class ShardSystem {
         if (g.shardVariant !== 'glass-shard' && g.shardVariant !== 'rock-shard' && g.shardVariant !== 'metal-shard') continue;
         const gcx = Math.floor(g.position.x / CELL);
         const gcy = Math.floor(g.position.y / CELL);
-        const gR = Math.max(g.size.x, g.size.y) / 2;
+        const gR = getCollisionR(g);
         // Nearest plastic-shard within the attraction range.
         let nearP: GameEntity | null = null;
         let nearDistSq = Infinity;
@@ -1380,7 +1398,7 @@ export class ShardSystem {
         if (!isDebris && !isLoosePlastic) continue;
         const tcx = Math.floor(t.position.x / CELL);
         const tcy = Math.floor(t.position.y / CELL);
-        const tR = Math.max(t.size.x, t.size.y) / 2;
+        const tR = getCollisionR(t);
         let bestP: GameEntity | null = null;
         let bestSq = Infinity;
         for (let ncx = tcx - 1; ncx <= tcx + 1; ncx++) {
@@ -1394,7 +1412,7 @@ export class ShardSystem {
               const dx = wrapDeltaX(p.position.x, t.position.x);
               const dy = wrapDeltaY(p.position.y, t.position.y);
               const dSq = dx * dx + dy * dy;
-              const grab = (Math.max(p.size.x, p.size.y) / 2 + tR) * grabF;
+              const grab = (getCollisionR(p) + tR) * grabF;
               if (dSq > grab * grab && dSq <= RANGE_SQ && dSq < bestSq) {
                 bestSq = dSq;
                 bestP = p;
@@ -1445,7 +1463,7 @@ export class ShardSystem {
           const dx = wrapDeltaX(p.position.x, t.position.x);
           const dy = wrapDeltaY(p.position.y, t.position.y);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const grab = (Math.max(p.size.x, p.size.y) / 2 + Math.max(t.size.x, t.size.y) / 2) * grabF;
+          const grab = (getCollisionR(p) + getCollisionR(t)) * grabF;
           if (dist <= grab) {
             p.reachBack = true; // grabbed → retract (bond/eat systems take it from here)
           } else if (dist > 0.001) {
@@ -1488,7 +1506,7 @@ export class ShardSystem {
       // ── Pull pass: find nearest larger qualifying neighbour ────
       let bestPullTarget: GameEntity | null = null;
       let bestPullDistSq = Infinity;
-      const aR = Math.max(a.size.x, a.size.y) / 2;
+      const aR = getCollisionR(a);
 
       // ── Bond formation pass ────────────────────────────────────
       const aBondedAlready = bonded.has(a) || bondedThisFrame.has(a);
@@ -1532,7 +1550,7 @@ export class ShardSystem {
             // process this pair even when j < i.  Cooldowns on the
             // target are honoured.
             if (wantsPull && bVariantId !== null) {
-              const bR = Math.max(b.size.x, b.size.y) / 2;
+              const bR = getCollisionR(b);
               const pullRange  = aVariant!.merge.pullRange ?? CELL;
               const pullRangeSq = pullRange * pullRange;
               const targetCooldownOk = (b.nebulaMergeCooldown ?? 0) <= 0;
@@ -1910,6 +1928,7 @@ export class ShardSystem {
 
     entity.size.x = newDiam;
     entity.size.y = newDiam;
+    invalidateCollisionR(entity);
     entity.densityTier = newTier;
     entity.densityCachedTint = undefined;
     // Nebula fast-path cache lives on tiles (not shards), but the
@@ -2696,6 +2715,7 @@ export class ShardSystem {
       a.shardVariant     = dominantVariant;
       a.powerupGlowColor = newGlow;
       a.size.x = newDiam; a.size.y = newDiam;
+      invalidateCollisionR(a);
       a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
@@ -2796,6 +2816,7 @@ export class ShardSystem {
     eater.polygonPoints = this.generateShardPolygon((newDiam / 2) * 0.82, 16, 16, 0, 0.98, 0.04);
     eater.size.x = newDiam;
     eater.size.y = newDiam;
+    invalidateCollisionR(eater);
     eater.mass = SHARD_VARIANTS['plastic-shard'].spawn.sizeToMass(newDiam);
     // Re-pin the soft-body anchor to the eater's (unchanged) centre.
     if (eater.anchorX !== undefined) {
@@ -2844,6 +2865,7 @@ export class ShardSystem {
     eater.polygonPoints = this.generateShardPolygon((grown / 2) * 0.82, 16, 16, 0, 0.98, 0.04);
     eater.size.x = grown;
     eater.size.y = grown;
+    invalidateCollisionR(eater);
     eater.mass = SHARD_VARIANTS['plastic-shard'].spawn.sizeToMass(grown);
     if (eater.anchorX !== undefined) {
       eater.anchorX = eater.position.x;
@@ -2893,8 +2915,8 @@ export class ShardSystem {
     // vs glass-shard, routed inside the adapter).  No area-
     // accumulator any more: every successful nebula self-bond
     // triggers a transmute attempt.
-    const aR = Math.max(a.size.x, a.size.y) / 2;
-    const bR = Math.max(b.size.x, b.size.y) / 2;
+    const aR = getCollisionR(a);
+    const bR = getCollisionR(b);
     const aArea = Math.PI * aR * aR;
     const bArea = Math.PI * bR * bR;
 
