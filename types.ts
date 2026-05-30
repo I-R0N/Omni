@@ -693,6 +693,17 @@ export interface GameEntity {
   // Lazily computed on first read; invalidated (set undefined) at the few
   // sites that mutate `size` so stale values are impossible.
   _collisionR?: number;
+
+  // True while this static tile is currently rendered to the pre-baked
+  // static-tile world canvas managed by RenderSystem.  When true, the
+  // per-entity render path skips drawing this entity (the cache has its
+  // appearance); when false, the per-entity render runs normally.  Toggled
+  // on each frame by RenderSystem.renderEntities when the tile's "fast-
+  // path criteria" (no glow active, no hit flash, no regen) changes —
+  // entering a slow-path condition erases the tile from the cache, leaving
+  // it restores the cache stamp.  Only set on cache-eligible variants
+  // (glass-tile, indestructible-tile today).
+  _staticCached?: boolean;
 }
 
 export interface CameraState {

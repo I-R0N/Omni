@@ -3303,6 +3303,10 @@ export class GameEngine {
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // Pre-bake the world-tile static layer (glass + indestructible hex
+      // sprites) so the per-frame world render replaces hundreds of
+      // per-tile drawImage calls with a single (toroidal-wrapped) blit.
+      this.renderer.buildStaticTileLayer(map.entities, map.width, map.height);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
   }

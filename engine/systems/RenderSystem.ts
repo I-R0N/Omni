@@ -360,6 +360,35 @@ export class RenderSystem {
   // without re-reading the map dimensions.
   private _minimapStaticRange: number = 0;
 
+  // ── Static world-tile canvas ───────────────────────────────────────────
+  // Pre-bakes the appearance of every cacheable static tile (glass-tile,
+  // indestructible-tile) into a single map-sized offscreen canvas at map
+  // load.  The per-frame world render blits the visible portion in 1-4
+  // drawImage calls instead of issuing one per visible tile — at typical
+  // viewports this replaces ~400-800 per-tile drawImage calls per frame
+  // with a single multi-quad blit.
+  //
+  // Tiles enter "slow-path" appearance (glow, hit flash, regen) get
+  // erased from the cache on entry and re-stamped on exit so the cache
+  // always represents the *base* appearance of every currently-cached
+  // tile.  The per-entity render loop's existing slow-path runs on top
+  // of the (partially erased) cache, so the visual output is identical
+  // to the original per-tile pipeline.
+  //
+  // Memory budget: max 3072×3072 RGBA → 36 MB.  Scale auto-shrinks for
+  // maps larger than that so the canvas always fits the budget.
+  private _staticTileCanvas: HTMLCanvasElement | null = null;
+  private _staticTileCanvasCtx: CanvasRenderingContext2D | null = null;
+  private _staticTileScale: number = 1.0;      // canvas px per world unit
+  private _staticTileMapW: number = 0;
+  private _staticTileMapH: number = 0;
+  // Tiles currently stamped into the cache — used to walk-and-erase
+  // any tiles that get deactivated (destroyed) since the last frame.
+  // Set is fine here: the per-frame walk runs O(N) in the cached count
+  // (typically 200-1000) and only on cache-eligible variants.
+  private _staticTileCacheSet: Set<GameEntity> = new Set();
+  private readonly STATIC_TILE_MAX_CANVAS_DIM = 3072;
+
   constructor() {
     this.backgroundManager = new BackgroundManager();
     // Preload basic assets
@@ -737,6 +766,221 @@ export class RenderSystem {
       this._minimapStaticCanvas = c;
   }
 
+  /**
+   * True for tile variants whose fast-path appearance can be pre-baked
+   * into the static-tile world canvas.  Glass and indestructible tiles
+   * share the same hex-sprite fast path used by renderEntities, so they
+   * stamp identically into the cache.  Nebula tiles already have a
+   * per-tile cached tinted sprite + complex twinkle/spawn animation;
+   * caching them at world-canvas resolution would lose fidelity and is
+   * redundant with the existing fast path.  Plastic / metal / rock tiles
+   * have no hex-sprite fast path today, so they always render via the
+   * slow path and skip the cache entirely.
+   */
+  private isStaticTileCacheable(e: GameEntity): boolean {
+      return e.type === EntityType.STRUCTURE
+          && e.mass === Infinity
+          && (e.shardVariant === 'glass-tile'
+              || e.shardVariant === 'indestructible-tile');
+  }
+
+  /**
+   * Stamp a single cache-eligible tile into the world-tile canvas using
+   * the same hex-sprite drawImage the per-entity fast path would have
+   * issued.  Called both at map load (initial population) and on slow→
+   * fast transitions (tile leaves a glow / hit flash / regen state).
+   * Marks `_staticCached = true` so renderEntities skips the per-entity
+   * draw on subsequent frames.
+   */
+  private stampStaticTileToCache(e: GameEntity): void {
+      const cx = this._staticTileCanvasCtx;
+      if (!cx) return;
+      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      if (!hexSprite.complete || hexSprite.naturalWidth === 0) return;
+      const s = this._staticTileScale;
+      const halfMapW = this._staticTileMapW / 2;
+      const halfMapH = this._staticTileMapH / 2;
+      // Map world (-halfMapW, +halfMapW] → canvas [0, canvasW).
+      const wx = (e.position.x + halfMapW) * s;
+      const wy = (e.position.y + halfMapH) * s;
+      const maxDim = Math.max(e.size.x, e.size.y);
+      const drawSize = maxDim * 1.02 * s;
+      const dHalf = drawSize / 2;
+      cx.drawImage(hexSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
+      e._staticCached = true;
+      this._staticTileCacheSet.add(e);
+  }
+
+  /**
+   * Erase a tile's pre-baked appearance from the world-tile canvas via
+   * destination-out compositing.  Called on fast→slow transitions
+   * (tile enters glow / hit flash / regen) and on tile destruction
+   * (active flips false).  The cleared rect is sized slightly larger
+   * than the tile's draw extent so the hex sprite's anti-aliased edges
+   * fully erase without ringing.
+   */
+  private eraseStaticTileFromCache(e: GameEntity): void {
+      const cx = this._staticTileCanvasCtx;
+      if (!cx || e._staticCached !== true) return;
+      const s = this._staticTileScale;
+      const halfMapW = this._staticTileMapW / 2;
+      const halfMapH = this._staticTileMapH / 2;
+      const wx = (e.position.x + halfMapW) * s;
+      const wy = (e.position.y + halfMapH) * s;
+      const maxDim = Math.max(e.size.x, e.size.y);
+      // Erase a hair larger than the stamp to cover the sprite's soft edge.
+      const eraseSize = maxDim * 1.1 * s;
+      const eHalf = eraseSize / 2;
+      const prevOp = cx.globalCompositeOperation;
+      cx.globalCompositeOperation = 'destination-out';
+      cx.fillStyle = '#000';
+      cx.fillRect(wx - eHalf, wy - eHalf, eraseSize, eraseSize);
+      cx.globalCompositeOperation = prevOp;
+      e._staticCached = false;
+      this._staticTileCacheSet.delete(e);
+  }
+
+  /**
+   * Build the static-tile world canvas from scratch.  Called from
+   * GameEngine.loadMap right after buildMinimapStaticLayer.  Canvas is
+   * sized to cover one full toroidal wrap unit of the map at a scale
+   * picked to fit the STATIC_TILE_MAX_CANVAS_DIM budget; on smaller maps
+   * the canvas is 1:1 with world coords (zero blur), on larger maps the
+   * scale shrinks and the blit upscales (mild blur on close zoom).
+   */
+  public buildStaticTileLayer(entities: GameEntity[], mapWidth: number, mapHeight: number): void {
+      const maxWorld = Math.max(mapWidth, mapHeight);
+      let scale = 1.0;
+      if (maxWorld * scale > this.STATIC_TILE_MAX_CANVAS_DIM) {
+          scale = this.STATIC_TILE_MAX_CANVAS_DIM / maxWorld;
+      }
+      this._staticTileScale = scale;
+      this._staticTileMapW = mapWidth;
+      this._staticTileMapH = mapHeight;
+      const cW = Math.ceil(mapWidth * scale);
+      const cH = Math.ceil(mapHeight * scale);
+      const c = document.createElement('canvas');
+      c.width = cW;
+      c.height = cH;
+      const cx = c.getContext('2d');
+      if (!cx) { this._staticTileCanvas = null; return; }
+      this._staticTileCanvas = c;
+      this._staticTileCanvasCtx = cx;
+      this._staticTileCacheSet.clear();
+
+      // Hex sprite might still be loading; tiles below will silently skip
+      // and the next renderEntities sweep will lazily stamp them once the
+      // image completes.  Keeps map-load deterministic without blocking
+      // on the asset pipeline.
+      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || !this.isStaticTileCacheable(e)) {
+              e._staticCached = false;
+              continue;
+          }
+          if (!hexReady) { e._staticCached = false; continue; }
+          this.stampStaticTileToCache(e);
+      }
+  }
+
+  /**
+   * Blit the pre-baked static-tile canvas into the current camera-local
+   * world frame.  Called inside renderEntities's camera transform so
+   * world coords map straight to screen.  Handles toroidal wrap by
+   * always drawing 4 wrap-offset copies — most will fall outside the
+   * scissor rect and become near-noop GPU blits, so this is cheaper
+   * than computing which copies are needed every frame.
+   */
+  private blitStaticTileLayer(ctx: CanvasRenderingContext2D): void {
+      const canvas = this._staticTileCanvas;
+      if (!canvas) return;
+      const mapW = this._staticTileMapW;
+      const mapH = this._staticTileMapH;
+      const x0 = -mapW / 2;
+      const y0 = -mapH / 2;
+      ctx.drawImage(canvas, x0,        y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0,        y0 + mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0,        y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0 + mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0 + mapH, mapW, mapH);
+  }
+
+  /**
+   * Pre-frame pass that resolves fast↔slow appearance transitions BEFORE
+   * the static-tile canvas is blitted into the world frame.  Without
+   * this pass, a tile entering its glow / hit flash window would draw
+   * its slow-path overlay on top of the cache's still-present base
+   * appearance for one frame — a brief one-frame brightening glitch.
+   *
+   * Walks `_visibleEntities` (the camera-culled candidate list already
+   * built by renderEntities's caller in prepareFrameEntities) and, for
+   * each cacheable static tile, decides whether the cache stamp should
+   * be present and transitions if it isn't.  Off-screen tiles can't
+   * cause this glitch (the player can't see them) so we don't bother
+   * walking the master list.
+   */
+  private prepareStaticTileCacheForFrame(playerPos: Vector2 | undefined): void {
+      if (!this._staticTileCanvas) return;
+      const entries = this._visibleEntities;
+      for (let i = 0; i < entries.length; i++) {
+          const entity = entries[i].entity;
+          if (!this.isStaticTileCacheable(entity)) continue;
+          // Reproduce the fast-path acceptance check used in renderEntities
+          // so a tile that's about to take the slow path gets erased now,
+          // before the canvas blit paints its stale base.  Glass tiles
+          // also brighten on contact via repelImpulse — same gate as the
+          // existing fast-path branch.
+          let inGlowRange = false;
+          if (entity.shardVariant === 'glass-tile') {
+              inGlowRange = (entity.repelImpulse ?? 0) > 0;
+          } else if (playerPos && entity.shardVariant !== undefined) {
+              const g = SHARD_VARIANTS[entity.shardVariant].glow;
+              if (g !== undefined) {
+                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+                  inGlowRange = fpdx * fpdx + fpdy * fpdy < g.range * g.range;
+              }
+          }
+          const wantsCache = entity.active
+              && !entity.hitFlash
+              && entity.regenPopTimer === undefined
+              && !inGlowRange;
+          if (wantsCache && entity._staticCached !== true) {
+              this.stampStaticTileToCache(entity);
+          } else if (!wantsCache && entity._staticCached === true) {
+              this.eraseStaticTileFromCache(entity);
+          }
+      }
+  }
+
+  /**
+   * Sync the static-tile cache against any tile-destruction events that
+   * happened since the last frame.  Called at the top of render() so
+   * stale tiles don't linger as ghost stamps after the gameplay state
+   * removes them.  Cheap: only walks tiles currently in the cache.
+   */
+  private syncStaticTileCacheAgainstDeaths(): void {
+      if (this._staticTileCacheSet.size === 0) return;
+      // Collect first to avoid mutating set while iterating.
+      let dead: GameEntity[] | null = null;
+      for (const e of this._staticTileCacheSet) {
+          if (!e.active) {
+              if (dead === null) dead = [];
+              dead.push(e);
+          }
+      }
+      if (dead) {
+          for (let i = 0; i < dead.length; i++) this.eraseStaticTileFromCache(dead[i]);
+      }
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,
@@ -886,6 +1130,10 @@ export class RenderSystem {
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
 
+    // Drop any tiles from the static cache that died since the previous
+    // frame so we don't paint a ghost copy from the pre-baked canvas.
+    this.syncStaticTileCacheAgainstDeaths();
+
     // 1. Clear & Background
     ctx.clearRect(0, 0, width, height);
     
@@ -921,6 +1169,20 @@ export class RenderSystem {
     // entities, so a ship/projectile trail crossing a nebula cloud stays
     // visible on top of it instead of vanishing underneath.
     this.renderTrails(ctx, this._trailEntities, camera);
+
+    // 4a₀. Pre-baked static-tile canvas blit.  Replaces ~400-800 per-tile
+    // drawImage calls below with at most 9 wrap-aware blits.  Tiles whose
+    // appearance is currently in the cache will skip their per-entity
+    // draw in renderEntities; tiles with slow-path overlays (glow, hit
+    // flash, regen) will have been erased from the cache and rendered
+    // via the existing per-entity slow path on top of the blit.
+    //
+    // Resolve any pending fast↔slow appearance transitions on visible
+    // cacheable tiles BEFORE the blit, so the canvas state matches
+    // what each tile actually needs this frame — prevents the 1-frame
+    // double-paint a same-frame transition would otherwise produce.
+    this.prepareStaticTileCacheForFrame(playerPos);
+    this.blitStaticTileLayer(ctx);
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -1658,11 +1920,35 @@ export class RenderSystem {
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
           && !inGlowRange) {
+          // Static-tile cache: when the pre-baked world canvas already
+          // holds this tile's appearance, the per-frame blit (step 4a₀
+          // in render()) painted it for us — skip the per-tile drawImage
+          // entirely.  If the tile isn't currently cached, lazily stamp
+          // it so subsequent frames take the cache-skip fast path; the
+          // direct drawImage below covers the current frame either way.
+          if (entity._staticCached === true) return;
+          if (this._staticTileCanvas !== null) {
+              this.stampStaticTileToCache(entity);
+              // We just painted the tile into the cache; the canvas blit
+              // ran BEFORE this loop this frame, so the on-screen pixels
+              // still need to come from the per-entity drawImage below.
+          }
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
           ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           return;
+      }
+
+      // Slow-path slide-out from cache: when a cacheable tile reaches the
+      // generic per-entity render path it means the fast-path conditions
+      // no longer hold (glow, hit flash, regen, etc.).  Erase its stamp
+      // from the pre-baked canvas so the slow path's pixels aren't
+      // composited over a stale base appearance.  Re-cached automatically
+      // by the fast-path branch above on the next frame the conditions
+      // clear.
+      if (isGlassFamilyStaticTile && entity._staticCached === true) {
+          this.eraseStaticTileFromCache(entity);
       }
 
       // ── Fast-path NEBULA tile render ───────────────────────────────
