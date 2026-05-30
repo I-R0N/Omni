@@ -1719,8 +1719,12 @@ export const NEBULA_CONSTANTS = {
   SHARD_LINEAR_RATIO: 0.60,
   // Minimum diameter below which a shard is no longer shatter-able.  Keeps
   // the system bounded under repeated impacts — sub-min shards simply
-  // pass-through without fragmenting further.
-  MIN_SHATTER_DIAMETER: 10,
+  // pass-through without fragmenting further.  Lowered from 10 to 6 so
+  // tile→tier-1→tier-2 chains actually trigger (a tile-shatter child at
+  // ~12.6 diameter * SHARD_LINEAR_RATIO 0.6 = 7.56 floor, so MIN must
+  // be ≤ 7 to allow the tier-2 break; tier-2 children land below 6 and
+  // naturally stop, capping the recursion at 2 generations of shards).
+  MIN_SHATTER_DIAMETER: 6,
   // Seconds a PLAYER/ENEMY must wait after shattering a nebula before they
   // can shatter another.  Prevents a single fly-through from ripping an
   // entire cluster apart simultaneously.  140 px/s × 0.2 s ≈ 28 px traversal
@@ -1820,6 +1824,18 @@ export const NEBULA_CONSTANTS = {
   GRAVITY_RANGE: 380,
   GRAVITY_STRENGTH: 380,
   GRAVITY_MIN_DIST: 15,
+  // Player→nebula-shard pull (PhysicsSystem.applyNebulaPlayerPull).
+  // Active when a player ship passes within PLAYER_PULL_RANGE of a
+  // nebula-shard; falloff is linear (full at the centre, zero at the
+  // range edge).  STRENGTH is the velocity nudge (units/s) added each
+  // step at the centre.  SPIN_KICK is the rad/s nudge added per shard
+  // per second of being in range — stable per-shard sign drawn from
+  // the entity id so the cloud reads as varied swirls.  The shatter
+  // path is independent — shards in range still shatter on direct
+  // contact via the standard nebula pass-through trigger.
+  PLAYER_PULL_RANGE: 220,
+  PLAYER_PULL_STRENGTH: 220,
+  PLAYER_PULL_SPIN: 2.5,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
   // shards must substantially OVERLAP, not merely touch, before a merge
@@ -3308,7 +3324,25 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       defaultOutcome: 'compose',
       postMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
     },
-    shatter: { kind: 'none', countMin: 0, countMax: 0, alphaMin: 1, alphaMax: 1, childVariant: 'nebula-shard', forwardDrag: 0, perpScatter: 0, scatterHalfCone: 0 },
+    // Recursive shatter — a nebula-shard hit by the player breaks
+    // into 2-3 smaller nebula-shards (same fan visual as tile shatter,
+    // child diameter scales with parent via parentSizeAreaBudget so
+    // each generation is meaningfully smaller).  The MIN_SHATTER_
+    // DIAMETER size floor in PhysicsSystem caps the tiering at 2-3
+    // generations before contacts just pass through.
+    shatter: {
+      kind: 'powerlaw',
+      style: 'nebula',
+      countMin: 2, countMax: 3,
+      alphaMin: 1.0, alphaMax: 1.0,
+      childVariant: 'nebula-shard',
+      forwardDrag: NEBULA_CONSTANTS.FORWARD_DRAG_FACTOR,
+      perpScatter: NEBULA_CONSTANTS.PERP_SCATTER_FACTOR,
+      scatterHalfCone: NEBULA_CONSTANTS.FAN_HALF_ANGLE,
+      fadeInSeconds: NEBULA_CONSTANTS.FADE_IN_DURATION,
+      postShatterMergeCooldown: NEBULA_CONSTANTS.MERGE_COOLDOWN,
+      parentSizeAreaBudget: true,
+    },
     // passThrough = true so shard-vs-shard and shard-vs-striker
     // contacts skip collision impulse entirely.  Mass = 0.01 alone
     // would let strikers pass with negligible impulse, but
