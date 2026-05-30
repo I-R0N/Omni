@@ -377,11 +377,12 @@ k. After N waves, spawn a portal to a new map.
     `this.regenAdapter` (silent no-op on nebula-tile regen
     colour rewrite). Tracked in the side-cleanup punch list.
 
-19. **plastic-revert (micro session) — scope revised this
-    turn.** User direction: keep colour-facing affordances
+19. **plastic-revert (micro session) — scope revised across
+    two turns.** User direction: keep colour-facing affordances
     (DBG palette/colour cycles + the nebula-blend hook on
     plastic shards); strip only the perf-heavy structural
-    divergence. Scope:
+    divergence; add per-partner bond strength so plastic
+    sticks to glass strongly. Scope:
     a. Restore plastic-shard to standard polygon-shard render
        and behaviour (mirror glass / rock / metal shard
        treatment). Drop the soft-radial-gradient render.
@@ -389,15 +390,12 @@ k. After N waves, spawn a portal to a new map.
        implementing session asks the user if the original
        amber `#d97706` is preferred.
     b. **Keep** the DBG palette / colour-cycle controls for
-       plastic tiles and shards (the per-instance palette
-       cycle, the plastic-specific colour picker if any).
-       These let the user iterate plastic colours without a
-       code change.
+       plastic tiles and shards.
     c. **Keep** the nebula-based shard colour blending that
        plastic shards currently use — the PR #54
        cellular-automata equilibration hook applied to plastic
-       (plastic-only at this time; see decision #21 for the
-       deferred rock/metal extension).
+       (plastic-only at this time; rock + metal extension
+       moves to decision #21's material-palette-pass).
     d. **Drop** the rest of the plastic-softbody divergence:
        opacity cycle, composite-op cycle, stretch-stiffness
        cycle, snap/free toggle, plastic-specific outline
@@ -412,35 +410,197 @@ k. After N waves, spawn a portal to a new map.
        Implementing session picks the schema expression — a
        new `cohesionOnly: true` flag on the bond entry, or
        reuse existing fields with a very long bondTime so the
-       compose step never triggers. Whichever is cleaner.
-    f. Verify PerfController tasks tied to plastic
+       compose step never triggers. Recommend option 1.
+    f. **Per-partner bond strength.** Plastic-shard's bond to
+       `glass-tile` and `glass-shard` is a **strong tier**
+       (higher cohesion / pull constant). Other partners
+       (`rock-tile` / `rock-shard` / `metal-tile` /
+       `metal-shard` / `indestructible-tile` / `plastic-tile`
+       / `plastic-shard`) get the default tier. Schema
+       picks: a per-partner `strength` field on the
+       `bondsWith` partner list, OR two `bondsWith` entries
+       (one strong, one default) keyed by partner variant.
+       Implementing session picks; recommend per-partner
+       strength so the entry list stays compact.
+    g. Verify PerfController tasks tied to plastic
        (`plastic-cosmetic`, `plastic-self-break`,
        `plastic-eat`) still make sense after the revert; drop
        any whose body becomes empty / no-op. The
        `plastic-cosmetic` gate likely stays alive because the
        kept colour-blend hook still needs pacing.
-    g. No behaviour changes to non-plastic variants.
+    h. No behaviour changes to non-plastic variants.
     Out of scope: redesigning plastic from scratch, changing
     HP, changing spawn rules, extending the colour-blend
-    system to other variants (see decision #21).
+    system to other variants (decision #21), shard-count or
+    mass retuning (decision #22).
 
-21. **Cellular-automata colour equilibration extension to
-    rock + metal (deferred follow-up).** User flagged
-    interest this turn in extending the PR #54-style
-    nebula-based colour blending — the lerp-toward-neighbours
-    equilibration in `NebulaSystem.equilibrateColors` — to
-    rock and metal shard families. Explicitly deferred to a
-    later session ("only plastic at this time"). Queued in
-    the side-cleanup punch list as a real follow-up, not a
-    trivial one. When the time comes, the brief should
-    cover: per-material palette sub-arcs (the dust-puff
-    palette split from PR #54 already established
-    non-overlapping sub-arcs of the nebula range for glass
-    and rock — extend the same concept to metal); whether
-    rock and metal tiles act as anchor cells the way nebula
-    tiles do; performance budget (the equilibration pass is
-    a PerfController-gated task — adding rock + metal
-    materially increases the active-shard count it walks).
+21. **material-palette-pass (expanded from prior decision
+    #21).** Originally scoped as "extend nebula colour
+    equilibration to rock + metal." Expanded this turn to a
+    cohesive material-palette-pass that combines palette
+    work with the automata extension. Scope:
+    a. **Palette adjustments.** Metal — remove white from
+       the palette; add a shiny-ready blue range. Rock — add
+       red + blue range so rock can carry warmer / cooler
+       reads depending on cluster context. Plastic — verify
+       the current palette still works under the
+       cohesion-only bond model (post-revert) and the
+       automata equilibration; tune if necessary.
+    b. **Automata coloring extension.** Extend the
+       `NebulaSystem.equilibrateColors` hue-lerp behaviour
+       across non-nebula tile families:
+       - **Warm sub-arc** applied to rock + plastic.
+       - **Cool sub-arc** applied to glass + metal.
+       - **Neighbour-tile count gates intensity** — dense
+         clusters drift further from the base hue than
+         sparse cells. The dust-puff palette split from
+         PR #54 established non-overlapping nebula sub-arcs
+         for glass and rock; reuse the sub-arc concept.
+       - Plastic already has the equilibration hook from
+         PR #55 / plastic-revert; this task generalises the
+         pattern to rock, glass, metal.
+    c. **Performance budget.** Equilibration is a
+       PerfController-gated task. Adding rock + glass + metal
+       materially increases the active-shard / tile count
+       walked per pass. Implementing session must validate
+       perf on TILE_HEAVY and the dense natural maps.
+    d. Tile-anchor question — should rock / glass / metal
+       tiles act as anchor cells the way nebula tiles do
+       (anchors don't drift; shards catch up to them), or
+       should all material tiles drift together? Design
+       phase decision. Recommend anchors-on for visual
+       stability.
+    e. Out of scope: net-new rock variants (fire / ice — see
+       parked items under decision #27), shiny metal render
+       (separate visual task, decision #27), per-shard
+       mass / collision retune (decision #22).
+
+22. **material-balance-pass.** Three tuning items bundled
+    into one session, all touching how materials feel in
+    play:
+    a. **Reduce per-entity shard counts.** Audit the current
+       per-material shard composition from the PR #52 g1
+       over-delivery (rock = larger count; glass / plastic /
+       metal scaled relative). Reduce where the post-shatter
+       cloud feels excessive. Tunable via the existing
+       `breakShards` counts in `SHARD_VARIANTS`.
+    b. **Per-material shard mass retune.** Glass and plastic
+       shards should be light enough that the player flies
+       through dense shard fields without losing significant
+       velocity. Metal and rock shards should be heavy
+       enough that pushing through a cluster feels resistive.
+       Touches the `mass` field on the spawned-shard
+       defaults across SHARD_VARIANTS.
+    c. **Momentum audit.** Verify that today's
+       `PhysicsSystem.resolveCollision` impulse calculation
+       and the PR #57 composite-collision additions account
+       for entity velocity AND mass in a way that reads
+       correctly to the player. If the impulse formula
+       feels lossy (player slows more than expected for the
+       material being pushed) tune the elastic / damping
+       constants. Out of scope: rewriting the impulse model
+       — only tuning constants and validating the existing
+       code path.
+    Runs after plastic-revert so the plastic mass / shard-
+    count baseline is the post-revert one, not the
+    softbody one.
+
+23. **map-composition (promoted from side-cleanup).** Two
+    pieces:
+    a. **MAP_POPULATION authority for natural maps.**
+       Flip UniverseMap / PocketMap / SevenRingsMap to read
+       per-variant tile ratios from `MAP_POPULATION` instead
+       of the hardcoded subclass literals noted in the
+       PR #54 CLAUDE.md update. After this, MAP_POPULATION
+       is the single source of truth for entity counts
+       across all maps.
+    b. **Cluster-composition rules.** Rock tiles mixed
+       around metal-tile clusters (so metal feels like
+       refined material embedded in a rock matrix). Plastic
+       tiles mixed with glass-tile clusters (the two
+       materials currently feel disjoint; mixing reinforces
+       the "manufactured" vs "natural" axis).
+       Implementing session picks the schema expression —
+       extend MAP_POPULATION cluster entries with an
+       optional adjacency / inter-mix descriptor, or wire
+       the rule into `TileGenerator` directly.
+
+24. **minimap-faithfulness.** Small UI task to make the
+    minimap more representative of what's on screen.
+    a. Minimap tile colours should closely match the actual
+       on-screen tile colours, not the simplified swatches
+       used today. Pull the same `COLORS.STRUCTURE_*`
+       constants the renderer uses.
+    b. Nebula tiles and shards drawn with reduced alpha on
+       the minimap to read as "thin / fog" rather than
+       solid blockers.
+    c. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render
+       only. No engine changes. Independent of other tasks
+       — can slot in anywhere in the sequence.
+
+25. **orbital-fields-moons (deferred / queued).** Net-new
+    mechanic, not in current sequence. Specifications:
+    a. Flow fields that create circular orbits around a
+       central planet entity, replacing or augmenting the
+       analytical asteroid flow on planet-bearing maps.
+    b. Moons rendered in the background that move along
+       their own orbital paths and contribute gravitational
+       pull on dynamic entities the way `LOCAL_GRAVITY_*`
+       contributes today.
+    c. Likely new `EntityType.PLANET` and
+       `EntityType.MOON` (or a single CELESTIAL_BODY with
+       a role discriminator). Likely a new map (or maps)
+       designed around the orbital flow.
+    d. Touches FlowField + FlowFieldGrid (planet at centre
+       generates the orbital flow), BackgroundManager
+       (moons in the parallax layer with gameplay weight),
+       LOCAL_GRAVITY_CONSTANTS (moon + planet gravity
+       sources), MAP_POPULATION (planet-map population),
+       MapClasses (new MapType).
+    e. Estimated 2+ sessions. Slots between Phase 2 (k)
+       and Phase 3 or alongside Pair B/C polish.
+
+26. **voronoi-rock-fracture (deferred / queued).** New
+    rock shatter algorithm. Specifications:
+    a. Rock-tile fractures via Voronoi cell decomposition
+       — chip a sector off the tile per hit, leaving the
+       remainder of the tile mostly intact.
+    b. The chipped-off shards have larger count and higher
+       ejection velocity than the current break model.
+    c. Tile takes several hits before fully breaking;
+       cumulative chip-off area drives the break threshold.
+    d. Fallback if Voronoi is too heavy on the CPU budget:
+       chunkier polygon-decomposition with the same
+       feel (multiple hits, partial breakaway, faster
+       shards).
+    e. Touches the `breakShards` policy on rock-tile +
+       new shatter pathway in ShardSystem.
+    f. Estimated 1–2 sessions. Slots into Phase 3 polish.
+
+27. **Parked items — not in plan, considered but deferred
+    indefinitely.** Items the user listed but decided
+    against pulling into the current sequence:
+    a. **dbg-cleanup + perf-mode preset cycle** — DBG menu
+       sweep + a single toggle that cycles through
+       performance modes built on PerfController.
+       Parked this turn.
+    b. **Infinite maps with landmarks (planets)** — would
+       replace the bounded-torus model from CLAUDE.md §1.
+       Architectural; not in this arc. Distinct from
+       orbital-fields-moons (which works inside the
+       existing torus).
+    c. **Fire-rock / ice-rock variants** — new
+       `ShardVariantId` values with distinct palettes /
+       behaviour. Content task; revisit after
+       material-palette-pass lands and see whether the
+       expanded rock palette already scratches the itch.
+    d. **Shiny metal render** — substantial visual / shader
+       work to give metal a specular / reflective read.
+       Revisit after material-palette-pass; the white-removal
+       + blue-range palette may be enough.
+    If any of these get pulled back in, promote from this
+    decision to a new Phase 1 follow-up entry and a new
+    decision number.
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
@@ -543,8 +703,12 @@ Run when convenient; can run in parallel with Phase 2.
 | g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | shipped (PR #55, merged into plan branch) | `claude/plastic-softbody-retrofit-sTxYR` | Metal piece landed per spec (`passthroughShatter: { targets: ['glass-tile', 'glass-shard'] }` on existing metal-shard). Plastic piece **drifted heavily** from the brief (see decision #17): elasticBond schema added then scrapped mid-session in favor of bondsWith + nebula-level damping; ~30 follow-up tuning commits; ended with hex-tile render, radial-gradient shards, palette/opacity/composite-op DBG cycles, polymer-chain bond, sleep gate, color-blend hook into nebula equilibration. Visual asymmetry between polygon-rendered plastic-tile and gradient-rendered plastic-shard. Known perf cost. **To be reverted** by `plastic-revert` task below. |
 | ff-review | Asteroid/shard flow field audit + debug tooling | shipped (PR #56, merged into plan branch) | `claude/flow-field-debug-audit-IcwCq` | Audit doc at `docs/FLOW_FIELD_AUDIT.md` — 10 findings (4 L1 / 3 L2 / 3 L3). Consolidation answer: **don't consolidate** — analytical `FlowField.ts` is load-bearing for map-load streamline integration + per-respawn velocity bias before the grid exists; baked grid adds wall-repulsion the analytical formula can't provide. DBG overlays added: `AstFF` toggle, `FF Vec` arrows with sample-N cycle, `FF Cells` outlines, `FF Obs` obstacle tint, `FF Reb` rebuild flash. Three follow-ups deferred (#FF-1 obstacle-aware fallback, #FF-2 obstacle filter re-examination, #FF-3 asteroid-bake perf timer). One trivial doc fix in passing. |
 | perf-controller | Unified frame-skipping `PerfController` | shipped unplanned (PR #57, merged into plan branch) | `claude/omni-perf-controller-6ScG1` | **Not in original plan — user-initiated infra add (see decision #18).** New `engine/systems/PerfController.ts` replaces scattered AUTO interval tables with one coordinator. Each substep samples a load signal (entity count + collision-cell density + EWMA sim time), quantises to tiers with hysteresis, schedules tasks with phase offsets. Migrated gates: shard-pair, shard-tile-pair, color-blend, plastic-cosmetic. Newly skippable: AI state machine, flow-field pursuit flush, nebula neighbour recompute, drop-collection scan, plastic self-break. Dynamic merge-rate ladder by entity count (0.6× sparse → 3.5× crowded). New DBG "Perf" section. New constants: `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS`, `MERGE_RATE_CONSTANTS`. Pre-existing bug flagged but not fixed: `ShardSystem.completeRegen` references nonexistent `this.regenAdapter`. |
-| plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session, scope revised this turn.** Revert plastic-shard to standard polygon-shard render and behavior. Keep plastic-tile color scheme. **Keep** the DBG palette / color-cycle controls for plastic tiles and shards. **Keep** the nebula-based color-blend hook that plastic shards currently use (PR #54-style cellular-automata equilibration, plastic-only for now). **Drop** the soft-radial-gradient render, opacity cycle, composite-op cycle, polymer-chain bond, sleep gate, hex-shape tile render diff, stretch-stiffness cycle, snap/free toggle. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. See decision #19. |
-| living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction this turn. Decision #20 captures the design surface for whenever this resumes. |
+| plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session, scope revised this turn.** Revert plastic-shard to standard polygon-shard render and behavior. Keep plastic-tile color scheme. **Keep** the DBG palette / color-cycle controls for plastic tiles and shards. **Keep** the nebula-based color-blend hook that plastic shards currently use (PR #54-style cellular-automata equilibration, plastic-only for now). **Drop** the soft-radial-gradient render, opacity cycle, composite-op cycle, polymer-chain bond, sleep gate, hex-shape tile render diff, stretch-stiffness cycle, snap/free toggle. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. **Per-partner bond strength** — glass-tile / glass-shard get a strong tier; other partners get a default tier (see decision #19). See decisions #19 + #22 (the material-balance-pass picks up shard counts / masses / momentum tuning afterward). |
+| material-balance-pass | Reduced shard counts + per-material mass retune + momentum audit | pending | `claude/material-balance-pass-<suffix>` | Three tuning items bundled. (1) Audit per-entity shard counts and reduce where the post-shatter cloud feels excessive. (2) Per-material shard mass retune so glass / plastic feel light (player flies through), metal / rock feel heavy (player slows). (3) Momentum audit: today's `PhysicsSystem.resolveCollision` impulse path + the PR #57 composite-collision additions — verify entity velocity and mass both feed the resolved impulse in a way that reads correctly; retune impulse constants if the player perceives lossy collisions. See decision #22. |
+| material-palette-pass | Material palette adjustments + automata coloring extension | pending | `claude/material-palette-pass-<suffix>` | **Expanded from prior decision #21.** Per-material palette work + cellular-automata colour blending applied across non-nebula tile families. Palette: metal loses white, gains a shiny-ready blue range; rock gains red+blue range; plastic palette tuned for cohesion-readability. Automata: extend `NebulaSystem.equilibrateColors`-style hue-lerp to rock + plastic (warm sub-arc) and glass + metal (cool sub-arc), gated by neighbour-tile count so dense clusters drift further from the base hue than sparse cells. Plastic equilibration already exists from PR #55 — extend the pattern. See decision #21 (rewritten). |
+| map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
+| minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
+| living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction. Decision #20 captures the design surface for whenever this resumes. |
 
 ---
 
@@ -554,7 +718,21 @@ Run when convenient; can run in parallel with Phase 2.
 |----|------|--------|--------|-------|
 | f | Timed waves of mixed enemy types | pending | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. |
 | h | New enemies + bosses | pending | `claude/bosses-<suffix>` | Shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses. Weapons unlock per-run. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. |
-| k | Portal to next map after N waves | pending | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring. |
+| k | Portal to next map after N waves | pending | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring. **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. |
+
+---
+
+## Deferred — queued but not in current sequence
+
+These are real follow-up tasks, not parking-lot ideas. They have committed
+scope and slot into the work after Phase 2 or alongside Phase 3 polish,
+but they don't gate the current sequence and should not be spawned ahead
+of the items in Phase 1 follow-ups.
+
+| ID | Task | Notes |
+|----|------|-------|
+| orbital-fields-moons | Orbital flow fields + moving moons with gravity | New mechanic. Flow fields that create circular orbits around a central planet entity; moving moons rendered in the background that contribute gravitational pull like the central planet. Touches FlowField + FlowFieldGrid + BackgroundManager + LOCAL_GRAVITY_CONSTANTS. Likely 2+ sessions. Fits between Phase 2 (k) and Phase 3, or alongside Pair B/C polish. See decision #25. |
+| voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. See decision #26. |
 
 ---
 
@@ -613,14 +791,6 @@ These are not full tasks — fold into a relevant PR when convenient.
       under the nebula field category; PR #54 deleted those fields and
       unified all consumers onto `mergeFadeTimer` / `mergeFadeDuration`.
       Trivial doc edit; fold into the next CLAUDE.md-touching PR.
-- [ ] PR #54's own CLAUDE.md update notes that "natural mixed maps
-      (UniverseMap, PocketMap, SevenRingsMap) still hardcode their per-
-      variant ratios in their MapClasses subclass" — MAP_POPULATION is
-      authoritative for the showcase maps and rock-shard free-spawn
-      counts but NOT yet for natural-map tile ratios. Real follow-up,
-      not just a comment fix — flip the natural maps to read from
-      MAP_POPULATION. Bigger than a punch-list item; queue as a small
-      named task if it bites.
 - [ ] PR #57 introduced `PerfController` as load-bearing infra; not
       yet documented in CLAUDE.md (§2 directory layout, §3 per-frame
       order, §5 constants list, §8 conventions). Real follow-up.
@@ -633,14 +803,12 @@ These are not full tasks — fold into a relevant PR when convenient.
       once any finite-mass wall-like variants ship), #FF-3 (perf
       timer for asteroid-bake path). Track via the audit doc
       `docs/FLOW_FIELD_AUDIT.md`.
-- [ ] **Cellular-automata colour equilibration extension to rock +
-      metal shard families** (decision #21). User-flagged future
-      work to extend the PR #54 `NebulaSystem.equilibrateColors`
-      hue-lerp behaviour beyond plastic (which keeps it after
-      `plastic-revert`). Per-material palette sub-arcs; whether
-      rock / metal tiles act as anchor cells; PerfController budget
-      impact. Real task, not a punch-list one — queue as a small
-      named task when ready.
+- [x] MAP_POPULATION authority for natural maps. **Promoted this
+      turn** to a real Phase 1 follow-up (`map-composition`); see
+      decision #23.
+- [x] Cellular-automata colour equilibration extension to rock +
+      metal. **Promoted this turn** to a real Phase 1 follow-up
+      (`material-palette-pass`); see decision #21 (rewritten).
 
 ---
 
