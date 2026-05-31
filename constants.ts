@@ -2295,8 +2295,20 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
 // Plastic shards: 4-vertex polygon with mild jitter — distinct
 // silhouette from rock (5/7/9) / metal (6/8/10) / glass (3/4 with
 // high jitter).  Standard rock/metal-style polygon render via the
-// rocky-asteroid branch in RenderSystem (no soft-gradient, no
-// per-shard damping override).
+// rocky-asteroid branch in RenderSystem.
+//
+// Sluggish motion (per-entity damping path in PhysicsSystem.update):
+// rock / glass / metal shards free-drift (no per-step friction), so
+// plastic is the only mobile shard family that bleeds velocity —
+// reads as a heavier, draggier material.  linearDamping 0.96 retains
+// ~8.7 %/s (a kicked shard coasts to a stop in ~1 s); angularDamping
+// matches so spin bleeds too (heavy things don't twirl freely).
+// restSpeed / restSpin 0.1 snap the damped tail to a clean stop —
+// low enough that launches (~0.3–2.7 px/frame), cohesion blends, and
+// real pushes still move the shard, high enough that a settling
+// cluster comes to a definite rest instead of micro-drifting.  All
+// four are stamped onto every plastic-shard at spawn (DropSystem
+// .spawnDentShard + ShardSystem.shatterAsteroidStyle forward them).
 const SHARD_SPAWN_SHAPE_PLASTIC = {
   sizeMin: 20, sizeMax: 200,
   polyVerticesMin: 4, polyVerticesMax: 4,
@@ -2304,6 +2316,10 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   // Weight ∝ area (d²); plastic sits between glass (0.010) and
   // rock (0.018), so it shoves glass and is shoved by rock.
   sizeToMass: (d: number) => d * d * 0.013,
+  linearDamping:  0.96,
+  angularDamping: 0.96,
+  restSpeed: 0.1,
+  restSpin:  0.1,
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
