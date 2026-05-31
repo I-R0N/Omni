@@ -1261,6 +1261,31 @@ export class PhysicsSystem {
       // outline).  Both caches re-populate lazily on next use.
       tile._satCacheAxes = undefined;
       if (tile._staticCached === true) tile._staticCached = false;
+
+      // Damage indicator for rock-tile: append a short crack line in
+      // entity-local space.  Drawn over the cache stamp's fill on the
+      // next pre-blit re-stamp (the cache-invalidate just above forces
+      // a re-stamp this frame), so accumulating dents read as visible
+      // cracks even though rock-tile renders no edge outline.  Bounded
+      // so a swarm of stray hits doesn't pile up indefinitely; the
+      // tile dies long before this cap matters in normal play.
+      if (tile.shardVariant === 'rock-tile') {
+          if (!tile.damageCracks) tile.damageCracks = [];
+          if (tile.damageCracks.length < 8) {
+              const R = Math.max(tile.size.x, tile.size.y) * 0.5;
+              const angle = Math.random() * Math.PI * 2;
+              const startR = R * (Math.random() * 0.25);
+              const lenR = R * (0.45 + Math.random() * 0.35);
+              const ca = Math.cos(angle);
+              const sa = Math.sin(angle);
+              tile.damageCracks.push({
+                  x1: ca * startR,
+                  y1: sa * startR,
+                  x2: ca * (startR + lenR),
+                  y2: sa * (startR + lenR),
+              });
+          }
+      }
   }
 
   // Returns true if world-space point (x, y) with radius r is clear of all

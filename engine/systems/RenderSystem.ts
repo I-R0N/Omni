@@ -876,6 +876,26 @@ export class RenderSystem {
       cx.closePath();
       cx.fillStyle = e.color;
       cx.fill();
+      // Damage cracks — drawn after the fill so they read as dark
+      // fissures on the slate face.  Each crack accumulates one entry
+      // per dent hit (see PhysicsSystem.applyDentStep) and is stored in
+      // entity-local space; we're already translated to the tile centre
+      // so we can stamp straight in.  Slate-900 with partial alpha so
+      // the rock colour shows through and the cracks read as natural
+      // shadow inside the fracture rather than as opaque outlines.
+      const cracks = e.damageCracks;
+      if (cracks && cracks.length > 0) {
+          cx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
+          cx.lineWidth = Math.max(1, 2 * s);
+          cx.lineCap = 'round';
+          for (let i = 0; i < cracks.length; i++) {
+              const c = cracks[i];
+              cx.beginPath();
+              cx.moveTo(c.x1 * s, c.y1 * s);
+              cx.lineTo(c.x2 * s, c.y2 * s);
+              cx.stroke();
+          }
+      }
       cx.restore();
       this.captureStampPolyOnce(e);
       e._staticCached = true;

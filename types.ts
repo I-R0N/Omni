@@ -723,6 +723,16 @@ export interface GameEntity {
   // Multiplied into the existing isTile/isShard alpha base in
   // renderEntities; absent values default to 1.0 (no change).
   nebulaAlphaMul?: number;
+
+  // Accumulated damage cracks for rock-tile.  Each crack is an entity-
+  // local line segment (rotation is baked in at generation, position is
+  // the tile centre).  Appended once per dent hit by PhysicsSystem
+  // .applyDentStep and drawn by RenderSystem.stampRockTileToCache on
+  // top of the polygon fill so accumulating hits read as visible damage
+  // even though rock-tile suppresses hit-flash and renders no edge
+  // outline.  Persists for the tile's lifetime — rock-tile has no
+  // regen, so cracks don't need to clear on resurrection.
+  damageCracks?: Array<{ x1: number; y1: number; x2: number; y2: number }>;
 }
 
 export interface CameraState {
