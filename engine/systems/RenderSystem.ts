@@ -827,6 +827,7 @@ export class RenderSystem {
       const drawSize = maxDim * 1.02 * s;
       const dHalf = drawSize / 2;
       cx.drawImage(hexSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
+      this.captureStampPolyOnce(e);
       e._staticCached = true;
       this._staticTileCacheSet.add(e);
   }
@@ -839,6 +840,24 @@ export class RenderSystem {
    * since densityTier transitions invalidate the cache via dent /
    * shatter paths anyway.
    */
+  /**
+   * Capture the entity's polygonPoints into `_staticStampPoly` on the
+   * FIRST cache stamp for this tile, deep-copying so subsequent dent
+   * mutations to polygonPoints don't reach back and shrink the stored
+   * erase footprint.  The stored polygon is what eraseStaticTileFromCache
+   * uses — covers the maximum footprint anything was ever stamped at
+   * for this tile, so post-dent or on-death erases never leave a halo
+   * of original rim around the now-smaller current polygon.
+   */
+  private captureStampPolyOnce(e: GameEntity): void {
+      if (e._staticStampPoly !== undefined) return;
+      const pts = e.polygonPoints;
+      if (!pts || pts.length === 0) return;
+      const copy: Vector2[] = new Array(pts.length);
+      for (let i = 0; i < pts.length; i++) copy[i] = { x: pts[i].x, y: pts[i].y };
+      e._staticStampPoly = copy;
+  }
+
   private stampRockTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
       const pts = e.polygonPoints;
       if (!pts || pts.length === 0) return;
@@ -858,6 +877,7 @@ export class RenderSystem {
       cx.fillStyle = e.color;
       cx.fill();
       cx.restore();
+      this.captureStampPolyOnce(e);
       e._staticCached = true;
       this._staticTileCacheSet.add(e);
   }
@@ -895,7 +915,14 @@ export class RenderSystem {
       const prevOp = cx.globalCompositeOperation;
       cx.globalCompositeOperation = 'destination-out';
       cx.fillStyle = '#000';
-      const pts = e.polygonPoints;
+      // Prefer the polygon captured at first stamp — it covers the
+      // maximum footprint anything was ever stamped at for this tile,
+      // so post-dent or on-death erases never leave a halo of original
+      // rim around the (now smaller) current polygonPoints.  Falls
+      // back to current polygon for tiles that somehow reach erase
+      // without a first stamp, and finally to a rect for tiles
+      // without polygonPoints at all.
+      const pts = e._staticStampPoly ?? e.polygonPoints;
       if (pts && pts.length > 0) {
           cx.save();
           cx.translate(wx, wy);

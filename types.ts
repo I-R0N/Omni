@@ -704,6 +704,17 @@ export interface GameEntity {
   // it restores the cache stamp.  Only set on cache-eligible variants
   // (glass-tile, indestructible-tile today).
   _staticCached?: boolean;
+
+  // Original-stamp polygon kept by RenderSystem so the cache erase always
+  // covers the full footprint of EVERYTHING this tile ever stamped, not
+  // just the current (possibly dent-shrunken) polygonPoints.  Captured
+  // once on first cache stamp; without it, a rock-tile that takes a few
+  // dent hits and then dies would leave the original outer rim of fill
+  // visible in the cache because the death-time erase used the shrunken
+  // current polygon and missed it.  Each entry is a fresh {x,y} so future
+  // dent-mutations to polygonPoints can't reach back and shrink the
+  // stored erase footprint.
+  _staticStampPoly?: Vector2[];
 }
 
 export interface CameraState {
