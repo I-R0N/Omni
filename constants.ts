@@ -2640,21 +2640,25 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Cohesion-only bonds (plastic-revert) — plastic-shards stick to
     // every variant EXCEPT nebula-tile / nebula-shard.  bondPartners
     // marks every entry cohesionOnly so the bond timer never fires
-    // compose, and tags glass-tile / glass-shard as the strong tier
-    // (slower to detach, higher cohesion blend).  pullStrength stays
+    // compose.  Every OTHER material (glass / rock / metal /
+    // indestructible, tiles + shards) is the 'strong' tier — plastic
+    // grips foreign material firmly (faster cohesion lock + much
+    // longer break distance, see STRONG_* in ShardSystem).  Plastic ↔
+    // plastic stays 'default' so a plastic blob holds itself together
+    // loosely while gripping other materials hard.  pullStrength stays
     // 0 — bonds form by contact, no gravity attraction.
     merge: {
       attractedTo: 'none',
       bondsWith: { exclude: ['nebula-tile', 'nebula-shard'] },
       bondTimeSeconds: 1,                 // arbitrary — cohesionOnly skips compose
       bondPartners: [
-        { partner: 'glass-tile',  cohesionOnly: true, strength: 'strong'  },
-        { partner: 'glass-shard', cohesionOnly: true, strength: 'strong'  },
-        { partner: 'rock-tile',           cohesionOnly: true, strength: 'default' },
-        { partner: 'rock-shard',          cohesionOnly: true, strength: 'default' },
-        { partner: 'metal-tile',          cohesionOnly: true, strength: 'default' },
-        { partner: 'metal-shard',         cohesionOnly: true, strength: 'default' },
-        { partner: 'indestructible-tile', cohesionOnly: true, strength: 'default' },
+        { partner: 'glass-tile',          cohesionOnly: true, strength: 'strong'  },
+        { partner: 'glass-shard',         cohesionOnly: true, strength: 'strong'  },
+        { partner: 'rock-tile',           cohesionOnly: true, strength: 'strong'  },
+        { partner: 'rock-shard',          cohesionOnly: true, strength: 'strong'  },
+        { partner: 'metal-tile',          cohesionOnly: true, strength: 'strong'  },
+        { partner: 'metal-shard',         cohesionOnly: true, strength: 'strong'  },
+        { partner: 'indestructible-tile', cohesionOnly: true, strength: 'strong'  },
         { partner: 'plastic-tile',        cohesionOnly: true, strength: 'default' },
         { partner: 'plastic-shard',       cohesionOnly: true, strength: 'default' },
       ],

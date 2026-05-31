@@ -168,6 +168,18 @@ interface BondEntry {
   breakFactorMul?: number;
 }
 
+// 'strong' bond-tier multipliers (plastic-shard ↔ glass / rock /
+// metal / indestructible today).  cohesionMul scales the velocity-
+// blend rate (base COHESION 4.0/s in tickBonds) so a strong pair
+// locks to a shared velocity faster — reads as a rigid grip.
+// breakFactorMul scales the break distance (base BREAK_FACTOR 1.5 ×
+// contactDist) so a strong bond stretches much further before it
+// snaps — reads as hard to pull apart.  Both bond-formation sites
+// (runMergeBroadphase mobile↔mobile + runShardTileBondFormation
+// shard↔tile) read these constants so the two paths can't drift.
+const STRONG_COHESION_MUL = 3.0;
+const STRONG_BREAK_FACTOR_MUL = 4.0;
+
 // ── Metal triangular-lattice constants ──────────────────────────────────
 // An UP cell (apex toward local -y) shares its 3 edges with DOWN cells at
 // these integer key offsets; a DOWN cell mirrors them.  Cell key (ix,iy)
@@ -1382,8 +1394,8 @@ export class ShardSystem {
             this.bonds.push({
               a, b, timer: 0, threshold,
               cohesionOnly: cohesionOnly || undefined,
-              cohesionMul:    strong ? 2.0 : undefined,
-              breakFactorMul: strong ? 2.0 : undefined,
+              cohesionMul:    strong ? STRONG_COHESION_MUL : undefined,
+              breakFactorMul: strong ? STRONG_BREAK_FACTOR_MUL : undefined,
             });
             bondedThisFrame.add(a);
             bondedThisFrame.add(b);
@@ -1503,8 +1515,8 @@ export class ShardSystem {
         this.bonds.push({
           a, b: tile, timer: 0, threshold: baseTime,
           cohesionOnly: cohesionOnly || undefined,
-          cohesionMul:    strong ? 2.0 : undefined,
-          breakFactorMul: strong ? 2.0 : undefined,
+          cohesionMul:    strong ? STRONG_COHESION_MUL : undefined,
+          breakFactorMul: strong ? STRONG_BREAK_FACTOR_MUL : undefined,
         });
         bondedThisFrame.add(a);
         bondedThisFrame.add(tile);
