@@ -1,5 +1,6 @@
 import { GameEntity, EntityType } from '../../types';
 import { isVisibleOnTorus } from '../toroidal';
+import { getCollisionR } from '../entityCache';
 
 /**
  * Camera-aligned viewport rectangle in world coordinates.  Set once
@@ -93,7 +94,7 @@ export class EntityIndex {
   public isOffscreen(entity: GameEntity): boolean {
     const rect = this.viewportRect;
     if (!rect) return false;
-    const r = Math.max(entity.size.x, entity.size.y) * 0.5;
+    const r = getCollisionR(entity);
     return !isVisibleOnTorus(
       entity.position.x, entity.position.y, r,
       rect.left, rect.right, rect.top, rect.bottom,

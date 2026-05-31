@@ -675,6 +675,64 @@ export interface GameEntity {
   nebulaTwinkleNextAt?: number;
   nebulaTwinkleX?: number;
   nebulaTwinkleY?: number;
+
+  // ── Physics SAT caches ─────────────────────────────────────────────────
+  // Populated lazily on first collision involving the entity.  For static
+  // entities (mass === Infinity) these never invalidate — rotation and
+  // polygonPoints are frozen at spawn — so cache hits are 100 % after the
+  // first collision pair.  Dynamic entities bypass the cache entirely.
+  // _satCacheCos / _satCacheSin replace per-pair Math.cos / Math.sin in
+  // fillVertices; _satCacheAxes replaces the per-pair sqrt + inverse-multiply
+  // axis normalisation in fillAxes.
+  _satCacheCos?: number;
+  _satCacheSin?: number;
+  _satCacheAxes?: Vector2[];
+  // Cached `Math.max(size.x, size.y) / 2` — the bounding-circle radius used
+  // by the broadphase pre-check, render layout, and many distance scans
+  // across PhysicsSystem / ShardSystem / NebulaSystem / RenderSystem.
+  // Lazily computed on first read; invalidated (set undefined) at the few
+  // sites that mutate `size` so stale values are impossible.
+  _collisionR?: number;
+
+  // True while this static tile is currently rendered to the pre-baked
+  // static-tile world canvas managed by RenderSystem.  When true, the
+  // per-entity render path skips drawing this entity (the cache has its
+  // appearance); when false, the per-entity render runs normally.  Toggled
+  // on each frame by RenderSystem.renderEntities when the tile's "fast-
+  // path criteria" (no glow active, no hit flash, no regen) changes —
+  // entering a slow-path condition erases the tile from the cache, leaving
+  // it restores the cache stamp.  Only set on cache-eligible variants
+  // (glass-tile, indestructible-tile today).
+  _staticCached?: boolean;
+
+  // Original-stamp polygon kept by RenderSystem so the cache erase always
+  // covers the full footprint of EVERYTHING this tile ever stamped, not
+  // just the current (possibly dent-shrunken) polygonPoints.  Captured
+  // once on first cache stamp; without it, a rock-tile that takes a few
+  // dent hits and then dies would leave the original outer rim of fill
+  // visible in the cache because the death-time erase used the shrunken
+  // current polygon and missed it.  Each entry is a fresh {x,y} so future
+  // dent-mutations to polygonPoints can't reach back and shrink the
+  // stored erase footprint.
+  _staticStampPoly?: Vector2[];
+
+  // Per-shard alpha multiplier baked in at spawn — drives the nebula
+  // render path's globalAlpha so a caller (e.g. rock-tile shatter) can
+  // ask for a softer cloud puff that reads as lighter dust without
+  // changing the variant-wide default alpha for every nebula entity.
+  // Multiplied into the existing isTile/isShard alpha base in
+  // renderEntities; absent values default to 1.0 (no change).
+  nebulaAlphaMul?: number;
+
+  // Accumulated damage cracks for rock-tile.  Each crack is an entity-
+  // local line segment (rotation is baked in at generation, position is
+  // the tile centre).  Appended once per dent hit by PhysicsSystem
+  // .applyDentStep and drawn by RenderSystem.stampRockTileToCache on
+  // top of the polygon fill so accumulating hits read as visible damage
+  // even though rock-tile suppresses hit-flash and renders no edge
+  // outline.  Persists for the tile's lifetime — rock-tile has no
+  // regen, so cracks don't need to clear on resurrection.
+  damageCracks?: Array<{ x1: number; y1: number; x2: number; y2: number }>;
 }
 
 export interface CameraState {

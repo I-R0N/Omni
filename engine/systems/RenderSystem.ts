@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -359,6 +359,35 @@ export class RenderSystem {
   // center).  Stored so renderMinimap can compute the blit source rect
   // without re-reading the map dimensions.
   private _minimapStaticRange: number = 0;
+
+  // ── Static world-tile canvas ───────────────────────────────────────────
+  // Pre-bakes the appearance of every cacheable static tile (glass-tile,
+  // indestructible-tile) into a single map-sized offscreen canvas at map
+  // load.  The per-frame world render blits the visible portion in 1-4
+  // drawImage calls instead of issuing one per visible tile — at typical
+  // viewports this replaces ~400-800 per-tile drawImage calls per frame
+  // with a single multi-quad blit.
+  //
+  // Tiles enter "slow-path" appearance (glow, hit flash, regen) get
+  // erased from the cache on entry and re-stamped on exit so the cache
+  // always represents the *base* appearance of every currently-cached
+  // tile.  The per-entity render loop's existing slow-path runs on top
+  // of the (partially erased) cache, so the visual output is identical
+  // to the original per-tile pipeline.
+  //
+  // Memory budget: max 3072×3072 RGBA → 36 MB.  Scale auto-shrinks for
+  // maps larger than that so the canvas always fits the budget.
+  private _staticTileCanvas: HTMLCanvasElement | null = null;
+  private _staticTileCanvasCtx: CanvasRenderingContext2D | null = null;
+  private _staticTileScale: number = 1.0;      // canvas px per world unit
+  private _staticTileMapW: number = 0;
+  private _staticTileMapH: number = 0;
+  // Tiles currently stamped into the cache — used to walk-and-erase
+  // any tiles that get deactivated (destroyed) since the last frame.
+  // Set is fine here: the per-frame walk runs O(N) in the cached count
+  // (typically 200-1000) and only on cache-eligible variants.
+  private _staticTileCacheSet: Set<GameEntity> = new Set();
+  private readonly STATIC_TILE_MAX_CANVAS_DIM = 3072;
 
   constructor() {
     this.backgroundManager = new BackgroundManager();
@@ -737,6 +766,301 @@ export class RenderSystem {
       this._minimapStaticCanvas = c;
   }
 
+  /**
+   * True for tile variants whose appearance can be pre-baked into the
+   * static-tile world canvas.
+   *  - glass-tile + indestructible-tile: share the hex-sprite fast path
+   *    in renderEntities — cache stamps the same drawImage.
+   *
+   * Excluded:
+   *  - rock-tile: takes per-hit polygon-shrink dents AND accumulates
+   *    crack-line damage indicators.  Both need the slow-path render
+   *    to reach the live entity state every frame; caching makes both
+   *    invisible until the cache happens to invalidate, which has been
+   *    a recurring source of visual bugs.  Keeping rock-tile on the
+   *    slow path costs a small per-frame draw per visible rock-tile
+   *    in exchange for correct, immediate damage feedback.
+   *  - nebula-tile: already cached per-entity (tinted sprite cache +
+   *    the nebula fast path); world-canvas caching would lose fidelity.
+   *  - plastic-tile / metal-tile: selective neighbour-aware outline
+   *    rendering requires the spatial-grid neighbour lookup; not worth
+   *    the extra complexity for the smaller marginal gain.
+   */
+  private isStaticTileCacheable(e: GameEntity): boolean {
+      return e.type === EntityType.STRUCTURE
+          && e.mass === Infinity
+          && (e.shardVariant === 'glass-tile'
+              || e.shardVariant === 'indestructible-tile');
+  }
+
+  /**
+   * Variant dispatch for the cache stamp.  Glass-family tiles stamp via
+   * the shared hex sprite (matches their renderEntities fast path).
+   * Caller has already guaranteed the variant is cache-eligible.
+   */
+  private stampStaticTileToCache(e: GameEntity): void {
+      const cx = this._staticTileCanvasCtx;
+      if (!cx) return;
+      this.stampHexSpriteTileToCache(cx, e);
+  }
+
+  /**
+   * Glass/indestructible stamp — the hex sprite drawImage that the
+   * per-entity fast path uses, ported to the cache canvas's coordinate
+   * system (1 canvas px = 1/scale world units).
+   */
+  private stampHexSpriteTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
+      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      if (!hexSprite.complete || hexSprite.naturalWidth === 0) return;
+      const s = this._staticTileScale;
+      const halfMapW = this._staticTileMapW / 2;
+      const halfMapH = this._staticTileMapH / 2;
+      const wx = (e.position.x + halfMapW) * s;
+      const wy = (e.position.y + halfMapH) * s;
+      const maxDim = Math.max(e.size.x, e.size.y);
+      const drawSize = maxDim * 1.02 * s;
+      const dHalf = drawSize / 2;
+      cx.drawImage(hexSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
+      this.captureStampPolyOnce(e);
+      e._staticCached = true;
+      this._staticTileCacheSet.add(e);
+  }
+
+  /**
+   * Rock-tile stamp — replicates the slow-path "polygon fill in
+   * entity.color, no outline" branch at the tile's canvas position.
+   * Mirrors the densityHex-tinted fill that renderEntities would draw
+   * on the main ctx; for cache purposes we use entity.color directly
+   * since densityTier transitions invalidate the cache via dent /
+   * shatter paths anyway.
+   */
+  /**
+   * Capture the entity's polygonPoints into `_staticStampPoly` on the
+   * FIRST cache stamp for this tile, deep-copying so subsequent dent
+   * mutations to polygonPoints don't reach back and shrink the stored
+   * erase footprint.  The stored polygon is what eraseStaticTileFromCache
+   * uses — covers the maximum footprint anything was ever stamped at
+   * for this tile, so post-dent or on-death erases never leave a halo
+   * of original rim around the now-smaller current polygon.
+   */
+  private captureStampPolyOnce(e: GameEntity): void {
+      if (e._staticStampPoly !== undefined) return;
+      const pts = e.polygonPoints;
+      if (!pts || pts.length === 0) return;
+      const copy: Vector2[] = new Array(pts.length);
+      for (let i = 0; i < pts.length; i++) copy[i] = { x: pts[i].x, y: pts[i].y };
+      e._staticStampPoly = copy;
+  }
+
+  /**
+   * Erase a tile's stamped pixels from the world-tile canvas via
+   * destination-out compositing.  Always clears regardless of the
+   * tile's current `_staticCached` flag — used in three situations:
+   *  - fast→slow transitions (tile entered glow / hit flash / regen);
+   *  - tile destruction (active flipped false);
+   *  - pre-stamp scrub on a transition where polygonPoints may have
+   *    been mutated since the last stamp (rock-tile dent).
+   *
+   * Erases along the polygon outline at exactly 1× the stamp scale.
+   * Hex tiles in a grid abut directly — adjacent polygons share an
+   * edge, no gap — so any erase polygon LARGER than the stamp would
+   * bite into neighbouring cached tiles, leaving transparent wedges
+   * around their edges (reads as heavy black outlines on dark
+   * backgrounds).  At 1×, the erase covers exactly the stamp's
+   * footprint and stops at the shared edge; neighbours stay intact.
+   * Tiny anti-aliasing residue at the polygon edge is masked by the
+   * slow-path render that paints in that area immediately after.
+   *
+   * Tiles without polygonPoints fall back to the rect path with a
+   * small margin — none today, but defensive.
+   */
+  private eraseStaticTileFromCache(e: GameEntity): void {
+      const cx = this._staticTileCanvasCtx;
+      if (!cx) return;
+      const s = this._staticTileScale;
+      const halfMapW = this._staticTileMapW / 2;
+      const halfMapH = this._staticTileMapH / 2;
+      const wx = (e.position.x + halfMapW) * s;
+      const wy = (e.position.y + halfMapH) * s;
+      const prevOp = cx.globalCompositeOperation;
+      cx.globalCompositeOperation = 'destination-out';
+      cx.fillStyle = '#000';
+      // Prefer the polygon captured at first stamp — it covers the
+      // maximum footprint anything was ever stamped at for this tile,
+      // so post-dent or on-death erases never leave a halo of original
+      // rim around the (now smaller) current polygonPoints.  Falls
+      // back to current polygon for tiles that somehow reach erase
+      // without a first stamp, and finally to a rect for tiles
+      // without polygonPoints at all.
+      const pts = e._staticStampPoly ?? e.polygonPoints;
+      if (pts && pts.length > 0) {
+          cx.save();
+          cx.translate(wx, wy);
+          cx.beginPath();
+          cx.moveTo(pts[0].x * s, pts[0].y * s);
+          for (let i = 1; i < pts.length; i++) {
+              cx.lineTo(pts[i].x * s, pts[i].y * s);
+          }
+          cx.closePath();
+          cx.fill();
+          cx.restore();
+      } else {
+          const maxDim = Math.max(e.size.x, e.size.y);
+          const eraseSize = maxDim * 1.1 * s;
+          const eHalf = eraseSize / 2;
+          cx.fillRect(wx - eHalf, wy - eHalf, eraseSize, eraseSize);
+      }
+      cx.globalCompositeOperation = prevOp;
+      e._staticCached = false;
+      this._staticTileCacheSet.delete(e);
+  }
+
+  /**
+   * Build the static-tile world canvas from scratch.  Called from
+   * GameEngine.loadMap right after buildMinimapStaticLayer.  Canvas is
+   * sized to cover one full toroidal wrap unit of the map at a scale
+   * picked to fit the STATIC_TILE_MAX_CANVAS_DIM budget; on smaller maps
+   * the canvas is 1:1 with world coords (zero blur), on larger maps the
+   * scale shrinks and the blit upscales (mild blur on close zoom).
+   */
+  public buildStaticTileLayer(entities: GameEntity[], mapWidth: number, mapHeight: number): void {
+      const maxWorld = Math.max(mapWidth, mapHeight);
+      let scale = 1.0;
+      if (maxWorld * scale > this.STATIC_TILE_MAX_CANVAS_DIM) {
+          scale = this.STATIC_TILE_MAX_CANVAS_DIM / maxWorld;
+      }
+      this._staticTileScale = scale;
+      this._staticTileMapW = mapWidth;
+      this._staticTileMapH = mapHeight;
+      const cW = Math.ceil(mapWidth * scale);
+      const cH = Math.ceil(mapHeight * scale);
+      const c = document.createElement('canvas');
+      c.width = cW;
+      c.height = cH;
+      const cx = c.getContext('2d');
+      if (!cx) { this._staticTileCanvas = null; return; }
+      this._staticTileCanvas = c;
+      this._staticTileCanvasCtx = cx;
+      this._staticTileCacheSet.clear();
+
+      // Hex sprite might still be loading; tiles below will silently skip
+      // and the next renderEntities sweep will lazily stamp them once the
+      // image completes.  Keeps map-load deterministic without blocking
+      // on the asset pipeline.
+      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      const hexReady = hexSprite.complete && hexSprite.naturalWidth > 0;
+
+      for (let i = 0; i < entities.length; i++) {
+          const e = entities[i];
+          if (!e.active || !this.isStaticTileCacheable(e)) {
+              e._staticCached = false;
+              continue;
+          }
+          if (!hexReady) { e._staticCached = false; continue; }
+          this.stampStaticTileToCache(e);
+      }
+  }
+
+  /**
+   * Blit the pre-baked static-tile canvas into the current camera-local
+   * world frame.  Called inside renderEntities's camera transform so
+   * world coords map straight to screen.  Handles toroidal wrap by
+   * always drawing 4 wrap-offset copies — most will fall outside the
+   * scissor rect and become near-noop GPU blits, so this is cheaper
+   * than computing which copies are needed every frame.
+   */
+  private blitStaticTileLayer(ctx: CanvasRenderingContext2D): void {
+      const canvas = this._staticTileCanvas;
+      if (!canvas) return;
+      const mapW = this._staticTileMapW;
+      const mapH = this._staticTileMapH;
+      const x0 = -mapW / 2;
+      const y0 = -mapH / 2;
+      ctx.drawImage(canvas, x0,        y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0,        mapW, mapH);
+      ctx.drawImage(canvas, x0,        y0 + mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0,        y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0 + mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 + mapW, y0 - mapH, mapW, mapH);
+      ctx.drawImage(canvas, x0 - mapW, y0 + mapH, mapW, mapH);
+  }
+
+  /**
+   * Pre-frame pass that resolves fast↔slow appearance transitions BEFORE
+   * the static-tile canvas is blitted into the world frame.  Without
+   * this pass, a tile entering its glow / hit flash window would draw
+   * its slow-path overlay on top of the cache's still-present base
+   * appearance for one frame — a brief one-frame brightening glitch.
+   *
+   * Walks `_visibleEntities` (the camera-culled candidate list already
+   * built by renderEntities's caller in prepareFrameEntities) and, for
+   * each cacheable static tile, decides whether the cache stamp should
+   * be present and transitions if it isn't.  Off-screen tiles can't
+   * cause this glitch (the player can't see them) so we don't bother
+   * walking the master list.
+   */
+  private prepareStaticTileCacheForFrame(playerPos: Vector2 | undefined): void {
+      if (!this._staticTileCanvas) return;
+      const entries = this._visibleEntities;
+      for (let i = 0; i < entries.length; i++) {
+          const entity = entries[i].entity;
+          if (!this.isStaticTileCacheable(entity)) continue;
+          // Reproduce the fast-path acceptance check used in renderEntities
+          // so a tile that's about to take the slow path gets erased now,
+          // before the canvas blit paints its stale base.  Glass tiles
+          // also brighten on contact via repelImpulse — same gate as the
+          // existing fast-path branch.
+          let inGlowRange = false;
+          if (entity.shardVariant === 'glass-tile') {
+              inGlowRange = (entity.repelImpulse ?? 0) > 0;
+          } else if (playerPos && entity.shardVariant !== undefined) {
+              const g = SHARD_VARIANTS[entity.shardVariant].glow;
+              if (g !== undefined) {
+                  const fpdx = wrapDeltaX(entity.position.x, playerPos.x);
+                  const fpdy = wrapDeltaY(entity.position.y, playerPos.y);
+                  inGlowRange = fpdx * fpdx + fpdy * fpdy < g.range * g.range;
+              }
+          }
+          const wantsCache = entity.active
+              && !entity.hitFlash
+              && entity.regenPopTimer === undefined
+              && !inGlowRange;
+          if (wantsCache && entity._staticCached !== true) {
+              // Pre-scrub the stamp area in case polygonPoints was
+              // mutated since the last stamp (rock-tile dent) — without
+              // this the new (smaller) polygon paints inside the old
+              // outline, leaving a halo of stale pixels around the dent.
+              this.eraseStaticTileFromCache(entity);
+              this.stampStaticTileToCache(entity);
+          } else if (!wantsCache && entity._staticCached === true) {
+              this.eraseStaticTileFromCache(entity);
+          }
+      }
+  }
+
+  /**
+   * Sync the static-tile cache against any tile-destruction events that
+   * happened since the last frame.  Called at the top of render() so
+   * stale tiles don't linger as ghost stamps after the gameplay state
+   * removes them.  Cheap: only walks tiles currently in the cache.
+   */
+  private syncStaticTileCacheAgainstDeaths(): void {
+      if (this._staticTileCacheSet.size === 0) return;
+      // Collect first to avoid mutating set while iterating.
+      let dead: GameEntity[] | null = null;
+      for (const e of this._staticTileCacheSet) {
+          if (!e.active) {
+              if (dead === null) dead = [];
+              dead.push(e);
+          }
+      }
+      if (dead) {
+          for (let i = 0; i < dead.length; i++) this.eraseStaticTileFromCache(dead[i]);
+      }
+  }
+
   public render(
     entities: GameEntity[],
     camera: CameraState,
@@ -886,6 +1210,10 @@ export class RenderSystem {
     // Sort indicators once for the frame
     this._indicatorBuffer.sort((a, b) => b.distSq - a.distSq);
 
+    // Drop any tiles from the static cache that died since the previous
+    // frame so we don't paint a ghost copy from the pre-baked canvas.
+    this.syncStaticTileCacheAgainstDeaths();
+
     // 1. Clear & Background
     ctx.clearRect(0, 0, width, height);
     
@@ -921,6 +1249,20 @@ export class RenderSystem {
     // entities, so a ship/projectile trail crossing a nebula cloud stays
     // visible on top of it instead of vanishing underneath.
     this.renderTrails(ctx, this._trailEntities, camera);
+
+    // 4a₀. Pre-baked static-tile canvas blit.  Replaces ~400-800 per-tile
+    // drawImage calls below with at most 9 wrap-aware blits.  Tiles whose
+    // appearance is currently in the cache will skip their per-entity
+    // draw in renderEntities; tiles with slow-path overlays (glow, hit
+    // flash, regen) will have been erased from the cache and rendered
+    // via the existing per-entity slow path on top of the blit.
+    //
+    // Resolve any pending fast↔slow appearance transitions on visible
+    // cacheable tiles BEFORE the blit, so the canvas state matches
+    // what each tile actually needs this frame — prevents the 1-frame
+    // double-paint a same-frame transition would otherwise produce.
+    this.prepareStaticTileCacheForFrame(playerPos);
+    this.blitStaticTileLayer(ctx);
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -1315,16 +1657,22 @@ export class RenderSystem {
       }
   }
 
-  // Reusable scratch buffer for shifted trail coordinates — keeps the
-  // trail path tool allocation-free even when every projectile in the
-  // scene is rendering a 30-point trail.
+  // Reusable scratch buffers for shifted trail coordinates and per-point
+  // edge normals — keeps trail rendering allocation-free even when every
+  // projectile in the scene is drawing a 30-point trail.  The normal
+  // buffers eliminate the duplicate sqrt+div pair that the forward and
+  // backward strip passes previously each performed on the same data.
   private _trailShiftedX: Float32Array = new Float32Array(64);
   private _trailShiftedY: Float32Array = new Float32Array(64);
+  private _trailNX: Float32Array = new Float32Array(64);
+  private _trailNY: Float32Array = new Float32Array(64);
   private _ensureTrailScratch(n: number) {
       if (this._trailShiftedX.length < n) {
           const next = Math.max(n, this._trailShiftedX.length * 2);
           this._trailShiftedX = new Float32Array(next);
           this._trailShiftedY = new Float32Array(next);
+          this._trailNX = new Float32Array(next);
+          this._trailNY = new Float32Array(next);
       }
   }
 
@@ -1352,56 +1700,50 @@ export class RenderSystem {
       // --- OPTIMIZATION: Polygon Strip (One draw call per trail) ---
       ctx.beginPath();
 
+      // Pre-compute per-point normals once.  The forward and backward
+      // strip passes below use identical normals (they only differ in
+      // the sign of the width offset), so doing this in one pass replaces
+      // 2N sqrt+div pairs with N — eliminating ~half the trig cost on
+      // every visible projectile trail.
+      const nxBuf = this._trailNX;
+      const nyBuf = this._trailNY;
+      const n = t.length;
+      for (let i = 0; i < n; i++) {
+          let dx = 0, dy = 0;
+          if (i < n - 1) {
+              dx = sx[i+1] - sx[i];
+              dy = sy[i+1] - sy[i];
+          } else if (i > 0) {
+              dx = sx[i] - sx[i-1];
+              dy = sy[i] - sy[i-1];
+          }
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              nxBuf[i] = -dy * inv;
+              nyBuf[i] = dx * inv;
+          } else {
+              nxBuf[i] = 0;
+              nyBuf[i] = 0;
+          }
+      }
+
       // Forward pass: Right side of trail
-      for (let i = 0; i < t.length; i++) {
+      for (let i = 0; i < n; i++) {
           const p = t[i];
           const ratio = p.lifetime / p.maxLifetime;
           if (ratio <= 0) continue;
           const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2; // Half width
-
-          // Simple normal calculation (perpendicular to velocity approximation)
-          // For first point, use next point. For last, use prev.
-          let nx = 0, ny = 0;
-          if (i < t.length - 1) {
-              const dx = sx[i+1] - sx[i];
-              const dy = sy[i+1] - sy[i];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          } else if (i > 0) {
-              const dx = sx[i] - sx[i-1];
-              const dy = sy[i] - sy[i-1];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          }
-
-          ctx.lineTo(sx[i] + nx * width, sy[i] + ny * width);
+          ctx.lineTo(sx[i] + nxBuf[i] * width, sy[i] + nyBuf[i] * width);
       }
 
-      // Backward pass: Left side of trail
-      for (let i = t.length - 1; i >= 0; i--) {
+      // Backward pass: Left side of trail (same normals, negated width).
+      for (let i = n - 1; i >= 0; i--) {
           const p = t[i];
           const ratio = p.lifetime / p.maxLifetime;
           if (ratio <= 0) continue;
           const width = (p.scale ?? 1) * (1 + (ratio * 5)) / 2;
-
-          let nx = 0, ny = 0;
-          if (i < t.length - 1) {
-              const dx = sx[i+1] - sx[i];
-              const dy = sy[i+1] - sy[i];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          } else if (i > 0) {
-              const dx = sx[i] - sx[i-1];
-              const dy = sy[i] - sy[i-1];
-              const len = Math.sqrt(dx*dx + dy*dy) || 1;
-              nx = -dy / len;
-              ny = dx / len;
-          }
-
-          ctx.lineTo(sx[i] - nx * width, sy[i] - ny * width);
+          ctx.lineTo(sx[i] - nxBuf[i] * width, sy[i] - nyBuf[i] * width);
       }
 
       ctx.closePath();
@@ -1617,6 +1959,15 @@ export class RenderSystem {
       // Particles are handled separately in renderParticles() — skip here
       if (entity.type === EntityType.PARTICLE) return;
 
+      // ── Static-tile cache skip ─────────────────────────────────────
+      // Cacheable static tiles whose pre-blit prepare pass stamped them
+      // into the world-tile canvas this frame are already painted by
+      // the blit — no per-entity draw needed.  The prepare pass already
+      // erased any tile that has slow-path overlays active (glow / hit
+      // flash / regen) so reaching the per-entity path means the tile
+      // legitimately needs the slow-path render below.
+      if (entity._staticCached === true) return;
+
       // ── Fast-path STRUCTURE sprite render ───────────────────────────
       // Structures have rotation = 0, no per-entity ctx state changes,
       // and almost always render as a single drawImage call.  Skipping
@@ -1658,6 +2009,12 @@ export class RenderSystem {
           && entity.active && hexReady
           && !entity.hitFlash && entity.regenPopTimer === undefined
           && !inGlowRange) {
+          // Fallback fast path for tiles not currently in the static
+          // canvas (e.g. world-canvas allocation failed, hex sprite was
+          // still loading at map load, or pre-blit prepare missed an
+          // off-screen→on-screen transition this frame).  Cached tiles
+          // are short-circuited by the early-return at the top of this
+          // forEach so they never reach here.
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
@@ -1914,7 +2271,12 @@ export class RenderSystem {
                   }
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
-                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
+                  // Optional per-entity multiplier so callers can ask for
+                  // a wispier-than-default puff (rock-tile / rock-shard
+                  // shatter callers set ~0.5 so their nebula debris
+                  // reads as a faint dust cloud rather than a solid
+                  // tinted shard).
+                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul * (entity.nebulaAlphaMul ?? 1);
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
                   // Populate the nebula fast-path cache while we have
@@ -2189,11 +2551,17 @@ export class RenderSystem {
 
                 // Proximity tint: edge shifts from cool blue-white → bright cyan.
                 // Toroidal delta so tiles across a seam reveal the same tint
-                // treatment as tiles on the same side of the map.
+                // treatment as tiles on the same side of the map.  Squared
+                // early-out skips the sqrt for tiles outside the prox range
+                // (the vast majority on densely-tiled maps).
                 const PROX_RANGE = 120;
+                const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
-                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const pdistSq = pdx * pdx + pdy * pdy;
+                const prox = pdistSq >= PROX_RANGE_SQ
+                    ? 0
+                    : Math.max(0, 1 - Math.sqrt(pdistSq) / PROX_RANGE);
 
                 const edgeR = Math.round(186 - prox * 83);
                 const edgeG = Math.round(230 + prox * 2);
@@ -2804,6 +3172,28 @@ export class RenderSystem {
                         ctx.lineWidth   = 2;
                         ctx.stroke();
                     }
+
+                    // Damage cracks for rock-tile — accumulate one per
+                    // dent hit via PhysicsSystem.applyDentStep and draw
+                    // here on top of the fill.  Slate-900 at 70 % alpha
+                    // so cracks read as natural fracture shadow rather
+                    // than opaque outlines; the rock fill shows
+                    // through.  Drawn in entity-local space (ctx is
+                    // already translated + rotated to the entity centre
+                    // by the setTransform earlier in renderEntities).
+                    if (entity.shardVariant === 'rock-tile' && entity.damageCracks) {
+                        const cracks = entity.damageCracks;
+                        ctx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
+                        ctx.lineWidth   = 2;
+                        ctx.lineCap     = 'round';
+                        for (let i = 0; i < cracks.length; i++) {
+                            const c = cracks[i];
+                            ctx.beginPath();
+                            ctx.moveTo(c.x1, c.y1);
+                            ctx.lineTo(c.x2, c.y2);
+                            ctx.stroke();
+                        }
+                    }
                 }
 
                 // Proximity bloom for rock-tile (the only entity in this
@@ -2964,11 +3354,16 @@ export class RenderSystem {
                     ctx.closePath();
                 };
 
-                // Proximity tint — same formula as full tile (toroidal)
+                // Proximity tint — same formula as full tile (toroidal).
+                // Squared early-out skips the sqrt for tiles outside range.
                 const PROX_RANGE = 120;
+                const PROX_RANGE_SQ = PROX_RANGE * PROX_RANGE;
                 const pdx = playerPos ? wrapDeltaX(playerPos.x, entity.position.x) : Infinity;
                 const pdy = playerPos ? wrapDeltaY(playerPos.y, entity.position.y) : Infinity;
-                const prox = Math.max(0, 1 - Math.sqrt(pdx * pdx + pdy * pdy) / PROX_RANGE);
+                const pdistSq = pdx * pdx + pdy * pdy;
+                const prox = pdistSq >= PROX_RANGE_SQ
+                    ? 0
+                    : Math.max(0, 1 - Math.sqrt(pdistSq) / PROX_RANGE);
                 const edgeR = Math.round(186 - prox * 83);
                 const edgeG = Math.round(230 + prox * 2);
                 const edgeB = Math.round(253 - prox * 4);
@@ -3495,8 +3890,12 @@ export class RenderSystem {
           const dy = wrapDeltaY(playerPos.y, t.position.y);
           const angle = Math.atan2(dy, dx);
 
+          // One sqrt per indicator instead of two — the distance-text
+          // branch below would otherwise recompute it.
+          const dist = Math.sqrt(item.distSq);
+
           // Skip if the enemy is already closer than the indicator ring
-          const screenDist = Math.sqrt(item.distSq) * camera.zoom;
+          const screenDist = dist * camera.zoom;
           if (t.type === EntityType.ENEMY && screenDist < RADIUS) continue;
 
           const ix = cx + Math.cos(angle) * RADIUS;
@@ -3534,12 +3933,12 @@ export class RenderSystem {
           // Distance Text (only if far)
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
 
-          if (item.distSq > threshold) { 
+          if (item.distSq > threshold) {
                ctx.rotate(-angle);
                ctx.fillStyle = 'rgba(255,255,255,0.7)';
                ctx.font = '10px monospace';
                ctx.textAlign = 'center';
-               const d = Math.round(Math.sqrt(item.distSq));
+               const d = Math.round(dist);
                ctx.fillText(`${d}m`, 0, 24);
           }
 
@@ -3635,7 +4034,9 @@ export class RenderSystem {
           ctx.fill();
 
           if (slotW >= 28) {
-              const label = wCfg.name.split(' ').map((w: string) => w[0]).join('').substring(0, 3);
+              // Pre-computed at module init in constants.ts — saves per-frame
+              // split/map/join string allocation for every visible weapon slot.
+              const label = WEAPON_SLOT_LABELS[wCfg.type] ?? '';
               ctx.font        = `bold ${Math.max(7, Math.min(8, slotW * 0.19))}px monospace`;
               ctx.globalAlpha = canFire ? 0.7 : 0.2;
               ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';

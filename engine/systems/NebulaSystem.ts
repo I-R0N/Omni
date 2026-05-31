@@ -25,6 +25,7 @@ import { DropSystem } from './DropSystem';
 import { PhysicsSystem } from './PhysicsSystem';
 import type { PerfController } from './PerfController';
 import { wrapDeltaX, wrapDeltaY, wrapPosition, MAP_WIDTH, MAP_HEIGHT } from '../toroidal';
+import { getCollisionR } from '../entityCache';
 
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
@@ -354,7 +355,7 @@ export class NebulaSystem {
                     if (!nTile || !nTile.active || nTile.mergeFadeTimer !== undefined) continue;
                     if (!nTile.nebulaColorComposition || !nTile.nebulaColorComposition[0]) continue;
                     const nHue = clampHueToPalette(hexToHueDeg(nTile.nebulaColorComposition[0].hex));
-                    const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+                    const r = getCollisionR(nTile);
                     neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
                 }
                 if (neighborEntries.length === 0) continue; // isolated tile keeps its hue
@@ -743,7 +744,7 @@ export class NebulaSystem {
                 const hex = nTile.nebulaColorComposition[0]?.hex;
                 if (!hex) continue;
                 const nHue = clampHueToPalette(hexToHueDeg(hex));
-                const r = Math.max(nTile.size.x, nTile.size.y) / 2;
+                const r = getCollisionR(nTile);
                 neighborEntries.push({ hue: nHue, weight: Math.PI * r * r });
             }
         }

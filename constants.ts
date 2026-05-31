@@ -2249,6 +2249,18 @@ export const WEAPON_LIST = [
   WeaponType.CANNON,
 ];
 
+// Pre-computed slot abbreviations for the ammo HUD (initials of each word in
+// the weapon's display name, capped at 3 chars).  Built once on module init
+// so the HUD render path avoids per-frame split/map/join string churn for
+// every visible weapon slot.
+export const WEAPON_SLOT_LABELS: Record<WeaponType, string> = (() => {
+  const out = {} as Record<WeaponType, string>;
+  for (const wt of WEAPON_LIST) {
+    out[wt] = WEAPONS[wt].name.split(' ').map(w => w[0]).join('').substring(0, 3);
+  }
+  return out;
+})();
+
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
 export const ENEMY_BURST_CONFIG = {
@@ -2960,11 +2972,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
-    // Proximity lighting — a red/orange bloom that warms the light-gray
-    // rock face near the player.  Fill-only radial bloom, no edge
-    // stroke; drawn from the asteroid/shard render branch, gated to
-    // static tiles (mass=∞) so rock-shards are excluded.
-    glow: { color: '#ea580c', range: 250, peakAlpha: 0.33 },
+    // Rock-tile has no proximity glow — the brittle slate fill reads
+    // cleanly without a warming halo, and removing the glow lets the
+    // static-tile world canvas keep the tile cached even when the
+    // player is nearby (no fast↔slow transition churn).
     // Rock-tile uses the 'pull' dent kind (default) with
     // pullVertexCount = 3: each hit pulls the closest vertex AND
     // both immediate neighbours inward, each by its own random

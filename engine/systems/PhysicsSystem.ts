@@ -54,6 +54,7 @@ function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCo
     e.dentY = newDY;
 }
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
+import { getCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -104,6 +105,15 @@ export class PhysicsSystem {
   // savings the DBG slider was missing when shard-shard pairs
   // were inline in the main collision pass.
   private shardGrid: Map<number, GameEntity[]> = new Map();
+
+  // True if any static tile on the current map emits a repel field
+  // (glass-tile / metal-tile today).  Set in initializeStaticGrid by
+  // walking the entity list once.  When false, the 5×5 repel-cell scan
+  // inside handleEntityCollisions can short-circuit entirely — saves
+  // ~25 Map lookups per dynamic entity per frame on maps with no repel
+  // emitters (most showcase maps, plus any natural map composed only of
+  // indestructible / plastic / rock / nebula tiles).
+  private _anyRepelTilesPresent: boolean = false;
 
   // Cached list of gravitational attractors (planets/stars — entities with
   // `gravityRange > 0`).  Populated once per map via initializeAttractors()
@@ -255,6 +265,7 @@ export class PhysicsSystem {
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
       this.staticGrid.clear();
+      this._anyRepelTilesPresent = false;
 
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
@@ -268,6 +279,14 @@ export class PhysicsSystem {
                    this.staticGrid.set(key, cell);
                }
                cell.push(e);
+               // While we're walking the static set anyway, note whether
+               // any tile emits a repel field — used to short-circuit the
+               // 5×5 repel-cell scan in handleEntityCollisions on maps
+               // where no tile pushes back.
+               if (e.shardVariant !== undefined
+                   && SHARD_VARIANTS[e.shardVariant].repel !== undefined) {
+                   this._anyRepelTilesPresent = true;
+               }
           }
       }
   }
@@ -786,19 +805,21 @@ export class PhysicsSystem {
           const distSq = dx*dx + dy*dy;
 
           if (distSq < rangeSq && distSq > minDistSq) {
-              const dist = Math.sqrt(distSq);
-              const forceMag = (STRENGTH / dist) * timeScale; // Normalize force by time
-              const ndx = dx / dist;
-              const ndy = dy / dist;
+              // Fold the 1/dist normalisation into the force scalar so
+              // each velocity axis is one mul instead of one div + one mul.
+              const invDist = 1 / Math.sqrt(distSq);
+              const forceMag = (STRENGTH * invDist) * timeScale; // Normalize force by time
+              const kx = dx * invDist * forceMag;
+              const ky = dy * invDist * forceMag;
 
               // Pull Asteroid
-              e.velocity.x += ndx * forceMag;
-              e.velocity.y += ndy * forceMag;
+              e.velocity.x += kx;
+              e.velocity.y += ky;
 
               // Pull Player
-              const accelPlayer = forceMag * (e.mass / player.mass) * PLAYER_INFLUENCE;
-              player.velocity.x -= ndx * accelPlayer;
-              player.velocity.y -= ndy * accelPlayer;
+              const playerScale = (e.mass / player.mass) * PLAYER_INFLUENCE;
+              player.velocity.x -= kx * playerScale;
+              player.velocity.y -= ky * playerScale;
           }
       }
   }
@@ -839,18 +860,17 @@ export class PhysicsSystem {
             }
 
             if (distSq < rangeSq) {
-                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000); 
+                const force = (attractor.gravityStrength || 1000) / Math.max(distSq, 10000);
                 const maxAccel = entity.type === EntityType.PLAYER ? 0.2 : 5.0;
-                
+
                 // Scale force by time step so higher framerates don't increase gravity strength
                 const clampedForce = Math.min(force, maxAccel) * timeScale;
 
-                const dist = Math.sqrt(distSq);
-                const ax = (dx / dist) * clampedForce;
-                const ay = (dy / dist) * clampedForce;
-
-                entity.velocity.x += ax;
-                entity.velocity.y += ay;
+                // One reciprocal-sqrt for two normalised axes — one div instead
+                // of two.  Same math, half the per-pair division cost.
+                const k = clampedForce / Math.sqrt(distSq);
+                entity.velocity.x += dx * k;
+                entity.velocity.y += dy * k;
             }
         }
     }
@@ -968,8 +988,12 @@ export class PhysicsSystem {
         // distance compare and (when in range) one sqrt + one
         // velocity nudge.  No allocations on the hot path.
         const aVariantDef = a.shardVariant !== undefined ? SHARD_VARIANTS[a.shardVariant] : undefined;
+        // Map-level short-circuit: when the current map has zero static
+        // tiles emitting a repel field, the 5×5 cell scan below will
+        // find no emitters in any cell, so skip the walk entirely.
         const aRepellable =
-            a.type !== EntityType.PROJECTILE
+            this._anyRepelTilesPresent
+            && a.type !== EntityType.PROJECTILE
             && a.type !== EntityType.PARTICLE
             && aVariantDef?.repelImmune !== true;
         // Hoisted per-emitter immunity list — metal-shard ignores
@@ -1229,6 +1253,38 @@ export class PhysicsSystem {
           const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
+      }
+
+      // polygonPoints mutated → invalidate any cached SAT axes (the
+      // edge normals derived from those points are now stale) AND the
+      // static-tile world-canvas stamp (which baked the old polygon
+      // outline).  Both caches re-populate lazily on next use.
+      tile._satCacheAxes = undefined;
+      if (tile._staticCached === true) tile._staticCached = false;
+
+      // Damage indicator for rock-tile: append a short crack line in
+      // entity-local space.  Drawn over the cache stamp's fill on the
+      // next pre-blit re-stamp (the cache-invalidate just above forces
+      // a re-stamp this frame), so accumulating dents read as visible
+      // cracks even though rock-tile renders no edge outline.  Bounded
+      // so a swarm of stray hits doesn't pile up indefinitely; the
+      // tile dies long before this cap matters in normal play.
+      if (tile.shardVariant === 'rock-tile') {
+          if (!tile.damageCracks) tile.damageCracks = [];
+          if (tile.damageCracks.length < 8) {
+              const R = Math.max(tile.size.x, tile.size.y) * 0.5;
+              const angle = Math.random() * Math.PI * 2;
+              const startR = R * (Math.random() * 0.25);
+              const lenR = R * (0.45 + Math.random() * 0.35);
+              const ca = Math.cos(angle);
+              const sa = Math.sin(angle);
+              tile.damageCracks.push({
+                  x1: ca * startR,
+                  y1: sa * startR,
+                  x2: ca * (startR + lenR),
+                  y2: sa * (startR + lenR),
+              });
+          }
       }
   }
 
@@ -1896,8 +1952,10 @@ export class PhysicsSystem {
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
-      let rA = Math.max(a.size.x, a.size.y) / 2;
-      let rB = Math.max(b.size.x, b.size.y) / 2;
+      // Cached bounding-radius lookup — getCollisionR() is a 1-field read
+      // on cache hit (vast majority of frames) vs. Math.max + division.
+      let rA = getCollisionR(a);
+      let rB = getCollisionR(b);
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
@@ -1950,8 +2008,9 @@ export class PhysicsSystem {
       const countA = this.fillVertices(a, this.bufferVerticesA);
       const countB = this.fillVertices(b, this.bufferVerticesB);
       
-      // Calculate Axes into buffer
-      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes);
+      // Calculate Axes into buffer.  Pass entity refs so static-entity
+      // axes are pulled from cache instead of recomputed every pair.
+      const axesCount = this.fillAxes(this.bufferVerticesA, countA, this.bufferVerticesB, countB, this.bufferAxes, a, b);
 
       let minOverlap = Infinity;
       let smallestAxisX = 0;
@@ -2891,8 +2950,23 @@ export class PhysicsSystem {
           ? SHIELD_CONSTANTS.COLLISION_MULTIPLIER : 1;
 
       if (e.polygonPoints && e.polygonPoints.length > 0) {
-          const cos = Math.cos(e.rotation);
-          const sin = Math.sin(e.rotation);
+          // Static entities (mass === Infinity) never rotate after spawn, so
+          // their cos/sin are cached on first use and re-used across every
+          // future collision pair the entity participates in.  Dynamic
+          // entities take the trig path normally — their rotation can change
+          // each substep so caching would be unsafe.
+          let cos: number, sin: number;
+          if (e.mass === Infinity && e._satCacheCos !== undefined) {
+              cos = e._satCacheCos;
+              sin = e._satCacheSin!;
+          } else {
+              cos = Math.cos(e.rotation);
+              sin = Math.sin(e.rotation);
+              if (e.mass === Infinity) {
+                  e._satCacheCos = cos;
+                  e._satCacheSin = sin;
+              }
+          }
 
           // Warn once if an entity ever exceeds the vertex cap — the break
           // below still protects against buffer overrun, but a truncated
@@ -2927,37 +3001,68 @@ export class PhysicsSystem {
       return count;
   }
 
-  private fillAxes(vertsA: Vector2[], countA: number, vertsB: Vector2[], countB: number, bufferAxes: Vector2[]): number {
+  private fillAxes(
+      vertsA: Vector2[], countA: number,
+      vertsB: Vector2[], countB: number,
+      bufferAxes: Vector2[],
+      eA?: GameEntity, eB?: GameEntity,
+  ): number {
       let axisIdx = 0;
-      
-      // Axes for A
-      for (let i = 0; i < countA; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsA[i];
-          const p2 = vertsA[(i + 1) % countA];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
-              axisIdx++;
-          }
-      }
-      // Axes for B
-      for (let i = 0; i < countB; i++) {
-          if (axisIdx >= bufferAxes.length) break;
-          const p1 = vertsB[i];
-          const p2 = vertsB[(i + 1) % countB];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0.001) {
-              bufferAxes[axisIdx].x = -dy / len;
-              bufferAxes[axisIdx].y = dx / len;
-              axisIdx++;
-          }
-      }
+      axisIdx = this.fillEntityAxes(vertsA, countA, bufferAxes, axisIdx, eA);
+      axisIdx = this.fillEntityAxes(vertsB, countB, bufferAxes, axisIdx, eB);
       return axisIdx;
+  }
+
+  /**
+   * Append normalised edge normals for ONE entity to bufferAxes.  Static
+   * entities (mass === Infinity) get a permanent cached axis list stamped
+   * onto the entity on first use — their polygon shape and rotation are
+   * frozen at spawn, so the world-space axes never change.  Subsequent
+   * collisions involving the same static entity skip the sqrt+inverse-
+   * multiply per edge entirely and only pay a memcpy.
+   *
+   * Dynamic entities (and callers that don't pass an entity ref) take the
+   * compute path, identical to the original fillAxes loop.
+   */
+  private fillEntityAxes(
+      verts: Vector2[], count: number,
+      bufferAxes: Vector2[], startIdx: number,
+      e: GameEntity | undefined,
+  ): number {
+      // Fast path: cached world-space axes for static entities.
+      if (e && e.mass === Infinity && e._satCacheAxes !== undefined) {
+          const cache = e._satCacheAxes;
+          let idx = startIdx;
+          for (let i = 0; i < cache.length && idx < bufferAxes.length; i++) {
+              bufferAxes[idx].x = cache[i].x;
+              bufferAxes[idx].y = cache[i].y;
+              idx++;
+          }
+          return idx;
+      }
+      const wantCache = e !== undefined && e.mass === Infinity;
+      const newCache: Vector2[] | null = wantCache ? [] : null;
+      let idx = startIdx;
+      for (let i = 0; i < count; i++) {
+          if (idx >= bufferAxes.length) break;
+          const p1 = verts[i];
+          const p2 = verts[(i + 1) % count];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const lenSq = dx*dx + dy*dy;
+          if (lenSq > 0.000001) {
+              const inv = 1 / Math.sqrt(lenSq);
+              const ax = -dy * inv;
+              const ay = dx * inv;
+              bufferAxes[idx].x = ax;
+              bufferAxes[idx].y = ay;
+              idx++;
+              if (newCache) newCache.push({ x: ax, y: ay });
+          }
+      }
+      if (wantCache && e) {
+          e._satCacheAxes = newCache!;
+      }
+      return idx;
   }
 }

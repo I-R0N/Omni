@@ -33,6 +33,14 @@ function blendHexColors(hexA: string, hexB: string): string {
     return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
 }
 
+// Per-projectile-hit probability that a rock-tile dent emits a nebula-
+// puff shard.  Death-burst puffs (rock-tile end-of-life, rock-shard
+// shatter) are not gated by this — only the per-hit dust kick is.
+// Tuned so a player drilling a single rock-tile sees one puff per ~3
+// hits rather than every shot, matching the user-requested "occasional
+// dust" feel instead of a continuous cloud.
+const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
+
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -71,6 +79,12 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  // Damage-text object pool — see ParticleSystem._pool for the same
+  // pattern in entity-space.  Damage texts spawn a few per impact and
+  // expire on lifetime; reusing the objects across the spawn/despawn
+  // cycle removes the literal-allocation cost from the hot combat path.
+  private _damageTextPool: DamageText[] = [];
+  private readonly DAMAGE_TEXT_POOL_CAP = 64;
   private playerMessages: PlayerHUDMessage[] = [];
   private readonly MAX_PLAYER_MESSAGES = 6;
   private currentWeaponIndex: number = 0;
@@ -1755,11 +1769,20 @@ export class GameEngine {
 
       // In-place compaction (Garbage Free)
       // Inactive tiles with regenProgress set are kept as ghost placeholders.
+      // Inactive particles + projectiles are routed back to their owning
+      // system's object pool for reuse on the next spawn — saves the
+      // per-spawn allocation and the matching GC scan work.  All other
+      // inactive entity types just fall out of the array and let the GC
+      // collect them on the next sweep.
       let writeIdx = 0;
       for (let i = 0; i < this.currentMap.entities.length; i++) {
           const ent = this.currentMap.entities[i];
           if (ent.active || (ent.type === EntityType.STRUCTURE && ent.regenProgress !== undefined)) {
               this.currentMap.entities[writeIdx++] = ent;
+          } else if (ent.type === EntityType.PARTICLE) {
+              this.particles.releaseToPool(ent);
+          } else if (ent.type === EntityType.PROJECTILE) {
+              this.projectiles.releaseToPool(ent);
           }
       }
       this.currentMap.entities.length = writeIdx;
@@ -1842,6 +1865,7 @@ export class GameEngine {
                       0.45 + Math.random() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
                       comp,
+                      0.5,
                   );
               }
           }
@@ -1871,6 +1895,7 @@ export class GameEngine {
                       0.4 + Math.random() * 0.3,
                       entity.lastImpactVelocity,
                       comp,
+                      0.5,
                   );
               }
           }
@@ -1987,19 +2012,20 @@ export class GameEngine {
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
 
-    // Update Shake
+    // Update Shake.  Mutate shakeOffset in place rather than replacing the
+    // object — the field is read by reference downstream and a fresh object
+    // every active-shake frame is wasted GC pressure.
     if (this.shakeTimer > 0) {
         this.shakeTimer -= dt;
         const decay = Math.max(0, this.shakeTimer / CAMERA_CONSTANTS.SHAKE_DECAY); // Linear falloff
         const mag = this.shakeIntensity * decay;
-        
-        this.camera.shakeOffset = {
-            x: (Math.random() - 0.5) * mag * 2,
-            y: (Math.random() - 0.5) * mag * 2
-        };
 
         if (this.shakeTimer <= 0) {
-            this.camera.shakeOffset = { x: 0, y: 0 };
+            this.camera.shakeOffset.x = 0;
+            this.camera.shakeOffset.y = 0;
+        } else {
+            this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
+            this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
         }
     }
 
@@ -2296,7 +2322,8 @@ export class GameEngine {
     this.updateLightningGravity(dt);
     this.updateProjectileTrails(dt);
 
-    // Damage Text cleanup
+    // Damage Text cleanup.  Expired texts return to the pool for reuse
+    // by the next spawnDamageText call instead of being dropped to GC.
     let dTextIdx = 0;
     for (let i = 0; i < this.damageTexts.length; i++) {
         const t = this.damageTexts[i];
@@ -2305,6 +2332,8 @@ export class GameEngine {
         t.position.y += t.velocity.y * dt;
         if (t.lifetime > 0) {
             this.damageTexts[dTextIdx++] = t;
+        } else if (this._damageTextPool.length < this.DAMAGE_TEXT_POOL_CAP) {
+            this._damageTextPool.push(t);
         }
     }
     this.damageTexts.length = dTextIdx;
@@ -2519,19 +2548,32 @@ export class GameEngine {
           return;
       }
       const isCrit = amount > 3;
-      this.damageTexts.push({
-          id: nextId('dmg'),
-          position: { ...pos },
-          text: Math.round(amount).toString(),
-          velocity: {
-              x: (Math.random() - 0.5) * 10,
-              y: -DAMAGE_TEXT_CONSTANTS.SPEED
-          },
-          lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-          color: isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR,
-          active: true
-      });
+      const vx = (Math.random() - 0.5) * 10;
+      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+      const color = isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR;
+      const pooled = this._damageTextPool.pop();
+      if (pooled) {
+          pooled.id = nextId('dmg');
+          pooled.position.x = pos.x; pooled.position.y = pos.y;
+          pooled.text = Math.round(amount).toString();
+          pooled.velocity.x = vx; pooled.velocity.y = vy;
+          pooled.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          pooled.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          pooled.color = color;
+          pooled.active = true;
+          this.damageTexts.push(pooled);
+      } else {
+          this.damageTexts.push({
+              id: nextId('dmg'),
+              position: { x: pos.x, y: pos.y },
+              text: Math.round(amount).toString(),
+              velocity: { x: vx, y: vy },
+              lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+              maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
+              color,
+              active: true,
+          });
+      }
 
       // Dent-policy post-damage hooks — fire only while the tile is
       // still alive (target.health > 0).  Killing hits route through
@@ -2566,27 +2608,30 @@ export class GameEngine {
                   // selling the brittle fracture as both shrapnel and
                   // dust.  Only rock today; other dent variants want
                   // the cleaner solid-shard-only readout.
-                  if (target.shardVariant === 'rock-tile') {
+                  if (target.shardVariant === 'rock-tile' && Math.random() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
+                      // Occasional puff per hit (probability gated above)
+                      // at a varied size + small jitter on spawn position
+                      // so it doesn't overlap exactly.  Without the gate
+                      // every projectile that dented a rock-tile spawned
+                      // a puff, which read as a constant cloud trailing
+                      // the player rather than as occasional dust kicks.
                       const baseSize = this.deformedDiameter(target);
-                      // 1 puff per hit at a varied size + small jitter
-                      // on spawn position so it doesn't overlap exactly.
-                      for (let nb = 0; nb < 1; nb++) {
-                          const jitter = baseSize * 0.15;
-                          const puffPos = {
-                              x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
-                              y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
-                          };
-                          const comp = randomRockNebulaComposition();
-                          this.drops.spawnColoredNebulaShard(
-                              this.currentMap.entities,
-                              puffPos,
-                              baseSize,
-                              comp[0].hex,
-                              0.45 + Math.random() * 0.2,
-                              target.lastImpactVelocity,
-                              comp,
-                          );
-                      }
+                      const jitter = baseSize * 0.15;
+                      const puffPos = {
+                          x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
+                          y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                      };
+                      const comp = randomRockNebulaComposition();
+                      this.drops.spawnColoredNebulaShard(
+                          this.currentMap.entities,
+                          puffPos,
+                          baseSize,
+                          comp[0].hex,
+                          0.45 + Math.random() * 0.2,
+                          target.lastImpactVelocity,
+                          comp,
+                          0.5,
+                      );
                   }
               }
               // Intermediate dent-shard spawn (pull-kind variants):
@@ -3302,6 +3347,10 @@ export class GameEngine {
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // Pre-bake the world-tile static layer (glass + indestructible hex
+      // sprites) so the per-frame world render replaces hundreds of
+      // per-tile drawImage calls with a single (toroidal-wrapped) blit.
+      this.renderer.buildStaticTileLayer(map.entities, map.width, map.height);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
   }
