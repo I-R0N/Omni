@@ -475,35 +475,32 @@ k. After N waves, spawn a portal to a new map.
        (separate visual task, decision #27), per-shard
        mass / collision retune (decision #22).
 
-22. **material-balance-pass.** Three tuning items bundled
-    into one session, all touching how materials feel in
-    play:
-    a. **Reduce per-entity shard counts.** Audit the current
-       per-material shard composition from the PR #52 g1
-       over-delivery (rock = larger count; glass / plastic /
-       metal scaled relative). Reduce where the post-shatter
-       cloud feels excessive. Tunable via the existing
-       `breakShards` counts in `SHARD_VARIANTS`.
-    b. **Per-material shard mass retune.** Glass and plastic
-       shards should be light enough that the player flies
-       through dense shard fields without losing significant
-       velocity. Metal and rock shards should be heavy
-       enough that pushing through a cluster feels resistive.
-       Touches the `mass` field on the spawned-shard
-       defaults across SHARD_VARIANTS.
-    c. **Momentum audit.** Verify that today's
+22. **momentum-collisions (replaces prior material-balance-
+    pass).** User direction this turn: scope narrows to just
+    the momentum / velocity-in-collisions piece; the prior
+    bundled shard-count and per-material mass retune items
+    move to parked under decision #27. Scope:
+    a. **Momentum in the impulse path.** Verify that today's
        `PhysicsSystem.resolveCollision` impulse calculation
        and the PR #57 composite-collision additions account
-       for entity velocity AND mass in a way that reads
-       correctly to the player. If the impulse formula
-       feels lossy (player slows more than expected for the
-       material being pushed) tune the elastic / damping
-       constants. Out of scope: rewriting the impulse model
-       — only tuning constants and validating the existing
-       code path.
-    Runs after plastic-revert so the plastic mass / shard-
-    count baseline is the post-revert one, not the
-    softbody one.
+       for entity velocity in addition to mass. The user's
+       perception is that collisions read mass-dominant —
+       light fast things bounce off heavy slow things
+       instead of shoving them. Introduce / restore
+       velocity into the impulse so a fast small entity can
+       shove a heavy slow one (`p = mv` rather than mass-
+       only).
+    b. Tuning task — no rewrite of the impulse model. If the
+       formula already does the right thing on paper, retune
+       the elastic / damping constants until play matches
+       intent. If the formula is mass-only in practice,
+       extend it to use mv.
+    c. Out of scope: per-material shard mass retune, per-
+       entity shard-count reduction (both parked under
+       decision #27), any non-collision physics.
+    Runs after plastic-revert so the post-revert plastic
+    behaviour is what's being tuned against, not the
+    softbody-era behaviour.
 
 23. **map-composition (promoted from side-cleanup).** Two
     pieces:
@@ -583,7 +580,7 @@ k. After N waves, spawn a portal to a new map.
     a. **dbg-cleanup + perf-mode preset cycle** — DBG menu
        sweep + a single toggle that cycles through
        performance modes built on PerfController.
-       Parked this turn.
+       Parked.
     b. **Infinite maps with landmarks (planets)** — would
        replace the bounded-torus model from CLAUDE.md §1.
        Architectural; not in this arc. Distinct from
@@ -598,6 +595,18 @@ k. After N waves, spawn a portal to a new map.
        work to give metal a specular / reflective read.
        Revisit after material-palette-pass; the white-removal
        + blue-range palette may be enough.
+    e. **Per-entity shard-count reduction** (moved this
+       turn from the original material-balance-pass).
+       Audit per-material `breakShards` counts and reduce
+       where the post-shatter cloud feels excessive.
+       Decoupled from momentum-collisions because the user
+       narrowed that task to physics only. Revisit during
+       a future tuning beat.
+    f. **Per-material shard mass retune** (moved this turn
+       from the original material-balance-pass). Goal
+       was: glass / plastic feel light, metal / rock feel
+       heavy. Revisit if momentum-collisions doesn't
+       produce the desired material-weight read on its own.
     If any of these get pulled back in, promote from this
     decision to a new Phase 1 follow-up entry and a new
     decision number.
@@ -704,7 +713,8 @@ Run when convenient; can run in parallel with Phase 2.
 | ff-review | Asteroid/shard flow field audit + debug tooling | shipped (PR #56, merged into plan branch) | `claude/flow-field-debug-audit-IcwCq` | Audit doc at `docs/FLOW_FIELD_AUDIT.md` — 10 findings (4 L1 / 3 L2 / 3 L3). Consolidation answer: **don't consolidate** — analytical `FlowField.ts` is load-bearing for map-load streamline integration + per-respawn velocity bias before the grid exists; baked grid adds wall-repulsion the analytical formula can't provide. DBG overlays added: `AstFF` toggle, `FF Vec` arrows with sample-N cycle, `FF Cells` outlines, `FF Obs` obstacle tint, `FF Reb` rebuild flash. Three follow-ups deferred (#FF-1 obstacle-aware fallback, #FF-2 obstacle filter re-examination, #FF-3 asteroid-bake perf timer). One trivial doc fix in passing. |
 | perf-controller | Unified frame-skipping `PerfController` | shipped unplanned (PR #57, merged into plan branch) | `claude/omni-perf-controller-6ScG1` | **Not in original plan — user-initiated infra add (see decision #18).** New `engine/systems/PerfController.ts` replaces scattered AUTO interval tables with one coordinator. Each substep samples a load signal (entity count + collision-cell density + EWMA sim time), quantises to tiers with hysteresis, schedules tasks with phase offsets. Migrated gates: shard-pair, shard-tile-pair, color-blend, plastic-cosmetic. Newly skippable: AI state machine, flow-field pursuit flush, nebula neighbour recompute, drop-collection scan, plastic self-break. Dynamic merge-rate ladder by entity count (0.6× sparse → 3.5× crowded). New DBG "Perf" section. New constants: `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS`, `MERGE_RATE_CONSTANTS`. Pre-existing bug flagged but not fixed: `ShardSystem.completeRegen` references nonexistent `this.regenAdapter`. |
 | plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session, scope revised this turn.** Revert plastic-shard to standard polygon-shard render and behavior. Keep plastic-tile color scheme. **Keep** the DBG palette / color-cycle controls for plastic tiles and shards. **Keep** the nebula-based color-blend hook that plastic shards currently use (PR #54-style cellular-automata equilibration, plastic-only for now). **Drop** the soft-radial-gradient render, opacity cycle, composite-op cycle, polymer-chain bond, sleep gate, hex-shape tile render diff, stretch-stiffness cycle, snap/free toggle. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. **Per-partner bond strength** — glass-tile / glass-shard get a strong tier; other partners get a default tier (see decision #19). See decisions #19 + #22 (the material-balance-pass picks up shard counts / masses / momentum tuning afterward). |
-| material-balance-pass | Reduced shard counts + per-material mass retune + momentum audit | pending | `claude/material-balance-pass-<suffix>` | Three tuning items bundled. (1) Audit per-entity shard counts and reduce where the post-shatter cloud feels excessive. (2) Per-material shard mass retune so glass / plastic feel light (player flies through), metal / rock feel heavy (player slows). (3) Momentum audit: today's `PhysicsSystem.resolveCollision` impulse path + the PR #57 composite-collision additions — verify entity velocity and mass both feed the resolved impulse in a way that reads correctly; retune impulse constants if the player perceives lossy collisions. See decision #22. |
+| material-balance-pass | ~~Reduced shard counts + per-material mass retune + momentum audit~~ → see `momentum-collisions` | replaced this turn | — | Scope narrowed: shard-count reduction and per-material mass retune dropped from this batch (parked under decision #27); only the momentum / velocity-in-collisions piece carries forward as `momentum-collisions` below. |
+| momentum-collisions | Velocity-aware collision impulse | pending | `claude/momentum-collisions-<suffix>` | Audit `PhysicsSystem.resolveCollision` + the PR #57 composite-collision additions and ensure the impulse calculation accounts for entity velocity in addition to mass. Today's collisions read mass-dominant to the player; this task introduces velocity into the impulse path so a fast small entity can shove a heavy slow one. Tuning task — no rewrite of the impulse model. See decision #22 (rewritten). |
 | material-palette-pass | Material palette adjustments + automata coloring extension | pending | `claude/material-palette-pass-<suffix>` | **Expanded from prior decision #21.** Per-material palette work + cellular-automata colour blending applied across non-nebula tile families. Palette: metal loses white, gains a shiny-ready blue range; rock gains red+blue range; plastic palette tuned for cohesion-readability. Automata: extend `NebulaSystem.equilibrateColors`-style hue-lerp to rock + plastic (warm sub-arc) and glass + metal (cool sub-arc), gated by neighbour-tile count so dense clusters drift further from the base hue than sparse cells. Plastic equilibration already exists from PR #55 — extend the pattern. See decision #21 (rewritten). |
 | map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
 | minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
