@@ -373,6 +373,17 @@ export const PLASTIC_SHARD_AUTOMATA = {
   MAX_BRIGHTNESS: 1.6,
 } as const;
 
+// ── Plastic-shard flow-field affinity ──────────────────────────────
+// Multiplier on the asteroid flow-field correction blend rate
+// (FLOW_CORRECTION in GameEngine.applyFlow) applied only when the
+// entity being corrected is a plastic-shard.  Default 5× — at the
+// baseline 0.08 correction × max urgency 9 × FIXED_DT 1/120, this
+// raises the per-substep velocity-toward-target blend from ~0.6 %
+// to ~3 %, so plastic shards snap onto flow lanes within a fraction
+// of a second instead of drifting for several.  Reads like the wind
+// catches them.  Rock / glass / metal / nebula stay on the baseline.
+export const PLASTIC_SHARD_FLOW_MULT = 5;
+
 // PADIR toggle — direction of the PAuto automata.  false (default) =
 // darken dense interiors (mirrors nebula); true = brighten them.
 let activePlasticAutomataBrighten = true; // brighten dense interiors
