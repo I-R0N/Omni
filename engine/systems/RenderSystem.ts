@@ -871,19 +871,18 @@ export class RenderSystem {
    *  - pre-stamp scrub on a transition where polygonPoints may have
    *    been mutated since the last stamp (rock-tile dent).
    *
-   * Erases along the polygon outline (scaled 1.15× from the stamped
-   * polygon to cover any anti-aliased edge, sprite footprint, or
-   * post-dent shrinkage) rather than a bounding-box rect.  A rect
-   * erase of a hex polygon sized to cover the vertices necessarily
-   * extends past the hex's inscribed circle by the corner overhang,
-   * and on tightly-packed hex grids that overhang would bite into
-   * adjacent cached tiles — leaving transparent rectangles ("black
-   * squares") in the surrounding tile fills.  Polygon-fill erase has
-   * no corners and stays inside the tile's own footprint.
+   * Erases along the polygon outline at exactly 1× the stamp scale.
+   * Hex tiles in a grid abut directly — adjacent polygons share an
+   * edge, no gap — so any erase polygon LARGER than the stamp would
+   * bite into neighbouring cached tiles, leaving transparent wedges
+   * around their edges (reads as heavy black outlines on dark
+   * backgrounds).  At 1×, the erase covers exactly the stamp's
+   * footprint and stops at the shared edge; neighbours stay intact.
+   * Tiny anti-aliasing residue at the polygon edge is masked by the
+   * slow-path render that paints in that area immediately after.
    *
-   * Tiles without polygonPoints (none today, but the fallback keeps
-   * the helper safe if any new variant joins the cache) still use the
-   * rect path with a small margin.
+   * Tiles without polygonPoints fall back to the rect path with a
+   * small margin — none today, but defensive.
    */
   private eraseStaticTileFromCache(e: GameEntity): void {
       const cx = this._staticTileCanvasCtx;
@@ -898,17 +897,12 @@ export class RenderSystem {
       cx.fillStyle = '#000';
       const pts = e.polygonPoints;
       if (pts && pts.length > 0) {
-          // Polygon-fill erase, 1.15× expansion covers sprite anti-alias
-          // ringing and ~13 % per-hit dent shrinkage (rock-tile's
-          // vertexJitter cap).  Stays inside the tile's hex footprint so
-          // adjacent cached tiles are unaffected.
-          const grow = 1.15;
           cx.save();
           cx.translate(wx, wy);
           cx.beginPath();
-          cx.moveTo(pts[0].x * s * grow, pts[0].y * s * grow);
+          cx.moveTo(pts[0].x * s, pts[0].y * s);
           for (let i = 1; i < pts.length; i++) {
-              cx.lineTo(pts[i].x * s * grow, pts[i].y * s * grow);
+              cx.lineTo(pts[i].x * s, pts[i].y * s);
           }
           cx.closePath();
           cx.fill();
