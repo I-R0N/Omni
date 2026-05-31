@@ -189,14 +189,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.togglePlasticAutomataDirection();
   };
 
-  const handleCyclePlasticEatAttract = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticEatAttract();
-  };
-
-  const handleTogglePlasticReach = () => {
-      if (engineRef.current) engineRef.current.togglePlasticReach();
-  };
-
   const handleCyclePlasticPalette = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
@@ -209,10 +201,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleNebulaPalette();
   };
 
-  const handleCyclePlasticBlendMode = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
-  };
-
   const handleTogglePlasticBlend = () => {
       if (engineRef.current) engineRef.current.togglePlasticBlend();
   };
@@ -221,32 +209,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleNebulaStretch();
   };
 
-  const handleCyclePlasticOpacity = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticOpacity();
-  };
-
-  const handleCyclePlasticCoreRadius = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticCoreRadius();
-  };
-
-  const handleCyclePlasticBlendRadius = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticBlendRadius();
-  };
-
-  const handleCyclePlasticYield = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticYield();
-  };
-
   const handleCycleShatterGrace = () => {
       if (engineRef.current) engineRef.current.cycleShatterGrace();
-  };
-
-  const handleCyclePlasticStiffness = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticStiffness();
-  };
-
-  const handleCyclePlasticDamping = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticDamping();
   };
 
   const handleCyclePlayerThrust = () => {
@@ -255,10 +219,6 @@ const App: React.FC = () => {
 
   const handleCyclePlayerSpeed = () => {
       if (engineRef.current) engineRef.current.cyclePlayerSpeed();
-  };
-
-  const handleCyclePlasticImpactCooldown = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticImpactCooldown();
   };
 
   const handleCycleTileBlendAlpha = () => {
@@ -359,24 +319,14 @@ const App: React.FC = () => {
         onToggleTileOutlines={handleToggleTileOutlines}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
-        onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
-        onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}
         onCycleGlassGlowColor={handleCycleGlassGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
-        onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
-        onCyclePlasticOpacity={handleCyclePlasticOpacity}
-        onCyclePlasticCoreRadius={handleCyclePlasticCoreRadius}
-        onCyclePlasticBlendRadius={handleCyclePlasticBlendRadius}
-        onCyclePlasticYield={handleCyclePlasticYield}
         onCycleShatterGrace={handleCycleShatterGrace}
-        onCyclePlasticStiffness={handleCyclePlasticStiffness}
-        onCyclePlasticDamping={handleCyclePlasticDamping}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}
-        onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}

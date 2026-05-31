@@ -7,8 +7,6 @@ import {
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
   randomPlasticShardShade,
-  colorToWigglePhase,
-  PLASTIC_DEFORM_CONSTANTS,
   getActiveShatterGraceDelay,
   METAL_ASSEMBLY,
 } from '../../constants';
@@ -602,19 +600,11 @@ export class DropSystem {
         ? shardHealthOverride
         : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
 
-      // Resolve colour once — plastic re-rolls its amber shade per
-      // shard, everything else inherits from the tile.  Reused below
-      // for both `color` and (plastic only) `wigglePhase`.
+      // Resolve colour once — plastic re-rolls its shade per shard,
+      // everything else inherits from the tile.
       const shardColor = spec.variant === 'plastic-shard'
         ? randomPlasticShardShade()
         : tile.color;
-      // Spawn-time shape variance for plastic-shards — per-axis
-      // random scale in [1 − V, 1 + V] so each shard reads as its
-      // own slightly-irregular outline rather than a perfect circle.
-      const isPlasticShardSpec = spec.variant === 'plastic-shard';
-      const sv = PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE;
-      const baseScaleX = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
-      const baseScaleY = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -638,10 +628,6 @@ export class DropSystem {
         // Smaller shards spin faster — same angular-momentum-from-
         // impact logic as the speed scaling above.
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
-        // Plastic-shards re-roll their amber shade per-instance so
-        // each shard in a burst reads as its own tone (see
-        // PLASTIC_AMBER_SHADES in constants.ts).  Other variants
-        // inherit the parent tile's colour as before.
         color:         shardColor,
         active:        true,
         health:        shardHealth,
@@ -649,29 +635,12 @@ export class DropSystem {
         mass,
         polygonPoints: scaledPts,
         // Optional per-entity damping from the variant's spawn shape
-        // — today plastic-shard sets these so cluster motion damps
-        // out quickly.  Undefined for variants that drift naturally
-        // (rock / metal).  restSpeed / restSpin raise the "snap-
-        // to-zero" floor PhysicsSystem applies after damping so
-        // tiny residual drifts get culled and the shard stays
-        // motionless unless directly disturbed.
+        // — undefined for variants that drift naturally (rock / glass
+        // / plastic post-revert).  Metal-assembly uses these.
         linearDamping:  variantDef.spawn.linearDamping,
         angularDamping: variantDef.spawn.angularDamping,
         restSpeed:      variantDef.spawn.restSpeed,
         restSpin:       variantDef.spawn.restSpin,
-        // Plastic-shard wiggle phase derived from the shard's amber
-        // shade so each colour wiggles with a distinct offset (see
-        // WIGGLE_CONSTANTS).  Other variants don't wiggle.
-        wigglePhase:   spec.variant === 'plastic-shard' ? colorToWigglePhase(shardColor) : undefined,
-        // Plastic-shard spawn-time shape variance (option B).
-        baseScaleX,
-        baseScaleY,
-        // Plastic-shard sticky-bond anchor — PhysicsSystem pulls each
-        // shard toward this rest position every substep, so the cluster
-        // can be shoved off-anchor by continuous force but returns when
-        // the force releases.  Anchor sits at the spawn position.
-        anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
-        anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
         // Let dent-break debris (rock-tile breakShards, etc.) scatter
         // before the overlap-collapse pass can re-condense it.
         collapseGraceTimer: getActiveShatterGraceDelay(),

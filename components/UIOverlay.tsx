@@ -48,24 +48,14 @@ interface UIOverlayProps {
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
-  onCyclePlasticEatAttract?: () => void;
-  onTogglePlasticReach?: () => void;
   onCyclePlasticPalette?: () => void;
   onCycleGlassGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
-  onCyclePlasticBlendMode?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
-  onCyclePlasticOpacity?: () => void;
-  onCyclePlasticCoreRadius?: () => void;
-  onCyclePlasticBlendRadius?: () => void;
-  onCyclePlasticYield?: () => void;
   onCycleShatterGrace?: () => void;
-  onCyclePlasticStiffness?: () => void;
-  onCyclePlasticDamping?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
-  onCyclePlasticImpactCooldown?: () => void;
   onCycleTileBlendAlpha?: () => void;
   onCycleShardBlendAlpha?: () => void;
   onCycleColorBlendInterval?: () => void;
@@ -116,24 +106,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleTileOutlines,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
-  onCyclePlasticEatAttract,
-  onTogglePlasticReach,
   onCyclePlasticPalette,
   onCycleGlassGlowColor,
   onCycleNebulaPalette,
-  onCyclePlasticBlendMode,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
-  onCyclePlasticOpacity,
-  onCyclePlasticCoreRadius,
-  onCyclePlasticBlendRadius,
-  onCyclePlasticYield,
   onCycleShatterGrace,
-  onCyclePlasticStiffness,
-  onCyclePlasticDamping,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
-  onCyclePlasticImpactCooldown,
   onCycleTileBlendAlpha,
   onCycleShardBlendAlpha,
   onCycleColorBlendInterval,
@@ -357,20 +337,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark',
                   'Plastic automata direction: Darken dense cluster interiors (default) or Brighten. Only affects rendering while Pl shade is On.')}
                 {ctrlRow('Palette', onCyclePlasticPalette,
-                  stats.plasticPaletteName ?? 'amber',
+                  stats.plasticPaletteName ?? 'litegreen',
                   'Cycle the plastic palette family. Re-rolls every active plastic-tile and plastic-shard colour on toggle.')}
-                {ctrlRow('Blend op', onCyclePlasticBlendMode,
-                  stats.plasticBlendMode ?? 'source-over',
-                  'Cycle the globalCompositeOperation for the plastic-shard render — how overlapping shards combine: source-over / multiply / darken / screen / lighter.')}
-                {ctrlRow('Opacity', onCyclePlasticOpacity,
-                  stats.plasticOpacity ?? '75%',
-                  'Cycle plastic tile/shard globalAlpha: 25 / 50 / 75 / 100 %. Default 75 %.')}
-                {ctrlRow('Disc core', onCyclePlasticCoreRadius,
-                  stats.plasticCoreRadiusName ?? '0.15',
-                  'Cycle the plastic-shard disc opaque-core radius (fraction of disc radius). Smaller core = longer alpha fade = deeper blend between overlapping shards.')}
-                {ctrlRow('Disc size', onCyclePlasticBlendRadius,
-                  stats.plasticBlendRadiusName ?? '2.0',
-                  'Cycle the plastic-shard disc draw radius (× collision radius). Larger spreads the disc past its footprint so neighbours overlap and blend more.')}
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
@@ -434,24 +402,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     ? `auto (${stats.shardTilePairEffectiveInterval ?? 1})`
                     : `every ${stats.shardTilePairInterval ?? 1}`,
                   'Cycle the shard ↔ static-tile interval. Only fires when Shard↔tile is ON.')}
-                {ctrlRow('Eat pull', onCyclePlasticEatAttract,
-                  stats.plasticEatAttractName ?? '180',
-                  'Cycle the plastic-eat attraction strength — how hard plastic-shards pull nearby glass/rock debris in to be consumed. 90 → 1440 (nebula self-gravity is 380 for reference).')}
-                {ctrlRow('Reach', onTogglePlasticReach,
-                  stats.plasticReachEnabled === true ? 'On' : 'Off',
-                  'Plastic reach pseudopod: the nearest plastic shard leads its anchor toward a loose plastic/glass/rock target, stretches, grabs on contact, then retracts to reel it in. Off = passive cohesive cluster.')}
-                {ctrlRow('Yield', onCyclePlasticYield,
-                  stats.plasticYieldName ?? '5',
-                  'Cycle plastic-shard elastoplastic yield distance (world units): 2 / 5 / 10 / 25 / 60. Within yield the spring returns the shard; past it the anchor permanently migrates (plastic). Smaller = yields more easily; 60 is near-elastic.')}
-                {ctrlRow('Stiffness', onCyclePlasticStiffness,
-                  stats.plasticStiffnessName ?? '1',
-                  'Cycle plastic-shard sticky-bond spring stiffness k: 0.01 / 0.05 / 0.1 / 0.5 / 1 / 2 / 4. Lower k = gentler in-zone recovery and weaker over-yield cap, so kicks carry shards further past the yield point (more flow).')}
-                {ctrlRow('Damping', onCyclePlasticDamping,
-                  stats.plasticDampingName ?? '0.99',
-                  'Cycle plastic-shard linear damping (per-substep velocity multiplier): 0.95 … 1.0. At 120 Hz retention is value^120, so 0.95 ≈ 0.2 % (heavy), 0.999 ≈ 89 % (light); 1.0 frictionless. Applies live to all active plastic-shards.')}
-                {ctrlRow('Impact cd', onCyclePlasticImpactCooldown,
-                  stats.plasticImpactCooldownName ?? 'off',
-                  'Cycle plastic-shard collision-deformation cooldown (seconds): 0.2 / 0.4 / 0.8 / 1.5 / off. Caps how often a collision re-orients the squash axis. off disables collision-driven deformation entirely; projectile hits still wiggle.')}
                 {ctrlRow('Tile blend', onCycleTileBlendAlpha,
                   blendLabel(stats.tileBlendAlpha),
                   'Cycle nebula tile→tile colour blend (tiles drift toward neighbour-hex weighted hue average each frame): Off / Slow / Med / Fast.')}

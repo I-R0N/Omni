@@ -105,25 +105,19 @@ export interface ShardSpawnShape {
   /** Optional per-entity damping stamped at spawn time.  When set,
    *  spawn sites copy these onto the entity so PhysicsSystem.update
    *  ticks them via the existing per-entity damping path (gated by
-   *  `entity.linearDamping !== undefined`).  Used today by plastic-
-   *  shard for aggressive cluster damping so the shards settle to
-   *  rest without bond infrastructure.  Nebula-shards use
-   *  NEBULA_CONSTANTS values stamped directly at spawn — they
-   *  predate this field.  Values are per-second decay factors —
-   *  PhysicsSystem applies them via `Math.pow(damping, timeScale)`,
-   *  so 0.93 ≈ 7 % velocity bleed per second. */
+   *  `entity.linearDamping !== undefined`).  Today metal-assembly
+   *  uses this so locked composite cells share the same damping.
+   *  Nebula-shards use NEBULA_CONSTANTS values stamped directly at
+   *  spawn — they predate this field.  Values are per-second decay
+   *  factors — PhysicsSystem applies them via
+   *  `Math.pow(damping, timeScale)`. */
   linearDamping?: number;
   angularDamping?: number;
   /** Optional per-entity speed/spin floor stamped at spawn time.
    *  PhysicsSystem snaps |velocity| below this threshold to zero
-   *  each substep so tiny residual drifts (e.g. steady-state
-   *  push-back from a distant repel field, accumulated rounding)
-   *  don't keep the shard alive.  Higher values make the shard
-   *  more "static" — it stays at rest unless something gives it
-   *  a clear external kick.  When unset, the entity falls back to
-   *  NEBULA_CONSTANTS.REST_SPEED / REST_SPIN (tiny — 0.005 / 0.01).
-   *  Today plastic-shard sets these to make clusters effectively
-   *  static unless directly hit. */
+   *  each substep so tiny residual drifts don't keep the shard
+   *  alive.  When unset, the entity falls back to
+   *  NEBULA_CONSTANTS.REST_SPEED / REST_SPIN. */
   restSpeed?: number;
   restSpin?: number;
 }
@@ -163,20 +157,14 @@ export interface ShardMergePolicy {
   bondTimeSeconds?: number;
   bondTimeSizeRef?: number;
   bondTimeSizePower?: number;
-  /** Optional exponential size-scaling rate for the bond timer.
-   *  When set, threshold = baseTime × exp((avgSize − sizeRef) ×
-   *  bondTimeSizeExp) instead of the polynomial sizePower
-   *  formulation.  Mutually exclusive in practice — variants pick
-   *  one or the other.  Used by plastic-shard so very large shards
-   *  take exponentially longer to merge (k = 0.04 doubles the
-   *  threshold for every ~17 units of additional size). */
-  bondTimeSizeExp?: number;
-  /** Optional size-disparity gate at bond formation.  Bond only
-   *  forms when |a.size − b.size| / max(a.size, b.size) >=
-   *  requireSizeDeltaFraction.  At 0.05 the pair must differ by
-   *  at least 5 % in diameter — used by plastic-shard so two
-   *  equal-sized shards don't compose (only smaller-into-larger). */
-  requireSizeDeltaFraction?: number;
+
+  /** Per-partner overrides for bonds.  When a bond resolves a partner
+   *  variant id listed here, the entry's fields override the variant
+   *  defaults.  Pairs not listed use the variant defaults (default
+   *  strength, compose-on-mature).  Used by plastic-shard to bond
+   *  cohesion-only with mixed-strength partners (glass = strong, the
+   *  rest = default). */
+  bondPartners?: ReadonlyArray<BondPartnerConfig>;
 
   /** Per-pair outcome; falls back to defaultOutcome if no rule matches. */
   rules?: MergeRule[];
@@ -185,6 +173,19 @@ export interface ShardMergePolicy {
   /** Cooldown before a freshly-spawned or freshly-merged entity may
    *  participate in another merge.  Today: nebulaMergeCooldown. */
   postMergeCooldown?: number;
+}
+
+/** Per-partner bond override entry.  See ShardMergePolicy.bondPartners. */
+export interface BondPartnerConfig {
+  partner: ShardVariantId;
+  /** When true, the bond NEVER matures into compose — it persists
+   *  indefinitely for cohesion + threshold-pull behaviour only.
+   *  Used for sticky pairs that should not transmute upward. */
+  cohesionOnly?: boolean;
+  /** Cohesion tier — 'strong' bumps the velocity-blend rate and the
+   *  break-factor (slower to detach) vs the 'default' tier.  Today:
+   *  plastic-shard ↔ glass-tile / glass-shard use 'strong'. */
+  strength?: 'strong' | 'default';
 }
 
 // ── Shatter policy ──────────────────────────────────────────────────
