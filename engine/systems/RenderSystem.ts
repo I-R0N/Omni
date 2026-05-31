@@ -2301,7 +2301,12 @@ export class RenderSystem {
                   }
                   // Soft alpha — tiles slightly more opaque so the cloud
                   // reads as solid, shards slightly less so they feel light.
-                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul;
+                  // Optional per-entity multiplier so callers can ask for
+                  // a wispier-than-default puff (rock-tile / rock-shard
+                  // shatter callers set ~0.5 so their nebula debris
+                  // reads as a faint dust cloud rather than a solid
+                  // tinted shard).
+                  ctx.globalAlpha = (isTile ? 0.55 : 0.45) * fadeMul * spawnMul * speedMul * (entity.nebulaAlphaMul ?? 1);
                   ctx.drawImage(tinted, dx, dy, drawSize, drawSize);
                   ctx.globalAlpha = 1.0;
                   // Populate the nebula fast-path cache while we have

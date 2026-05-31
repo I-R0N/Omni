@@ -33,6 +33,14 @@ function blendHexColors(hexA: string, hexB: string): string {
     return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
 }
 
+// Per-projectile-hit probability that a rock-tile dent emits a nebula-
+// puff shard.  Death-burst puffs (rock-tile end-of-life, rock-shard
+// shatter) are not gated by this — only the per-hit dust kick is.
+// Tuned so a player drilling a single rock-tile sees one puff per ~3
+// hits rather than every shot, matching the user-requested "occasional
+// dust" feel instead of a continuous cloud.
+const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
+
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -1857,6 +1865,7 @@ export class GameEngine {
                       0.45 + Math.random() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
                       comp,
+                      0.5,
                   );
               }
           }
@@ -1886,6 +1895,7 @@ export class GameEngine {
                       0.4 + Math.random() * 0.3,
                       entity.lastImpactVelocity,
                       comp,
+                      0.5,
                   );
               }
           }
@@ -2598,27 +2608,30 @@ export class GameEngine {
                   // selling the brittle fracture as both shrapnel and
                   // dust.  Only rock today; other dent variants want
                   // the cleaner solid-shard-only readout.
-                  if (target.shardVariant === 'rock-tile') {
+                  if (target.shardVariant === 'rock-tile' && Math.random() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
+                      // Occasional puff per hit (probability gated above)
+                      // at a varied size + small jitter on spawn position
+                      // so it doesn't overlap exactly.  Without the gate
+                      // every projectile that dented a rock-tile spawned
+                      // a puff, which read as a constant cloud trailing
+                      // the player rather than as occasional dust kicks.
                       const baseSize = this.deformedDiameter(target);
-                      // 1 puff per hit at a varied size + small jitter
-                      // on spawn position so it doesn't overlap exactly.
-                      for (let nb = 0; nb < 1; nb++) {
-                          const jitter = baseSize * 0.15;
-                          const puffPos = {
-                              x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
-                              y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
-                          };
-                          const comp = randomRockNebulaComposition();
-                          this.drops.spawnColoredNebulaShard(
-                              this.currentMap.entities,
-                              puffPos,
-                              baseSize,
-                              comp[0].hex,
-                              0.45 + Math.random() * 0.2,
-                              target.lastImpactVelocity,
-                              comp,
-                          );
-                      }
+                      const jitter = baseSize * 0.15;
+                      const puffPos = {
+                          x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
+                          y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                      };
+                      const comp = randomRockNebulaComposition();
+                      this.drops.spawnColoredNebulaShard(
+                          this.currentMap.entities,
+                          puffPos,
+                          baseSize,
+                          comp[0].hex,
+                          0.45 + Math.random() * 0.2,
+                          target.lastImpactVelocity,
+                          comp,
+                          0.5,
+                      );
                   }
               }
               // Intermediate dent-shard spawn (pull-kind variants):

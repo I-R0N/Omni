@@ -911,6 +911,7 @@ export class DropSystem {
     sizeFraction: number = 0.5,
     inheritVelocity?: Vector2,
     composition?: NebulaColorStop[],
+    alphaMul?: number,
   ) {
     const variantDef = SHARD_VARIANTS['nebula-shard'];
     const targetSize = Math.max(4, baseSize * sizeFraction);
@@ -982,6 +983,11 @@ export class DropSystem {
       // shatter spawn duration.
       nebulaSpawnTimer:    NEBULA_CONSTANTS.FADE_IN_DURATION,
       nebulaSpawnDuration: NEBULA_CONSTANTS.FADE_IN_DURATION,
+      // Per-shard alpha multiplier — set by callers (e.g. rock-tile /
+      // rock-shard shatter paths) that want a wispier puff than the
+      // variant-default 0.45 base, without touching the nebula
+      // variant config globally.
+      nebulaAlphaMul: alphaMul,
     });
   }
 

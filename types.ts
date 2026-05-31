@@ -715,6 +715,14 @@ export interface GameEntity {
   // dent-mutations to polygonPoints can't reach back and shrink the
   // stored erase footprint.
   _staticStampPoly?: Vector2[];
+
+  // Per-shard alpha multiplier baked in at spawn — drives the nebula
+  // render path's globalAlpha so a caller (e.g. rock-tile shatter) can
+  // ask for a softer cloud puff that reads as lighter dust without
+  // changing the variant-wide default alpha for every nebula entity.
+  // Multiplied into the existing isTile/isShard alpha base in
+  // renderEntities; absent values default to 1.0 (no change).
+  nebulaAlphaMul?: number;
 }
 
 export interface CameraState {
