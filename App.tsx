@@ -193,6 +193,18 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
   };
 
+  const handleCyclePlasticShardPalette = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticShardPalette();
+  };
+
+  const handleCyclePlasticGlowBrightness = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticGlowBrightness();
+  };
+
+  const handleCycleMetalGlowBrightness = () => {
+      if (engineRef.current) engineRef.current.cycleMetalGlowBrightness();
+  };
+
   const handleCycleGlassGlowColor = () => {
       if (engineRef.current) engineRef.current.cycleGlassGlowColor();
   };
@@ -320,6 +332,9 @@ const App: React.FC = () => {
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
         onCyclePlasticPalette={handleCyclePlasticPalette}
+        onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
+        onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
+        onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
         onCycleGlassGlowColor={handleCycleGlassGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}

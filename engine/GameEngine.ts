@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -626,11 +626,11 @@ export class GameEngine {
   }
 
   /**
-   * Cycle the active plastic palette (litegreen → amber → black …)
-   * and immediately re-roll the colour of every active plastic-tile
-   * and plastic-shard so the swap is visible without breaking tiles.
-   * Shards stay on the fixed yellow/orange family (contrast vs the
-   * cyclable tile palette); only tiles follow the palette cycle.
+   * Cycle the active plastic-TILE palette (litegreen → amber → black …)
+   * and re-roll the colour of every active plastic-tile so the swap
+   * is visible without breaking tiles.  Shards have their own
+   * independent cycle (cyclePlasticShardPalette) so this method only
+   * touches tiles.
    */
   public cyclePlasticPalette() {
     cyclePlasticPalette();
@@ -638,13 +638,47 @@ export class GameEngine {
     const ents = this.currentMap.entities;
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
-      if (e.shardVariant !== 'plastic-tile' && e.shardVariant !== 'plastic-shard') continue;
-      if (e.shardVariant === 'plastic-shard') {
-        e.color = randomPlasticShardShade();
-      } else {
-        e.color = randomPlasticShade();
-      }
+      if (e.shardVariant !== 'plastic-tile') continue;
+      e.color = randomPlasticShade();
     }
+  }
+
+  /**
+   * Cycle the DBG plastic-SHARD palette through PLASTIC_PALETTES.
+   * Independent of the tile palette (cyclePlasticPalette) — rotates
+   * the shard colour family without touching tiles.  Live re-roll:
+   * every plastic-shard's colour resamples from the new palette so
+   * the change is visible without breaking shards.
+   */
+  public cyclePlasticShardPalette() {
+    cyclePlasticShardPalette();
+    if (!this.currentMap) return;
+    const ents = this.currentMap.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      if (e.shardVariant !== 'plastic-shard') continue;
+      e.color = randomPlasticShardShade();
+    }
+  }
+
+  /**
+   * Cycle the plastic-tile proximity-glow brightness multiplier
+   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
+   * the multiplier live each frame inside renderProximityBloom for
+   * the plastic-tile branch only; metal has its own cycle, and other
+   * glow-bearing tiles (rock / indestructible) are unaffected.
+   */
+  public cyclePlasticGlowBrightness() {
+    cyclePlasticGlowBrightness();
+  }
+
+  /**
+   * Cycle the metal-tile proximity-glow brightness multiplier
+   * (MATERIAL_GLOW_BRIGHTNESS_CYCLE, 1× … 5×).  RenderSystem reads
+   * the multiplier live each frame inside the metal-tile glow draw.
+   */
+  public cycleMetalGlowBrightness() {
+    cycleMetalGlowBrightness();
   }
 
   /**
@@ -1144,6 +1178,9 @@ export class GameEngine {
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticPaletteName: getActivePlasticPaletteName(),
+      plasticShardPaletteName: getActivePlasticShardPaletteName(),
+      plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
+      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
       glassGlowColorName: getActiveGlassGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,
@@ -1293,6 +1330,9 @@ export class GameEngine {
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       plasticPaletteName: getActivePlasticPaletteName(),
+      plasticShardPaletteName: getActivePlasticShardPaletteName(),
+      plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
+      metalGlowBrightnessName:   getActiveMetalGlowBrightnessName(),
       glassGlowColorName: getActiveGlassGlowColorName(),
       nebulaPaletteName: getActiveNebulaPaletteName(),
       plasticBlendEnabled: this.nebulas.plasticBlendEnabled,

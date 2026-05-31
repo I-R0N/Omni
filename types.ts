@@ -854,6 +854,16 @@ export interface EngineStats {
   // used by randomPlasticShade() and re-rolls every active plastic
   // entity's colour on toggle.
   plasticPaletteName?: string;
+  // Active plastic-SHARD palette name (independent index into the same
+  // PLASTIC_PALETTES list).  Cycled via the DBG Shard pal button —
+  // re-rolls every active plastic-shard's colour on toggle.
+  plasticShardPaletteName?: string;
+  // Brightness multiplier for the plastic-tile / metal-tile proximity
+  // glow (MATERIAL_GLOW_BRIGHTNESS_CYCLE, "1x" … "5x").  Independent
+  // cycles per material; multiplies the variant peakAlpha and the
+  // canvas clamps to 1.0 so the visible-glow range widens.
+  plasticGlowBrightnessName?: string;
+  metalGlowBrightnessName?: string;
   glassGlowColorName?: string;
   nebulaPaletteName?: string;
   // DBG gate for the plastic colour-equilibration block in

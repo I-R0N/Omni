@@ -49,6 +49,9 @@ interface UIOverlayProps {
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onCyclePlasticPalette?: () => void;
+  onCyclePlasticShardPalette?: () => void;
+  onCyclePlasticGlowBrightness?: () => void;
+  onCycleMetalGlowBrightness?: () => void;
   onCycleGlassGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
@@ -107,6 +110,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onCyclePlasticPalette,
+  onCyclePlasticShardPalette,
+  onCyclePlasticGlowBrightness,
+  onCycleMetalGlowBrightness,
   onCycleGlassGlowColor,
   onCycleNebulaPalette,
   onTogglePlasticBlend,
@@ -338,7 +344,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Plastic automata direction: Darken dense cluster interiors (default) or Brighten. Only affects rendering while Pl shade is On.')}
                 {ctrlRow('Palette', onCyclePlasticPalette,
                   stats.plasticPaletteName ?? 'litegreen',
-                  'Cycle the plastic palette family. Re-rolls every active plastic-tile and plastic-shard colour on toggle.')}
+                  'Cycle the plastic-TILE palette family. Re-rolls every active plastic-tile colour on toggle. Plastic-shards have their own independent cycle (Shard pal).')}
+                {ctrlRow('Shard pal', onCyclePlasticShardPalette,
+                  stats.plasticShardPaletteName ?? 'litegreen',
+                  'Cycle the plastic-SHARD palette family through the same list as the tile Palette button (independent index). Re-rolls every active plastic-shard colour on toggle so the change is immediate.')}
+                {ctrlRow('P glow', onCyclePlasticGlowBrightness,
+                  stats.plasticGlowBrightnessName ?? '1x',
+                  'Cycle the plastic-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the green bloom lights up from farther away and reads brighter near contact. Plastic-shards are unaffected.')}
+                {ctrlRow('M glow', onCycleMetalGlowBrightness,
+                  stats.metalGlowBrightnessName ?? '1x',
+                  'Cycle the metal-tile proximity-glow brightness multiplier (1×–5×). Multiplies the variant peakAlpha so the fuchsia repel-glow lights up from farther away and reads brighter near contact.')}
                 {ctrlRow('Recolor', onTogglePlasticBlend,
                   stats.plasticBlendEnabled === false ? 'Off' : 'On',
                   'Toggle plastic colour equilibration. Off freezes plastic tiles + shards at their spawn/shatter colours; uses the same tile/shard blend alphas as nebula when on.')}
