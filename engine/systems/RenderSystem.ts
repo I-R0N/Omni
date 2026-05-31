@@ -771,15 +771,17 @@ export class RenderSystem {
    * static-tile world canvas.
    *  - glass-tile + indestructible-tile: share the hex-sprite fast path
    *    in renderEntities — cache stamps the same drawImage.
-   *  - rock-tile: polygon fill in entity.color (no outline).  Stamped by
-   *    walking the entity's polygonPoints into the cache context.  Dent
-   *    jitter mutates polygonPoints on hits; the cache is erased on the
-   *    next visit via the slide-out logic in renderEntities and re-
-   *    stamped with the dented polygon on the next pre-pass.
    *
    * Excluded:
-   *  - nebula-tile: already cached per-entity (tinted sprite cache + the
-   *    nebula fast path); world-canvas caching would lose fidelity.
+   *  - rock-tile: takes per-hit polygon-shrink dents AND accumulates
+   *    crack-line damage indicators.  Both need the slow-path render
+   *    to reach the live entity state every frame; caching makes both
+   *    invisible until the cache happens to invalidate, which has been
+   *    a recurring source of visual bugs.  Keeping rock-tile on the
+   *    slow path costs a small per-frame draw per visible rock-tile
+   *    in exchange for correct, immediate damage feedback.
+   *  - nebula-tile: already cached per-entity (tinted sprite cache +
+   *    the nebula fast path); world-canvas caching would lose fidelity.
    *  - plastic-tile / metal-tile: selective neighbour-aware outline
    *    rendering requires the spatial-grid neighbour lookup; not worth
    *    the extra complexity for the smaller marginal gain.
@@ -788,26 +790,18 @@ export class RenderSystem {
       return e.type === EntityType.STRUCTURE
           && e.mass === Infinity
           && (e.shardVariant === 'glass-tile'
-              || e.shardVariant === 'indestructible-tile'
-              || e.shardVariant === 'rock-tile');
+              || e.shardVariant === 'indestructible-tile');
   }
 
   /**
    * Variant dispatch for the cache stamp.  Glass-family tiles stamp via
-   * the shared hex sprite (matches their renderEntities fast path);
-   * rock-tile stamps via a polygon-fill replay of its slow-path base
-   * (matches the slow-path branch that draws `polygonPoints` filled
-   * with entity.color, sans outline).  Caller has already guaranteed
-   * the variant is cache-eligible.
+   * the shared hex sprite (matches their renderEntities fast path).
+   * Caller has already guaranteed the variant is cache-eligible.
    */
   private stampStaticTileToCache(e: GameEntity): void {
       const cx = this._staticTileCanvasCtx;
       if (!cx) return;
-      if (e.shardVariant === 'rock-tile') {
-          this.stampRockTileToCache(cx, e);
-      } else {
-          this.stampHexSpriteTileToCache(cx, e);
-      }
+      this.stampHexSpriteTileToCache(cx, e);
   }
 
   /**
@@ -856,50 +850,6 @@ export class RenderSystem {
       const copy: Vector2[] = new Array(pts.length);
       for (let i = 0; i < pts.length; i++) copy[i] = { x: pts[i].x, y: pts[i].y };
       e._staticStampPoly = copy;
-  }
-
-  private stampRockTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
-      const pts = e.polygonPoints;
-      if (!pts || pts.length === 0) return;
-      const s = this._staticTileScale;
-      const halfMapW = this._staticTileMapW / 2;
-      const halfMapH = this._staticTileMapH / 2;
-      const cxPos = (e.position.x + halfMapW) * s;
-      const cyPos = (e.position.y + halfMapH) * s;
-      cx.save();
-      cx.translate(cxPos, cyPos);
-      cx.beginPath();
-      cx.moveTo(pts[0].x * s, pts[0].y * s);
-      for (let i = 1; i < pts.length; i++) {
-          cx.lineTo(pts[i].x * s, pts[i].y * s);
-      }
-      cx.closePath();
-      cx.fillStyle = e.color;
-      cx.fill();
-      // Damage cracks — drawn after the fill so they read as dark
-      // fissures on the slate face.  Each crack accumulates one entry
-      // per dent hit (see PhysicsSystem.applyDentStep) and is stored in
-      // entity-local space; we're already translated to the tile centre
-      // so we can stamp straight in.  Slate-900 with partial alpha so
-      // the rock colour shows through and the cracks read as natural
-      // shadow inside the fracture rather than as opaque outlines.
-      const cracks = e.damageCracks;
-      if (cracks && cracks.length > 0) {
-          cx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
-          cx.lineWidth = Math.max(1, 2 * s);
-          cx.lineCap = 'round';
-          for (let i = 0; i < cracks.length; i++) {
-              const c = cracks[i];
-              cx.beginPath();
-              cx.moveTo(c.x1 * s, c.y1 * s);
-              cx.lineTo(c.x2 * s, c.y2 * s);
-              cx.stroke();
-          }
-      }
-      cx.restore();
-      this.captureStampPolyOnce(e);
-      e._staticCached = true;
-      this._staticTileCacheSet.add(e);
   }
 
   /**
@@ -3221,6 +3171,28 @@ export class RenderSystem {
                         ctx.strokeStyle = 'rgba(0,0,0,0.3)';
                         ctx.lineWidth   = 2;
                         ctx.stroke();
+                    }
+
+                    // Damage cracks for rock-tile — accumulate one per
+                    // dent hit via PhysicsSystem.applyDentStep and draw
+                    // here on top of the fill.  Slate-900 at 70 % alpha
+                    // so cracks read as natural fracture shadow rather
+                    // than opaque outlines; the rock fill shows
+                    // through.  Drawn in entity-local space (ctx is
+                    // already translated + rotated to the entity centre
+                    // by the setTransform earlier in renderEntities).
+                    if (entity.shardVariant === 'rock-tile' && entity.damageCracks) {
+                        const cracks = entity.damageCracks;
+                        ctx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
+                        ctx.lineWidth   = 2;
+                        ctx.lineCap     = 'round';
+                        for (let i = 0; i < cracks.length; i++) {
+                            const c = cracks[i];
+                            ctx.beginPath();
+                            ctx.moveTo(c.x1, c.y1);
+                            ctx.lineTo(c.x2, c.y2);
+                            ctx.stroke();
+                        }
                     }
                 }
 
