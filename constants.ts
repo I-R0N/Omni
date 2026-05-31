@@ -1157,19 +1157,18 @@ export const STRUCTURE_VARIANTS = {
     color: COLORS.STRUCTURE,
   },
   plastic: {
-    // 1 HP — matches glass: a single projectile shatters the tile
-    // into a burst of plastic-shards.  Per-shard durability (24 HP)
-    // moves down into `plastic-tile.dent.shardHealth` so the cluster
-    // still absorbs sustained damage even though the tile face is
-    // brittle.  The softbody read is "thin polymer skin, dense
-    // shards underneath."
-    health: 1,
+    // 8 HP — plastic dents progressively over ~8 hits, then bursts
+    // into a cluster of plastic-shards.  Deliberately lighter than
+    // metal (24) so plastic reads as a softer, more fragile material
+    // both in look (deep soft denting) and toughness.  Per-shard
+    // durability (12 HP) is set on `plastic-tile.dent.shardHealth`.
+    health: 8,
     mass: Infinity,
     indestructible: false,
-    // sprite left empty so RenderSystem falls through to the
-    // dedicated plastic-tile soft-gradient branch (no polygon
-    // outline / no sprite).  ASSETS.HEX_STRUCTURE_PLASTIC is kept
-    // in the manifest for a future per-variant sprite.
+    // sprite left empty so RenderSystem falls through to the polygon
+    // material-tile branch (solid fill + selective outline + dent).
+    // ASSETS.HEX_STRUCTURE_PLASTIC is kept in the manifest for a
+    // future per-variant sprite.
     sprite: '',
     color: COLORS.STRUCTURE_PLASTIC,
   },
@@ -2352,32 +2351,29 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Matches the green tile fill so the brighten reads as the tile
     // lighting up rather than a clashing tint.
     glow: { color: '#bbf7d0', range: 250, peakAlpha: 0.33 },
-    // Plastic-softbody retrofit (decision #15b, follow-up tweak):
-    // tile face is now glass-brittle (STRUCTURE_VARIANTS.plastic.
-    // health = 1 → dies in one hit, same as glass) but releases a
-    // burst of 8–12 small plastic-shards on shatter.  Each shard
-    // carries the full plastic durability via `dent.shardHealth =
-    // 24`, decoupled from the tile's own 1-HP face.  The softbody
-    // read is "thin polymer skin pops, dense bonded shards
-    // underneath."
+    // Soft denting — each hit pulls the closest hex vertex AND both
+    // immediate neighbours inward (pullVertexCount: 3) by up to 30 %
+    // of their current radius, uniformly (centerVertexJitterMul: 1).
+    // The wide, uniform, deep pull reads as a soft polymer squish —
+    // distinct from metal's small sharp single-vertex pinch
+    // (vertexJitter 0.13, pullCount 1) and rock's jagged two-notch
+    // fracture (centerVertexJitterMul 10).  Over the tile's 8 HP the
+    // hex visibly crumples before bursting.  On death it releases a
+    // burst of 8–12 plastic-shards (no inheritParentPolygon — shards
+    // use the variant's own polygon).  shardHealth: 12 sets the
+    // released shards' durability (denting, ~12 hits each),
+    // decoupled from the tile's 8-HP face.
     //
-    // vertexJitter: 0 is kept so PhysicsSystem.applyDentStep
-    // remains a no-op — even at 1 HP the dent-policy branch still
-    // routes through applyDentStep for tile/shard parity.  No
-    // `inheritParentPolygon`: shards use the variant's 16-gon
-    // spawn shape, not the hex outline.  countMin/countMax expand
-    // a single template into a random burst at spawn time.
-    //
-    // sizeFraction range 0.44-0.64: chunky shards (2× larger than
-    // the earlier 0.22-0.32 burst per playtest feedback).  At a
-    // ~120-diameter hex tile the burst spawns 8-12 shards in the
-    // 53-77 diameter range — they overlap each other and the tile
-    // footprint, which reads as the polymer sheet breaking into
-    // big visible chunks rather than confetti.
+    // sizeFraction range 0.44-0.64: chunky shards.  At a ~120-
+    // diameter hex tile the burst spawns 8-12 shards in the 53-77
+    // diameter range — overlapping the tile footprint so the break
+    // reads as the sheet fragmenting into big visible chunks.
     regen: { kind: 'none' },
     dent: {
-      vertexJitter: 0,
-      shardHealth: 24,
+      vertexJitter: 0.30,
+      pullVertexCount: 3,
+      centerVertexJitterMul: 1,
+      shardHealth: 12,
       breakShards: [
         {
           variant: 'plastic-shard',
@@ -2678,6 +2674,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       largeShardCollapseSize: 99999,
       tintFloor: 1.0,
       shrinkFactor: 1.0,
+    },
+    // Soft denting — same character as plastic-tile (deep, uniform
+    // pull) but a single vertex per hit (pullVertexCount defaults to
+    // 1) since the shard polygon is a 4-gon and pulling more would
+    // collapse it.  vertexJitter 0.30 pushes the closest corner in by
+    // up to 30 % each hit, so a shard visibly squishes over its ~12-HP
+    // life before breaking.  Each hit also costs 1 HP (isDentEntity
+    // contract) and gives the free-floating shard a small velocity
+    // kick (PhysicsSystem).  breakShards is EMPTY so the variant's
+    // `shatter` policy still fires on death (GameEngine.handleEntity
+    // Death routes empty-breakShards dent entities to ShardSystem
+    // .shatter) — the shard fragments into smaller plastic-shards.
+    dent: {
+      vertexJitter: 0.30,
+      breakShards: [],
     },
   },
   'metal-shard': {
