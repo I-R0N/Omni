@@ -120,33 +120,16 @@ export const PLASTIC_WHITE_SHADES: ReadonlyArray<string> = [
   '#e5e5e5',  // Neutral 200
 ] as const;
 
-/** Yellow / gold + cyan shades — the fixed families plastic-SHARDS draw
- *  from (an equal 50/50 mix, see PLASTIC_SHARD_SHADES).  Tiles use the
- *  cyclable PLASTIC_PALETTES family (default green).  The tile/shard
- *  colour split gives plastic a multi-tone read that sets it apart from
- *  nebula. */
+/** Yellow / gold shades — kept as the constant base shade for the
+ *  PAuto (neighbour-brightness) automata via getPlasticShardBaseShade().
+ *  Per-instance plastic-shard colour now goes through the cyclable
+ *  PLASTIC_PALETTES list via randomPlasticShardShade() instead. */
 export const PLASTIC_YELLOW_SHADES: ReadonlyArray<string> = [
   '#fde047',  // Yellow 300
   '#facc15',  // Yellow 400
   '#eab308',  // Yellow 500
   '#fbbf24',  // Amber 400 (golden)
   '#f59e0b',  // Amber 500 (amber-gold)
-] as const;
-
-/** Cyan / light-blue shades — second plastic-SHARD family. */
-export const PLASTIC_CYAN_SHADES: ReadonlyArray<string> = [
-  '#a5f3fc',  // Cyan 200
-  '#67e8f9',  // Cyan 300
-  '#22d3ee',  // Cyan 400
-  '#7dd3fc',  // Sky 300
-  '#38bdf8',  // Sky 400
-] as const;
-
-/** Plastic-SHARD shade pool — equal mix of yellow and cyan (the two
- *  arrays are the same length, so a uniform pick is a 50/50 blend). */
-export const PLASTIC_SHARD_SHADES: ReadonlyArray<string> = [
-  ...PLASTIC_YELLOW_SHADES,
-  ...PLASTIC_CYAN_SHADES,
 ] as const;
 
 /** Bright green / emerald shades — the default plastic-TILE palette. */
@@ -202,6 +185,11 @@ export const PLASTIC_PALETTES: ReadonlyArray<PlasticPalette> = [
 ] as const;
 
 let activePlasticPaletteIndex = 0; // litegreen
+// Independent palette index for plastic-SHARDS — cycles through the
+// same PLASTIC_PALETTES list as tiles via a separate DBG button
+// (cyclePlasticShardPalette).  Lets shards read in a different family
+// from the tiles they spawn from.
+let activePlasticShardPaletteIndex = 0; // litegreen
 
 /** Index of the active palette in PLASTIC_PALETTES.  Exposed for
  *  the DBG panel via EngineStats. */
@@ -234,6 +222,59 @@ export function getActivePlasticPaletteSolidEdge(): boolean {
 export function cyclePlasticPalette(): number {
   activePlasticPaletteIndex = (activePlasticPaletteIndex + 1) % PLASTIC_PALETTES.length;
   return activePlasticPaletteIndex;
+}
+
+/** Name of the active plastic-SHARD palette (for DBG button label). */
+export function getActivePlasticShardPaletteName(): string {
+  return PLASTIC_PALETTES[activePlasticShardPaletteIndex].name;
+}
+
+/** Advance the plastic-SHARD palette by one slot.  Cycles through
+ *  the same PLASTIC_PALETTES list as tiles but tracked separately.
+ *  Re-colouring existing shards is the caller's responsibility
+ *  (see GameEngine.cyclePlasticShardPalette). */
+export function cyclePlasticShardPalette(): number {
+  activePlasticShardPaletteIndex = (activePlasticShardPaletteIndex + 1) % PLASTIC_PALETTES.length;
+  return activePlasticShardPaletteIndex;
+}
+
+// ── Material proximity-glow brightness cycles (DBG-only) ────────────
+// Multipliers applied to the final globalAlpha of the material-tile
+// proximity bloom (RenderSystem).  Independent cycles for plastic and
+// metal so the two materials' glows can be tuned separately.  At 1×
+// the glow renders at its SHARD_VARIANTS-defined peakAlpha (today
+// plastic 0.33, metal 0.75); higher steps multiply that alpha and the
+// canvas clamps to 1.0, which broadens the visible-glow range so the
+// halo lights up from farther away and reads brighter near contact.
+export const MATERIAL_GLOW_BRIGHTNESS_CYCLE: ReadonlyArray<number> = [
+  1, 2, 3, 4, 5,
+] as const;
+
+let activePlasticGlowBrightnessIndex = 0; // 1×
+let activeMetalGlowBrightnessIndex   = 0; // 1×
+
+export function getActivePlasticGlowBrightness(): number {
+  return MATERIAL_GLOW_BRIGHTNESS_CYCLE[activePlasticGlowBrightnessIndex];
+}
+export function getActivePlasticGlowBrightnessName(): string {
+  return `${getActivePlasticGlowBrightness()}x`;
+}
+export function cyclePlasticGlowBrightness(): number {
+  activePlasticGlowBrightnessIndex =
+    (activePlasticGlowBrightnessIndex + 1) % MATERIAL_GLOW_BRIGHTNESS_CYCLE.length;
+  return activePlasticGlowBrightnessIndex;
+}
+
+export function getActiveMetalGlowBrightness(): number {
+  return MATERIAL_GLOW_BRIGHTNESS_CYCLE[activeMetalGlowBrightnessIndex];
+}
+export function getActiveMetalGlowBrightnessName(): string {
+  return `${getActiveMetalGlowBrightness()}x`;
+}
+export function cycleMetalGlowBrightness(): number {
+  activeMetalGlowBrightnessIndex =
+    (activeMetalGlowBrightnessIndex + 1) % MATERIAL_GLOW_BRIGHTNESS_CYCLE.length;
+  return activeMetalGlowBrightnessIndex;
 }
 
 // ── Glass-tile glow colour cycle (DBG-only) ─────────────────────────
@@ -326,11 +367,13 @@ export function randomPlasticShade(): string {
   return palette[Math.floor(Math.random() * palette.length)];
 }
 
-/** Pick a random shade for a plastic-SHARD spawn — an equal mix of the
- *  yellow and cyan families (PLASTIC_SHARD_SHADES), independent of the
- *  cyclable tile palette so shards contrast with the green tiles. */
+/** Pick a random shade from the ACTIVE plastic-SHARD palette.  Cycles
+ *  through the same PLASTIC_PALETTES list as tiles but via its own
+ *  independent index — DBG `Shard pal` button can rotate shard colour
+ *  family without touching tiles, and vice-versa. */
 export function randomPlasticShardShade(): string {
-  return PLASTIC_SHARD_SHADES[Math.floor(Math.random() * PLASTIC_SHARD_SHADES.length)];
+  const palette = PLASTIC_PALETTES[activePlasticShardPaletteIndex].shades;
+  return palette[Math.floor(Math.random() * palette.length)];
 }
 
 /** Constant base colour for the plastic-shard neighbour-brightness

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -2834,14 +2834,15 @@ export class RenderSystem {
                         const impulse = entity.repelImpulse ?? 0;
                         if (glow !== undefined && impulse > 0) {
                             const intensityM = repelGlowIntensity(impulse);
+                            const bright = getActiveMetalGlowBrightness();
                             buildPath();
-                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM);
+                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM * bright);
                             ctx.fillStyle = glow.color;
                             ctx.fill();
                             // Thinner outline than glass (1.5 vs 3.0)
                             // — metal reads as a precise mechanical
                             // edge rather than glass's diffuse halo.
-                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM));
+                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM * bright));
                             ctx.strokeStyle = glow.color;
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
@@ -3769,6 +3770,12 @@ export class RenderSystem {
       const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
       if (pdistSq >= glow.range * glow.range) return;
       const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
+      // Plastic-tile glow is the only variant routed through here with a
+      // DBG brightness multiplier; other glow-bearing tiles (rock /
+      // indestructible) render at their variant peakAlpha unchanged.
+      const peakAlpha = entity.shardVariant === 'plastic-tile'
+          ? glow.peakAlpha * getActivePlasticGlowBrightness()
+          : glow.peakAlpha;
 
       // The polygon is stored in entity-local coords (pre-rotation); the
       // canvas transform rotates the rendering by `entity.rotation` at
@@ -3831,7 +3838,7 @@ export class RenderSystem {
       const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
       og.addColorStop(0, glow.color);
       og.addColorStop(1, glow.color + '00');
-      ctx.globalAlpha = glow.peakAlpha * intensity;
+      ctx.globalAlpha = peakAlpha * intensity;
       ctx.fillStyle = og;
       ctx.fill();
 
@@ -3845,7 +3852,7 @@ export class RenderSystem {
           const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
           rg.addColorStop(0, hot.color);
           rg.addColorStop(1, hot.color + '00');
-          ctx.globalAlpha = glow.peakAlpha * hotT;
+          ctx.globalAlpha = peakAlpha * hotT;
           ctx.fillStyle = rg;
           ctx.fill();
       }
