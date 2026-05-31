@@ -1724,13 +1724,18 @@ export class ShardSystem {
       // expires — gives a destroyed tile's debris time to scatter.
       if ((c.collapseGraceTimer ?? 0) > 0) continue;
       const v = c.shardVariant;
-      const isRockGlass = v === 'rock-shard' || v === 'glass-shard';
+      // Rock-shards used to be hotspot-collapse candidates (cluster
+      // densely enough → snap to a static rock-tile) but per user
+      // direction they now stay shards forever, growing via the
+      // ROCK_CONDENSE size+density grid on merge instead.  Glass
+      // remains a hotspot candidate (cluster → glass-tile transmute).
+      const isGlass = v === 'glass-shard';
       // Plastic condenses too, but only the smaller shards — larger ones
       // (>= PLASTIC_MAX_SIZE) only split/shatter, so they're excluded.
       const isSmallPlastic = PLASTIC_ENABLED && v === 'plastic-shard' && c.size.x < PLASTIC_MAX_SIZE;
       // Metal triangles reassemble into a metal-tile once enough pack a cell.
       const isMetal = METAL_ENABLED && v === 'metal-shard';
-      if (!isRockGlass && !isSmallPlastic && !isMetal) continue;
+      if (!isGlass && !isSmallPlastic && !isMetal) continue;
       const key = keyFor(Math.floor(c.position.x / CELL), Math.floor(c.position.y / CELL));
       let cell = grid.get(key);
       if (!cell) { cell = []; grid.set(key, cell); }
@@ -1744,16 +1749,16 @@ export class ShardSystem {
     for (const idxs of grid.values()) {
       if (tilesMade >= MAX_TILES_PER_PASS) break;
       if (idxs.length < minAny) continue;
-      // Tally each material + remember its largest shard (the transmute host).
-      let rockCount = 0, glassCount = 0, plasticCount = 0, metalCount = 0;
-      let rockHost = -1, glassHost = -1, plasticHost = -1, metalHost = -1;
+      // Tally each material + remember its largest shard (the transmute
+      // host).  Rock-shards are excluded by the filter above per user
+      // direction (no rock-shard → rock-tile collapse); their counter
+      // is omitted.
+      let glassCount = 0, plasticCount = 0, metalCount = 0;
+      let glassHost = -1, plasticHost = -1, metalHost = -1;
       for (let k = 0; k < idxs.length; k++) {
         const e = candidates[idxs[k]];
         const sv = e.shardVariant;
-        if (sv === 'rock-shard') {
-          rockCount++;
-          if (rockHost < 0 || e.size.x > candidates[rockHost].size.x) rockHost = idxs[k];
-        } else if (sv === 'glass-shard') {
+        if (sv === 'glass-shard') {
           glassCount++;
           if (glassHost < 0 || e.size.x > candidates[glassHost].size.x) glassHost = idxs[k];
         } else if (sv === 'metal-shard') {
@@ -1764,11 +1769,6 @@ export class ShardSystem {
           if (plasticHost < 0 || e.size.x > candidates[plasticHost].size.x) plasticHost = idxs[k];
         }
       }
-      if (rockCount >= MIN_COUNT &&
-          this.collapseStack(candidates, idxs, rockHost, 'rock-shard', 'rock', entities, physics)) {
-        tilesMade++;
-      }
-      if (tilesMade >= MAX_TILES_PER_PASS) break;
       if (METAL_ENABLED && metalCount >= METAL_MIN_COUNT &&
           this.collapseStack(candidates, idxs, metalHost, 'metal-shard', 'metal', entities, physics)) {
         tilesMade++;
@@ -2643,15 +2643,18 @@ export class ShardSystem {
         const startTier = Math.max(nearestRockSizeTier(aDia), nearestRockSizeTier(bDia));
         const cell = deriveRockCell(startTier, newMass);
         if (cell === null) {
-          // Overflow — clamp visuals to the top cell; the post-compose
-          // mass check below transmutes to a tile (or retries next merge
-          // if no hex is free).
-          newDiam = ROCK_MAX_DIAMETER;
-          if (density) newTier = density.maxSteps;
-        } else {
-          newDiam = ROCK_CONDENSE.DIAMETERS[cell.s - 1];
-          if (density) newTier = Math.min(density.maxSteps, cell.d - 1);
+          // Overflow — both parties are already at the top of the
+          // ROCK_CONDENSE grid (max size + max density), and rock-
+          // shards no longer transmute into rock-tiles per user
+          // direction.  Refuse the merge so the pair stays as two
+          // separate top-tier shards.  Without this gate the pair
+          // would silently keep accumulating mass into a single
+          // entity that visually never changes — a sink that swallows
+          // every nearby shard without feedback.
+          return;
         }
+        newDiam = ROCK_CONDENSE.DIAMETERS[cell.s - 1];
+        if (density) newTier = Math.min(density.maxSteps, cell.d - 1);
       } else if (density?.enabled && !isGlassSelfMerge && !isPlasticSelfMerge) {
         // Density-enabled self-merge compaction (shrink + tier).  With
         // same-material-only bonds this is the metal-shard path; it
@@ -2754,16 +2757,18 @@ export class ShardSystem {
       if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
         this.tryConvertOversizedGlassShard(a, entities, physics);
       }
-      // Rock-shard tile transition.  Only once the survivor's mass would
-      // exceed the top condensation cell (largest size + max density) does
-      // it condense into a STATIC rock-tile at the nearest free hex —
-      // leaving the dynamic collision system entirely (the hotspot win).
-      // This is the sole tile-forming event, so tiles are rare and appear
-      // only after a cluster is fully consolidated.  If no hex is free it
-      // stays a max-tier shard and a later merge retries.
-      if (a.shardVariant === 'rock-shard' && a.mass > ROCK_MAX_CELL_MASS) {
-        this.tryTransmuteShardToTile(a, 'rock-shard', 'rock', entities, physics);
-      }
+      // Rock-shard tile transition — DISABLED per user direction.
+      // Rock-shards now merge into larger / denser rock-shards only;
+      // they cap out at the top ROCK_CONDENSE cell (refused merge
+      // gate above in the isRockResult branch) and never transmute
+      // into a static rock-tile.  To restore the old behaviour,
+      // uncomment the block below and the overflow path in the
+      // isRockResult merge branch:
+      //
+      // if (a.shardVariant === 'rock-shard' && a.mass > ROCK_MAX_CELL_MASS) {
+      //   this.tryTransmuteShardToTile(a, 'rock-shard', 'rock', entities, physics);
+      // }
+
       // Plastic-shard tier transition — DISABLED per user direction.
       // Plastic-shards merge into ever-larger plastic-shards
       // indefinitely; no transmute back to plastic-tile.  To restore,
