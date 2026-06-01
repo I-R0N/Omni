@@ -1047,15 +1047,17 @@ export class PhysicsSystem {
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
 
-      // Plastic-shard dent-recovery lazy snapshot: on the FIRST dent
-      // of a plastic-shard, capture the pristine polygon points so
-      // tickPlasticDentRecovery can lerp back toward them after the
-      // delay.  Subsequent dents reset only the delay countdown
-      // (below) — the original snapshot stays as the recovery
-      // target.  Cleared on compose / transmute by their respective
-      // call sites.  Cheap allocation: 4 Vector2s per plastic-shard,
-      // one-shot at first damage.
-      if (tile.shardVariant === 'plastic-shard' && tile.originalPolygonPoints === undefined) {
+      // Plastic dent-recovery lazy snapshot: on the FIRST dent of a
+      // plastic-tile or plastic-shard, capture the pristine polygon
+      // points so tickPlasticDentRecovery can lerp back toward them
+      // after the delay.  Subsequent dents reset only the delay
+      // countdown (below) — the original snapshot stays as the
+      // recovery target.  Cleared on compose / transmute by their
+      // respective call sites.  Cheap allocation: a handful of
+      // Vector2s per entity, one-shot at first damage.
+      const isPlasticDent = tile.shardVariant === 'plastic-shard'
+                         || tile.shardVariant === 'plastic-tile';
+      if (isPlasticDent && tile.originalPolygonPoints === undefined) {
           const orig: Vector2[] = new Array(pts.length);
           for (let i = 0; i < pts.length; i++) {
               orig[i] = { x: pts[i].x, y: pts[i].y };
@@ -1183,10 +1185,11 @@ export class PhysicsSystem {
           }
       }
 
-      // Plastic-shard dent recovery: reset the delay countdown on
-      // every dent so a flurry of hits holds the deformation until
-      // the lull.  tickPlasticDentRecovery in ShardSystem reads this.
-      if (tile.shardVariant === 'plastic-shard') {
+      // Plastic dent recovery: reset the delay countdown on every
+      // dent (tile or shard) so a flurry of hits holds the
+      // deformation until the lull.  tickPlasticDentRecovery in
+      // ShardSystem reads this.
+      if (isPlasticDent) {
           tile.plasticDentRecoveryDelay = PLASTIC_DENT_RECOVERY.DELAY_SECONDS;
       }
 

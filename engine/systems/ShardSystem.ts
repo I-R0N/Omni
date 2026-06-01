@@ -1858,15 +1858,18 @@ export class ShardSystem {
   }
 
   /**
-   * Plastic-shard dent recovery.  Each plastic-shard with an
-   * originalPolygonPoints snapshot (captured by applyDentStep on
-   * first dent) lerps polygonPoints back toward the original after
-   * its plasticDentRecoveryDelay countdown expires.  Dents reset
-   * the delay every hit, so a flurry holds the polygon deformed;
-   * after PLASTIC_DENT_RECOVERY.DELAY_SECONDS of no damage the
-   * shard heals at RATE_PER_SECOND exponential rate.  Polygon
-   * recovery invalidates the SAT cache so collision picks up the
-   * updated edge normals.
+   * Plastic dent recovery (tiles + shards).  Each plastic entity
+   * with an originalPolygonPoints snapshot (captured by applyDent
+   * Step on first dent) lerps polygonPoints back toward the
+   * original after its plasticDentRecoveryDelay countdown expires.
+   * Dents reset the delay every hit, so a flurry holds the polygon
+   * deformed; after PLASTIC_DENT_RECOVERY.DELAY_SECONDS of no
+   * damage the entity heals at RATE_PER_SECOND exponential rate.
+   *
+   * Polygon recovery invalidates the SAT cache so collision picks
+   * up the updated edge normals.  Static tiles also have a baked
+   * world-canvas stamp; flag _staticCached false so RenderSystem
+   * re-stamps on next draw with the recovered outline.
    */
   private tickPlasticDentRecovery(entities: GameEntity[], dt: number): void {
     if (dt <= 0) return;
@@ -1874,7 +1877,7 @@ export class ShardSystem {
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
-      if (e.shardVariant !== 'plastic-shard') continue;
+      if (e.shardVariant !== 'plastic-shard' && e.shardVariant !== 'plastic-tile') continue;
       if (e.originalPolygonPoints === undefined) continue;
       // Tick the delay countdown.  While > 0 the polygon holds.
       if (e.plasticDentRecoveryDelay !== undefined && e.plasticDentRecoveryDelay > 0) {
@@ -1895,7 +1898,15 @@ export class ShardSystem {
         pts[j].y += dy * rate;
         moved = true;
       }
-      if (moved) e._satCacheAxes = undefined;
+      if (moved) {
+        e._satCacheAxes = undefined;
+        // Static-tile world-canvas stamp baked the old outline;
+        // flag dirty so RenderSystem re-stamps with the recovered
+        // shape.  Plastic-shards have _staticCached === undefined
+        // (mobile shards never enter the static-cache path), so
+        // this is a no-op for them.
+        if (e._staticCached === true) e._staticCached = false;
+      }
     }
   }
 
