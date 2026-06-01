@@ -629,14 +629,23 @@ export class ShardSystem {
     const damageNorm = Math.min(1, (damage - 1) / 4);
     const { countMin, countMax, alphaMin, alphaMax } = parentVariant.shatter;
 
-    // Size-keyed count override (today: plastic-shard, 5 levels).
-    // When set, picks the count from the first entry whose
-    // `maxSize` exceeds parent.size — "bigger shards burst into
-    // more children."  Falls through to the damage-based formula
-    // otherwise.
+    // Merged-plastic override — when the parent is a plastic-shard
+    // that was built up by self-merge (plasticMergeCount > 1), break
+    // it back into roughly the same number of base-sized fragments
+    // that composed it.  Damage-norm / size-keyed count are ignored
+    // for merged plastic so the invariant "N base shards in, N
+    // fragments out" holds regardless of how hard the killing hit
+    // was.  A small ±1 wobble keeps the fragment count from feeling
+    // mechanically uniform on repeated breaks.
     let count: number;
     const sizeLevels = parentVariant.shatter.shatterCountBySize;
-    if (sizeLevels && sizeLevels.length > 0) {
+    const plasticMerges = parent.shardVariant === 'plastic-shard'
+      ? (parent.plasticMergeCount ?? 1)
+      : 1;
+    if (plasticMerges > 1) {
+      const wobble = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+      count = Math.max(2, plasticMerges + wobble);
+    } else if (sizeLevels && sizeLevels.length > 0) {
       const parentSize = parent.size.x;
       let chosen = sizeLevels[sizeLevels.length - 1].count;
       for (let i = 0; i < sizeLevels.length; i++) {
@@ -649,7 +658,17 @@ export class ShardSystem {
     if (count < 2) return;
 
     let sizes: number[];
-    if (useFraction) {
+    if (plasticMerges > 1) {
+      // Merged plastic — even area-per-fragment so every shard lands
+      // at roughly base-shard size, regardless of how many merges
+      // built the parent up.  compose grows via area conservation
+      // (newDiam² = dA² + dB²), so parentArea / N recovers the
+      // average base diameter directly.  No MIN_SIZE filter pass
+      // since the invariant guarantees fragments sit at base size.
+      const parentArea = parent.size.x * parent.size.x;
+      const childSize = Math.sqrt(parentArea / count);
+      sizes = Array.from({ length: count }, () => childSize);
+    } else if (useFraction) {
       sizes = [];
       const span = fMax! - fMin!;
       for (let i = 0; i < count; i++) {
@@ -2546,6 +2565,12 @@ export class ShardSystem {
       if (density?.enabled && newTier !== undefined) {
         a.densityTier = newTier;
         a.densityCachedTint = undefined;
+      }
+      // Plastic self-merge: track how many base shards composed this
+      // entity so shatterAsteroidStyle can fragment it back into the
+      // same count on death.  Undefined parents default to 1 each.
+      if (isPlasticSelfMerge) {
+        a.plasticMergeCount = (a.plasticMergeCount ?? 1) + (b.plasticMergeCount ?? 1);
       }
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`

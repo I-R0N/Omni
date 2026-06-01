@@ -357,6 +357,15 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // Number of base shards that have composed into this entity (plastic-
+  // shard only).  Each tile-break / shatter spawn starts implicitly at 1
+  // (undefined === 1); composeEntities sums the two parents' counts on
+  // a plastic↔plastic self-merge.  shatterAsteroidStyle reads this on
+  // death and breaks the shard into `plasticMergeCount` fragments, so a
+  // merged plastic shard always fragments back into roughly the same
+  // number of base-sized pieces that built it.
+  plasticMergeCount?: number;
+
   // ── Metal rigid-composite assembly ──────────────────────────────────────
   // A metal-shard entity carrying `metalCells` is a rigid composite: a set
   // of equilateral-triangle cells locked to a shared triangular lattice.
