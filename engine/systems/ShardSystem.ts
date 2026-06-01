@@ -2525,9 +2525,10 @@ export class ShardSystem {
 
       // Regenerate polygon at new size — vertex count + jitter per
       // dominant variant.  Glass: 4–6 verts, blocky panel shape.
-      // Plastic: 16 verts, near-circular (matches SHARD_SPAWN_SHAPE_
-      // PLASTIC's collision-only round silhouette).  Default
-      // (rock): 7–10 verts, jagged.
+      // Plastic: pull straight from SHARD_SPAWN_SHAPE_PLASTIC so the
+      // merged shard reads as a bigger version of a base shard (4
+      // jittered verts) rather than the smooth near-circle it used
+      // to be.  Default (rock): 7–10 verts, jagged.
       const isTile     = dominantVariant === 'glass-shard';
       const isPlasticS = dominantVariant === 'plastic-shard';
       let numPts: number;
@@ -2538,8 +2539,12 @@ export class ShardSystem {
         numPts = 4 + Math.floor(Math.random() * 3);
         jitterK = 0.25; rMin = 0.60; rRange = 0.55;
       } else if (isPlasticS) {
-        numPts = 16;
-        jitterK = 0.0; rMin = 0.98; rRange = 0.04;
+        const ps = dominantDef.spawn;
+        numPts = ps.polyVerticesMin
+               + Math.floor(Math.random() * (ps.polyVerticesMax - ps.polyVerticesMin + 1));
+        jitterK = ps.angleJitter;
+        rMin    = ps.radiusMin;
+        rRange  = ps.radiusRange;
       } else {
         numPts = 7 + Math.floor(Math.random() * 4);
         jitterK = 0.7; rMin = 0.60; rRange = 0.65;
