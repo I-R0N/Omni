@@ -2690,20 +2690,25 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_PLASTIC,
     regen: { kind: 'none' },
-    // Cohesion-only bonds (plastic-revert) — plastic-shards stick to
-    // every variant EXCEPT nebula-tile / nebula-shard.  bondPartners
-    // marks every entry cohesionOnly so the bond timer never fires
-    // compose.  Every OTHER material (glass / rock / metal /
-    // indestructible, tiles + shards) is the 'strong' tier — plastic
-    // grips foreign material firmly (faster cohesion lock + much
-    // longer break distance, see STRONG_* in ShardSystem).  Plastic ↔
-    // plastic stays 'default' so a plastic blob holds itself together
-    // loosely while gripping other materials hard.  pullStrength stays
-    // 0 — bonds form by contact, no gravity attraction.
+    // Cohesion-only cross-material bonds + self-compose growth.
+    // Plastic-shards stick to every variant EXCEPT nebula-tile /
+    // nebula-shard.  Cross-material partners (glass / rock / metal /
+    // indestructible, tiles + shards, plus plastic-tile) are marked
+    // cohesionOnly so the bond timer never fires compose — plastic
+    // grips foreign material firmly but never absorbs it.  Strong tier
+    // means a much faster cohesion lock + much longer break distance
+    // (see STRONG_* in ShardSystem).  plastic-shard ↔ plastic-shard
+    // is intentionally absent: the bond falls through to defaultOutcome
+    // 'compose', which routes through composeEntities' isPlasticSelfMerge
+    // branch — area-conserving growth, no size cap, no tile transmute
+    // (per user direction).  pullStrength stays 0 — bonds form by
+    // contact, no gravity attraction.
     merge: {
       attractedTo: 'none',
       bondsWith: { exclude: ['nebula-tile', 'nebula-shard'] },
-      bondTimeSeconds: 1,                 // arbitrary — cohesionOnly skips compose
+      bondTimeSeconds: 10,
+      bondTimeSizeRef: 20,
+      bondTimeSizePower: 1.5,
       bondPartners: [
         { partner: 'glass-tile',          cohesionOnly: true, strength: 'strong'  },
         { partner: 'glass-shard',         cohesionOnly: true, strength: 'strong'  },
@@ -2713,7 +2718,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
         { partner: 'metal-shard',         cohesionOnly: true, strength: 'strong'  },
         { partner: 'indestructible-tile', cohesionOnly: true, strength: 'strong'  },
         { partner: 'plastic-tile',        cohesionOnly: true, strength: 'default' },
-        { partner: 'plastic-shard',       cohesionOnly: true, strength: 'default' },
       ],
       defaultOutcome: 'compose',
     },
