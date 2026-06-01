@@ -366,6 +366,29 @@ export interface GameEntity {
   // number of base-sized pieces that built it.
   plasticMergeCount?: number;
 
+  // Pristine polygon snapshot captured on the plastic-shard's first
+  // dent.  ShardSystem.tickPlasticDentRecovery lerps polygonPoints
+  // toward this after a delay so dents heal back to the spawn
+  // silhouette over time.  Cleared on compose (polygon regenerates
+  // at a new size) and on cross-material transmute (no longer
+  // plastic).
+  originalPolygonPoints?: Vector2[];
+  // Countdown seconds since the most recent plastic-shard dent.
+  // While > 0, the recovery pass holds the cumulative deformation;
+  // each fresh dent resets this to PLASTIC_DENT_RECOVERY.DELAY_
+  // SECONDS so a flurry of hits doesn't heal until the lull.
+  plasticDentRecoveryDelay?: number;
+
+  // Plastic-tile damage colour blend — set on first hit, sticky for
+  // the tile's life.  applyDentStep lerps tile.color from
+  // plasticTileOriginalColor toward plasticTileTargetColor as
+  // health/maxHealth falls, so a tile visibly shifts from its
+  // palette shade to a shard shade across its HP curve.  At HP=0
+  // the tile.color === plasticTileTargetColor (full shard colour)
+  // and the existing break path releases shards.
+  plasticTileOriginalColor?: string;
+  plasticTileTargetColor?: string;
+
   // ── Metal rigid-composite assembly ──────────────────────────────────────
   // A metal-shard entity carrying `metalCells` is a rigid composite: a set
   // of equilateral-triangle cells locked to a shared triangular lattice.

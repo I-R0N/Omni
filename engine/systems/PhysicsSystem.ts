@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -35,6 +35,18 @@ function cellKey(x: number, y: number): number {
 }
 function cellKeyFromCell(cx: number, cy: number): number {
     return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
+}
+
+// Parametric hex-colour lerp.  Used by applyDentStep to fade
+// plastic-tile colour toward its sticky shard-shade target as
+// damage accumulates.  Inputs expected as #RRGGBB.
+function lerpHexColors(a: string, b: string, t: number): string {
+    const rA = parseInt(a.slice(1, 3), 16), gA = parseInt(a.slice(3, 5), 16), bA = parseInt(a.slice(5, 7), 16);
+    const rB = parseInt(b.slice(1, 3), 16), gB = parseInt(b.slice(3, 5), 16), bB = parseInt(b.slice(5, 7), 16);
+    const r = Math.round(rA + (rB - rA) * t);
+    const g = Math.round(gA + (gB - gA) * t);
+    const c = Math.round(bA + (bB - bA) * t);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${c.toString(16).padStart(2, '0')}`;
 }
 
 // Precompute the squared "still-settled" distance multiplier:
@@ -1035,6 +1047,33 @@ export class PhysicsSystem {
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
 
+      // Plastic-shard dent-recovery lazy snapshot: on the FIRST dent
+      // of a plastic-shard, capture the pristine polygon points so
+      // tickPlasticDentRecovery can lerp back toward them after the
+      // delay.  Subsequent dents reset only the delay countdown
+      // (below) — the original snapshot stays as the recovery
+      // target.  Cleared on compose / transmute by their respective
+      // call sites.  Cheap allocation: 4 Vector2s per plastic-shard,
+      // one-shot at first damage.
+      if (tile.shardVariant === 'plastic-shard' && tile.originalPolygonPoints === undefined) {
+          const orig: Vector2[] = new Array(pts.length);
+          for (let i = 0; i < pts.length; i++) {
+              orig[i] = { x: pts[i].x, y: pts[i].y };
+          }
+          tile.originalPolygonPoints = orig;
+      }
+
+      // Capture pre-dent max vertex radius for preserveBoundingRadius
+      // variants (today: plastic-shard).  Scaled below so the post-
+      // dent bounding circle matches.
+      let preMaxR2 = 0;
+      if (dent.preserveBoundingRadius) {
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > preMaxR2) preMaxR2 = r2;
+          }
+      }
+
       // Impact in entity-local coords (centroid at origin), with
       // toroidal wrap so impacts across the seam pick the right side.
       // wrapDeltaX(from, to) returns (to - from), so pass tile first
@@ -1121,6 +1160,57 @@ export class PhysicsSystem {
           const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
+      }
+
+      // preserveBoundingRadius rescale (today: plastic-shard).  After
+      // pulling, find the new max radius and scale every vertex by
+      // preMaxR / postMaxR so the bounding circle holds at its pre-
+      // dent extent.  The pulled vertex is now at a smaller radius
+      // than its neighbours after the scale — visible asymmetric
+      // deformation, no overall shrink.
+      if (dent.preserveBoundingRadius && preMaxR2 > 0) {
+          let postMaxR2 = 0;
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > postMaxR2) postMaxR2 = r2;
+          }
+          if (postMaxR2 > 0 && postMaxR2 < preMaxR2) {
+              const scale = Math.sqrt(preMaxR2 / postMaxR2);
+              for (let i = 0; i < pts.length; i++) {
+                  pts[i].x *= scale;
+                  pts[i].y *= scale;
+              }
+          }
+      }
+
+      // Plastic-shard dent recovery: reset the delay countdown on
+      // every dent so a flurry of hits holds the deformation until
+      // the lull.  tickPlasticDentRecovery in ShardSystem reads this.
+      if (tile.shardVariant === 'plastic-shard') {
+          tile.plasticDentRecoveryDelay = PLASTIC_DENT_RECOVERY.DELAY_SECONDS;
+      }
+
+      // Plastic-tile damage colour shift toward the shard palette.
+      // Lazy-init the original + target on first dent (target picks
+      // one random shard shade and stays sticky), then lerp tile.
+      // color from original to target by (1 - hpRatio).  At HP=0 the
+      // colour equals the full shard shade and the existing break
+      // path fires.
+      if (tile.shardVariant === 'plastic-tile') {
+          if (tile.plasticTileOriginalColor === undefined) {
+              tile.plasticTileOriginalColor = tile.color;
+          }
+          if (tile.plasticTileTargetColor === undefined) {
+              tile.plasticTileTargetColor = randomPlasticShardShade();
+          }
+          const maxHP = tile.maxHealth ?? 1;
+          const hpRatio = Math.max(0, Math.min(1, tile.health / maxHP));
+          const t = 1 - hpRatio;
+          tile.color = lerpHexColors(
+              tile.plasticTileOriginalColor!,
+              tile.plasticTileTargetColor!,
+              t,
+          );
       }
 
       // polygonPoints mutated → invalidate any cached SAT axes (the
@@ -1562,7 +1652,9 @@ export class PhysicsSystem {
       plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
       plastic.color            = other.color || plastic.color;
       plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
-      plastic.plasticMergeCount = undefined;
+      plastic.plasticMergeCount        = undefined;
+      plastic.originalPolygonPoints    = undefined;
+      plastic.plasticDentRecoveryDelay = undefined;
       invalidateCollisionR(plastic);
   }
 

@@ -456,6 +456,17 @@ export interface ShardVariantDef {
      *  deepVertexCount === pullVertexCount, every pulled vertex
      *  gets the boost (uniform deep pull). */
     deepVertexCount?: number;
+    /** When true, applyDentStep captures the polygon's max vertex
+     *  radius BEFORE the inward pull and scales every vertex
+     *  afterwards so the post-dent max radius matches.  Net effect:
+     *  the polygon visibly deforms (the pulled vertex sits at a
+     *  smaller radius than its neighbours after scaling) but the
+     *  bounding circle stays at its pre-dent extent — the silhouette
+     *  doesn't shrink overall as hits accumulate.  Plastic-shard
+     *  uses this so a dented shard reads as "squished" rather than
+     *  "smaller".  Default false (legacy behaviour: bounding
+     *  radius shrinks as the impact vertex pulls in). */
+    preserveBoundingRadius?: boolean;
     /** Optional shard released on every hit, IN ADDITION TO the
      *  on-death breakShards.  Sized like breakShards entries
      *  (linear sizeFraction × deformed diameter) but spawned at the

@@ -416,6 +416,26 @@ export const PLASTIC_TILE_SNAP = {
   DEBRIS_DIAMETER: 50,
 } as const;
 
+// ── Plastic-shard dent recovery ────────────────────────────────────
+// Plastic-shards take dents (single-vertex inward pulls) but the
+// material slowly springs back: each dent resets a recovery delay,
+// and once expired the polygon points lerp toward
+// originalPolygonPoints (a snapshot of the shard's pristine
+// silhouette captured on first dent).  Reads as plastic memory —
+// dents "set" momentarily before relaxing back to the spawn shape.
+// Continuous damage holds the polygon deformed; a brief lull lets
+// it heal.  See ShardSystem.tickPlasticDentRecovery.
+export const PLASTIC_DENT_RECOVERY = {
+  /** Seconds after the last dent before the polygon starts lerping
+   *  back toward originalPolygonPoints.  Below this, the polygon
+   *  holds the cumulative deformation. */
+  DELAY_SECONDS: 1.5,
+  /** Per-second fraction of remaining displacement to recover (an
+   *  exponential lerp toward original).  0.6 = ~60 %/s, so after
+   *  ~4 s past the delay the polygon is ~97 % back to original. */
+  RATE_PER_SECOND: 0.6,
+} as const;
+
 // PADIR toggle — direction of the PAuto automata.  false (default) =
 // darken dense interiors (mirrors nebula); true = brighten them.
 let activePlasticAutomataBrighten = true; // brighten dense interiors
@@ -2474,7 +2494,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       vertexJitter: 0.30,
       pullVertexCount: 3,
       centerVertexJitterMul: 1,
-      shardHealth: 12,
+      shardHealth: 24,
       breakShards: [
         {
           variant: 'plastic-shard',
@@ -2785,11 +2805,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       shrinkFactor: 1.0,
     },
     // Soft denting — same character as plastic-tile (deep, uniform
-    // pull) but a single vertex per hit (pullVertexCount defaults to
-    // 1) since the shard polygon is a 4-gon and pulling more would
-    // collapse it.  vertexJitter 0.30 pushes the closest corner in by
-    // up to 30 % each hit, so a shard visibly squishes over its ~12-HP
-    // life before breaking.  Each hit also costs 1 HP (isDentEntity
+    // pull) but two vertices per hit so the dent matches the tile's
+    // "half the polygon deforms" feel without collapsing the 4-gon
+    // (pullVertexCount: 3 on a 4-gon would leave a single anchor
+    // vertex and pinch the shard to a sliver).  vertexJitter 0.30
+    // pushes corners in by up to 30 % each hit.  preserveBounding
+    // Radius scales the polygon back after the pull so the bounding
+    // circle holds at the spawn extent — the shard reads as
+    // "squished" rather than "smaller" as hits accumulate, and the
+    // per-frame dent-recovery pass (ShardSystem.tickPlasticDent
+    // Recovery) lerps the polygon back toward originalPolygonPoints
+    // after a brief delay.  Each hit costs 1 HP (isDentEntity
     // contract) and gives the free-floating shard a small velocity
     // kick (PhysicsSystem).  breakShards is EMPTY so the variant's
     // `shatter` policy still fires on death (GameEngine.handleEntity
@@ -2797,6 +2823,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // .shatter) — the shard fragments into smaller plastic-shards.
     dent: {
       vertexJitter: 0.30,
+      pullVertexCount: 2,
+      preserveBoundingRadius: true,
       breakShards: [],
     },
   },

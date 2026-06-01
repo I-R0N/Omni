@@ -28,6 +28,7 @@ import {
   randomPlasticShardShade,
   PLASTIC_SHARD_AUTOMATA,
   PLASTIC_TILE_SNAP,
+  PLASTIC_DENT_RECOVERY,
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
   getActiveShatterGraceDelay,
@@ -404,6 +405,10 @@ export class ShardSystem {
       this.tickPlasticTileSnap(entities, physics);
       if (METAL_ASSEMBLY.ENABLED) this.tickMetalAssembly(entities, physics);
     }
+    // Plastic-shard dent recovery is unconditional (runMergePass
+    // gates the broadphase passes; recovery is independent of that
+    // cadence and runs every sim step so the lerp is smooth).
+    this.tickPlasticDentRecovery(entities, dt);
     this.lastUpdateMs = performance.now() - t0;
   }
 
@@ -1853,6 +1858,48 @@ export class ShardSystem {
   }
 
   /**
+   * Plastic-shard dent recovery.  Each plastic-shard with an
+   * originalPolygonPoints snapshot (captured by applyDentStep on
+   * first dent) lerps polygonPoints back toward the original after
+   * its plasticDentRecoveryDelay countdown expires.  Dents reset
+   * the delay every hit, so a flurry holds the polygon deformed;
+   * after PLASTIC_DENT_RECOVERY.DELAY_SECONDS of no damage the
+   * shard heals at RATE_PER_SECOND exponential rate.  Polygon
+   * recovery invalidates the SAT cache so collision picks up the
+   * updated edge normals.
+   */
+  private tickPlasticDentRecovery(entities: GameEntity[], dt: number): void {
+    if (dt <= 0) return;
+    const rate = 1 - Math.exp(-PLASTIC_DENT_RECOVERY.RATE_PER_SECOND * dt);
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active) continue;
+      if (e.shardVariant !== 'plastic-shard') continue;
+      if (e.originalPolygonPoints === undefined) continue;
+      // Tick the delay countdown.  While > 0 the polygon holds.
+      if (e.plasticDentRecoveryDelay !== undefined && e.plasticDentRecoveryDelay > 0) {
+        e.plasticDentRecoveryDelay -= dt;
+        if (e.plasticDentRecoveryDelay > 0) continue;
+        e.plasticDentRecoveryDelay = undefined;
+      }
+      const pts = e.polygonPoints;
+      const orig = e.originalPolygonPoints;
+      if (!pts || pts.length !== orig.length) continue;
+      let moved = false;
+      for (let j = 0; j < pts.length; j++) {
+        const ox = orig[j].x, oy = orig[j].y;
+        const dx = ox - pts[j].x;
+        const dy = oy - pts[j].y;
+        if (dx * dx + dy * dy < 1e-4) continue;
+        pts[j].x += dx * rate;
+        pts[j].y += dy * rate;
+        moved = true;
+      }
+      if (moved) e._satCacheAxes = undefined;
+    }
+  }
+
+  /**
    * Spawn the surplus-material burst released when a merged plastic-
    * shard snaps into a static plastic-tile.  PLASTIC_TILE_SNAP.DEBRIS_
    * COUNT shards at DEBRIS_DIAMETER, spawned at the snap position
@@ -2654,8 +2701,12 @@ export class ShardSystem {
       // Plastic self-merge: track how many base shards composed this
       // entity so shatterAsteroidStyle can fragment it back into the
       // same count on death.  Undefined parents default to 1 each.
+      // Also clear the dent-recovery snapshot so the next dent on the
+      // freshly-shaped survivor re-captures the pristine polygon.
       if (isPlasticSelfMerge) {
         a.plasticMergeCount = (a.plasticMergeCount ?? 1) + (b.plasticMergeCount ?? 1);
+        a.originalPolygonPoints = undefined;
+        a.plasticDentRecoveryDelay = undefined;
       }
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
