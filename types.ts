@@ -366,18 +366,15 @@ export interface GameEntity {
   // number of base-sized pieces that built it.
   plasticMergeCount?: number;
 
-  // Pristine polygon snapshot captured on the plastic-shard's first
-  // dent.  ShardSystem.tickPlasticDentRecovery lerps polygonPoints
-  // toward this after a delay so dents heal back to the spawn
-  // silhouette over time.  Cleared on compose (polygon regenerates
-  // at a new size) and on cross-material transmute (no longer
-  // plastic).
-  originalPolygonPoints?: Vector2[];
-  // Countdown seconds since the most recent plastic-shard dent.
-  // While > 0, the recovery pass holds the cumulative deformation;
-  // each fresh dent resets this to PLASTIC_DENT_RECOVERY.DELAY_
-  // SECONDS so a flurry of hits doesn't heal until the lull.
-  plasticDentRecoveryDelay?: number;
+  // Per-dent snap-back history for plastic-tile / plastic-shard.
+  // applyDentStep pushes one entry per hit holding the polygon
+  // delta this dent applied (post - pre, including the preserve-
+  // bounding-radius rescale).  When an entry's timer expires,
+  // tickPlasticDentRecovery subtracts its delta from polygonPoints
+  // — one hit's worth of deformation snaps back instantly.  Cleared
+  // on compose (polygon regenerates at a new size) and on cross-
+  // material transmute (no longer plastic).
+  plasticDentHistory?: Array<{ timer: number; delta: Vector2[] }>;
 
   // Plastic-tile damage colour blend — set on first hit, sticky for
   // the tile's life.  applyDentStep lerps tile.color from

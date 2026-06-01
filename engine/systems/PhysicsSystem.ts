@@ -1047,22 +1047,20 @@ export class PhysicsSystem {
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
 
-      // Plastic dent-recovery lazy snapshot: on the FIRST dent of a
-      // plastic-tile or plastic-shard, capture the pristine polygon
-      // points so tickPlasticDentRecovery can lerp back toward them
-      // after the delay.  Subsequent dents reset only the delay
-      // countdown (below) — the original snapshot stays as the
-      // recovery target.  Cleared on compose / transmute by their
-      // respective call sites.  Cheap allocation: a handful of
-      // Vector2s per entity, one-shot at first damage.
+      // Plastic dent recovery: snapshot the polygon BEFORE this dent
+      // so the post-dent delta (this hit's contribution) can be
+      // pushed onto plasticDentHistory after the pull + preserve
+      // rescale complete.  Each dent gets its own snap-back timer
+      // (see tickPlasticDentRecovery + PLASTIC_DENT_RECOVERY in
+      // constants).  Cheap allocation: one Vector2[] per dent event.
       const isPlasticDent = tile.shardVariant === 'plastic-shard'
                          || tile.shardVariant === 'plastic-tile';
-      if (isPlasticDent && tile.originalPolygonPoints === undefined) {
-          const orig: Vector2[] = new Array(pts.length);
+      let preSnapshot: Vector2[] | undefined;
+      if (isPlasticDent) {
+          preSnapshot = new Array(pts.length);
           for (let i = 0; i < pts.length; i++) {
-              orig[i] = { x: pts[i].x, y: pts[i].y };
+              preSnapshot[i] = { x: pts[i].x, y: pts[i].y };
           }
-          tile.originalPolygonPoints = orig;
       }
 
       // Capture pre-dent max vertex radius for preserveBoundingRadius
@@ -1185,12 +1183,22 @@ export class PhysicsSystem {
           }
       }
 
-      // Plastic dent recovery: reset the delay countdown on every
-      // dent (tile or shard) so a flurry of hits holds the
-      // deformation until the lull.  tickPlasticDentRecovery in
-      // ShardSystem reads this.
-      if (isPlasticDent) {
-          tile.plasticDentRecoveryDelay = PLASTIC_DENT_RECOVERY.DELAY_SECONDS;
+      // Plastic dent recovery: push this hit's per-vertex delta onto
+      // plasticDentHistory with its own timer.  When the timer
+      // expires, ShardSystem.tickPlasticDentRecovery subtracts the
+      // delta from polygonPoints — one hit's worth of deformation
+      // snaps back instantly.  Three hits in quick succession =
+      // three snap-backs spaced DELAY_SECONDS apart.
+      if (isPlasticDent && preSnapshot !== undefined) {
+          const delta: Vector2[] = new Array(pts.length);
+          for (let i = 0; i < pts.length; i++) {
+              delta[i] = { x: pts[i].x - preSnapshot[i].x, y: pts[i].y - preSnapshot[i].y };
+          }
+          if (!tile.plasticDentHistory) tile.plasticDentHistory = [];
+          tile.plasticDentHistory.push({
+              timer: PLASTIC_DENT_RECOVERY.DELAY_SECONDS,
+              delta,
+          });
       }
 
       // Plastic-tile damage colour shift toward the shard palette.
@@ -1655,9 +1663,8 @@ export class PhysicsSystem {
       plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
       plastic.color            = other.color || plastic.color;
       plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
-      plastic.plasticMergeCount        = undefined;
-      plastic.originalPolygonPoints    = undefined;
-      plastic.plasticDentRecoveryDelay = undefined;
+      plastic.plasticMergeCount  = undefined;
+      plastic.plasticDentHistory = undefined;
       invalidateCollisionR(plastic);
   }
 

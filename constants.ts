@@ -416,24 +416,21 @@ export const PLASTIC_TILE_SNAP = {
   DEBRIS_DIAMETER: 50,
 } as const;
 
-// ── Plastic-shard dent recovery ────────────────────────────────────
-// Plastic-shards take dents (single-vertex inward pulls) but the
-// material slowly springs back: each dent resets a recovery delay,
-// and once expired the polygon points lerp toward
-// originalPolygonPoints (a snapshot of the shard's pristine
-// silhouette captured on first dent).  Reads as plastic memory —
-// dents "set" momentarily before relaxing back to the spawn shape.
-// Continuous damage holds the polygon deformed; a brief lull lets
-// it heal.  See ShardSystem.tickPlasticDentRecovery.
+// ── Plastic dent recovery (per-dent snap-back) ─────────────────────
+// Every dent on a plastic-tile / plastic-shard pushes one entry
+// onto entity.plasticDentHistory holding the polygon delta that
+// dent applied (post - pre, including the preserve-bounding-radius
+// rescale).  Each entry counts down DELAY_SECONDS, and on expiry
+// the recovery pass subtracts its delta from polygonPoints — one
+// hit's worth of deformation snaps back instantly.  Three hits in
+// quick succession = three snap-backs spaced DELAY_SECONDS apart;
+// no smooth lerp, no per-entity lull.  Reads as plastic "memory"
+// expiring per impact rather than the whole polygon relaxing
+// together.  See ShardSystem.tickPlasticDentRecovery.
 export const PLASTIC_DENT_RECOVERY = {
-  /** Seconds after the last dent before the polygon starts lerping
-   *  back toward originalPolygonPoints.  Below this, the polygon
-   *  holds the cumulative deformation. */
+  /** Seconds between the dent landing and that single dent snapping
+   *  back instantly.  Each dent timer is independent. */
   DELAY_SECONDS: 1.5,
-  /** Per-second fraction of remaining displacement to recover (an
-   *  exponential lerp toward original).  0.6 = ~60 %/s, so after
-   *  ~4 s past the delay the polygon is ~97 % back to original. */
-  RATE_PER_SECOND: 0.6,
 } as const;
 
 // PADIR toggle — direction of the PAuto automata.  false (default) =
@@ -2813,9 +2810,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // Radius scales the polygon back after the pull so the bounding
     // circle holds at the spawn extent — the shard reads as
     // "squished" rather than "smaller" as hits accumulate, and the
-    // per-frame dent-recovery pass (ShardSystem.tickPlasticDent
-    // Recovery) lerps the polygon back toward originalPolygonPoints
-    // after a brief delay.  Each hit costs 1 HP (isDentEntity
+    // per-dent snap-back pass (ShardSystem.tickPlasticDentRecovery)
+    // subtracts each dent's stored delta from polygonPoints when
+    // its individual timer expires.  Each hit costs 1 HP (isDentEntity
     // contract) and gives the free-floating shard a small velocity
     // kick (PhysicsSystem).  breakShards is EMPTY so the variant's
     // `shatter` policy still fires on death (GameEngine.handleEntity

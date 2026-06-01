@@ -1858,53 +1858,53 @@ export class ShardSystem {
   }
 
   /**
-   * Plastic dent recovery (tiles + shards).  Each plastic entity
-   * with an originalPolygonPoints snapshot (captured by applyDent
-   * Step on first dent) lerps polygonPoints back toward the
-   * original after its plasticDentRecoveryDelay countdown expires.
-   * Dents reset the delay every hit, so a flurry holds the polygon
-   * deformed; after PLASTIC_DENT_RECOVERY.DELAY_SECONDS of no
-   * damage the entity heals at RATE_PER_SECOND exponential rate.
+   * Plastic dent recovery (tiles + shards) — per-dent snap-back.
+   * applyDentStep pushes one entry per hit onto e.plasticDentHistory
+   * holding the polygon delta that dent applied (post - pre, after
+   * the preserve-bounding-radius rescale).  Each entry ticks down
+   * its own timer; when one expires, the recovery pass subtracts
+   * its delta from polygonPoints and drops the entry.  Three hits
+   * in quick succession produce three snap-backs spaced DELAY_
+   * SECONDS apart — no smooth lerp, no per-entity lull.
    *
-   * Polygon recovery invalidates the SAT cache so collision picks
+   * Polygon mutation invalidates the SAT cache so collision picks
    * up the updated edge normals.  Static tiles also have a baked
    * world-canvas stamp; flag _staticCached false so RenderSystem
-   * re-stamps on next draw with the recovered outline.
+   * re-stamps with the recovered outline.
    */
   private tickPlasticDentRecovery(entities: GameEntity[], dt: number): void {
     if (dt <= 0) return;
-    const rate = 1 - Math.exp(-PLASTIC_DENT_RECOVERY.RATE_PER_SECOND * dt);
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (!e.active) continue;
       if (e.shardVariant !== 'plastic-shard' && e.shardVariant !== 'plastic-tile') continue;
-      if (e.originalPolygonPoints === undefined) continue;
-      // Tick the delay countdown.  While > 0 the polygon holds.
-      if (e.plasticDentRecoveryDelay !== undefined && e.plasticDentRecoveryDelay > 0) {
-        e.plasticDentRecoveryDelay -= dt;
-        if (e.plasticDentRecoveryDelay > 0) continue;
-        e.plasticDentRecoveryDelay = undefined;
-      }
+      const history = e.plasticDentHistory;
+      if (history === undefined || history.length === 0) continue;
       const pts = e.polygonPoints;
-      const orig = e.originalPolygonPoints;
-      if (!pts || pts.length !== orig.length) continue;
-      let moved = false;
-      for (let j = 0; j < pts.length; j++) {
-        const ox = orig[j].x, oy = orig[j].y;
-        const dx = ox - pts[j].x;
-        const dy = oy - pts[j].y;
-        if (dx * dx + dy * dy < 1e-4) continue;
-        pts[j].x += dx * rate;
-        pts[j].y += dy * rate;
-        moved = true;
+      if (!pts) continue;
+      let writeIdx = 0;
+      let mutated = false;
+      for (let h = 0; h < history.length; h++) {
+        const entry = history[h];
+        entry.timer -= dt;
+        if (entry.timer <= 0 && entry.delta.length === pts.length) {
+          // Snap back: subtract this dent's delta from the current
+          // polygon so the vertex that was pulled in springs out by
+          // the same amount it moved.  Other dents on the history
+          // stay intact and continue counting down independently.
+          for (let j = 0; j < pts.length; j++) {
+            pts[j].x -= entry.delta[j].x;
+            pts[j].y -= entry.delta[j].y;
+          }
+          mutated = true;
+          // Skip writing — entry retires here.
+        } else {
+          history[writeIdx++] = entry;
+        }
       }
-      if (moved) {
+      history.length = writeIdx;
+      if (mutated) {
         e._satCacheAxes = undefined;
-        // Static-tile world-canvas stamp baked the old outline;
-        // flag dirty so RenderSystem re-stamps with the recovered
-        // shape.  Plastic-shards have _staticCached === undefined
-        // (mobile shards never enter the static-cache path), so
-        // this is a no-op for them.
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -2712,12 +2712,12 @@ export class ShardSystem {
       // Plastic self-merge: track how many base shards composed this
       // entity so shatterAsteroidStyle can fragment it back into the
       // same count on death.  Undefined parents default to 1 each.
-      // Also clear the dent-recovery snapshot so the next dent on the
-      // freshly-shaped survivor re-captures the pristine polygon.
+      // Clear dent-history too — the polygon was regenerated at a
+      // new size, so prior dent deltas are tied to the OLD geometry
+      // and would be wrong to subtract from the new polygon.
       if (isPlasticSelfMerge) {
         a.plasticMergeCount = (a.plasticMergeCount ?? 1) + (b.plasticMergeCount ?? 1);
-        a.originalPolygonPoints = undefined;
-        a.plasticDentRecoveryDelay = undefined;
+        a.plasticDentHistory = undefined;
       }
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`
