@@ -27,6 +27,7 @@ import {
   nebulaFadeRateScale,
   randomPlasticShardShade,
   PLASTIC_SHARD_AUTOMATA,
+  PLASTIC_TILE_SNAP,
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
   getActiveShatterGraceDelay,
@@ -400,6 +401,7 @@ export class ShardSystem {
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
       this.runLargeShardCollapse(entities);
+      this.tickPlasticTileSnap(entities, physics);
       if (METAL_ASSEMBLY.ENABLED) this.tickMetalAssembly(entities, physics);
     }
     this.lastUpdateMs = performance.now() - t0;
@@ -1816,6 +1818,84 @@ export class ShardSystem {
     // If every candidate hex is occupied the shard stays a (max-size)
     // shard and a later merge retries.
     this.tryTransmuteShardToTile(shard, 'glass-shard', 'glass', entities, physics);
+  }
+
+  /**
+   * Plastic-shard → plastic-tile snap pass.  Iterates plastic-shards
+   * whose diameter has grown past PLASTIC_TILE_SNAP.DIAMETER_MULT ×
+   * the hex tile's circular-equivalent (sqrt(HEX_AREA)) AND whose
+   * per-substep speed has settled below PLASTIC_TILE_SNAP.REST_SPEED;
+   * each eligible shard snaps to the nearest free hex via the shared
+   * buildTileAtNearestFreeHex helper and releases DEBRIS_COUNT small
+   * plastic-shards (the surplus material that didn't fit into the
+   * tile).  Speed gate keeps a fast-flying merged shard moving until
+   * it actually rests rather than abruptly halting mid-flight.
+   */
+  private tickPlasticTileSnap(entities: GameEntity[], physics: PhysicsSystem): void {
+    const minDiam   = GLASS_TIER_DIAMETER * PLASTIC_TILE_SNAP.DIAMETER_MULT;
+    const restSpeed = PLASTIC_TILE_SNAP.REST_SPEED;
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e.active) continue;
+      if (e.shardVariant !== 'plastic-shard') continue;
+      // Skip shards already fading out from a successful snap — the
+      // fade window keeps active=true for the dissolve, but the snap
+      // has been booked so a second attempt could pick a different
+      // free neighbour and build a duplicate tile.
+      if ((e.mergeFadeTimer ?? 0) > 0) continue;
+      if (e.size.x < minDiam) continue;
+      const vx = e.velocity.x, vy = e.velocity.y;
+      if (vx * vx + vy * vy >= restSpeed * restSpeed) continue;
+      const snapPos = { x: e.position.x, y: e.position.y };
+      if (!this.tryTransmuteShardToTile(e, 'plastic-shard', 'plastic', entities, physics)) continue;
+      this.spawnPlasticSnapDebris(snapPos, entities);
+    }
+  }
+
+  /**
+   * Spawn the surplus-material burst released when a merged plastic-
+   * shard snaps into a static plastic-tile.  PLASTIC_TILE_SNAP.DEBRIS_
+   * COUNT shards at DEBRIS_DIAMETER, spawned at the snap position
+   * with small outward velocities so they spray off the materialising
+   * tile.  Same polygon shape as base shards (4-vert plastic spawn).
+   */
+  private spawnPlasticSnapDebris(pos: Vector2, entities: GameEntity[]): void {
+    const variantDef = SHARD_VARIANTS['plastic-shard'];
+    const childSpawn = variantDef.spawn;
+    const size = PLASTIC_TILE_SNAP.DEBRIS_DIAMETER;
+    const mass = childSpawn.sizeToMass(size);
+    const count = PLASTIC_TILE_SNAP.DEBRIS_COUNT;
+    const baseR = (size / 2) * 0.8;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const speed = 1.0 + Math.random() * 1.5;
+      const points = this.generateShardPolygon(
+        baseR,
+        childSpawn.polyVerticesMin,
+        childSpawn.polyVerticesMax,
+        childSpawn.angleJitter,
+        childSpawn.radiusMin,
+        childSpawn.radiusRange,
+        childSpawn.polyVerticesOptions,
+      );
+      entities.push({
+        id:            nextId('plastic_snap_debris'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  'plastic-shard',
+        position:      { x: pos.x + Math.cos(angle) * size * 0.5, y: pos.y + Math.sin(angle) * size * 0.5 },
+        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        size:          { x: size, y: size },
+        rotation:      Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        color:         randomPlasticShardShade(),
+        active:        true,
+        health:        1,
+        maxHealth:     1,
+        polygonPoints: points,
+        mass,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
   }
 
   /**

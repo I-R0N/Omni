@@ -384,6 +384,38 @@ export const PLASTIC_SHARD_AUTOMATA = {
 // catches them.  Rock / glass / metal / nebula stay on the baseline.
 export const PLASTIC_SHARD_FLOW_MULT = 5;
 
+// ── Plastic-shard cross-material transmute on contact ──────────────
+// When a plastic-shard collides with a strictly larger shard whose
+// material is NOT plastic and NOT nebula, the plastic-shard adopts
+// the partner's material — same size, same polygon shape, new
+// variant + colour + mass.  Reads as plastic absorbing the surface
+// character of whatever it touches.  Indestructible has no
+// corresponding shard variant and is therefore excluded.  See
+// PhysicsSystem.tryPlasticTransmuteOnContact.
+export const PLASTIC_TRANSMUTE_EXCLUDE: ReadonlyArray<string> = [
+  'plastic-tile', 'plastic-shard',
+  'nebula-tile',  'nebula-shard',
+  'indestructible-tile',
+] as const;
+
+// ── Plastic-shard → plastic-tile snap ──────────────────────────────
+// Merged plastic-shards eventually consolidate into a static plastic-
+// tile.  When a shard's diameter passes DIAMETER_MULT × the hex
+// tile's circular-equivalent (sqrt(HEX_AREA)) AND its speed has
+// settled below REST_SPEED, ShardSystem.tickPlasticTileSnap snaps it
+// onto the nearest free hex via the shared buildTileAtNearestFreeHex
+// helper (same path glass uses) and releases DEBRIS_COUNT small
+// plastic-shards at DEBRIS_DIAMETER — the surplus material that
+// didn't fit into the tile.  Speed gate keeps a fast-flying merged
+// shard moving until it actually rests rather than abruptly halting
+// mid-flight.
+export const PLASTIC_TILE_SNAP = {
+  DIAMETER_MULT: 1.5,
+  REST_SPEED:    1.0,
+  DEBRIS_COUNT:  4,
+  DEBRIS_DIAMETER: 50,
+} as const;
+
 // PADIR toggle — direction of the PAuto automata.  false (default) =
 // darken dense interiors (mirrors nebula); true = brighten them.
 let activePlasticAutomataBrighten = true; // brighten dense interiors

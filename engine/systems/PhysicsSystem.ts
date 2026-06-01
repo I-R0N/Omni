@@ -1,10 +1,10 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
-import { getCollisionR } from '../entityCache';
+import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -1525,6 +1525,48 @@ export class PhysicsSystem {
   }
 
   /**
+   * Plastic-shard cross-material transmute on contact.  When a
+   * plastic-shard collides with a strictly larger non-plastic non-
+   * nebula shard (mobile or static tile), the plastic-shard adopts
+   * the partner's material at the plastic-shard's current size +
+   * polygon shape.  Reads as plastic absorbing the surface character
+   * of whatever it touches; once converted the entity behaves as a
+   * normal shard of the new variant for all subsequent passes
+   * (bonds, repel immunity, density, render).  Tile partners
+   * (glass-tile / rock-tile / metal-tile) map to the matching
+   * SHARD variant — the plastic becomes a shard of that material,
+   * not another tile.  Partners listed in PLASTIC_TRANSMUTE_EXCLUDE
+   * (plastic-*, nebula-*, indestructible-tile) are no-ops.
+   */
+  private tryPlasticTransmuteOnContact(a: GameEntity, b: GameEntity): void {
+      let plastic: GameEntity, other: GameEntity;
+      if (a.shardVariant === 'plastic-shard') { plastic = a; other = b; }
+      else if (b.shardVariant === 'plastic-shard') { plastic = b; other = a; }
+      else return;
+      const oVar = other.shardVariant;
+      if (oVar === undefined) return;
+      if (PLASTIC_TRANSMUTE_EXCLUDE.indexOf(oVar) !== -1) return;
+      if (plastic.size.x >= other.size.x) return;
+
+      // Tile → matching shard variant; shard variants pass through.
+      let targetVariant: string;
+      switch (oVar) {
+          case 'glass-tile':  targetVariant = 'glass-shard';  break;
+          case 'rock-tile':   targetVariant = 'rock-shard';   break;
+          case 'metal-tile':  targetVariant = 'metal-shard';  break;
+          default:            targetVariant = oVar;           break;
+      }
+      const newVariantDef = SHARD_VARIANTS[targetVariant as keyof typeof SHARD_VARIANTS];
+      if (newVariantDef === undefined) return;
+
+      plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
+      plastic.color            = other.color || plastic.color;
+      plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
+      plastic.plasticMergeCount = undefined;
+      invalidateCollisionR(plastic);
+  }
+
+  /**
    * Mobile-shard ↔ static-tile collision pass — debug-gated by
    * `shardTileCollisionsEnabled`.  The main broadphase skips
    * STRUCTURE entities as outer-loop subjects (commit cf69102),
@@ -2104,6 +2146,15 @@ export class PhysicsSystem {
       // else so projectile / shake / drop branches don't bounce
       // off a tile that's about to shatter from this contact.
       if (this.tryPassthroughShatter(a, b, onDeath)) return;
+
+      // Plastic cross-material transmute — smaller plastic-shard
+      // adopts the partner's material at its current size + shape.
+      // Runs before nebula passThrough so the transmute fires on
+      // glass / rock / metal partners only (nebula partners are in
+      // PLASTIC_TRANSMUTE_EXCLUDE, so this is a fast no-op there);
+      // post-transmute the entity behaves as its new variant for the
+      // remainder of resolveCollision.
+      this.tryPlasticTransmuteOnContact(a, b);
 
       // ── NEBULA: pass-through with conditional shatter ──────────────────
       // Stage 5: per-variant passThrough flag drives the impulse skip.
