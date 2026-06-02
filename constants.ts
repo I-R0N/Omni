@@ -2750,10 +2750,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // is intentionally absent: the bond falls through to defaultOutcome
     // 'compose', which routes through composeEntities' isPlasticSelfMerge
     // branch — area-conserving growth, no size cap, no tile transmute
-    // (per user direction).  pullStrength stays 0 — bonds form by
-    // contact, no gravity attraction.
+    // (per user direction).  attractedTo + pull* drive a heavy 1/dist
+    // gravity toward every non-nebula shard (mirror of bondsWith), so
+    // plastic actively SEEKS contact with neighbouring material
+    // instead of relying on stray drift to trigger bond formation.
+    // The spatial hash never holds static tiles, so the `nebula-tile`
+    // entry in the exclude list is defensive only — the pull pass
+    // wouldn't see tiles regardless.
     merge: {
-      attractedTo: 'none',
+      attractedTo: { exclude: ['nebula-tile', 'nebula-shard'] },
+      pullRange:    300,
+      pullStrength: 500,
+      pullMinDist:  15,
       bondsWith: { exclude: ['nebula-tile', 'nebula-shard'] },
       bondTimeSeconds: 10,
       bondTimeSizeRef: 20,
