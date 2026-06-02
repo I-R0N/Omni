@@ -149,6 +149,17 @@ export interface ShardMergePolicy {
   pullRange?: number;
   pullStrength?: number;
   pullMinDist?: number;
+  /** Inner annulus boundary — when set, the pull pass ignores
+   *  targets whose centre-to-centre distance is BELOW this value.
+   *  Together with pullRange this defines an annular ring in which
+   *  the puller seeks targets; inside the ring the pull turns off
+   *  entirely so bond cohesion (and physics contact) handle the
+   *  close-range case without competing with gravity acceleration.
+   *  Undefined → 0 → today's behaviour (full disc from contact to
+   *  pullRange).  Plastic-shard sets a non-zero value so its heavy
+   *  attractedTo gravity hands off cleanly to bond cohesion at
+   *  contact distance. */
+  pullInnerRange?: number;
 
   /** Contact-stick candidate set.  'none' disables bond formation. */
   bondsWith: VariantSelector;

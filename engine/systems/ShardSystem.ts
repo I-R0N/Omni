@@ -1333,20 +1333,22 @@ export class ShardSystem {
             // process this pair even when j < i.  Cooldowns on the
             // target are honoured.
             if (wantsPull && bVariantId !== null) {
-              const bR = getCollisionR(b);
               const pullRange  = aVariant!.merge.pullRange ?? CELL;
               const pullRangeSq = pullRange * pullRange;
+              const pullInner    = aVariant!.merge.pullInnerRange ?? 0;
+              const pullInnerSq  = pullInner * pullInner;
               const targetCooldownOk = (b.nebulaMergeCooldown ?? 0) <= 0;
               const matchesPull = aVariant!.merge.attractedTo !== 'none'
                 && this.selects(aVariant!.merge.attractedTo, bVariantId, aVariantId!);
-              // Today's nebula gravity targets nearest LARGER-OR-EQUAL
-              // neighbour.  Preserve.  A completed metal hexagon can't accept
-              // more triangles, so don't let pieces home onto it (they'd just
-              // pile up unable to join until it snaps to a tile).
-              const targetIsFullHexagon = b.metalCells !== undefined
-                && b.metalCells.length >= METAL_HEX_SIZE;
-              if (matchesPull && targetCooldownOk && bR >= aR && !targetIsFullHexagon
-                  && distSq <= pullRangeSq && distSq < bestPullDistSq) {
+              // Annular gate: pull is suppressed below pullInnerRange so
+              // the gravity hands off to bond cohesion at close range
+              // instead of fighting it.  Outer cap stays at pullRange.
+              // pullInnerRange undefined → 0 → today's behaviour (full
+              // range from contact to outer).
+              if (matchesPull && targetCooldownOk
+                  && distSq >= pullInnerSq
+                  && distSq <= pullRangeSq
+                  && distSq < bestPullDistSq) {
                 bestPullDistSq = distSq;
                 bestPullTarget = b;
               }

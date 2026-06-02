@@ -2757,9 +2757,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // The spatial hash never holds static tiles, so the `nebula-tile`
     // entry in the exclude list is defensive only — the pull pass
     // wouldn't see tiles regardless.
+    // pullInnerRange 80 turns the gravity OFF inside ~contact distance
+    // for typical plastic-shard sizes (20-200 dia) so bond cohesion
+    // takes over cleanly at close range instead of fighting the pull.
+    // Outside 80px the pull seeks the nearest qualifying neighbour
+    // (no size or completed-hexagon filter — those were metal-
+    // specific and have been dropped from the generic pull pass).
     merge: {
       attractedTo: { exclude: ['nebula-tile', 'nebula-shard'] },
       pullRange:    300,
+      pullInnerRange: 80,
       pullStrength: 500,
       pullMinDist:  15,
       bondsWith: { exclude: ['nebula-tile', 'nebula-shard'] },
