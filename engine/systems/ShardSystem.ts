@@ -1882,8 +1882,10 @@ export class ShardSystem {
       if (history === undefined || history.length === 0) continue;
       const pts = e.polygonPoints;
       if (!pts) continue;
+      const isTile = e.shardVariant === 'plastic-tile';
       let writeIdx = 0;
       let mutated = false;
+      let healed  = 0;
       for (let h = 0; h < history.length; h++) {
         const entry = history[h];
         entry.timer -= dt;
@@ -1897,12 +1899,33 @@ export class ShardSystem {
             pts[j].y -= entry.delta[j].y;
           }
           mutated = true;
+          healed++;
           // Skip writing — entry retires here.
         } else {
           history[writeIdx++] = entry;
         }
       }
       history.length = writeIdx;
+      // Plastic-tile health + colour recovery — one dent retire =
+      // one HP back, capped at maxHealth.  Each hit decremented HP
+      // by 1 and bumped tile.color toward plasticTileTargetColor
+      // (applyDentStep), so reversing N dents recovers N HP and
+      // re-lerps the colour from current toward original by the new
+      // hpRatio.  Shards don't get HP recovery — they're free-
+      // floating debris and just visually un-dent.
+      if (isTile && healed > 0) {
+        const maxHP = e.maxHealth ?? 1;
+        e.health = Math.min(maxHP, e.health + healed);
+        if (e.plasticTileOriginalColor !== undefined
+         && e.plasticTileTargetColor   !== undefined) {
+          const hpRatio = Math.max(0, Math.min(1, e.health / maxHP));
+          e.color = lerpHexColors(
+            e.plasticTileOriginalColor,
+            e.plasticTileTargetColor,
+            1 - hpRatio,
+          );
+        }
+      }
       if (mutated) {
         e._satCacheAxes = undefined;
         if (e._staticCached === true) e._staticCached = false;
@@ -2847,4 +2870,18 @@ function blendHex(hexA: string, hexB: string): string {
   const rA = parseInt(hexA.slice(1, 3), 16), gA = parseInt(hexA.slice(3, 5), 16), bA = parseInt(hexA.slice(5, 7), 16);
   const rB = parseInt(hexB.slice(1, 3), 16), gB = parseInt(hexB.slice(3, 5), 16), bB = parseInt(hexB.slice(5, 7), 16);
   return `#${Math.round((rA + rB) / 2).toString(16).padStart(2, '0')}${Math.round((gA + gB) / 2).toString(16).padStart(2, '0')}${Math.round((bA + bB) / 2).toString(16).padStart(2, '0')}`;
+}
+
+// Parametric hex-colour lerp.  Mirrors lerpHexColors in PhysicsSystem
+// (kept duplicated rather than cross-imported — the two systems don't
+// share a colour helpers module today and the function is 8 lines).
+// Used by tickPlasticDentRecovery to walk the plastic-tile colour
+// back toward its original as HP recovers.
+function lerpHexColors(a: string, b: string, t: number): string {
+  const rA = parseInt(a.slice(1, 3), 16), gA = parseInt(a.slice(3, 5), 16), bA = parseInt(a.slice(5, 7), 16);
+  const rB = parseInt(b.slice(1, 3), 16), gB = parseInt(b.slice(3, 5), 16), bB = parseInt(b.slice(5, 7), 16);
+  const r = Math.round(rA + (rB - rA) * t);
+  const g = Math.round(gA + (gB - gA) * t);
+  const c = Math.round(bA + (bB - bA) * t);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${c.toString(16).padStart(2, '0')}`;
 }
