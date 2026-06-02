@@ -556,6 +556,24 @@ export class ShardSystem {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;
     const variant = SHARD_VARIANTS[variantId];
+
+    // Metal-composite decomposition — metal-shard.shatter.kind is
+    // 'none', so by default a dying metal entity just disappears.
+    // But a composite (metalCells.length >= 2) is conceptually N
+    // bonded triangles, and the user expects it to fragment back
+    // into those triangles on destruction.  decomposeMetalComposite
+    // walks the lattice, spawns one loose triangle per cell at the
+    // cell's world position, and returns — bypassing the powerlaw
+    // pipeline entirely so we don't double-spawn.  Single-cell
+    // metal-shards still fall through to the kind-check below and
+    // die cleanly without children.
+    if (parent.shardVariant === 'metal-shard'
+     && parent.metalCells !== undefined
+     && parent.metalCells.length >= 2) {
+      this.decomposeMetalComposite(parent, entities);
+      return;
+    }
+
     if (variant.shatter.kind !== 'powerlaw') return;
 
     if (variant.shatter.style === 'nebula') {
@@ -2379,6 +2397,114 @@ export class ShardSystem {
   }
 
   /** Lock loose triangle `l` into composite `comp` at lattice cell `target`. */
+  /**
+   * Decompose a dying metal composite into its constituent loose
+   * triangles.  Mirrors the lattice math in mergeMetalComposites:
+   * each cell's local centroid is (ix·R·√3/2, iy·R/2) relative to
+   * the composite's own centroid; rotate by the composite's
+   * rotation, add parent.position to get world coords.  Each loose
+   * triangle inherits parent's velocity plus a small outward
+   * scatter from the composite centroid so the cluster pops apart
+   * rather than overlapping perfectly at spawn.  Each triangle's
+   * polygon is the standard equilateral (matches DropSystem's
+   * metal-tile breakShards), with metalLatticeR carried over so a
+   * later re-assembly pass measures the same lattice size.
+   *
+   * Mass + HP are split evenly across the cells.  Mass per cell =
+   * SHARD_SPAWN_SHAPE_METAL.sizeToMass(2R) — same formula tile-
+   * break uses — so a decomposed triangle is interchangeable with
+   * one freshly broken off a tile.  collapseGraceTimer is stamped
+   * so the decomposed pieces float free for a moment before
+   * tickMetalAssembly can re-snap them onto other composites.
+   */
+  private decomposeMetalComposite(parent: GameEntity, entities: GameEntity[]): void {
+    const cells = parent.metalCells;
+    if (!cells || cells.length < 2) return;
+    const R = parent.metalLatticeR;
+    if (!R) return;
+
+    const ux = (R * Math.sqrt(3)) / 2;
+    const uy = R / 2;
+    // Composite centroid in lattice frame (mean of cell coords) —
+    // matches how mergeMetalComposites + tickMetalAssembly compute
+    // the body's own (0, 0) anchor.
+    let cmx = 0, cmy = 0;
+    for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
+    cmx /= cells.length; cmy /= cells.length;
+    const cos = Math.cos(parent.rotation);
+    const sin = Math.sin(parent.rotation);
+
+    const triDiameter = 2 * R;
+    const variantDef = SHARD_VARIANTS['metal-shard'];
+    const triMass = variantDef.spawn.sizeToMass(triDiameter);
+    const hpEach = Math.max(1, Math.round((parent.health ?? cells.length) / cells.length));
+    const maxHpEach = Math.max(1, Math.round((parent.maxHealth ?? cells.length) / cells.length));
+
+    const baseEquilateral: Vector2[] = [
+      { x: R * Math.cos(-Math.PI / 2),                 y: R * Math.sin(-Math.PI / 2) },
+      { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+      { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+    ];
+
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      // Cell centroid in entity-local frame (lattice → composite frame).
+      const ex = c.ix * ux - cmx;
+      const ey = c.iy * uy - cmy;
+      // Composite frame → world.
+      const wx = parent.position.x + ex * cos - ey * sin;
+      const wy = parent.position.y + ex * sin + ey * cos;
+      // Outward scatter direction from composite centroid.
+      const dx = wx - parent.position.x;
+      const dy = wy - parent.position.y;
+      const scatterMag = Math.sqrt(dx * dx + dy * dy);
+      const scatterSpeed = 1.0 + Math.random() * 1.5;
+      const sx = scatterMag > 0.001 ? (dx / scatterMag) * scatterSpeed : Math.cos(i) * scatterSpeed;
+      const sy = scatterMag > 0.001 ? (dy / scatterMag) * scatterSpeed : Math.sin(i) * scatterSpeed;
+      // Clone the equilateral template so each loose triangle owns
+      // its own points (the dent pipeline mutates polygonPoints in
+      // place; shared references would deform every sibling).
+      const points: Vector2[] = baseEquilateral.map(p => ({ x: p.x, y: p.y }));
+
+      entities.push({
+        id:            nextId('metal_decomp'),
+        type:          EntityType.STRUCTURE,
+        shardVariant:  'metal-shard',
+        position:      { x: wx, y: wy },
+        velocity:      { x: parent.velocity.x + sx, y: parent.velocity.y + sy },
+        size:          { x: triDiameter, y: triDiameter },
+        rotation:      parent.rotation,
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        color:         parent.color,
+        active:        true,
+        health:        hpEach,
+        maxHealth:     maxHpEach,
+        polygonPoints: points,
+        mass:          triMass,
+        metalLatticeR: R,
+        collapseGraceTimer: getActiveShatterGraceDelay(),
+      });
+    }
+
+    // Dust puff matches metal-tile's slate colour — same particle
+    // tone whether you break a tile face or pop a composite.
+    const onParticles = variantDef.onShatterParticles;
+    if (onParticles && onParticles !== 'none' && onParticles !== 'inherit') {
+      const iv = parent.lastImpactVelocity;
+      const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
+      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : undefined;
+      const dustCount = 4 + cells.length;
+      this.particles.spawn(entities, parent.position, dustCount, onParticles.color, {
+        speedMin: 1, speedMax: impactSpeed * 0.4 + 2,
+        sizeMin: 1, sizeMax: 2.5,
+        lifetimeMin: 0.25, lifetimeMax: 0.55,
+        spreadAngle: impactAngle,
+        spreadCone: Math.PI,
+        baseVelocity: parent.velocity,
+      });
+    }
+  }
+
   private growMetalComposite(
     comp: GameEntity,
     l: GameEntity,
