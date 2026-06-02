@@ -357,14 +357,18 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
-  // Number of base shards that have composed into this entity (plastic-
-  // shard only).  Each tile-break / shatter spawn starts implicitly at 1
-  // (undefined === 1); composeEntities sums the two parents' counts on
-  // a plastic↔plastic self-merge.  shatterAsteroidStyle reads this on
-  // death and breaks the shard into `plasticMergeCount` fragments, so a
-  // merged plastic shard always fragments back into roughly the same
-  // number of base-sized pieces that built it.
-  plasticMergeCount?: number;
+  // Number of base shards that have composed into this entity.
+  // Tile-break / shatter spawns start implicitly at 1 (undefined ===
+  // 1); composeEntities sums the two parents' counts on every merge
+  // (rock condense / glass-self / plastic-self).  shatter
+  // AsteroidStyle reads this on death and breaks the shard into ~
+  // mergeCount fragments with even per-fragment sizing, so a merged
+  // shard always fragments back into roughly the same number of
+  // base-sized pieces that built it — applies to every variant going
+  // through shatterAsteroidStyle (rock-shard, glass-shard, plastic-
+  // shard); metal-shard.shatter.kind is 'none' so the field exists
+  // but the override path doesn't fire there.
+  mergeCount?: number;
 
   // Per-dent snap-back history for plastic-tile / plastic-shard.
   // applyDentStep pushes one entry per hit holding the polygon

@@ -636,22 +636,23 @@ export class ShardSystem {
     const damageNorm = Math.min(1, (damage - 1) / 4);
     const { countMin, countMax, alphaMin, alphaMax } = parentVariant.shatter;
 
-    // Merged-plastic override — when the parent is a plastic-shard
-    // that was built up by self-merge (plasticMergeCount > 1), break
-    // it back into roughly the same number of base-sized fragments
-    // that composed it.  Damage-norm / size-keyed count are ignored
-    // for merged plastic so the invariant "N base shards in, N
-    // fragments out" holds regardless of how hard the killing hit
-    // was.  A small ±1 wobble keeps the fragment count from feeling
-    // mechanically uniform on repeated breaks.
+    // Merge-count override — when the parent was built up by self-
+    // merge (mergeCount > 1), break it back into roughly the same
+    // number of base-sized fragments that composed it.  Damage-norm
+    // and size-keyed count are ignored so the invariant "N base
+    // shards in, N fragments out" holds regardless of how hard the
+    // killing hit was.  A small ±1 wobble keeps the fragment count
+    // from feeling mechanically uniform on repeated breaks.  Applies
+    // to every variant going through shatterAsteroidStyle (rock-
+    // shard / glass-shard / plastic-shard); base shards (mergeCount
+    // === 1 or undefined) fall through to the existing size-keyed
+    // and damage-based formulas.
     let count: number;
     const sizeLevels = parentVariant.shatter.shatterCountBySize;
-    const plasticMerges = parent.shardVariant === 'plastic-shard'
-      ? (parent.plasticMergeCount ?? 1)
-      : 1;
-    if (plasticMerges > 1) {
+    const merges = parent.mergeCount ?? 1;
+    if (merges > 1) {
       const wobble = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
-      count = Math.max(2, plasticMerges + wobble);
+      count = Math.max(2, merges + wobble);
     } else if (sizeLevels && sizeLevels.length > 0) {
       const parentSize = parent.size.x;
       let chosen = sizeLevels[sizeLevels.length - 1].count;
@@ -665,13 +666,17 @@ export class ShardSystem {
     if (count < 2) return;
 
     let sizes: number[];
-    if (plasticMerges > 1) {
-      // Merged plastic — even area-per-fragment so every shard lands
+    if (merges > 1) {
+      // Merged shard — even area-per-fragment so every child lands
       // at roughly base-shard size, regardless of how many merges
-      // built the parent up.  compose grows via area conservation
-      // (newDiam² = dA² + dB²), so parentArea / N recovers the
-      // average base diameter directly.  No MIN_SIZE filter pass
-      // since the invariant guarantees fragments sit at base size.
+      // built the parent up.  Area-conserving composes (glass-self,
+      // plastic-self) recover the base diameter directly via sqrt
+      // (parentArea / N); rock-condense merges shrink the survivor
+      // via density tiers, so its parentArea / N is smaller than the
+      // original base — fragments come out slightly under base size,
+      // which reads correctly for a "denser cluster bursting apart."
+      // No MIN_SIZE filter pass since the invariant guarantees
+      // fragments sit at roughly base size.
       const parentArea = parent.size.x * parent.size.x;
       const childSize = Math.sqrt(parentArea / count);
       sizes = Array.from({ length: count }, () => childSize);
@@ -2734,14 +2739,17 @@ export class ShardSystem {
         a.densityTier = newTier;
         a.densityCachedTint = undefined;
       }
-      // Plastic self-merge: track how many base shards composed this
+      // Merge-count sum — tracks how many base shards composed this
       // entity so shatterAsteroidStyle can fragment it back into the
-      // same count on death.  Undefined parents default to 1 each.
-      // Clear dent-history too — the polygon was regenerated at a
-      // new size, so prior dent deltas are tied to the OLD geometry
-      // and would be wrong to subtract from the new polygon.
+      // same count on death.  Applies to EVERY compose path (rock
+      // condense / glass-self / plastic-self) so the "N in, N out"
+      // invariant holds across all variants going through this
+      // function.  Undefined parents default to 1 each.
+      a.mergeCount = (a.mergeCount ?? 1) + (b.mergeCount ?? 1);
+      // Plastic-specific: clear dent-history because the polygon was
+      // regenerated at a new size and prior dent deltas tied to the
+      // OLD geometry would be wrong to subtract from the new polygon.
       if (isPlasticSelfMerge) {
-        a.plasticMergeCount = (a.plasticMergeCount ?? 1) + (b.plasticMergeCount ?? 1);
         a.plasticDentHistory = undefined;
       }
       // Graceful retire — fade the smaller party out instead of

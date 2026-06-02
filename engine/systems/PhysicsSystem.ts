@@ -1663,7 +1663,7 @@ export class PhysicsSystem {
       plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
       plastic.color            = other.color || plastic.color;
       plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
-      plastic.plasticMergeCount  = undefined;
+      plastic.mergeCount         = undefined;
       plastic.plasticDentHistory = undefined;
       invalidateCollisionR(plastic);
   }
