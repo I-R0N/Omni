@@ -2304,6 +2304,14 @@ export class GameEngine {
       }
     }
 
+    // Consolidate ammo-drop clusters — pairs within touching range
+    // fuse, the survivor absorbs the value, the other retires for
+    // the compaction sweep below.  Total ammo across the cluster is
+    // preserved (sum-of-values onto the survivor), so this is purely
+    // an entity-count reduction, not an ammo nerf.  Runs every step
+    // since activeDrops is bounded by DROP_CONFIG.MAX_ACTIVE_DROPS.
+    this.drops.mergeAmmoDrops(this.activeDrops);
+
     // Remove drops that were deactivated (collected, shot, or expired).
     let dropWriteIdx = 0;
     for (let i = 0; i < this.activeDrops.length; i++) {

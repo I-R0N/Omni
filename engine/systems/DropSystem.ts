@@ -13,6 +13,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
 import { HEX_SIZE } from '../maps/TileGenerator';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import { NEBULA_IMAGES, ASSETS } from '../../assets';
 import {
   blendCompositionToHex,
@@ -971,10 +972,18 @@ export class DropSystem {
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
-    amount: number,
+    _amount: number,
     parentVelocity?: Vector2,
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    // Base ammo drops always carry value 1 — the per-source amount
+    // parameter is intentionally ignored so an enemy/asteroid kill
+    // grants exactly one ammo regardless of historical AMMO_PER_*
+    // tunables.  Field clutter is held in check by mergeAmmoDrops,
+    // which consolidates adjacent ammo drops by summing their values
+    // onto a single survivor — total ammo conservation across the
+    // wave-cluster, single entity instead of many.
+    const amount = 1;
     const drop = this.makeDropEntity(
       nextId('drop_ammo'),
       pos,
@@ -986,6 +995,53 @@ export class DropSystem {
     drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
     entities.push(drop);
     activeDrops.push(drop);
+  }
+
+  /**
+   * Consolidate adjacent ammo drops: any two ammo drops whose
+   * centres are within (rA + rB) world units fuse — the larger
+   * absorbs the smaller's value and the smaller retires.  Cluster
+   * cases (5+ ammo drops from a wave of enemy deaths near each
+   * other) collapse to a single entity carrying the summed value,
+   * holding total ammo constant while sharply cutting drop-entity
+   * count.  Survivor's polygon + entity size regenerate from the
+   * new value so the visual reads as "fatter pickup".
+   *
+   * O(N²) pairwise scan; activeDrops is bounded by DROP_CONFIG.MAX_
+   * ACTIVE_DROPS (64 today) so the worst case is a few thousand
+   * ops — negligible vs the broadphase passes.  Toroidal-correct
+   * via wrapDeltaX/Y.  Inactive drops left for the next-step
+   * compaction sweep to drop from the activeDrops cache.
+   */
+  public mergeAmmoDrops(activeDrops: GameEntity[]): void {
+    for (let i = 0; i < activeDrops.length; i++) {
+      const a = activeDrops[i];
+      if (!a.active || a.dropType !== 'ammo') continue;
+      const aR = a.size.x * 0.5;
+      for (let j = i + 1; j < activeDrops.length; j++) {
+        const b = activeDrops[j];
+        if (!b.active || b.dropType !== 'ammo') continue;
+        const bR = b.size.x * 0.5;
+        const dx = wrapDeltaX(a.position.x, b.position.x);
+        const dy = wrapDeltaY(a.position.y, b.position.y);
+        const sumR = aR + bR;
+        if (dx * dx + dy * dy > sumR * sumR) continue;
+        // Merge b into a.  Keep a's velocity + magnetized state so a
+        // pull already in progress isn't interrupted; if either side
+        // was magnetised the survivor inherits it.
+        a.dropValue   = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+        a.position.x  = (a.position.x + b.position.x) * 0.5;
+        a.position.y  = (a.position.y + b.position.y) * 0.5;
+        a.magnetized  = a.magnetized || b.magnetized;
+        const newR = Math.min(10, Math.max(4, 3.5 + a.dropValue * 0.075));
+        a.size.x = newR * 3;
+        a.size.y = newR * 3;
+        a.polygonPoints = this.generateShardPolygon(
+          'ammo', Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
+        );
+        b.active = false;
+      }
+    }
   }
 
   /** Spawn a static (mass=Infinity) health drop at `pos`. */
