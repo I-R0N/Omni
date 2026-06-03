@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, SHARD_FLOW_MULT, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -1659,21 +1659,55 @@ export class GameEngine {
           const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
           const perpDeficit     = Math.min(1, vPerp / FLOW_TARGET_SPEED);
           const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-          // Every mobile shard locks onto flow lanes via SHARD_FLOW_
-          // MULT (default 5×) — nebula-shards already returned above
-          // so the multiplier only applies to rock / glass / metal /
-          // plastic, all at the same strength.  At baseline 0.08
-          // correction × max urgency 9 × FIXED_DT 1/120 this is
-          // ~3 %/substep blend — convergence within a fraction of
-          // a second on any active flow region.
-          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * SHARD_FLOW_MULT);
+          // Plastic-shards lock onto flow lanes much harder than other
+          // mobile shards (PLASTIC_SHARD_FLOW_MULT, default 5×).  Reads
+          // like the wind catches them while rock/glass drift gently.
+          const correctionMul   = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
+          const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * correctionMul);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
           if (e.rotationSpeed) e.rotation += e.rotationSpeed * dt;
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
-      // Ammo drops are non-physics: no flow-field pursuit, only the
-      // player magnet (see the drop scan in updateGameLogic).
+
+      // Ammo drops follow the same asteroid flow field — the wind
+      // that catches loose shards also drags drops along, so a wave
+      // kill's drops drift with the local current toward the player
+      // instead of sitting where they spawned.  Magnetised drops
+      // skip the pass so the player-magnet trajectory isn't tugged
+      // sideways; health drops have mass=Infinity (static pickups)
+      // and aren't iterated here either.
+      if (flowEnabled) {
+          for (let i = 0; i < this.activeDrops.length; i++) {
+              const d = this.activeDrops[i];
+              if (!d.active) continue;
+              if (d.dropType !== 'ammo') continue;
+              if (d.magnetized) continue;
+              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+              let fxDir = flow.x, fyDir = flow.y;
+              if (laneJitter > 0) {
+                  if (d.flowLane === undefined) d.flowLane = Math.random() * 2 - 1;
+                  const off = d.flowLane * laneJitter;
+                  const px = -flow.y, py = flow.x;
+                  let nx = flow.x + px * off;
+                  let ny = flow.y + py * off;
+                  const nmag = Math.sqrt(nx * nx + ny * ny) || 1;
+                  fxDir = nx / nmag;
+                  fyDir = ny / nmag;
+              }
+              const tx = fxDir * FLOW_TARGET_SPEED;
+              const ty = fyDir * FLOW_TARGET_SPEED;
+              const vAlongFlow = d.velocity.x * fxDir + d.velocity.y * fyDir;
+              const vSq = d.velocity.x * d.velocity.x + d.velocity.y * d.velocity.y;
+              const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
+              const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
+              const perpDeficit     = Math.min(1, vPerp / FLOW_TARGET_SPEED);
+              const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
+              const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
+              d.velocity.x += (tx - d.velocity.x) * alpha;
+              d.velocity.y += (ty - d.velocity.y) * alpha;
+          }
+      }
 
 
       // Stage 4: stick-bond + nebula gravity-merge are owned by
