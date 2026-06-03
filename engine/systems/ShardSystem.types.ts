@@ -317,25 +317,34 @@ export interface ShardVariantDef {
    *  RenderSystem fast-path gating flips from EntityType-keyed to
    *  variant-id-keyed in Stage 5. */
   renderCache?: 'none' | 'composition';
-  /** Conway-style neighbour-count brightness automata for STATIC
-   *  material tiles (glass / metal / rock).  When set AND the global
-   *  DBG "Tile shade" master toggle is on, RenderSystem scales the
-   *  tile's render colour by its same-variant hex-neighbour count
-   *  (`materialNeighborCount`): lone tiles and cluster edges stay at
-   *  the base palette colour, dense interiors shift toward
-   *  `saturationBrightness`.  The sign of `saturationBrightness`
-   *  relative to 1 encodes the variant's default direction (>1
-   *  brightens interiors, <1 darkens — the nebula rule).  Mirrors
-   *  PLASTIC_SHARD_AUTOMATA, but per-variant and keyed off the static
-   *  hex grid (ShardSystem recomputes the count lazily on tile
-   *  destroy / regen) rather than the mobile merge broadphase. */
+  /** Conway-style neighbour-count automata for STATIC material tiles
+   *  (glass / metal / rock).  When set AND the global DBG "Tile shade"
+   *  master toggle is on, RenderSystem shifts the tile's render by its
+   *  same-variant hex-neighbour count (`materialNeighborCount`): lone
+   *  tiles and cluster edges stay at the base appearance, dense
+   *  interiors ramp toward saturation.  Mirrors PLASTIC_SHARD_AUTOMATA,
+   *  but per-variant and keyed off the static hex grid (ShardSystem
+   *  recomputes the count lazily on tile destroy / regen) rather than
+   *  the mobile merge broadphase.
+   *
+   *  The shift mode is per-variant — set EXACTLY ONE of:
+   *   - `saturationBrightness`: RGB-multiply for OPAQUE faces (metal /
+   *     rock), where recession reads as a colour shift.
+   *   - `saturationOpacity`: alpha-multiply for TRANSLUCENT faces
+   *     (glass), where recession reads as see-through — a brightness
+   *     multiply just muddies the tint. */
   automata?: {
-    /** Same-variant neighbour count at which the brightness factor
-     *  saturates.  Hex tiles have up to 6 immediate neighbours. */
+    /** Same-variant neighbour count at which the factor saturates.
+     *  Hex tiles have up to 6 immediate neighbours. */
     maxNeighbors: number;
-    /** Brightness multiplier at `maxNeighbors`.  >1 brightens dense
-     *  interiors, <1 darkens them (the nebula default). */
-    saturationBrightness: number;
+    /** Brightness multiplier at `maxNeighbors` (opaque-face path).
+     *  >1 brightens dense interiors, <1 darkens them (the nebula
+     *  rule).  Omit when using `saturationOpacity`. */
+    saturationBrightness?: number;
+    /** Alpha multiplier at `maxNeighbors` (translucent-face path).
+     *  <1 fades dense interiors toward the background; edges stay
+     *  opaque.  Omit when using `saturationBrightness`. */
+    saturationOpacity?: number;
   };
   /** Density compaction policy.  Absent (or `enabled: false`) opts
    *  the variant out of the smaller-but-denser merge / collapse
