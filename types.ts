@@ -625,6 +625,18 @@ export interface GameEntity {
   // PAuto neighbour-brightness automata in RenderSystem (more contacts
   // = darker, like nebula interior-darkening).  Plastic-shards only.
   plasticNeighborCount?: number;
+  // ── Material-tile automata (glass / metal / rock STATIC tiles) ──────────
+  // Odd-r offset hex-grid coordinate of a material STRUCTURE tile, stamped
+  // at build time by TileGenerator.buildStructureTile.  Used by ShardSystem
+  // to count same-variant hex neighbours (parallels nebulaGridCol/Row).
+  tileGridCol?: number;
+  tileGridRow?: number;
+  // Number of same-variant material-tile neighbours in the 6 hex cells
+  // around this tile (0 = isolated / cluster edge, 6 = fully interior).
+  // Drives the per-variant neighbour-brightness automata in RenderSystem
+  // (SHARD_VARIANTS[v].automata).  ShardSystem recomputes it lazily
+  // whenever a static tile is destroyed or regenerated — never per frame.
+  materialNeighborCount?: number;
   // Countdown (seconds) until a plastic-shard self-shatters (v7
   // self-break replaces merge).  Lazily rolled in
   // GameEngine.tickPlasticSelfBreak from PLASTIC_SELF_BREAK; on expiry
@@ -919,6 +931,11 @@ export interface EngineStats {
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
   plasticAutomataBrighten?: boolean;
+  // When true, material STATIC tiles (glass / metal / rock) shift render
+  // brightness by their same-variant hex-neighbour count (per-variant
+  // darken/brighten default from SHARD_VARIANTS[v].automata).  Master
+  // on/off; DBG-toggleable via the "Tile shade" button.  Default true.
+  materialAutomataEnabled?: boolean;
   // Active plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_CYCLE),
   // formatted for the PEat DBG button.
   plasticEatAttractName?: string;

@@ -189,6 +189,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.togglePlasticAutomataDirection();
   };
 
+  const handleToggleMaterialAutomata = () => {
+      if (engineRef.current) engineRef.current.toggleMaterialAutomata();
+  };
+
   const handleCyclePlasticEatAttract = () => {
       if (engineRef.current) engineRef.current.cyclePlasticEatAttract();
   };
@@ -359,6 +363,7 @@ const App: React.FC = () => {
         onToggleTileOutlines={handleToggleTileOutlines}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
+        onToggleMaterialAutomata={handleToggleMaterialAutomata}
         onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
         onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}

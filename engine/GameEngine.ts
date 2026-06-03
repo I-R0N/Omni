@@ -626,6 +626,20 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the material-tile neighbour-brightness automata (DBG "Tile
+   * shade") for glass / metal / rock static tiles.  Flips the render
+   * gate AND the ShardSystem count-compute gate together so the
+   * neighbour scan is skipped while off; re-enabling forces a recompute
+   * so counts are current on the next frame.
+   */
+  public toggleMaterialAutomata() {
+    const next = !this.renderer.materialAutomataEnabled;
+    this.renderer.materialAutomataEnabled = next;
+    this.shards.materialAutomataEnabled = next;
+    if (next) this.shards.markMaterialNeighborsDirty();
+  }
+
+  /**
    * Cycle the plastic-eat attraction strength (PLASTIC_EAT_ATTRACT_
    * CYCLE) — how hard plastic-shards pull nearby glass/rock debris in
    * to be eaten.  Live; ShardSystem reads it each eat pass.
@@ -1255,6 +1269,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticEatAttractName: getActivePlasticEatAttractName(),
       plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
@@ -1414,6 +1429,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticEatAttractName: getActivePlasticEatAttractName(),
       plasticReachEnabled: this.shards.plasticReachEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
@@ -1819,6 +1835,10 @@ export class GameEngine {
           // footprint.
           if (isStaticTile) {
               this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
+              // A destroyed tile changes its neighbours' material-automata
+              // counts — flag a lazy recompute for the next ShardSystem
+              // update (no-op for variants without an automata config).
+              this.shards.markMaterialNeighborsDirty();
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.

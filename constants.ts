@@ -2922,6 +2922,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    // Neighbour-count brightness automata (DBG "Tile shade").  Metal
+    // BRIGHTENS dense interiors (saturationBrightness > 1) so packed
+    // slabs read as a polished, light-catching mass while cluster
+    // edges and lone plates stay at the matte base shade.  Saturates
+    // at the full 6-neighbour hex ring.
+    automata: { maxNeighbors: 6, saturationBrightness: 1.5 },
     // Heavy repel — 1.5× glass strength.  Reads as a real shove
     // when the player approaches; the field is the warning.  Range
     // matches glass so dense mixed clusters present a single
@@ -2972,6 +2978,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    // Neighbour-count brightness automata (DBG "Tile shade").  Rock
+    // DARKENS dense interiors (saturationBrightness < 1, the nebula
+    // rule) so the centre of a slab recedes into shadow and the broken
+    // edges catch the light — reinforcing the brittle-stone read.
+    // Saturates at the full 6-neighbour hex ring.  Note: the automata
+    // re-stamps only on neighbour-count change (tile destroy), so it
+    // does NOT reintroduce the every-frame cache churn that motivated
+    // rock-tile's no-glow decision.
+    automata: { maxNeighbors: 6, saturationBrightness: 0.6 },
     // Rock-tile has no proximity glow — the brittle slate fill reads
     // cleanly without a warming halo, and removing the glow lets the
     // static-tile world canvas keep the tile cached even when the

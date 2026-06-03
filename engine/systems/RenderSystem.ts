@@ -126,6 +126,28 @@ function plasticAutomataHex(neighborCount: number): string {
 }
 
 /**
+ * Material-tile automata colour: the tile's base colour scaled toward
+ * `cfg.saturationBrightness` by its same-variant hex-neighbour count.
+ * 0 neighbours (lone tile / cluster edge) → base colour untouched;
+ * `cfg.maxNeighbors` (fully interior) → full factor.  Direction is
+ * encoded by the variant config (>1 brightens, <1 darkens), mirroring
+ * the plastic-shard / nebula-tile interior rules.  Called per frame
+ * from the metal-tile and rock-tile slow-path fills.
+ */
+function materialAutomataHex(
+    baseHex: string,
+    neighborCount: number,
+    cfg: { maxNeighbors: number; saturationBrightness: number },
+): string {
+    if (neighborCount <= 0) return baseHex;
+    const t = Math.min(1, neighborCount / cfg.maxNeighbors);
+    const factor = 1 + t * (cfg.saturationBrightness - 1);
+    if (factor === 1) return baseHex;
+    const [r, g, b] = hexToRgb(baseHex);
+    return rgbToHex(r * factor, g * factor, b * factor);
+}
+
+/**
  * Combined alpha multiplier for graceful retire windows on a shard.
  * Returns 1.0 outside any fade window; during a `mergeFadeTimer`
  * it returns the remaining-fraction (timer / duration) so the entity
@@ -196,6 +218,15 @@ export class RenderSystem {
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
   // false, they keep their per-instance random shade.  Default ON.
   public plasticAutomataEnabled: boolean = false;
+  // DBG toggle (Tile shade) — master gate for the material-tile
+  // neighbour-brightness automata.  When true, glass / metal / rock
+  // STATIC tiles scale their render colour by their same-variant
+  // hex-neighbour count (SHARD_VARIANTS[v].automata); cluster edges and
+  // lone tiles stay at the base palette colour.  Default ON so the
+  // effect reads immediately for review.  Paired with
+  // ShardSystem.materialAutomataEnabled (the count-compute gate) via
+  // GameEngine.toggleMaterialAutomata.
+  public materialAutomataEnabled: boolean = true;
   // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
   // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
   // solid disc instead of their full polygon render.  Default ON.
@@ -764,6 +795,23 @@ export class RenderSystem {
       }
 
       this._minimapStaticCanvas = c;
+  }
+
+  /**
+   * Resolve a material STATIC tile's render base colour through the
+   * neighbour-brightness automata.  Returns `entity.color` unchanged
+   * when the master toggle is off, the variant carries no `automata`
+   * config, or the tile has no same-variant neighbours — so it's safe
+   * to call unconditionally from any STRUCTURE fill site (mobile shards
+   * and non-automata tiles fall straight through).
+   */
+  private materialAutomataColor(entity: GameEntity): string {
+    if (!this.materialAutomataEnabled) return entity.color;
+    const v = entity.shardVariant;
+    if (v === undefined) return entity.color;
+    const cfg = SHARD_VARIANTS[v].automata;
+    if (cfg === undefined) return entity.color;
+    return materialAutomataHex(entity.color, entity.materialNeighborCount ?? 0, cfg);
   }
 
   /**
@@ -2732,7 +2780,10 @@ export class RenderSystem {
                     const flashColor = entity.shardVariant === 'metal-tile'
                         ? '#cbd5e1' // slate-300 — bright but still gray
                         : '#ffffff';
-                    ctx.fillStyle = isFlash ? flashColor : entity.color;
+                    // Material-tile automata: metal brightens dense
+                    // cluster interiors by same-variant neighbour count
+                    // (no-op for plastic-tile, which has no automata cfg).
+                    ctx.fillStyle = isFlash ? flashColor : this.materialAutomataColor(entity);
                     ctx.fill();
 
                     // Layer 2 — selective outline.  Skip edges that are
@@ -3127,7 +3178,11 @@ export class RenderSystem {
                     //    keep their fully-opaque default.
                     //  - plastic-shard takes the dedicated soft-gradient
                     //    branch above (decision #15b).
-                    const densityHex = densityTintForRender(entity, entity.color);
+                    // Material-tile automata: rock-tile darkens dense
+                    // cluster interiors by same-variant neighbour count.
+                    // materialAutomataColor is a no-op for mobile shards
+                    // (no automata cfg) so rock-/metal-shards are untouched.
+                    const densityHex = densityTintForRender(entity, this.materialAutomataColor(entity));
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const flashColor = entity.shardVariant === 'metal-shard'
                         ? '#cbd5e1'
