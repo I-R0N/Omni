@@ -470,6 +470,19 @@ export class ShardSystem {
   }
 
   /**
+   * Seed material-tile neighbour counts immediately and clear the dirty
+   * flag.  Called from GameEngine.loadMap BEFORE the static-tile world
+   * canvas is baked, so cache-eligible variants (glass) stamp at the
+   * correct automata brightness from the first frame instead of flashing
+   * base-bright for one frame while the deferred update() catches up.
+   */
+  public ensureMaterialNeighbors(entities: GameEntity[]): void {
+    if (!this.materialAutomataEnabled) return;
+    this.recomputeMaterialNeighbors(entities);
+    this.materialNeighborsDirty = false;
+  }
+
+  /**
    * Recompute every material tile's same-variant hex-neighbour count
    * (`materialNeighborCount`) for the brightness automata.  Two passes:
    * build a hex-cell→variant occupancy index of the active automata
@@ -2168,6 +2181,9 @@ export class ShardSystem {
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
     entities.push(tile);
     physics.addStaticEntity(tile);
+    // A freshly transmuted tile changes its neighbours' automata counts
+    // (and needs its own) — flag a recompute for the next update().
+    this.materialNeighborsDirty = true;
 
     // Blow-back: the tile snapping into place shoves nearby loose shards
     // clear (non-damaging shockwave — see MERGE_BLOWBACK).

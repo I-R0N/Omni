@@ -3367,6 +3367,10 @@ export class GameEngine {
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // Seed material-tile neighbour counts before baking the static
+      // layer so cache-eligible variants (glass) stamp at the correct
+      // automata brightness on the first frame.
+      this.shards.ensureMaterialNeighbors(map.entities);
       // Pre-bake the world-tile static layer (glass + indestructible hex
       // sprites) so the per-frame world render replaces hundreds of
       // per-tile drawImage calls with a single (toroidal-wrapped) blit.

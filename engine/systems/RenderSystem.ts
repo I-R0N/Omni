@@ -806,12 +806,71 @@ export class RenderSystem {
    * and non-automata tiles fall straight through).
    */
   private materialAutomataColor(entity: GameEntity): string {
-    if (!this.materialAutomataEnabled) return entity.color;
+    const factor = this.materialAutomataFactor(entity);
+    if (factor === 1) return entity.color;
+    const [r, g, b] = hexToRgb(entity.color);
+    return rgbToHex(r * factor, g * factor, b * factor);
+  }
+
+  /**
+   * Brightness multiplier (0..N, 1 = unchanged) a material tile's
+   * automata applies given its same-variant neighbour count.  Returns 1
+   * when the master toggle is off, the variant has no `automata` config,
+   * or the tile has no same-variant neighbours.  Shared by the solid-
+   * fill colour path (`materialAutomataColor`) and the cached-sprite
+   * tint path (`getBrightnessTintedHexSprite`) so glass and metal/rock
+   * scale identically.
+   */
+  private materialAutomataFactor(entity: GameEntity): number {
+    if (!this.materialAutomataEnabled) return 1;
     const v = entity.shardVariant;
-    if (v === undefined) return entity.color;
+    if (v === undefined) return 1;
     const cfg = SHARD_VARIANTS[v].automata;
-    if (cfg === undefined) return entity.color;
-    return materialAutomataHex(entity.color, entity.materialNeighborCount ?? 0, cfg);
+    if (cfg === undefined) return 1;
+    const count = entity.materialNeighborCount ?? 0;
+    if (count <= 0) return 1;
+    const t = Math.min(1, count / cfg.maxNeighbors);
+    return 1 + t * (cfg.saturationBrightness - 1);
+  }
+
+  // Brightness-bucketed tinted copies of the HEX_STRUCTURE sprite, keyed
+  // by a quantised factor so a whole glass cluster shares ~7 canvases
+  // (one per neighbour count) instead of re-tinting per stamp.
+  private _tintedHexSpriteCache: Map<number, HTMLCanvasElement> = new Map();
+
+  /**
+   * Return the HEX_STRUCTURE sprite multiplied by `factor`, preserving
+   * the sprite's alpha mask.  factor ≈ 1 → the shared base image (no
+   * allocation); factor < 1 → a cached darkened canvas via a true RGB
+   * multiply (draw sprite → multiply gray → destination-in sprite).
+   * factor > 1 can't brighten through a multiply, so it falls back to
+   * the base sprite — fine today since the only sprite-rendered automata
+   * variant (glass) darkens; metal/rock brighten through the solid-fill
+   * colour path instead.
+   */
+  private getBrightnessTintedHexSprite(factor: number): CanvasImageSource {
+    const base = this.getImage(ASSETS.HEX_STRUCTURE);
+    if (factor >= 0.999 || !base.complete || base.naturalWidth === 0) return base;
+    const key = Math.round(factor * 50); // ~0.02 brightness buckets
+    const cached = this._tintedHexSpriteCache.get(key);
+    if (cached) return cached;
+    const w = base.naturalWidth;
+    const h = base.naturalHeight;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const cx = cv.getContext('2d');
+    if (!cx) return base;
+    const g = Math.round(Math.max(0, Math.min(1, factor)) * 255);
+    cx.drawImage(base, 0, 0);
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${g},${g},${g})`;
+    cx.fillRect(0, 0, w, h);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(base, 0, 0);
+    cx.globalCompositeOperation = 'source-over';
+    this._tintedHexSpriteCache.set(key, cv);
+    return cv;
   }
 
   /**
@@ -858,8 +917,13 @@ export class RenderSystem {
    * system (1 canvas px = 1/scale world units).
    */
   private stampHexSpriteTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
-      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
-      if (!hexSprite.complete || hexSprite.naturalWidth === 0) return;
+      const baseSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      if (!baseSprite.complete || baseSprite.naturalWidth === 0) return;
+      // Glass tiles tint the sprite by their neighbour-count automata
+      // factor; indestructible (no automata cfg) and zero-neighbour
+      // tiles get the untouched base sprite.  A count change flips
+      // _staticCached false (ShardSystem), forcing this re-stamp.
+      const hexSprite = this.getBrightnessTintedHexSprite(this.materialAutomataFactor(e));
       const s = this._staticTileScale;
       const halfMapW = this._staticTileMapW / 2;
       const halfMapH = this._staticTileMapH / 2;
@@ -2066,7 +2130,10 @@ export class RenderSystem {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
-          ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
+          // Match the cache stamp's neighbour-count tint so an uncached
+          // glass tile reads identically to its cached siblings.
+          const fpSprite = this.getBrightnessTintedHexSprite(this.materialAutomataFactor(entity));
+          ctx.drawImage(fpSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           return;
       }
 
@@ -2617,10 +2684,17 @@ export class RenderSystem {
                 const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
-                // Layer 1 — translucent base fill
+                // Layer 1 — translucent base fill.  Carry the neighbour-
+                // count automata into the transient glow/slow-path state
+                // so an interior tile stays darker than its edges even
+                // while lit, matching its cached sprite tint.
+                const autoFactor = this.materialAutomataFactor(entity);
+                const baseR = Math.round(186 * autoFactor);
+                const baseG = Math.round(230 * autoFactor);
+                const baseB = Math.round(253 * autoFactor);
                 buildPath();
                 ctx.globalAlpha = isFlash ? 0.55 : 0.13;
-                ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
+                ctx.fillStyle = isFlash ? '#ffffff' : `rgba(${baseR},${baseG},${baseB},1)`;
                 ctx.fill();
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)

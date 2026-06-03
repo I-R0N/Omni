@@ -2853,6 +2853,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    // Neighbour-count brightness automata (DBG "Tile shade").  Glass
+    // DARKENS dense interiors (saturationBrightness < 1, the nebula
+    // rule) so a packed pane recedes into a cool blue depth while the
+    // cluster edges keep the bright cyan face — the most legible
+    // direction on glass's translucent palette.  Glass renders through
+    // the cached HEX_STRUCTURE sprite, so RenderSystem tints the sprite
+    // (getBrightnessTintedHexSprite) and re-stamps the static-tile
+    // canvas when the count changes; saturates at the full 6-ring.
+    automata: { maxNeighbors: 6, saturationBrightness: 0.6 },
     // Glass tiles do not respawn at their original hex once
     // shattered.  Fresh glass-tiles only appear via the
     // glass-shard → glass-tile transmute path
