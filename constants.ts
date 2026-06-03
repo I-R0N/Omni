@@ -400,22 +400,44 @@ export const PLASTIC_TRANSMUTE_EXCLUDE: ReadonlyArray<string> = [
   'indestructible-tile',
 ] as const;
 
-// ── Plastic-shard → plastic-tile snap ──────────────────────────────
-// Merged plastic-shards eventually consolidate into a static plastic-
-// tile.  When a shard's diameter passes DIAMETER_MULT × the hex
-// tile's circular-equivalent (sqrt(HEX_AREA)) AND its speed has
-// settled below REST_SPEED, ShardSystem.tickPlasticTileSnap snaps it
-// onto the nearest free hex via the shared buildTileAtNearestFreeHex
-// helper (same path glass uses) and releases DEBRIS_COUNT small
-// plastic-shards at DEBRIS_DIAMETER — the surplus material that
-// didn't fit into the tile.  Speed gate keeps a fast-flying merged
-// shard moving until it actually rests rather than abruptly halting
-// mid-flight.
-export const PLASTIC_TILE_SNAP = {
-  DIAMETER_MULT: 1.5,
-  REST_SPEED:    1.0,
-  DEBRIS_COUNT:  4,
+// ── Shard → tile snap thresholds (plastic / glass / metal) ─────────
+// Unified snap criteria for the three materials that condense into
+// static tiles from mobile shards.  Rock is excluded — rocks grow
+// through ROCK_CONDENSE tiers without a tile-snap path; nebula has
+// its own probabilistic adapter.  Each path:
+//   1. Polls AFTER every successful compose (post-merge, end of
+//      composeEntities, NOT per-tick).
+//   2. Requires the survivor's effective area / cell count to reach
+//      the 2× tile-area threshold.
+//   3. Requires per-substep speed² below REST_SPEED_SQ so a fast-
+//      flying merged shard doesn't abruptly halt mid-flight.
+//   4. On snap: spawns a static tile via buildTileAtNearestFreeHex
+//      AND releases ~1 tile's worth of debris as overflow (the half
+//      of the absorbed mass that didn't fit into the tile).
+export const TILE_SNAP = {
+  /** Diameter multiplier vs sqrt(HEX_AREA) (= GLASS_TIER_DIAMETER).
+   *  At 2× the merged area is 4× a single tile's area, so the snap
+   *  converts ~25 % into the tile and the remaining 75 % is released
+   *  as debris.  Applied to plastic + glass survivors after compose. */
+  DIAMETER_MULT: 2.0,
+  /** Per-substep speed-squared threshold (px²/step²) below which a
+   *  candidate may snap.  1.0 = 1 px/substep at FIXED_DT 1/120 =
+   *  120 px/s drift; a shard moving slower than this counts as
+   *  "settled enough."  Applied to plastic + glass + metal. */
+  REST_SPEED_SQ: 1.0,
+  /** Debris count + per-shard diameter spawned as overflow on snap.
+   *  Each material spawns its own variant (plastic → plastic-shard,
+   *  glass → glass-shard, metal → 6 equilateral triangles per the
+   *  existing decomposeMetalComposite path). */
+  DEBRIS_COUNT: 4,
   DEBRIS_DIAMETER: 50,
+  /** Excess-cell threshold for metal — after the composite reaches
+   *  its 6-cell visible hexagon, it continues absorbing loose
+   *  triangles into an "excess" counter that doesn't extend the
+   *  lattice.  Once excess reaches this value, the composite has
+   *  absorbed 2 × HEX_AREA total mass and snaps to a tile while
+   *  releasing its 6 visible triangles as debris (mass-conserving). */
+  METAL_EXCESS_CELLS: 6,
 } as const;
 
 // ── Plastic dent recovery (per-dent snap-back) ─────────────────────
@@ -1034,12 +1056,16 @@ export const HOTSPOT_COLLAPSE = {
 // the assembly pull reels them into a hexagon.
 //
 // Hexagon lifecycle: every composite builds exactly ONE hexagon (6 triangle
-// slots).  Loose triangles snap into its empty slots and partial composites
-// pour their triangles into a larger one's empty slots (overflow released as
-// loose at RELEASE_POP_SPEED).  Once all 6 slots are filled the composite is
-// a complete floating hexagon: it free-floats for HEX_FLOAT_SECONDS, then
-// snaps onto the nearest free grid hex as a static metal tile.  So the metal
-// cycle closes: tile -> shatter -> triangles -> hexagon -> float -> tile.
+// slots).  Loose triangles snap into its empty slots; once all 6 are filled
+// the composite keeps absorbing more loose triangles as TILE_SNAP.METAL_
+// EXCESS_CELLS worth of invisible mass (the composite still shows only 6
+// lattice cells).  At excess === METAL_EXCESS_CELLS the composite has soaked
+// 2 × HEX_AREA worth of mass; when the speed gate (TILE_SNAP.REST_SPEED_SQ)
+// is also satisfied it snaps onto the nearest free grid hex as a static
+// metal tile AND releases its 6 visible triangles as overflow debris —
+// mass-conserving (tile takes 1 × HEX_AREA, debris takes the other 1 ×).
+// So the metal cycle closes: tile → shatter → triangles → hexagon + excess
+// → settle → tile + 6 loose triangles.
 export const METAL_ASSEMBLY = {
   ENABLED: true,
   FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
@@ -1055,7 +1081,6 @@ export const METAL_ASSEMBLY = {
   REST_SPIN: 0,
   BREAK_SPEED_MULT: 2.0, // × normal dent-debris speed for metal-tile shards
   SPAWN_SPIN: 1.0,       // ± baseline random spin (rad/s) a composite gets on formation, like loose shards
-  HEX_FLOAT_SECONDS: 3.0, // a completed hexagon free-floats this long before snapping to grid
   RELEASE_POP_SPEED: 1.5, // outward speed given to triangles released on merge overflow
   MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
 };
@@ -1093,10 +1118,24 @@ export function cycleShatterGrace(): number {
 // matches the rock-shard spawn sizeToMass so a tier-1/density-1 shard
 // weighs exactly as much as a freshly spawned 20px rock.
 export const ROCK_CONDENSE = {
-  // 5 size tiers (diameter), ≈ area-doubling from the 20px spawn min.
-  DIAMETERS: [20, 28, 40, 56, 80],
-  // 5 density tiers (mass-per-area multiplier), doubling.
-  DENSITY_MULT: [1, 2, 4, 8, 16],
+  // 25 size tiers (diameter) — 5× deeper grid per user direction.  Same
+  // ≈ √2 ratio so area still doubles per tier; top diameter ~1500 px
+  // (≈ map-quarter) supports very large condensed boulders without
+  // exceeding the playfield.
+  DIAMETERS: [
+    20, 24, 29, 34, 41, 49, 58, 70, 84, 100,
+    120, 144, 173, 207, 248, 297, 356, 426, 510, 611,
+    731, 875, 1048, 1254, 1500,
+  ],
+  // 25 density tiers (mass-per-area multiplier) — also 5× deeper.
+  // Doubling all the way: a top-tier boulder is 2^24 = 16.8M × denser
+  // than a base shard; combined with the 75× larger diameter this
+  // makes condensed rocks effectively un-shoveable.
+  DENSITY_MULT: [
+    1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
+    1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
+    1048576, 2097152, 4194304, 8388608, 16777216,
+  ],
   MASS_COEFF: 0.018,
 };
 

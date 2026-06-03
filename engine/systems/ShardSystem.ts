@@ -27,7 +27,7 @@ import {
   nebulaFadeRateScale,
   randomPlasticShardShade,
   PLASTIC_SHARD_AUTOMATA,
-  PLASTIC_TILE_SNAP,
+  TILE_SNAP,
   PLASTIC_DENT_RECOVERY,
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
@@ -402,7 +402,6 @@ export class ShardSystem {
     if (runMergePass) {
       this.runMergeBroadphase(entities, dt, physics);
       this.runLargeShardCollapse(entities);
-      this.tickPlasticTileSnap(entities, physics);
       if (METAL_ASSEMBLY.ENABLED) this.tickMetalAssembly(entities, physics);
     }
     // Plastic-shard dent recovery is unconditional (runMergePass
@@ -1837,49 +1836,33 @@ export class ShardSystem {
    * occupied — in that case the shard stays a glass-shard and a
    * later merge will retry.
    */
-  private tryConvertOversizedGlassShard(
-    shard: GameEntity,
+  /**
+   * Unified post-compose tile snap for plastic + glass.  Called at
+   * the end of every successful compose for the survivor.  Snaps
+   * when the survivor's diameter has grown past TILE_SNAP.DIAMETER_
+   * MULT × sqrt(HEX_AREA) AND its per-substep speed² has settled
+   * below TILE_SNAP.REST_SPEED_SQ.  On snap: spawns the static tile
+   * via buildTileAtNearestFreeHex and releases TILE_SNAP.DEBRIS_
+   * COUNT debris shards of the survivor's variant — at the 2× area
+   * threshold the merged shard carried roughly 4 × HEX_AREA worth
+   * of mass, so 75 % is overflow released as the debris burst.
+   */
+  private trySnapToTile(
+    survivor: GameEntity,
+    shardVariant: 'plastic-shard' | 'glass-shard',
+    material: 'plastic' | 'glass',
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    if (shard.shardVariant !== 'glass-shard') return;
-    if (shard.size.x < GLASS_TIER_DIAMETER) return;
-    // At cap size a glass-shard condenses into a static glass-tile.
-    // If every candidate hex is occupied the shard stays a (max-size)
-    // shard and a later merge retries.
-    this.tryTransmuteShardToTile(shard, 'glass-shard', 'glass', entities, physics);
-  }
-
-  /**
-   * Plastic-shard → plastic-tile snap pass.  Iterates plastic-shards
-   * whose diameter has grown past PLASTIC_TILE_SNAP.DIAMETER_MULT ×
-   * the hex tile's circular-equivalent (sqrt(HEX_AREA)) AND whose
-   * per-substep speed has settled below PLASTIC_TILE_SNAP.REST_SPEED;
-   * each eligible shard snaps to the nearest free hex via the shared
-   * buildTileAtNearestFreeHex helper and releases DEBRIS_COUNT small
-   * plastic-shards (the surplus material that didn't fit into the
-   * tile).  Speed gate keeps a fast-flying merged shard moving until
-   * it actually rests rather than abruptly halting mid-flight.
-   */
-  private tickPlasticTileSnap(entities: GameEntity[], physics: PhysicsSystem): void {
-    const minDiam   = GLASS_TIER_DIAMETER * PLASTIC_TILE_SNAP.DIAMETER_MULT;
-    const restSpeed = PLASTIC_TILE_SNAP.REST_SPEED;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (!e.active) continue;
-      if (e.shardVariant !== 'plastic-shard') continue;
-      // Skip shards already fading out from a successful snap — the
-      // fade window keeps active=true for the dissolve, but the snap
-      // has been booked so a second attempt could pick a different
-      // free neighbour and build a duplicate tile.
-      if ((e.mergeFadeTimer ?? 0) > 0) continue;
-      if (e.size.x < minDiam) continue;
-      const vx = e.velocity.x, vy = e.velocity.y;
-      if (vx * vx + vy * vy >= restSpeed * restSpeed) continue;
-      const snapPos = { x: e.position.x, y: e.position.y };
-      if (!this.tryTransmuteShardToTile(e, 'plastic-shard', 'plastic', entities, physics)) continue;
-      this.spawnPlasticSnapDebris(snapPos, entities);
-    }
+    if (survivor.shardVariant !== shardVariant) return;
+    if ((survivor.mergeFadeTimer ?? 0) > 0) return;
+    const minDiam = GLASS_TIER_DIAMETER * TILE_SNAP.DIAMETER_MULT;
+    if (survivor.size.x < minDiam) return;
+    const vx = survivor.velocity.x, vy = survivor.velocity.y;
+    if (vx * vx + vy * vy >= TILE_SNAP.REST_SPEED_SQ) return;
+    const snapPos = { x: survivor.position.x, y: survivor.position.y };
+    if (!this.tryTransmuteShardToTile(survivor, shardVariant, material, entities, physics)) return;
+    this.spawnSnapDebris(snapPos, shardVariant, entities);
   }
 
   /**
@@ -1959,19 +1942,26 @@ export class ShardSystem {
   }
 
   /**
-   * Spawn the surplus-material burst released when a merged plastic-
-   * shard snaps into a static plastic-tile.  PLASTIC_TILE_SNAP.DEBRIS_
-   * COUNT shards at DEBRIS_DIAMETER, spawned at the snap position
-   * with small outward velocities so they spray off the materialising
-   * tile.  Same polygon shape as base shards (4-vert plastic spawn).
+   * Spawn the surplus-material burst released when a merged shard
+   * snaps into a static tile.  TILE_SNAP.DEBRIS_COUNT shards of the
+   * supplied variant at DEBRIS_DIAMETER, spawned at the snap
+   * position with small outward velocities so they spray off the
+   * materialising tile.  Polygon + colour follow the variant's
+   * spawn config so plastic and glass debris read as base shards
+   * of their respective materials.
    */
-  private spawnPlasticSnapDebris(pos: Vector2, entities: GameEntity[]): void {
-    const variantDef = SHARD_VARIANTS['plastic-shard'];
+  private spawnSnapDebris(
+    pos: Vector2,
+    variant: 'plastic-shard' | 'glass-shard',
+    entities: GameEntity[],
+  ): void {
+    const variantDef = SHARD_VARIANTS[variant];
     const childSpawn = variantDef.spawn;
-    const size = PLASTIC_TILE_SNAP.DEBRIS_DIAMETER;
+    const size = TILE_SNAP.DEBRIS_DIAMETER;
     const mass = childSpawn.sizeToMass(size);
-    const count = PLASTIC_TILE_SNAP.DEBRIS_COUNT;
+    const count = TILE_SNAP.DEBRIS_COUNT;
     const baseR = (size / 2) * 0.8;
+    const idPrefix = variant === 'plastic-shard' ? 'plastic_snap_debris' : 'glass_snap_debris';
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
       const speed = 1.0 + Math.random() * 1.5;
@@ -1985,15 +1975,15 @@ export class ShardSystem {
         childSpawn.polyVerticesOptions,
       );
       entities.push({
-        id:            nextId('plastic_snap_debris'),
+        id:            nextId(idPrefix),
         type:          EntityType.STRUCTURE,
-        shardVariant:  'plastic-shard',
+        shardVariant:  variant,
         position:      { x: pos.x + Math.cos(angle) * size * 0.5, y: pos.y + Math.sin(angle) * size * 0.5 },
         velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
         size:          { x: size, y: size },
         rotation:      Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 2,
-        color:         randomPlasticShardShade(),
+        color:         variant === 'plastic-shard' ? randomPlasticShardShade() : COLORS.STRUCTURE,
         active:        true,
         health:        1,
         maxHealth:     1,
@@ -2124,24 +2114,49 @@ export class ShardSystem {
 
     // Pass 1 — loose → composite.  A freshly-shattered triangle is left to
     // float free until its post-break grace (collapseGraceTimer) expires —
-    // that's the delay before it starts snapping onto anything.
+    // that's the delay before it starts snapping onto anything.  Composites
+    // with empty lattice slots take the triangle as a new visible cell
+    // (growMetalComposite); composites already at 6 cells but still under
+    // the TILE_SNAP.METAL_EXCESS_CELLS cap absorb the triangle as invisible
+    // mass (metalExcessCells counter), accumulating toward the 2 × HEX_
+    // AREA snap threshold.
     for (let i = 0; i < loose.length; i++) {
       const l = loose[i];
       if (!l.active || l.metalCells !== undefined) continue;
       if ((l.collapseGraceTimer ?? 0) > 0) continue;
-      let best: GameEntity | null = null;
-      let bestTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+      let bestLattice: GameEntity | null = null;
+      let bestLatticeTarget: { ix: number; iy: number; up: boolean; d2: number } | null = null;
+      let bestExcess: GameEntity | null = null;
+      let bestExcessD2 = Infinity;
       for (let c = 0; c < composites.length; c++) {
         const comp = composites[c];
-        if (!comp.active || comp.metalCells!.length >= METAL_HEX_SIZE) continue;
+        if (!comp.active) continue;
+        const cells = comp.metalCells!;
         const dx = wrapDeltaX(comp.position.x, l.position.x);
         const dy = wrapDeltaY(comp.position.y, l.position.y);
         const reach = comp.size.x * 0.5 + SNAP;
-        if (dx * dx + dy * dy > reach * reach) continue;
-        const t = this.nearestMetalHexSlot(comp, l.position.x, l.position.y);
-        if (t && (bestTarget === null || t.d2 < bestTarget.d2)) { best = comp; bestTarget = t; }
+        const distSq = dx * dx + dy * dy;
+        if (distSq > reach * reach) continue;
+        if (cells.length < METAL_HEX_SIZE) {
+          const t = this.nearestMetalHexSlot(comp, l.position.x, l.position.y);
+          if (t && (bestLatticeTarget === null || t.d2 < bestLatticeTarget.d2)) {
+            bestLattice = comp;
+            bestLatticeTarget = t;
+          }
+        } else if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_EXCESS_CELLS) {
+          if (distSq < bestExcessD2) {
+            bestExcess = comp;
+            bestExcessD2 = distSq;
+          }
+        }
       }
-      if (best && bestTarget) this.growMetalComposite(best, l, bestTarget);
+      if (bestLattice && bestLatticeTarget) {
+        this.growMetalComposite(bestLattice, l, bestLatticeTarget);
+      } else if (bestExcess) {
+        bestExcess.metalExcessCells = (bestExcess.metalExcessCells ?? 0) + 1;
+        bestExcess.mass += l.mass;
+        l.active = false;
+      }
     }
 
     // Pass 2 — loose + loose → new composite, bucketed into a coarse grid
@@ -2249,38 +2264,45 @@ export class ShardSystem {
       }
     }
 
-    // Pass 3 — completed hexagons float, then snap.  Start the free-float
-    // countdown the first tick a composite reaches 6 cells; snap it onto the
-    // nearest free grid hex as a static metal tile only once the timer has
-    // elapsed AND the hexagon has come to rest (asleep).  A hexagon that's
-    // still drifting/spinning keeps floating instead of freezing mid-motion.
+    // Pass 3 — composites that have completed their lattice AND soaked
+    // METAL_EXCESS_CELLS worth of additional mass AND settled below the
+    // speed gate snap to the nearest free grid hex.  Asleep + float-
+    // timer gates were dropped — speed² < TILE_SNAP.REST_SPEED_SQ is
+    // the single rest criterion, matching plastic + glass.  A hexagon
+    // that's still drifting keeps absorbing (excess cap permitting)
+    // until both gates are clean on the same tick.
     for (let c = 0; c < composites.length; c++) {
       const comp = composites[c];
       if (!comp.active || comp.metalCells === undefined) continue;
       if (comp.metalCells.length < METAL_HEX_SIZE) continue;
-      if (comp.metalFloatTimer === undefined) {
-        comp.metalFloatTimer = METAL_ASSEMBLY.HEX_FLOAT_SECONDS;
-      } else if (comp.metalFloatTimer <= 0 && comp.asleep === true) {
-        this.snapHexagonToGrid(comp, entities, physics);
-      }
+      if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_EXCESS_CELLS) continue;
+      const vx = comp.velocity.x, vy = comp.velocity.y;
+      if (vx * vx + vy * vy >= TILE_SNAP.REST_SPEED_SQ) continue;
+      this.snapHexagonToGrid(comp, entities, physics);
     }
   }
 
   /**
-   * Snap a complete (6-cell) floating hexagon onto the nearest free grid hex
-   * as a static metal tile and consume the composite.  A completed hexagon's
-   * mass centroid is the hexagon centre, so `comp.position` is the tile
-   * centre.  If every candidate grid cell is occupied the snap is deferred
-   * (the hexagon keeps floating and retries on a later tick).
+   * Snap a complete-plus-excess composite onto the nearest free grid
+   * hex as a static metal tile, then release its 6 visible lattice
+   * triangles as overflow debris (mass-conserving: composite absorbed
+   * 2 × HEX_AREA, tile takes 1 ×, debris takes 1 ×).  If every
+   * candidate grid cell is occupied the snap is deferred — the
+   * composite stays alive and retries on a later tick.
    */
   private snapHexagonToGrid(
     comp: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    if (this.buildTileAtNearestFreeHex(comp.position.x, comp.position.y, 'metal', entities, physics)) {
-      comp.active = false;
-    }
+    if (!this.buildTileAtNearestFreeHex(comp.position.x, comp.position.y, 'metal', entities, physics)) return;
+    // Release the 6 lattice cells as loose triangles — same world
+    // positions + per-cell orientation the decompose-on-death path
+    // uses, so the debris reads consistently with a "shot composite"
+    // burst.  Triangles re-enter the assembly cycle if they're near
+    // another incomplete composite.
+    this.decomposeMetalComposite(comp, entities);
+    comp.active = false;
   }
 
   /** Spawn a single loose metal-shard triangle at world `(wx, wy)` drifting
@@ -2885,14 +2907,16 @@ export class ShardSystem {
       // the dissolve reads visibly across the field.
       this.startMergeFadeOut(b);
 
-      // Glass-shard tier transition.  When the survivor is a glass-
-      // shard that has grown to tile-equivalent diameter
-      // (sqrt(HEX_AREA)), roll 50/50: condense into a glass-tile at
-      // the nearest free hex, or downgrade to a smaller (denser)
-      // rock-shard — the first leg of the planned material tier
-      // chain (nebula→glass→rock→metal→plastic).
-      if (a.shardVariant === 'glass-shard' && a.size.x >= GLASS_TIER_DIAMETER) {
-        this.tryConvertOversizedGlassShard(a, entities, physics);
+      // Post-compose tile-snap check — plastic + glass route to the
+      // shared TILE_SNAP path with 2 × tile-diameter threshold, speed
+      // gate, and overflow debris.  Polled here (not per-tick) so a
+      // newly-merged survivor either snaps immediately on this frame
+      // (if all gates pass) or waits until its next compose; in
+      // either case the snap is tied to a clear "I just grew" event.
+      if (a.shardVariant === 'plastic-shard') {
+        this.trySnapToTile(a, 'plastic-shard', 'plastic', entities, physics);
+      } else if (a.shardVariant === 'glass-shard') {
+        this.trySnapToTile(a, 'glass-shard', 'glass', entities, physics);
       }
       // Rock-shard tile transition — DISABLED per user direction.
       // Rock-shards now merge into larger / denser rock-shards only;
