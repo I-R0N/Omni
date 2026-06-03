@@ -2024,6 +2024,15 @@ export const AMMO_DROP_PULL = {
    *  when the pair holds at 1 unit apart — strong, but capped
    *  naturally by the merge contact distance. */
   STRENGTH: 0.08,
+  /** Per-substep velocity multiplier applied to both drops in the
+   *  pull band (before the pull itself adds new velocity).  0.97
+   *  per step at FIXED_DT 1/120 retains ~2.5 % per second — heavy
+   *  damping that kills tangential drift before it forms orbits.
+   *  Without this, the pull purely ADDS velocity each step and a
+   *  pair with even slight perpendicular motion settles into a
+   *  stable orbit that never quite contacts; with it, drops spiral
+   *  cleanly into each other and merge calmly. */
+  DAMP_PER_STEP: 0.97,
 } as const;
 
 /**

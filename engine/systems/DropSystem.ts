@@ -1031,9 +1031,17 @@ export class DropSystem {
         const sumR = aR + bR;
         const sumRSq = sumR * sumR;
         if (distSq <= sumRSq) {
-          // Merge b into a.  Keep a's velocity + magnetized state so a
-          // pull already in progress isn't interrupted; if either side
-          // was magnetised the survivor inherits it.
+          // Mass-weighted velocity blend — drops share mass (5
+          // each per makeDropEntity), so this is effectively the
+          // average.  Two converging drops cancel out cleanly
+          // instead of the survivor keeping a's velocity alone and
+          // shooting off after merge — fixes the "orbit, merge,
+          // zoom" pattern users observe with pure pull + keep-a.
+          const ma = a.mass || 5;
+          const mb = b.mass || 5;
+          const totalM = ma + mb;
+          a.velocity.x = (a.velocity.x * ma + b.velocity.x * mb) / totalM;
+          a.velocity.y = (a.velocity.y * ma + b.velocity.y * mb) / totalM;
           a.dropValue   = (a.dropValue ?? 0) + (b.dropValue ?? 0);
           a.position.x  = (a.position.x + b.position.x) * 0.5;
           a.position.y  = (a.position.y + b.position.y) * 0.5;
@@ -1046,9 +1054,18 @@ export class DropSystem {
           );
           b.active = false;
         } else if (distSq < pullRangeSq && !a.magnetized && !b.magnetized) {
-          // Mutual gravity nudge — 1/dist falloff toward the partner.
-          // Magnetised drops skip the pull so the player-magnet
-          // trajectory isn't tugged sideways by stray clusters.
+          // Damp first — kills tangential momentum accumulated by
+          // prior pull steps so the convergence stays controlled
+          // rather than building up an orbital trajectory that
+          // overshoots the merge contact.
+          const damp = AMMO_DROP_PULL.DAMP_PER_STEP;
+          a.velocity.x *= damp;
+          a.velocity.y *= damp;
+          b.velocity.x *= damp;
+          b.velocity.y *= damp;
+          // Then pull: 1/dist nudge toward partner.  Magnetised
+          // drops skip the whole branch so the player-magnet
+          // trajectory isn't tugged sideways.
           const dist = Math.sqrt(distSq);
           const k = pullStrength / dist;
           a.velocity.x +=  dx * k;
