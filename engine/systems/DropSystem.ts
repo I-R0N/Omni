@@ -4,6 +4,7 @@ import {
   COLORS,
   AMMO_CONSTANTS,
   DROP_CONFIG,
+  AMMO_DROP_PULL,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
   randomPlasticShardShade,
@@ -1014,6 +1015,8 @@ export class DropSystem {
    * compaction sweep to drop from the activeDrops cache.
    */
   public mergeAmmoDrops(activeDrops: GameEntity[]): void {
+    const pullRangeSq = AMMO_DROP_PULL.RANGE * AMMO_DROP_PULL.RANGE;
+    const pullStrength = AMMO_DROP_PULL.STRENGTH;
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
       if (!a.active || a.dropType !== 'ammo') continue;
@@ -1024,22 +1027,35 @@ export class DropSystem {
         const bR = b.size.x * 0.5;
         const dx = wrapDeltaX(a.position.x, b.position.x);
         const dy = wrapDeltaY(a.position.y, b.position.y);
+        const distSq = dx * dx + dy * dy;
         const sumR = aR + bR;
-        if (dx * dx + dy * dy > sumR * sumR) continue;
-        // Merge b into a.  Keep a's velocity + magnetized state so a
-        // pull already in progress isn't interrupted; if either side
-        // was magnetised the survivor inherits it.
-        a.dropValue   = (a.dropValue ?? 0) + (b.dropValue ?? 0);
-        a.position.x  = (a.position.x + b.position.x) * 0.5;
-        a.position.y  = (a.position.y + b.position.y) * 0.5;
-        a.magnetized  = a.magnetized || b.magnetized;
-        const newR = Math.min(10, Math.max(4, 3.5 + a.dropValue * 0.075));
-        a.size.x = newR * 3;
-        a.size.y = newR * 3;
-        a.polygonPoints = this.generateShardPolygon(
-          'ammo', Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
-        );
-        b.active = false;
+        const sumRSq = sumR * sumR;
+        if (distSq <= sumRSq) {
+          // Merge b into a.  Keep a's velocity + magnetized state so a
+          // pull already in progress isn't interrupted; if either side
+          // was magnetised the survivor inherits it.
+          a.dropValue   = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+          a.position.x  = (a.position.x + b.position.x) * 0.5;
+          a.position.y  = (a.position.y + b.position.y) * 0.5;
+          a.magnetized  = a.magnetized || b.magnetized;
+          const newR = Math.min(10, Math.max(4, 3.5 + a.dropValue * 0.075));
+          a.size.x = newR * 3;
+          a.size.y = newR * 3;
+          a.polygonPoints = this.generateShardPolygon(
+            'ammo', Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
+          );
+          b.active = false;
+        } else if (distSq < pullRangeSq && !a.magnetized && !b.magnetized) {
+          // Mutual gravity nudge — 1/dist falloff toward the partner.
+          // Magnetised drops skip the pull so the player-magnet
+          // trajectory isn't tugged sideways by stray clusters.
+          const dist = Math.sqrt(distSq);
+          const k = pullStrength / dist;
+          a.velocity.x +=  dx * k;
+          a.velocity.y +=  dy * k;
+          b.velocity.x += -dx * k;
+          b.velocity.y += -dy * k;
+        }
       }
     }
   }

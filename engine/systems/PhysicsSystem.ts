@@ -1647,7 +1647,6 @@ export class PhysicsSystem {
       const oVar = other.shardVariant;
       if (oVar === undefined) return;
       if (PLASTIC_TRANSMUTE_EXCLUDE.indexOf(oVar) !== -1) return;
-      if (plastic.size.x >= other.size.x) return;
 
       // Tile → matching shard variant; shard variants pass through.
       let targetVariant: string;

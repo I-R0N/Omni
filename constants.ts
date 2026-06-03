@@ -2003,6 +2003,29 @@ export const DROP_CONFIG = {
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };
 
+// ── Ammo-drop ↔ ammo-drop pull ─────────────────────────────────────
+// Mutual gravity between non-magnetised ammo drops, applied inside
+// DropSystem.mergeAmmoDrops on the same O(N²) pair walk that
+// consolidates touching drops.  Pairs already in contact merge as
+// before; pairs in (sumR, RANGE] receive a small 1/dist velocity
+// nudge toward each other so a cluster from a wave kill converges
+// and merges over a fraction of a second instead of sitting put
+// waiting for the player.  Magnetised drops (already homing on the
+// player) skip the pull so the magnet path keeps a clean trajectory.
+export const AMMO_DROP_PULL = {
+  /** Centre-to-centre distance above which the pull turns off.
+   *  Inside the player magnet range (DROP_CONFIG.MAGNET_RANGE) so
+   *  the player still has the final say on collection cadence. */
+  RANGE: 120,
+  /** Per-substep velocity nudge magnitude toward the partner.
+   *  Multiplied by 1/dist so distant pairs get a softer pull and
+   *  close pairs converge faster.  At FIXED_DT 1/120 a constant
+   *  STRENGTH 0.08 means ~9.6 units/s of velocity accumulation
+   *  when the pair holds at 1 unit apart — strong, but capped
+   *  naturally by the merge contact distance. */
+  STRENGTH: 0.08,
+} as const;
+
 /**
  * Compute the ammo-HUD slot layout for a given screen size.
  *
