@@ -2663,10 +2663,14 @@ export class RenderSystem {
                 const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
-                // Layer 1 — translucent base fill.  Carry the neighbour-
-                // count automata into the transient glow/slow-path state
-                // so an interior tile stays more see-through than its
-                // edges even while lit, matching its cached sprite fade.
+                // Layer 1 — translucent base fill.  Every glass layer
+                // below is multiplied by the neighbour-count opacity
+                // automata (`autoAlpha`) so a dense-interior tile renders
+                // uniformly more see-through than its cluster edges.
+                // (The HEX_STRUCTURE sprite is a placeholder in this
+                // build, so glass always takes this vector slow-path —
+                // fading layer 1 alone was invisible; the edge stroke
+                // and specular carry most of the read.)
                 const autoAlpha = this.materialAutomataAlpha(entity);
                 buildPath();
                 ctx.globalAlpha = (isFlash ? 0.55 : 0.13) * autoAlpha;
@@ -2675,7 +2679,7 @@ export class RenderSystem {
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
                 if (!isFlash) {
-                    ctx.globalAlpha = 0.09;
+                    ctx.globalAlpha = 0.09 * autoAlpha;
                     ctx.fillStyle = '#ffffff';
                     ctx.fill();
                 }
@@ -2698,10 +2702,10 @@ export class RenderSystem {
                         // peakAlpha stay with the SHARD_VARIANTS entry.
                         const glowColor = getActiveGlassGlowColor();
                         const intensityG = repelGlowIntensity(impulse);
-                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
+                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG) * autoAlpha;
                         ctx.fillStyle = glowColor;
                         ctx.fill();
-                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG));
+                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG)) * autoAlpha;
                         ctx.strokeStyle = glowColor;
                         ctx.lineWidth = 3.0;
                         ctx.stroke();
@@ -2709,7 +2713,7 @@ export class RenderSystem {
                 }
 
                 // Layer 3 — edge stroke (proximity-tinted)
-                ctx.globalAlpha = 1.0;
+                ctx.globalAlpha = autoAlpha;
                 ctx.strokeStyle = edgeColor;
                 ctx.lineWidth = isFlash ? 2.5 : 1.5;
                 ctx.stroke();
@@ -2717,7 +2721,7 @@ export class RenderSystem {
                 // Layer 4 — small specular dot (upper-left of hex)
                 // Uses a pre-rendered 12×12 bitmap instead of a per-tile gradient.
                 if (!isFlash) {
-                    ctx.globalAlpha = 0.28 + prox * 0.18;
+                    ctx.globalAlpha = (0.28 + prox * 0.18) * autoAlpha;
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
