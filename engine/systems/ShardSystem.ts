@@ -664,10 +664,24 @@ export class ShardSystem {
     // shard / glass-shard / plastic-shard); base shards (mergeCount
     // === 1 or undefined) fall through to the existing size-keyed
     // and damage-based formulas.
+    //
+    // Rock-shard override — large rocks ALWAYS break into a
+    // satisfying swarm regardless of merge history.  Count is the
+    // MAX of (merges ± wobble) and (size / 40), so even a base
+    // rock that condensed through ROCK_CONDENSE without going
+    // through compose ends up with proportional debris instead of
+    // 2-3 chunks.  Capped at 30 so top-tier boulders don't flood
+    // the field.
     let count: number;
     const sizeLevels = parentVariant.shatter.shatterCountBySize;
     const merges = parent.mergeCount ?? 1;
-    if (merges > 1) {
+    const isRockShatter = parent.shardVariant === 'rock-shard';
+    if (isRockShatter) {
+      const sizeBased = Math.min(30, Math.max(2, Math.floor(parent.size.x / 40)));
+      const wobble = merges > 1 ? Math.floor(Math.random() * 3) - 1 : 0;
+      const mergeBased = merges > 1 ? Math.max(2, merges + wobble) : 2;
+      count = Math.max(mergeBased, sizeBased);
+    } else if (merges > 1) {
       const wobble = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
       count = Math.max(2, merges + wobble);
     } else if (sizeLevels && sizeLevels.length > 0) {
@@ -683,17 +697,18 @@ export class ShardSystem {
     if (count < 2) return;
 
     let sizes: number[];
-    if (merges > 1) {
-      // Merged shard — even area-per-fragment so every child lands
-      // at roughly base-shard size, regardless of how many merges
-      // built the parent up.  Area-conserving composes (glass-self,
-      // plastic-self) recover the base diameter directly via sqrt
-      // (parentArea / N); rock-condense merges shrink the survivor
-      // via density tiers, so its parentArea / N is smaller than the
-      // original base — fragments come out slightly under base size,
-      // which reads correctly for a "denser cluster bursting apart."
-      // No MIN_SIZE filter pass since the invariant guarantees
-      // fragments sit at roughly base size.
+    if (merges > 1 || isRockShatter) {
+      // Merged shard OR rock-shatter — even area-per-fragment so
+      // every child lands at roughly base-shard size, regardless of
+      // how many merges or how big the parent is.  Area-conserving
+      // composes (glass-self, plastic-self) recover the base
+      // diameter directly via sqrt(parentArea / N); rock-condense
+      // merges shrink the survivor via density tiers, so its
+      // parentArea / N is smaller than the original base —
+      // fragments come out slightly under base size, which reads
+      // correctly for a "denser cluster bursting apart."  No MIN_
+      // SIZE filter pass since the invariant guarantees fragments
+      // sit at roughly base size.
       const parentArea = parent.size.x * parent.size.x;
       const childSize = Math.sqrt(parentArea / count);
       sizes = Array.from({ length: count }, () => childSize);
@@ -724,9 +739,40 @@ export class ShardSystem {
     const isTile = childVariant.id === 'glass-shard'; // colour fallback distinguishes blocky vs jagged
     const childSpawn = childVariant.spawn;
 
+    // Rock-only: pre-compute per-child density tiers as a mix around
+    // the parent's tier (random ±2 clamped to valid range), then
+    // scale each child's mass and HP by the chosen tier.  Reads as
+    // "the parent's density distributes unevenly across fragments"
+    // — some chunks are softer than the parent, some denser, and
+    // the denser ones take more hits to crack open.  Non-rock
+    // children leave densityTier undefined and use the standard
+    // sizeToMass formula unchanged.
+    let childDensityTiers: number[] | null = null;
+    if (isRockShatter) {
+      const parentTier = parent.densityTier ?? 0;
+      const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
+      childDensityTiers = new Array(sizes.length);
+      for (let i = 0; i < sizes.length; i++) {
+        const offset = Math.floor(Math.random() * 5) - 2; // -2..+2
+        childDensityTiers[i] = Math.max(0, Math.min(maxTier, parentTier + offset));
+      }
+    }
+
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const hp      = newSize > 30 ? 2 : 1;
+      const baseHp  = newSize > 30 ? 2 : 1;
+      // Density-aware mass + HP for rock children — sqrt(tier + 1)
+      // scales HP gently so even top-tier rocks stay breakable
+      // (tier 24 ≈ 5× HP); mass scales by the full DENSITY_MULT so
+      // dense fragments feel heavy on impact and resist push.
+      let childMass = childSpawn.sizeToMass(newSize);
+      let hp = baseHp;
+      let densityTier: number | undefined = undefined;
+      if (childDensityTiers !== null) {
+        densityTier = childDensityTiers[i];
+        childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
+        hp = Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)));
+      }
 
       let scatterAngle: number;
       let scatterSpeed: number;
@@ -780,7 +826,13 @@ export class ShardSystem {
         health:        hp,
         maxHealth:     hp,
         polygonPoints: points,
-        mass:          childSpawn.sizeToMass(newSize),
+        mass:          childMass,
+        // Rock children only: densityTier carries the chosen mix
+        // tier so the renderer picks up the density tint and any
+        // future merge / shatter respects the inherited density.
+        // densityCachedTint left undefined so the renderer
+        // recomputes on first draw.
+        densityTier,
         sprite:        parent.sprite,
         // Optional per-entity damping from the variant's spawn shape
         // — undefined for variants that drift naturally; metal-
@@ -2875,8 +2927,18 @@ export class ShardSystem {
       a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
-      a.health     = Math.min(MAX_HP, a.health + b.health);
-      a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
+      // Rock-only HP cap scales with density tier — denser rocks
+      // take more damage to destroy.  Cap = MAX_HP × sqrt(tier+1),
+      // so tier 0 keeps the flat MAX_HP, tier 5 ≈ 14.7, top tier 24
+      // = 30.  Summed HP from both parents clamps to that cap so a
+      // rock that's accumulated through many merges accrues HP up
+      // to the cap dictated by its current density tier.  Other
+      // variants use the flat MAX_HP unchanged.
+      const hpCap = isRockResult
+        ? Math.max(MAX_HP, Math.round(MAX_HP * Math.sqrt((newTier ?? 0) + 1)))
+        : MAX_HP;
+      a.health     = Math.min(hpCap, a.health + b.health);
+      a.maxHealth  = Math.min(hpCap, a.maxHealth + b.maxHealth);
       a.dropComposition = composition.length > 0 ? composition : undefined;
       // Density bookkeeping — invalidate the per-entity tint cache so
       // the renderer picks up the darker tier on its next draw, then
