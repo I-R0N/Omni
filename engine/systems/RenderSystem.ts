@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -2678,15 +2678,18 @@ export class RenderSystem {
                         if (glow !== undefined && impulse > 0) {
                             const intensityM = repelGlowIntensity(impulse);
                             const bright = getActiveMetalGlowBrightness();
+                            // Live colour from the DBG metal-glow cycle.
+                            // Range + peakAlpha stay with the variant.
+                            const glowColor = getActiveMetalGlowColor();
                             buildPath();
                             ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM * bright);
-                            ctx.fillStyle = glow.color;
+                            ctx.fillStyle = glowColor;
                             ctx.fill();
                             // Thinner outline than glass (1.5 vs 3.0)
                             // — metal reads as a precise mechanical
                             // edge rather than glass's diffuse halo.
                             ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM * bright));
-                            ctx.strokeStyle = glow.color;
+                            ctx.strokeStyle = glowColor;
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
                             ctx.globalAlpha = 1.0;

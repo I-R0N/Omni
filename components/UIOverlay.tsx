@@ -53,6 +53,7 @@ interface UIOverlayProps {
   onCyclePlasticGlowBrightness?: () => void;
   onCycleMetalGlowBrightness?: () => void;
   onCycleGlassGlowColor?: () => void;
+  onCycleMetalGlowColor?: () => void;
   onCycleNebulaPalette?: () => void;
   onTogglePlasticBlend?: () => void;
   onCycleNebulaStretch?: () => void;
@@ -114,6 +115,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCyclePlasticGlowBrightness,
   onCycleMetalGlowBrightness,
   onCycleGlassGlowColor,
+  onCycleMetalGlowColor,
   onCycleNebulaPalette,
   onTogglePlasticBlend,
   onCycleNebulaStretch,
@@ -360,6 +362,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Glass', onCycleGlassGlowColor,
                   stats.glassGlowColorName ?? 'sky',
                   'Cycle the glass-tile proximity glow ONLY through the 11-entry colour list (cyan / yellow / amber / gold / magenta / rose / lime / emerald / sky / violet / white). Glass shatter dust + main background nebula clusters now live on the Nebula cycle. Default sky.')}
+                {ctrlRow('M color', onCycleMetalGlowColor,
+                  stats.metalGlowColorName ?? 'magenta',
+                  'Cycle the metal-tile proximity glow through the same 11-entry colour list as Glass (independent index). Default magenta — closest match to the legacy fuchsia. Range + peakAlpha stay with the variant; the M glow brightness multiplier is independent.')}
                 {ctrlRow('Nebula', onCycleNebulaPalette,
                   stats.nebulaPaletteName ?? 'sky',
                   'Cycle the glass-side nebula palette through the same 11-entry list. Governs glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition). Main background nebula tiles + shards, BG puffs, and NebulaSystem colour drift all stay on the legacy default palette and are NOT affected. Rock-side dust (rock tile original + regenerated + shards) is fixed at white. Default sky.')}

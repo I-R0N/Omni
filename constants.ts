@@ -289,6 +289,26 @@ export function cycleGlassGlowColor(): number {
   return activeGlassGlowIndex;
 }
 
+// ── Metal-tile glow colour cycle (DBG-only) ─────────────────────────
+// Independent cycle through the SAME GLASS_GLOW_COLORS list — reuses
+// the palette so the two tile glows can be A/B'd against a shared
+// vocabulary.  Default index 4 = 'magenta' (#e879f9), the closest
+// match to the legacy fuchsia `#d946ef` baked into SHARD_VARIANTS
+// ['metal-tile'].glow.color.  RenderSystem reads the live hex via
+// getActiveMetalGlowColor() in the metal-tile glow branch.
+let activeMetalGlowIndex = 4; // 'magenta' — matches legacy fuchsia
+
+export function getActiveMetalGlowColor(): string {
+  return GLASS_GLOW_COLORS[activeMetalGlowIndex].hex;
+}
+export function getActiveMetalGlowColorName(): string {
+  return GLASS_GLOW_COLORS[activeMetalGlowIndex].name;
+}
+export function cycleMetalGlowColor(): number {
+  activeMetalGlowIndex = (activeMetalGlowIndex + 1) % GLASS_GLOW_COLORS.length;
+  return activeMetalGlowIndex;
+}
+
 // ── Nebula palette cycle (DBG-only) ─────────────────────────────────
 // Independent cycle into the same GLASS_GLOW_COLORS list, governing
 // glass-tile shatter / merge dust ONLY (randomGlassNebulaComposition).

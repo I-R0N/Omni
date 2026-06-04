@@ -898,6 +898,7 @@ export interface EngineStats {
   plasticGlowBrightnessName?: string;
   metalGlowBrightnessName?: string;
   glassGlowColorName?: string;
+  metalGlowColorName?: string;
   nebulaPaletteName?: string;
   // DBG gate for the plastic colour-equilibration block in
   // NebulaSystem.equilibrateColors.  Independent of the nebula

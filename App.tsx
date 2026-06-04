@@ -209,6 +209,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleGlassGlowColor();
   };
 
+  const handleCycleMetalGlowColor = () => {
+      if (engineRef.current) engineRef.current.cycleMetalGlowColor();
+  };
+
   const handleCycleNebulaPalette = () => {
       if (engineRef.current) engineRef.current.cycleNebulaPalette();
   };
@@ -336,6 +340,7 @@ const App: React.FC = () => {
         onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
         onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
         onCycleGlassGlowColor={handleCycleGlassGlowColor}
+        onCycleMetalGlowColor={handleCycleMetalGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
