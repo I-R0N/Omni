@@ -384,6 +384,37 @@ export const PLASTIC_SHARD_AUTOMATA = {
 // catches them.  Rock / glass / metal / nebula stay on the baseline.
 export const PLASTIC_SHARD_FLOW_MULT = 5;
 
+// ── Flow-field per-entity variability ──────────────────────────────
+// Inverse-mass scaling applied to BOTH the correction blend rate
+// (how fast an entity locks onto the flow direction) AND the
+// terminal flow speed (the steady-state drift velocity an entity
+// settles at).  Lighter entities snap into flow lanes faster AND
+// reach a higher cruise speed; heavier entities drift sluggishly
+// behind at a lower steady-state.  Replaces the lockstep behaviour
+// where every shard in the same flow cell converged identically.
+//
+// Formula:  massScale = sqrt(MASS_REF / max(mass, MASS_REF × MIN_MASS_FRACTION))
+//           alpha       *= massScale × (plasticBoost if plastic)
+//           targetSpeed *= massScale
+//
+// Plastic's 5× boost is applied BEFORE the mass scale (so heavy
+// plastic blobs are diluted just like heavy rock — the plastic
+// character shows mainly when the blob is light).  Drops use the
+// same math at their fixed mass = 5, so all ammo drops cruise
+// slightly faster than baseline shards but consistently within
+// their own family.
+export const FLOW_VARIABILITY = {
+  /** Reference mass — entities at this mass get massScale = 1.0
+   *  (baseline flow response).  Picked at the median spawn mass of
+   *  base shards (~7 for rock at 20 px) so a fresh chip is neutral
+   *  and merged / condensed shards skew below it. */
+  MASS_REF: 7,
+  /** Floor on the mass divisor.  Clamps the effective minimum at
+   *  MASS_REF × MIN_MASS_FRACTION so ultralight outliers don't
+   *  produce runaway massScale values. */
+  MIN_MASS_FRACTION: 0.05,
+} as const;
+
 // ── Plastic-shard cross-material transmute on contact ──────────────
 // When a plastic-shard collides with a strictly larger shard whose
 // material is NOT plastic and NOT nebula, the plastic-shard adopts

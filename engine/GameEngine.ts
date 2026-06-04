@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -1651,18 +1651,24 @@ export class GameEngine {
               fxDir = nx / nmag;
               fyDir = ny / nmag;
           }
-          const tx = fxDir * FLOW_TARGET_SPEED;
-          const ty = fyDir * FLOW_TARGET_SPEED;
+          // Inverse-mass scaling — heavier shards lock on slower AND
+          // cruise at a lower terminal speed.  Plastic's 5× boost is
+          // multiplied BEFORE the mass scale so heavy plastic blobs
+          // are diluted along with everything else; the boost shows
+          // primarily on light plastic.
+          const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
+              / Math.max(e.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
+          const plasticBoost = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
+          const correctionMul = plasticBoost * massScale;
+          const targetSpeed = FLOW_TARGET_SPEED * massScale;
+          const tx = fxDir * targetSpeed;
+          const ty = fyDir * targetSpeed;
           const vAlongFlow = e.velocity.x * fxDir + e.velocity.y * fyDir;
           const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
           const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
-          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
-          const perpDeficit     = Math.min(1, vPerp / FLOW_TARGET_SPEED);
+          const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
+          const perpDeficit     = Math.min(1, vPerp / targetSpeed);
           const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-          // Plastic-shards lock onto flow lanes much harder than other
-          // mobile shards (PLASTIC_SHARD_FLOW_MULT, default 5×).  Reads
-          // like the wind catches them while rock/glass drift gently.
-          const correctionMul   = e.shardVariant === 'plastic-shard' ? PLASTIC_SHARD_FLOW_MULT : 1;
           const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * correctionMul);
           e.velocity.x += (tx - e.velocity.x) * alpha;
           e.velocity.y += (ty - e.velocity.y) * alpha;
@@ -1695,15 +1701,23 @@ export class GameEngine {
                   fxDir = nx / nmag;
                   fyDir = ny / nmag;
               }
-              const tx = fxDir * FLOW_TARGET_SPEED;
-              const ty = fyDir * FLOW_TARGET_SPEED;
+              // Same inverse-mass scaling as the shard loop.  Drops
+              // have fixed mass = 5 (makeDropEntity), so all ammo
+              // drops share a single massScale ≈ sqrt(7/5) = 1.18 —
+              // slightly faster than baseline-mass shards.  Plastic
+              // boost doesn't apply (drops aren't shards).
+              const massScale = Math.sqrt(FLOW_VARIABILITY.MASS_REF
+                  / Math.max(d.mass, FLOW_VARIABILITY.MASS_REF * FLOW_VARIABILITY.MIN_MASS_FRACTION));
+              const targetSpeed = FLOW_TARGET_SPEED * massScale;
+              const tx = fxDir * targetSpeed;
+              const ty = fyDir * targetSpeed;
               const vAlongFlow = d.velocity.x * fxDir + d.velocity.y * fyDir;
               const vSq = d.velocity.x * d.velocity.x + d.velocity.y * d.velocity.y;
               const vPerp = Math.sqrt(Math.max(0, vSq - vAlongFlow * vAlongFlow));
-              const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / FLOW_TARGET_SPEED));
-              const perpDeficit     = Math.min(1, vPerp / FLOW_TARGET_SPEED);
+              const parallelDeficit = Math.max(0, Math.min(1, 1 - vAlongFlow / targetSpeed));
+              const perpDeficit     = Math.min(1, vPerp / targetSpeed);
               const urgency         = 1 + 8 * Math.max(parallelDeficit, perpDeficit);
-              const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency);
+              const alpha           = Math.min(0.8, FLOW_CORRECTION * dt * urgency * massScale);
               d.velocity.x += (tx - d.velocity.x) * alpha;
               d.velocity.y += (ty - d.velocity.y) * alpha;
           }
