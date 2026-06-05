@@ -46,7 +46,7 @@ import {
   cloneComposition,
 } from '../NebulaColor';
 import { ParticleSystem } from './ParticleSystem';
-import { PhysicsSystem } from './PhysicsSystem';
+import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
 import {
   ShardVariantId,
@@ -1932,31 +1932,40 @@ export class ShardSystem {
    * world-canvas stamp; flag _staticCached false so RenderSystem
    * re-stamps with the recovered outline.
    */
-  private tickPlasticDentRecovery(entities: GameEntity[], dt: number): void {
+  private tickPlasticDentRecovery(_entities: GameEntity[], dt: number): void {
     if (dt <= 0) return;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (!e.active) continue;
-      if (e.shardVariant !== 'plastic-shard' && e.shardVariant !== 'plastic-tile') continue;
+    if (pendingPlasticDentEntities.size === 0) return;
+    // Iterate the Set of entities with active dent history rather
+    // than the full entity list — applyDentStep adds entries when a
+    // dent fires; we remove an entry here once its history fully
+    // retires (or the entity dies / changes variant).  Set iteration
+    // is allocation-free and visits only the work that needs doing.
+    for (const e of pendingPlasticDentEntities) {
+      if (!e.active) { pendingPlasticDentEntities.delete(e); continue; }
+      if (e.shardVariant !== 'plastic-shard' && e.shardVariant !== 'plastic-tile') {
+        pendingPlasticDentEntities.delete(e);
+        continue;
+      }
       const history = e.plasticDentHistory;
-      if (history === undefined || history.length === 0) continue;
+      if (history === undefined || history.length === 0) {
+        pendingPlasticDentEntities.delete(e);
+        continue;
+      }
       const pts = e.polygonPoints;
-      if (!pts) continue;
+      if (!pts) { pendingPlasticDentEntities.delete(e); continue; }
       const isTile = e.shardVariant === 'plastic-tile';
       let writeIdx = 0;
       let mutated = false;
       let healed  = 0;
+      const N = pts.length;
       for (let h = 0; h < history.length; h++) {
         const entry = history[h];
         entry.timer -= dt;
-        if (entry.timer <= 0 && entry.delta.length === pts.length) {
-          // Snap back: subtract this dent's delta from the current
-          // polygon so the vertex that was pulled in springs out by
-          // the same amount it moved.  Other dents on the history
-          // stay intact and continue counting down independently.
-          for (let j = 0; j < pts.length; j++) {
-            pts[j].x -= entry.delta[j].x;
-            pts[j].y -= entry.delta[j].y;
+        // Delta is Float64Array(2N): index 2j = x, 2j+1 = y.
+        if (entry.timer <= 0 && entry.delta.length === 2 * N) {
+          for (let j = 0; j < N; j++) {
+            pts[j].x -= entry.delta[2 * j];
+            pts[j].y -= entry.delta[2 * j + 1];
           }
           mutated = true;
           healed++;
@@ -1966,13 +1975,7 @@ export class ShardSystem {
         }
       }
       history.length = writeIdx;
-      // Plastic-tile health + colour recovery — one dent retire =
-      // one HP back, capped at maxHealth.  Each hit decremented HP
-      // by 1 and bumped tile.color toward plasticTileTargetColor
-      // (applyDentStep), so reversing N dents recovers N HP and
-      // re-lerps the colour from current toward original by the new
-      // hpRatio.  Shards don't get HP recovery — they're free-
-      // floating debris and just visually un-dent.
+      if (writeIdx === 0) pendingPlasticDentEntities.delete(e);
       if (isTile && healed > 0) {
         const maxHP = e.maxHealth ?? 1;
         e.health = Math.min(maxHP, e.health + healed);
@@ -2961,6 +2964,7 @@ export class ShardSystem {
       // OLD geometry would be wrong to subtract from the new polygon.
       if (isPlasticSelfMerge) {
         a.plasticDentHistory = undefined;
+        pendingPlasticDentEntities.delete(a);
       }
       // Graceful retire — fade the smaller party out instead of
       // snapping to inactive.  PhysicsSystem ticks `mergeFadeTimer`

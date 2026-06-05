@@ -55,6 +55,22 @@ function lerpHexColors(a: string, b: string, t: number): string {
 // overlap is below the configured fraction of contact distance.
 const STABLE_DIST_FACTOR_SQ = (1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION) ** 2;
 
+// Scratch buffer for applyDentStep's pre-dent vertex snapshot — sized
+// to the largest variant polygon (hex tiles have 6 vertices; plastic
+// shards have 4).  Reused across calls so each dent event makes ZERO
+// allocations for the snapshot pass.  Layout: alternating x, y per
+// vertex (so index 2i = x, 2i+1 = y).  Sized at 12 (6 verts × 2)
+// with a small safety margin.
+const _dentPreSnapshot: Float64Array = new Float64Array(16);
+
+// Registry of plastic entities with at least one entry in their
+// plasticDentHistory.  Populated by applyDentStep when it pushes a
+// dent delta; consumed by ShardSystem.tickPlasticDentRecovery, which
+// iterates this set INSTEAD of walking the full entity list every
+// step.  When an entity's history empties (or it gets transmuted /
+// composed / dies) the recovery pass / clear sites remove it.
+export const pendingPlasticDentEntities: Set<GameEntity> = new Set();
+
 export class PhysicsSystem {
   // Dual-grid system:
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
@@ -1040,18 +1056,23 @@ export class PhysicsSystem {
       if (!pts || pts.length === 0) return;
 
       // Plastic dent recovery: snapshot the polygon BEFORE this dent
-      // so the post-dent delta (this hit's contribution) can be
-      // pushed onto plasticDentHistory after the pull + preserve
-      // rescale complete.  Each dent gets its own snap-back timer
-      // (see tickPlasticDentRecovery + PLASTIC_DENT_RECOVERY in
-      // constants).  Cheap allocation: one Vector2[] per dent event.
+      // into the module-level _dentPreSnapshot scratch buffer (zero
+      // per-dent allocation), then compute the post-dent delta after
+      // the pull + preserve rescale.  Delta is stored on plasticDent
+      // History as a Float64Array (one typed-array allocation per
+      // dent instead of N+1 Vector2 objects).  Layout: 2i = x, 2i+1
+      // = y.
       const isPlasticDent = tile.shardVariant === 'plastic-shard'
                          || tile.shardVariant === 'plastic-tile';
-      let preSnapshot: Vector2[] | undefined;
+      const ptsLen = pts.length;
       if (isPlasticDent) {
-          preSnapshot = new Array(pts.length);
-          for (let i = 0; i < pts.length; i++) {
-              preSnapshot[i] = { x: pts[i].x, y: pts[i].y };
+          // Snapshot is bounded by the scratch buffer size (16 = 8
+          // verts).  Variants with bigger polygons would silently
+          // truncate here — bump _dentPreSnapshot if that ever
+          // becomes a concern.
+          for (let i = 0; i < ptsLen; i++) {
+              _dentPreSnapshot[2 * i]     = pts[i].x;
+              _dentPreSnapshot[2 * i + 1] = pts[i].y;
           }
       }
 
@@ -1176,21 +1197,26 @@ export class PhysicsSystem {
       }
 
       // Plastic dent recovery: push this hit's per-vertex delta onto
-      // plasticDentHistory with its own timer.  When the timer
-      // expires, ShardSystem.tickPlasticDentRecovery subtracts the
-      // delta from polygonPoints — one hit's worth of deformation
-      // snaps back instantly.  Three hits in quick succession =
-      // three snap-backs spaced DELAY_SECONDS apart.
-      if (isPlasticDent && preSnapshot !== undefined) {
-          const delta: Vector2[] = new Array(pts.length);
-          for (let i = 0; i < pts.length; i++) {
-              delta[i] = { x: pts[i].x - preSnapshot[i].x, y: pts[i].y - preSnapshot[i].y };
+      // plasticDentHistory with its own timer.  Delta is a flat
+      // Float64Array (2N: alternating x,y) — one typed-array
+      // allocation per dent instead of an Array + N {x,y} objects.
+      // When the timer expires, ShardSystem.tickPlasticDentRecovery
+      // subtracts the delta from polygonPoints and removes the
+      // entity from pendingPlasticDentEntities once history empties.
+      if (isPlasticDent) {
+          const delta = new Float64Array(2 * ptsLen);
+          for (let i = 0; i < ptsLen; i++) {
+              delta[2 * i]     = pts[i].x - _dentPreSnapshot[2 * i];
+              delta[2 * i + 1] = pts[i].y - _dentPreSnapshot[2 * i + 1];
           }
           if (!tile.plasticDentHistory) tile.plasticDentHistory = [];
           tile.plasticDentHistory.push({
               timer: PLASTIC_DENT_RECOVERY.DELAY_SECONDS,
               delta,
           });
+          // Register for the recovery pass — the Set short-circuits
+          // tickPlasticDentRecovery's full-entity walk.
+          pendingPlasticDentEntities.add(tile);
       }
 
       // Plastic-tile damage colour shift toward the shard palette.
@@ -1656,6 +1682,7 @@ export class PhysicsSystem {
       plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
       plastic.mergeCount         = undefined;
       plastic.plasticDentHistory = undefined;
+      pendingPlasticDentEntities.delete(plastic);
       invalidateCollisionR(plastic);
   }
 

@@ -80,6 +80,15 @@ const DC4 = [ 0,  0, -1,  1] as const;
 // ~90°.  Farther walls in the kernel contribute smoothly less.
 const WALL_REPULSE = 1.2;
 
+// Module-level scratch for sampleAsteroidFlow — mutated and returned
+// per call instead of allocating a fresh {x, y} literal each time.
+// Eliminates ~one allocation per shard + drop per sim step in the
+// applyFlow hot path.  Callers MUST consume the returned vector
+// synchronously before the next sample call.  Both this scratch and
+// FlowField.ts's _flowScratch may be returned depending on whether
+// the grid had a baked vector or fell back to the analytical sampler.
+const _gridFlowScratch: FlowVector = { x: 0, y: 0 };
+
 // Default wall-kernel radius (cells).  R = 0 reproduces the legacy
 // 4-cardinal-only scan for A/B testing; R ≥ 1 enables the extended
 // (2R+1)² kernel.  Default 3 — wide enough to bend the flow several
@@ -594,11 +603,15 @@ export class FlowFieldGrid {
   sampleAsteroidFlow(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
     // Outside the grid or zero-vector cell: fall back to the active map
-    // sampler (set by buildAsteroidField) rather than the global analytical
-    // meander so the fallback matches the baked grid's geometry.
+    // sampler (set by buildAsteroidField).  Both paths mutate a scratch
+    // vector in place — callers must consume the returned vector
+    // synchronously before the next sample call.
     if (idx < 0) return this.flowSampler(wx, wy);
     const fx = this.astFlowX[idx], fy = this.astFlowY[idx];
-    return (fx !== 0 || fy !== 0) ? { x: fx, y: fy } : this.flowSampler(wx, wy);
+    if (fx === 0 && fy === 0) return this.flowSampler(wx, wy);
+    _gridFlowScratch.x = fx;
+    _gridFlowScratch.y = fy;
+    return _gridFlowScratch;
   }
 
   /**

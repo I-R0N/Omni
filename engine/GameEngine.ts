@@ -2373,9 +2373,13 @@ export class GameEngine {
     // fuse, the survivor absorbs the value, the other retires for
     // the compaction sweep below.  Total ammo across the cluster is
     // preserved (sum-of-values onto the survivor), so this is purely
-    // an entity-count reduction, not an ammo nerf.  Runs every step
-    // since activeDrops is bounded by DROP_CONFIG.MAX_ACTIVE_DROPS.
-    this.drops.mergeAmmoDrops(this.activeDrops);
+    // an entity-count reduction, not an ammo nerf.  Cadenced via
+    // PerfController 'dropMerge' (autoCurve 1-4 steps) — the O(N²)
+    // pair scan + pull damping isn't time-critical, drops converge
+    // over many frames either way.
+    if (this.perfController.shouldRun('dropMerge')) {
+      this.drops.mergeAmmoDrops(this.activeDrops);
+    }
 
     // Remove drops that were deactivated (collected, shot, or expired).
     let dropWriteIdx = 0;

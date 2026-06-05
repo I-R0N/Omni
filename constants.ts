@@ -1004,6 +1004,12 @@ export const PERF_TASKS = {
   flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
   nebulaNeighbors:  { minInterval: 1, maxInterval: 4,   costWeight: 0.9, autoCurve: 1.0 },
   dropScan:         { minInterval: 1, maxInterval: 2,   costWeight: 0.6, autoCurve: 1.0 },
+  // O(N²) ammo-drop merge pass (DropSystem.mergeAmmoDrops).  Up to
+  // DROP_CONFIG.MAX_ACTIVE_DROPS² pair-ops + damping + nudges per
+  // step; not time-critical (drops settle over many frames), so a
+  // 4-step cadence at peak load drops cost ~75 % while staying
+  // visually responsive.
+  dropMerge:        { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
 } as const;
 
 export type PerfTaskId = keyof typeof PERF_TASKS;

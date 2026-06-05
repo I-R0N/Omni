@@ -373,12 +373,15 @@ export interface GameEntity {
   // Per-dent snap-back history for plastic-tile / plastic-shard.
   // applyDentStep pushes one entry per hit holding the polygon
   // delta this dent applied (post - pre, including the preserve-
-  // bounding-radius rescale).  When an entry's timer expires,
-  // tickPlasticDentRecovery subtracts its delta from polygonPoints
-  // — one hit's worth of deformation snaps back instantly.  Cleared
-  // on compose (polygon regenerates at a new size) and on cross-
-  // material transmute (no longer plastic).
-  plasticDentHistory?: Array<{ timer: number; delta: Vector2[] }>;
+  // bounding-radius rescale).  Delta layout: Float64Array of
+  // length 2N (alternating x, y per vertex) so each entry is one
+  // typed-array allocation, no per-vertex objects.  When the
+  // timer expires, tickPlasticDentRecovery subtracts the delta
+  // from polygonPoints — one hit's worth of deformation snaps
+  // back instantly.  Cleared on compose (polygon regenerates at
+  // a new size) and on cross-material transmute (no longer
+  // plastic).
+  plasticDentHistory?: Array<{ timer: number; delta: Float64Array }>;
 
   // Plastic-tile damage colour blend — set on first hit, sticky for
   // the tile's life.  applyDentStep lerps tile.color from
