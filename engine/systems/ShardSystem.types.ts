@@ -341,9 +341,14 @@ export interface ShardVariantDef {
      *  >1 brightens dense interiors, <1 darkens them (the nebula
      *  rule).  Omit when using `saturationOpacity`. */
     saturationBrightness?: number;
-    /** Alpha multiplier at `maxNeighbors` (translucent-face path).
-     *  <1 fades dense interiors toward the background; edges stay
-     *  opaque.  Omit when using `saturationBrightness`. */
+    /** Alpha multiplier at the densest interior (translucent-face
+     *  path) — the most-transparent endpoint, e.g. 0.45.  The mapping
+     *  is BIPOLAR about the neutral 1.0: a half-surrounded tile
+     *  (count ≈ maxNeighbors/2) renders at the default opacity (the
+     *  range middle), sparser tiles trend more opaque toward the
+     *  mirrored endpoint (2 − this, clamped at solid per layer), and
+     *  dense interiors fade toward this value.  Omit when using
+     *  `saturationBrightness`. */
     saturationOpacity?: number;
   };
   /** Density compaction policy.  Absent (or `enabled: false`) opts

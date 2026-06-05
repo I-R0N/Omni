@@ -830,18 +830,26 @@ export class RenderSystem {
    * Alpha multiplier (1 = unchanged) for the OPACITY automata path —
    * glass-tile, whose translucent face reads interior recession as
    * see-through rather than dim (a brightness multiply just muddies the
-   * tint).  <1 fades dense interiors toward the background; cluster
-   * edges and lone panes stay fully opaque.  1 for variants without a
-   * `saturationOpacity` (metal/rock, which use the brightness path).
+   * tint).  1 for variants without a `saturationOpacity` (metal/rock,
+   * which use the brightness path).
+   *
+   * BIPOLAR around the neutral 1.0: a half-surrounded tile
+   * (t = 0.5, ~maxNeighbors/2 neighbours) renders at the default
+   * opacity — the MIDDLE of the [`saturationOpacity`, 2-`saturationOpacity`]
+   * range.  Sparser tiles trend more opaque (up toward 2-sat, clamped
+   * at solid by each layer's Math.min(1, …)); dense interiors fade
+   * toward `saturationOpacity`.  Callers MUST clamp the final per-layer
+   * globalAlpha to ≤1 — canvas silently ignores values outside [0,1].
    */
   private materialAutomataAlpha(entity: GameEntity): number {
+    if (!this.materialAutomataEnabled) return 1;
     const v = entity.shardVariant;
     if (v === undefined) return 1;
-    const sat = SHARD_VARIANTS[v].automata?.saturationOpacity;
-    if (sat === undefined) return 1;
-    const t = this.materialAutomataT(entity);
-    if (t === 0) return 1;
-    return 1 + t * (sat - 1);
+    const cfg = SHARD_VARIANTS[v].automata;
+    if (cfg === undefined || cfg.saturationOpacity === undefined) return 1;
+    const count = Math.max(0, entity.materialNeighborCount ?? 0);
+    const t = Math.min(1, count / cfg.maxNeighbors);
+    return 1 + (0.5 - t) * 2 * (1 - cfg.saturationOpacity);
   }
 
   /**
@@ -906,7 +914,7 @@ export class RenderSystem {
       // Indestructible (no automata cfg) and edge tiles stamp at 1.0.
       // A count change flips _staticCached false (ShardSystem), forcing
       // this re-stamp.
-      const alpha = this.materialAutomataAlpha(e);
+      const alpha = Math.min(1, this.materialAutomataAlpha(e));
       if (alpha !== 1) cx.globalAlpha = alpha;
       cx.drawImage(baseSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
       if (alpha !== 1) cx.globalAlpha = 1;
@@ -2109,7 +2117,7 @@ export class RenderSystem {
           const dHalf = drawSize / 2;
           // Match the cache stamp's neighbour-count opacity fade so an
           // uncached glass tile reads identically to its cached siblings.
-          const fpAlpha = this.materialAutomataAlpha(entity);
+          const fpAlpha = Math.min(1, this.materialAutomataAlpha(entity));
           if (fpAlpha !== 1) ctx.globalAlpha = fpAlpha;
           ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           if (fpAlpha !== 1) ctx.globalAlpha = 1;
@@ -2664,22 +2672,23 @@ export class RenderSystem {
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
                 // Layer 1 — translucent base fill.  Every glass layer
-                // below is multiplied by the neighbour-count opacity
-                // automata (`autoAlpha`) so a dense-interior tile renders
-                // uniformly more see-through than its cluster edges.
-                // (The HEX_STRUCTURE sprite is a placeholder in this
-                // build, so glass always takes this vector slow-path —
-                // fading layer 1 alone was invisible; the edge stroke
-                // and specular carry most of the read.)
+                // below is multiplied by the bipolar neighbour-count
+                // opacity automata (`autoAlpha`, centred on the neutral
+                // 1.0): sparse tiles trend more opaque (clamped at solid
+                // by the Math.min(1, …) on every layer), dense interiors
+                // fade see-through.  (The HEX_STRUCTURE sprite is a
+                // placeholder in this build, so glass always takes this
+                // vector slow-path — fading layer 1 alone was invisible;
+                // the edge stroke and specular carry most of the read.)
                 const autoAlpha = this.materialAutomataAlpha(entity);
                 buildPath();
-                ctx.globalAlpha = (isFlash ? 0.55 : 0.13) * autoAlpha;
+                ctx.globalAlpha = Math.min(1, (isFlash ? 0.55 : 0.13) * autoAlpha);
                 ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
                 ctx.fill();
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
                 if (!isFlash) {
-                    ctx.globalAlpha = 0.09 * autoAlpha;
+                    ctx.globalAlpha = Math.min(1, 0.09 * autoAlpha);
                     ctx.fillStyle = '#ffffff';
                     ctx.fill();
                 }
@@ -2702,10 +2711,10 @@ export class RenderSystem {
                         // peakAlpha stay with the SHARD_VARIANTS entry.
                         const glowColor = getActiveGlassGlowColor();
                         const intensityG = repelGlowIntensity(impulse);
-                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG) * autoAlpha;
+                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG * autoAlpha);
                         ctx.fillStyle = glowColor;
                         ctx.fill();
-                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG)) * autoAlpha;
+                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG) * autoAlpha);
                         ctx.strokeStyle = glowColor;
                         ctx.lineWidth = 3.0;
                         ctx.stroke();
@@ -2713,7 +2722,7 @@ export class RenderSystem {
                 }
 
                 // Layer 3 — edge stroke (proximity-tinted)
-                ctx.globalAlpha = autoAlpha;
+                ctx.globalAlpha = Math.min(1, autoAlpha);
                 ctx.strokeStyle = edgeColor;
                 ctx.lineWidth = isFlash ? 2.5 : 1.5;
                 ctx.stroke();
@@ -2721,7 +2730,7 @@ export class RenderSystem {
                 // Layer 4 — small specular dot (upper-left of hex)
                 // Uses a pre-rendered 12×12 bitmap instead of a per-tile gradient.
                 if (!isFlash) {
-                    ctx.globalAlpha = (0.28 + prox * 0.18) * autoAlpha;
+                    ctx.globalAlpha = Math.min(1, (0.28 + prox * 0.18) * autoAlpha);
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 

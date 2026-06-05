@@ -2853,14 +2853,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
-    // Neighbour-count OPACITY automata (DBG "Tile shade").  Glass is
-    // translucent, so a brightness multiply just muddies the tint —
-    // instead dense interiors FADE toward the background (alpha 0.45 at
-    // a full 6-neighbour ring) so a packed pane reads as see-through
-    // depth while the cluster edges keep the solid bright cyan face.
+    // Neighbour-count OPACITY automata (DBG "Tile shade"), BIPOLAR
+    // around the neutral default: a half-surrounded tile (~3 of 6
+    // neighbours) renders at the normal opacity — the MIDDLE of the
+    // range — while sparser tiles trend more opaque (clamped at solid)
+    // and dense interiors fade see-through (down to 0.45× at a full
+    // 6-neighbour ring).  Glass is translucent, so a brightness
+    // multiply just muddies the tint; fading reads as real depth.
     // Glass renders through the cached HEX_STRUCTURE sprite, so
-    // RenderSystem bakes the reduced alpha into the static-tile cache
-    // and re-stamps when the count changes.
+    // RenderSystem bakes the alpha into the static-tile cache and
+    // re-stamps when the count changes.  saturationOpacity = the
+    // most-transparent (interior) endpoint; the opaque endpoint mirrors
+    // it about 1.0 (→ 1.55×).
     automata: { maxNeighbors: 6, saturationOpacity: 0.45 },
     // Glass tiles do not respawn at their original hex once
     // shattered.  Fresh glass-tiles only appear via the
