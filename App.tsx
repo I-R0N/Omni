@@ -193,28 +193,32 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleMaterialAutomata();
   };
 
-  const handleCyclePlasticEatAttract = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticEatAttract();
-  };
-
-  const handleTogglePlasticReach = () => {
-      if (engineRef.current) engineRef.current.togglePlasticReach();
-  };
-
   const handleCyclePlasticPalette = () => {
       if (engineRef.current) engineRef.current.cyclePlasticPalette();
+  };
+
+  const handleCyclePlasticShardPalette = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticShardPalette();
+  };
+
+  const handleCyclePlasticGlowBrightness = () => {
+      if (engineRef.current) engineRef.current.cyclePlasticGlowBrightness();
+  };
+
+  const handleCycleMetalGlowBrightness = () => {
+      if (engineRef.current) engineRef.current.cycleMetalGlowBrightness();
   };
 
   const handleCycleGlassGlowColor = () => {
       if (engineRef.current) engineRef.current.cycleGlassGlowColor();
   };
 
-  const handleCycleNebulaPalette = () => {
-      if (engineRef.current) engineRef.current.cycleNebulaPalette();
+  const handleCycleMetalGlowColor = () => {
+      if (engineRef.current) engineRef.current.cycleMetalGlowColor();
   };
 
-  const handleCyclePlasticBlendMode = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticBlendMode();
+  const handleCycleNebulaPalette = () => {
+      if (engineRef.current) engineRef.current.cycleNebulaPalette();
   };
 
   const handleTogglePlasticBlend = () => {
@@ -225,32 +229,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleNebulaStretch();
   };
 
-  const handleCyclePlasticOpacity = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticOpacity();
-  };
-
-  const handleCyclePlasticCoreRadius = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticCoreRadius();
-  };
-
-  const handleCyclePlasticBlendRadius = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticBlendRadius();
-  };
-
-  const handleCyclePlasticYield = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticYield();
-  };
-
   const handleCycleShatterGrace = () => {
       if (engineRef.current) engineRef.current.cycleShatterGrace();
-  };
-
-  const handleCyclePlasticStiffness = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticStiffness();
-  };
-
-  const handleCyclePlasticDamping = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticDamping();
   };
 
   const handleCyclePlayerThrust = () => {
@@ -259,10 +239,6 @@ const App: React.FC = () => {
 
   const handleCyclePlayerSpeed = () => {
       if (engineRef.current) engineRef.current.cyclePlayerSpeed();
-  };
-
-  const handleCyclePlasticImpactCooldown = () => {
-      if (engineRef.current) engineRef.current.cyclePlasticImpactCooldown();
   };
 
   const handleCycleTileBlendAlpha = () => {
@@ -364,24 +340,18 @@ const App: React.FC = () => {
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
         onToggleMaterialAutomata={handleToggleMaterialAutomata}
-        onCyclePlasticEatAttract={handleCyclePlasticEatAttract}
-        onTogglePlasticReach={handleTogglePlasticReach}
         onCyclePlasticPalette={handleCyclePlasticPalette}
+        onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
+        onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
+        onCycleMetalGlowBrightness={handleCycleMetalGlowBrightness}
         onCycleGlassGlowColor={handleCycleGlassGlowColor}
+        onCycleMetalGlowColor={handleCycleMetalGlowColor}
         onCycleNebulaPalette={handleCycleNebulaPalette}
-        onCyclePlasticBlendMode={handleCyclePlasticBlendMode}
         onTogglePlasticBlend={handleTogglePlasticBlend}
         onCycleNebulaStretch={handleCycleNebulaStretch}
-        onCyclePlasticOpacity={handleCyclePlasticOpacity}
-        onCyclePlasticCoreRadius={handleCyclePlasticCoreRadius}
-        onCyclePlasticBlendRadius={handleCyclePlasticBlendRadius}
-        onCyclePlasticYield={handleCyclePlasticYield}
         onCycleShatterGrace={handleCycleShatterGrace}
-        onCyclePlasticStiffness={handleCyclePlasticStiffness}
-        onCyclePlasticDamping={handleCyclePlasticDamping}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}
-        onCyclePlasticImpactCooldown={handleCyclePlasticImpactCooldown}
         onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}

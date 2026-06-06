@@ -4,17 +4,17 @@ import {
   COLORS,
   AMMO_CONSTANTS,
   DROP_CONFIG,
+  AMMO_DROP_PULL,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
   randomPlasticShardShade,
-  colorToWigglePhase,
-  PLASTIC_DEFORM_CONSTANTS,
   getActiveShatterGraceDelay,
   METAL_ASSEMBLY,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
 import { HEX_SIZE } from '../maps/TileGenerator';
+import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import { NEBULA_IMAGES, ASSETS } from '../../assets';
 import {
   blendCompositionToHex,
@@ -602,19 +602,11 @@ export class DropSystem {
         ? shardHealthOverride
         : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
 
-      // Resolve colour once — plastic re-rolls its amber shade per
-      // shard, everything else inherits from the tile.  Reused below
-      // for both `color` and (plastic only) `wigglePhase`.
+      // Resolve colour once — plastic re-rolls its shade per shard,
+      // everything else inherits from the tile.
       const shardColor = spec.variant === 'plastic-shard'
         ? randomPlasticShardShade()
         : tile.color;
-      // Spawn-time shape variance for plastic-shards — per-axis
-      // random scale in [1 − V, 1 + V] so each shard reads as its
-      // own slightly-irregular outline rather than a perfect circle.
-      const isPlasticShardSpec = spec.variant === 'plastic-shard';
-      const sv = PLASTIC_DEFORM_CONSTANTS.SPAWN_SHAPE_VARIANCE;
-      const baseScaleX = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
-      const baseScaleY = isPlasticShardSpec ? (1 - sv + Math.random() * 2 * sv) : undefined;
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -638,10 +630,6 @@ export class DropSystem {
         // Smaller shards spin faster — same angular-momentum-from-
         // impact logic as the speed scaling above.
         rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
-        // Plastic-shards re-roll their amber shade per-instance so
-        // each shard in a burst reads as its own tone (see
-        // PLASTIC_AMBER_SHADES in constants.ts).  Other variants
-        // inherit the parent tile's colour as before.
         color:         shardColor,
         active:        true,
         health:        shardHealth,
@@ -649,29 +637,12 @@ export class DropSystem {
         mass,
         polygonPoints: scaledPts,
         // Optional per-entity damping from the variant's spawn shape
-        // — today plastic-shard sets these so cluster motion damps
-        // out quickly.  Undefined for variants that drift naturally
-        // (rock / metal).  restSpeed / restSpin raise the "snap-
-        // to-zero" floor PhysicsSystem applies after damping so
-        // tiny residual drifts get culled and the shard stays
-        // motionless unless directly disturbed.
+        // — undefined for variants that drift naturally (rock / glass
+        // / plastic post-revert).  Metal-assembly uses these.
         linearDamping:  variantDef.spawn.linearDamping,
         angularDamping: variantDef.spawn.angularDamping,
         restSpeed:      variantDef.spawn.restSpeed,
         restSpin:       variantDef.spawn.restSpin,
-        // Plastic-shard wiggle phase derived from the shard's amber
-        // shade so each colour wiggles with a distinct offset (see
-        // WIGGLE_CONSTANTS).  Other variants don't wiggle.
-        wigglePhase:   spec.variant === 'plastic-shard' ? colorToWigglePhase(shardColor) : undefined,
-        // Plastic-shard spawn-time shape variance (option B).
-        baseScaleX,
-        baseScaleY,
-        // Plastic-shard sticky-bond anchor — PhysicsSystem pulls each
-        // shard toward this rest position every substep, so the cluster
-        // can be shoved off-anchor by continuous force but returns when
-        // the force releases.  Anchor sits at the spawn position.
-        anchorX: isPlasticShardSpec ? (tile.position.x + offsetX) : undefined,
-        anchorY: isPlasticShardSpec ? (tile.position.y + offsetY) : undefined,
         // Let dent-break debris (rock-tile breakShards, etc.) scatter
         // before the overlap-collapse pass can re-condense it.
         collapseGraceTimer: getActiveShatterGraceDelay(),
@@ -1002,10 +973,18 @@ export class DropSystem {
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
-    amount: number,
+    _amount: number,
     parentVelocity?: Vector2,
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
+    // Base ammo drops always carry value 1 — the per-source amount
+    // parameter is intentionally ignored so an enemy/asteroid kill
+    // grants exactly one ammo regardless of historical AMMO_PER_*
+    // tunables.  Field clutter is held in check by mergeAmmoDrops,
+    // which consolidates adjacent ammo drops by summing their values
+    // onto a single survivor — total ammo conservation across the
+    // wave-cluster, single entity instead of many.
+    const amount = 1;
     const drop = this.makeDropEntity(
       nextId('drop_ammo'),
       pos,
@@ -1017,6 +996,85 @@ export class DropSystem {
     drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
     entities.push(drop);
     activeDrops.push(drop);
+  }
+
+  /**
+   * Consolidate adjacent ammo drops: any two ammo drops whose
+   * centres are within (rA + rB) world units fuse — the larger
+   * absorbs the smaller's value and the smaller retires.  Cluster
+   * cases (5+ ammo drops from a wave of enemy deaths near each
+   * other) collapse to a single entity carrying the summed value,
+   * holding total ammo constant while sharply cutting drop-entity
+   * count.  Survivor's polygon + entity size regenerate from the
+   * new value so the visual reads as "fatter pickup".
+   *
+   * O(N²) pairwise scan; activeDrops is bounded by DROP_CONFIG.MAX_
+   * ACTIVE_DROPS (64 today) so the worst case is a few thousand
+   * ops — negligible vs the broadphase passes.  Toroidal-correct
+   * via wrapDeltaX/Y.  Inactive drops left for the next-step
+   * compaction sweep to drop from the activeDrops cache.
+   */
+  public mergeAmmoDrops(activeDrops: GameEntity[]): void {
+    const pullRangeSq = AMMO_DROP_PULL.RANGE * AMMO_DROP_PULL.RANGE;
+    const pullStrength = AMMO_DROP_PULL.STRENGTH;
+    for (let i = 0; i < activeDrops.length; i++) {
+      const a = activeDrops[i];
+      if (!a.active || a.dropType !== 'ammo') continue;
+      const aR = a.size.x * 0.5;
+      for (let j = i + 1; j < activeDrops.length; j++) {
+        const b = activeDrops[j];
+        if (!b.active || b.dropType !== 'ammo') continue;
+        const bR = b.size.x * 0.5;
+        const dx = wrapDeltaX(a.position.x, b.position.x);
+        const dy = wrapDeltaY(a.position.y, b.position.y);
+        const distSq = dx * dx + dy * dy;
+        const sumR = aR + bR;
+        const sumRSq = sumR * sumR;
+        if (distSq <= sumRSq) {
+          // Mass-weighted velocity blend — drops share mass (5
+          // each per makeDropEntity), so this is effectively the
+          // average.  Two converging drops cancel out cleanly
+          // instead of the survivor keeping a's velocity alone and
+          // shooting off after merge — fixes the "orbit, merge,
+          // zoom" pattern users observe with pure pull + keep-a.
+          const ma = a.mass || 5;
+          const mb = b.mass || 5;
+          const totalM = ma + mb;
+          a.velocity.x = (a.velocity.x * ma + b.velocity.x * mb) / totalM;
+          a.velocity.y = (a.velocity.y * ma + b.velocity.y * mb) / totalM;
+          a.dropValue   = (a.dropValue ?? 0) + (b.dropValue ?? 0);
+          a.position.x  = (a.position.x + b.position.x) * 0.5;
+          a.position.y  = (a.position.y + b.position.y) * 0.5;
+          a.magnetized  = a.magnetized || b.magnetized;
+          const newR = Math.min(10, Math.max(4, 3.5 + a.dropValue * 0.075));
+          a.size.x = newR * 3;
+          a.size.y = newR * 3;
+          a.polygonPoints = this.generateShardPolygon(
+            'ammo', Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
+          );
+          b.active = false;
+        } else if (distSq < pullRangeSq && !a.magnetized && !b.magnetized) {
+          // Damp first — kills tangential momentum accumulated by
+          // prior pull steps so the convergence stays controlled
+          // rather than building up an orbital trajectory that
+          // overshoots the merge contact.
+          const damp = AMMO_DROP_PULL.DAMP_PER_STEP;
+          a.velocity.x *= damp;
+          a.velocity.y *= damp;
+          b.velocity.x *= damp;
+          b.velocity.y *= damp;
+          // Then pull: 1/dist nudge toward partner.  Magnetised
+          // drops skip the whole branch so the player-magnet
+          // trajectory isn't tugged sideways.
+          const dist = Math.sqrt(distSq);
+          const k = pullStrength / dist;
+          a.velocity.x +=  dx * k;
+          a.velocity.y +=  dy * k;
+          b.velocity.x += -dx * k;
+          b.velocity.y += -dy * k;
+        }
+      }
+    }
   }
 
   /** Spawn a static (mass=Infinity) health drop at `pos`. */

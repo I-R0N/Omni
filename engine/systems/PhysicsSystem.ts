@@ -1,60 +1,10 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticStiffness, getActivePlasticYield, getActivePlasticDamping, getActivePlasticImpactCooldown } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
 
-/** Set wiggle + dent state on a plastic-shard whose post-impulse
- *  speed has crossed restSpeed — wakes the shard out of its sleep
- *  state, so it both jiggles (visual short pulse) and accumulates
- *  a persistent dent in the impact direction (visual long-tail
- *  squash that decays over ~4 s).  `dirX` / `dirY` is the impact
- *  direction; stored as wiggleAngle for the wiggle's axis and
- *  normalised + accumulated into entity.dentX/Y for the dent.
- *  No-op for non-plastic entities and for impulses too small to
- *  matter.  Inlined comparison (squared speed vs squared rest) so
- *  the hot path skips a sqrt. */
-function maybeStampPlasticWiggle(e: GameEntity, dirX: number, dirY: number, isCollision: boolean): void {
-    if (e.shardVariant !== 'plastic-shard') return;
-    const cooldownVal = getActivePlasticImpactCooldown();
-    // 'off' (Infinity): collision contacts never re-orient the
-    // deformation axis — kills the cluster-jitter entirely.
-    // Projectile hits (isCollision=false) still wiggle.
-    if (isCollision && cooldownVal === Infinity) return;
-    // Debounce: a shard packed among neighbours fields several
-    // contacts per substep; without this gate each one re-orients
-    // the deformation axis, making the disc twitch back and forth.
-    if ((e.wiggleCooldown ?? 0) > 0) return;
-    const rest = e.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
-    const restSq = rest * rest;
-    const vSq = e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y;
-    if (vSq <= restSq) return;
-
-    e.wiggleCooldown = cooldownVal === Infinity ? WIGGLE_CONSTANTS.DURATION : cooldownVal;
-    e.wiggleTimer = WIGGLE_CONSTANTS.DURATION;
-    e.wiggleAngle = Math.atan2(dirY, dirX);
-
-    // Accumulate impact direction (normalised) into the dent
-    // vector; cap total magnitude so repeated hits in the same
-    // direction don't grow the dent indefinitely.
-    const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
-    if (dirLen <= 0.0001) return;
-    const nx = dirX / dirLen;
-    const ny = dirY / dirLen;
-    const inc = PLASTIC_DEFORM_CONSTANTS.DENT_INCREMENT_PER_IMPACT;
-    let newDX = (e.dentX ?? 0) + nx * inc;
-    let newDY = (e.dentY ?? 0) + ny * inc;
-    const max = PLASTIC_DEFORM_CONSTANTS.DENT_MAX_MAGNITUDE;
-    const m = Math.sqrt(newDX * newDX + newDY * newDY);
-    if (m > max) {
-        const k = max / m;
-        newDX *= k;
-        newDY *= k;
-    }
-    e.dentX = newDX;
-    e.dentY = newDY;
-}
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
-import { getCollisionR } from '../entityCache';
+import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 
 // Number of spatial-hash cells along each axis of the toroidal map.  The
@@ -87,11 +37,39 @@ function cellKeyFromCell(cx: number, cy: number): number {
     return (wrapCellX(cx) << 16) | (wrapCellY(cy) & 0xFFFF);
 }
 
+// Parametric hex-colour lerp.  Used by applyDentStep to fade
+// plastic-tile colour toward its sticky shard-shade target as
+// damage accumulates.  Inputs expected as #RRGGBB.
+function lerpHexColors(a: string, b: string, t: number): string {
+    const rA = parseInt(a.slice(1, 3), 16), gA = parseInt(a.slice(3, 5), 16), bA = parseInt(a.slice(5, 7), 16);
+    const rB = parseInt(b.slice(1, 3), 16), gB = parseInt(b.slice(3, 5), 16), bB = parseInt(b.slice(5, 7), 16);
+    const r = Math.round(rA + (rB - rA) * t);
+    const g = Math.round(gA + (gB - gA) * t);
+    const c = Math.round(bA + (bB - bA) * t);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${c.toString(16).padStart(2, '0')}`;
+}
+
 // Precompute the squared "still-settled" distance multiplier:
 // pair is considered stable when distSq > sumRSq × STABLE_DIST_FACTOR_SQ.
 // Derived from `dist > sumR × (1 − STABLE_OVERLAP_FRACTION)`, i.e. the
 // overlap is below the configured fraction of contact distance.
 const STABLE_DIST_FACTOR_SQ = (1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION) ** 2;
+
+// Scratch buffer for applyDentStep's pre-dent vertex snapshot — sized
+// to the largest variant polygon (hex tiles have 6 vertices; plastic
+// shards have 4).  Reused across calls so each dent event makes ZERO
+// allocations for the snapshot pass.  Layout: alternating x, y per
+// vertex (so index 2i = x, 2i+1 = y).  Sized at 12 (6 verts × 2)
+// with a small safety margin.
+const _dentPreSnapshot: Float64Array = new Float64Array(16);
+
+// Registry of plastic entities with at least one entry in their
+// plasticDentHistory.  Populated by applyDentStep when it pushes a
+// dent delta; consumed by ShardSystem.tickPlasticDentRecovery, which
+// iterates this set INSTEAD of walking the full entity list every
+// step.  When an entity's history empties (or it gets transmuted /
+// composed / dies) the recovery pass / clear sites remove it.
+export const pendingPlasticDentEntities: Set<GameEntity> = new Set();
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -436,40 +414,6 @@ export class PhysicsSystem {
       if (entity.nebulaImpactCooldown !== undefined && entity.nebulaImpactCooldown > 0) {
           entity.nebulaImpactCooldown -= dt;
       }
-      // Plastic-shard wiggle timer — counts down to 0; the renderer
-      // applies a damped-sinusoid scale pulse while > 0.  Set at
-      // collision sites when the impulse wakes the shard above its
-      // restSpeed.  Skipped (and cleared) when at 0 so the renderer's
-      // gate check sees undefined rather than a stale near-zero.
-      if (entity.wiggleTimer !== undefined && entity.wiggleTimer > 0) {
-          entity.wiggleTimer -= dt;
-          if (entity.wiggleTimer <= 0) entity.wiggleTimer = undefined;
-      }
-      // Impact-stamp cooldown — gates how often maybeStampPlasticWiggle
-      // can re-orient the deformation axis (anti-twitch debounce).
-      if (entity.wiggleCooldown !== undefined && entity.wiggleCooldown > 0) {
-          entity.wiggleCooldown -= dt;
-          if (entity.wiggleCooldown <= 0) entity.wiggleCooldown = undefined;
-      }
-      // Plastic-shard impact-dent decay — 2D vector that decays
-      // exponentially toward zero each substep.  Half-life ~1 s
-      // at PLASTIC_DEFORM_CONSTANTS.DENT_DECAY_PER_SECOND = 0.5
-      // (a max-magnitude dent visibly persists ~4 s).  Both axes
-      // snap to undefined together once both fall below the rest
-      // threshold so the renderer's check stays cheap.
-      if (entity.dentX !== undefined || entity.dentY !== undefined) {
-          const decayMul = Math.pow(PLASTIC_DEFORM_CONSTANTS.DENT_DECAY_PER_SECOND, dt);
-          const newDX = (entity.dentX ?? 0) * decayMul;
-          const newDY = (entity.dentY ?? 0) * decayMul;
-          const rest = PLASTIC_DEFORM_CONSTANTS.DENT_REST_THRESHOLD;
-          if (Math.abs(newDX) < rest && Math.abs(newDY) < rest) {
-              entity.dentX = undefined;
-              entity.dentY = undefined;
-          } else {
-              entity.dentX = newDX;
-              entity.dentY = newDY;
-          }
-      }
       // Merge fade-out — both nebula AND non-nebula shard families
       // ride the same `mergeFadeTimer` field; the value differs by
       // variant (nebula longer, ~1 s; others crisp, ~0.5 s).  The
@@ -514,14 +458,6 @@ export class PhysicsSystem {
           if (entity.collapseGraceTimer <= 0) {
               entity.collapseGraceTimer = undefined;
           }
-      }
-      // Metal hexagon free-float — a completed composite floats while this
-      // counts down, then ShardSystem snaps it to the grid as a tile.  Held
-      // at 0 (not cleared) so ShardSystem can tell "ready" from "still
-      // floating"; only the assembly pass clears it.
-      if (entity.metalFloatTimer !== undefined && entity.metalFloatTimer > 0) {
-          entity.metalFloatTimer -= dt;
-          if (entity.metalFloatTimer < 0) entity.metalFloatTimer = 0;
       }
       // Shield: tick down hit flash and recharge timer, then recharge
       if (entity.shieldHitFlash && entity.shieldHitFlash > 0) {
@@ -571,20 +507,9 @@ export class PhysicsSystem {
           if (entity.linearDamping !== undefined) {
             // Custom heavy linear & angular damping (nebula-shards
             // today, future variants opt in via the same per-entity
-            // field at spawn time).  Per-entity restSpeed / restSpin
-            // (when set) raise the snap-to-zero floor — plastic-
-            // shards use this for sleep-like behaviour so tiny
-            // residual drifts get culled and clusters stay
-            // motionless unless directly disturbed.  Falls back to
-            // NEBULA_CONSTANTS values for entities that don't set
-            // them (nebula-shards, free-floating rock-shards).
-            // Plastic-shards read the live DBG damping cycle so the
-            // PDmp button retunes friction on every active shard, not
-            // just newly-spawned ones.  Other variants keep their
-            // spawn-time per-entity value.
-            const linearD = entity.shardVariant === 'plastic-shard'
-                ? getActivePlasticDamping()
-                : entity.linearDamping;
+            // field at spawn time).  Falls back to NEBULA_CONSTANTS
+            // values for entities that don't set them.
+            const linearD = entity.linearDamping;
             const angularD = entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING;
             const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
             const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
@@ -594,43 +519,6 @@ export class PhysicsSystem {
             entity.velocity.y *= lin;
             if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
             if (Math.abs(entity.velocity.y) < restSpeed) entity.velocity.y = 0;
-            // Elastoplastic sticky-bond anchor (today: plastic-shard).
-            // Applied AFTER the damping + rest snap so the spring can
-            // re-introduce velocity above restSpeed and keep pulling
-            // the shard toward its anchor.  Toroidal-correct delta so
-            // anchors near a wrap seam pull the shorter way.
-            //
-            // The anchor is an elastic-perfectly-plastic element:
-            // while |displacement| <= yieldDist the spring pulls back
-            // fully (elastic recovery); once displacement exceeds
-            // yieldDist the anchor permanently MIGRATES toward the
-            // shard so the clamped displacement stays at yieldDist —
-            // the over-yield motion is "forgotten", leaving the shard
-            // deformed.  That permanent migration is the lossy/plastic
-            // behaviour the elastic spring alone could not produce.
-            if (entity.anchorX !== undefined && entity.anchorY !== undefined) {
-                let adx = wrapDeltaX(entity.anchorX, entity.position.x);
-                let ady = wrapDeltaY(entity.anchorY, entity.position.y);
-                const yieldDist = getActivePlasticYield();
-                const distSq = adx * adx + ady * ady;
-                if (distSq > yieldDist * yieldDist) {
-                    // Plastic flow: migrate the anchor toward the
-                    // shard along the displacement direction by the
-                    // over-yield excess, then clamp the displacement
-                    // used for the restoring force to yieldDist.
-                    const dist = Math.sqrt(distSq);
-                    const excess = dist - yieldDist;
-                    const ux = adx / dist;
-                    const uy = ady / dist;
-                    entity.anchorX = wrapX(entity.anchorX + ux * excess);
-                    entity.anchorY = wrapY(entity.anchorY + uy * excess);
-                    adx = ux * yieldDist;
-                    ady = uy * yieldDist;
-                }
-                const k = getActivePlasticStiffness();
-                entity.velocity.x -= adx * k * dt;
-                entity.velocity.y -= ady * k * dt;
-            }
             if (entity.rotationSpeed !== undefined) {
                 entity.rotationSpeed *= ang;
                 if (Math.abs(entity.rotationSpeed) < restSpin) entity.rotationSpeed = 0;
@@ -1167,6 +1055,38 @@ export class PhysicsSystem {
       const pts = tile.polygonPoints;
       if (!pts || pts.length === 0) return;
 
+      // Plastic dent recovery: snapshot the polygon BEFORE this dent
+      // into the module-level _dentPreSnapshot scratch buffer (zero
+      // per-dent allocation), then compute the post-dent delta after
+      // the pull + preserve rescale.  Delta is stored on plasticDent
+      // History as a Float64Array (one typed-array allocation per
+      // dent instead of N+1 Vector2 objects).  Layout: 2i = x, 2i+1
+      // = y.
+      const isPlasticDent = tile.shardVariant === 'plastic-shard'
+                         || tile.shardVariant === 'plastic-tile';
+      const ptsLen = pts.length;
+      if (isPlasticDent) {
+          // Snapshot is bounded by the scratch buffer size (16 = 8
+          // verts).  Variants with bigger polygons would silently
+          // truncate here — bump _dentPreSnapshot if that ever
+          // becomes a concern.
+          for (let i = 0; i < ptsLen; i++) {
+              _dentPreSnapshot[2 * i]     = pts[i].x;
+              _dentPreSnapshot[2 * i + 1] = pts[i].y;
+          }
+      }
+
+      // Capture pre-dent max vertex radius for preserveBoundingRadius
+      // variants (today: plastic-shard).  Scaled below so the post-
+      // dent bounding circle matches.
+      let preMaxR2 = 0;
+      if (dent.preserveBoundingRadius) {
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > preMaxR2) preMaxR2 = r2;
+          }
+      }
+
       // Impact in entity-local coords (centroid at origin), with
       // toroidal wrap so impacts across the seam pick the right side.
       // wrapDeltaX(from, to) returns (to - from), so pass tile first
@@ -1253,6 +1173,73 @@ export class PhysicsSystem {
           const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
+      }
+
+      // preserveBoundingRadius rescale (today: plastic-shard).  After
+      // pulling, find the new max radius and scale every vertex by
+      // preMaxR / postMaxR so the bounding circle holds at its pre-
+      // dent extent.  The pulled vertex is now at a smaller radius
+      // than its neighbours after the scale — visible asymmetric
+      // deformation, no overall shrink.
+      if (dent.preserveBoundingRadius && preMaxR2 > 0) {
+          let postMaxR2 = 0;
+          for (let i = 0; i < pts.length; i++) {
+              const r2 = pts[i].x * pts[i].x + pts[i].y * pts[i].y;
+              if (r2 > postMaxR2) postMaxR2 = r2;
+          }
+          if (postMaxR2 > 0 && postMaxR2 < preMaxR2) {
+              const scale = Math.sqrt(preMaxR2 / postMaxR2);
+              for (let i = 0; i < pts.length; i++) {
+                  pts[i].x *= scale;
+                  pts[i].y *= scale;
+              }
+          }
+      }
+
+      // Plastic dent recovery: push this hit's per-vertex delta onto
+      // plasticDentHistory with its own timer.  Delta is a flat
+      // Float64Array (2N: alternating x,y) — one typed-array
+      // allocation per dent instead of an Array + N {x,y} objects.
+      // When the timer expires, ShardSystem.tickPlasticDentRecovery
+      // subtracts the delta from polygonPoints and removes the
+      // entity from pendingPlasticDentEntities once history empties.
+      if (isPlasticDent) {
+          const delta = new Float64Array(2 * ptsLen);
+          for (let i = 0; i < ptsLen; i++) {
+              delta[2 * i]     = pts[i].x - _dentPreSnapshot[2 * i];
+              delta[2 * i + 1] = pts[i].y - _dentPreSnapshot[2 * i + 1];
+          }
+          if (!tile.plasticDentHistory) tile.plasticDentHistory = [];
+          tile.plasticDentHistory.push({
+              timer: PLASTIC_DENT_RECOVERY.DELAY_SECONDS,
+              delta,
+          });
+          // Register for the recovery pass — the Set short-circuits
+          // tickPlasticDentRecovery's full-entity walk.
+          pendingPlasticDentEntities.add(tile);
+      }
+
+      // Plastic-tile damage colour shift toward the shard palette.
+      // Lazy-init the original + target on first dent (target picks
+      // one random shard shade and stays sticky), then lerp tile.
+      // color from original to target by (1 - hpRatio).  At HP=0 the
+      // colour equals the full shard shade and the existing break
+      // path fires.
+      if (tile.shardVariant === 'plastic-tile') {
+          if (tile.plasticTileOriginalColor === undefined) {
+              tile.plasticTileOriginalColor = tile.color;
+          }
+          if (tile.plasticTileTargetColor === undefined) {
+              tile.plasticTileTargetColor = randomPlasticShardShade();
+          }
+          const maxHP = tile.maxHealth ?? 1;
+          const hpRatio = Math.max(0, Math.min(1, tile.health / maxHP));
+          const t = 1 - hpRatio;
+          tile.color = lerpHexColors(
+              tile.plasticTileOriginalColor!,
+              tile.plasticTileTargetColor!,
+              t,
+          );
       }
 
       // polygonPoints mutated → invalidate any cached SAT axes (the
@@ -1342,6 +1329,30 @@ export class PhysicsSystem {
           }
       }
       return false;
+  }
+
+  /**
+   * Iterate every active static tile in the 3x3 spatial cells around
+   * (x, y) and invoke `cb` for each.  Used by ShardSystem's plastic-
+   * shard ↔ tile bond formation pass to find candidate tile partners
+   * — the merge broadphase only walks the dynamic candidates set, so
+   * static tiles need this side-channel.  Callbacks return early if
+   * they want to break out of the inner loop.
+   */
+  public forEachStaticTileNear(x: number, y: number, cb: (tile: GameEntity) => void): void {
+      const cx = Math.floor(wrapX(x) / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(wrapY(y) / SPATIAL_GRID_SIZE);
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  cb(t);
+              }
+          }
+      }
   }
 
   /**
@@ -1633,6 +1644,49 @@ export class PhysicsSystem {
   }
 
   /**
+   * Plastic-shard cross-material transmute on contact.  When a
+   * plastic-shard collides with a strictly larger non-plastic non-
+   * nebula shard (mobile or static tile), the plastic-shard adopts
+   * the partner's material at the plastic-shard's current size +
+   * polygon shape.  Reads as plastic absorbing the surface character
+   * of whatever it touches; once converted the entity behaves as a
+   * normal shard of the new variant for all subsequent passes
+   * (bonds, repel immunity, density, render).  Tile partners
+   * (glass-tile / rock-tile / metal-tile) map to the matching
+   * SHARD variant — the plastic becomes a shard of that material,
+   * not another tile.  Partners listed in PLASTIC_TRANSMUTE_EXCLUDE
+   * (plastic-*, nebula-*, indestructible-tile) are no-ops.
+   */
+  private tryPlasticTransmuteOnContact(a: GameEntity, b: GameEntity): void {
+      let plastic: GameEntity, other: GameEntity;
+      if (a.shardVariant === 'plastic-shard') { plastic = a; other = b; }
+      else if (b.shardVariant === 'plastic-shard') { plastic = b; other = a; }
+      else return;
+      const oVar = other.shardVariant;
+      if (oVar === undefined) return;
+      if (PLASTIC_TRANSMUTE_EXCLUDE.indexOf(oVar) !== -1) return;
+
+      // Tile → matching shard variant; shard variants pass through.
+      let targetVariant: string;
+      switch (oVar) {
+          case 'glass-tile':  targetVariant = 'glass-shard';  break;
+          case 'rock-tile':   targetVariant = 'rock-shard';   break;
+          case 'metal-tile':  targetVariant = 'metal-shard';  break;
+          default:            targetVariant = oVar;           break;
+      }
+      const newVariantDef = SHARD_VARIANTS[targetVariant as keyof typeof SHARD_VARIANTS];
+      if (newVariantDef === undefined) return;
+
+      plastic.shardVariant     = targetVariant as typeof plastic.shardVariant;
+      plastic.color            = other.color || plastic.color;
+      plastic.mass             = newVariantDef.spawn.sizeToMass(plastic.size.x);
+      plastic.mergeCount         = undefined;
+      plastic.plasticDentHistory = undefined;
+      pendingPlasticDentEntities.delete(plastic);
+      invalidateCollisionR(plastic);
+  }
+
+  /**
    * Mobile-shard ↔ static-tile collision pass — debug-gated by
    * `shardTileCollisionsEnabled`.  The main broadphase skips
    * STRUCTURE entities as outer-loop subjects (commit cf69102),
@@ -1660,19 +1714,6 @@ export class PhysicsSystem {
           const cx = Math.floor(a.position.x / SPATIAL_GRID_SIZE);
           const cy = Math.floor(a.position.y / SPATIAL_GRID_SIZE);
 
-          // Snapshot the plastic-shard's pre-collision position so we
-          // can detect after the inner loop whether SAT pushed it.
-          // Sustained contact with a static tile means the shard's
-          // sticky-bond anchor is pulling it INTO geometry — the
-          // shard oscillates against the tile and damages it on every
-          // bounce.  When that happens we snap the anchor to the
-          // post-correction position so the spring stops fighting
-          // the wall (see plastic anchor reset below).
-          const isPlasticWithAnchor =
-              a.shardVariant === 'plastic-shard' && a.anchorX !== undefined;
-          const preX = isPlasticWithAnchor ? a.position.x : 0;
-          const preY = isPlasticWithAnchor ? a.position.y : 0;
-
           for (let x = -1; x <= 1; x++) {
               for (let y = -1; y <= 1; y++) {
                   const cell = this.staticGrid.get(cellKeyFromCell(cx + x, cy + y));
@@ -1682,21 +1723,6 @@ export class PhysicsSystem {
                       if (!b.active) continue;
                       this.checkAndResolveCollision(a, b, onDamage, onDeath, onShake, onHit);
                   }
-              }
-          }
-
-          // Plastic-shard anchor reset on real tile contact.  If the
-          // collision pass moved the shard (positional correction
-          // fired), the shard's anchor was effectively unreachable
-          // — relocating the anchor to its current position breaks
-          // the spring-into-tile vibration loop that would otherwise
-          // chain-destroy neighbouring plastic-tiles.
-          if (isPlasticWithAnchor && a.active) {
-              const dxA = a.position.x - preX;
-              const dyA = a.position.y - preY;
-              if (dxA * dxA + dyA * dyA > 0.01) {
-                  a.anchorX = a.position.x;
-                  a.anchorY = a.position.y;
               }
           }
       }
@@ -1904,15 +1930,6 @@ export class PhysicsSystem {
       a.velocity.y -= iy * invMassA;
       b.velocity.x += ix * invMassB;
       b.velocity.y += iy * invMassB;
-      // Plastic-shard wiggle trigger — fires when the post-impulse
-      // speed is above restSpeed (collision was strong enough to
-      // wake the shard out of its sleep state).  Impact direction
-      // = the contact normal (nx, ny); for entity b the inbound
-      // direction is opposite, but atan2 produces a 180°-swapped
-      // angle whose squash visual is identical (squash axis is
-      // unsigned).  No-op for non-plastic pairs; sqrt-free.
-      maybeStampPlasticWiggle(a,  nx,  ny, true);
-      maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
   /**
@@ -2250,6 +2267,15 @@ export class PhysicsSystem {
       // off a tile that's about to shatter from this contact.
       if (this.tryPassthroughShatter(a, b, onDeath)) return;
 
+      // Plastic cross-material transmute — smaller plastic-shard
+      // adopts the partner's material at its current size + shape.
+      // Runs before nebula passThrough so the transmute fires on
+      // glass / rock / metal partners only (nebula partners are in
+      // PLASTIC_TRANSMUTE_EXCLUDE, so this is a fast no-op there);
+      // post-transmute the entity behaves as its new variant for the
+      // remainder of resolveCollision.
+      this.tryPlasticTransmuteOnContact(a, b);
+
       // ── NEBULA: pass-through with conditional shatter ──────────────────
       // Stage 5: per-variant passThrough flag drives the impulse skip.
       // Nebula tiles AND nebula shards both set passThrough=true, so
@@ -2548,56 +2574,10 @@ export class PhysicsSystem {
                   // lighter plastic.  Static tiles (mass = Infinity)
                   // are filtered out by the finite-mass check.
                   //
-                  // Plastic-shards get a 3× push factor — pairs with
-                  // the wiggle visualisation to read as visibly
-                  // bouncy when struck.  Other dent shards keep the
-                  // baseline pushFactor.
                   if (isDentEntity && target.mass !== Infinity && proj.velocity) {
-                      const bouncinessMul = target.shardVariant === 'plastic-shard' ? 3.0 : 1.0;
-                      const pushFactor = (0.20 * bouncinessMul) / Math.max(1, target.mass / 10);
+                      const pushFactor = 0.20 / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
-                      maybeStampPlasticWiggle(target, proj.velocity.x, proj.velocity.y, false);
-
-                      // Plastic-shard tangent-rule spin from off-
-                      // centre projectile hits.  Mirrors the
-                      // nebula-shatter spin convention (ShardSystem
-                      // .shatterNebulaStyle: `cross = fx*dy − fy*dx`,
-                      // sign drives rotationSpeed direction) so
-                      // plastic absorbs impacts with the same fluid-
-                      // swirl handedness — shards on the upper /
-                      // lower side of the impact axis rotate in
-                      // opposite directions, like a fluid being
-                      // parted.
-                      //
-                      // fx/fy = projectile forward (striker velocity).
-                      // dx/dy = shard offset from striker position.
-                      // |cross| is essentially |F|·|d|·sin(θ), i.e.
-                      // the unsigned torque.  Magnitude here scales
-                      // with how off-centre the hit is — dead-centre
-                      // hits (cross ≈ 0) fall back to a random sign
-                      // so the shard still nudges.
-                      //
-                      // angularDamping = 0.99 (variant config) is
-                      // intentionally lighter than linearDamping
-                      // (0.97) so the spin persists noticeably
-                      // longer than the linear push — plastic
-                      // shards visibly twirl after a hit.
-                      if (target.shardVariant === 'plastic-shard' && target.rotationSpeed !== undefined) {
-                          const fx = proj.velocity.x;
-                          const fy = proj.velocity.y;
-                          const dx = target.position.x - proj.position.x;
-                          const dy = target.position.y - proj.position.y;
-                          const cross = fx * dy - fy * dx;
-                          const offsetLen = Math.sqrt(dx * dx + dy * dy);
-                          const radius = target.size.x * 0.5;
-                          const offsetFrac = Math.min(1, offsetLen / Math.max(1, radius));
-                          const SPIN_PER_HIT = 3.0;
-                          const sign = cross > 0.01 ? 1
-                                     : cross < -0.01 ? -1
-                                     : (Math.random() < 0.5 ? 1 : -1);
-                          target.rotationSpeed += sign * SPIN_PER_HIT * Math.max(0.15, offsetFrac);
-                      }
                   }
               }
               target.hitFlash = 0.1;
@@ -2932,14 +2912,6 @@ export class PhysicsSystem {
           b.velocity.x += ix * invMassB;
           b.velocity.y += iy * invMassB;
       }
-      // Plastic-shard wiggle trigger — fires when post-impulse
-      // speed > restSpeed (collision woke the shard from its
-      // sleep state).  Impact direction = contact normal (nx, ny)
-      // flipped for the b side; squash visual is unsigned so the
-      // 180° flip doesn't matter, but it's cheap to pass the
-      // correct sign anyway.  No-op for non-plastic.
-      maybeStampPlasticWiggle(a,  nx,  ny, true);
-      maybeStampPlasticWiggle(b, -nx, -ny, true);
   }
 
   // --- OPTIMIZED SAT HELPERS ---

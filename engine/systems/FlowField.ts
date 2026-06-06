@@ -61,11 +61,20 @@ onMapDimensionsChanged((w, h) => {
  * so the field has no stagnation points — no region where asteroids
  * can pile up or stall out.
  */
+// Module-level scratch — sampleFlow / samplePattern return THIS
+// object (mutated each call) instead of allocating a fresh literal.
+// Callers must use the result synchronously; storing it across a
+// later sample call is undefined behaviour.  Eliminates ~one
+// allocation per shard + drop per sim step on the hot path.
+const _flowScratch: FlowVector = { x: 0, y: 0 };
+
 export function sampleFlow(wx: number, wy: number): FlowVector {
   const theta = BASE_ANGLE
               + AMP_X * Math.sin(TWO_PI_OVER_W * wx)
               + AMP_Y * Math.cos(TWO_PI_OVER_H * wy);
-  return { x: Math.cos(theta), y: Math.sin(theta) };
+  _flowScratch.x = Math.cos(theta);
+  _flowScratch.y = Math.sin(theta);
+  return _flowScratch;
 }
 
 // ─── selectable flow patterns (DBG) ─────────────────────────────────────────
@@ -109,64 +118,63 @@ const PATTERN_WAVES    = 2;
  * meander here, but callers should special-case it to the map sampler.
  */
 export function samplePattern(pattern: FlowPattern, wx: number, wy: number): FlowVector {
+  // Same scratch-return idiom as sampleFlow.  All branches mutate
+  // _flowScratch in place; callers consume synchronously.
   switch (pattern) {
     case FlowPattern.HORIZONTAL:
-      return { x: 1, y: 0 };
+      _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch;
 
     case FlowPattern.VERTICAL:
-      return { x: 0, y: 1 };
+      _flowScratch.x = 0; _flowScratch.y = 1; return _flowScratch;
 
     case FlowPattern.WAVY_HORIZONTAL: {
       const a = PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_H * PATTERN_WAVES * wy);
-      return { x: Math.cos(a), y: Math.sin(a) };
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
     }
 
     case FlowPattern.WAVY_VERTICAL: {
       const a = Math.PI / 2 + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * wx);
-      return { x: Math.cos(a), y: Math.sin(a) };
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
     }
 
     case FlowPattern.CIRCULAR: {
       const r2 = wx * wx + wy * wy;
-      if (r2 < 1e-6) return { x: 1, y: 0 };
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const inv = 1 / Math.sqrt(r2);
-      return { x: -wy * inv, y: wx * inv };   // CCW tangent
+      _flowScratch.x = -wy * inv; _flowScratch.y = wx * inv; return _flowScratch;
     }
 
     case FlowPattern.SPIRAL: {
       const r2 = wx * wx + wy * wy;
-      if (r2 < 1e-6) return { x: 1, y: 0 };
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const inv = 1 / Math.sqrt(r2);
-      // 70 % tangential (CCW) + 30 % inward → an in-drawing swirl.
       const sx = (-wy * inv) * 0.7 + (-wx * inv) * 0.3;
       const sy = ( wx * inv) * 0.7 + (-wy * inv) * 0.3;
       const m = Math.sqrt(sx * sx + sy * sy) || 1;
-      return { x: sx / m, y: sy / m };
+      _flowScratch.x = sx / m; _flowScratch.y = sy / m; return _flowScratch;
     }
 
     case FlowPattern.GRAVITY_WELL: {
       const r2 = wx * wx + wy * wy;
-      if (r2 < 1e-6) return { x: 1, y: 0 };
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const inv = 1 / Math.sqrt(r2);
-      return { x: -wx * inv, y: -wy * inv };  // inward
+      _flowScratch.x = -wx * inv; _flowScratch.y = -wy * inv; return _flowScratch;
     }
 
     case FlowPattern.WAVY_GRAVITY_WELL: {
       const r2 = wx * wx + wy * wy;
-      if (r2 < 1e-6) return { x: 1, y: 0 };
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const r = Math.sqrt(r2);
-      // Inward angle, wobbled by a radial wave so the inflow snakes
-      // through concentric "wavy" rings on its way to the centre.
       const baseA = Math.atan2(-wy, -wx);
       const a = baseA + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * r);
-      return { x: Math.cos(a), y: Math.sin(a) };
+      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
     }
 
     case FlowPattern.OUTWARD: {
       const r2 = wx * wx + wy * wy;
-      if (r2 < 1e-6) return { x: 1, y: 0 };
+      if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const inv = 1 / Math.sqrt(r2);
-      return { x: wx * inv, y: wy * inv };    // outward
+      _flowScratch.x = wx * inv; _flowScratch.y = wy * inv; return _flowScratch;
     }
 
     case FlowPattern.MEANDER:
