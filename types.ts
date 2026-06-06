@@ -425,6 +425,13 @@ export interface GameEntity {
   // by ShardSystem at every site that mutates densityTier.  Skips the
   // per-frame RGB multiply when the tier hasn't changed.
   densityCachedTint?: string;
+  // Per-entity render cache for the resolved material-automata tint hex
+  // (metal/rock brightness path).  Built lazily by RenderSystem and
+  // invalidated by ShardSystem.recomputeMaterialNeighbors whenever
+  // materialNeighborCount changes — so the per-frame RGB multiply runs
+  // once per neighbour-count change, not every frame.  Mirrors
+  // densityCachedTint.
+  materialAutomataCachedColor?: string;
 
   // Unified fade-out timer for the whole shard family — nebula
   // tiles / shards AND rock / glass / plastic / metal shards all

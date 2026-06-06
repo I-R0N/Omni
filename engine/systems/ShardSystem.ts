@@ -77,6 +77,17 @@ export function shardVariantOf(entity: GameEntity): ShardVariantId | null {
   }
 }
 
+// Odd-r offset hex neighbour deltas (must match TileGenerator.getNeighbors),
+// hoisted to module scope as flat [dc, dr] pairs so the per-destroy
+// neighbour-count recompute walks them with zero per-tile allocation
+// (getHexNeighbors allocates 12 objects + arrays per call).
+const HEX_NEIGHBOR_DELTAS_EVEN: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1],
+];
+const HEX_NEIGHBOR_DELTAS_ODD: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1],
+];
+
 /**
  * Per-entity regen entry.  `delaySeconds` is captured from the
  * variant config at queue time so the per-tick progress calculation
@@ -523,18 +534,24 @@ export class ShardSystem {
       if (e.tileGridCol === undefined || e.tileGridRow === undefined) continue;
       let count = 0;
       if (e.active) {
-        const neighbors = TileGenerator.getHexNeighbors(e.tileGridCol, e.tileGridRow);
-        for (const n of neighbors) {
-          const key = (n.c << 16) | (n.r & 0xFFFF);
+        // Allocation-free hex-neighbour walk (no getHexNeighbors array).
+        const deltas = (e.tileGridRow % 2 === 0)
+          ? HEX_NEIGHBOR_DELTAS_EVEN
+          : HEX_NEIGHBOR_DELTAS_ODD;
+        for (let d = 0; d < deltas.length; d++) {
+          const nc = e.tileGridCol + deltas[d][0];
+          const nr = e.tileGridRow + deltas[d][1];
+          const key = (nc << 16) | (nr & 0xFFFF);
           if (index.get(key) === v) count++;
         }
       }
       if (e.materialNeighborCount !== count) {
         e.materialNeighborCount = count;
-        // Forward-compat: cache-eligible variants (glass / indestructible)
-        // bake their tint into the static-tile world canvas, so a count
-        // change must force a re-stamp.  Metal / rock aren't cached, so
-        // this is a harmless no-op for them today.
+        // The neighbour count drives the render tint/alpha, so invalidate
+        // the cached automata colour (metal/rock string tint) and force a
+        // re-stamp for cache-eligible variants (glass / indestructible bake
+        // their tint into the static-tile world canvas).
+        e.materialAutomataCachedColor = undefined;
         if (e._staticCached === true) e._staticCached = false;
       }
     }
@@ -613,9 +630,11 @@ export class ShardSystem {
     // call physics.addStaticEntity at completion.
     physics.addStaticEntity(entity);
 
-    // A reviving static tile changes its neighbours' material-automata
-    // counts — flag a recompute for the next update().
-    if (entity.mass === Infinity) this.materialNeighborsDirty = true;
+    // A reviving static tile changes its same-variant neighbours'
+    // automata counts — flag a recompute (only for automata variants).
+    if (entity.mass === Infinity && variant.automata !== undefined) {
+      this.materialNeighborsDirty = true;
+    }
 
     // Variant-driven pop animation: STRUCTURE tiles emit a chip
     // burst of tile-coloured particles; nebula tiles use the
@@ -2244,9 +2263,13 @@ export class ShardSystem {
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
     entities.push(tile);
     physics.addStaticEntity(tile);
-    // A freshly transmuted tile changes its neighbours' automata counts
-    // (and needs its own) — flag a recompute for the next update().
-    this.materialNeighborsDirty = true;
+    // A freshly transmuted tile changes its same-variant neighbours'
+    // automata counts (and needs its own) — flag a recompute, but only
+    // when the new tile is an automata variant (glass/metal/rock).
+    if (tile.shardVariant !== undefined
+        && SHARD_VARIANTS[tile.shardVariant].automata !== undefined) {
+      this.materialNeighborsDirty = true;
+    }
 
     // Blow-back: the tile snapping into place shoves nearby loose shards
     // clear (non-damaging shockwave — see MERGE_BLOWBACK).

@@ -703,8 +703,15 @@ export class RenderSystem {
   private materialAutomataColor(entity: GameEntity): string {
     const factor = this.materialAutomataFactor(entity);
     if (factor === 1) return entity.color;
+    // Tint depends only on count (via factor) + base colour, both stable
+    // between neighbour-count changes, so cache the string and skip the
+    // per-frame hex parse/build.  Invalidated in
+    // ShardSystem.recomputeMaterialNeighbors when the count changes.
+    if (entity.materialAutomataCachedColor !== undefined) return entity.materialAutomataCachedColor;
     const [r, g, b] = hexToRgb(entity.color);
-    return rgbToHex(r * factor, g * factor, b * factor);
+    const out = rgbToHex(r * factor, g * factor, b * factor);
+    entity.materialAutomataCachedColor = out;
+    return out;
   }
 
   /**

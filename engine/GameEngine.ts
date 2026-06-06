@@ -1812,10 +1812,14 @@ export class GameEngine {
           // footprint.
           if (isStaticTile) {
               this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
-              // A destroyed tile changes its neighbours' material-automata
-              // counts — flag a lazy recompute for the next ShardSystem
-              // update (no-op for variants without an automata config).
-              this.shards.markMaterialNeighborsDirty();
+              // A destroyed tile changes its same-variant neighbours'
+              // automata counts — flag a lazy recompute.  Gated to variants
+              // that actually carry an automata config (glass/metal/rock):
+              // a nebula/plastic/indestructible tile death can't shift any
+              // automata tile's count, so it shouldn't trigger the O(n) pass.
+              if (SHARD_VARIANTS[variant].automata !== undefined) {
+                  this.shards.markMaterialNeighborsDirty();
+              }
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
