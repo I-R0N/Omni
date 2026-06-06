@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, WIGGLE_CONSTANTS, PLASTIC_DEFORM_CONSTANTS, getActivePlasticBlendMode, getActivePlasticPaletteOutline, getActivePlasticPaletteSolidEdge, getActivePlasticOpacity, getActiveNebulaStretchK, getActivePlasticCoreRadius, getActivePlasticBlendRadius, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -413,27 +413,6 @@ export class RenderSystem {
       return c;
   }
 
-  // Pre-rendered soft-edge disc bitmap cache, keyed by
-  // `${colour}|${outline}|${solidEdge}`.  Three profiles:
-  //
-  //  - No outline (default palettes): opaque core 0–70 % radius,
-  //    smooth falloff to alpha 0 at the rim — polymer chunk with
-  //    a fuzzy edge.
-  //  - Soft outline (black+glow / white+glow): opaque core 0–55 %,
-  //    fade to 65 %, then a glow ring in the outline colour fading
-  //    out to 100 %.
-  //  - Solid edge + outline (black palette): solid colour all the
-  //    way to ~60 % radius, then an immediate transition to the
-  //    glow halo.  Hard silhouette with a soft bloom around it.
-  //
-  // All three are one drawImage at render time.  Overlapping shards
-  // in a cluster blend cleanly because the outer rings cross-fade.
-  // Per-frame ctx.createRadialGradient is the hidden GPU-rasterisation
-  // cost that doesn't surface in JS perf timing — that's why this
-  // lives in a cache instead of being computed inline.  Cache size
-  // stays small (typically 4-7 bitmaps across an active map).
-  private _softDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
-
   // LOD solid-triangle cache (Step 4).  Keyed by fill colour; a flat
   // opaque filled equilateral triangle blitted for metal shards too small
   // for their polygon detail to read.  Metal shards are equilateral
@@ -468,68 +447,6 @@ export class RenderSystem {
           if (firstKey !== undefined) this._solidTriangleBitmaps.delete(firstKey);
       }
       this._solidTriangleBitmaps.set(hex, c);
-      return c;
-  }
-
-  private getSoftDiscBitmap(
-      hex: string,
-      outline: string | undefined,
-      solidEdge: boolean,
-      coreRadius: number,
-  ): HTMLCanvasElement {
-      // Cache key — solidEdge bit only matters when outline is set;
-      // coreRadius only shapes the plain (no-outline) profile, so it
-      // only enters the key there.
-      const key = outline === undefined
-        ? `${hex}|c${coreRadius}`
-        : `${hex}|${outline}|${solidEdge ? 's' : 'f'}`;
-      const cached = this._softDiscBitmaps.get(key);
-      if (cached) return cached;
-      const size = 128;
-      const c = document.createElement('canvas');
-      c.width = size; c.height = size;
-      const cx = c.getContext('2d')!;
-      const center = size / 2;
-      const [r, g, b] = hexToRgb(hex);
-      const grad = cx.createRadialGradient(center, center, 0, center, center, center);
-      if (outline === undefined) {
-          // Plain polymer chunk profile.  Opaque out to coreRadius,
-          // then a long alpha fade to the edge — smaller core =
-          // deeper blend between overlapping shards.
-          grad.addColorStop(0, `rgba(${r},${g},${b},1.0)`);
-          if (coreRadius > 0 && coreRadius < 1) {
-              grad.addColorStop(coreRadius, `rgba(${r},${g},${b},0.95)`);
-          }
-          grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      } else if (solidEdge) {
-          // Hard-edge disc + soft outline halo.  Stops at 0.6 and
-          // 0.601 force a near-instant transition between the
-          // solid disc and the glow ring (canvas may interpolate
-          // 1px across identical-position stops, so we offset by a
-          // hair).
-          const [or, og, ob] = hexToRgb(outline);
-          grad.addColorStop(0,     `rgba(${r},${g},${b},1.0)`);
-          grad.addColorStop(0.6,   `rgba(${r},${g},${b},1.0)`);
-          grad.addColorStop(0.601, `rgba(${or},${og},${ob},0.75)`);
-          grad.addColorStop(0.85,  `rgba(${or},${og},${ob},0.40)`);
-          grad.addColorStop(1,     `rgba(${or},${og},${ob},0)`);
-      } else {
-          // Soft-gradient disc + soft outline halo.  Disc colour
-          // 0–0.65, outline glow 0.7–1.0.  Small overlap at 0.65→
-          // 0.7 to avoid a hard seam between the two colours.
-          const [or, og, ob] = hexToRgb(outline);
-          grad.addColorStop(0,    `rgba(${r},${g},${b},1.0)`);
-          grad.addColorStop(0.55, `rgba(${r},${g},${b},0.95)`);
-          grad.addColorStop(0.65, `rgba(${r},${g},${b},0.7)`);
-          grad.addColorStop(0.7,  `rgba(${or},${og},${ob},0.7)`);
-          grad.addColorStop(0.85, `rgba(${or},${og},${ob},0.45)`);
-          grad.addColorStop(1,    `rgba(${or},${og},${ob},0)`);
-      }
-      cx.fillStyle = grad;
-      cx.beginPath();
-      cx.arc(center, center, center, 0, Math.PI * 2);
-      cx.fill();
-      this._softDiscBitmaps.set(key, c);
       return c;
   }
 
@@ -2496,22 +2413,12 @@ export class RenderSystem {
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
               && (entity.shardVariant === 'glass-tile'
                   || entity.shardVariant === 'indestructible-tile');
-            // Plastic-tile takes the dedicated soft-gradient render
-            // (decision #15b follow-up): radial gradient at 1.2× the
-            // tile's collision diameter, no polygon outline.  Matches
-            // the plastic-shard render style so the tile→shard
-            // shatter transition reads continuous.
-            const isPlasticTile =
-              entity.type === EntityType.STRUCTURE && entity.mass === Infinity
-              && entity.shardVariant === 'plastic-tile';
-            // Metal-tile keeps the solid-color polygon-fill render
+            // Material tile branch — solid-color polygon-fill render
             // (variant-specific alpha, dent outline, repel-driven
-            // glow).  Plastic-tile used to share this branch; the
-            // softbody retrofit split it out into its own gradient
-            // path above.
+            // glow on metal / proximity bloom on plastic).
             const isMaterialTile =
               entity.type === EntityType.STRUCTURE && entity.mass === Infinity
-              && entity.shardVariant === 'metal-tile';
+              && (entity.shardVariant === 'metal-tile' || entity.shardVariant === 'plastic-tile');
             if (isGlassFamilyTile) {
                 // Glass-family static tiles render with the glass-tile
                 // aesthetic (translucent fill + edge stroke + specular
@@ -2631,70 +2538,6 @@ export class RenderSystem {
                 }
 
                 } // end else (glass tile — paired with regen ghost if/else above)
-
-            } else if (isPlasticTile) {
-                // ── Plastic tile — soft-edged radial gradient ──────────
-                // Mirrors the plastic-shard render style (decision #15b
-                // follow-up).  Single radial gradient at 1.2× the
-                // tile's collision diameter, no polygon outline.  At
-                // entity.size.x ≈ 99 (HEX_SIZE-derived hex width) the
-                // gradient diameter is ~119 — comparable to the hex's
-                // vertex-to-vertex extent, so adjacent tiles in a
-                // cluster blend their gradient edges and the cluster
-                // reads as one soft polymer sheet rather than a row
-                // of distinct hexes.
-                const isFlash = false;
-
-                // Regen ghost — plastic-tile has regen.kind === 'none'
-                // today so this branch is dead, but kept for parity
-                // with the other tile branches in case regen is
-                // re-enabled.
-                if (!entity.active && entity.regenProgress !== undefined) {
-                    const delay = 12;
-                    const ghostStart = 1 - (3 / delay);
-                    if (entity.regenProgress >= ghostStart) {
-                        const t = (entity.regenProgress - ghostStart) / (1 - ghostStart);
-                        const pulse = 0.4 + Math.sin(Date.now() / 250) * 0.25;
-                        buildPath();
-                        ctx.globalAlpha = t * pulse * 0.6;
-                        ctx.strokeStyle = 'rgba(103,232,249,1)';
-                        ctx.lineWidth = 1.5;
-                        ctx.stroke();
-                        ctx.globalAlpha = 1.0;
-                    }
-                } else {
-                    // Hex-tile shape: trace the entity's polygon
-                    // (set by TileGenerator at HEX_SIZE) rather than
-                    // a circle so the silhouette reads as a proper
-                    // tile within the structure grid.  Solid fill in
-                    // entity.color (per-instance amber shade picked
-                    // at spawn — see TileGenerator.buildStructureTile
-                    // + PLASTIC_AMBER_SHADES in constants.ts).
-                    // globalAlpha cycles through the Opacity DBG
-                    // setting so tiles and shards stay matched
-                    // visually.
-                    buildPath();
-                    ctx.globalAlpha = getActivePlasticOpacity();
-                    ctx.fillStyle   = entity.color;
-                    ctx.fill();
-
-                    // DBG outline overlay (Outline toggle) — thin
-                    // stroke of the hex polygon so the SAT collision
-                    // shape is visible inside the solid circle.
-                    if (this.tileOutlinesEnabled) {
-                        buildPath();
-                        ctx.globalAlpha = 0.9;
-                        ctx.strokeStyle = '#22d3ee';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    }
-
-                    // Proximity glow — the tile face brightens as the
-                    // player nears (player-distance driven, like the
-                    // glass / indestructible blooms).  Painted last so it
-                    // sits over the fill.
-                    this.timedTileBloom(ctx, entity, playerPos);
-                }
 
             } else if (isMaterialTile) {
                 // ── Material tile (plastic / metal) ────────────────────────
@@ -2834,15 +2677,19 @@ export class RenderSystem {
                         const impulse = entity.repelImpulse ?? 0;
                         if (glow !== undefined && impulse > 0) {
                             const intensityM = repelGlowIntensity(impulse);
+                            const bright = getActiveMetalGlowBrightness();
+                            // Live colour from the DBG metal-glow cycle.
+                            // Range + peakAlpha stay with the variant.
+                            const glowColor = getActiveMetalGlowColor();
                             buildPath();
-                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM);
-                            ctx.fillStyle = glow.color;
+                            ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityM * bright);
+                            ctx.fillStyle = glowColor;
                             ctx.fill();
                             // Thinner outline than glass (1.5 vs 3.0)
                             // — metal reads as a precise mechanical
                             // edge rather than glass's diffuse halo.
-                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM));
-                            ctx.strokeStyle = glow.color;
+                            ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityM * bright));
+                            ctx.strokeStyle = glowColor;
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
                             ctx.globalAlpha = 1.0;
@@ -2918,7 +2765,6 @@ export class RenderSystem {
                 }
 
                 const isTileShard = entity.shardVariant === 'glass-shard';
-                const isPlasticShard = entity.shardVariant === 'plastic-shard';
                 const glowColor = entity.powerupGlowColor;
 
                 // ── LOD: tiny metal shards → cached solid triangle ─────────
@@ -2950,133 +2796,7 @@ export class RenderSystem {
                     return;
                 }
 
-                if (isPlasticShard) {
-                    // ── Plastic shard — soft-edge disc + wiggle ────────────
-                    // Cached soft-disc bitmap drawn at getActivePlastic
-                    // BlendRadius()× the collision diameter (PBlnd knob)
-                    // and getActivePlasticOpacity().  Profile is "opaque
-                    // core + alpha fade" (see getSoftDiscBitmap): the
-                    // core fraction (PCore knob) stays opaque, then a
-                    // long fade to transparent lets adjacent shards in a
-                    // cluster blend cleanly without visible seams — a
-                    // smaller core / larger blend radius deepens that
-                    // blend.  Per-instance amber shade comes
-                    // from entity.color (set at spawn via random
-                    // PlasticShade — see DropSystem.spawnDentShard +
-                    // PLASTIC_PALETTES in constants.ts).
-                    //
-                    // Wiggle: when entity.wiggleTimer > 0 (set by
-                    // PhysicsSystem.maybeStampPlasticWiggle on
-                    // collision impulses that wake the shard above
-                    // restSpeed), the shard squashes along the impact
-                    // axis via damped sinusoid math.  Visual-only:
-                    // ctx.rotate + ctx.scale before draw, doesn't
-                    // touch the 16-gon collision polygon.  One Math.
-                    // sin per draw on the hot path.
-                    //
-                    // Composite op: getActivePlasticBlendMode() is
-                    // cycled via the DBG Blend button (source-over /
-                    // multiply / darken / screen / lighter).  Set
-                    // before draw and reset after so the next entity
-                    // renders with default source-over.
-                    //
-                    // The 16-gon polygon is still used for SAT
-                    // collisions (see SHARD_SPAWN_SHAPE_PLASTIC).
-                    // Density-tier tinting via densityTintForRender
-                    // is a no-op while density.enabled is false on
-                    // the variant.  mergeFadeAlpha multiplies through
-                    // globalAlpha for the graceful retire window.
-                    const fadeAlpha = shardMergeFadeAlpha(entity);
-                    // PAuto: constant palette base shade darkened by the
-                    // contact-count automata; otherwise the per-instance
-                    // density-tinted spawn shade.
-                    const baseHex   = this.plasticAutomataEnabled
-                        ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
-                        : densityTintForRender(entity, entity.color);
-                    const collisionR = entity.size.x / 2;
-                    const renderR    = collisionR * getActivePlasticBlendRadius();
-
-                    // B: spawn-time shape variance — entity-local per-axis
-                    // scale rolled at spawn (DropSystem.spawnDentShard /
-                    // ShardSystem.shatterAsteroidStyle).  Static; gives
-                    // each shard its own slightly-irregular outline.
-                    const bsx = entity.baseScaleX ?? 1;
-                    const bsy = entity.baseScaleY ?? 1;
-                    if (bsx !== 1 || bsy !== 1) ctx.scale(bsx, bsy);
-
-                    // A: impact dent (persistent, decaying) + wiggle
-                    // (short pulse).  Both apply along the most recent
-                    // impact axis — wiggle takes precedence while it's
-                    // active (its `wiggleAngle` is the canonical axis);
-                    // once it decays the dent vector's own direction is
-                    // used.  Composed multiplicatively: wiggle stretches
-                    // along axis (1+amp, 1-amp), dent compresses along
-                    // axis (1-dent×SQUASH, 1+dent×BULGE).  At peak hit
-                    // wiggle dominates (stretch), then it decays and the
-                    // dent compression takes over — reads as polymer
-                    // popping out, then sagging back, then slowly
-                    // recovering.
-                    const dxv = entity.dentX ?? 0;
-                    const dyv = entity.dentY ?? 0;
-                    const dentMagSq = dxv * dxv + dyv * dyv;
-                    const wt = entity.wiggleTimer;
-                    let wiggleAmp = 0;
-                    if (wt !== undefined && wt > 0) {
-                        const decay = wt / WIGGLE_CONSTANTS.DURATION;
-                        const tElapsed = WIGGLE_CONSTANTS.DURATION - wt;
-                        const phase = entity.wigglePhase ?? 0;
-                        const wave = Math.sin(tElapsed * WIGGLE_CONSTANTS.FREQ + phase);
-                        wiggleAmp = WIGGLE_CONSTANTS.AMPLITUDE * wave * decay;
-                    }
-                    if (dentMagSq > 0 || wiggleAmp !== 0) {
-                        const dentMag = dentMagSq > 0 ? Math.sqrt(dentMagSq) : 0;
-                        const axisAngle = (wt !== undefined && wt > 0)
-                          ? (entity.wiggleAngle ?? 0)
-                          : Math.atan2(dyv, dxv);
-                        ctx.rotate(axisAngle - entity.rotation);
-                        const scaleX = (1 + wiggleAmp) * (1 - dentMag * PLASTIC_DEFORM_CONSTANTS.DENT_SQUASH_FACTOR);
-                        const scaleY = (1 - wiggleAmp) * (1 + dentMag * PLASTIC_DEFORM_CONSTANTS.DENT_BULGE_FACTOR);
-                        ctx.scale(scaleX, scaleY);
-                    }
-
-                    const outline = getActivePlasticPaletteOutline();
-                    const solidEdge = getActivePlasticPaletteSolidEdge();
-                    const bitmap = this.getSoftDiscBitmap(baseHex, outline, solidEdge, getActivePlasticCoreRadius());
-                    ctx.globalCompositeOperation = getActivePlasticBlendMode();
-                    ctx.globalAlpha = getActivePlasticOpacity() * fadeAlpha;
-                    ctx.drawImage(bitmap, -renderR, -renderR, renderR * 2, renderR * 2);
-                    ctx.globalCompositeOperation = 'source-over';
-
-                    // DBG outline overlay (Outline toggle) — thin
-                    // stroke of the 16-gon collision shape so the
-                    // SAT footprint is visible against the gradient.
-                    if (this.tileOutlinesEnabled) {
-                        buildPath();
-                        ctx.globalAlpha = 0.9;
-                        ctx.strokeStyle = '#22d3ee';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    }
-
-                    // Power-up bloom overlay — same convention as the
-                    // rocky-asteroid branch below, scaled to plastic's
-                    // soft palette.
-                    if (glowColor && !isFlash) {
-                        const [gr, gg, gb] = hexToRgb(glowColor);
-                        const pulse = 0.6 + Math.sin(nowSec * 4.5) * 0.15;
-                        const glowR = collisionR * 2.0 * pulse;
-                        const bloom = ctx.createRadialGradient(0, 0, collisionR * 0.25, 0, 0, glowR);
-                        bloom.addColorStop(0,   `rgba(${gr},${gg},${gb},0)`);
-                        bloom.addColorStop(0.6, `rgba(${gr},${gg},${gb},0.18)`);
-                        bloom.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
-                        ctx.globalAlpha = fadeAlpha;
-                        ctx.fillStyle   = bloom;
-                        ctx.beginPath();
-                        ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-
-                } else if (isTileShard) {
+                if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
                     // Density tier darkens the base hue (cool blue-white → muted
                     // slate as tier climbs); merge-fade alpha multiplies every
@@ -3125,9 +2845,15 @@ export class RenderSystem {
                     //    hit flash (no white) to match metal-tile.
                     //  - Other rocky shards (rock-shard, rock-tile)
                     //    keep their fully-opaque default.
-                    //  - plastic-shard takes the dedicated soft-gradient
-                    //    branch above (decision #15b).
-                    const densityHex = densityTintForRender(entity, entity.color);
+                    //  - plastic-shard renders here too post-revert; the
+                    //    PAuto automata (Pl shade DBG) optionally swaps
+                    //    the per-instance shade for a constant palette
+                    //    base brightness-scaled by neighbour count.
+                    const baseColor = (this.plasticAutomataEnabled
+                                       && entity.shardVariant === 'plastic-shard')
+                        ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
+                        : entity.color;
+                    const densityHex = densityTintForRender(entity, baseColor);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const flashColor = entity.shardVariant === 'metal-shard'
                         ? '#cbd5e1'
@@ -3769,6 +3495,12 @@ export class RenderSystem {
       const pdistSq = pdxWorld * pdxWorld + pdyWorld * pdyWorld;
       if (pdistSq >= glow.range * glow.range) return;
       const intensity = (1 - Math.sqrt(pdistSq) / glow.range) ** 2;
+      // Plastic-tile glow is the only variant routed through here with a
+      // DBG brightness multiplier; other glow-bearing tiles (rock /
+      // indestructible) render at their variant peakAlpha unchanged.
+      const peakAlpha = entity.shardVariant === 'plastic-tile'
+          ? glow.peakAlpha * getActivePlasticGlowBrightness()
+          : glow.peakAlpha;
 
       // The polygon is stored in entity-local coords (pre-rotation); the
       // canvas transform rotates the rendering by `entity.rotation` at
@@ -3831,7 +3563,7 @@ export class RenderSystem {
       const og = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, oR);
       og.addColorStop(0, glow.color);
       og.addColorStop(1, glow.color + '00');
-      ctx.globalAlpha = glow.peakAlpha * intensity;
+      ctx.globalAlpha = peakAlpha * intensity;
       ctx.fillStyle = og;
       ctx.fill();
 
@@ -3845,7 +3577,7 @@ export class RenderSystem {
           const rg = ctx.createRadialGradient(cgx, cgy, 0, cgx, cgy, rR);
           rg.addColorStop(0, hot.color);
           rg.addColorStop(1, hot.color + '00');
-          ctx.globalAlpha = glow.peakAlpha * hotT;
+          ctx.globalAlpha = peakAlpha * hotT;
           ctx.fillStyle = rg;
           ctx.fill();
       }
