@@ -278,24 +278,15 @@ export class ShardSystem {
   /**
    * DBG toggle (Tile shade) — master gate for the material-tile
    * neighbour-brightness automata (glass / metal / rock STATIC tiles).
-   * When false, `materialNeighborCount` isn't refreshed and RenderSystem
-   * draws tiles at their base colour.  Default ON so the effect is
-   * visible at launch for review.
+   * When false, RenderSystem draws tiles at their base colour.  Default
+   * ON.  Neighbour counts are baked once at map load and frozen, so
+   * this only gates the render-side read, not any recompute.
    */
   public materialAutomataEnabled: boolean = true;
-  /**
-   * Set true whenever the active material-tile population changes
-   * (tile destroyed / regenerated, map reset).  Drives a lazy O(n)
-   * recompute of every material tile's `materialNeighborCount` at the
-   * top of the next update() — static tiles only change neighbour count
-   * when a neighbour appears or disappears, so amortised cost is near
-   * zero.  Mirrors NebulaSystem.neighborCountsDirty.  Starts true so
-   * the first frame after map load seeds counts from scratch.
-   */
-  private materialNeighborsDirty: boolean = true;
-  /** Reused occupancy index for the material-tile neighbour recompute —
-   *  hex-cell key → variant id, so neighbour counting stays same-variant
-   *  (a metal tile abutting a rock tile is an edge for both). */
+  /** Reused occupancy index for the one-time material-tile neighbour
+   *  bake — hex-cell key → variant id, so neighbour counting stays
+   *  same-variant (a metal tile abutting a rock tile is an edge for
+   *  both). */
   private materialGridIndex: Map<number, ShardVariantId> = new Map();
   /**
    * Active stick-bonds.  Replaces GameEngine.stickBonds.  Each bond
@@ -423,13 +414,9 @@ export class ShardSystem {
     if (!this.shardBondingEnabled && this.bonds.length > 0) {
       this.bonds.length = 0;
     }
-    // Material-tile brightness automata — lazy neighbour recompute,
-    // gated by the master toggle and the dirty flag so it costs nothing
-    // on steady-state frames.
-    if (this.materialAutomataEnabled && this.materialNeighborsDirty) {
-      this.recomputeMaterialNeighbors(entities);
-      this.materialNeighborsDirty = false;
-    }
+    // Material-tile automata neighbour counts are baked once at map load
+    // (ensureMaterialNeighbors) and frozen — destroying tiles does NOT
+    // re-tint the survivors.  No per-frame or per-destroy recompute.
     this.tickRegens(entities, dt, physics);
     // tickBonds always runs to advance bond timers, break bonds
     // whose parties have separated, and compose pairs when timers
@@ -476,40 +463,30 @@ export class ShardSystem {
     this.pending.length = 0;
     this.bonds.length = 0;
     this.plasticCosmeticTick = 0;
-    this.materialNeighborsDirty = true;
   }
 
   /**
-   * Flag the material-tile neighbour counts stale.  Called by
-   * GameEngine on any static-tile death and by completeRegen on revive;
-   * the actual O(n) recompute is deferred to the next update() so a
-   * burst of destructions in one frame collapses to a single pass.
-   */
-  public markMaterialNeighborsDirty(): void {
-    this.materialNeighborsDirty = true;
-  }
-
-  /**
-   * Seed material-tile neighbour counts immediately and clear the dirty
-   * flag.  Called from GameEngine.loadMap BEFORE the static-tile world
-   * canvas is baked, so cache-eligible variants (glass) stamp at the
-   * correct automata brightness from the first frame instead of flashing
-   * base-bright for one frame while the deferred update() catches up.
+   * Bake every material tile's same-variant neighbour count ONCE.
+   * Called from GameEngine.loadMap (before the static-tile world canvas
+   * is stamped) and on Tile-shade enable.  The counts are then frozen —
+   * destroying / regenerating tiles does not re-tint survivors — which
+   * is what keeps the automata free of any per-frame or per-destroy
+   * recompute cost.
    */
   public ensureMaterialNeighbors(entities: GameEntity[]): void {
     if (!this.materialAutomataEnabled) return;
     this.recomputeMaterialNeighbors(entities);
-    this.materialNeighborsDirty = false;
   }
 
   /**
-   * Recompute every material tile's same-variant hex-neighbour count
-   * (`materialNeighborCount`) for the brightness automata.  Two passes:
-   * build a hex-cell→variant occupancy index of the active automata
-   * tiles, then for each tile count the neighbours whose stored variant
-   * matches its own.  Same shape as NebulaSystem.recomputeNeighborCounts
-   * but spans every variant carrying an `automata` config.  Only runs
-   * when the dirty flag is set (tile destroy / regen / map reset).
+   * Bake every material tile's same-variant hex-neighbour count
+   * (`materialNeighborCount`) for the brightness/opacity automata.  Two
+   * passes: build a hex-cell→variant occupancy index of the active
+   * automata tiles, then for each tile count the neighbours whose stored
+   * variant matches its own.  Same shape as
+   * NebulaSystem.recomputeNeighborCounts but spans every variant carrying
+   * an `automata` config.  Runs ONCE per map (via ensureMaterialNeighbors)
+   * — the counts are frozen thereafter.
    */
   private recomputeMaterialNeighbors(entities: GameEntity[]): void {
     const index = this.materialGridIndex;
@@ -630,11 +607,8 @@ export class ShardSystem {
     // call physics.addStaticEntity at completion.
     physics.addStaticEntity(entity);
 
-    // A reviving static tile changes its same-variant neighbours'
-    // automata counts — flag a recompute (only for automata variants).
-    if (entity.mass === Infinity && variant.automata !== undefined) {
-      this.materialNeighborsDirty = true;
-    }
+    // Automata neighbour counts are frozen at map-load bake, so a
+    // reviving tile keeps whatever count it had — no recompute here.
 
     // Variant-driven pop animation: STRUCTURE tiles emit a chip
     // burst of tile-coloured particles; nebula tiles use the
@@ -2263,13 +2237,9 @@ export class ShardSystem {
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
     entities.push(tile);
     physics.addStaticEntity(tile);
-    // A freshly transmuted tile changes its same-variant neighbours'
-    // automata counts (and needs its own) — flag a recompute, but only
-    // when the new tile is an automata variant (glass/metal/rock).
-    if (tile.shardVariant !== undefined
-        && SHARD_VARIANTS[tile.shardVariant].automata !== undefined) {
-      this.materialNeighborsDirty = true;
-    }
+    // Automata counts are frozen at map-load bake; a runtime-transmuted
+    // tile keeps its default count 0 (renders as a lone/neutral tile)
+    // rather than triggering a recompute.
 
     // Blow-back: the tile snapping into place shoves nearby loose shards
     // clear (non-damaging shockwave — see MERGE_BLOWBACK).

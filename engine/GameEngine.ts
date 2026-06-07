@@ -626,17 +626,16 @@ export class GameEngine {
   }
 
   /**
-   * Toggle the material-tile neighbour-brightness automata (DBG "Tile
-   * shade") for glass / metal / rock static tiles.  Flips the render
-   * gate AND the ShardSystem count-compute gate together so the
-   * neighbour scan is skipped while off; re-enabling forces a recompute
-   * so counts are current on the next frame.
+   * Toggle the material-tile neighbour automata (DBG "Tile shade") for
+   * glass / metal / rock static tiles.  Flips the render gate; on enable
+   * it bakes the (frozen) neighbour counts once so the tint is correct
+   * even if the toggle started off.
    */
   public toggleMaterialAutomata() {
     const next = !this.renderer.materialAutomataEnabled;
     this.renderer.materialAutomataEnabled = next;
     this.shards.materialAutomataEnabled = next;
-    if (next) this.shards.markMaterialNeighborsDirty();
+    if (next && this.currentMap) this.shards.ensureMaterialNeighbors(this.currentMap.entities);
   }
 
   /**
@@ -1812,14 +1811,10 @@ export class GameEngine {
           // footprint.
           if (isStaticTile) {
               this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
-              // A destroyed tile changes its same-variant neighbours'
-              // automata counts — flag a lazy recompute.  Gated to variants
-              // that actually carry an automata config (glass/metal/rock):
-              // a nebula/plastic/indestructible tile death can't shift any
-              // automata tile's count, so it shouldn't trigger the O(n) pass.
-              if (SHARD_VARIANTS[variant].automata !== undefined) {
-                  this.shards.markMaterialNeighborsDirty();
-              }
+              // Material-tile automata counts are frozen at map-load bake,
+              // so a tile death does NOT re-tint its surviving neighbours —
+              // no recompute trigger here (that per-destroy O(n) pass was
+              // the merge's main lag source).
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
