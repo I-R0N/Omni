@@ -2663,6 +2663,13 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // slabs read as a polished, light-catching mass while cluster
     // edges and lone plates stay at the matte base shade.  Saturates
     // at the full 6-neighbour hex ring.
+    //
+    // INTENTIONAL CONTRAST (do not "align" to rock): metal-tile
+    // brightens with aggregation while metal-shard DARKENS with density
+    // (see 'metal-shard'.density).  This is a deliberate "live, powered
+    // structure vs cooled, compacted debris" read, not a bug — packed
+    // standing slabs gleam; the scrap they shatter into goes dark.
+    // Rock unifies on a shared darkening floor; metal does NOT.
     automata: { maxNeighbors: 6, saturationBrightness: 1.5 },
     // Heavy repel — 1.5× glass strength.  Reads as a real shove
     // when the player approaches; the field is the warning.  Range
@@ -3063,6 +3070,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       maxSteps: 4,
       areaThreshold: 32 * 32,
       largeShardCollapseSize: 130,
+      // Darkens with density — INTENTIONALLY the OPPOSITE of the
+      // metal-tile brightening automata (see 'metal-tile'.automata).
+      // Powered slabs gleam; the compacted scrap they break into goes
+      // dark.  Deliberate contrast, not a misalignment to "fix".
       tintFloor: 0.50,                         // metal goes darker when packed dense
       shrinkFactor: 0.88,
     },
