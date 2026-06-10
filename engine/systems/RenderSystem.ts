@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalAggregationBrightness, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -2863,7 +2863,21 @@ export class RenderSystem {
                     for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
                     cmx /= cells.length; cmy /= cells.length;
                     ctx.globalAlpha = shardMergeFadeAlpha(entity);
-                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, entity.color);
+                    // Metal aggregation cue: brighten by hexagon fill
+                    // (metalCells / METAL_HEX_CELLS) toward the shared
+                    // METAL_AGGREGATION_BRIGHT_CEIL — the composite analogue of
+                    // the metal-tile neighbour automata, so a complete hexagon
+                    // reads as bright as a fully-interior tile and a barely-
+                    // started composite ≈ base.  (densityTier is never set on
+                    // metal, so densityTintForRender is a pass-through here;
+                    // kept for parity with the other shard branches.)
+                    let aggHex = entity.color;
+                    const aggFactor = metalAggregationBrightness(cells.length);
+                    if (aggFactor !== 1) {
+                        const [mr, mg, mb] = hexToRgb(entity.color);
+                        aggHex = rgbToHex(mr * aggFactor, mg * aggFactor, mb * aggFactor);
+                    }
+                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, aggHex);
                     for (const c of cells) {
                         const ccx = c.ix * ux - cmx;
                         const ccy = c.iy * uy - cmy;

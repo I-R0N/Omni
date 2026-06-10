@@ -1815,7 +1815,28 @@ export class ShardSystem {
   ): boolean {
     const host = hostIdx >= 0 ? candidates[hostIdx] : null;
     if (!host || !host.active || host.mergeFadeTimer !== undefined) return false;
-    if (!this.tryTransmuteShardToTile(host, variant, material, entities, physics)) return false;
+    // Metal only: seed the new tile's brightness from the formation's
+    // aggregation so a dense metal mass crystallises into a BRIGHT tile
+    // (conserved — see buildTileAtNearestFreeHex), instead of resetting to
+    // neutral and contradicting the "denser = lighter" rule.  Use the max of
+    // the host composite's hexagon fill (continuity with what it was showing)
+    // and the count of metal shards fusing in (so a dense pile of loose
+    // triangles also reads bright, not just a completed hexagon), clamped to
+    // a full hexagon.  Other materials pass no seed (unchanged behaviour).
+    let seedNeighborCount: number | undefined;
+    if (variant === 'metal-shard') {
+      let metalConsumed = 0;
+      for (let k = 0; k < idxs.length; k++) {
+        if (candidates[idxs[k]].shardVariant === 'metal-shard') metalConsumed++;
+      }
+      seedNeighborCount = Math.min(
+        METAL_HEX_SIZE,
+        Math.max(host.metalCells?.length ?? 1, metalConsumed),
+      );
+    }
+    if (!this.tryTransmuteShardToTile(
+      host, variant, material, entities, physics, seedNeighborCount,
+    )) return false;
     for (let k = 0; k < idxs.length; k++) {
       if (idxs[k] === hostIdx) continue;
       const e = candidates[idxs[k]];
@@ -2167,11 +2188,12 @@ export class ShardSystem {
     material: StructureVariant,
     entities: GameEntity[],
     physics: PhysicsSystem,
+    seedNeighborCount?: number,
   ): boolean {
     if (shard.shardVariant !== variant) return false;
 
     if (!this.buildTileAtNearestFreeHex(
-      shard.position.x, shard.position.y, material, entities, physics,
+      shard.position.x, shard.position.y, material, entities, physics, seedNeighborCount,
     )) return false;
 
     // Source shard fades out — the tile materialises while the shard
@@ -2194,6 +2216,7 @@ export class ShardSystem {
     material: StructureVariant,
     entities: GameEntity[],
     physics: PhysicsSystem,
+    seedNeighborCount?: number,
   ): boolean {
     const origin = pixelToHexCoord(wx, wy);
     const candidates: { c: number; r: number; distSq: number }[] = [];
@@ -2235,11 +2258,20 @@ export class ShardSystem {
       { x: -w / 2, y: -h / 4 },
     ];
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
+    // Conserve aggregation across the shard→tile boundary.  Map-load tiles
+    // bake their neighbour count once; a runtime-transmuted tile would
+    // otherwise default to count 0 (neutral) and DISCARD whatever shade the
+    // shards had built up — so a fully-assembled bright metal hexagon would
+    // pop to a dull tile.  When the caller passes a `seedNeighborCount`
+    // (today: metal, from the host composite's hexagon fill) we stamp it so
+    // the tile's automata renders at the same brightness the shards showed,
+    // making the cycle seamless.  This is O(1) — a single assignment, NOT
+    // the per-destroy neighbour recompute that was removed for perf.
+    if (seedNeighborCount !== undefined && seedNeighborCount > 0) {
+      tile.materialNeighborCount = seedNeighborCount;
+    }
     entities.push(tile);
     physics.addStaticEntity(tile);
-    // Automata counts are frozen at map-load bake; a runtime-transmuted
-    // tile keeps its default count 0 (renders as a lone/neutral tile)
-    // rather than triggering a recompute.
 
     // Blow-back: the tile snapping into place shoves nearby loose shards
     // clear (non-damaging shockwave — see MERGE_BLOWBACK).

@@ -1140,6 +1140,32 @@ export const METAL_ASSEMBLY = {
   MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
 };
 
+// ── Metal aggregation brightness ────────────────────────────────────
+// Metal's coherent "denser = lighter, more polished" cue, applied across
+// every form metal takes so the look survives the tile↔shard↔tile cycle:
+//   - metal-TILE:      neighbour-count automata (loaded-cluster interiors)
+//   - metal composite: hexagon fill (metalCells / METAL_HEX_CELLS)
+//   - transmuted tile: formation fill carried over at crystallisation
+// All three ramp base→the SHARED ceiling below, so a complete hexagon, a
+// fully-interior tile, and a tile crystallised from a full hexagon all
+// read at the same brightness — no seam where one form hands off to the
+// next.  (Contrast with rock, which DARKENS toward ROCK_AGGREGATION_TINT_
+// FLOOR; metal is the bright-with-aggregation material.)
+export const METAL_HEX_CELLS = 6;               // complete hexagon = 6 triangles
+export const METAL_AGGREGATION_BRIGHT_CEIL = 1.5; // brightness at full aggregation
+
+/** Brightness multiplier for a metal body by how aggregated it is —
+ *  `cellCount` filled out of `maxCells` (default METAL_HEX_CELLS).  1 at
+ *  zero aggregation, METAL_AGGREGATION_BRIGHT_CEIL when full. */
+export function metalAggregationBrightness(
+  cellCount: number,
+  maxCells: number = METAL_HEX_CELLS,
+): number {
+  if (maxCells <= 0) return 1;
+  const t = Math.min(1, Math.max(0, cellCount) / maxCells);
+  return 1 + t * (METAL_AGGREGATION_BRIGHT_CEIL - 1);
+}
+
 // Grace period (seconds) stamped on freshly-shattered rock/glass shards:
 // the hot-spot collapse ignores shards younger than this so a just-
 // destroyed tile's debris scatters instead of instantly re-condensing.
@@ -2664,13 +2690,15 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // edges and lone plates stay at the matte base shade.  Saturates
     // at the full 6-neighbour hex ring.
     //
-    // INTENTIONAL CONTRAST (do not "align" to rock): metal-tile
-    // brightens with aggregation while metal-shard DARKENS with density
-    // (see 'metal-shard'.density).  This is a deliberate "live, powered
-    // structure vs cooled, compacted debris" read, not a bug — packed
-    // standing slabs gleam; the scrap they shatter into goes dark.
-    // Rock unifies on a shared darkening floor; metal does NOT.
-    automata: { maxNeighbors: 6, saturationBrightness: 1.5 },
+    // One of THREE forms that share the metal aggregation cue (see
+    // metalAggregationBrightness / METAL_AGGREGATION_BRIGHT_CEIL): tile
+    // neighbours here, hexagon fill on assembling composites, and the
+    // formation fill carried onto a tile crystallised from shards.  All
+    // brighten toward the same ceiling, so the "denser = lighter" look is
+    // conserved across the tile↔shard↔tile cycle rather than resetting at
+    // each boundary.  maxNeighbors (hex ring = 6) intentionally equals
+    // METAL_HEX_CELLS so a full hexagon maps straight onto a full ring.
+    automata: { maxNeighbors: 6, saturationBrightness: METAL_AGGREGATION_BRIGHT_CEIL },
     // Heavy repel — 1.5× glass strength.  Reads as a real shove
     // when the player approaches; the field is the warning.  Range
     // matches glass so dense mixed clusters present a single
@@ -3070,11 +3098,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       maxSteps: 4,
       areaThreshold: 32 * 32,
       largeShardCollapseSize: 130,
-      // Darkens with density — INTENTIONALLY the OPPOSITE of the
-      // metal-tile brightening automata (see 'metal-tile'.automata).
-      // Powered slabs gleam; the compacted scrap they break into goes
-      // dark.  Deliberate contrast, not a misalignment to "fix".
-      tintFloor: 0.50,                         // metal goes darker when packed dense
+      // NOTE: this darkening tintFloor is INERT for colour — metal shards
+      // never receive a densityTier (metal aggregates via rigid hexagon
+      // assembly, not density-tier compaction), so densityTintForRender
+      // always returns the base hue.  Metal's actual aggregation cue is
+      // BRIGHTENING by hexagon fill (see metalAggregationBrightness, applied
+      // in the composite render branch).  The block is kept only for the
+      // non-colour fields below (largeShardCollapseSize / shrinkFactor).
+      tintFloor: 0.50,
       shrinkFactor: 0.88,
     },
     // Metal shards deform subtly per hit (vertexJitter 0.10 vs
