@@ -2565,6 +2565,16 @@ const SHARD_SPAWN_SHAPE_METAL = {
   sizeToMass: (d: number) => d * d * 0.030,
 };
 
+// ── Rock aggregation tint floor ─────────────────────────────────────
+// Single source of truth for "how dark fully-aggregated rock gets".
+// Rock has TWO color-shift systems that must agree so the material reads
+// coherently: the rock-TILE neighbour automata (darkens packed cluster
+// interiors) and the rock-SHARD density tint (darkens compacted shards).
+// Both ramp from base (lone / loose) to this floor (max aggregated), so
+// a packed tile interior and a max-density shard reach identical darkness.
+// Keep them locked here rather than tuning two separate numbers.
+export const ROCK_AGGREGATION_TINT_FLOOR = 0.55;
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
@@ -2712,7 +2722,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // re-stamps only on neighbour-count change (tile destroy), so it
     // does NOT reintroduce the every-frame cache churn that motivated
     // rock-tile's no-glow decision.
-    automata: { maxNeighbors: 6, saturationBrightness: 0.6 },
+    // Aligned with rock-shard density: both darken toward the shared
+    // ROCK_AGGREGATION_TINT_FLOOR as the rock gets more aggregated
+    // (tile = neighbour count, shard = density tier).
+    automata: { maxNeighbors: 6, saturationBrightness: ROCK_AGGREGATION_TINT_FLOOR },
     // Rock-tile has no proximity glow — the brittle slate fill reads
     // cleanly without a warming halo, and removing the glow lets the
     // static-tile world canvas keep the tile cached even when the
@@ -2846,7 +2859,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       maxSteps: 4,
       areaThreshold: 32 * 32, // ~MIN_SIZE² × 2.5 — micro chips stay separate
       largeShardCollapseSize: 130,
-      tintFloor: 0.55,
+      // Shared with the rock-tile automata so tile-interior and dense-shard
+      // darkness match (see ROCK_AGGREGATION_TINT_FLOOR).
+      tintFloor: ROCK_AGGREGATION_TINT_FLOOR,
       shrinkFactor: 0.88,
     },
   },
