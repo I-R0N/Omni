@@ -474,6 +474,11 @@ k. After N waves, spawn a portal to a new map.
        parked items under decision #27), shiny metal render
        (separate visual task, decision #27), per-shard
        mass / collision retune (decision #22).
+    Partially superseded by decision #30 — PR #61 shipped a
+    neighbour/density brightness+opacity automata model in this
+    slot instead of the hue-lerp extension. Remaining scope is
+    the palette work; see #30 and the open question on whether
+    the hue-lerp extension is still wanted.
 
 22. **momentum-collisions (replaces prior material-balance-
     pass).** User direction this turn: scope narrows to just
@@ -610,6 +615,10 @@ k. After N waves, spawn a portal to a new map.
     If any of these get pulled back in, promote from this
     decision to a new Phase 1 follow-up entry and a new
     decision number.
+    Note (post-PR #60): rock density-aware HP, size-based
+    fragment counts, and deeper density-mass tiers shipped
+    inside PR #60 partially re-enter (e)/(f) territory without
+    formally unparking them — see decision #29f.
 
 28. **perf-hotpath (PR #58) — clean zero-behaviour perf
     pass.** User-driven perf work alongside the plan,
@@ -640,6 +649,117 @@ k. After N waves, spawn a portal to a new map.
     CLAUDE.md refresh (side-cleanup pile, PerfController
     docs item). No new constants or schema; the
     `enforceCap` helper is the only net-new module.
+
+29. **plastic-revert shipped with major over-delivery (PR #60).**
+    The "micro session" became 29 commits / +1744 / −2289 across
+    12 files. Decision #19's core checklist (a–g) all landed and
+    were verified in code post-merge:
+    - (a) Soft-disc / gradient render deleted; plastic-tile back
+      on the standard material-tile path, plastic-shard on the
+      standard polygon-shard path. Default colour stayed fuchsia
+      `#e879f9`.
+    - (b)/(c) DBG palette + colour-cycle controls and the
+      nebula-based colour-blend hook kept, per spec.
+    - (d) `elasticBond` schema field fully removed (zero code
+      references remain).
+    - (e) Cohesion-only bonds via new `BondPartnerConfig` +
+      per-partner `cohesionOnly: true` flag (the recommended
+      option); `bondsWith` excludes nebula-tile / nebula-shard.
+    - (g) `plasticSelfBreak` PerfController task removed;
+      `plasticCosmetic` kept; new `dropMerge` task added.
+    Two spec deviations (both playtest-driven, accepted):
+    a. **(f) strength tiers widened.** Spec said glass-tile /
+       glass-shard get the strong tier, everything else default.
+       Shipped: glass, rock, metal, AND indestructible partners
+       (tiles + shards) are all `strength: 'strong'`; only
+       plastic-tile is default (commit `bfb3a4c`). Glass is no
+       longer special on the bond axis.
+    b. **Cross-material transmute on contact.** Plastic-shard
+       touching any non-plastic non-nebula partner converts to
+       the partner's material at its current size + shape
+       (`PhysicsSystem.tryPlasticTransmuteOnContact`); the
+       relative-size gate was dropped mid-session per user
+       direction. Goes beyond (e)'s "cohesion-only, NOT
+       pair-consume transmute" framing.
+    Over-delivery — decision #19h said "no behaviour changes to
+    non-plastic variants" and was exceeded system-wide:
+    c. **Generic merge bookkeeping.** `mergeCount` on GameEntity
+       (replaces `plasticMergeCount`); `shatterAsteroidStyle`
+       breaks merged parents into `mergeCount ± 1` fragments for
+       every variant on the asteroid-style path.
+    d. **Unified shard→tile `TILE_SNAP`** for plastic + glass +
+       metal: shared 2× tile-diameter threshold + rest-speed
+       gate, debris release on snap; absorbed
+       `tryConvertOversizedGlassShard` and `tickPlasticTileSnap`.
+    e. **Metal composite decomposition.** Multi-cell metal shards
+       die into per-cell loose triangles; composites grow past
+       the 6-cell lattice via invisible `metalExcessCells`.
+    f. **Rock condense deepened 5 → 25 tiers** with
+       density-scaled HP (`MAX_HP × sqrt(tier+1)`),
+       size-proportional fragment counts (cap 30), and
+       mixed-density children. **Partially re-enters territory
+       parked under decision #27e/f** (shard counts +
+       per-material mass) without formally unparking it.
+    g. **Flow field.** Ammo drops follow the asteroid flow;
+       inverse-mass variability (`FLOW_VARIABILITY`) replaces
+       lockstep convergence; plastic keeps a 5× flow affinity
+       applied before the mass scale.
+    h. **Ammo-drop overhaul.** `spawnAmmoDrop` hard-forces
+       value = 1 (ignores the `AMMO_PER_*` tunables — ~5× ammo
+       reduction per kill) + O(N²) adjacent-drop merging with
+       mutual pull / damping / mass-weighted velocity blend,
+       cadenced by the new `dropMerge` PerfController task.
+       **The value=1 change cuts against (d1)'s recorded goal of
+       preserving shots-per-pickup feel; recorded here as the new
+       intended baseline (playtest-driven).**
+    i. **DBG additions.** `Shard pal`, `P glow`, `M glow`,
+       `M color` cycles.
+    j. **Perf sweep.** Set-based plastic-dent recovery,
+       Float64Array dent deltas, pooled dent scratch, mutable
+       flow-sample returns, cadenced drop merge.
+    Validation: `npm run build` clean; the PR's 15-item manual
+    test plan was deferred — **stacks on the playtest debt
+    already owed from PR #54** (see punch list).
+
+30. **material-tile-automata (PR #61) — unplanned session that
+    partially supersedes material-palette-pass.** User-initiated
+    visual/balance session occupying decision #21's conceptual
+    slot but with a different model: neighbour-count /
+    density-tier **brightness + opacity** automata, NOT the
+    planned hue-lerp extension of
+    `NebulaSystem.equilibrateColors`. Shipped:
+    a. **Glass** — bipolar opacity automata around neutral 1.0×
+       (sparse / edge tiles trend opaque up to 1.55×, dense
+       interiors fade toward 0.45×).
+    b. **Rock** — tile neighbour automata + shard density tier
+       both darken toward one shared
+       `ROCK_AGGREGATION_TINT_FLOOR` (0.55); shatter colour-pop
+       fixed by inheriting a density tier onto dent-spawned
+       shards across all three spawn paths
+       (`DropSystem.inheritedTileDensityTier`). Tint only.
+    c. **Metal density tiers.** `densityTier` counted in 6-shard
+       hexagon layers drives brightness, **HP (×tier)** and
+       **break count (tier × 3 — deliberately lossy, ~half the
+       metal destroyed on break)**; per-cell composite render
+       shows mixed shades mid-layer; map-load tiles seed their
+       tier from cluster neighbour count; the interim metal
+       neighbour-brightness automata was dropped in favour of
+       tiers. The HP / break-count changes are gameplay balance
+       beyond a "coloring" scope — accepted as shipped.
+    d. **DBG.** Master `Tile shade` toggle gating both render and
+       neighbour compute. New per-variant `automata` block on
+       `SHARD_VARIANTS` (`maxNeighbors` +
+       `saturationBrightness` / `saturationOpacity`).
+       `indestructible-tile` deliberately excluded.
+    NOT shipped (still owned by material-palette-pass):
+    - Palette adjustments — metal white-removal + shiny-ready
+      blue range, rock red + blue range, plastic palette
+      verification.
+    - The hue-lerp / warm-cool sub-arc equilibration extension.
+    **material-palette-pass is rescoped** to the palette piece;
+    whether the hue-lerp extension is still wanted on top of the
+    brightness/opacity automata is an open question (see Open
+    questions).
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
@@ -743,10 +863,11 @@ Run when convenient; can run in parallel with Phase 2.
 | ff-review | Asteroid/shard flow field audit + debug tooling | shipped (PR #56, merged into plan branch) | `claude/flow-field-debug-audit-IcwCq` | Audit doc at `docs/FLOW_FIELD_AUDIT.md` — 10 findings (4 L1 / 3 L2 / 3 L3). Consolidation answer: **don't consolidate** — analytical `FlowField.ts` is load-bearing for map-load streamline integration + per-respawn velocity bias before the grid exists; baked grid adds wall-repulsion the analytical formula can't provide. DBG overlays added: `AstFF` toggle, `FF Vec` arrows with sample-N cycle, `FF Cells` outlines, `FF Obs` obstacle tint, `FF Reb` rebuild flash. Three follow-ups deferred (#FF-1 obstacle-aware fallback, #FF-2 obstacle filter re-examination, #FF-3 asteroid-bake perf timer). One trivial doc fix in passing. |
 | perf-controller | Unified frame-skipping `PerfController` | shipped unplanned (PR #57, merged into plan branch) | `claude/omni-perf-controller-6ScG1` | **Not in original plan — user-initiated infra add (see decision #18).** New `engine/systems/PerfController.ts` replaces scattered AUTO interval tables with one coordinator. Each substep samples a load signal (entity count + collision-cell density + EWMA sim time), quantises to tiers with hysteresis, schedules tasks with phase offsets. Migrated gates: shard-pair, shard-tile-pair, color-blend, plastic-cosmetic. Newly skippable: AI state machine, flow-field pursuit flush, nebula neighbour recompute, drop-collection scan, plastic self-break. Dynamic merge-rate ladder by entity count (0.6× sparse → 3.5× crowded). New DBG "Perf" section. New constants: `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS`, `MERGE_RATE_CONSTANTS`. Pre-existing bug flagged but not fixed: `ShardSystem.completeRegen` references nonexistent `this.regenAdapter`. |
 | perf-hotpath | Hot-path allocation + math reductions | shipped (PR #58, merged into plan branch) | `claude/gallant-gauss-btopZ` | **Zero behaviour changes** — pure scalar / allocation rewrites. AISystem reuses `liveIds` Set scratch + mutates `laggedTargets` / `lastPositions` in place; GameEngine mutates `camera.shakeOffset.x/y` in place; PhysicsSystem `fillAxes` folds divisions, `applyGravity` / `applyLocalGravity` hoist `clampedForce/dist`; ProjectileSystem `updateHoming` / `updateLightningGravity` cache winning dx/dy; RenderSystem trail strip pre-computes edge normals into Float32Array scratch, off-screen indicator caches sqrt, glass proximity tints get squared-range early-out, weapon HUD uses pre-computed slot labels. New `engine/systems/enforceCap.ts` consolidates the FIFO hard-cap routine from ParticleSystem + ProjectileSystem. Flagged but not in scope: EntityIndex conditional rebuild, broadphase dense-cell cap, per-entity cached SAT axes, ShardSystem merge-broadphase Map/Set reuse. See decision #28. |
-| plastic-revert | Strip plastic-softbody divergence; restore standard shards | pending | `claude/plastic-revert-<suffix>` | **Micro session, scope revised this turn.** Revert plastic-shard to standard polygon-shard render and behavior. Keep plastic-tile color scheme. **Keep** the DBG palette / color-cycle controls for plastic tiles and shards. **Keep** the nebula-based color-blend hook that plastic shards currently use (PR #54-style cellular-automata equilibration, plastic-only for now). **Drop** the soft-radial-gradient render, opacity cycle, composite-op cycle, polymer-chain bond, sleep gate, hex-shape tile render diff, stretch-stiffness cycle, snap/free toggle. Add new bondsWith behavior: plastic-shard sticks (cohesion-only, NOT pair-consume transmute) to all variants EXCEPT `nebula-tile` / `nebula-shard`. **Per-partner bond strength** — glass-tile / glass-shard get a strong tier; other partners get a default tier (see decision #19). See decisions #19 + #22 (the material-balance-pass picks up shard counts / masses / momentum tuning afterward). |
+| plastic-revert | Strip plastic-softbody divergence; restore standard shards | shipped (PR #60, merged into plan branch) | `claude/plastic-revert-RhPVQ` | Core decision #19 scope (a–g) landed and verified post-merge. Two playtest-driven deviations: strength tiers widened beyond glass (rock / metal / indestructible also strong; only plastic-tile default), and cross-material transmute-on-contact added. Major over-delivery across shards / drops / flow / DBG / perf (mergeCount shatter generalization, unified TILE_SNAP, metal composite decomposition, rock condense 25 tiers + density HP/fragments, flow inverse-mass variability, ammo drops hard-forced to value 1 + adjacent-drop merging). **Ammo value=1 supersedes d1's shots-per-pickup tuning as the new baseline.** Manual test plan deferred — playtest debt. See decision #29. |
+| material-tile-automata | Neighbour/density automata coloring (glass / rock / metal) | shipped unplanned (PR #61, merged into plan branch) | `claude/material-tile-automata-BXXKt` | **Not in original plan — user-initiated (see decision #30).** Glass bipolar opacity automata; rock darkening unified on a shared tint floor + shatter colour-pop fix via inherited density tier; metal reworked onto 6-shard-layer density tiers driving brightness + HP (×tier) + break count (tier×3, deliberately lossy). Master `Tile shade` DBG toggle. Partially supersedes material-palette-pass's automata piece; palette work still outstanding. |
 | material-balance-pass | ~~Reduced shard counts + per-material mass retune + momentum audit~~ → see `momentum-collisions` | replaced this turn | — | Scope narrowed: shard-count reduction and per-material mass retune dropped from this batch (parked under decision #27); only the momentum / velocity-in-collisions piece carries forward as `momentum-collisions` below. |
-| momentum-collisions | Velocity-aware collision impulse | pending | `claude/momentum-collisions-<suffix>` | Audit `PhysicsSystem.resolveCollision` + the PR #57 composite-collision additions and ensure the impulse calculation accounts for entity velocity in addition to mass. Today's collisions read mass-dominant to the player; this task introduces velocity into the impulse path so a fast small entity can shove a heavy slow one. Tuning task — no rewrite of the impulse model. See decision #22 (rewritten). |
-| material-palette-pass | Material palette adjustments + automata coloring extension | pending | `claude/material-palette-pass-<suffix>` | **Expanded from prior decision #21.** Per-material palette work + cellular-automata colour blending applied across non-nebula tile families. Palette: metal loses white, gains a shiny-ready blue range; rock gains red+blue range; plastic palette tuned for cohesion-readability. Automata: extend `NebulaSystem.equilibrateColors`-style hue-lerp to rock + plastic (warm sub-arc) and glass + metal (cool sub-arc), gated by neighbour-tile count so dense clusters drift further from the base hue than sparse cells. Plastic equilibration already exists from PR #55 — extend the pattern. See decision #21 (rewritten). |
+| momentum-collisions | Velocity-aware collision impulse | pending (unblocked) | `claude/momentum-collisions-<suffix>` | Audit `PhysicsSystem.resolveCollision` + the PR #57 composite-collision additions and ensure the impulse calculation accounts for entity velocity in addition to mass. Today's collisions read mass-dominant to the player; this task introduces velocity into the impulse path so a fast small entity can shove a heavy slow one. Tuning task — no rewrite of the impulse model. **Unblocked**: plastic-revert shipped (PR #60), and the impulse path was verified untouched by PRs #60/#61, so the audit baseline is current. See decision #22 (rewritten). |
+| material-palette-pass | Material palette adjustments (rescoped) | pending (rescoped after PR #61) | `claude/material-palette-pass-<suffix>` | **Rescoped — see decisions #21 + #30.** PR #61 shipped neighbour/density brightness+opacity automata in this slot, so the automata-intensity piece is delivered in a different form. Remaining scope: palette adjustments only — metal loses white / gains a shiny-ready blue range; rock gains red + blue range; plastic palette verified under the post-revert cohesion-bond model. Whether the original hue-lerp warm/cool sub-arc extension is still wanted on top of the shipped automata is an open question — resolve before the session starts. |
 | map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
 | minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
 | living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction. Decision #20 captures the design surface for whenever this resumes. |
@@ -844,6 +965,19 @@ These are not full tasks — fold into a relevant PR when convenient.
       once any finite-mass wall-like variants ship), #FF-3 (perf
       timer for asteroid-bake path). Track via the audit doc
       `docs/FLOW_FIELD_AUDIT.md`.
+- [ ] CLAUDE.md staleness grew in PRs #60/#61: no mention of
+      `TILE_SNAP`, `mergeCount` shatter generalization, the
+      `densityTier` system, per-variant `automata` blocks,
+      ammo-drop value=1 + adjacent-drop merging,
+      `bondPartners`/`cohesionOnly` schema, `dropMerge`
+      PerfController task, or `FLOW_VARIABILITY`. Fold into the
+      same CLAUDE.md refresh as the PerfController docs item
+      above.
+- [ ] **Compounded playtest debt.** PR #54's deferred manual
+      playtest pass was never recorded as done, and PR #60
+      deferred a 15-item test plan on top of it. A consolidated
+      in-browser playtest pass is owed before stacking further
+      shard-system / visual work.
 - [x] MAP_POPULATION authority for natural maps. **Promoted this
       turn** to a real Phase 1 follow-up (`map-composition`); see
       decision #23.
@@ -857,4 +991,8 @@ These are not full tasks — fold into a relevant PR when convenient.
 
 _(Append as they arise; resolve before relevant task starts.)_
 
-- _none currently_
+- **material-palette-pass**: is the hue-lerp / warm-cool sub-arc
+  equilibration extension (decision #21b) still wanted now that
+  PR #61 ships neighbour/density brightness+opacity automata, or
+  do the palette adjustments alone close the task? Resolve before
+  the material-palette-pass session starts.
