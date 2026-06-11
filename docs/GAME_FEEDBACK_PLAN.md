@@ -476,9 +476,9 @@ k. After N waves, spawn a portal to a new map.
        mass / collision retune (decision #22).
     Partially superseded by decision #30 — PR #61 shipped a
     neighbour/density brightness+opacity automata model in this
-    slot instead of the hue-lerp extension. Remaining scope is
-    the palette work; see #30 and the open question on whether
-    the hue-lerp extension is still wanted.
+    slot instead of the hue-lerp extension. The hue-lerp
+    extension was subsequently dropped per user direction;
+    remaining scope is the palette work only (see #30).
 
 22. **momentum-collisions (replaces prior material-balance-
     pass).** User direction this turn: scope narrows to just
@@ -756,10 +756,10 @@ k. After N waves, spawn a portal to a new map.
       blue range, rock red + blue range, plastic palette
       verification.
     - The hue-lerp / warm-cool sub-arc equilibration extension.
-    **material-palette-pass is rescoped** to the palette piece;
-    whether the hue-lerp extension is still wanted on top of the
-    brightness/opacity automata is an open question (see Open
-    questions).
+    **material-palette-pass is rescoped** to the palette piece.
+    Resolved the following turn: the hue-lerp extension is
+    **dropped** per user direction — the palette adjustments
+    alone close the task.
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
@@ -867,7 +867,7 @@ Run when convenient; can run in parallel with Phase 2.
 | material-tile-automata | Neighbour/density automata coloring (glass / rock / metal) | shipped unplanned (PR #61, merged into plan branch) | `claude/material-tile-automata-BXXKt` | **Not in original plan — user-initiated (see decision #30).** Glass bipolar opacity automata; rock darkening unified on a shared tint floor + shatter colour-pop fix via inherited density tier; metal reworked onto 6-shard-layer density tiers driving brightness + HP (×tier) + break count (tier×3, deliberately lossy). Master `Tile shade` DBG toggle. Partially supersedes material-palette-pass's automata piece; palette work still outstanding. |
 | material-balance-pass | ~~Reduced shard counts + per-material mass retune + momentum audit~~ → see `momentum-collisions` | replaced this turn | — | Scope narrowed: shard-count reduction and per-material mass retune dropped from this batch (parked under decision #27); only the momentum / velocity-in-collisions piece carries forward as `momentum-collisions` below. |
 | momentum-collisions | Velocity-aware collision impulse | pending (unblocked) | `claude/momentum-collisions-<suffix>` | Audit `PhysicsSystem.resolveCollision` + the PR #57 composite-collision additions and ensure the impulse calculation accounts for entity velocity in addition to mass. Today's collisions read mass-dominant to the player; this task introduces velocity into the impulse path so a fast small entity can shove a heavy slow one. Tuning task — no rewrite of the impulse model. **Unblocked**: plastic-revert shipped (PR #60), and the impulse path was verified untouched by PRs #60/#61, so the audit baseline is current. See decision #22 (rewritten). |
-| material-palette-pass | Material palette adjustments (rescoped) | pending (rescoped after PR #61) | `claude/material-palette-pass-<suffix>` | **Rescoped — see decisions #21 + #30.** PR #61 shipped neighbour/density brightness+opacity automata in this slot, so the automata-intensity piece is delivered in a different form. Remaining scope: palette adjustments only — metal loses white / gains a shiny-ready blue range; rock gains red + blue range; plastic palette verified under the post-revert cohesion-bond model. Whether the original hue-lerp warm/cool sub-arc extension is still wanted on top of the shipped automata is an open question — resolve before the session starts. |
+| material-palette-pass | Material palette adjustments (rescoped) | pending (rescoped after PR #61) | `claude/material-palette-pass-<suffix>` | **Rescoped — see decisions #21 + #30.** PR #61 shipped neighbour/density brightness+opacity automata in this slot, and the original hue-lerp warm/cool sub-arc extension is **dropped per user direction**. Remaining scope: palette adjustments only — metal loses white / gains a shiny-ready blue range; rock gains red + blue range; plastic palette verified under the post-revert cohesion-bond model. |
 | map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
 | minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
 | living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction. Decision #20 captures the design surface for whenever this resumes. |
@@ -991,8 +991,5 @@ These are not full tasks — fold into a relevant PR when convenient.
 
 _(Append as they arise; resolve before relevant task starts.)_
 
-- **material-palette-pass**: is the hue-lerp / warm-cool sub-arc
-  equilibration extension (decision #21b) still wanted now that
-  PR #61 ships neighbour/density brightness+opacity automata, or
-  do the palette adjustments alone close the task? Resolve before
-  the material-palette-pass session starts.
+- _none currently_ (hue-lerp question resolved — dropped; see
+  decisions #21 / #30)
