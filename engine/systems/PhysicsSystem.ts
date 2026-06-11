@@ -1917,19 +1917,25 @@ export class PhysicsSystem {
       b.asleep = false; b.sleepTimer = 0;
 
       // Velocity resolution — elastic bounce along the contact normal.
+      // The impulse split uses mass-bias-compressed inverse masses
+      // (COLLISION_CONFIG.MASS_BIAS_EXPONENT) so a light fast shard
+      // visibly shoves a heavy slow one; the positional correction
+      // above keeps the true mass split.
       const rvx = b.velocity.x - a.velocity.x;
       const rvy = b.velocity.y - a.velocity.y;
       const velAlongNormal = rvx * nx + rvy * ny;
       if (velAlongNormal > 0) return; // already moving apart
 
+      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
       const j = -(1 + ELASTICITY) * velAlongNormal;
-      const impulse = j / totalInvMass;
+      const impulse = j / (effInvMassA + effInvMassB);
       const ix = nx * impulse;
       const iy = ny * impulse;
-      a.velocity.x -= ix * invMassA;
-      a.velocity.y -= iy * invMassA;
-      b.velocity.x += ix * invMassB;
-      b.velocity.y += iy * invMassB;
+      a.velocity.x -= ix * effInvMassA;
+      a.velocity.y -= iy * effInvMassA;
+      b.velocity.x += ix * effInvMassB;
+      b.velocity.y += iy * effInvMassB;
   }
 
   /**
@@ -2235,9 +2241,13 @@ export class PhysicsSystem {
                   const rvy = b.velocity.y - a.velocity.y;
                   const van = rvx * nx + rvy * ny;
                   if (van <= 0) {
-                      const j = -(1 + ELASTICITY) * van / totalInvMass;
-                      a.velocity.x -= nx * j * invMassA; a.velocity.y -= ny * j * invMassA;
-                      b.velocity.x += nx * j * invMassB; b.velocity.y += ny * j * invMassB;
+                      // Mass-bias-compressed impulse split — same policy
+                      // as resolveAsteroidPair / resolveCollision.
+                      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const j = -(1 + ELASTICITY) * van / (effInvMassA + effInvMassB);
+                      a.velocity.x -= nx * j * effInvMassA; a.velocity.y -= ny * j * effInvMassA;
+                      b.velocity.x += nx * j * effInvMassB; b.velocity.y += ny * j * effInvMassB;
                   }
               }
           }
@@ -2746,8 +2756,8 @@ export class PhysicsSystem {
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              player.velocity.x *= 0.5;
-              player.velocity.y *= 0.5;
+              player.velocity.x *= STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
+              player.velocity.y *= STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
               structure.hitFlash = 0.1;
               if (isIndestructible) {
                   // Permanent wall — signal the hit for SFX/shake but don't
@@ -2898,19 +2908,26 @@ export class PhysicsSystem {
           }
       }
       
+      // Mass-bias-compressed impulse split (velocity step only — the
+      // positional correction above keeps the true mass split).  See
+      // COLLISION_CONFIG.MASS_BIAS_EXPONENT.  invMass = 0 for static
+      // entities survives the pow unchanged (0^k = 0), so infinite-
+      // mass behaviour is identical.
+      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
       const j = -(1 + ELASTICITY) * velAlongNormal;
-      const impulse = j / totalInvMass;
+      const impulse = j / (effInvMassA + effInvMassB);
 
       const ix = nx * impulse;
       const iy = ny * impulse;
 
       if (a.mass !== Infinity) {
-          a.velocity.x -= ix * invMassA;
-          a.velocity.y -= iy * invMassA;
+          a.velocity.x -= ix * effInvMassA;
+          a.velocity.y -= iy * effInvMassA;
       }
       if (b.mass !== Infinity) {
-          b.velocity.x += ix * invMassB;
-          b.velocity.y += iy * invMassB;
+          b.velocity.x += ix * effInvMassB;
+          b.velocity.y += iy * effInvMassB;
       }
   }
 
