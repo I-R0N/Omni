@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalAggregationBrightness, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -700,6 +700,24 @@ export class RenderSystem {
    * to call unconditionally from any STRUCTURE fill site (mobile shards
    * and non-automata tiles fall straight through).
    */
+  /**
+   * Fill colour for an automata-bearing static tile.  metal-tile brightens
+   * by its densityTier (shard-layer density — metalDensityBrightness);
+   * everything else (rock darken, plastic) keeps the neighbour-count
+   * automata.  Metal's tier is stable after formation, so the brightened
+   * hex is cached on materialAutomataCachedColor like the automata path.
+   */
+  private tileFillColor(entity: GameEntity): string {
+    if (entity.shardVariant !== 'metal-tile') return this.materialAutomataColor(entity);
+    const f = metalDensityBrightness(entity.densityTier ?? 1);
+    if (f === 1) return entity.color;
+    if (entity.materialAutomataCachedColor !== undefined) return entity.materialAutomataCachedColor;
+    const [r, g, b] = hexToRgb(entity.color);
+    const out = rgbToHex(r * f, g * f, b * f);
+    entity.materialAutomataCachedColor = out;
+    return out;
+  }
+
   private materialAutomataColor(entity: GameEntity): string {
     const factor = this.materialAutomataFactor(entity);
     if (factor === 1) return entity.color;
@@ -2693,10 +2711,11 @@ export class RenderSystem {
                     const flashColor = entity.shardVariant === 'metal-tile'
                         ? '#cbd5e1' // slate-300 — bright but still gray
                         : '#ffffff';
-                    // Material-tile automata: metal brightens dense
-                    // cluster interiors by same-variant neighbour count
-                    // (no-op for plastic-tile, which has no automata cfg).
-                    ctx.fillStyle = isFlash ? flashColor : this.materialAutomataColor(entity);
+                    // Fill colour: metal-tile brightens by densityTier
+                    // (shard-layer density, see metalDensityBrightness); every
+                    // other automata tile (rock darken / plastic) goes through
+                    // materialAutomataColor.
+                    ctx.fillStyle = isFlash ? flashColor : this.tileFillColor(entity);
                     ctx.fill();
 
                     // Layer 2 — selective outline.  Skip edges that are
@@ -2863,22 +2882,29 @@ export class RenderSystem {
                     for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
                     cmx /= cells.length; cmy /= cells.length;
                     ctx.globalAlpha = shardMergeFadeAlpha(entity);
-                    // Metal aggregation cue: brighten by hexagon fill
-                    // (metalCells / METAL_HEX_CELLS) toward the shared
-                    // METAL_AGGREGATION_BRIGHT_CEIL — the composite analogue of
-                    // the metal-tile neighbour automata, so a complete hexagon
-                    // reads as bright as a fully-interior tile and a barely-
-                    // started composite ≈ base.  (densityTier is never set on
-                    // metal, so densityTintForRender is a pass-through here;
-                    // kept for parity with the other shard branches.)
-                    let aggHex = entity.color;
-                    const aggFactor = metalAggregationBrightness(cells.length);
-                    if (aggFactor !== 1) {
-                        const [mr, mg, mb] = hexToRgb(entity.color);
-                        aggHex = rgbToHex(mr * aggFactor, mg * aggFactor, mb * aggFactor);
-                    }
-                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, aggHex);
-                    for (const c of cells) {
+                    // Metal density cue, PER CELL: the composite holds
+                    // N = cells + excess shards spread evenly across its 6
+                    // slots (base = ⌊N/6⌋, with N mod 6 cells one layer
+                    // deeper), and each cell is brightened by its own depth
+                    // (metalDensityBrightness, depth 1 = darkest floor).  So a
+                    // hexagon mid-layer shows MIXED shades (some cells already
+                    // lightened) and a completed layer reads uniform — the live
+                    // telegraph of density building toward the next tier.
+                    const total = cells.length + (entity.metalExcessCells ?? 0);
+                    const baseDepth = cells.length >= METAL_HEX_CELLS
+                        ? Math.floor(total / METAL_HEX_CELLS)
+                        : 1;
+                    const deeperCells = cells.length >= METAL_HEX_CELLS
+                        ? total % METAL_HEX_CELLS
+                        : 0;
+                    const [mr, mg, mb] = hexToRgb(entity.color);
+                    for (let ci = 0; ci < cells.length; ci++) {
+                        const c = cells[ci];
+                        const depth = ci < deeperCells ? baseDepth + 1 : baseDepth;
+                        const f = metalDensityBrightness(depth);
+                        ctx.fillStyle = isFlash
+                            ? '#cbd5e1'
+                            : (f === 1 ? entity.color : rgbToHex(mr * f, mg * f, mb * f));
                         const ccx = c.ix * ux - cmx;
                         const ccy = c.iy * uy - cmy;
                         ctx.beginPath();

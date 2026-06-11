@@ -31,6 +31,7 @@ import {
   PLASTIC_DENT_RECOVERY,
   HOTSPOT_COLLAPSE,
   METAL_ASSEMBLY,
+  METAL_MAX_DENSITY_TIER,
   getActiveShatterGraceDelay,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
@@ -530,6 +531,19 @@ export class ShardSystem {
         // their tint into the static-tile world canvas).
         e.materialAutomataCachedColor = undefined;
         if (e._staticCached === true) e._staticCached = false;
+      }
+      // Metal unifies on densityTier: a natural map-load tile seeds its
+      // initial tier from cluster neighbour count (denser cluster = higher
+      // tier = lighter + tougher + more break-shards), once.  Guarded on
+      // densityTier === undefined so a re-run can't compound the HP scale.
+      if (v === 'metal-tile' && e.densityTier === undefined) {
+        const tier = Math.max(1, Math.min(METAL_MAX_DENSITY_TIER, count));
+        e.densityTier = tier;
+        e.materialAutomataCachedColor = undefined;
+        if (tier > 1) {
+          e.maxHealth = (e.maxHealth ?? 1) * tier;
+          e.health = e.maxHealth;
+        }
       }
     }
   }
@@ -1815,28 +1829,11 @@ export class ShardSystem {
   ): boolean {
     const host = hostIdx >= 0 ? candidates[hostIdx] : null;
     if (!host || !host.active || host.mergeFadeTimer !== undefined) return false;
-    // Metal only: seed the new tile's brightness from the formation's
-    // aggregation so a dense metal mass crystallises into a BRIGHT tile
-    // (conserved — see buildTileAtNearestFreeHex), instead of resetting to
-    // neutral and contradicting the "denser = lighter" rule.  Use the max of
-    // the host composite's hexagon fill (continuity with what it was showing)
-    // and the count of metal shards fusing in (so a dense pile of loose
-    // triangles also reads bright, not just a completed hexagon), clamped to
-    // a full hexagon.  Other materials pass no seed (unchanged behaviour).
-    let seedNeighborCount: number | undefined;
-    if (variant === 'metal-shard') {
-      let metalConsumed = 0;
-      for (let k = 0; k < idxs.length; k++) {
-        if (candidates[idxs[k]].shardVariant === 'metal-shard') metalConsumed++;
-      }
-      seedNeighborCount = Math.min(
-        METAL_HEX_SIZE,
-        Math.max(host.metalCells?.length ?? 1, metalConsumed),
-      );
-    }
-    if (!this.tryTransmuteShardToTile(
-      host, variant, material, entities, physics, seedNeighborCount,
-    )) return false;
+    // Hot-spot collapse (a dense PILE of shards in one cell, bypassing the
+    // floating-hexagon assembly) forms a tier-1 / base tile — minimal
+    // density.  Tiered (lighter) metal tiles come from the proper assembly
+    // snap (snapHexagonToGrid), where shard layers accumulate.
+    if (!this.tryTransmuteShardToTile(host, variant, material, entities, physics)) return false;
     for (let k = 0; k < idxs.length; k++) {
       if (idxs[k] === hostIdx) continue;
       const e = candidates[idxs[k]];
@@ -2188,12 +2185,12 @@ export class ShardSystem {
     material: StructureVariant,
     entities: GameEntity[],
     physics: PhysicsSystem,
-    seedNeighborCount?: number,
+    seedDensityTier?: number,
   ): boolean {
     if (shard.shardVariant !== variant) return false;
 
     if (!this.buildTileAtNearestFreeHex(
-      shard.position.x, shard.position.y, material, entities, physics, seedNeighborCount,
+      shard.position.x, shard.position.y, material, entities, physics, seedDensityTier,
     )) return false;
 
     // Source shard fades out — the tile materialises while the shard
@@ -2216,7 +2213,7 @@ export class ShardSystem {
     material: StructureVariant,
     entities: GameEntity[],
     physics: PhysicsSystem,
-    seedNeighborCount?: number,
+    seedDensityTier?: number,
   ): boolean {
     const origin = pixelToHexCoord(wx, wy);
     const candidates: { c: number; r: number; distSq: number }[] = [];
@@ -2258,17 +2255,17 @@ export class ShardSystem {
       { x: -w / 2, y: -h / 4 },
     ];
     const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
-    // Conserve aggregation across the shard→tile boundary.  Map-load tiles
-    // bake their neighbour count once; a runtime-transmuted tile would
-    // otherwise default to count 0 (neutral) and DISCARD whatever shade the
-    // shards had built up — so a fully-assembled bright metal hexagon would
-    // pop to a dull tile.  When the caller passes a `seedNeighborCount`
-    // (today: metal, from the host composite's hexagon fill) we stamp it so
-    // the tile's automata renders at the same brightness the shards showed,
-    // making the cycle seamless.  This is O(1) — a single assignment, NOT
-    // the per-destroy neighbour recompute that was removed for perf.
-    if (seedNeighborCount !== undefined && seedNeighborCount > 0) {
-      tile.materialNeighborCount = seedNeighborCount;
+    // Carry a density tier onto the new tile (today: metal, from the
+    // crystallising composite's shard layers).  Drives brightness via
+    // metalDensityBrightness and, for metal, scales HP so a denser tile
+    // takes proportionally more damage to break.  Other materials pass
+    // undefined → tier 1 / base, unchanged.
+    if (seedDensityTier !== undefined && seedDensityTier > 0) {
+      tile.densityTier = seedDensityTier;
+      if (material === 'metal' && seedDensityTier > 1) {
+        tile.maxHealth = (tile.maxHealth ?? 1) * seedDensityTier;
+        tile.health = tile.maxHealth;
+      }
     }
     entities.push(tile);
     physics.addStaticEntity(tile);
@@ -2306,9 +2303,9 @@ export class ShardSystem {
     // that's the delay before it starts snapping onto anything.  Composites
     // with empty lattice slots take the triangle as a new visible cell
     // (growMetalComposite); composites already at 6 cells but still under
-    // the TILE_SNAP.METAL_EXCESS_CELLS cap absorb the triangle as invisible
-    // mass (metalExcessCells counter), accumulating toward the 2 × HEX_
-    // AREA snap threshold.
+    // the TILE_SNAP.METAL_MAX_EXCESS_CELLS cap absorb the triangle as
+    // invisible "excess" mass (metalExcessCells counter), each +6 climbing
+    // one density tier until it settles and snaps.
     for (let i = 0; i < loose.length; i++) {
       const l = loose[i];
       if (!l.active || l.metalCells !== undefined) continue;
@@ -2332,7 +2329,10 @@ export class ShardSystem {
             bestLattice = comp;
             bestLatticeTarget = t;
           }
-        } else if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_EXCESS_CELLS) {
+        } else if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_MAX_EXCESS_CELLS) {
+          // Full hexagon still drifting: keep soaking shards as excess mass,
+          // each +6 climbing one density tier, until the cap (top tier) or
+          // until it settles and snaps (Pass 3).
           if (distSq < bestExcessD2) {
             bestExcess = comp;
             bestExcessD2 = distSq;
@@ -2453,18 +2453,17 @@ export class ShardSystem {
       }
     }
 
-    // Pass 3 — composites that have completed their lattice AND soaked
-    // METAL_EXCESS_CELLS worth of additional mass AND settled below the
-    // speed gate snap to the nearest free grid hex.  Asleep + float-
-    // timer gates were dropped — speed² < TILE_SNAP.REST_SPEED_SQ is
-    // the single rest criterion, matching plastic + glass.  A hexagon
-    // that's still drifting keeps absorbing (excess cap permitting)
-    // until both gates are clean on the same tick.
+    // Pass 3 — a composite that has completed its 6-cell lattice AND
+    // settled below the speed gate snaps to the nearest free grid hex at
+    // whatever density tier it has reached.  Rest speed is the SINGLE
+    // criterion (the old "must soak 6 excess first" gate is gone): a
+    // hexagon that keeps drifting keeps absorbing shards and climbing tiers
+    // (cap permitting); the moment it rests it crystallises at its current
+    // tier, releasing any partial-layer remainder (see snapHexagonToGrid).
     for (let c = 0; c < composites.length; c++) {
       const comp = composites[c];
       if (!comp.active || comp.metalCells === undefined) continue;
       if (comp.metalCells.length < METAL_HEX_SIZE) continue;
-      if ((comp.metalExcessCells ?? 0) < TILE_SNAP.METAL_EXCESS_CELLS) continue;
       const vx = comp.velocity.x, vy = comp.velocity.y;
       if (vx * vx + vy * vy >= TILE_SNAP.REST_SPEED_SQ) continue;
       this.snapHexagonToGrid(comp, entities, physics);
@@ -2472,25 +2471,38 @@ export class ShardSystem {
   }
 
   /**
-   * Snap a complete-plus-excess composite onto the nearest free grid
-   * hex as a static metal tile, then release its 6 visible lattice
-   * triangles as overflow debris (mass-conserving: composite absorbed
-   * 2 × HEX_AREA, tile takes 1 ×, debris takes 1 ×).  If every
-   * candidate grid cell is occupied the snap is deferred — the
-   * composite stays alive and retries on a later tick.
+   * Snap a settled composite onto the nearest free grid hex as a static
+   * metal tile at its DENSITY TIER.  The composite holds
+   * N = 6 lattice + metalExcessCells shards; tier = ⌊N / 6⌋ (capped),
+   * and the tile is built at that tier (lighter + tougher + more break-
+   * shards the denser it is).  The partial-layer remainder (N − tier×6
+   * shards that didn't complete the next layer) is released as loose
+   * triangles that re-enter the assembly cycle.  If every candidate grid
+   * cell is occupied the snap is deferred — the composite retries later.
    */
   private snapHexagonToGrid(
     comp: GameEntity,
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    if (!this.buildTileAtNearestFreeHex(comp.position.x, comp.position.y, 'metal', entities, physics)) return;
-    // Release the 6 lattice cells as loose triangles — same world
-    // positions + per-cell orientation the decompose-on-death path
-    // uses, so the debris reads consistently with a "shot composite"
-    // burst.  Triangles re-enter the assembly cycle if they're near
-    // another incomplete composite.
-    this.decomposeMetalComposite(comp, entities);
+    const total = comp.metalCells!.length + (comp.metalExcessCells ?? 0);
+    const tier = Math.max(1, Math.min(METAL_MAX_DENSITY_TIER, Math.floor(total / METAL_HEX_SIZE)));
+    if (!this.buildTileAtNearestFreeHex(
+      comp.position.x, comp.position.y, 'metal', entities, physics, tier,
+    )) return;
+    // Release the partial-layer remainder as loose triangles; the rest is
+    // consumed into the tile (mass conserved by the tier's break count).
+    const remainder = total - tier * METAL_HEX_SIZE;
+    const R = comp.metalLatticeR ?? (HEX_SIZE / Math.sqrt(3));
+    for (let i = 0; i < remainder; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const wx = comp.position.x + Math.cos(ang) * R;
+      const wy = comp.position.y + Math.sin(ang) * R;
+      this.spawnLooseMetalTriangle(
+        entities, wx, wy, comp.position.x, comp.position.y, R,
+        comp.color, comp.sprite, 1, comp.velocity.x, comp.velocity.y,
+      );
+    }
     comp.active = false;
   }
 

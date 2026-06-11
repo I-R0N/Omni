@@ -480,13 +480,11 @@ export const TILE_SNAP = {
    *  existing decomposeMetalComposite path). */
   DEBRIS_COUNT: 4,
   DEBRIS_DIAMETER: 50,
-  /** Excess-cell threshold for metal — after the composite reaches
-   *  its 6-cell visible hexagon, it continues absorbing loose
-   *  triangles into an "excess" counter that doesn't extend the
-   *  lattice.  Once excess reaches this value, the composite has
-   *  absorbed 2 × HEX_AREA total mass and snaps to a tile while
-   *  releasing its 6 visible triangles as debris (mass-conserving). */
-  METAL_EXCESS_CELLS: 6,
+  /** Max excess a floating composite can soak before it stops absorbing.
+   *  At METAL_MAX_DENSITY_TIER = 6 a tile holds 36 shards (6 lattice + 30
+   *  excess), so cap excess at 30.  A composite snaps on REST SPEED at
+   *  whatever tier it has reached; this only bounds the top tier. */
+  METAL_MAX_EXCESS_CELLS: 30,
 } as const;
 
 // ── Plastic dent recovery (per-dent snap-back) ─────────────────────
@@ -1112,15 +1110,14 @@ export const HOTSPOT_COLLAPSE = {
 //
 // Hexagon lifecycle: every composite builds exactly ONE hexagon (6 triangle
 // slots).  Loose triangles snap into its empty slots; once all 6 are filled
-// the composite keeps absorbing more loose triangles as TILE_SNAP.METAL_
-// EXCESS_CELLS worth of invisible mass (the composite still shows only 6
-// lattice cells).  At excess === METAL_EXCESS_CELLS the composite has soaked
-// 2 × HEX_AREA worth of mass; when the speed gate (TILE_SNAP.REST_SPEED_SQ)
-// is also satisfied it snaps onto the nearest free grid hex as a static
-// metal tile AND releases its 6 visible triangles as overflow debris —
-// mass-conserving (tile takes 1 × HEX_AREA, debris takes the other 1 ×).
-// So the metal cycle closes: tile → shatter → triangles → hexagon + excess
-// → settle → tile + 6 loose triangles.
+// the composite keeps absorbing more loose triangles as invisible "excess"
+// mass (metalExcessCells, up to TILE_SNAP.METAL_MAX_EXCESS_CELLS), each +6
+// climbing one DENSITY TIER while the composite still shows 6 lattice cells
+// (rendered per-cell lighter as depth builds — see RenderSystem).  When the
+// speed gate (TILE_SNAP.REST_SPEED_SQ) is satisfied it snaps onto the nearest
+// free grid hex as a static metal tile at tier ⌊N/6⌋, releasing only the
+// partial-layer remainder as loose triangles.  So the metal cycle closes:
+// tile → shatter → triangles → hexagon (+ tiers) → settle → tiered tile.
 export const METAL_ASSEMBLY = {
   ENABLED: true,
   FORM_RANGE_R: 1.6,    // × R — loose+loose fuse within this centroid distance
@@ -1140,29 +1137,34 @@ export const METAL_ASSEMBLY = {
   MERGE_OVERLAP_FACTOR: 0.95, // composites merge when centroid gap < this × sum of bounding radii
 };
 
-// ── Metal aggregation brightness ────────────────────────────────────
-// Metal's coherent "denser = lighter, more polished" cue, applied across
-// every form metal takes so the look survives the tile↔shard↔tile cycle:
-//   - metal-TILE:      neighbour-count automata (loaded-cluster interiors)
-//   - metal composite: hexagon fill (metalCells / METAL_HEX_CELLS)
-//   - transmuted tile: formation fill carried over at crystallisation
-// All three ramp base→the SHARED ceiling below, so a complete hexagon, a
-// fully-interior tile, and a tile crystallised from a full hexagon all
-// read at the same brightness — no seam where one form hands off to the
-// next.  (Contrast with rock, which DARKENS toward ROCK_AGGREGATION_TINT_
-// FLOOR; metal is the bright-with-aggregation material.)
-export const METAL_HEX_CELLS = 6;               // complete hexagon = 6 triangles
-export const METAL_AGGREGATION_BRIGHT_CEIL = 1.5; // brightness at full aggregation
+// ── Metal density (shard-layer) brightness ──────────────────────────
+// Metal's coherent "denser = lighter, more polished" cue, driven by a
+// DENSITY TIER counted in hexagon layers of 6 shards:
+//   - tier 1 (6 shards, one full hexagon) = darkest / least dense FLOOR
+//   - each +6 shards = +1 tier = one step lighter, up to METAL_MAX_DENSITY_TIER
+// A floating composite accumulates shards (per-cell, see RenderSystem) and
+// snaps into a tile at its completed tier; map-load tiles seed their tier
+// from cluster neighbour count.  ONE axis (densityTier) drives brightness,
+// break-shard count, and tile HP for every metal form, so the look + mass
+// survive the tile↔shard↔tile cycle.  (Contrast with rock, which DARKENS
+// toward ROCK_AGGREGATION_TINT_FLOOR; metal BRIGHTENS with density.)
+export const METAL_HEX_CELLS = 6;                 // shards per hexagon layer (= 1 tier)
+export const METAL_MAX_DENSITY_TIER = 6;          // tier cap (rare — 36 shards)
+export const METAL_AGGREGATION_BRIGHT_CEIL = 1.5; // brightness at the top tier
+// Shards released when a metal tile breaks = densityTier × this.  Below the
+// 6/tier it took to BUILD the tile, so ~half the metal is "destroyed" in the
+// break — keeps dense clusters from flooding the field with debris.
+export const METAL_BREAK_SHARDS_PER_TIER = 3;
 
-/** Brightness multiplier for a metal body by how aggregated it is —
- *  `cellCount` filled out of `maxCells` (default METAL_HEX_CELLS).  1 at
- *  zero aggregation, METAL_AGGREGATION_BRIGHT_CEIL when full. */
-export function metalAggregationBrightness(
-  cellCount: number,
-  maxCells: number = METAL_HEX_CELLS,
+/** Brightness multiplier for a metal body at density `tier` (1 = darkest
+ *  floor, METAL_MAX_DENSITY_TIER = lightest).  tier ≤ 1 (and loose shards)
+ *  return 1 (base); climbs linearly to METAL_AGGREGATION_BRIGHT_CEIL. */
+export function metalDensityBrightness(
+  tier: number,
+  maxTier: number = METAL_MAX_DENSITY_TIER,
 ): number {
-  if (maxCells <= 0) return 1;
-  const t = Math.min(1, Math.max(0, cellCount) / maxCells);
+  if (tier <= 1) return 1;
+  const t = Math.min(1, (tier - 1) / Math.max(1, maxTier - 1));
   return 1 + t * (METAL_AGGREGATION_BRIGHT_CEIL - 1);
 }
 
@@ -2684,21 +2686,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
-    // Neighbour-count brightness automata (DBG "Tile shade").  Metal
-    // BRIGHTENS dense interiors (saturationBrightness > 1) so packed
-    // slabs read as a polished, light-catching mass while cluster
-    // edges and lone plates stay at the matte base shade.  Saturates
-    // at the full 6-neighbour hex ring.
-    //
-    // One of THREE forms that share the metal aggregation cue (see
-    // metalAggregationBrightness / METAL_AGGREGATION_BRIGHT_CEIL): tile
-    // neighbours here, hexagon fill on assembling composites, and the
-    // formation fill carried onto a tile crystallised from shards.  All
-    // brighten toward the same ceiling, so the "denser = lighter" look is
-    // conserved across the tile↔shard↔tile cycle rather than resetting at
-    // each boundary.  maxNeighbors (hex ring = 6) intentionally equals
-    // METAL_HEX_CELLS so a full hexagon maps straight onto a full ring.
-    automata: { maxNeighbors: 6, saturationBrightness: METAL_AGGREGATION_BRIGHT_CEIL },
+    // Metal brightness is driven by densityTier (shard layers), NOT this
+    // automata — see metalDensityBrightness.  The automata block is kept
+    // only as the marker that makes recomputeMaterialNeighbors count a
+    // metal tile's same-variant hex neighbours; ShardSystem converts that
+    // count into the tile's initial densityTier at load (denser natural
+    // clusters → higher tier → lighter + tougher).  No saturationBrightness:
+    // the render path bypasses the automata factor for metal entirely.
+    automata: { maxNeighbors: 6 },
     // Heavy repel — 1.5× glass strength.  Reads as a real shove
     // when the player approaches; the field is the warning.  Range
     // matches glass so dense mixed clusters present a single
@@ -3098,13 +3093,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       maxSteps: 4,
       areaThreshold: 32 * 32,
       largeShardCollapseSize: 130,
-      // NOTE: this darkening tintFloor is INERT for colour — metal shards
-      // never receive a densityTier (metal aggregates via rigid hexagon
-      // assembly, not density-tier compaction), so densityTintForRender
-      // always returns the base hue.  Metal's actual aggregation cue is
-      // BRIGHTENING by hexagon fill (see metalAggregationBrightness, applied
-      // in the composite render branch).  The block is kept only for the
-      // non-colour fields below (largeShardCollapseSize / shrinkFactor).
+      // NOTE: this darkening tintFloor is INERT for colour — loose metal
+      // shards never go through densityTintForRender's tint (they render at
+      // base), and composites/tiles brighten by density TIER via
+      // metalDensityBrightness, not this table.  The block is kept only for
+      // the non-colour fields below (largeShardCollapseSize / shrinkFactor).
       tintFloor: 0.50,
       shrinkFactor: 0.88,
     },

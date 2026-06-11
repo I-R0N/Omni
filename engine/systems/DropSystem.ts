@@ -10,6 +10,7 @@ import {
   randomPlasticShardShade,
   getActiveShatterGraceDelay,
   METAL_ASSEMBLY,
+  METAL_BREAK_SHARDS_PER_TIER,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -453,13 +454,20 @@ export class DropSystem {
       inheritParentPolygon?: boolean;
       equilateralTriangle?: boolean;
     };
+    // Metal-tile break count is density-driven: densityTier × the per-tier
+    // multiplier (below the 6/tier it took to BUILD, so ~half the metal is
+    // "destroyed" in the break — keeps dense clusters from flooding the
+    // field).  Overrides the spec's countMin/Max for the single metal spec.
+    const metalBreakCount = tile.shardVariant === 'metal-tile'
+      ? Math.max(1, (tile.densityTier ?? 1) * METAL_BREAK_SHARDS_PER_TIER)
+      : undefined;
     const expanded: ExpandedSpec[] = [];
     for (let s = 0; s < breakShards.length; s++) {
       const spec = breakShards[s];
       const hasCount = spec.countMin !== undefined && spec.countMax !== undefined;
-      const count = hasCount
+      const count = metalBreakCount ?? (hasCount
         ? spec.countMin! + Math.floor(Math.random() * (spec.countMax! - spec.countMin! + 1))
-        : 1;
+        : 1);
       const hasSizeRange = spec.sizeFractionMin !== undefined && spec.sizeFractionMax !== undefined;
       for (let k = 0; k < count; k++) {
         const sizeFraction = hasSizeRange
