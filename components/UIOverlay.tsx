@@ -48,6 +48,7 @@ interface UIOverlayProps {
   onToggleTileOutlines?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
+  onToggleMaterialAutomata?: () => void;
   onCyclePlasticPalette?: () => void;
   onCyclePlasticShardPalette?: () => void;
   onCyclePlasticGlowBrightness?: () => void;
@@ -110,6 +111,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleTileOutlines,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
+  onToggleMaterialAutomata,
   onCyclePlasticPalette,
   onCyclePlasticShardPalette,
   onCyclePlasticGlowBrightness,
@@ -344,6 +346,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Shade dir', onTogglePlasticAutomataDirection,
                   stats.plasticAutomataBrighten === true ? 'Bright' : 'Dark',
                   'Plastic automata direction: Darken dense cluster interiors (default) or Brighten. Only affects rendering while Pl shade is On.')}
+                {ctrlRow('Tile shade', onToggleMaterialAutomata,
+                  stats.materialAutomataEnabled === true ? 'On' : 'Off',
+                  'Material-tile neighbour-brightness automata (glass/metal/rock). On: dense cluster interiors shift brightness by same-variant hex-neighbour count (per-variant default: metal brightens, rock darkens); cluster edges and lone tiles stay at the base colour.')}
                 {ctrlRow('Palette', onCyclePlasticPalette,
                   stats.plasticPaletteName ?? 'litegreen',
                   'Cycle the plastic-TILE palette family. Re-rolls every active plastic-tile colour on toggle. Plastic-shards have their own independent cycle (Shard pal).')}

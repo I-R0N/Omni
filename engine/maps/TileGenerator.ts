@@ -270,6 +270,11 @@ export class TileGenerator {
         mass: cfg.mass,
         polygonPoints: pts,
         sprite: cfg.sprite,
+        // Stash the odd-r offset grid cell so ShardSystem can count
+        // same-variant hex neighbours for the material-tile brightness
+        // automata (parallels nebula tiles' nebulaGridCol/Row).
+        tileGridCol: c,
+        tileGridRow: r,
     };
   }
 

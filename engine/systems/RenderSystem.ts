@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -196,6 +196,15 @@ export class RenderSystem {
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
   // false, they keep their per-instance random shade.  Default ON.
   public plasticAutomataEnabled: boolean = false;
+  // DBG toggle (Tile shade) — master gate for the material-tile
+  // neighbour-brightness automata.  When true, glass / metal / rock
+  // STATIC tiles scale their render colour by their same-variant
+  // hex-neighbour count (SHARD_VARIANTS[v].automata); cluster edges and
+  // lone tiles stay at the base palette colour.  Default ON so the
+  // effect reads immediately for review.  Paired with
+  // ShardSystem.materialAutomataEnabled (the count-compute gate) via
+  // GameEngine.toggleMaterialAutomata.
+  public materialAutomataEnabled: boolean = true;
   // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
   // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
   // solid disc instead of their full polygon render.  Default ON.
@@ -684,6 +693,108 @@ export class RenderSystem {
   }
 
   /**
+   * Resolve a material STATIC tile's render base colour through the
+   * neighbour-brightness automata.  Returns `entity.color` unchanged
+   * when the master toggle is off, the variant carries no `automata`
+   * config, or the tile has no same-variant neighbours — so it's safe
+   * to call unconditionally from any STRUCTURE fill site (mobile shards
+   * and non-automata tiles fall straight through).
+   */
+  /**
+   * Fill colour for an automata-bearing static tile.  metal-tile brightens
+   * by its densityTier (shard-layer density — metalDensityBrightness);
+   * everything else (rock darken, plastic) keeps the neighbour-count
+   * automata.  Metal's tier is stable after formation, so the brightened
+   * hex is cached on materialAutomataCachedColor like the automata path.
+   */
+  private tileFillColor(entity: GameEntity): string {
+    if (entity.shardVariant !== 'metal-tile') return this.materialAutomataColor(entity);
+    const f = metalDensityBrightness(entity.densityTier ?? 1);
+    if (f === 1) return entity.color;
+    if (entity.materialAutomataCachedColor !== undefined) return entity.materialAutomataCachedColor;
+    const [r, g, b] = hexToRgb(entity.color);
+    const out = rgbToHex(r * f, g * f, b * f);
+    entity.materialAutomataCachedColor = out;
+    return out;
+  }
+
+  private materialAutomataColor(entity: GameEntity): string {
+    const factor = this.materialAutomataFactor(entity);
+    if (factor === 1) return entity.color;
+    // Tint depends only on count (via factor) + base colour, both stable
+    // between neighbour-count changes, so cache the string and skip the
+    // per-frame hex parse/build.  Invalidated in
+    // ShardSystem.recomputeMaterialNeighbors when the count changes.
+    if (entity.materialAutomataCachedColor !== undefined) return entity.materialAutomataCachedColor;
+    const [r, g, b] = hexToRgb(entity.color);
+    const out = rgbToHex(r * factor, g * factor, b * factor);
+    entity.materialAutomataCachedColor = out;
+    return out;
+  }
+
+  /**
+   * Normalised saturation `t` (0..1) for a material tile's automata:
+   * 0 at no same-variant neighbours (lone tile / cluster edge), 1 at
+   * `maxNeighbors` (fully interior).  Returns 0 when the master toggle
+   * is off, the variant has no `automata` config, or the tile is on the
+   * cluster edge — so both the brightness and opacity wrappers short-
+   * circuit to "unchanged".
+   */
+  private materialAutomataT(entity: GameEntity): number {
+    if (!this.materialAutomataEnabled) return 0;
+    const v = entity.shardVariant;
+    if (v === undefined) return 0;
+    const cfg = SHARD_VARIANTS[v].automata;
+    if (cfg === undefined) return 0;
+    const count = entity.materialNeighborCount ?? 0;
+    if (count <= 0) return 0;
+    return Math.min(1, count / cfg.maxNeighbors);
+  }
+
+  /**
+   * Brightness multiplier (1 = unchanged) for the SOLID-FILL automata
+   * path — metal-tile / rock-tile, whose opaque face reads interior
+   * recession as a colour shift (>1 brightens, <1 darkens).  1 for
+   * variants without a `saturationBrightness` (e.g. glass, which uses
+   * the opacity path instead).
+   */
+  private materialAutomataFactor(entity: GameEntity): number {
+    const v = entity.shardVariant;
+    if (v === undefined) return 1;
+    const sat = SHARD_VARIANTS[v].automata?.saturationBrightness;
+    if (sat === undefined) return 1;
+    const t = this.materialAutomataT(entity);
+    if (t === 0) return 1;
+    return 1 + t * (sat - 1);
+  }
+
+  /**
+   * Alpha multiplier (1 = unchanged) for the OPACITY automata path —
+   * glass-tile, whose translucent face reads interior recession as
+   * see-through rather than dim (a brightness multiply just muddies the
+   * tint).  1 for variants without a `saturationOpacity` (metal/rock,
+   * which use the brightness path).
+   *
+   * BIPOLAR around the neutral 1.0: a half-surrounded tile
+   * (t = 0.5, ~maxNeighbors/2 neighbours) renders at the default
+   * opacity — the MIDDLE of the [`saturationOpacity`, 2-`saturationOpacity`]
+   * range.  Sparser tiles trend more opaque (up toward 2-sat, clamped
+   * at solid by each layer's Math.min(1, …)); dense interiors fade
+   * toward `saturationOpacity`.  Callers MUST clamp the final per-layer
+   * globalAlpha to ≤1 — canvas silently ignores values outside [0,1].
+   */
+  private materialAutomataAlpha(entity: GameEntity): number {
+    if (!this.materialAutomataEnabled) return 1;
+    const v = entity.shardVariant;
+    if (v === undefined) return 1;
+    const cfg = SHARD_VARIANTS[v].automata;
+    if (cfg === undefined || cfg.saturationOpacity === undefined) return 1;
+    const count = Math.max(0, entity.materialNeighborCount ?? 0);
+    const t = Math.min(1, count / cfg.maxNeighbors);
+    return 1 + (0.5 - t) * 2 * (1 - cfg.saturationOpacity);
+  }
+
+  /**
    * True for tile variants whose appearance can be pre-baked into the
    * static-tile world canvas.
    *  - glass-tile + indestructible-tile: share the hex-sprite fast path
@@ -727,8 +838,8 @@ export class RenderSystem {
    * system (1 canvas px = 1/scale world units).
    */
   private stampHexSpriteTileToCache(cx: CanvasRenderingContext2D, e: GameEntity): void {
-      const hexSprite = this.getImage(ASSETS.HEX_STRUCTURE);
-      if (!hexSprite.complete || hexSprite.naturalWidth === 0) return;
+      const baseSprite = this.getImage(ASSETS.HEX_STRUCTURE);
+      if (!baseSprite.complete || baseSprite.naturalWidth === 0) return;
       const s = this._staticTileScale;
       const halfMapW = this._staticTileMapW / 2;
       const halfMapH = this._staticTileMapH / 2;
@@ -737,7 +848,18 @@ export class RenderSystem {
       const maxDim = Math.max(e.size.x, e.size.y);
       const drawSize = maxDim * 1.02 * s;
       const dHalf = drawSize / 2;
-      cx.drawImage(hexSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
+      // Glass tiles fade the sprite by their neighbour-count automata
+      // (opacity path) so dense interiors read see-through against the
+      // background — a brightness multiply muddies translucent glass.
+      // The reduced alpha bakes straight into the cache pixels, so the
+      // single static-layer blit composites the transparency for free.
+      // Indestructible (no automata cfg) and edge tiles stamp at 1.0.
+      // A count change flips _staticCached false (ShardSystem), forcing
+      // this re-stamp.
+      const alpha = Math.min(1, this.materialAutomataAlpha(e));
+      if (alpha !== 1) cx.globalAlpha = alpha;
+      cx.drawImage(baseSprite, wx - dHalf, wy - dHalf, drawSize, drawSize);
+      if (alpha !== 1) cx.globalAlpha = 1;
       this.captureStampPolyOnce(e);
       e._staticCached = true;
       this._staticTileCacheSet.add(e);
@@ -1935,7 +2057,12 @@ export class RenderSystem {
           const maxDim = Math.max(entity.size.x, entity.size.y);
           const drawSize = maxDim * 1.02;
           const dHalf = drawSize / 2;
+          // Match the cache stamp's neighbour-count opacity fade so an
+          // uncached glass tile reads identically to its cached siblings.
+          const fpAlpha = Math.min(1, this.materialAutomataAlpha(entity));
+          if (fpAlpha !== 1) ctx.globalAlpha = fpAlpha;
           ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
+          if (fpAlpha !== 1) ctx.globalAlpha = 1;
           return;
       }
 
@@ -2476,15 +2603,24 @@ export class RenderSystem {
                 const edgeAlpha = isFlash ? 0.95 : (0.55 + prox * 0.35);
                 const edgeColor = isFlash ? '#ffffff' : `rgba(${edgeR},${edgeG},${edgeB},${edgeAlpha})`;
 
-                // Layer 1 — translucent base fill
+                // Layer 1 — translucent base fill.  Every glass layer
+                // below is multiplied by the bipolar neighbour-count
+                // opacity automata (`autoAlpha`, centred on the neutral
+                // 1.0): sparse tiles trend more opaque (clamped at solid
+                // by the Math.min(1, …) on every layer), dense interiors
+                // fade see-through.  (The HEX_STRUCTURE sprite is a
+                // placeholder in this build, so glass always takes this
+                // vector slow-path — fading layer 1 alone was invisible;
+                // the edge stroke and specular carry most of the read.)
+                const autoAlpha = this.materialAutomataAlpha(entity);
                 buildPath();
-                ctx.globalAlpha = isFlash ? 0.55 : 0.13;
+                ctx.globalAlpha = Math.min(1, (isFlash ? 0.55 : 0.13) * autoAlpha);
                 ctx.fillStyle = isFlash ? '#ffffff' : 'rgba(186,230,253,1)';
                 ctx.fill();
 
                 // Layer 2 — diagonal shine (flat fill avoids per-tile gradient allocation)
                 if (!isFlash) {
-                    ctx.globalAlpha = 0.09;
+                    ctx.globalAlpha = Math.min(1, 0.09 * autoAlpha);
                     ctx.fillStyle = '#ffffff';
                     ctx.fill();
                 }
@@ -2507,10 +2643,10 @@ export class RenderSystem {
                         // peakAlpha stay with the SHARD_VARIANTS entry.
                         const glowColor = getActiveGlassGlowColor();
                         const intensityG = repelGlowIntensity(impulse);
-                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG);
+                        ctx.globalAlpha = Math.min(1, glow.peakAlpha * intensityG * autoAlpha);
                         ctx.fillStyle = glowColor;
                         ctx.fill();
-                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG));
+                        ctx.globalAlpha = Math.min(1, Math.max(0.4, glow.peakAlpha * intensityG) * autoAlpha);
                         ctx.strokeStyle = glowColor;
                         ctx.lineWidth = 3.0;
                         ctx.stroke();
@@ -2518,7 +2654,7 @@ export class RenderSystem {
                 }
 
                 // Layer 3 — edge stroke (proximity-tinted)
-                ctx.globalAlpha = 1.0;
+                ctx.globalAlpha = Math.min(1, autoAlpha);
                 ctx.strokeStyle = edgeColor;
                 ctx.lineWidth = isFlash ? 2.5 : 1.5;
                 ctx.stroke();
@@ -2526,7 +2662,7 @@ export class RenderSystem {
                 // Layer 4 — small specular dot (upper-left of hex)
                 // Uses a pre-rendered 12×12 bitmap instead of a per-tile gradient.
                 if (!isFlash) {
-                    ctx.globalAlpha = 0.28 + prox * 0.18;
+                    ctx.globalAlpha = Math.min(1, (0.28 + prox * 0.18) * autoAlpha);
                     ctx.drawImage(this.getSpecularBitmap(), -15, -17);
                 }
 
@@ -2575,7 +2711,11 @@ export class RenderSystem {
                     const flashColor = entity.shardVariant === 'metal-tile'
                         ? '#cbd5e1' // slate-300 — bright but still gray
                         : '#ffffff';
-                    ctx.fillStyle = isFlash ? flashColor : entity.color;
+                    // Fill colour: metal-tile brightens by densityTier
+                    // (shard-layer density, see metalDensityBrightness); every
+                    // other automata tile (rock darken / plastic) goes through
+                    // materialAutomataColor.
+                    ctx.fillStyle = isFlash ? flashColor : this.tileFillColor(entity);
                     ctx.fill();
 
                     // Layer 2 — selective outline.  Skip edges that are
@@ -2742,8 +2882,29 @@ export class RenderSystem {
                     for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
                     cmx /= cells.length; cmy /= cells.length;
                     ctx.globalAlpha = shardMergeFadeAlpha(entity);
-                    ctx.fillStyle = isFlash ? '#cbd5e1' : densityTintForRender(entity, entity.color);
-                    for (const c of cells) {
+                    // Metal density cue, PER CELL: the composite holds
+                    // N = cells + excess shards spread evenly across its 6
+                    // slots (base = ⌊N/6⌋, with N mod 6 cells one layer
+                    // deeper), and each cell is brightened by its own depth
+                    // (metalDensityBrightness, depth 1 = darkest floor).  So a
+                    // hexagon mid-layer shows MIXED shades (some cells already
+                    // lightened) and a completed layer reads uniform — the live
+                    // telegraph of density building toward the next tier.
+                    const total = cells.length + (entity.metalExcessCells ?? 0);
+                    const baseDepth = cells.length >= METAL_HEX_CELLS
+                        ? Math.floor(total / METAL_HEX_CELLS)
+                        : 1;
+                    const deeperCells = cells.length >= METAL_HEX_CELLS
+                        ? total % METAL_HEX_CELLS
+                        : 0;
+                    const [mr, mg, mb] = hexToRgb(entity.color);
+                    for (let ci = 0; ci < cells.length; ci++) {
+                        const c = cells[ci];
+                        const depth = ci < deeperCells ? baseDepth + 1 : baseDepth;
+                        const f = metalDensityBrightness(depth);
+                        ctx.fillStyle = isFlash
+                            ? '#cbd5e1'
+                            : (f === 1 ? entity.color : rgbToHex(mr * f, mg * f, mb * f));
                         const ccx = c.ix * ux - cmx;
                         const ccy = c.iy * uy - cmy;
                         ctx.beginPath();
@@ -2849,10 +3010,15 @@ export class RenderSystem {
                     //    PAuto automata (Pl shade DBG) optionally swaps
                     //    the per-instance shade for a constant palette
                     //    base brightness-scaled by neighbour count.
+                    //  - rock-tile: material-tile automata darkens dense
+                    //    cluster interiors by same-variant neighbour count
+                    //    (materialAutomataColor — a no-op for mobile shards
+                    //    and non-automata variants, so rock-/metal-shards
+                    //    are untouched).
                     const baseColor = (this.plasticAutomataEnabled
                                        && entity.shardVariant === 'plastic-shard')
                         ? plasticAutomataHex(entity.plasticNeighborCount ?? 0)
-                        : entity.color;
+                        : this.materialAutomataColor(entity);
                     const densityHex = densityTintForRender(entity, baseColor);
                     const fadeAlpha = shardMergeFadeAlpha(entity);
                     const flashColor = entity.shardVariant === 'metal-shard'

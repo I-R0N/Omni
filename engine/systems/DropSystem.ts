@@ -10,6 +10,7 @@ import {
   randomPlasticShardShade,
   getActiveShatterGraceDelay,
   METAL_ASSEMBLY,
+  METAL_BREAK_SHARDS_PER_TIER,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -390,6 +391,40 @@ export class DropSystem {
    * than one shard spawns, each gets a small radial offset so they
    * don't pile up at the tile centre.
    */
+  /**
+   * Density tier that reproduces a DARKENING tile's neighbour-shade on a
+   * detached shard, so dent debris doesn't pop from the tile's aggregated
+   * shade back to base.  Both the tile automata and the shard density tint
+   * ramp linearly base→the shared floor (ROCK_AGGREGATION_TINT_FLOOR), so
+   * the matching tier is the tile's neighbour count rescaled from the
+   * automata domain (0..maxNeighbors) into the tint domain (0..maxSteps).
+   *
+   * Returns undefined for: brightening tiles (metal — its shard density
+   * darkens, the OPPOSITE direction, a deliberate "live slab vs cooled
+   * scrap" contrast, not a pop to fix); density-less children; and tier 0
+   * (base / cluster-edge tiles) — so callers keep the untinted render
+   * fast path.  Tint only: callers size mass from `sizeToMass`, so seeding
+   * the tier shifts colour without making interior debris heavier.
+   */
+  private inheritedTileDensityTier(
+    tile: GameEntity,
+    childVariantId: ShardVariantId,
+  ): number | undefined {
+    const tileVariant = tile.shardVariant ? SHARD_VARIANTS[tile.shardVariant] : undefined;
+    const auto = tileVariant?.automata;
+    if (auto === undefined
+      || auto.saturationBrightness === undefined
+      || auto.saturationBrightness >= 1
+      || auto.maxNeighbors <= 0) {
+      return undefined;
+    }
+    const density = SHARD_VARIANTS[childVariantId].density;
+    if (!density?.enabled) return undefined;
+    const norm = Math.min(1, Math.max(0, tile.materialNeighborCount ?? 0) / auto.maxNeighbors);
+    const tier = Math.round(norm * density.maxSteps);
+    return tier > 0 ? tier : undefined;
+  }
+
   public spawnDentShard(
     entities: GameEntity[],
     tile: GameEntity,
@@ -419,13 +454,20 @@ export class DropSystem {
       inheritParentPolygon?: boolean;
       equilateralTriangle?: boolean;
     };
+    // Metal-tile break count is density-driven: densityTier × the per-tier
+    // multiplier (below the 6/tier it took to BUILD, so ~half the metal is
+    // "destroyed" in the break — keeps dense clusters from flooding the
+    // field).  Overrides the spec's countMin/Max for the single metal spec.
+    const metalBreakCount = tile.shardVariant === 'metal-tile'
+      ? Math.max(1, (tile.densityTier ?? 1) * METAL_BREAK_SHARDS_PER_TIER)
+      : undefined;
     const expanded: ExpandedSpec[] = [];
     for (let s = 0; s < breakShards.length; s++) {
       const spec = breakShards[s];
       const hasCount = spec.countMin !== undefined && spec.countMax !== undefined;
-      const count = hasCount
+      const count = metalBreakCount ?? (hasCount
         ? spec.countMin! + Math.floor(Math.random() * (spec.countMax! - spec.countMin! + 1))
-        : 1;
+        : 1);
       const hasSizeRange = spec.sizeFractionMin !== undefined && spec.sizeFractionMax !== undefined;
       for (let k = 0; k < count; k++) {
         const sizeFraction = hasSizeRange
@@ -608,6 +650,12 @@ export class DropSystem {
         ? randomPlasticShardShade()
         : tile.color;
 
+      // Seed the density tier that reproduces the parent tile's shade so
+      // the fragment doesn't pop from the tile's aggregated shade back to
+      // base.  Uniform across the burst — the tile was one shade, so its
+      // fragments are too.  (See inheritedTileDensityTier.)
+      const densityTier = this.inheritedTileDensityTier(tile, spec.variant);
+
       entities.push({
         id:            nextId('dent_shard'),
         type:          EntityType.STRUCTURE,
@@ -635,6 +683,10 @@ export class DropSystem {
         health:        shardHealth,
         maxHealth:     shardHealth,
         mass,
+        // Inherited tile shade as a density tier (tint only — mass above
+        // stays at the base sizeToMass value); undefined for base/edge
+        // tiles so the renderer keeps the untinted fast path.
+        densityTier,
         polygonPoints: scaledPts,
         // Optional per-entity damping from the variant's spawn shape
         // — undefined for variants that drift naturally (rock / glass
@@ -761,6 +813,9 @@ export class DropSystem {
       health:        1,
       maxHealth:     1,
       mass,
+      // Match the parent tile's shade (tint only — see
+      // inheritedTileDensityTier).
+      densityTier:   this.inheritedTileDensityTier(tile, childVariant),
       polygonPoints: shardPts,
       // Freed corner — exempt from instant re-collapse.
       collapseGraceTimer: getActiveShatterGraceDelay(),
@@ -845,6 +900,9 @@ export class DropSystem {
       health:        1,
       maxHealth:     1,
       mass,
+      // Match the parent tile's shade so chips off a dark interior tile
+      // don't pop to base (tint only — see inheritedTileDensityTier).
+      densityTier:   this.inheritedTileDensityTier(tile, spec.variant),
       polygonPoints: shardPts,
       // Per-hit chip — also exempt from instant re-collapse.
       collapseGraceTimer: getActiveShatterGraceDelay(),

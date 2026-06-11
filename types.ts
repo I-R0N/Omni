@@ -425,6 +425,13 @@ export interface GameEntity {
   // by ShardSystem at every site that mutates densityTier.  Skips the
   // per-frame RGB multiply when the tier hasn't changed.
   densityCachedTint?: string;
+  // Per-entity render cache for the resolved material-automata tint hex
+  // (metal/rock brightness path).  Built lazily by RenderSystem and
+  // invalidated by ShardSystem.recomputeMaterialNeighbors whenever
+  // materialNeighborCount changes — so the per-frame RGB multiply runs
+  // once per neighbour-count change, not every frame.  Mirrors
+  // densityCachedTint.
+  materialAutomataCachedColor?: string;
 
   // Unified fade-out timer for the whole shard family — nebula
   // tiles / shards AND rock / glass / plastic / metal shards all
@@ -612,6 +619,18 @@ export interface GameEntity {
   // PAuto neighbour-brightness automata in RenderSystem (more contacts
   // = darker, like nebula interior-darkening).  Plastic-shards only.
   plasticNeighborCount?: number;
+  // ── Material-tile automata (glass / metal / rock STATIC tiles) ──────────
+  // Odd-r offset hex-grid coordinate of a material STRUCTURE tile, stamped
+  // at build time by TileGenerator.buildStructureTile.  Used by ShardSystem
+  // to count same-variant hex neighbours (parallels nebulaGridCol/Row).
+  tileGridCol?: number;
+  tileGridRow?: number;
+  // Number of same-variant material-tile neighbours in the 6 hex cells
+  // around this tile (0 = isolated / cluster edge, 6 = fully interior).
+  // Drives the per-variant neighbour-brightness automata in RenderSystem
+  // (SHARD_VARIANTS[v].automata).  ShardSystem recomputes it lazily
+  // whenever a static tile is destroyed or regenerated — never per frame.
+  materialNeighborCount?: number;
   // Per-entity cooldown for nebula shatter triggering.  Set to
   // NEBULA_CONSTANTS.IMPACT_COOLDOWN on PLAYER/ENEMY strikers when they
   // shatter a nebula; ticked down each frame in PhysicsSystem.update.
@@ -885,6 +904,11 @@ export interface EngineStats {
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.
   plasticAutomataBrighten?: boolean;
+  // When true, material STATIC tiles (glass / metal / rock) shift render
+  // brightness by their same-variant hex-neighbour count (per-variant
+  // darken/brighten default from SHARD_VARIANTS[v].automata).  Master
+  // on/off; DBG-toggleable via the "Tile shade" button.  Default true.
+  materialAutomataEnabled?: boolean;
   // Active plastic palette name (PLASTIC_PALETTES[i].name).  Cycled
   // via the DBG panel's Palette button — switches the colour family
   // used by randomPlasticShade() and re-rolls every active plastic

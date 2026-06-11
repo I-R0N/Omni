@@ -626,6 +626,19 @@ export class GameEngine {
   }
 
   /**
+   * Toggle the material-tile neighbour automata (DBG "Tile shade") for
+   * glass / metal / rock static tiles.  Flips the render gate; on enable
+   * it bakes the (frozen) neighbour counts once so the tint is correct
+   * even if the toggle started off.
+   */
+  public toggleMaterialAutomata() {
+    const next = !this.renderer.materialAutomataEnabled;
+    this.renderer.materialAutomataEnabled = next;
+    this.shards.materialAutomataEnabled = next;
+    if (next && this.currentMap) this.shards.ensureMaterialNeighbors(this.currentMap.entities);
+  }
+
+  /**
    * Cycle the active plastic-TILE palette (litegreen → amber → black …)
    * and re-roll the colour of every active plastic-tile so the swap
    * is visible without breaking tiles.  Shards have their own
@@ -1189,6 +1202,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
@@ -1342,6 +1356,7 @@ export class GameEngine {
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
+      materialAutomataEnabled: this.renderer.materialAutomataEnabled,
       plasticPaletteName: getActivePlasticPaletteName(),
       plasticShardPaletteName: getActivePlasticShardPaletteName(),
       plasticGlowBrightnessName: getActivePlasticGlowBrightnessName(),
@@ -1796,6 +1811,10 @@ export class GameEngine {
           // footprint.
           if (isStaticTile) {
               this.flowField.onTileDestroyed(entity.position.x, entity.position.y);
+              // Material-tile automata counts are frozen at map-load bake,
+              // so a tile death does NOT re-tint its surviving neighbours —
+              // no recompute trigger here (that per-destroy O(n) pass was
+              // the merge's main lag source).
           }
           // Variant-driven shatter (no-op for kind='none').
           // - nebula-tile: spawns 2-3 nebula-shards.
@@ -3273,6 +3292,10 @@ export class GameEngine {
       // Pre-render structure dots to an offscreen minimap canvas so the
       // per-frame minimap pass is a single blit instead of ~22k fillRects.
       this.renderer.buildMinimapStaticLayer(map.entities, map.width, map.height);
+      // Seed material-tile neighbour counts before baking the static
+      // layer so cache-eligible variants (glass) stamp at the correct
+      // automata brightness on the first frame.
+      this.shards.ensureMaterialNeighbors(map.entities);
       // Pre-bake the world-tile static layer (glass + indestructible hex
       // sprites) so the per-frame world render replaces hundreds of
       // per-tile drawImage calls with a single (toroidal-wrapped) blit.
