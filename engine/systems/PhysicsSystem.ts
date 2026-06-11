@@ -2740,7 +2740,9 @@ export class PhysicsSystem {
       // into glass shards (via onDeath → spawnDrops → spawnGlassShards)
       // and then regenerates on the normal 12 s timer (via onDeath → the
       // STRUCTURE branch of handleEntityDeath that queues pendingRegens).
-      // The player loses half its velocity to the tile break.
+      // Static tiles cost the player a fixed CRASH_VELOCITY_RETENTION
+      // cut per crash-hit; mobile shards cost a mass-scaled cut and
+      // receive the shed momentum (conserved hand-off, see below).
       //
       // Tiered tiles (plastic/metal) with maxHealth > 1 consume one
       // health tier per above-threshold crash rather than shattering in
@@ -2756,8 +2758,29 @@ export class PhysicsSystem {
           const isIndestructible = structure.shardVariant === 'indestructible-tile';
 
           if (impactSpeed > STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD) {
-              player.velocity.x *= STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
-              player.velocity.y *= STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
+              // Stamp the pre-retention crash velocity so the death
+              // pipeline (ShardSystem.shatter / spawnGlassShards)
+              // scatters debris along the player's heading — same
+              // contract as the projectile-hit stamp further down.
+              structure.lastImpactVelocity = { x: player.velocity.x, y: player.velocity.y };
+              // Mobile shards receive the momentum the player sheds.
+              // The player's speed loss scales with the mass ratio (a
+              // pebble barely slows the player; rocks at or above
+              // player mass cost the full retention cut), and the same
+              // Δp lands on the shard — so a killed rock's fragments
+              // inherit real forward velocity instead of scattering
+              // from rest, and a survivor gets knocked downrange.
+              let retention = STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
+              if (structure.mass !== Infinity) {
+                  const lossFrac = (1 - retention)
+                      * Math.min(1, structure.mass / player.mass);
+                  retention = 1 - lossFrac;
+                  const dvFactor = lossFrac * (player.mass / structure.mass);
+                  structure.velocity.x += player.velocity.x * dvFactor;
+                  structure.velocity.y += player.velocity.y * dvFactor;
+              }
+              player.velocity.x *= retention;
+              player.velocity.y *= retention;
               structure.hitFlash = 0.1;
               if (isIndestructible) {
                   // Permanent wall — signal the hit for SFX/shake but don't

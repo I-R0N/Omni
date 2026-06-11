@@ -1373,6 +1373,11 @@ export const STRUCTURE_CONSTANTS = {
   // through.  At 0.5 a 3-tile plow retained ~12 % of entry speed and
   // read as bouncing off the cluster; 0.65 retains ~27 % and reads as
   // shoving through while still costing something.
+  // Static tiles take the full cut.  Mobile shards scale the cut by
+  // min(1, shard.mass / player.mass) and receive the shed momentum
+  // (Δv capped at (1 − retention) × player speed for light shards),
+  // so plowing a pebble field doesn't bleed the player dry and the
+  // debris of a killed rock carries the crash velocity forward.
   CRASH_VELOCITY_RETENTION: 0.65,
   // Momentum threshold (asteroid.mass × impactSpeed) above which an
   // asteroid plows through a tile permanently.  At 200 a cruising
