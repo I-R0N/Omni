@@ -613,7 +613,7 @@ export class ShardSystem {
     // + cache invalidation + neighbour-counts dirty bookkeeping +
     // grid-index update).  Adapter no-ops gracefully when not set.
     if (variant.regen.rewriteColor === 'neighborhood-blend') {
-      this.regenAdapter?.onNeighborhoodBlendRegen(entity, entities);
+      this.adapter?.onNeighborhoodBlendRegen(entity, entities);
     }
 
     // Re-register in the static grid so collisions hit again.  Both

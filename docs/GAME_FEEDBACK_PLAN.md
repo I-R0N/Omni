@@ -949,30 +949,38 @@ These are not full tasks — fold into a relevant PR when convenient.
       deliberate border placement only. **Done in PR #54** for UNIVERSE
       and POCKET; SevenRings outer ring + IndestructibleFieldMap showcase
       preserved as the deliberate-border / showcase cases.
-- [ ] CLAUDE.md §4 still lists `nebulaFadeTimer` / `nebulaFadeDuration`
+- [x] CLAUDE.md §4 still lists `nebulaFadeTimer` / `nebulaFadeDuration`
       under the nebula field category; PR #54 deleted those fields and
       unified all consumers onto `mergeFadeTimer` / `mergeFadeDuration`.
-      Trivial doc edit; fold into the next CLAUDE.md-touching PR.
-- [ ] PR #57 introduced `PerfController` as load-bearing infra; not
+      **Done in the branch-review punch-list pass** — §4 now points at
+      the shared fields.
+- [x] PR #57 introduced `PerfController` as load-bearing infra; not
       yet documented in CLAUDE.md (§2 directory layout, §3 per-frame
-      order, §5 constants list, §8 conventions). Real follow-up.
-- [ ] `ShardSystem.completeRegen` references nonexistent
+      order, §5 constants list, §8 conventions). **Done in the
+      branch-review punch-list pass** — documented in all four
+      sections plus `enforceCap.ts` (PR #58) in §2.
+- [x] `ShardSystem.completeRegen` references nonexistent
       `this.regenAdapter` (field is `adapter`). `tsc --noEmit` flags
       it; `vite build` ignores it. Silent no-op on nebula-tile regen
-      colour rewrite (off by default). Trivial fix.
+      colour rewrite (off by default). **Fixed in the branch-review
+      punch-list pass** — now calls `this.adapter`.
 - [ ] FF audit follow-ups #FF-1 (asteroid obstacle-aware fallback +
       diagonal wall-repulsion), #FF-2 (re-examine obstacle filter
       once any finite-mass wall-like variants ship), #FF-3 (perf
       timer for asteroid-bake path). Track via the audit doc
       `docs/FLOW_FIELD_AUDIT.md`.
-- [ ] CLAUDE.md staleness grew in PRs #60/#61: no mention of
+- [x] CLAUDE.md staleness grew in PRs #60/#61: no mention of
       `TILE_SNAP`, `mergeCount` shatter generalization, the
       `densityTier` system, per-variant `automata` blocks,
       ammo-drop value=1 + adjacent-drop merging,
       `bondPartners`/`cohesionOnly` schema, `dropMerge`
-      PerfController task, or `FLOW_VARIABILITY`. Fold into the
-      same CLAUDE.md refresh as the PerfController docs item
-      above.
+      PerfController task, or `FLOW_VARIABILITY`. **Done in the
+      branch-review punch-list pass** — §4 field categories
+      (incl. the missing plastic-shard / metal-shard variant ids),
+      §5 constant blocks, §8 conventions all refreshed. Note:
+      PR #57's `MERGE_RATE_CONSTANTS` was since replaced by
+      `LOCAL_MERGE_CONSTANTS` (local-density boost); documented
+      under its current name.
 - [ ] **Compounded playtest debt.** PR #54's deferred manual
       playtest pass was never recorded as done, and PR #60
       deferred a 15-item test plan on top of it. A consolidated

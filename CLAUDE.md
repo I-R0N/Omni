@@ -94,6 +94,10 @@ engine/
     EntityIndex.ts        Per-frame filtered lists (enemies, asteroids, …)
     BackgroundManager.ts  Parallax stars + nebula BG layers
     IdAllocator.ts        Monotonic nextId() for entity IDs
+    PerfController.ts     Load-driven frame-skip coordinator for every
+                          skippable periodic pass (see §3 and §8)
+    enforceCap.ts         Shared FIFO hard-cap helper (particles,
+                          projectiles)
 
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above
@@ -120,9 +124,15 @@ Per-frame `loop()`:
 1. Measure delta, accumulate into `simAccumulator`.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
+   - `PerfController.beginStep(...)` — samples a load signal
+     (dynamic-entity count + collision-cell density + EWMA sim time),
+     quantises it to a tier with hysteresis, and decides which periodic
+     tasks run this step. Gated call sites check
+     `perfController.shouldRun(taskId)`; tasks and cadences live in
+     `PERF_TASKS` (see §8).
    - `updatePhysics(dt)`:
-     1. FlowField rebuild check (enemy pursuit grid)
-     2. `AISystem.update()` — enemy AI
+     1. FlowField rebuild check (enemy pursuit grid; `flowField` task)
+     2. `AISystem.update()` — enemy AI (`ai` task)
      3. `handleEnemyShooting()` — enemy projectiles
      4. `PhysicsSystem.update()` — gravity, collisions, on-death dispatch
    - `updateGameLogic(dt)`:
@@ -130,13 +140,16 @@ Per-frame `loop()`:
      2. `ShardSystem.update()` — drains the unified regen queue, ticks
         existing stick-bonds (cohesion + threshold), runs the merge
         broadphase (gravity-pull + bond formation).  Variant config
-        (SHARD_VARIANTS) drives every policy decision.
+        (SHARD_VARIANTS) drives every policy decision.  Pair scans are
+        cadenced via the `shardPair` / `shardTilePair` tasks.
      3. Wave-announcement timers
      4. `NebulaSystem.update()` — neighbour-count refresh + lazy
         grid-index reset (nebula-specific bookkeeping only;
         merge/regen/shatter all moved to ShardSystem)
      5. `WaveSystem.update()` — completion check, grace countdown
-     6. Drop-collection scan (`activeDrops` cache)
+     6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
+        ammo-drop merge pass (`DropSystem.mergeAmmoDrops`; `dropMerge`
+        task)
      7. Player weapon tick + input
      8. Projectile lifetime tick
 3. Final `prepareFrameEntities()` after sim steps.
@@ -151,8 +164,9 @@ physics has resolved deaths.
 ## 4. The GameEntity contract
 
 Everything on-screen — player, enemies, tiles (glass / plastic /
-metal / indestructible / nebula), mobile shards (rock / glass /
-nebula), projectiles, particles, drops — is a `GameEntity` (see
+metal / rock / indestructible / nebula), mobile shards (rock / glass /
+plastic / metal / nebula), projectiles, particles, drops — is a
+`GameEntity` (see
 `types.ts`). Discriminated by `type: EntityType` plus optional role
 fields (`enemySubtype`, `shardVariant`, `dropType`, `isBouncer`,
 `isLightningArc`, `isLightningProjectile`, …).
@@ -197,16 +211,28 @@ Notable existing field categories on `GameEntity`:
 - Shard family (tiles + shards): `shardVariant`
   (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
-  'glass-shard' | 'nebula-shard'`),
+  'glass-shard' | 'plastic-shard' | 'metal-shard' | 'nebula-shard'`),
   `asteroidHitCount`, `asteroidHitTimer`, `asteroidHitCooldown`,
   `regenProgress`, `regenPopTimer`.  Per-variant policy
-  (regen / merge / shatter / passThrough) lives in
-  `SHARD_VARIANTS` (see §5).
+  (regen / merge / shatter / dent / repel / glow / automata /
+  passThrough) lives in `SHARD_VARIANTS` (see §5).  Shared
+  merge/density bookkeeping: `mergeCount` (accumulated by
+  `composeEntities`; drives fragment count on asteroid-style
+  shatter), `densityTier` + `densityCachedTint` (tint cache —
+  invalidate when tier or neighbour count mutates),
+  `materialNeighborCount` (automata input, frozen at map-load
+  bake), `mergeFadeTimer`/`mergeFadeDuration` (all fade-in
+  consumers).  Material-specific: `metalCells`/`metalExcessCells`
+  (metal composite lattice + invisible excess mass),
+  `plasticDentHistory` (per-dent snap-back queue),
+  `plasticNeighborCount`.
 - Nebula: `nebulaColorComposition`, `nebulaBlendedHex`, `nebulaTintedKey`,
   `nebulaTileArea`, `nebulaGridCol/Row`, `nebulaNeighborCount`,
   `nebulaImpactCooldown`, `nebulaMergeCooldown`,
-  `nebulaFadeTimer`/`Duration`, `nebulaSpawnTimer`/`Duration`,
-  `nebulaTwinkleNextAt/X/Y`. **Render fast-path cache** (nebula-tile
+  `nebulaSpawnTimer`/`Duration`,
+  `nebulaTwinkleNextAt/X/Y`. (Fade-out uses the shared
+  `mergeFadeTimer`/`Duration` fields — the old
+  `nebulaFadeTimer`/`Duration` pair was deleted.) **Render fast-path cache** (nebula-tile
   variant only): `nebulaCachedTinted`, `nebulaCachedDx`, `nebulaCachedDy`,
   `nebulaCachedSize` — populated by RenderSystem after a slow-path
   draw and invalidated at every site that mutates the inputs
@@ -240,11 +266,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `NEBULA_CONSTANTS` (palette / cluster / fade-rate / drop tuning;
   twinkle scheduling)
 - `SHARD_VARIANTS` — per-variant regen / merge / shatter / dent /
-  repel / glow / passThrough / renderCache policy.  Source of truth
-  for the shard-family behaviour table.  11 variants today:
+  repel / glow / automata / passThrough / renderCache policy.
+  Source of truth for the shard-family behaviour table.  11 variants
+  today:
   glass-tile / plastic-tile / metal-tile / indestructible-tile /
   rock-tile / nebula-tile / rock-shard / glass-shard / plastic-shard
-  / metal-shard / nebula-shard.  See
+  / metal-shard / nebula-shard.  The `merge.bondsWith` entry
+  supports per-partner `bondPartners` config (`cohesionOnly` flag +
+  `strength: 'strong' | 'default'` tier); the `automata` block
+  (`maxNeighbors` + `saturationBrightness` / `saturationOpacity`)
+  drives the aggregation-coloring rules.  See
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/SHARD_SYSTEM.md` for the design rationale.
 - `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
@@ -268,7 +299,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `DIFFICULTY_SCALES` (enemy count), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
-  `ASTEROID_AMMO_PROGRESSION`
+  `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
+  (mutual drop attraction + merge band)
+- `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS` (per-task min/max
+  interval, cost weight, auto curve), `LOCAL_MERGE_CONSTANTS`
+  (local-density merge-rate boost; replaced the global
+  entity-count merge-rate ladder)
+- `TILE_SNAP` (unified shard→tile snap for plastic / glass /
+  metal), `FLOW_VARIABILITY` (inverse-mass flow-correction +
+  terminal-speed scaling)
+- `ROCK_CONDENSE` (25 density tiers), `ROCK_AGGREGATION_TINT_FLOOR`,
+  `METAL_ASSEMBLY`, `METAL_HEX_CELLS`, `METAL_MAX_DENSITY_TIER`,
+  `METAL_AGGREGATION_BRIGHT_CEIL`, `METAL_BREAK_SHARDS_PER_TIER`
+- `PLASTIC_PALETTES`, `PLASTIC_SHARD_AUTOMATA`,
+  `PLASTIC_DENT_RECOVERY`, `MATERIAL_GLOW_BRIGHTNESS_CYCLE`,
+  `GLASS_GLOW_COLORS`
 
 Difficulty is a single `0..3` index that feeds both `DIFFICULTY_SCALES`
 and `DIFFICULTY_STAT_SCALES`.
@@ -388,6 +433,38 @@ button in `UIOverlay.tsx`.
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
+- **Ammo drops carry value 1 and merge.** `DropSystem.spawnAmmoDrop`
+  hard-forces value = 1 (the per-source `amount` argument and
+  `AMMO_PER_*` tunables are intentionally ignored). Nearby drops
+  mutually attract, damp, and fuse via `mergeAmmoDrops`
+  (`AMMO_DROP_PULL`), conserving total ammo — a wave-kill cluster
+  collapses into one fatter pickup. Non-magnetised ammo drops also
+  drift with the asteroid flow field.
+- **Periodic passes route through PerfController.** Any new skippable
+  per-frame work (scans, cosmetic ticks, O(N²) passes) must register
+  a task in `PERF_TASKS` and gate on `perfController.shouldRun(id)` —
+  do NOT roll a private frame-counter or AUTO interval table. The
+  controller samples load per sim step, applies tier hysteresis, and
+  staggers task phases so skipped work doesn't bunch up.
+- **Shard→tile snap is unified.** Merged plastic / glass / metal
+  shards snap onto the hex grid through the shared `TILE_SNAP` policy
+  (≥ 2× tile diameter + rest-speed gate) and release debris on snap.
+  Metal grows as a rigid 6-cell composite (`metalCells`) that keeps
+  absorbing shards as invisible `metalExcessCells`; its `densityTier`
+  (1 tier = 6 shards) drives brightness, HP (×tier), and break count
+  (`METAL_BREAK_SHARDS_PER_TIER` × tier — deliberately lossy).
+- **`mergeCount` drives shatter.** `composeEntities` accumulates
+  `mergeCount` on every merge path; the asteroid-style shatter breaks
+  a merged parent into ~`mergeCount` fragments (rock additionally
+  scales with size and inherits mixed density tiers onto children).
+- **Aggregation-coloring automata.** Per-variant `automata` blocks
+  map neighbour count / density tier to colour: glass = bipolar
+  opacity around neutral, rock = darkens toward
+  `ROCK_AGGREGATION_TINT_FLOOR` (tiles and shards share the floor),
+  metal = brightens by `densityTier`. Neighbour counts are frozen at
+  map-load bake (`materialNeighborCount`); `densityCachedTint` must
+  be invalidated at every site that mutates its inputs. Master DBG
+  `Tile shade` toggle gates both compute and render.
 - **Death routing.** `PhysicsSystem` raises an on-death callback
   that `GameEngine.handleEntityDeath` dispatches: explosions for
   player/enemy, variant-driven shatter + regen-queue via
