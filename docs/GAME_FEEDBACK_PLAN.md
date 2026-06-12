@@ -1076,12 +1076,14 @@ These are not full tasks — fold into a relevant PR when convenient.
       once any finite-mass wall-like variants ship), #FF-3 (perf
       timer for asteroid-bake path). Track via the audit doc
       `docs/FLOW_FIELD_AUDIT.md`.
-- [ ] **Compounded playtest debt.** PR #54's deferred manual
-      playtest pass was never recorded as done, and PR #60 deferred
-      a 15-item test plan on top of it (decision #29.5 also flags
-      the ammo value=1 pacing check). A consolidated in-browser
-      playtest pass is owed before stacking further shard-system /
-      visual work.
+- [x] **Compounded playtest debt.** PR #54's deferred manual
+      playtest pass + PR #57 + PR #60 + PR #61 + PR #63. **Closed
+      by user this turn** — playtest done, no regressions flagged.
+      PR #63's three deferred follow-ups (per-pair-class exponent,
+      asteroid/projectile bespoke push factors, orphaned doc
+      comment) remain deferred. Combat-pacing read on ammo
+      base-value=1 + cluster shove + crash retention was acceptable
+      enough to proceed into Phase 2 (f) Timed waves.
 - [x] MAP_POPULATION authority for natural maps. **Promoted this
       turn** to a real Phase 1 follow-up (`map-composition`); see
       decision #23.
