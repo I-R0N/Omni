@@ -791,6 +791,72 @@ k. After N waves, spawn a portal to a new map.
     adjustments in `material-palette-residual` alone close
     out decision #21's remaining scope.
 
+31. **momentum-collisions (PR #63) — model tight-line
+    execution.** 2 commits, +78 / -16 across 2 files,
+    exactly the discipline the brief asked for. Audit
+    outcome was **(i) coefficient tune** — every impulse
+    site (`resolveCollision` full SAT path,
+    `resolveAsteroidPair` circle fast path,
+    `resolveCompositeShardPair` PR #57 composite path)
+    already used the standard normal-impulse
+    `j = -(1+e)·(v_rel·n) / (invA + invB)` with both
+    velocities + both masses. No gate leaks; `passThrough`
+    nebula-only as designed, sleep gate awake↔asleep wakes
+    correctly, settled-pair gate requires near-zero
+    relative velocity. The mass-dominant *feel* was the
+    natural inverse-mass split: light striker hitting 16×
+    heavier target transferred only ~9% of closing speed
+    at `e=0.5`.
+    Two new constants land:
+    a. **`COLLISION_CONFIG.MASS_BIAS_EXPONENT = 0.5`** —
+       compresses the mass ratio in the velocity split at
+       all three sites identically. `effInv = invMass ^ k`
+       feeds the impulse calc. 16×-heavier target now
+       picks up ~30% of closing speed (3.4× prior). Light
+       striker's rebound drops from 1.41× to 1.2× closing
+       speed, reading as "pushing through" rather than
+       bouncing. **Properties preserved:** equal-mass
+       pairs unchanged at any exponent (split is
+       normalized, scale-invariant); static entities
+       unchanged (`0^k = 0`, so bounces off tiles/walls
+       identical); positional correction keeps the true
+       mass split so heavy bodies aren't teleported by
+       light debris. `1.0` restores exact physics. Tier
+       table for retuning: exponent 0.75 → ~17%, 0.5 →
+       ~30%, 0.25 → ~50% (1:16 mass ratio, e=0.5).
+    b. **`STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION =
+       0.65`** (was hardcoded 0.5) — player crash-through
+       retains 65% of velocity per broken tile, so plowing
+       a 3-tile row retains ~27% of entry speed instead of
+       ~12%.
+    `ELASTICITY` left at 0.5 — with the bias, light side
+    rebound already softens; changing `e` would alter
+    equal-mass feel which wasn't the complaint.
+    AskUserQuestion calibration: "Moderate ~30%" (the
+    target-pickup level) and "Keep 65%" (crash retention).
+    Validation: `npm run build` clean; manual smoke tests
+    deferred to user playtest.
+    **Three deferred follow-ups in PR body:**
+    a. Player plow cost rises with the bias — player↔
+       light-shard contacts now shed ~19% of closing speed
+       each (was ~6%). If dense shard fields feel draggy,
+       a per-pair-class exponent (player pairs pinned
+       nearer 1.0) is the next knob. Deliberately not
+       shipped to keep one global coefficient.
+    b. Asteroid→tile crash retention (`×0.85`) and bespoke
+       projectile push factors (`massRatio × 0.3` for
+       pierce + dent `pushFactor`) are independent
+       mini-models that bypass the impulse formula —
+       consistent but untuned. Candidates for a later
+       pass if projectile shove reads wrong.
+    c. `resolveAsteroidPair`'s orphaned doc comment
+       ("Cheap circle-only collision resolver…") sits
+       ~400 lines above the function it describes. Pure
+       cosmetic cleanup.
+    Closes the momentum-collisions task; next per the
+    tight line is the playtest pass, then Phase 2 (f)
+    Timed waves.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -895,7 +961,7 @@ Run when convenient; can run in parallel with Phase 2.
 | perf-hotpath | Hot-path allocation + math reductions | shipped (PR #58, merged into plan branch) | `claude/gallant-gauss-btopZ` | **Zero behaviour changes** — pure scalar / allocation rewrites. AISystem reuses `liveIds` Set scratch + mutates `laggedTargets` / `lastPositions` in place; GameEngine mutates `camera.shakeOffset.x/y` in place; PhysicsSystem `fillAxes` folds divisions, `applyGravity` / `applyLocalGravity` hoist `clampedForce/dist`; ProjectileSystem `updateHoming` / `updateLightningGravity` cache winning dx/dy; RenderSystem trail strip pre-computes edge normals into Float32Array scratch, off-screen indicator caches sqrt, glass proximity tints get squared-range early-out, weapon HUD uses pre-computed slot labels. New `engine/systems/enforceCap.ts` consolidates the FIFO hard-cap routine from ParticleSystem + ProjectileSystem. Flagged but not in scope: EntityIndex conditional rebuild, broadphase dense-cell cap, per-entity cached SAT axes, ShardSystem merge-broadphase Map/Set reuse. See decision #28. |
 | plastic-revert | Strip plastic-softbody divergence; restore standard shards | shipped — massively over-delivered (PR #60, merged into plan branch) | `claude/plastic-revert-RhPVQ` | Original revert scope (Parts A/B/C) landed clean: softbody render + schemas + DBG cycles + internals stripped; palette cycle + neighbour-brightness + nebula-blend kept; new `BondPartnerConfig` type with cohesion-only flag + per-partner `strength` tier; `plastic-shard.bondsWith = { exclude: nebula }` with per-partner config. THEN iterated across Parts D–I (decision #29): plastic self-merge growth, cross-material transmute on contact, plastic-tile snap at 1.5× hex, per-dent snap-back recovery with HP/colour rewind, heavy `attractedTo` gravity, annular pull gate, 5× flow-field affinity, new `mergeCount` field generalized across all shards, metal composite decomposition, unified shard→tile snap across plastic/glass/metal, metal excess absorption + density-aware build, rock condense extended 5→25 tiers, density-aware rock HP + size-keyed fragment counts + mixed-density children, ammo drops follow flow, inverse-mass flow variability, ammo drops base-value=1 + adjacent merge + mutual pull, new DBG cycles (`Shard pal`, `P glow`, `M glow`, `M color`), perf hot-path sweep. |
 | material-balance-pass | ~~Reduced shard counts + per-material mass retune + momentum audit~~ → see `momentum-collisions` | replaced earlier | — | Scope narrowed: shard-count reduction and per-material mass retune dropped from this batch (parked under decision #27); only the momentum / velocity-in-collisions piece carries forward as `momentum-collisions` below. PR #60 incidentally addressed adjacent items (rock fragment count now scales with size, inverse-mass flow variability) but did NOT touch impulse resolution. |
-| momentum-collisions | Velocity-aware collision impulse | pending | `claude/momentum-collisions-<suffix>` | Audit `PhysicsSystem.resolveCollision` + the PR #57 composite-collision additions and ensure the impulse calculation accounts for entity velocity in addition to mass. Today's collisions read mass-dominant to the player; this task introduces velocity into the impulse path so a fast small entity can shove a heavy slow one. Tuning task — no rewrite of the impulse model. See decision #22 (rewritten). |
+| momentum-collisions | Velocity-aware collision impulse | shipped — model tight-line discipline (PR #63, merged into plan branch) | `claude/momentum-collisions-audit-nnr28e` | Audit outcome **(i) coefficient tune** — all three impulse sites (`resolveCollision` full SAT, `resolveAsteroidPair` circle fast path, `resolveCompositeShardPair` PR #57 per-cell composite) already used the standard normal-impulse formula with both velocities + both masses. No gate leaks. Feel issue was the natural inverse-mass split. Fixed by introducing `COLLISION_CONFIG.MASS_BIAS_EXPONENT = 0.5` — compresses mass ratio in the velocity split at all three sites identically (16× heavier target now picks up ~30% of closing speed, 3.4× prior). Equal-mass pairs unchanged. Static entities unchanged (`0^k = 0`). Positional correction keeps true mass split. Plus `STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION = 0.65` (was hardcoded 0.5) so player crash-through retains more velocity per broken tile. AskUserQuestion chose "Moderate ~30% / Keep 65%". 2 commits, +78/-16 across 2 files. Three deferred follow-ups in PR body. See decision #31. |
 | material-palette-pass | Material palette adjustments + automata coloring extension | **automata shipped (PR #61); palette work split out below** | `claude/material-tile-automata-BXXKt` | Automata-coloring extension shipped, but with **per-material directions** instead of warm/cool sub-arcs (see decision #30): glass = opacity bipolar around neutral, rock = darkens toward shared floor (tile neighbour-count + shard density tier aligned), metal = brightens via density-tier ladder (6 shards = 1 layer). Rock shatter colour-pop fixed (dent shards inherit parent tile's density tier). Metal got a full density-tier system: cells track in `densityTier`, render per-cell mixed shades, snap on rest speed, density drives brightness + HP + break count. One master `Tile shade` DBG toggle. **Palette-adjustment piece NOT shipped** — metal still includes white shades; rock palette unchanged. Carved out as `material-palette-residual` below. |
 | material-palette-residual | Metal de-white + rock red/blue palette | pending | `claude/material-palette-residual-<suffix>` | Carved out of `material-palette-pass` (decision #21) after PR #61 shipped the automata piece. Small palette-only task: remove white from metal palette and add a shiny-ready blue range; add red+blue to rock palette so the existing rock-aggregation darkening reads warmer/cooler depending on cluster context. No automata changes (already done), and the original hue-lerp / warm-cool sub-arc extension is **dropped per user direction** — this palette work closes decision #21 entirely. See decision #30. |
 | map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
