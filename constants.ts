@@ -690,7 +690,16 @@ export const UI_CONSTANTS = {
     RADIUS: 120, // Distance from center of screen
     TEXT_THRESHOLD_ENEMY: 250000, // Distance sq to show text
     TEXT_THRESHOLD_POI: 160000,
-    MAX_VISIBLE: 5 // Max arrows per type
+    MAX_VISIBLE: 5, // Max arrows for POIs
+    // Enemy chevrons are range-unlimited (maps are big and live wave
+    // enemies are capped at TIMED_WAVE_CONFIG.MAX_CONCURRENT_ENEMIES),
+    // so every live enemy is always findable.  The cap here only guards
+    // pathological counts; alpha fades with distance to a floor so far
+    // chevrons read as "out there" without shouting.
+    MAX_VISIBLE_ENEMY: 12,
+    ENEMY_FADE_START: 800,   // world units — full opacity inside this
+    ENEMY_FADE_END: 4000,    // world units — alpha floor from here out
+    ENEMY_MIN_ALPHA: 0.35,
   }
 };
 
@@ -719,6 +728,16 @@ export const MINIMAP_CONSTANTS = {
   PLAYER_DOT_COLOR: '#ffffff',
   VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
   VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
+  // Boosted enemy blips: bigger pulsing dots, and enemies beyond the
+  // minimap range clamp to the border (slightly dimmer) instead of
+  // disappearing, so a distant straggler still registers at a glance.
+  ENEMY_BLIP: {
+    RADIUS: 3,
+    EDGE_INSET: 4,        // px inside the minimap border for clamped blips
+    PULSE_HZ: 1.5,        // pulse cycles per second
+    PULSE_MIN_ALPHA: 0.55,
+    CLAMPED_ALPHA_MULT: 0.75,
+  },
 };
 
 export const INPUT_CONSTANTS = {
@@ -2087,6 +2106,18 @@ export const WAVE_CONSTANTS = {
   // minimum distance).  Keeps the ring visually varied without bringing
   // any spawn point on-screen.
   SPAWN_RING_SPREAD: 200,
+};
+
+// ── Score system ─────────────────────────────────────────────────────────────
+// Points incentivise hunting enemies down across the big maps.  Kills are
+// tier-scaled; clearing a timed wave's full spawn budget before time-up
+// pays a wave-scaled bonus on top (see WaveSystem early-clear path).
+// Survivors despawned at time-up bypass the death path and award nothing.
+export const SCORE_CONSTANTS = {
+  POINTS_PER_TIER: 100,           // tier-1 kill = 100, tier-2 = 200, tier-3 = 300
+  EARLY_CLEAR_BONUS_PER_WAVE: 50, // early-clear bonus = this × wave number
+  POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
+  POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
 };
 
 // ── Timed-wave config ────────────────────────────────────────────────────────

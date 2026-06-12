@@ -574,6 +574,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="flex flex-col items-end gap-1">
+              {/* Run score */}
+              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-amber-300 text-xs font-bold tracking-widest tabular-nums">
+                  {(stats.score ?? 0).toLocaleString()} PTS
+                </span>
+              </div>
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${

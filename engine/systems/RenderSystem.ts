@@ -1190,10 +1190,12 @@ export class RenderSystem {
         }
 
         if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+            // Enemies are range-UNLIMITED here (live count is capped by the
+            // wave concurrency cap): the maps are big and the chevrons are
+            // how the player finds the stragglers.  renderIndicators fades
+            // far chevrons instead of culling them.
             const distSq = dx*dx + dy*dy;
-            if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
-                this._indicatorBuffer.push({ entity, distSq });
-            }
+            this._indicatorBuffer.push({ entity, distSq });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -3761,13 +3763,16 @@ export class RenderSystem {
       const playerPos = camera.position;
       if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
 
-      const { RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE } = UI_CONSTANTS.INDICATORS;
+      const {
+          RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE,
+          MAX_VISIBLE_ENEMY, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+      } = UI_CONSTANTS.INDICATORS;
 
       if (targets.length === 0) return;
 
       const cx = width / 2;
       const cy = height / 2;
-      
+
       // Limit drawing counts per type to avoid clutter, but keep sorted draw order
       let enemiesDrawn = 0;
       let poisDrawn = 0;
@@ -3777,7 +3782,7 @@ export class RenderSystem {
           const t = item.entity;
 
           if (t.type === EntityType.ENEMY) {
-              if (enemiesDrawn >= MAX_VISIBLE) continue;
+              if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
               enemiesDrawn++;
           } else {
               if (poisDrawn >= MAX_VISIBLE) continue;
@@ -3800,6 +3805,12 @@ export class RenderSystem {
           const iy = cy + Math.sin(angle) * RADIUS;
 
           ctx.save();
+          // Far enemies fade toward an alpha floor — still findable, but
+          // a distant straggler doesn't shout like a closing threat.
+          if (t.type === EntityType.ENEMY && dist > ENEMY_FADE_START) {
+              const f = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
+              ctx.globalAlpha = 1 - f * (1 - ENEMY_MIN_ALPHA);
+          }
           ctx.translate(ix, iy);
           ctx.rotate(angle);
 
@@ -4112,10 +4123,37 @@ export class RenderSystem {
       }
 
       // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
+      // Enemy blips pulse so they pop against the static layer; the phase
+      // uses performance.now() (render-side animation, frame-rate smooth).
+      const blip = MINIMAP_CONSTANTS.ENEMY_BLIP;
+      const pulseT = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * blip.PULSE_HZ * Math.PI * 2);
+      const enemyPulseAlpha = blip.PULSE_MIN_ALPHA + (1 - blip.PULSE_MIN_ALPHA) * pulseT;
+      const clampHalf = currentSize / 2 - blip.EDGE_INSET;
       for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const entity = item.entity;
           if (!entity.active) continue;
+
+          if (entity.type === EntityType.ENEMY) {
+              // Out-of-range enemies clamp to the minimap border (square
+              // clamp, slightly dimmer) instead of vanishing, so a distant
+              // straggler still registers at a glance.
+              let ex = item.dx * scale;
+              let ey = item.dy * scale;
+              const extent = Math.max(Math.abs(ex), Math.abs(ey));
+              const clamped = extent > clampHalf;
+              if (clamped) {
+                  const f = clampHalf / extent;
+                  ex *= f; ey *= f;
+              }
+              ctx.globalAlpha = clamped ? enemyPulseAlpha * blip.CLAMPED_ALPHA_MULT : enemyPulseAlpha;
+              ctx.fillStyle = entity.color;
+              ctx.beginPath();
+              ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              continue;
+          }
 
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
@@ -4126,7 +4164,6 @@ export class RenderSystem {
 
           let dotRadius = 1.5;
           if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
-          if (entity.type === EntityType.ENEMY) dotRadius = 2;
 
           ctx.beginPath();
           ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);

@@ -301,6 +301,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
   teaching waves), `getWaveDurationSec()`, `getWaveSpawnBudget()`,
   `buildWaveSpawnList()`
+- `SCORE_CONSTANTS` (tier-scaled kill points, early-clear wave bonus,
+  "+N" popup styling)
 - `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,

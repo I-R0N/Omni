@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -79,6 +79,9 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  // Run score — tier-scaled enemy-kill points + early-clear wave bonuses.
+  // Reset with the rest of the run state in resetAndLoadSelectedMap.
+  private score: number = 0;
   // Damage-text object pool — see ParticleSystem._pool for the same
   // pattern in entity-space.  Damage texts spawn a few per impact and
   // expire on lifetime; reusing the objects across the spawn/despawn
@@ -1179,6 +1182,7 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       waveTimeRemaining: Math.ceil(this.waves.timeRemainingSec),
+      score: this.score,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1273,6 +1277,7 @@ export class GameEngine {
       this.player.shieldHitFlash = 0;
       this.player.ammo = 0;
       this.player.gold = 0;
+      this.score = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -1334,6 +1339,7 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveTimeRemaining: this.waveState === 'active' ? Math.ceil(this.waves.timeRemainingSec) : undefined,
+      score: this.score,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1781,6 +1787,13 @@ export class GameEngine {
   }
 
   private handleEntityDeath = (entity: GameEntity) => {
+      // Score before startExplosion flips isExploding — the flag doubles
+      // as the already-scored guard if a second death dispatch slips in.
+      // Survivors retired at time-up never reach this path (WaveSystem
+      // flips `active` directly), so they correctly award nothing.
+      if (entity.type === EntityType.ENEMY && !entity.isExploding) {
+          this.awardScore(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1), entity.position);
+      }
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
       }
@@ -2108,7 +2121,13 @@ export class GameEngine {
     if (this.currentMap) {
       const waveCtx = this.waveContext();
       if (waveCtx) {
-        this.waves.update(dt, waveCtx, (clearedIndex) => {
+        this.waves.update(dt, waveCtx, (clearedIndex, early) => {
+          if (early) {
+            // Wave-scaled bonus for hunting down the full spawn budget
+            // before time-up; popup over the player so it reads with the
+            // CLEARED EARLY banner.
+            this.awardScore(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (clearedIndex + 1), this.player.position);
+          }
           const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
           if ((clearedIndex + 1) % healthInterval === 0) {
             const hAngle = Math.random() * Math.PI * 2;
@@ -2534,6 +2553,39 @@ export class GameEngine {
         this.applyExplosionAoE(impactPos, proj, target);
     }
   };
+
+  /** Add points to the run score and float a gold "+N" popup at the
+   *  given world position (reuses the pooled damage-text machinery). */
+  private awardScore(points: number, popupPos?: Vector2) {
+      this.score += points;
+      if (!popupPos) return;
+      const vx = (Math.random() - 0.5) * 10;
+      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+      const text = `+${points}`;
+      const pooled = this._damageTextPool.pop();
+      if (pooled) {
+          pooled.id = nextId('score');
+          pooled.position.x = popupPos.x; pooled.position.y = popupPos.y;
+          pooled.text = text;
+          pooled.velocity.x = vx; pooled.velocity.y = vy;
+          pooled.lifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+          pooled.maxLifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+          pooled.color = SCORE_CONSTANTS.POPUP_COLOR;
+          pooled.active = true;
+          this.damageTexts.push(pooled);
+      } else {
+          this.damageTexts.push({
+              id: nextId('score'),
+              position: { x: popupPos.x, y: popupPos.y },
+              text,
+              velocity: { x: vx, y: vy },
+              lifetime: SCORE_CONSTANTS.POPUP_LIFETIME,
+              maxLifetime: SCORE_CONSTANTS.POPUP_LIFETIME,
+              color: SCORE_CONSTANTS.POPUP_COLOR,
+              active: true,
+          });
+      }
+  }
 
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
       // Player damage goes to the HUD list, not the world-space float

@@ -5,6 +5,7 @@ import {
   ENEMY_CONSTANTS,
   WAVE_CONSTANTS,
   WAVE_ANNOUNCE_CONSTANTS,
+  SCORE_CONSTANTS,
   TIMED_WAVE_CONFIG,
   getWaveDurationSec,
   getWaveSpawnBudget,
@@ -80,12 +81,13 @@ export class WaveSystem {
    * Per-sim-step tick: drives the spawn stream, both completion paths
    * (time-up / early clear), survivor cleanup, and the grace countdown
    * into the next wave.  `onCleared` fires once per wave end, on both
-   * paths, so milestone rewards (health drop) keep working.
+   * paths, so milestone rewards (health drop) keep working; `early` is
+   * true on the early-clear path so the caller can pay the score bonus.
    */
   public update(
     dt: number,
     ctx: WaveSpawnContext,
-    onCleared: (waveJustCleared: number) => void,
+    onCleared: (waveJustCleared: number, early: boolean) => void,
   ) {
     if (this.waveState === 'active') {
       this.elapsedSec += dt;
@@ -251,15 +253,17 @@ export class WaveSystem {
 
   /** Transition to 'cleared': banner per end path, milestone callback,
    *  grace countdown start.  Survivor cleanup happens during grace. */
-  private endWave(timedOut: boolean, onCleared: (waveJustCleared: number) => void) {
+  private endWave(timedOut: boolean, onCleared: (waveJustCleared: number, early: boolean) => void) {
     this.waveState = 'cleared';
     const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    const bonus = SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (this.waveIndex + 1);
     this.announcements.push(
       timedOut
         ? { text: `WAVE ${this.waveIndex + 1} ENDED`,         color: '#fbbf24', lifetime: life, maxLifetime: life }
-        : { text: `WAVE ${this.waveIndex + 1} CLEARED EARLY`, color: '#4ade80', lifetime: life, maxLifetime: life },
+        : { text: `WAVE ${this.waveIndex + 1} CLEARED EARLY`, subtext: `+${bonus} PTS`,
+            color: '#4ade80', lifetime: life, maxLifetime: life },
     );
-    onCleared(this.waveIndex);
+    onCleared(this.waveIndex, !timedOut);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
     this.survivorDespawnTimer = 0;
   }

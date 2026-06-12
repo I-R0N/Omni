@@ -847,6 +847,8 @@ export interface EngineStats {
   /** Whole seconds left on the active timed wave's clock; undefined
    *  outside the 'active' phase (grace, menu, difficulty "None"). */
   waveTimeRemaining?: number;
+  /** Run score — tier-scaled kill points + early-clear wave bonuses. */
+  score?: number;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
