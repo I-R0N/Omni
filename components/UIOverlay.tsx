@@ -290,6 +290,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('FPS', stats.fps)}
                 {statRow('Wave', stats.waveNumber ?? 1)}
                 {statRow('State', stats.waveStatus ?? '—')}
+                {statRow('Wave timer', stats.waveTimeRemaining !== undefined ? `${stats.waveTimeRemaining}s` : '—')}
                 {/* Total entity count with a display-only filter:
                     total / active (awake) / asleep (dynamic-sleeping). */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -583,6 +584,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               >
                 <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
                   Wave {stats.waveNumber ?? 1}
+                  {stats.waveTimeRemaining !== undefined && (
+                    <span className="text-cyan-300"> — {stats.waveTimeRemaining}s</span>
+                  )}
                 </span>
                 {isGrace && (
                   <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">

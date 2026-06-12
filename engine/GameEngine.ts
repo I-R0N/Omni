@@ -158,10 +158,8 @@ export class GameEngine {
   // call sites that still read/write them directly.
   private get waveIndex(): number { return this.waves.waveIndex; }
   private set waveIndex(v: number) { this.waves.waveIndex = v; }
-  private get waveEnemyIds(): Set<string> { return this.waves.waveEnemyIds; }
-  private set waveEnemyIds(v: Set<string>) { this.waves.waveEnemyIds = v; }
-  private get waveState(): 'inactive' | 'active' | 'cleared' | 'complete' { return this.waves.waveState; }
-  private set waveState(v: 'inactive' | 'active' | 'cleared' | 'complete') { this.waves.waveState = v; }
+  private get waveState(): 'inactive' | 'active' | 'cleared' { return this.waves.waveState; }
+  private set waveState(v: 'inactive' | 'active' | 'cleared') { this.waves.waveState = v; }
   private get waveGraceTimer(): number { return this.waves.waveGraceTimer; }
   private set waveGraceTimer(v: number) { this.waves.waveGraceTimer = v; }
 
@@ -1180,6 +1178,7 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveStatus: 'active',
       waveGraceTimer: undefined,
+      waveTimeRemaining: Math.ceil(this.waves.timeRemainingSec),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1320,8 +1319,8 @@ export class GameEngine {
     this.lastTime = time;
 
     // Report stats
-    const wsMap: Record<string, 'active' | 'cleared' | 'complete'> = {
-      inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
+    const wsMap: Record<string, 'active' | 'cleared'> = {
+      inactive: 'active', active: 'active', cleared: 'cleared'
     };
     this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
@@ -1334,6 +1333,7 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+      waveTimeRemaining: this.waveState === 'active' ? Math.ceil(this.waves.timeRemainingSec) : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2102,24 +2102,25 @@ export class GameEngine {
         return; // Skip controls while exploding
     }
 
-    // Wave completion + grace-period countdown — delegated to WaveSystem.
-    // On wave clear we drop a health pickup every Nth wave (difficulty-scaled).
+    // Timed-wave tick — spawn stream, time-up / early-clear completion,
+    // survivor cleanup, grace countdown into the next wave.  On wave end we
+    // drop a health pickup every Nth wave (difficulty-scaled).
     if (this.currentMap) {
-      this.waves.checkCompletion(this.currentMap.entities, (clearedIndex) => {
-        const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
-        if ((clearedIndex + 1) % healthInterval === 0) {
-          const hAngle = Math.random() * Math.PI * 2;
-          const hDist  = 20 + Math.random() * 80; // 20–100 units from player
-          const hPos   = {
-            x: this.player.position.x + Math.cos(hAngle) * hDist,
-            y: this.player.position.y + Math.sin(hAngle) * hDist,
-          };
-          this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
-        }
-      });
-
-      const graceCtx = this.waveContext();
-      if (graceCtx) this.waves.tickGrace(dt, graceCtx);
+      const waveCtx = this.waveContext();
+      if (waveCtx) {
+        this.waves.update(dt, waveCtx, (clearedIndex) => {
+          const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
+          if ((clearedIndex + 1) % healthInterval === 0) {
+            const hAngle = Math.random() * Math.PI * 2;
+            const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+            const hPos   = {
+              x: this.player.position.x + Math.cos(hAngle) * hDist,
+              y: this.player.position.y + Math.sin(hAngle) * hDist,
+            };
+            this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+          }
+        });
+      }
     }
 
     // Auto-collapse minimap
@@ -3160,8 +3161,8 @@ export class GameEngine {
   // --- WAVE SYSTEM ---
 
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
-   *  tiny helper so every wave entry point (init / grace tick / skip) goes
-   *  through the same factory. */
+   *  tiny helper so every wave entry point (init / update tick / skip)
+   *  goes through the same factory. */
   private waveContext(): WaveSpawnContext | null {
     if (!this.currentMap) return null;
     // Read the live window size + camera zoom at spawn time so a recent
@@ -3175,23 +3176,30 @@ export class GameEngine {
       entities: this.currentMap.entities,
       player: this.player,
       physics: this.physics,
+      entityIndex: this.entityIndex,
       enemyScale: this.enemyScale,
       difficultyLevel: this.difficultyLevel,
       viewportHalfDiagonal,
+      onSurvivorDespawn: this.handleSurvivorDespawn,
     };
   }
 
-  // Thin wrappers kept for internal call-site compatibility — delegate to WaveSystem.
+  /** Cover an on-screen survivor despawn (timed wave ended with enemies
+   *  alive) with a small puff in the enemy's colour so the removal reads
+   *  as a warp-out instead of a silent blink. */
+  private handleSurvivorDespawn = (e: GameEntity) => {
+    this.spawnParticles(e.position, 10, e.color || '#ffffff', {
+      speedMin: 1, speedMax: 3,
+      sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.25, lifetimeMax: 0.5,
+    });
+  };
+
+  // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
     this.waves.init(ctx);
-  }
-
-  private spawnWave(index: number) {
-    const ctx = this.waveContext();
-    if (!ctx) return;
-    this.waves.spawn(index, ctx);
   }
 
 

@@ -2089,15 +2089,43 @@ export const WAVE_CONSTANTS = {
   SPAWN_RING_SPREAD: 200,
 };
 
-// Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
-// The pattern is always: rammer → shooter → mixed (every PATTERN_LENGTH waves).
-// Enemy count starts at INFINITE_BASE_COUNT and grows by INFINITE_COUNT_PER_SET
-// each set (group of PATTERN_LENGTH waves), capped at INFINITE_MAX_COUNT.
-export const WAVE_CONFIG = {
-  PATTERN_LENGTH: 3,           // waves per set (rammer, shooter, mixed)
-  INFINITE_BASE_COUNT: 4,      // enemy count for the first infinite set
-  INFINITE_COUNT_PER_SET: 1,   // +1 enemy per set (every 3 waves)
-  INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
+// ── Timed-wave config ────────────────────────────────────────────────────────
+// Waves are timed windows: enemies stream in continuously until the clock
+// runs out.  Killing the full spawn budget before time-up ends the wave
+// early; survivors at time-up are despawned during the grace period
+// (offscreen-first, no drops) so the field is clear before the next wave.
+export const TIMED_WAVE_CONFIG = {
+  // Duration scaling: wave 1 = BASE, +PER_WAVE each wave, capped.
+  BASE_DURATION_SEC: 30,
+  DURATION_PER_WAVE_SEC: 5,
+  DURATION_CAP_SEC: 90,
+  // Spawn stream: unscaled budget = floor(duration / interval), where the
+  // interval shrinks per wave so later waves are denser as well as longer.
+  // DIFFICULTY_SCALES multiplies the budget (same duration → lower
+  // difficulty = proportionally slower spawn rate; 0 disables waves).
+  BASE_SPAWN_INTERVAL_SEC: 5.0,
+  SPAWN_INTERVAL_DECAY_PER_WAVE: 0.15,
+  MIN_SPAWN_INTERVAL_SEC: 1.8,
+  MAX_SPAWN_BUDGET: 30,        // per-wave ceiling regardless of duration math
+  // Final-quarter crescendo: spawn density multiplier over the last
+  // FRACTION of the wave window (the schedule is precomputed from this
+  // piecewise density, so the budget total is exact).
+  FINAL_QUARTER_FRACTION: 0.25,
+  FINAL_QUARTER_RATE_MULT: 1.5,
+  // Stream pressure valve: scheduled spawns are held while this many wave
+  // enemies are alive; the backlog then drains at most one spawn per
+  // BACKLOG_MIN_GAP_SEC so a freed cap never dumps a clump at once.
+  MAX_CONCURRENT_ENEMIES: 10,
+  BACKLOG_MIN_GAP_SEC: 0.4,
+  // Wave-index → tier-weight row mapping for the weighted-random mix
+  // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
+  TIER_SET_LENGTH: 3,
+  // Survivor cleanup during grace: one despawn per interval, offscreen
+  // entities first; on-screen stragglers only go once the remaining grace
+  // falls below FORCE_FRAC of the full grace period (with a particle puff
+  // via GameEngine so nothing silently blinks out under the player).
+  SURVIVOR_DESPAWN_INTERVAL_SEC: 0.35,
+  SURVIVOR_FORCE_DESPAWN_GRACE_FRAC: 0.45,
 };
 
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number
@@ -2317,76 +2345,106 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
-// 18 waves across 6 sets of 3.  Each set: [Ramming-only, Shooting-only, Mixed].
-// Difficulty blend per set:
-//   Set 1: L1       Set 2: ½L1+½L2   Set 3: L2
-//   Set 4: ⅓L1+⅓L2+⅓L3   Set 5: ½L2+½L3   Set 6: L3
+// Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each
+// enemy role gets a clean introduction (ram-only → shoot-only → mixed).  The
+// composition is cycled to fill the timed wave's spawn budget, so counts
+// express the mix ratio, not the absolute spawn total.  Waves 4+ roll a
+// weighted-random mix instead — see buildWaveSpawnList().
 //
-// powerup: weapon dropped when the wave is cleared (null = no drop, auto-advance;
-//          on the final wave null also triggers the victory state).
-export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null }[] = [
-
-  // ── Set 1 — Level 1 only ──────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }], powerup: null },                                                    // W1  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }], powerup: null },                                                    // W2  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }], powerup: WeaponType.BURST },   // W3  Mixed
-
-  // ── Set 2 — ½ L1, ½ L2 ───────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }], powerup: null },     // W4  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: null },     // W5  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }], powerup: WeaponType.SHOTGUN }, // W6  Mixed
-
-  // ── Set 3 — Level 2 only ─────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 4 }], powerup: null },                                                    // W7  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 4 }], powerup: null },                                                    // W8  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: WeaponType.HOMING }, // W9  Mixed
-
-  // ── Set 4 — ⅓ L1, ⅓ L2, ⅓ L3 ────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },    // W10 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },    // W11 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: WeaponType.CANNON }, // W12 Mixed
-
-  // ── Set 5 — ½ L2, ½ L3 ───────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },     // W13 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W14 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
-
-  // ── Set 6 — Level 3 only ─────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed
+// (The old per-wave `powerup` field was dead code — powerup drops were removed
+// from DropSystem — and is gone; weapon unlocks return with the (h) bosses.)
+export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[] }[] = [
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
 ];
 
-/**
- * Returns the wave definition for any wave index (0-based, infinite).
- *
- * Indices 0–17 map directly to the hand-authored WAVE_DEFINITIONS above.
- * Indices 18+ enter the infinite phase: pure tier-3 enemies, all-rammer →
- * all-shooter → mixed pattern, with enemy count increasing by
- * WAVE_CONFIG.INFINITE_COUNT_PER_SET each set, capped at INFINITE_MAX_COUNT.
- */
-export function generateWaveDef(index: number): { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null } {
-  if (index < WAVE_DEFINITIONS.length) return WAVE_DEFINITIONS[index];
+// Tier-weight progression for the weighted-random waves (index 3+).  Row =
+// min(floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH), last), so the blend
+// walks L1 → ½L1+½L2 → L2 → ⅓ each → ½L2+½L3 → L3 over the first 18 waves
+// and stays pure tier-3 from then on.  Shape: [w_tier1, w_tier2, w_tier3].
+const WAVE_TIER_WEIGHTS: [number, number, number][] = [
+  [1, 0, 0],
+  [0.5, 0.5, 0],
+  [0, 1, 0],
+  [1 / 3, 1 / 3, 1 / 3],
+  [0, 0.5, 0.5],
+  [0, 0, 1],
+];
 
-  const infiniteIdx = index - WAVE_DEFINITIONS.length;
-  const set     = Math.floor(infiniteIdx / WAVE_CONFIG.PATTERN_LENGTH);
-  const pattern = infiniteIdx % WAVE_CONFIG.PATTERN_LENGTH;
+const SUBTYPE_BY_ROLE_TIER: Record<EnemyRole, EnemySubtype[]> = {
+  [EnemyRole.RAMMING]:  [EnemySubtype.RAMMER_1,  EnemySubtype.RAMMER_2,  EnemySubtype.RAMMER_3],
+  [EnemyRole.SHOOTING]: [EnemySubtype.SHOOTER_1, EnemySubtype.SHOOTER_2, EnemySubtype.SHOOTER_3],
+};
 
-  const count = Math.min(
-    WAVE_CONFIG.INFINITE_BASE_COUNT + set * WAVE_CONFIG.INFINITE_COUNT_PER_SET,
-    WAVE_CONFIG.INFINITE_MAX_COUNT,
+/** Length of the timed window for a 0-based wave index, in seconds. */
+export function getWaveDurationSec(index: number): number {
+  return Math.min(
+    TIMED_WAVE_CONFIG.BASE_DURATION_SEC + index * TIMED_WAVE_CONFIG.DURATION_PER_WAVE_SEC,
+    TIMED_WAVE_CONFIG.DURATION_CAP_SEC,
   );
+}
 
-  const half = Math.ceil(count / 2);
-  const enemies: { subtype: EnemySubtype; count: number }[] =
-    pattern === 0 ? [{ subtype: EnemySubtype.RAMMER_3,  count }]
-    : pattern === 1 ? [{ subtype: EnemySubtype.SHOOTER_3, count }]
-    : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
+/** Unscaled total spawn budget for a wave (before DIFFICULTY_SCALES). */
+export function getWaveSpawnBudget(index: number): number {
+  const interval = Math.max(
+    TIMED_WAVE_CONFIG.MIN_SPAWN_INTERVAL_SEC,
+    TIMED_WAVE_CONFIG.BASE_SPAWN_INTERVAL_SEC - index * TIMED_WAVE_CONFIG.SPAWN_INTERVAL_DECAY_PER_WAVE,
+  );
+  return Math.min(
+    TIMED_WAVE_CONFIG.MAX_SPAWN_BUDGET,
+    Math.max(1, Math.floor(getWaveDurationSec(index) / interval)),
+  );
+}
 
-  return { enemies, powerup: null };
+/** Roll a 0-based tier from a [w1, w2, w3] weight row. */
+function rollTier(weights: [number, number, number]): number {
+  const r = Math.random() * (weights[0] + weights[1] + weights[2]);
+  if (r < weights[0]) return 0;
+  if (r < weights[0] + weights[1]) return 1;
+  return 2;
+}
+
+/**
+ * Build the ordered subtype list a timed wave will spawn (length = budget).
+ *
+ * Scripted waves (index < WAVE_DEFINITIONS.length) cycle their authored
+ * composition to fill the budget.  Later waves roll each slot independently:
+ * 50/50 ram/shoot role, tier from the WAVE_TIER_WEIGHTS row for the wave's
+ * set.  A variety guarantee re-rolls one slot's role when a random wave with
+ * budget ≥ 3 lands all-rammer or all-shooter, so every such wave mixes types.
+ */
+export function buildWaveSpawnList(index: number, budget: number): EnemySubtype[] {
+  const list: EnemySubtype[] = [];
+  if (index < WAVE_DEFINITIONS.length) {
+    const flat: EnemySubtype[] = [];
+    for (const g of WAVE_DEFINITIONS[index].enemies) {
+      for (let i = 0; i < g.count; i++) flat.push(g.subtype);
+    }
+    for (let i = 0; i < budget; i++) list.push(flat[i % flat.length]);
+    return list;
+  }
+
+  const set = Math.min(
+    Math.floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH),
+    WAVE_TIER_WEIGHTS.length - 1,
+  );
+  const weights = WAVE_TIER_WEIGHTS[set];
+  for (let i = 0; i < budget; i++) {
+    const role = Math.random() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
+    list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
+  }
+
+  if (budget >= 3) {
+    const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
+    const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
+    if (!hasRam || !hasShoot) {
+      const k = Math.floor(Math.random() * budget);
+      const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
+      list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
+    }
+  }
+  return list;
 }
 
 /**
