@@ -643,6 +643,18 @@ export const COLLISION_CONFIG = {
   ELASTICITY: 0.5, // Bounciness (0 to 1)
   CORRECTION_PERCENT: 0.2, // How much overlap to fix per frame
   SLOP: 0.01, // Penetration allowance to prevent jitter
+  // Mass-ratio compression for the impulse's velocity split.  The
+  // velocity-resolution step at every impulse site uses
+  // invMass^MASS_BIAS_EXPONENT instead of the raw inverse mass, so a
+  // light fast entity visibly shoves a heavy slow one (p = mv reads
+  // mass-dominant at true physics: a 16× heavier target picks up
+  // only ~9 % of the closing speed; at 0.5 it picks up ~30 %).
+  // 1.0 = exact physics; 0 = mass-agnostic equal split.  Equal-mass
+  // pairs and infinite-mass (static) entities are unaffected at any
+  // exponent.  Positional correction keeps the TRUE inverse-mass
+  // split — overlap separation should stay mass-faithful so heavy
+  // bodies aren't teleported by light debris.
+  MASS_BIAS_EXPONENT: 0.5,
 
   // Damage Values
   DAMAGE: {
@@ -1357,6 +1369,16 @@ export const STRUCTURE_CONSTANTS = {
   HEALTH: 1, // Single shot destroy
   MASS: Infinity, // Immovable walls
   CRASH_VELOCITY_THRESHOLD: 4, // Player speed needed to break through
+  // Fraction of velocity the player KEEPS per breakable-tile crash-
+  // through.  At 0.5 a 3-tile plow retained ~12 % of entry speed and
+  // read as bouncing off the cluster; 0.65 retains ~27 % and reads as
+  // shoving through while still costing something.
+  // Static tiles take the full cut.  Mobile shards scale the cut by
+  // min(1, shard.mass / player.mass) and receive the shed momentum
+  // (Δv capped at (1 − retention) × player speed for light shards),
+  // so plowing a pebble field doesn't bleed the player dry and the
+  // debris of a killed rock carries the crash velocity forward.
+  CRASH_VELOCITY_RETENTION: 0.65,
   // Momentum threshold (asteroid.mass × impactSpeed) above which an
   // asteroid plows through a tile permanently.  At 200 a cruising
   // size-100 merged cluster just barely crashes, while a 20-mass
