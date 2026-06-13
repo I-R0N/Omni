@@ -315,15 +315,19 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a
-  burst/coast AI — slow coasting (0.16× player cruise) punctuated by
-  darts (0.52×, still below cruise so a steady chase always closes) on
-  a random timer or when the player closes inside PANIC_RADIUS (panic
-  darts bias away from the player; a cooldown guarantees coast windows
-  between them).  Both speed states are scaled live by the DBG
-  `SNITCH_SPEED_CYCLE` multiplier (Player ▸ "Snitch spd").  Catching it
-  pays `SCORE_CONSTANTS.SNITCH_POINTS` and ends the current wave via
-  `WaveSystem.endWaveBySnitch` (no early-clear bonus on top); the next
-  wave spawns a fresh one.  Catch mode is the DBG "Snitch catch"
+  burst/coast AI.  Speed ramps PER WAVE: headline (dart) speed =
+  0.05× player cruise × wave number (capped at 1.2×), with coast
+  drifting at 0.30× of that — so wave 1 is nearly stationary and it
+  climbs each wave (the persistent snitch reads the live wave
+  counter).  Darts fire on a random timer or when the player closes
+  inside PANIC_RADIUS (panic darts bias away from the player; a
+  cooldown guarantees coast windows between them).  The whole ramp is
+  scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Player ▸
+  "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`,
+  wipes every live enemy for `SNITCH_SWEEP_KILL_FRACTION` (half) of its
+  normal kill value via the full death path, and ends the current wave
+  via `WaveSystem.endWaveBySnitch` (no early-clear bonus on top); the
+  next wave spawns a fresh one.  Catch mode is the DBG "Snitch catch"
   toggle, surfaced as `EngineStats.snitchCatchMode`.  Lifecycle lives
   in `GameEngine.updateSnitch` / `spawnSnitch`.
 - `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy

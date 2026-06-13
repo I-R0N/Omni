@@ -2127,6 +2127,9 @@ export const SCORE_CONSTANTS = {
   // immediately (no early-clear bonus stacks on top).  150 × 10: a nod
   // to quidditch's 150, scaled to sit above a typical full wave's kills.
   SNITCH_POINTS: 1500,
+  // Catching the snitch also wipes every live enemy on the field, each
+  // worth this fraction of its normal kill value (a board-clear bonus).
+  SNITCH_SWEEP_KILL_FRACTION: 0.5,
   POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
   POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
 };
@@ -2187,8 +2190,18 @@ export const SNITCH_CONSTANTS = {
   // panic darts so a persistent chaser always gets another chance.
   // Speed fractions apply to the friction-limited player cruise
   // (acceleration/(1−friction), clamped by maxSpeed).
-  COAST_SPEED_FRACTION: 0.16, // lazy drift — well under player cruise, easy to close on
-  DART_SPEED_FRACTION: 0.52,  // burst stays BELOW player cruise so a steady chase always gains
+  // Per-wave speed ramp.  The snitch's headline (dart) speed this wave is
+  // WAVE_SPEED_STEP × waveNumber as a fraction of player cruise — wave 1 =
+  // 0.05×, wave 2 = 0.10×, wave 3 = 0.15×, … — capped at WAVE_SPEED_MAX so
+  // it never gets hopelessly uncatchable.  Coast drifts at COAST_RATIO of
+  // that, preserving the burst/coast contrast (and the catch window) at
+  // every wave.  The snitch persists across waves, so it simply speeds up
+  // as the wave counter climbs.  The DBG SNITCH_SPEED_CYCLE multiplier
+  // scales the whole thing on top.
+  WAVE_SPEED_STEP: 0.05,
+  WAVE_SPEED_MAX: 1.2,
+  COAST_RATIO: 0.30,
+  DART_RATIO: 1.0,
   SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
   SPEED_EASE_COAST: 2.0, // 1/s ease back down — visible deceleration tail
   COAST_STEER_RATE: 0.06, // per-60Hz-frame velocity lerp while coasting

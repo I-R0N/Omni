@@ -327,7 +327,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
-                  'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling both its coast and dart speeds live. Lower = easier to catch. Base coast/dart are 0.16×/0.52× of player cruise, so even 2× keeps the dart near player speed.')}
+                  'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-wave ramp. The snitch starts at 0.05× player cruise on wave 1 and gains 0.05× each wave (capped at 1.2×); this knob scales that for testing. Lower = easier to catch.')}
               </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}

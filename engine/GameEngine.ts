@@ -1828,13 +1828,16 @@ export class GameEngine {
       this.currentMap.entities.length = writeIdx;
   }
 
-  private handleEntityDeath = (entity: GameEntity) => {
+  private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
       // Score before startExplosion flips isExploding — the flag doubles
       // as the already-scored guard if a second death dispatch slips in.
       // Survivors retired at time-up never reach this path (WaveSystem
       // flips `active` directly), so they correctly award nothing.
+      // scoreScale (default 1) lets the snitch board-clear pay a fraction
+      // of the normal kill value per swept enemy.
       if (entity.type === EntityType.ENEMY && !entity.isExploding) {
-          this.awardScore(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1), entity.position);
+          const scale = opts?.scoreScale ?? 1;
+          this.awardScore(Math.round(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1) * scale), entity.position);
       }
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
@@ -3372,9 +3375,14 @@ export class GameEngine {
     // (the burst), visibly slower on the way back down (the catch window
     // opens gradually as the dart bleeds off).
     const darting = this.snitchAiState === 'dart';
-    const speedTarget = darting
-        ? SNITCH_CONSTANTS.DART_SPEED_FRACTION
-        : SNITCH_CONSTANTS.COAST_SPEED_FRACTION;
+    // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
+    // cruise per wave, capped; coast is a fixed fraction of it.  Read live
+    // from the wave counter so the persistent snitch speeds up each wave.
+    const waveBase = Math.min(
+      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.waves.waveIndex + 1),
+    );
+    const speedTarget = waveBase * (darting ? SNITCH_CONSTANTS.DART_RATIO : SNITCH_CONSTANTS.COAST_RATIO);
     const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
     this.snitchSpeedMult += (speedTarget - this.snitchSpeedMult) * Math.min(1, ease * dt);
 
@@ -3495,7 +3503,11 @@ export class GameEngine {
     this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
         + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
     this.snitchPanicCooldown = 0;
-    this.snitchSpeedMult = SNITCH_CONSTANTS.COAST_SPEED_FRACTION;
+    const waveBase = Math.min(
+      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.waves.waveIndex + 1),
+    );
+    this.snitchSpeedMult = waveBase * SNITCH_CONSTANTS.COAST_RATIO;
     this.snitchDartAway = false;
   }
 
@@ -3510,6 +3522,20 @@ export class GameEngine {
       sizeMin: 1, sizeMax: 3,
       lifetimeMin: 0.3, lifetimeMax: 0.8,
     });
+    // Board clear: the catch wipes every live enemy on the field, each
+    // worth half its normal kill value (full death path — explosions,
+    // enemy shards, half-point "+N" popups).  Snapshot the count first so
+    // the shards/particles those deaths append aren't re-scanned.
+    if (this.currentMap) {
+      const ents = this.currentMap.entities;
+      const n = ents.length;
+      for (let i = 0; i < n; i++) {
+        const e = ents[i];
+        if (e.type === EntityType.ENEMY && e.active && !e.isExploding) {
+          this.handleEntityDeath(e, { scoreScale: SCORE_CONSTANTS.SNITCH_SWEEP_KILL_FRACTION });
+        }
+      }
+    }
     this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
   }
 
