@@ -343,6 +343,34 @@ export class WaveSystem {
     return true;
   }
 
+  /**
+   * Snitch caught — immediately end the active wave.  GameEngine awards
+   * SCORE_CONSTANTS.SNITCH_POINTS before calling this; `points` is only
+   * echoed into the banner subtext.  Same 'cleared' semantics as the
+   * natural completion paths: onCleared fires (early = false, so the
+   * early-clear bonus does NOT stack on the snitch payout) and survivors
+   * despawn during the normal grace countdown.
+   */
+  public endWaveBySnitch(
+    points: number,
+    onCleared: (waveJustCleared: number, early: boolean) => void,
+  ): boolean {
+    if (this.waveState !== 'active') return false;
+    this.waveState = 'cleared';
+    const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    this.announcements.push({
+      text: 'SNITCH CAUGHT',
+      subtext: `WAVE ${this.waveIndex + 1} ENDED  +${points} PTS`,
+      color: '#fde047',
+      lifetime: life,
+      maxLifetime: life,
+    });
+    onCleared(this.waveIndex, false);
+    this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
+    this.survivorDespawnTimer = 0;
+    return true;
+  }
+
   /** Clear all queued announcements — used on restart. */
   public resetAnnouncements() {
     this.announcements = [];

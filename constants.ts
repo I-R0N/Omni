@@ -2116,6 +2116,17 @@ export const WAVE_CONSTANTS = {
 export const SCORE_CONSTANTS = {
   POINTS_PER_TIER: 100,           // tier-1 kill = 100, tier-2 = 200, tier-3 = 300
   EARLY_CLEAR_BONUS_PER_WAVE: 50, // early-clear bonus = this × wave number
+  // Shard / tile destruction — player-attributed kills only (see
+  // GameEntity.killedByPlayer; environmental deaths award nothing).
+  // Tiles pay per point of maxHealth so tiered materials (plastic,
+  // metal × densityTier) are worth proportionally more than glass.
+  // Nebula variants are excluded — ambient clouds shatter constantly.
+  SHARD_DESTROY_POINTS: 5,        // flat, per mobile shard
+  TILE_DESTROY_POINTS_PER_HP: 10, // glass 10, plastic 30, metal 10 × tier…
+  // Snitch catch — large flat payout; catching it also ends the wave
+  // immediately (no early-clear bonus stacks on top).  150 × 10: a nod
+  // to quidditch's 150, scaled to sit above a typical full wave's kills.
+  SNITCH_POINTS: 1500,
   POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
   POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
 };
@@ -2157,6 +2168,40 @@ export const TIMED_WAVE_CONFIG = {
   // via GameEngine so nothing silently blinks out under the player).
   SURVIVOR_DESPAWN_INTERVAL_SEC: 0.35,
   SURVIVOR_FORCE_DESPAWN_GRACE_FRAC: 0.45,
+};
+
+// ── Snitch ───────────────────────────────────────────────────────────────────
+// One golden-comet snitch spawns per timed wave and rides the asteroid flow
+// field at near-player speed.  Catching it (collide or shoot — catch mode is
+// a DBG toggle while playtesting) pays SCORE_CONSTANTS.SNITCH_POINTS and
+// ends the wave immediately.  An uncaught snitch despawns with its wave.
+export const SNITCH_CONSTANTS = {
+  SIZE: 14,              // core diameter (world units)
+  MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
+  // Target speed = player terminal cruise × this fraction.  Cruise is the
+  // friction-limited acceleration/(1−friction) (clamped by maxSpeed), so
+  // the snitch is marginally outrunnable on straights while its weaving
+  // flow-line path rewards cutting corners.
+  SPEED_FRACTION: 0.85,
+  STEER_RATE: 0.12,      // per-60Hz-frame lerp toward the flow target
+  // Wander: the sampled flow direction is rotated by sin(t·FREQ + phase)·AMP
+  // so the snitch weaves around its streamline instead of railing it.
+  WANDER_AMPLITUDE: 0.9, // radians (~±51°)
+  WANDER_FREQ: 2.2,      // rad/s
+  // Catch geometry.  Collide mode: hull-to-hull contact plus this grace.
+  // Shoot mode: any player-owned projectile core within this radius.
+  COLLIDE_GRACE: 8,
+  SHOOT_RADIUS: 18,
+  // Spawn ring — same off-screen contract as wave-enemy spawns.
+  SPAWN_MARGIN: 240,     // world units beyond the viewport half-diagonal
+  // Visuals — golden comet: hot core (RenderSystem isSnitch branch), gold
+  // trail strip (TrailPoint array, projectile-style strip), sparkle motes.
+  CORE_COLOR: '#fde047',
+  GLOW_COLOR: '#f59e0b',
+  TRAIL_LIFETIME: 0.5,   // seconds per trail point — sets the comet-tail length
+  TRAIL_SCALE: 0.9,
+  SPARKLE_COLORS: ['#fde047', '#fbbf24', '#fff7cc', '#f59e0b'] as string[],
+  CATCH_BURST_COUNT: 40, // gold particle burst on catch
 };
 
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number

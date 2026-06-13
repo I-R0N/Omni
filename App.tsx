@@ -257,6 +257,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleAsteroidFlow();
   };
 
+  const handleToggleSnitchCatchMode = () => {
+      if (engineRef.current) engineRef.current.toggleSnitchCatchMode();
+  };
+
   const handleToggleFFOverlayVectors = () => {
       if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
   };
@@ -356,6 +360,7 @@ const App: React.FC = () => {
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}

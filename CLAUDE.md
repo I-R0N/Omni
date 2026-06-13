@@ -149,7 +149,9 @@ Per-frame `loop()`:
         merge/regen/shatter all moved to ShardSystem)
      5. `WaveSystem.update()` — timed-wave tick: spawn stream,
         time-up / early-clear completion, survivor despawn, grace
-        countdown
+        countdown.  Followed by `updateSnitch()` — per-wave snitch
+        lifecycle: flow-field steering, comet-tail emission, catch
+        check (collide/shoot per DBG toggle), wave-end on catch
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         ammo-drop merge pass (`DropSystem.mergeAmmoDrops`; `dropMerge`
         task)
@@ -301,8 +303,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
   teaching waves), `getWaveDurationSec()`, `getWaveSpawnBudget()`,
   `buildWaveSpawnList()`
-- `SCORE_CONSTANTS` (tier-scaled kill points, early-clear wave bonus,
-  "+N" popup styling)
+- `SCORE_CONSTANTS` (tier-scaled kill points; player-attributed
+  shard/tile destruction points — flat per shard, per-maxHealth for
+  tiles, nebula variants excluded, attribution via the
+  `GameEntity.killedByPlayer` stamp set by the projectile / crash /
+  lightning / cannon-AoE damage paths; snitch catch payout;
+  early-clear wave bonus; "+N" popup styling)
+- `SNITCH_CONSTANTS` — per-wave golden-comet snitch: a non-drop
+  INTERACTABLE (`isSnitch`) that rides the asteroid flow field at a
+  fraction of the player's terminal cruise with a sinusoidal weave.
+  Catching it (collide or shoot — DBG "Snitch catch" toggle, surfaced
+  as `EngineStats.snitchCatchMode`) pays `SCORE_CONSTANTS
+  .SNITCH_POINTS` and ends the wave via `WaveSystem.endWaveBySnitch`
+  (no early-clear bonus on top); uncaught snitches despawn with
+  their wave.  Lifecycle lives in `GameEngine.updateSnitch`.
 - `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,

@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -181,6 +181,20 @@ export class GameEngine {
   // toward zero velocity over a few seconds and then only move when
   // collided with or pulled by gravity.  Default true.
   private asteroidFlowEnabled: boolean = true;
+
+  // ── Snitch state ──────────────────────────────────────────────────────
+  // One quidditch-style snitch per timed wave: rides the asteroid flow
+  // field at near-player speed; catching it pays SCORE_CONSTANTS
+  // .SNITCH_POINTS and ends the wave (see updateSnitch / catchSnitch).
+  private snitch: GameEntity | null = null;
+  // Wave index the live snitch belongs to — spawn guard so each wave gets
+  // exactly one, including across skip() (which bypasses onCleared).
+  private snitchWaveIndex: number = -1;
+  // Wander clock for the weave oscillation (sim-time accumulated).
+  private snitchTime: number = 0;
+  // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
+  private snitchCatchMode: 'collide' | 'shoot' = 'collide';
+
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
   private ffOverlayVectors:   boolean = false;
@@ -789,6 +803,12 @@ export class GameEngine {
     this.asteroidFlowEnabled = !this.asteroidFlowEnabled;
   }
 
+  /** Toggle the snitch catch interaction (collide ↔ shoot) — DBG aid for
+   *  playtesting which catch mode feels better. */
+  public toggleSnitchCatchMode() {
+    this.snitchCatchMode = this.snitchCatchMode === 'collide' ? 'shoot' : 'collide';
+  }
+
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
   public toggleFFOverlayVectors() {
     this.ffOverlayVectors = !this.ffOverlayVectors;
@@ -1219,6 +1239,7 @@ export class GameEngine {
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
+      snitchCatchMode: this.snitchCatchMode,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -1266,6 +1287,11 @@ export class GameEngine {
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
       this.waveAnnouncements = [];
+      // Snitch entity dies with the old map's entity list — just drop the
+      // references so the next wave spawns a fresh one.
+      this.snitch = null;
+      this.snitchWaveIndex = -1;
+      this.snitchTime = 0;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Reset Player
@@ -1376,6 +1402,7 @@ export class GameEngine {
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
+      snitchCatchMode: this.snitchCatchMode,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -1818,6 +1845,21 @@ export class GameEngine {
               entity.active = true;
               return;
           }
+          // Shard/tile destruction points — player-attributed kills only
+          // (flag stamped by the projectile / crash / lightning / AoE
+          // damage paths).  Cleared immediately so a regen-reused tile
+          // entity can't re-award without a fresh player kill.  Nebula
+          // variants are excluded: ambient clouds shatter constantly and
+          // would spam micro-payouts.
+          if (entity.killedByPlayer) {
+              entity.killedByPlayer = undefined;
+              if (!isNebula) {
+                  const points = isStaticTile
+                      ? SCORE_CONSTANTS.TILE_DESTROY_POINTS_PER_HP * Math.max(1, Math.round(entity.maxHealth))
+                      : SCORE_CONSTANTS.SHARD_DESTROY_POINTS;
+                  this.awardScore(points, entity.position);
+              }
+          }
           // Tile destruction patches the analytical flow field so
           // pursuing enemies don't path through holes that closed
           // since map load.  Mobile shards have no flow-field
@@ -2121,26 +2163,13 @@ export class GameEngine {
     if (this.currentMap) {
       const waveCtx = this.waveContext();
       if (waveCtx) {
-        this.waves.update(dt, waveCtx, (clearedIndex, early) => {
-          if (early) {
-            // Wave-scaled bonus for hunting down the full spawn budget
-            // before time-up; popup over the player so it reads with the
-            // CLEARED EARLY banner.
-            this.awardScore(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (clearedIndex + 1), this.player.position);
-          }
-          const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
-          if ((clearedIndex + 1) % healthInterval === 0) {
-            const hAngle = Math.random() * Math.PI * 2;
-            const hDist  = 20 + Math.random() * 80; // 20–100 units from player
-            const hPos   = {
-              x: this.player.position.x + Math.cos(hAngle) * hDist,
-              y: this.player.position.y + Math.sin(hAngle) * hDist,
-            };
-            this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
-          }
-        });
+        this.waves.update(dt, waveCtx, this.handleWaveCleared);
       }
     }
+
+    // Snitch tick — spawn for a fresh wave, steer along the flow field,
+    // run the catch check (collide / shoot per the DBG toggle).
+    this.updateSnitch(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -2989,6 +3018,9 @@ export class GameEngine {
 
               if (target.health <= 0 && !target.isExploding) {
                   target.lastImpactDamage = dmg;
+                  // Lightning is a player-only weapon — chain kills are
+                  // player-attributed for shard/tile scoring.
+                  target.killedByPlayer = true;
                   this.handleEntityDeath(target);
               }
           }
@@ -3187,6 +3219,7 @@ export class GameEngine {
                   this.spawnDamageText(e.position, applied, e);
                   if (e.health <= 0 && !e.isExploding) {
                       e.lastImpactDamage = applied;
+                      if (ring.ownerType === EntityType.PLAYER) e.killedByPlayer = true;
                       if (e.type === EntityType.STRUCTURE && dist > 0) {
                           e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
                       }
@@ -3246,6 +3279,200 @@ export class GameEngine {
       lifetimeMin: 0.25, lifetimeMax: 0.5,
     });
   };
+
+  /** Shared wave-completion hook — fires once per wave end on every path
+   *  (time-up, early clear, snitch catch).  Pays the early-clear bonus,
+   *  retires any uncaught snitch, and drops the milestone health pickup. */
+  private handleWaveCleared = (clearedIndex: number, early: boolean) => {
+    if (early) {
+      // Wave-scaled bonus for hunting down the full spawn budget
+      // before time-up; popup over the player so it reads with the
+      // CLEARED EARLY banner.
+      this.awardScore(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (clearedIndex + 1), this.player.position);
+    }
+    // An uncaught snitch leaves with its wave (quiet puff, no points).
+    // No-op on the snitch-catch path — catchSnitch nulls it first.
+    this.despawnSnitch();
+    const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
+    if ((clearedIndex + 1) % healthInterval === 0) {
+      const hAngle = Math.random() * Math.PI * 2;
+      const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+      const hPos   = {
+        x: this.player.position.x + Math.cos(hAngle) * hDist,
+        y: this.player.position.y + Math.sin(hAngle) * hDist,
+      };
+      this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+    }
+  };
+
+  // ── Snitch — quidditch-style wave bonus target ──────────────────────────
+  //
+  // One snitch per timed wave.  It rides the asteroid flow field at a
+  // fraction of the player's terminal cruise with a sinusoidal weave, so
+  // chasing it means riding the same currents it does.  Catching it —
+  // colliding with it or shooting it, per the DBG-toggleable catch mode —
+  // pays SCORE_CONSTANTS.SNITCH_POINTS and ends the wave immediately.
+
+  /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
+   *  emission, and the catch check.  Called from updateGameLogic after the
+   *  wave tick so waveState/waveIndex are fresh. */
+  private updateSnitch(dt: number) {
+    if (!this.currentMap) return;
+    this.snitchTime += dt;
+
+    if (this.waves.waveState === 'active') {
+      // Spawn guard keys on the wave index so every wave gets exactly one
+      // snitch, including across skip() (which never fires onCleared).
+      if (this.snitchWaveIndex !== this.waves.waveIndex) {
+        this.despawnSnitch();
+        this.spawnSnitch();
+      }
+    } else if (this.snitch) {
+      // Defensive sweep for any path that ended the wave without routing
+      // through handleWaveCleared.
+      this.despawnSnitch();
+      return;
+    }
+
+    const s = this.snitch;
+    if (!s || !s.active) return;
+
+    // Steering: sampled flow direction rotated by the wander oscillation,
+    // blended toward at STEER_RATE.  Target speed derives from the
+    // player's friction-limited terminal cruise (same formula as the DBG
+    // thrust tooltip: acceleration/(1−friction), clamped by maxSpeed) so
+    // the chase stays winnable on straights across thrust-mult changes.
+    const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+    const wob = Math.sin(this.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
+        * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
+    const cosW = Math.cos(wob), sinW = Math.sin(wob);
+    const dirX = flow.x * cosW - flow.y * sinW;
+    const dirY = flow.x * sinW + flow.y * cosW;
+    const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+    const cruise = Math.min(
+      moveCfg.maxSpeed,
+      (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction),
+    );
+    const targetSpeed = cruise * SNITCH_CONSTANTS.SPEED_FRACTION;
+    const alpha = Math.min(1, SNITCH_CONSTANTS.STEER_RATE * dt * 60);
+    s.velocity.x += (dirX * targetSpeed - s.velocity.x) * alpha;
+    s.velocity.y += (dirY * targetSpeed - s.velocity.y) * alpha;
+    s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+
+    // Comet tail: decay + emit trail-strip points (rendered like a
+    // projectile trail in gold) and sprinkle sparkle motes behind the core.
+    if (!s.trail) s.trail = [];
+    this.trails.tickTrail(s.trail, dt);
+    const last = s.trail.length > 0 ? s.trail[s.trail.length - 1] : null;
+    const tdx = last ? wrapDeltaX(last.x, s.position.x) : 1;
+    const tdy = last ? wrapDeltaY(last.y, s.position.y) : 1;
+    if (!last || tdx * tdx + tdy * tdy > TRAIL_CONSTANTS.MIN_DISTANCE_SQ) {
+      s.trail.push({
+        x: s.position.x,
+        y: s.position.y,
+        lifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
+        maxLifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
+        scale: SNITCH_CONSTANTS.TRAIL_SCALE,
+      });
+    }
+    const sparkColors = SNITCH_CONSTANTS.SPARKLE_COLORS;
+    this.spawnParticles(s.position, 1, sparkColors[(Math.random() * sparkColors.length) | 0], {
+      speedMin: 0, speedMax: 1.5,
+      sizeMin: 0.5, sizeMax: 1.6,
+      lifetimeMin: 0.15, lifetimeMax: 0.4,
+      positionJitter: SNITCH_CONSTANTS.SIZE * 0.5,
+    });
+
+    // Catch check.
+    if (this.snitchCatchMode === 'collide') {
+      if (this.player.isExploding) return;
+      const dx = wrapDeltaX(s.position.x, this.player.position.x);
+      const dy = wrapDeltaY(s.position.y, this.player.position.y);
+      const r = Math.max(this.player.size.x, this.player.size.y) / 2
+          + SNITCH_CONSTANTS.SIZE / 2 + SNITCH_CONSTANTS.COLLIDE_GRACE;
+      if (dx * dx + dy * dy <= r * r) this.catchSnitch(s);
+    } else {
+      const r = SNITCH_CONSTANTS.SHOOT_RADIUS;
+      const projs = this.entityIndex.projectiles;
+      for (let i = 0; i < projs.length; i++) {
+        const p = projs[i];
+        if (!p.active || p.ownerType !== EntityType.PLAYER) continue;
+        const dx = wrapDeltaX(s.position.x, p.position.x);
+        const dy = wrapDeltaY(s.position.y, p.position.y);
+        if (dx * dx + dy * dy <= r * r) {
+          p.active = false; // the shot is spent on the catch
+          this.catchSnitch(s);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Spawn this wave's snitch on the off-screen ring around the player
+   *  (same viewport-derived contract as wave-enemy spawns).  Non-drop
+   *  INTERACTABLE → the physics broadphase ignores it entirely; it flies
+   *  through everything and only the manual catch check can end it. */
+  private spawnSnitch() {
+    if (!this.currentMap) return;
+    const zoom = this.camera.zoom || 1;
+    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    const angle = Math.random() * Math.PI * 2;
+    const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
+    const pos = {
+      x: this.player.position.x + Math.cos(angle) * dist,
+      y: this.player.position.y + Math.sin(angle) * dist,
+    };
+    wrapPosition(pos);
+    const s: GameEntity = {
+      id: nextId('snitch'),
+      type: EntityType.INTERACTABLE,
+      isSnitch: true,
+      snitchWanderPhase: Math.random() * Math.PI * 2,
+      position: pos,
+      velocity: { x: 0, y: 0 },
+      size: { x: SNITCH_CONSTANTS.SIZE, y: SNITCH_CONSTANTS.SIZE },
+      rotation: 0,
+      color: SNITCH_CONSTANTS.CORE_COLOR,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: SNITCH_CONSTANTS.MASS,
+      trail: [],
+    };
+    this.currentMap.entities.push(s);
+    this.snitch = s;
+    this.snitchWaveIndex = this.waves.waveIndex;
+  }
+
+  /** Snitch caught: big gold payout + burst, then end the wave through
+   *  the shared cleared path (no early-clear bonus stacks on top). */
+  private catchSnitch(s: GameEntity) {
+    s.active = false;
+    this.snitch = null;
+    this.snitchWaveIndex = -1;
+    this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
+    this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
+      speedMin: 1, speedMax: 6,
+      sizeMin: 1, sizeMax: 3,
+      lifetimeMin: 0.3, lifetimeMax: 0.8,
+    });
+    this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
+  }
+
+  /** Quiet snitch removal (uncaught wave end / skip / restart) — small
+   *  gold puff, no points, no wave-end side effects. */
+  private despawnSnitch() {
+    const s = this.snitch;
+    this.snitch = null;
+    this.snitchWaveIndex = -1;
+    if (!s || !s.active) return;
+    s.active = false;
+    this.spawnParticles(s.position, 10, SNITCH_CONSTANTS.CORE_COLOR, {
+      speedMin: 1, speedMax: 3,
+      sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.25, lifetimeMax: 0.5,
+    });
+  }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
   private initWaveSystem() {

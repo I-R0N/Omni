@@ -2604,6 +2604,9 @@ export class PhysicsSystem {
           if (onDamage) onDamage(target.position, proj.damage || 1, target, proj.position);
 
           if (target.health <= 0) {
+              // Player-attributed kill stamp — handleEntityDeath awards
+              // shard/tile destruction points only when this is set.
+              if (proj.ownerType === EntityType.PLAYER) target.killedByPlayer = true;
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
               if (target.type === EntityType.STRUCTURE) {
@@ -2794,6 +2797,8 @@ export class PhysicsSystem {
               if (structure.health <= 0) {
                   structure.health = 0;
                   structure.active = false;
+                  // Crash kills are player-attributed for scoring.
+                  structure.killedByPlayer = true;
                   if (structure.mass === Infinity) {
                       this.removeStaticEntity(structure);
                   }

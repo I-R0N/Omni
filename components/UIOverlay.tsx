@@ -67,6 +67,7 @@ interface UIOverlayProps {
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
   onToggleAsteroidFlow?: () => void;
+  onToggleSnitchCatchMode?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -130,6 +131,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
   onToggleAsteroidFlow,
+  onToggleSnitchCatchMode,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -318,6 +320,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration. Terminal cruise = acceleration/(1−friction), so this is the knob that actually changes everyday top speed.')}
                 {ctrlRow('Speed', onCyclePlayerSpeed, stats.playerSpeedName ?? '1×',
                   'Player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap. Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it).')}
+                {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
+                  stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
+                  'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}
               </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}

@@ -330,6 +330,22 @@ export interface GameEntity {
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
 
+  // ── Snitch (quidditch-style wave bonus target) ───────────────────────────
+  // Marks the one-per-wave snitch entity (EntityType.INTERACTABLE, no
+  // dropType, so the physics broadphase ignores it entirely).  Steering /
+  // catch logic lives in GameEngine.updateSnitch; RenderSystem keys the
+  // golden-comet draw + trail strip off this flag.
+  isSnitch?: boolean;
+  // Stable per-snitch phase offset (radians) for the wander oscillation so
+  // two consecutive snitches don't weave identically.
+  snitchWanderPhase?: number;
+
+  // Stamped by the damage paths when the killing blow came from the player
+  // (projectile, crash, lightning chain, cannon AoE).  handleEntityDeath
+  // awards shard/tile destruction points only when set, then clears it so
+  // a regen-reused tile entity can't re-award without a fresh player kill.
+  killedByPlayer?: boolean;
+
   // Tile regeneration — regenProgress counts up from 0; tile is a ghost
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
   regenProgress?: number;
@@ -953,6 +969,10 @@ export interface EngineStats {
   // (asteroids decay toward zero velocity over a few seconds; only
   // collisions / gravity move them after that).
   asteroidFlowEnabled?: boolean;
+  // Snitch catch mode — DBG-toggleable while playtesting which catch
+  // interaction feels better.  'collide' (default): fly into the snitch.
+  // 'shoot': any player-owned projectile within its catch radius nabs it.
+  snitchCatchMode?: 'collide' | 'shoot';
   // Overlay toggles — all DBG-only renderer gating.  Default false.
   // FF Vectors: per-cell arrows colored by magnitude.
   // FF Cells:   faint cell-grid outlines.

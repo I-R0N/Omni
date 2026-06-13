@@ -1229,7 +1229,9 @@ export class RenderSystem {
 
         // Player trail = independent expanding rings (one is enough to draw);
         // projectile trail = polygon strip (needs at least two points).
-        if (entity.trail && entity.trail.length > 0 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
+        // The snitch's comet tail rides the projectile-strip path in gold.
+        if (entity.trail && entity.trail.length > 0
+                && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE || entity.isSnitch)) {
             this._trailEntities.push({ entity, rx, ry });
         }
     }
@@ -1540,7 +1542,9 @@ export class RenderSystem {
           if (entity.type === EntityType.PLAYER) {
               if (this.trailShape === TrailShape.NONE) return;
               this.drawPlayerTrail(ctx, entity.trail, camera);
-          } else if (entity.type === EntityType.PROJECTILE && entity.trail.length >= 2) {
+          } else if ((entity.type === EntityType.PROJECTILE || entity.isSnitch) && entity.trail.length >= 2) {
+              // Snitch comet tail reuses the projectile strip — entity.color
+              // is the snitch's gold core colour.
               this.drawTrailStrip(ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
           }
       });
@@ -3402,6 +3406,37 @@ export class RenderSystem {
                 ctx.lineWidth = 1;
                 buildShardPath();
                 ctx.stroke();
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
+                // ── Snitch — golden comet core ────────────────────────────
+                // The tail is the gold trail strip + sparkle motes emitted by
+                // GameEngine.updateSnitch; this draws the core: wide gold
+                // bloom, solid gold body, hot white-gold centre.  Pulse keyed
+                // to nowSec so the core flickers like a guttering flame.
+                const r = entity.size.x / 2;
+                const pulse = 0.85 + Math.sin(nowSec * 11) * 0.15;
+                const bloomR = r * 4 * pulse;
+                const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
+                bloom.addColorStop(0,    'rgba(253, 224, 71, 0.85)');
+                bloom.addColorStop(0.35, 'rgba(245, 158, 11, 0.40)');
+                bloom.addColorStop(1,    'rgba(245, 158, 11, 0)');
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
+                ctx.globalAlpha = pulse;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fillStyle = '#fde047';
+                ctx.fill();
+
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+                ctx.fillStyle = '#fffbe6';
+                ctx.fill();
 
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
