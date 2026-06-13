@@ -183,13 +183,11 @@ export class GameEngine {
   private asteroidFlowEnabled: boolean = true;
 
   // ── Snitch state ──────────────────────────────────────────────────────
-  // One quidditch-style snitch per timed wave: rides the asteroid flow
-  // field at near-player speed; catching it pays SCORE_CONSTANTS
-  // .SNITCH_POINTS and ends the wave (see updateSnitch / catchSnitch).
+  // One quidditch-style snitch that persists across waves: rides the
+  // asteroid flow field with a burst/coast AI; catching it pays
+  // SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave (see
+  // updateSnitch / catchSnitch).  A fresh one spawns for the next wave.
   private snitch: GameEntity | null = null;
-  // Wave index the live snitch belongs to — spawn guard so each wave gets
-  // exactly one, including across skip() (which bypasses onCleared).
-  private snitchWaveIndex: number = -1;
   // Wander clock for the weave oscillation (sim-time accumulated).
   private snitchTime: number = 0;
   // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
@@ -1298,9 +1296,8 @@ export class GameEngine {
       this.chainBreakPending = false;
       this.waveAnnouncements = [];
       // Snitch entity dies with the old map's entity list — just drop the
-      // references so the next wave spawns a fresh one.
+      // reference so the next wave spawns a fresh one.
       this.snitch = null;
-      this.snitchWaveIndex = -1;
       this.snitchTime = 0;
       this.loadMap(this.buildMap(this.selectedMapType));
 
@@ -3287,9 +3284,9 @@ export class GameEngine {
       // CLEARED EARLY banner.
       this.awardScore(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (clearedIndex + 1), this.player.position);
     }
-    // An uncaught snitch leaves with its wave (quiet puff, no points).
-    // No-op on the snitch-catch path — catchSnitch nulls it first.
-    this.despawnSnitch();
+    // The snitch is wave bookkeeping only in that it pays out + ends the
+    // wave on catch; the entity itself persists across wave boundaries
+    // (it is never despawned at a wave end), so don't touch it here.
     const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
     if ((clearedIndex + 1) % healthInterval === 0) {
       const hAngle = Math.random() * Math.PI * 2;
@@ -3302,33 +3299,27 @@ export class GameEngine {
     }
   };
 
-  // ── Snitch — quidditch-style wave bonus target ──────────────────────────
+  // ── Snitch — quidditch-style bonus target ───────────────────────────────
   //
-  // One snitch per timed wave.  It rides the asteroid flow field at a
-  // fraction of the player's terminal cruise with a sinusoidal weave, so
-  // chasing it means riding the same currents it does.  Catching it —
-  // colliding with it or shooting it, per the DBG-toggleable catch mode —
-  // pays SCORE_CONSTANTS.SNITCH_POINTS and ends the wave immediately.
+  // The snitch rides the asteroid flow field with a burst/coast AI and
+  // PERSISTS across wave boundaries — one keeps flying until the player
+  // catches it.  Catching it (colliding with it or shooting it, per the
+  // DBG-toggleable catch mode) pays SCORE_CONSTANTS.SNITCH_POINTS and ends
+  // the current wave; the next wave then spawns a fresh one.
 
   /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
    *  emission, and the catch check.  Called from updateGameLogic after the
-   *  wave tick so waveState/waveIndex are fresh. */
+   *  wave tick so waveState is fresh. */
   private updateSnitch(dt: number) {
     if (!this.currentMap) return;
     this.snitchTime += dt;
 
-    if (this.waves.waveState === 'active') {
-      // Spawn guard keys on the wave index so every wave gets exactly one
-      // snitch, including across skip() (which never fires onCleared).
-      if (this.snitchWaveIndex !== this.waves.waveIndex) {
-        this.despawnSnitch();
-        this.spawnSnitch();
-      }
-    } else if (this.snitch) {
-      // Defensive sweep for any path that ended the wave without routing
-      // through handleWaveCleared.
-      this.despawnSnitch();
-      return;
+    // Persist across wave boundaries: the snitch is never despawned at a
+    // wave end, so an uncaught one keeps flying into the next wave.  A
+    // fresh one only spawns when a wave is active and none is live — the
+    // first wave, or the wave after a catch removed the previous snitch.
+    if (this.waves.waveState === 'active' && (!this.snitch || !this.snitch.active)) {
+      this.spawnSnitch();
     }
 
     const s = this.snitch;
@@ -3457,8 +3448,8 @@ export class GameEngine {
     }
   }
 
-  /** Spawn this wave's snitch on the off-screen ring around the player
-   *  (same viewport-derived contract as wave-enemy spawns).  Non-drop
+  /** Spawn a snitch on the off-screen ring around the player (same
+   *  viewport-derived contract as wave-enemy spawns).  Non-drop
    *  INTERACTABLE → the physics broadphase ignores it entirely; it flies
    *  through everything and only the manual catch check can end it. */
   private spawnSnitch() {
@@ -3490,7 +3481,6 @@ export class GameEngine {
     };
     this.currentMap.entities.push(s);
     this.snitch = s;
-    this.snitchWaveIndex = this.waves.waveIndex;
     // Re-seed the burst/coast AI for the fresh snitch: open on a coast
     // window so the spawn reads as a wandering glint, not an escape.
     this.snitchAiState = 'coast';
@@ -3506,7 +3496,6 @@ export class GameEngine {
   private catchSnitch(s: GameEntity) {
     s.active = false;
     this.snitch = null;
-    this.snitchWaveIndex = -1;
     this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
     this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
       speedMin: 1, speedMax: 6,
@@ -3514,21 +3503,6 @@ export class GameEngine {
       lifetimeMin: 0.3, lifetimeMax: 0.8,
     });
     this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
-  }
-
-  /** Quiet snitch removal (uncaught wave end / skip / restart) — small
-   *  gold puff, no points, no wave-end side effects. */
-  private despawnSnitch() {
-    const s = this.snitch;
-    this.snitch = null;
-    this.snitchWaveIndex = -1;
-    if (!s || !s.active) return;
-    s.active = false;
-    this.spawnParticles(s.position, 10, SNITCH_CONSTANTS.CORE_COLOR, {
-      speedMin: 1, speedMax: 3,
-      sizeMin: 1, sizeMax: 2.5,
-      lifetimeMin: 0.25, lifetimeMax: 0.5,
-    });
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

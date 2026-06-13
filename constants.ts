@@ -2165,10 +2165,13 @@ export const TIMED_WAVE_CONFIG = {
 };
 
 // ── Snitch ───────────────────────────────────────────────────────────────────
-// One golden-comet snitch spawns per timed wave and rides the asteroid flow
-// field at near-player speed.  Catching it (collide or shoot — catch mode is
-// a DBG toggle while playtesting) pays SCORE_CONSTANTS.SNITCH_POINTS and
-// ends the wave immediately.  An uncaught snitch despawns with its wave.
+// A golden-comet snitch rides the asteroid flow field with a burst/coast AI
+// and PERSISTS across waves — one keeps flying until the player catches it.
+// Both speed states sit below the player's cruise, so a steady chase always
+// closes; the weave + panic darts are what keep it slippery.  Catching it
+// (collide or shoot — catch mode is a DBG toggle while playtesting) pays
+// SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave; the next wave
+// spawns a fresh one.
 export const SNITCH_CONSTANTS = {
   SIZE: 14,              // core diameter (world units)
   MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
@@ -2184,8 +2187,8 @@ export const SNITCH_CONSTANTS = {
   // panic darts so a persistent chaser always gets another chance.
   // Speed fractions apply to the friction-limited player cruise
   // (acceleration/(1−friction), clamped by maxSpeed).
-  COAST_SPEED_FRACTION: 0.40,
-  DART_SPEED_FRACTION: 1.10,
+  COAST_SPEED_FRACTION: 0.22, // lazy drift — well under player cruise, easy to close on
+  DART_SPEED_FRACTION: 0.68,  // burst stays BELOW player cruise so a steady chase always gains
   SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
   SPEED_EASE_COAST: 2.0, // 1/s ease back down — visible deceleration tail
   COAST_STEER_RATE: 0.06, // per-60Hz-frame velocity lerp while coasting
