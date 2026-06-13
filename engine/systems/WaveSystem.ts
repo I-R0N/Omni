@@ -12,7 +12,6 @@ import {
   buildWaveSpawnList,
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
-import { EntityIndex } from './EntityIndex';
 import { nextId } from './IdAllocator';
 import { wrapPosition } from '../toroidal';
 
@@ -24,10 +23,13 @@ import { wrapPosition } from '../toroidal';
  * (scaling 30s + 5s/wave, capped) while a precomputed spawn schedule
  * streams enemies in one at a time — steady through the first three
  * quarters, denser over the final quarter.  The wave ends when the clock
- * expires ("WAVE N ENDED"; survivors despawn during grace, offscreen
- * first) or earlier when the full spawn budget has been emitted and
- * killed ("WAVE N CLEARED EARLY").  Either way the existing grace
- * countdown then rolls into the next wave — waves are infinite.
+ * expires ("WAVE N ENDED") or earlier when the full spawn budget has
+ * been emitted and killed ("WAVE N CLEARED EARLY").  Either way the
+ * existing grace countdown then rolls into the next wave — waves are
+ * infinite.  Survivors are NEVER despawned: enemies that outlive their
+ * wave simply carry over and keep fighting alongside the next wave's
+ * stream (per playtest feedback — enemies vanishing at the wave
+ * boundary read as a bug).
  */
 export class WaveSystem {
   public waveIndex: number = 0;
@@ -47,7 +49,6 @@ export class WaveSystem {
   private spawnTimesSec: number[] = [];
   private nextSpawnIdx: number = 0;
   private lastSpawnAtSec: number = -Infinity;
-  private survivorDespawnTimer: number = 0;
 
   // Reusable spawn-position scratch — never allocate inside the spawn loop.
   private readonly spawnPos: Vector2 = { x: 0, y: 0 };
@@ -72,17 +73,17 @@ export class WaveSystem {
     this.spawnTimesSec = [];
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
-    this.survivorDespawnTimer = 0;
     if (ctx.enemyScale <= 0) return;
     this.startWave(0, ctx);
   }
 
   /**
    * Per-sim-step tick: drives the spawn stream, both completion paths
-   * (time-up / early clear), survivor cleanup, and the grace countdown
-   * into the next wave.  `onCleared` fires once per wave end, on both
-   * paths, so milestone rewards (health drop) keep working; `early` is
-   * true on the early-clear path so the caller can pay the score bonus.
+   * (time-up / early clear), and the grace countdown into the next wave.
+   * `onCleared` fires once per wave end, on both paths, so milestone
+   * rewards (health drop) keep working; `early` is true on the
+   * early-clear path so the caller can pay the score bonus.  Survivors
+   * carry over untouched into the next wave.
    */
   public update(
     dt: number,
@@ -101,11 +102,9 @@ export class WaveSystem {
         this.endWave(false, onCleared);
       }
     } else if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
-      this.despawnSurvivorsPaced(dt, ctx);
       this.waveGraceTimer -= dt;
       if (this.waveGraceTimer <= 0) {
         this.waveGraceTimer = 0;
-        this.despawnAllSurvivors(ctx);
         this.startWave(this.waveIndex + 1, ctx);
       }
     }
@@ -119,7 +118,6 @@ export class WaveSystem {
     this.elapsedSec = 0;
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
-    this.survivorDespawnTimer = 0;
     this.durationSec = getWaveDurationSec(index);
 
     const budget = Math.max(1, Math.round(getWaveSpawnBudget(index) * ctx.enemyScale));
@@ -252,7 +250,8 @@ export class WaveSystem {
   }
 
   /** Transition to 'cleared': banner per end path, milestone callback,
-   *  grace countdown start.  Survivor cleanup happens during grace. */
+   *  grace countdown start.  Survivors stay in play — they keep fighting
+   *  through grace and alongside the next wave's stream. */
   private endWave(timedOut: boolean, onCleared: (waveJustCleared: number, early: boolean) => void) {
     this.waveState = 'cleared';
     const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
@@ -265,59 +264,6 @@ export class WaveSystem {
     );
     onCleared(this.waveIndex, !timedOut);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-    this.survivorDespawnTimer = 0;
-  }
-
-  /**
-   * Paced survivor cleanup during grace: at most one despawn per
-   * SURVIVOR_DESPAWN_INTERVAL_SEC, offscreen survivors first (PR #50
-   * priority pattern via EntityIndex.isOffscreen) so nothing pops out
-   * under the player's eyes.  On-screen stragglers only go once the
-   * remaining grace drops below the force threshold, and they get a
-   * particle puff via the onSurvivorDespawn hook.  No kill credit, no
-   * drops — survivors are removed, not killed.
-   */
-  private despawnSurvivorsPaced(dt: number, ctx: WaveSpawnContext) {
-    this.survivorDespawnTimer -= dt;
-    if (this.survivorDespawnTimer > 0) return;
-    const force = this.waveGraceTimer <=
-      WAVE_CONSTANTS.GRACE_PERIOD * TIMED_WAVE_CONFIG.SURVIVOR_FORCE_DESPAWN_GRACE_FRAC;
-    let onscreenCandidate: GameEntity | null = null;
-    const entities = ctx.entities;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (!e.active || e.isExploding || !this.waveEnemyIds.has(e.id)) continue;
-      if (ctx.entityIndex.isOffscreen(e)) {
-        this.retireSurvivor(e, ctx, false);
-        this.survivorDespawnTimer = TIMED_WAVE_CONFIG.SURVIVOR_DESPAWN_INTERVAL_SEC;
-        return;
-      }
-      if (!onscreenCandidate) onscreenCandidate = e;
-    }
-    if (onscreenCandidate && force) {
-      this.retireSurvivor(onscreenCandidate, ctx, true);
-      this.survivorDespawnTimer = TIMED_WAVE_CONFIG.SURVIVOR_DESPAWN_INTERVAL_SEC;
-    }
-  }
-
-  /** Remove every remaining tracked survivor immediately — safety net at
-   *  the end of grace (and on skip) so no stale wave enemy carries over. */
-  private despawnAllSurvivors(ctx: WaveSpawnContext) {
-    const entities = ctx.entities;
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (!e.active || e.isExploding || !this.waveEnemyIds.has(e.id)) continue;
-      this.retireSurvivor(e, ctx, !ctx.entityIndex.isOffscreen(e));
-    }
-  }
-
-  /** Quiet removal: flip `active` (the next prepareFrameEntities sweep
-   *  culls it) without routing through the death path — no explosion, no
-   *  enemy shards, no drops.  Visible removals get the despawn-puff hook. */
-  private retireSurvivor(e: GameEntity, ctx: WaveSpawnContext, visible: boolean) {
-    e.active = false;
-    e.suppressDrops = true;
-    if (visible) ctx.onSurvivorDespawn?.(e);
   }
 
   /** Tick down all active wave announcements and splice expired ones. */
@@ -331,14 +277,13 @@ export class WaveSystem {
   }
 
   /**
-   * Manually skip the remaining grace period: clear any survivors still
-   * being paced out and immediately start the next wave.  Safe to call
-   * from a keybinding or UI button during the 'cleared' phase.
+   * Manually skip the remaining grace period and immediately start the
+   * next wave.  Safe to call from a keybinding or UI button during the
+   * 'cleared' phase.  Survivors carry over, same as the natural rollover.
    */
   public skip(ctx: WaveSpawnContext): boolean {
     if (this.waveState !== 'cleared' || this.waveGraceTimer <= 0) return false;
     this.waveGraceTimer = 0;
-    this.despawnAllSurvivors(ctx);
     this.startWave(this.waveIndex + 1, ctx);
     return true;
   }
@@ -349,7 +294,7 @@ export class WaveSystem {
    * echoed into the banner subtext.  Same 'cleared' semantics as the
    * natural completion paths: onCleared fires (early = false, so the
    * early-clear bonus does NOT stack on the snitch payout) and survivors
-   * despawn during the normal grace countdown.
+   * carry over into the next wave.
    */
   public endWaveBySnitch(
     points: number,
@@ -367,7 +312,6 @@ export class WaveSystem {
     });
     onCleared(this.waveIndex, false);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
-    this.survivorDespawnTimer = 0;
     return true;
   }
 
@@ -386,9 +330,6 @@ export interface WaveSpawnContext {
   entities: GameEntity[];
   player: GameEntity;
   physics: PhysicsSystem;
-  /** Viewport-aware index — survivor cleanup uses isOffscreen() to retire
-   *  unseen enemies first, mirroring the graceful-cleanup priority rule. */
-  entityIndex: EntityIndex;
   enemyScale: number;
   difficultyLevel: number;
   /** World-unit half-diagonal of the player's current viewport.  Used by
@@ -396,9 +337,6 @@ export interface WaveSpawnContext {
    *  enemy outside the visible window on any aspect ratio.  Computed by the
    *  caller (GameEngine) at spawn time from window size + camera zoom. */
   viewportHalfDiagonal: number;
-  /** Invoked when a survivor is retired while visible on-screen so the
-   *  caller can cover the removal with a small particle puff. */
-  onSurvivorDespawn?: (e: GameEntity) => void;
 }
 
 // Re-export for callers that want to destructure a Vector2 from enemy spawn

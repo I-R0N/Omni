@@ -2134,8 +2134,8 @@ export const SCORE_CONSTANTS = {
 // ── Timed-wave config ────────────────────────────────────────────────────────
 // Waves are timed windows: enemies stream in continuously until the clock
 // runs out.  Killing the full spawn budget before time-up ends the wave
-// early; survivors at time-up are despawned during the grace period
-// (offscreen-first, no drops) so the field is clear before the next wave.
+// early; survivors at time-up are NEVER despawned — they carry over and
+// keep fighting alongside the next wave's stream.
 export const TIMED_WAVE_CONFIG = {
   // Duration scaling: wave 1 = BASE, +PER_WAVE each wave, capped.
   BASE_DURATION_SEC: 30,
@@ -2162,12 +2162,6 @@ export const TIMED_WAVE_CONFIG = {
   // Wave-index → tier-weight row mapping for the weighted-random mix
   // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
   TIER_SET_LENGTH: 3,
-  // Survivor cleanup during grace: one despawn per interval, offscreen
-  // entities first; on-screen stragglers only go once the remaining grace
-  // falls below FORCE_FRAC of the full grace period (with a particle puff
-  // via GameEngine so nothing silently blinks out under the player).
-  SURVIVOR_DESPAWN_INTERVAL_SEC: 0.35,
-  SURVIVOR_FORCE_DESPAWN_GRACE_FRAC: 0.45,
 };
 
 // ── Snitch ───────────────────────────────────────────────────────────────────
@@ -2178,12 +2172,31 @@ export const TIMED_WAVE_CONFIG = {
 export const SNITCH_CONSTANTS = {
   SIZE: 14,              // core diameter (world units)
   MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
-  // Target speed = player terminal cruise × this fraction.  Cruise is the
-  // friction-limited acceleration/(1−friction) (clamped by maxSpeed), so
-  // the snitch is marginally outrunnable on straights while its weaving
-  // flow-line path rewards cutting corners.
-  SPEED_FRACTION: 0.85,
-  STEER_RATE: 0.12,      // per-60Hz-frame lerp toward the flow target
+  // ── Burst/coast AI ────────────────────────────────────────────────────
+  // The snitch alternates between two states instead of flying flat-out:
+  //   coast — lazy drift along the flow at COAST_SPEED_FRACTION of the
+  //           player's terminal cruise; this is the catch window.
+  //   dart  — short, violent acceleration to DART_SPEED_FRACTION (briefly
+  //           faster than the player) before bleeding back down to coast.
+  // Darts fire on a random coast timer AND whenever the player closes
+  // inside PANIC_RADIUS (panic darts bias away from the player by
+  // PANIC_AWAY_BIAS).  PANIC_COOLDOWN guarantees a coast window between
+  // panic darts so a persistent chaser always gets another chance.
+  // Speed fractions apply to the friction-limited player cruise
+  // (acceleration/(1−friction), clamped by maxSpeed).
+  COAST_SPEED_FRACTION: 0.40,
+  DART_SPEED_FRACTION: 1.10,
+  SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
+  SPEED_EASE_COAST: 2.0, // 1/s ease back down — visible deceleration tail
+  COAST_STEER_RATE: 0.06, // per-60Hz-frame velocity lerp while coasting
+  DART_STEER_RATE: 0.18,  // snappier course-holding mid-dart
+  COAST_DURATION_MIN: 1.6, // seconds before a spontaneous dart
+  COAST_DURATION_MAX: 3.6,
+  DART_DURATION_MIN: 0.6,
+  DART_DURATION_MAX: 1.0,
+  PANIC_RADIUS: 700,     // world units — player inside this triggers a panic dart
+  PANIC_COOLDOWN: 2.2,   // seconds of guaranteed coast eligibility between panic darts
+  PANIC_AWAY_BIAS: 0.65, // 0..1 blend of away-from-player into the dart direction
   // Wander: the sampled flow direction is rotated by sin(t·FREQ + phase)·AMP
   // so the snitch weaves around its streamline instead of railing it.
   WANDER_AMPLITUDE: 0.9, // radians (~±51°)

@@ -81,7 +81,8 @@ engine/
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
     DropSystem.ts         Ammo + health drop spawn / collection
     WaveSystem.ts         Timed-wave clock + spawn scheduler, grace
-                          timer, survivor cleanup, spawn geometry
+                          timer, spawn geometry (survivors are never
+                          despawned — they carry into the next wave)
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
@@ -148,10 +149,11 @@ Per-frame `loop()`:
         grid-index reset (nebula-specific bookkeeping only;
         merge/regen/shatter all moved to ShardSystem)
      5. `WaveSystem.update()` — timed-wave tick: spawn stream,
-        time-up / early-clear completion, survivor despawn, grace
-        countdown.  Followed by `updateSnitch()` — per-wave snitch
-        lifecycle: flow-field steering, comet-tail emission, catch
-        check (collide/shoot per DBG toggle), wave-end on catch
+        time-up / early-clear completion, grace countdown (survivors
+        are never despawned — they carry into the next wave).
+        Followed by `updateSnitch()` — per-wave snitch lifecycle:
+        burst/coast AI + flow-field steering, comet-tail emission,
+        catch check (collide/shoot per DBG toggle), wave-end on catch
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         ammo-drop merge pass (`DropSystem.mergeAmmoDrops`; `dropMerge`
         task)
@@ -310,8 +312,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   lightning / cannon-AoE damage paths; snitch catch payout;
   early-clear wave bonus; "+N" popup styling)
 - `SNITCH_CONSTANTS` — per-wave golden-comet snitch: a non-drop
-  INTERACTABLE (`isSnitch`) that rides the asteroid flow field at a
-  fraction of the player's terminal cruise with a sinusoidal weave.
+  INTERACTABLE (`isSnitch`) that rides the asteroid flow field with a
+  sinusoidal weave and a burst/coast AI — slow catchable coasting
+  (0.40× player cruise) punctuated by quick darts (1.10×) on a random
+  timer or when the player closes inside PANIC_RADIUS (panic darts
+  bias away from the player; a cooldown guarantees coast windows
+  between them).
   Catching it (collide or shoot — DBG "Snitch catch" toggle, surfaced
   as `EngineStats.snitchCatchMode`) pays `SCORE_CONSTANTS
   .SNITCH_POINTS` and ends the wave via `WaveSystem.endWaveBySnitch`

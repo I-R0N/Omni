@@ -194,6 +194,16 @@ export class GameEngine {
   private snitchTime: number = 0;
   // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
   private snitchCatchMode: 'collide' | 'shoot' = 'collide';
+  // Burst/coast AI state (see the SNITCH_CONSTANTS doc block) — there is
+  // only ever one live snitch, so engine-level fields suffice; all of
+  // these are re-seeded in spawnSnitch().
+  private snitchAiState: 'coast' | 'dart' = 'coast';
+  private snitchAiTimer: number = 0;        // countdown to the next state flip
+  private snitchPanicCooldown: number = 0;  // guaranteed coast window between panic darts
+  private snitchSpeedMult: number = 0;      // eased current speed (fraction of player cruise)
+  private snitchDartAway: boolean = false;  // current dart is a panic dart (away-bias active)
+  private snitchDartAwayX: number = 0;
+  private snitchDartAwayY: number = 0;
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -3261,24 +3271,11 @@ export class GameEngine {
       entities: this.currentMap.entities,
       player: this.player,
       physics: this.physics,
-      entityIndex: this.entityIndex,
       enemyScale: this.enemyScale,
       difficultyLevel: this.difficultyLevel,
       viewportHalfDiagonal,
-      onSurvivorDespawn: this.handleSurvivorDespawn,
     };
   }
-
-  /** Cover an on-screen survivor despawn (timed wave ended with enemies
-   *  alive) with a small puff in the enemy's colour so the removal reads
-   *  as a warp-out instead of a silent blink. */
-  private handleSurvivorDespawn = (e: GameEntity) => {
-    this.spawnParticles(e.position, 10, e.color || '#ffffff', {
-      speedMin: 1, speedMax: 3,
-      sizeMin: 1, sizeMax: 2.5,
-      lifetimeMin: 0.25, lifetimeMax: 0.5,
-    });
-  };
 
   /** Shared wave-completion hook — fires once per wave end on every path
    *  (time-up, early clear, snitch catch).  Pays the early-clear bonus,
@@ -3337,24 +3334,78 @@ export class GameEngine {
     const s = this.snitch;
     if (!s || !s.active) return;
 
-    // Steering: sampled flow direction rotated by the wander oscillation,
-    // blended toward at STEER_RATE.  Target speed derives from the
-    // player's friction-limited terminal cruise (same formula as the DBG
-    // thrust tooltip: acceleration/(1−friction), clamped by maxSpeed) so
-    // the chase stays winnable on straights across thrust-mult changes.
+    // ── Burst/coast AI ──────────────────────────────────────────────────
+    // The snitch is interactive prey, not a constant-speed rail rider:
+    // it coasts slow enough to close on (the catch window), then darts —
+    // on a random timer, or the moment the player gets near (panic dart,
+    // biased away from the player).  See the SNITCH_CONSTANTS doc block.
+    this.snitchPanicCooldown = Math.max(0, this.snitchPanicCooldown - dt);
+    this.snitchAiTimer -= dt;
+    const toPlayerX = wrapDeltaX(s.position.x, this.player.position.x);
+    const toPlayerY = wrapDeltaY(s.position.y, this.player.position.y);
+    const playerDistSq = toPlayerX * toPlayerX + toPlayerY * toPlayerY;
+    if (this.snitchAiState === 'coast') {
+      const panic = this.snitchPanicCooldown <= 0
+          && !this.player.isExploding
+          && playerDistSq < SNITCH_CONSTANTS.PANIC_RADIUS * SNITCH_CONSTANTS.PANIC_RADIUS;
+      if (panic || this.snitchAiTimer <= 0) {
+        this.snitchAiState = 'dart';
+        this.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
+            + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
+        this.snitchDartAway = false;
+        if (panic) {
+          this.snitchPanicCooldown = SNITCH_CONSTANTS.PANIC_COOLDOWN;
+          const d = Math.sqrt(playerDistSq);
+          if (d > 1e-4) {
+            this.snitchDartAwayX = -toPlayerX / d;
+            this.snitchDartAwayY = -toPlayerY / d;
+            this.snitchDartAway = true;
+          }
+        }
+      }
+    } else if (this.snitchAiTimer <= 0) {
+      this.snitchAiState = 'coast';
+      this.snitchDartAway = false;
+      this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
+          + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+    }
+    // Speed eases toward the state target — near-instant on the way up
+    // (the burst), visibly slower on the way back down (the catch window
+    // opens gradually as the dart bleeds off).
+    const darting = this.snitchAiState === 'dart';
+    const speedTarget = darting
+        ? SNITCH_CONSTANTS.DART_SPEED_FRACTION
+        : SNITCH_CONSTANTS.COAST_SPEED_FRACTION;
+    const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
+    this.snitchSpeedMult += (speedTarget - this.snitchSpeedMult) * Math.min(1, ease * dt);
+
+    // Steering: sampled flow direction rotated by the wander oscillation;
+    // panic darts blend the away-from-player escape vector on top.  Speed
+    // derives from the player's friction-limited terminal cruise (same
+    // formula as the DBG thrust tooltip: acceleration/(1−friction),
+    // clamped by maxSpeed) so the chase tracks thrust-mult changes.
     const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
     const wob = Math.sin(this.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
         * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
     const cosW = Math.cos(wob), sinW = Math.sin(wob);
-    const dirX = flow.x * cosW - flow.y * sinW;
-    const dirY = flow.x * sinW + flow.y * cosW;
+    let dirX = flow.x * cosW - flow.y * sinW;
+    let dirY = flow.x * sinW + flow.y * cosW;
+    if (this.snitchDartAway) {
+      const b = SNITCH_CONSTANTS.PANIC_AWAY_BIAS;
+      const bx = dirX * (1 - b) + this.snitchDartAwayX * b;
+      const by = dirY * (1 - b) + this.snitchDartAwayY * b;
+      const bm = Math.sqrt(bx * bx + by * by) || 1;
+      dirX = bx / bm;
+      dirY = by / bm;
+    }
     const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
     const cruise = Math.min(
       moveCfg.maxSpeed,
       (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction),
     );
-    const targetSpeed = cruise * SNITCH_CONSTANTS.SPEED_FRACTION;
-    const alpha = Math.min(1, SNITCH_CONSTANTS.STEER_RATE * dt * 60);
+    const targetSpeed = cruise * this.snitchSpeedMult;
+    const steerRate = darting ? SNITCH_CONSTANTS.DART_STEER_RATE : SNITCH_CONSTANTS.COAST_STEER_RATE;
+    const alpha = Math.min(1, steerRate * dt * 60);
     s.velocity.x += (dirX * targetSpeed - s.velocity.x) * alpha;
     s.velocity.y += (dirY * targetSpeed - s.velocity.y) * alpha;
     s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
@@ -3383,14 +3434,12 @@ export class GameEngine {
       positionJitter: SNITCH_CONSTANTS.SIZE * 0.5,
     });
 
-    // Catch check.
+    // Catch check (toPlayer deltas already computed by the AI block above).
     if (this.snitchCatchMode === 'collide') {
       if (this.player.isExploding) return;
-      const dx = wrapDeltaX(s.position.x, this.player.position.x);
-      const dy = wrapDeltaY(s.position.y, this.player.position.y);
       const r = Math.max(this.player.size.x, this.player.size.y) / 2
           + SNITCH_CONSTANTS.SIZE / 2 + SNITCH_CONSTANTS.COLLIDE_GRACE;
-      if (dx * dx + dy * dy <= r * r) this.catchSnitch(s);
+      if (playerDistSq <= r * r) this.catchSnitch(s);
     } else {
       const r = SNITCH_CONSTANTS.SHOOT_RADIUS;
       const projs = this.entityIndex.projectiles;
@@ -3442,6 +3491,14 @@ export class GameEngine {
     this.currentMap.entities.push(s);
     this.snitch = s;
     this.snitchWaveIndex = this.waves.waveIndex;
+    // Re-seed the burst/coast AI for the fresh snitch: open on a coast
+    // window so the spawn reads as a wandering glint, not an escape.
+    this.snitchAiState = 'coast';
+    this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
+        + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+    this.snitchPanicCooldown = 0;
+    this.snitchSpeedMult = SNITCH_CONSTANTS.COAST_SPEED_FRACTION;
+    this.snitchDartAway = false;
   }
 
   /** Snitch caught: big gold payout + burst, then end the wave through
