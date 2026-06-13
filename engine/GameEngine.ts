@@ -82,6 +82,14 @@ export class GameEngine {
   // Run score — tier-scaled enemy-kill points + early-clear wave bonuses.
   // Reset with the rest of the run state in resetAndLoadSelectedMap.
   private score: number = 0;
+  // HUD ticker — eases up toward `score` by integer steps each frame so
+  // big awards roll up instead of snapping.  Display only; `score` is truth.
+  private displayScore: number = 0;
+  // Kill combo — `comboCount` rapid ship kills within `comboTimer`'s window
+  // build a points multiplier (see comboMultiplier()).  Reset when the
+  // window lapses.  Ship kills only; shard/tile kills don't touch it.
+  private comboCount: number = 0;
+  private comboTimer: number = 0;
   // Damage-text object pool — see ParticleSystem._pool for the same
   // pattern in entity-space.  Damage texts spawn a few per impact and
   // expire on lifetime; reusing the objects across the spawn/despawn
@@ -1216,7 +1224,10 @@ export class GameEngine {
       waveStatus: 'active',
       waveGraceTimer: undefined,
       waveTimeRemaining: Math.ceil(this.waves.timeRemainingSec),
-      score: this.score,
+      score: Math.round(this.displayScore),
+      comboMultiplier: this.comboMultiplier(),
+      comboCount: this.comboCount,
+      comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1318,6 +1329,9 @@ export class GameEngine {
       this.player.ammo = 0;
       this.player.gold = 0;
       this.score = 0;
+      this.displayScore = 0;
+      this.comboCount = 0;
+      this.comboTimer = 0;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -1363,6 +1377,21 @@ export class GameEngine {
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
 
+    // HUD score ticker — roll the displayed total up toward the true
+    // score by integer steps (≥1, ≤ a fraction of the gap) so awards
+    // animate up rather than snapping.  Pure display; `score` is truth.
+    if (this.displayScore !== this.score) {
+      if (this.displayScore < this.score) {
+        const diff = this.score - this.displayScore;
+        this.displayScore = Math.min(
+          this.score,
+          this.displayScore + Math.max(1, Math.ceil(diff * SCORE_CONSTANTS.DISPLAY_CATCHUP_FRAC)),
+        );
+      } else {
+        this.displayScore = this.score; // score only ever resets downward
+      }
+    }
+
     // Report stats
     const wsMap: Record<string, 'active' | 'cleared'> = {
       inactive: 'active', active: 'active', cleared: 'cleared'
@@ -1379,7 +1408,10 @@ export class GameEngine {
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveTimeRemaining: this.waveState === 'active' ? Math.ceil(this.waves.timeRemainingSec) : undefined,
-      score: this.score,
+      score: Math.round(this.displayScore),
+      comboMultiplier: this.comboMultiplier(),
+      comboCount: this.comboCount,
+      comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1836,8 +1868,14 @@ export class GameEngine {
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
       if (entity.type === EntityType.ENEMY && !entity.isExploding) {
+          // Ship kills build the combo and are paid at the resulting
+          // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
+          const mult = this.registerComboKill();
           const scale = opts?.scoreScale ?? 1;
-          this.awardScore(Math.round(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1) * scale), entity.position);
+          this.awardScore(
+              Math.round(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1) * scale * mult),
+              entity.position,
+          );
       }
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
@@ -2080,6 +2118,15 @@ export class GameEngine {
 
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
+
+    // Kill-combo window — lapses if no ship dies for COMBO_WINDOW_SEC.
+    if (this.comboTimer > 0) {
+        this.comboTimer -= dt;
+        if (this.comboTimer <= 0) {
+            this.comboTimer = 0;
+            this.comboCount = 0;
+        }
+    }
 
     // Update Shake.  Mutate shakeOffset in place rather than replacing the
     // object — the field is read by reference downstream and a fresh object
@@ -2601,37 +2648,73 @@ export class GameEngine {
     }
   };
 
-  /** Add points to the run score and float a gold "+N" popup at the
-   *  given world position (reuses the pooled damage-text machinery). */
+  /** Current kill-combo points multiplier (1 = no combo).  Steps up one
+   *  per COMBO_KILLS_PER_TIER ship kills, capped at COMBO_MAX_MULTIPLIER. */
+  private comboMultiplier(): number {
+      if (this.comboTimer <= 0 || this.comboCount <= 0) return 1;
+      return Math.min(
+          SCORE_CONSTANTS.COMBO_MAX_MULTIPLIER,
+          Math.max(1, Math.ceil(this.comboCount / SCORE_CONSTANTS.COMBO_KILLS_PER_TIER)),
+      );
+  }
+
+  /** Register a ship kill against the combo: bump the count and refresh
+   *  the window.  Returns the multiplier in effect AFTER the bump so the
+   *  awarding caller scales this kill's points by it. */
+  private registerComboKill(): number {
+      this.comboCount++;
+      this.comboTimer = SCORE_CONSTANTS.COMBO_WINDOW_SEC;
+      return this.comboMultiplier();
+  }
+
+  /** Style a gold "+N" points popup: text + magnitude-tiered colour/size
+   *  so a +5 chip reads differently from a +100 kill or a +1500 snitch. */
+  private styleScorePopup(t: DamageText, value: number) {
+      t.text = `+${value}`;
+      if (value >= 1000)     { t.color = '#fde047'; t.fontScale = 1.7; }
+      else if (value >= 300) { t.color = '#fbbf24'; t.fontScale = 1.35; }
+      else if (value >= 100) { t.color = '#facc15'; t.fontScale = 1.15; }
+      else                   { t.color = '#fcd34d'; t.fontScale = 0.9; }
+  }
+
+  /** Add points to the run score and float a gold "+N" popup.  Clustered
+   *  awards (AoE / chain / sweep / rapid kills) merge into one growing
+   *  total within POPUP_MERGE_RADIUS instead of stacking on a pixel. */
   private awardScore(points: number, popupPos?: Vector2) {
       this.score += points;
-      if (!popupPos) return;
+      if (!popupPos || points === 0) return;
+
+      // Merge into a live nearby score popup if there is one.
+      const r = SCORE_CONSTANTS.POPUP_MERGE_RADIUS;
+      for (let i = 0; i < this.damageTexts.length; i++) {
+          const t = this.damageTexts[i];
+          if (!t.isScore) continue;
+          const dx = wrapDeltaX(t.position.x, popupPos.x);
+          const dy = wrapDeltaY(t.position.y, popupPos.y);
+          if (dx * dx + dy * dy <= r * r) {
+              t.scoreValue = (t.scoreValue ?? 0) + points;
+              this.styleScorePopup(t, t.scoreValue);
+              t.lifetime = t.maxLifetime; // refresh so the total re-pops
+              return;
+          }
+      }
+
       const vx = (Math.random() - 0.5) * 10;
       const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
-      const text = `+${points}`;
-      const pooled = this._damageTextPool.pop();
-      if (pooled) {
-          pooled.id = nextId('score');
-          pooled.position.x = popupPos.x; pooled.position.y = popupPos.y;
-          pooled.text = text;
-          pooled.velocity.x = vx; pooled.velocity.y = vy;
-          pooled.lifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
-          pooled.maxLifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
-          pooled.color = SCORE_CONSTANTS.POPUP_COLOR;
-          pooled.active = true;
-          this.damageTexts.push(pooled);
-      } else {
-          this.damageTexts.push({
-              id: nextId('score'),
-              position: { x: popupPos.x, y: popupPos.y },
-              text,
-              velocity: { x: vx, y: vy },
-              lifetime: SCORE_CONSTANTS.POPUP_LIFETIME,
-              maxLifetime: SCORE_CONSTANTS.POPUP_LIFETIME,
-              color: SCORE_CONSTANTS.POPUP_COLOR,
-              active: true,
-          });
-      }
+      const popup = this._damageTextPool.pop() ?? ({
+          id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
+          text: '', lifetime: 0, maxLifetime: 0, color: '', active: true,
+      } as DamageText);
+      popup.id = nextId('score');
+      popup.position.x = popupPos.x; popup.position.y = popupPos.y;
+      popup.velocity.x = vx; popup.velocity.y = vy;
+      popup.lifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+      popup.maxLifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+      popup.isScore = true;
+      popup.scoreValue = points;
+      popup.active = true;
+      this.styleScorePopup(popup, points);
+      this.damageTexts.push(popup);
   }
 
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
@@ -2645,32 +2728,37 @@ export class GameEngine {
           );
           return;
       }
-      const isCrit = amount > 3;
-      const vx = (Math.random() - 0.5) * 10;
-      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
-      const color = isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR;
-      const pooled = this._damageTextPool.pop();
-      if (pooled) {
-          pooled.id = nextId('dmg');
-          pooled.position.x = pos.x; pooled.position.y = pos.y;
-          pooled.text = Math.round(amount).toString();
-          pooled.velocity.x = vx; pooled.velocity.y = vy;
-          pooled.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
-          pooled.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
-          pooled.color = color;
-          pooled.active = true;
-          this.damageTexts.push(pooled);
-      } else {
-          this.damageTexts.push({
-              id: nextId('dmg'),
-              position: { x: pos.x, y: pos.y },
-              text: Math.round(amount).toString(),
-              velocity: { x: vx, y: vy },
-              lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-              maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-              color,
-              active: true,
-          });
+      // World-space damage numbers only show on a genuine SURVIVOR of the
+      // hit — the case where the number carries information:
+      //  - lethal hits (health <= 0) show nothing; the destruction FX and
+      //    the gold points popup are the feedback (also kills the literal
+      //    "999" asteroid-crush number),
+      //  - dent tiles (plastic / metal) lose 1 HP per hit regardless of
+      //    weapon, so the raw weapon-damage number is misleading and the
+      //    visible deformation already telegraphs progress — skip them.
+      // The remaining numbers (multi-HP survivors, e.g. future tanky
+      // enemies) auto-appear without re-touching this gate.
+      const isDent = target?.shardVariant !== undefined
+          && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
+      if (target && target.health > 0 && !isDent) {
+          const vx = (Math.random() - 0.5) * 10;
+          const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+          const popup = this._damageTextPool.pop() ?? ({
+              id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
+              text: '', lifetime: 0, maxLifetime: 0, color: '', active: true,
+          } as DamageText);
+          popup.id = nextId('dmg');
+          popup.position.x = pos.x; popup.position.y = pos.y;
+          popup.text = Math.round(amount).toString();
+          popup.velocity.x = vx; popup.velocity.y = vy;
+          popup.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          popup.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          popup.color = DAMAGE_TEXT_CONSTANTS.COLOR;
+          popup.isScore = false;
+          popup.scoreValue = undefined;
+          popup.fontScale = DAMAGE_TEXT_CONSTANTS.DAMAGE_FONT_SCALE;
+          popup.active = true;
+          this.damageTexts.push(popup);
       }
 
       // Dent-policy post-damage hooks — fire only while the tile is

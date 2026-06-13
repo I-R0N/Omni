@@ -3637,8 +3637,10 @@ export class RenderSystem {
           
           const lifeRatio = t.lifetime / t.maxLifetime;
           ctx.globalAlpha = Math.max(0, lifeRatio);
-          
-          const scale = 1 + (1 - lifeRatio) * 0.5;
+
+          // Grow-as-it-fades animation, scaled by the per-text size tier
+          // (points popups bigger by magnitude; damage chips smaller).
+          const scale = (1 + (1 - lifeRatio) * 0.5) * (t.fontScale ?? 1);
           ctx.scale(scale, scale);
 
           ctx.fillStyle = t.color;

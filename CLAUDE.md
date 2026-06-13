@@ -311,7 +311,18 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   tiles, nebula variants excluded, attribution via the
   `GameEntity.killedByPlayer` stamp set by the projectile / crash /
   lightning / cannon-AoE damage paths; snitch catch payout;
-  early-clear wave bonus; "+N" popup styling)
+  early-clear wave bonus.  Gold "+N" popups are magnitude-tiered
+  (`styleScorePopup`) and MERGE within `POPUP_MERGE_RADIUS` so
+  cluster/AoE/sweep kills read as one growing total; the HUD chip is
+  an integer ticker (`displayScore` eases toward `score` by
+  `DISPLAY_CATCHUP_FRAC`/frame).  Kill combo: rapid SHIP kills build a
+  points multiplier (`COMBO_*` — steps up per N kills, capped,
+  resets after the window; ship kills only) that scales enemy-kill
+  points and shows next to the score chip.  World damage numbers
+  (`spawnDamageText`) are gated to non-lethal hits on multi-HP
+  survivors — lethal hits and dent tiles show nothing, so the
+  one-shot majority and the kill-frame overlap are gone; damage chips
+  render small + muted-red, distinct from gold points.)
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a

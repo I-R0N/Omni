@@ -590,6 +590,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {(stats.score ?? 0).toLocaleString()} PTS
                 </span>
               </div>
+              {/* Kill-combo multiplier — fades out as the window lapses */}
+              {(stats.comboMultiplier ?? 1) > 1 && (
+                <div
+                  className="pointer-events-none text-right -mt-0.5"
+                  style={{ opacity: Math.max(0.3, stats.comboFraction ?? 1) }}
+                >
+                  <span className="text-orange-400 text-sm font-extrabold tracking-wider tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    ×{stats.comboMultiplier} combo
+                  </span>
+                  {(stats.comboCount ?? 0) > 0 && (
+                    <span className="text-orange-300/70 text-[10px] font-bold ml-1">
+                      {stats.comboCount} kills
+                    </span>
+                  )}
+                </div>
+              )}
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${

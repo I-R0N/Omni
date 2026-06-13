@@ -863,8 +863,13 @@ export interface EngineStats {
   /** Whole seconds left on the active timed wave's clock; undefined
    *  outside the 'active' phase (grace, menu, difficulty "None"). */
   waveTimeRemaining?: number;
-  /** Run score — tier-scaled kill points + early-clear wave bonuses. */
+  /** Run score — animated integer ticker toward the true run total. */
   score?: number;
+  /** Kill-combo readout: active multiplier (1 = no combo), the kill
+   *  count feeding it, and the remaining-window fraction for fade. */
+  comboMultiplier?: number;
+  comboCount?: number;
+  comboFraction?: number;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
@@ -1047,6 +1052,13 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+  // Set on gold "+N" points popups (vs. white damage chips).  Score
+  // popups merge nearby spawns into one growing total via `scoreValue`.
+  isScore?: boolean;
+  scoreValue?: number;
+  // Per-text render size multiplier (points tier bigger by magnitude;
+  // damage chips render small).  Folded into the grow-animation scale.
+  fontScale?: number;
 }
 
 // Full-screen wave announcement banner rendered on the canvas.

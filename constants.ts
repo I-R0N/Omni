@@ -1892,8 +1892,12 @@ export const DAMAGE_TEXT_CONSTANTS = {
   LIFETIME: 1.2, // Seconds
   SPEED: 35, // Pixels per second upward
   SIZE: 14,
-  COLOR: '#ffffff',
-  CRIT_COLOR: '#facc15'
+  // Muted red chip — only shown on NON-lethal hits to multi-HP survivors
+  // now (lethal hits and dent tiles are gated out), so it never collides
+  // with the gold points popups.  Kept distinct from any gold.
+  COLOR: '#fca5a5',
+  CRIT_COLOR: '#fca5a5',
+  DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
@@ -2132,6 +2136,22 @@ export const SCORE_CONSTANTS = {
   SNITCH_SWEEP_KILL_FRACTION: 0.5,
   POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
   POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
+  // Cluster merge: a new "+N" popup spawning within this radius (world
+  // units) of a live one folds into it (running total + refreshed life)
+  // so AoE/cluster/sweep kills read as one growing number, not a pile.
+  POPUP_MERGE_RADIUS: 55,
+  // HUD score ticker: the displayed total catches up to the true score by
+  // at least 1 and at most this fraction of the gap per frame, so big
+  // awards (snitch, combos) roll up over ~0.2s instead of snapping.
+  DISPLAY_CATCHUP_FRAC: 0.2,
+  // ── Kill combo ────────────────────────────────────────────────────────
+  // Rapid enemy kills build a combo: every COMBO_KILLS_PER_TIER kills steps
+  // the multiplier up one (capped), and it multiplies enemy-kill points.
+  // The combo resets if no enemy dies for COMBO_WINDOW_SEC.  Shard/tile
+  // kills neither build nor consume it — only ships count.
+  COMBO_WINDOW_SEC: 3.5,
+  COMBO_KILLS_PER_TIER: 3,
+  COMBO_MAX_MULTIPLIER: 5,
 };
 
 // ── Timed-wave config ────────────────────────────────────────────────────────
