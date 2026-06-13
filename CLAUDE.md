@@ -312,7 +312,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEntity.killedByPlayer` stamp set by the projectile / crash /
   lightning / cannon-AoE damage paths; snitch catch payout;
   early-clear wave bonus.  Gold "+N" popups are magnitude-tiered
-  (`styleScorePopup`) and MERGE within `POPUP_MERGE_RADIUS` so
+  (`styleScorePopup`) and accumulate into ONE live popup
+  (`_livePointsPopup`, O(1) — no per-award array scan) so
   cluster/AoE/sweep kills read as one growing total; the HUD chip is
   an integer ticker (`displayScore` eases toward `score` by
   `DISPLAY_CATCHUP_FRAC`/frame).  Kill combo: rapid SHIP kills build a

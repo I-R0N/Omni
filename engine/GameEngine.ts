@@ -90,6 +90,10 @@ export class GameEngine {
   // window lapses.  Ship kills only; shard/tile kills don't touch it.
   private comboCount: number = 0;
   private comboTimer: number = 0;
+  // The one live "+N" points popup, if any.  New awards accumulate into it
+  // (O(1)) so a burst of kills reads as one growing number instead of a
+  // pile — and without scanning the damage-text array per award.
+  private _livePointsPopup: DamageText | null = null;
   // Damage-text object pool — see ParticleSystem._pool for the same
   // pattern in entity-space.  Damage texts spawn a few per impact and
   // expire on lifetime; reusing the objects across the spawn/despawn
@@ -1332,6 +1336,7 @@ export class GameEngine {
       this.displayScore = 0;
       this.comboCount = 0;
       this.comboTimer = 0;
+      this._livePointsPopup = null;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -2677,26 +2682,19 @@ export class GameEngine {
       else                   { t.color = '#fcd34d'; t.fontScale = 0.9; }
   }
 
-  /** Add points to the run score and float a gold "+N" popup.  Clustered
-   *  awards (AoE / chain / sweep / rapid kills) merge into one growing
-   *  total within POPUP_MERGE_RADIUS instead of stacking on a pixel. */
+  /** Add points to the run score and float a gold "+N" popup.  A burst of
+   *  awards (AoE / chain / sweep / rapid kills) accumulates into the one
+   *  live popup — O(1), no array scan — so it reads as a growing total. */
   private awardScore(points: number, popupPos?: Vector2) {
       this.score += points;
       if (!popupPos || points === 0) return;
 
-      // Merge into a live nearby score popup if there is one.
-      const r = SCORE_CONSTANTS.POPUP_MERGE_RADIUS;
-      for (let i = 0; i < this.damageTexts.length; i++) {
-          const t = this.damageTexts[i];
-          if (!t.isScore) continue;
-          const dx = wrapDeltaX(t.position.x, popupPos.x);
-          const dy = wrapDeltaY(t.position.y, popupPos.y);
-          if (dx * dx + dy * dy <= r * r) {
-              t.scoreValue = (t.scoreValue ?? 0) + points;
-              this.styleScorePopup(t, t.scoreValue);
-              t.lifetime = t.maxLifetime; // refresh so the total re-pops
-              return;
-          }
+      // Fold into the current popup if it's still floating.
+      const live = this._livePointsPopup;
+      if (live && live.isScore && live.lifetime > 0) {
+          live.scoreValue = (live.scoreValue ?? 0) + points;
+          this.styleScorePopup(live, live.scoreValue);
+          return;
       }
 
       const vx = (Math.random() - 0.5) * 10;
@@ -2715,6 +2713,7 @@ export class GameEngine {
       popup.active = true;
       this.styleScorePopup(popup, points);
       this.damageTexts.push(popup);
+      this._livePointsPopup = popup;
   }
 
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
