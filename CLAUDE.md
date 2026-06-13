@@ -324,6 +324,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   survivors — lethal hits and dent tiles show nothing, so the
   one-shot majority and the kill-frame overlap are gone; damage chips
   render small + muted-red, distinct from gold points.)
+- `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
+  spine.  8 leveled stat upgrades (hull / plating / capacitor / engine /
+  thrusters / gunnery / autoloader / magazine) bought with **Salvage**
+  (`GameEngine.credits`, a spendable mirror of score that earns 1:1 in
+  `awardScore`; score stays the high-score).  `GameEngine.applyUpgrades`
+  folds the run's `upgradeLevels` into the player's effective stats —
+  maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
+  WeaponSystem), `cooldownMult` (WeaponSystem), `maxAmmo` (DropSystem
+  clamp), plus speed/accel via `upgradeSpeedMult()`/`upgradeThrustMult()`
+  multiplied into the movement line.  At all-zero the game is identical
+  to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
+  testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
+  Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).  NOTE:
+  behaviour-changing UNLOCKS (weapons / shield / overcharge), the
+  between-wave Drydock shop UI, and per-wave enemy stat scaling are
+  planned next increments not yet built.
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a

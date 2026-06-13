@@ -316,6 +316,16 @@ export interface GameEntity {
   // Shared ammo pool — single currency consumed by every non-blaster weapon
   // at its per-weapon `ammoCost`.  Blaster is infinite and bypasses this pool.
   ammo?: number;
+  // Upgrade-derived stat modifiers (player only; set by GameEngine
+  // .applyUpgrades from the run's upgrade levels).  Read at the existing
+  // stat-hook sites with a sensible fallback so a fresh entity is unchanged:
+  //  - maxAmmo: ammo-pool cap (DropSystem clamp; default AMMO MAX_POOL)
+  //  - damageMult / cooldownMult: weapon scaling (WeaponSystem; default 1)
+  //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
+  maxAmmo?: number;
+  damageMult?: number;
+  cooldownMult?: number;
+  shieldRechargeRate?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -870,6 +880,11 @@ export interface EngineStats {
   comboMultiplier?: number;
   comboCount?: number;
   comboFraction?: number;
+  /** Spendable Salvage currency (earns 1:1 with score; score stays the
+   *  permanent high-score).  Spent on upgrades / unlocks. */
+  credits?: number;
+  /** Per-upgrade level snapshot for the DBG Upgrades panel. */
+  upgrades?: { id: string; label: string; level: number; max: number }[];
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

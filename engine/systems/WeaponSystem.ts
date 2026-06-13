@@ -124,8 +124,19 @@ export class WeaponSystem {
       baseConfig = WEAPONS[WeaponType.BLASTER];
     }
 
-    const config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
-    player.weaponCooldown = baseConfig.cooldown; // cooldown read from base — charge variant doesn't change cadence
+    let config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    // Progression: Gunnery scales damage (incl. cannon AoE), Autoloader
+    // scales fire cadence.  Copy the config before scaling so the shared
+    // WEAPONS table is never mutated.
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = {
+        ...config,
+        damage: config.damage * dmgMult,
+        explosionDamage: config.explosionDamage !== undefined ? config.explosionDamage * dmgMult : config.explosionDamage,
+      };
+    }
+    player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
     // Deduct shared-pool ammo (no-op for blaster: ammoCost 0).  Charged
     // shots use chargedAmmoCost; normal shots use ammoCost.
@@ -178,7 +189,11 @@ export class WeaponSystem {
 
     player.burstQueue--;
     const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
-    const config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    let config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = { ...config, damage: config.damage * dmgMult };
+    }
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;

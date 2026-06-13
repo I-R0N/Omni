@@ -265,6 +265,22 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleSnitchSpeed();
   };
 
+  const handleCycleUpgrade = (id: string) => {
+      if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
+  };
+
+  const handleMaxUpgrades = () => {
+      if (engineRef.current) engineRef.current.maxAllUpgrades();
+  };
+
+  const handleResetUpgrades = () => {
+      if (engineRef.current) engineRef.current.resetUpgrades();
+  };
+
+  const handleAddCredits = () => {
+      if (engineRef.current) engineRef.current.addDebugCredits(1000);
+  };
+
   const handleToggleFFOverlayVectors = () => {
       if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
   };
@@ -366,6 +382,10 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCycleUpgrade={handleCycleUpgrade}
+        onMaxUpgrades={handleMaxUpgrades}
+        onResetUpgrades={handleResetUpgrades}
+        onAddCredits={handleAddCredits}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}

@@ -469,7 +469,7 @@ export class PhysicsSystem {
       if (entity.shield !== undefined && entity.maxShield !== undefined
           && entity.shield < entity.maxShield
           && (entity.shieldRechargeTimer ?? 0) <= 0) {
-          entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
+          entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
 
       // ORBITAL PHYSICS

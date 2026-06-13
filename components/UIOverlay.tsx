@@ -69,6 +69,10 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCycleUpgrade?: (id: string) => void;
+  onMaxUpgrades?: () => void;
+  onResetUpgrades?: () => void;
+  onAddCredits?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -134,6 +138,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCycleUpgrade,
+  onMaxUpgrades,
+  onResetUpgrades,
+  onAddCredits,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -159,7 +167,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true,
   }));
   const toggleSection = (name: string) =>
@@ -328,6 +336,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
                   'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-wave ramp. The snitch starts at 0.05× player cruise on wave 1 and gains 0.05× each wave (capped at 1.2×); this knob scales that for testing. Lower = easier to catch.')}
+              </>)}
+
+              {/* ── Upgrades (progression spine — DBG) ─────────────── */}
+              {renderSectionHeader('upgrades', 'Upgrades')}
+              {!collapsed.upgrades && (<>
+                {statRow('Salvage', (stats.credits ?? 0).toLocaleString(), 'text-amber-300')}
+                {(stats.upgrades ?? []).map(u =>
+                  ctrlRow(u.label, () => onCycleUpgrade?.(u.id), `Lv ${u.level}/${u.max}`,
+                    `Cycle ${u.label} upgrade level (DBG). Click bumps the level and wraps back to 0 at max; applies live to the player's effective stats.`))}
+                {ctrlRow('+1k Salv', onAddCredits, 'Grant',
+                  'Grant 1000 Salvage for testing the (future) shop.')}
+                {ctrlRow('Max all', onMaxUpgrades, 'Max',
+                  'Set every upgrade to its max level.')}
+                {ctrlRow('Reset', onResetUpgrades, 'Clear',
+                  'Reset every upgrade back to level 0.')}
               </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}

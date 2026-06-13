@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -90,6 +90,15 @@ export class GameEngine {
   // window lapses.  Ship kills only; shard/tile kills don't touch it.
   private comboCount: number = 0;
   private comboTimer: number = 0;
+  // ── Progression ─────────────────────────────────────────────────────────
+  // Spendable Salvage currency (earns 1:1 with score) and per-upgrade levels.
+  // applyUpgrades() folds the levels into the player's effective stats; all
+  // reset per run.  Behaviour-changing unlocks + shop UI build on top.
+  private credits: number = 0;
+  private upgradeLevels: Record<UpgradeId, number> = {
+      hull: 0, plating: 0, capacitor: 0, engine: 0,
+      thrusters: 0, gunnery: 0, autoloader: 0, magazine: 0,
+  };
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -1133,6 +1142,7 @@ export class GameEngine {
       shieldRechargeTimer: 0,
       shieldHitFlash: 0
     };
+    this.applyUpgrades(); // initialise upgrade-derived stat fields (all at L0)
 
     this.camera = {
       position: { x: 0, y: 0 },
@@ -1232,6 +1242,8 @@ export class GameEngine {
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
+      credits: this.credits,
+      upgrades: this.upgradeSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1322,6 +1334,11 @@ export class GameEngine {
       this.snitch = null;
       this.snitchTime = 0;
       this.loadMap(this.buildMap(this.selectedMapType));
+
+      // Per-run progression reset — must precede the health/shield refill
+      // below so maxHealth/maxShield are back at base before they're topped.
+      this.credits = 0;
+      this.resetUpgrades();
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -1417,6 +1434,8 @@ export class GameEngine {
       comboMultiplier: this.comboMultiplier(),
       comboCount: this.comboCount,
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
+      credits: this.credits,
+      upgrades: this.upgradeSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2253,8 +2272,8 @@ export class GameEngine {
     this.player.inputVector = moveDir; // Debug visualization assignment
     
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult();
-    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult();
+    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.upgradeThrustMult();
+    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.upgradeSpeedMult();
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -2653,6 +2672,64 @@ export class GameEngine {
     }
   };
 
+  // ── Progression: upgrade application + DBG controls ─────────────────────
+
+  /** Engine/Thrusters levels feed the per-frame movement multipliers
+   *  alongside the existing DBG thrust/speed cycles. */
+  private upgradeSpeedMult(): number {
+      return 1 + UPGRADE_EFFECTS.ENGINE_SPEED_FRAC_PER_LEVEL * this.upgradeLevels.engine;
+  }
+  private upgradeThrustMult(): number {
+      return 1 + UPGRADE_EFFECTS.THRUSTERS_ACCEL_FRAC_PER_LEVEL * this.upgradeLevels.thrusters;
+  }
+
+  /** Recompute every upgrade-derived player stat from the current levels.
+   *  Called at construction, on any level change, and on run reset.  Hull
+   *  heals the HP it adds so a purchase is felt immediately. */
+  private applyUpgrades() {
+      const lv = this.upgradeLevels;
+      const newMaxHp = 100 + UPGRADE_EFFECTS.HULL_HP_PER_LEVEL * lv.hull;
+      const hpDelta = newMaxHp - this.player.maxHealth;
+      this.player.maxHealth = newMaxHp;
+      if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
+      this.player.maxShield = SHIELD_CONSTANTS.MAX_CHARGE + UPGRADE_EFFECTS.PLATING_SHIELD_PER_LEVEL * lv.plating;
+      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE
+          * (1 + UPGRADE_EFFECTS.CAPACITOR_RECHARGE_FRAC_PER_LEVEL * lv.capacitor);
+      this.player.damageMult = 1 + UPGRADE_EFFECTS.GUNNERY_DAMAGE_FRAC_PER_LEVEL * lv.gunnery;
+      this.player.cooldownMult = Math.max(
+          UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FLOOR,
+          1 - UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL * lv.autoloader,
+      );
+      this.player.maxAmmo = AMMO_CONSTANTS.MAX_POOL + UPGRADE_EFFECTS.MAGAZINE_AMMO_PER_LEVEL * lv.magazine;
+  }
+
+  /** Per-upgrade snapshot for the DBG panel + (future) shop. */
+  private upgradeSnapshot() {
+      return UPGRADE_DEFS.map(d => ({
+          id: d.id, label: d.label, level: this.upgradeLevels[d.id], max: d.max,
+      }));
+  }
+
+  /** DBG: bump an upgrade one level, wrapping max → 0, then re-apply. */
+  public cycleUpgrade(id: UpgradeId) {
+      const def = UPGRADE_DEFS.find(d => d.id === id);
+      if (!def) return;
+      this.upgradeLevels[id] = (this.upgradeLevels[id] + 1) % (def.max + 1);
+      this.applyUpgrades();
+  }
+  /** DBG: max every upgrade. */
+  public maxAllUpgrades() {
+      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = d.max;
+      this.applyUpgrades();
+  }
+  /** DBG: clear every upgrade back to L0. */
+  public resetUpgrades() {
+      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = 0;
+      this.applyUpgrades();
+  }
+  /** DBG: grant Salvage for testing the (future) shop. */
+  public addDebugCredits(n: number) { this.credits += n; }
+
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
    *  per COMBO_KILLS_PER_TIER ship kills, capped at COMBO_MAX_MULTIPLIER. */
   private comboMultiplier(): number {
@@ -2687,6 +2764,7 @@ export class GameEngine {
    *  live popup — O(1), no array scan — so it reads as a growing total. */
   private awardScore(points: number, popupPos?: Vector2) {
       this.score += points;
+      this.credits += points; // Salvage earns 1:1 with score (score stays the high-score)
       if (!popupPos || points === 0) return;
 
       // Fold into the current popup if it's still floating.
