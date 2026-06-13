@@ -973,6 +973,8 @@ export interface EngineStats {
   // interaction feels better.  'collide' (default): fly into the snitch.
   // 'shoot': any player-owned projectile within its catch radius nabs it.
   snitchCatchMode?: 'collide' | 'shoot';
+  // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
+  snitchSpeedName?: string;
   // Overlay toggles — all DBG-only renderer gating.  Default false.
   // FF Vectors: per-cell arrows colored by magnitude.
   // FF Cells:   faint cell-grid outlines.

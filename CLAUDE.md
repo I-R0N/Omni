@@ -315,15 +315,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a
-  burst/coast AI — slow coasting (0.22× player cruise) punctuated by
-  darts (0.68×, still below cruise so a steady chase always closes) on
+  burst/coast AI — slow coasting (0.16× player cruise) punctuated by
+  darts (0.52×, still below cruise so a steady chase always closes) on
   a random timer or when the player closes inside PANIC_RADIUS (panic
   darts bias away from the player; a cooldown guarantees coast windows
-  between them).  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS` and
-  ends the current wave via `WaveSystem.endWaveBySnitch` (no early-clear
-  bonus on top); the next wave spawns a fresh one.  Catch mode is the
-  DBG "Snitch catch" toggle, surfaced as `EngineStats.snitchCatchMode`.
-  Lifecycle lives in `GameEngine.updateSnitch` / `spawnSnitch`.
+  between them).  Both speed states are scaled live by the DBG
+  `SNITCH_SPEED_CYCLE` multiplier (Player ▸ "Snitch spd").  Catching it
+  pays `SCORE_CONSTANTS.SNITCH_POINTS` and ends the current wave via
+  `WaveSystem.endWaveBySnitch` (no early-clear bonus on top); the next
+  wave spawns a fresh one.  Catch mode is the DBG "Snitch catch"
+  toggle, surfaced as `EngineStats.snitchCatchMode`.  Lifecycle lives
+  in `GameEngine.updateSnitch` / `spawnSnitch`.
 - `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,

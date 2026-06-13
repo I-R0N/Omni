@@ -2187,8 +2187,8 @@ export const SNITCH_CONSTANTS = {
   // panic darts so a persistent chaser always gets another chance.
   // Speed fractions apply to the friction-limited player cruise
   // (acceleration/(1−friction), clamped by maxSpeed).
-  COAST_SPEED_FRACTION: 0.22, // lazy drift — well under player cruise, easy to close on
-  DART_SPEED_FRACTION: 0.68,  // burst stays BELOW player cruise so a steady chase always gains
+  COAST_SPEED_FRACTION: 0.16, // lazy drift — well under player cruise, easy to close on
+  DART_SPEED_FRACTION: 0.52,  // burst stays BELOW player cruise so a steady chase always gains
   SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
   SPEED_EASE_COAST: 2.0, // 1/s ease back down — visible deceleration tail
   COAST_STEER_RATE: 0.06, // per-60Hz-frame velocity lerp while coasting
@@ -2219,6 +2219,26 @@ export const SNITCH_CONSTANTS = {
   SPARKLE_COLORS: ['#fde047', '#fbbf24', '#fff7cc', '#f59e0b'] as string[],
   CATCH_BURST_COUNT: 40, // gold particle burst on catch
 };
+
+// DBG snitch-speed multiplier on both AI speed states (coast + dart).
+// Cycled live from the DBG panel (Player ▸ Snitch spd) so the chase feel
+// can be tuned without a rebuild.  Multiplies the cruise-relative target
+// speed in GameEngine.updateSnitch, so it scales coast and dart together
+// and tracks player-cruise changes.  Default 1.0× = the base fractions.
+export const SNITCH_SPEED_CYCLE: ReadonlyArray<number> = [
+  0.5, 0.75, 1.0, 1.5, 2.0,
+] as const;
+let activeSnitchSpeedIndex = 2; // 1.0×
+export function getActiveSnitchSpeedMult(): number {
+  return SNITCH_SPEED_CYCLE[activeSnitchSpeedIndex];
+}
+export function getActiveSnitchSpeedName(): string {
+  return `${SNITCH_SPEED_CYCLE[activeSnitchSpeedIndex]}×`;
+}
+export function cycleSnitchSpeed(): number {
+  activeSnitchSpeedIndex = (activeSnitchSpeedIndex + 1) % SNITCH_SPEED_CYCLE.length;
+  return activeSnitchSpeedIndex;
+}
 
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number
 // and provides the canonical pickup colour used by every ammo drop entity
