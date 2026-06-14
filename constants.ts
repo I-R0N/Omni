@@ -2119,7 +2119,12 @@ export const WAVE_CONSTANTS = {
 // Survivors despawned at time-up bypass the death path and award nothing.
 export const SCORE_CONSTANTS = {
   POINTS_PER_TIER: 100,           // tier-1 kill = 100, tier-2 = 200, tier-3 = 300
-  EARLY_CLEAR_BONUS_PER_WAVE: 50, // early-clear bonus = this × wave number
+  // Wave completion (kill-all model): a flat base on every clear plus a
+  // speed-graded bonus = SPEED_SCALE × wave × fraction, where the fraction
+  // is 1 when cleared within the wave's spawn-window "par" and decays to 0
+  // at 2× par.  Clearing fast is worth more.
+  WAVE_COMPLETE_BASE: 50,
+  EARLY_CLEAR_BONUS_PER_WAVE: 50, // speed-bonus scale (× wave number)
   // Shard / tile destruction — player-attributed kills only (see
   // GameEntity.killedByPlayer; environmental deaths award nothing).
   // Tiles pay per point of maxHealth so tiered materials (plastic,

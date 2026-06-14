@@ -684,8 +684,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               >
                 <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
                   Wave {stats.waveNumber ?? 1}
-                  {stats.waveTimeRemaining !== undefined && (
-                    <span className="text-cyan-300"> — {stats.waveTimeRemaining}s</span>
+                  {stats.enemiesRemaining !== undefined && (
+                    <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
+                  )}
+                  {stats.waveElapsedSec !== undefined && (
+                    <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
                   )}
                 </span>
                 {isGrace && (

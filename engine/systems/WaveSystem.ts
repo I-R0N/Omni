@@ -53,9 +53,18 @@ export class WaveSystem {
   // Reusable spawn-position scratch — never allocate inside the spawn loop.
   private readonly spawnPos: Vector2 = { x: 0, y: 0 };
 
-  /** Whole-window seconds left on the active wave clock (0 outside 'active'). */
-  public get timeRemainingSec(): number {
-    return this.waveState === 'active' ? Math.max(0, this.durationSec - this.elapsedSec) : 0;
+  /** Seconds elapsed in the active wave (0 outside 'active').  The clock no
+   *  longer ends the wave — it only grades the completion speed bonus. */
+  public get elapsedSecPublic(): number {
+    return this.waveState === 'active' ? this.elapsedSec : 0;
+  }
+
+  /** Enemies still standing between the player and wave completion: the
+   *  not-yet-spawned remainder of the budget PLUS the live tracked count.
+   *  Reaching 0 (while 'active') completes the wave. */
+  public enemiesRemaining(entities: GameEntity[]): number {
+    if (this.waveState !== 'active') return 0;
+    return (this.spawnList.length - this.nextSpawnIdx) + this.countLiveTracked(entities);
   }
 
   /** Reset all wave state and start wave 0.  Skipped entirely when
@@ -78,28 +87,26 @@ export class WaveSystem {
   }
 
   /**
-   * Per-sim-step tick: drives the spawn stream, both completion paths
-   * (time-up / early clear), and the grace countdown into the next wave.
-   * `onCleared` fires once per wave end, on both paths, so milestone
-   * rewards (health drop) keep working; `early` is true on the
-   * early-clear path so the caller can pay the score bonus.  Survivors
-   * carry over untouched into the next wave.
+   * Per-sim-step tick.  COMPLETION model: the wave is only over once the
+   * full budget has been spawned AND every spawned enemy is dead — the
+   * player must clear the field to advance.  The clock keeps counting but
+   * no longer ends the wave; `onCleared` receives the elapsed seconds so
+   * the caller can pay a speed-graded time bonus.  The grace countdown
+   * then rolls into the next wave.
    */
   public update(
     dt: number,
     ctx: WaveSpawnContext,
-    onCleared: (waveJustCleared: number, early: boolean) => void,
+    onCleared: (waveJustCleared: number, elapsedSec: number) => void,
   ) {
     if (this.waveState === 'active') {
       this.elapsedSec += dt;
       this.emitDueSpawns(ctx);
-      if (this.elapsedSec >= this.durationSec) {
-        this.endWave(true, onCleared);
-      } else if (
+      if (
         this.nextSpawnIdx >= this.spawnList.length &&
         this.countLiveTracked(ctx.entities) === 0
       ) {
-        this.endWave(false, onCleared);
+        this.endWave(onCleared);
       }
     } else if (this.waveState === 'cleared' && this.waveGraceTimer > 0) {
       this.waveGraceTimer -= dt;
@@ -110,8 +117,10 @@ export class WaveSystem {
     }
   }
 
-  /** Begin a new timed wave: compute duration + difficulty-scaled spawn
-   *  budget, build the subtype list and spawn schedule, announce. */
+  /** Begin a wave: compute the spawn-stream window + difficulty-scaled
+   *  budget, build the subtype list and spawn schedule, announce.  Note
+   *  `durationSec` is now only the window over which enemies STREAM IN —
+   *  it does not end the wave (completion does). */
   private startWave(index: number, ctx: WaveSpawnContext) {
     this.waveIndex = index;
     this.waveEnemyIds.clear();
@@ -128,7 +137,7 @@ export class WaveSystem {
     const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     this.announcements.push({
       text: `WAVE ${index + 1}`,
-      subtext: `SURVIVE ${Math.round(this.durationSec)}S`,
+      subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
       color: '#ffffff',
       lifetime: totalLife,
       maxLifetime: totalLife,
@@ -249,20 +258,20 @@ export class WaveSystem {
     this.waveEnemyIds.add(id);
   }
 
-  /** Transition to 'cleared': banner per end path, milestone callback,
-   *  grace countdown start.  Survivors stay in play — they keep fighting
-   *  through grace and alongside the next wave's stream. */
-  private endWave(timedOut: boolean, onCleared: (waveJustCleared: number, early: boolean) => void) {
+  /** Transition to 'cleared' once the field is empty: announce, hand the
+   *  elapsed time to the caller (it pays a speed-graded bonus), and start
+   *  the grace countdown into the next wave. */
+  private endWave(onCleared: (waveJustCleared: number, elapsedSec: number) => void) {
     this.waveState = 'cleared';
     const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-    const bonus = SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * (this.waveIndex + 1);
-    this.announcements.push(
-      timedOut
-        ? { text: `WAVE ${this.waveIndex + 1} ENDED`,         color: '#fbbf24', lifetime: life, maxLifetime: life }
-        : { text: `WAVE ${this.waveIndex + 1} CLEARED EARLY`, subtext: `+${bonus} PTS`,
-            color: '#4ade80', lifetime: life, maxLifetime: life },
-    );
-    onCleared(this.waveIndex, !timedOut);
+    this.announcements.push({
+      text: `WAVE ${this.waveIndex + 1} CLEARED`,
+      subtext: `${Math.round(this.elapsedSec)}S`,
+      color: '#4ade80',
+      lifetime: life,
+      maxLifetime: life,
+    });
+    onCleared(this.waveIndex, this.elapsedSec);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
   }
 
@@ -298,19 +307,19 @@ export class WaveSystem {
    */
   public endWaveBySnitch(
     points: number,
-    onCleared: (waveJustCleared: number, early: boolean) => void,
+    onCleared: (waveJustCleared: number, elapsedSec: number) => void,
   ): boolean {
     if (this.waveState !== 'active') return false;
     this.waveState = 'cleared';
     const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     this.announcements.push({
       text: 'SNITCH CAUGHT',
-      subtext: `WAVE ${this.waveIndex + 1} ENDED  +${points} PTS`,
+      subtext: `WAVE ${this.waveIndex + 1} CLEARED  +${points} PTS`,
       color: '#fde047',
       lifetime: life,
       maxLifetime: life,
     });
-    onCleared(this.waveIndex, false);
+    onCleared(this.waveIndex, this.elapsedSec);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
     return true;
   }

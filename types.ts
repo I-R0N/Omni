@@ -870,9 +870,12 @@ export interface EngineStats {
   waveTotal?: number;
   waveStatus?: 'active' | 'cleared';
   waveGraceTimer?: number;
-  /** Whole seconds left on the active timed wave's clock; undefined
-   *  outside the 'active' phase (grace, menu, difficulty "None"). */
-  waveTimeRemaining?: number;
+  /** Seconds elapsed in the active wave (count-up scoring timer); undefined
+   *  outside the 'active' phase. */
+  waveElapsedSec?: number;
+  /** Enemies left to destroy this wave (unspawned remainder + alive).
+   *  Completion model: the wave ends only when this reaches 0. */
+  enemiesRemaining?: number;
   /** Run score — animated integer ticker toward the true run total. */
   score?: number;
   /** Kill-combo readout: active multiplier (1 = no combo), the kill
