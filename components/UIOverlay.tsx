@@ -829,8 +829,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {(stats.upgrades ?? []).map(u => (
                     <div key={u.id} className="flex justify-between gap-1">
                       <span className={u.level > 0 ? 'text-slate-200' : 'text-slate-500'}>{u.label}</span>
-                      <span className={`font-bold tabular-nums ${u.level >= u.max ? 'text-amber-300' : u.level > 0 ? 'text-white' : 'text-slate-600'}`}>
-                        {u.level}/{u.max}
+                      <span className={`font-bold tabular-nums ${u.level >= 4 ? 'text-amber-300' : u.level > 0 ? 'text-white' : 'text-slate-600'}`}>
+                        Lv {u.level}
                       </span>
                     </div>
                   ))}

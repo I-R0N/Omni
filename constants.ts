@@ -2156,41 +2156,33 @@ export const SCORE_CONSTANTS = {
 };
 
 // ── Progression: leveled stat upgrades ───────────────────────────────────────
-// In-run progression spine.  Each upgrade is a repeatable level bought with
-// Salvage (the spendable mirror of score).  GameEngine.applyUpgrades folds the
-// run's `upgradeLevels` into the player's effective stats; at all-zero the
-// game is identical to before.  Behaviour-changing UNLOCKS (weapons / shield /
-// overcharge) and the Drydock shop UI build on top of this spine separately.
+// In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
+// (every 4th wave); each card grants ONE level worth 4× the old per-level
+// magnitude, and levels are UNCAPPED (a focused build can stack a stat as high
+// as picks allow).  GameEngine.applyUpgrades folds the run's `upgradeLevels`
+// into the player's effective stats.  Unlocks (weapons / shield / overcharge)
+// are the separate Salvage→Drydock economy.
 export type UpgradeId =
   | 'hull' | 'plating' | 'capacitor' | 'engine'
   | 'thrusters' | 'gunnery' | 'autoloader' | 'magazine';
 
 export interface UpgradeDef {
   id: UpgradeId;
-  label: string;   // DBG / shop label
-  desc: string;    // one-line effect summary
-  max: number;     // max level
-  // Next-level cost = round(baseCost × costGrowth^(currentLevel)).  Unused
-  // until the Drydock shop ships; defined now so the catalog is complete.
-  baseCost: number;
-  costGrowth: number;
+  label: string;   // DBG / card / menu label
+  desc: string;    // one-line effect of one card (= one level)
+  max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
 }
 
 export const UPGRADE_DEFS: readonly UpgradeDef[] = [
-  { id: 'hull',       label: 'Hull',       desc: '+25 max HP',        max: 5, baseCost: 400, costGrowth: 1.6 },
-  { id: 'plating',    label: 'Plating',    desc: '+15 max shield',    max: 5, baseCost: 350, costGrowth: 1.6 },
-  { id: 'capacitor',  label: 'Capacitor',  desc: '+25% shield regen', max: 3, baseCost: 500, costGrowth: 1.7 },
-  { id: 'engine',     label: 'Engine',     desc: '+8% top speed',     max: 5, baseCost: 400, costGrowth: 1.6 },
-  { id: 'thrusters',  label: 'Thrusters',  desc: '+12% acceleration', max: 5, baseCost: 350, costGrowth: 1.6 },
-  { id: 'gunnery',    label: 'Gunnery',    desc: '+12% weapon damage',max: 5, baseCost: 500, costGrowth: 1.7 },
-  { id: 'autoloader', label: 'Autoloader', desc: '-8% fire cooldown', max: 5, baseCost: 450, costGrowth: 1.65 },
-  { id: 'magazine',   label: 'Magazine',   desc: '+40 ammo capacity', max: 5, baseCost: 300, costGrowth: 1.5 },
+  { id: 'hull',       label: 'Hull',       desc: '+100 max HP'        , max: 10 },
+  { id: 'plating',    label: 'Plating',    desc: '+60 max shield'     , max: 10 },
+  { id: 'capacitor',  label: 'Capacitor',  desc: '+100% shield regen' , max: 10 },
+  { id: 'engine',     label: 'Engine',     desc: '+32% top speed'     , max: 10 },
+  { id: 'thrusters',  label: 'Thrusters',  desc: '+48% acceleration'  , max: 10 },
+  { id: 'gunnery',    label: 'Gunnery',    desc: '+48% weapon damage' , max: 10 },
+  { id: 'autoloader', label: 'Autoloader', desc: '-32% fire cooldown' , max: 10 },
+  { id: 'magazine',   label: 'Magazine',   desc: '+160 ammo capacity' , max: 10 },
 ] as const;
-
-// Next-level Salvage cost of a stat upgrade given its current level.
-export function upgradeCost(def: UpgradeDef, currentLevel: number): number {
-  return Math.round(def.baseCost * Math.pow(def.costGrowth, currentLevel));
-}
 
 // ── One-time unlocks ──────────────────────────────────────────────────────────
 // The run starts LEAN — Blaster only, no shield, no charged shots.  These
@@ -2218,16 +2210,20 @@ export const UNLOCK_DEFS: readonly UnlockDef[] = [
 // Per-level effect magnitudes (read by GameEngine.applyUpgrades + the
 // movement hook).  Base values they modify: HP 100, shield SHIELD_CONSTANTS
 // .MAX_CHARGE, recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
+// Per-level (= per-card) effect magnitudes — 4× the original per-level values
+// since cards now arrive 4× less often (every 4th wave).  Base values they
+// modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE, recharge SHIELD_CONSTANTS
+// .RECHARGE_RATE, ammo AMMO MAX_POOL.
 export const UPGRADE_EFFECTS = {
-  HULL_HP_PER_LEVEL: 25,
-  PLATING_SHIELD_PER_LEVEL: 15,
-  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 0.25,
-  ENGINE_SPEED_FRAC_PER_LEVEL: 0.08,
-  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.12,
-  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.12,
-  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.08,
+  HULL_HP_PER_LEVEL: 100,
+  PLATING_SHIELD_PER_LEVEL: 60,
+  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 1.0,
+  ENGINE_SPEED_FRAC_PER_LEVEL: 0.32,
+  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.48,
+  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.48,
+  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.32,
   AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
-  MAGAZINE_AMMO_PER_LEVEL: 40,
+  MAGAZINE_AMMO_PER_LEVEL: 160,
 };
 
 // ── Between-wave upgrade cards ────────────────────────────────────────────────
@@ -2237,8 +2233,8 @@ export const UPGRADE_EFFECTS = {
 // (weapons / shield / overcharge) plug into the same pool once unlocks ship.
 export const UPGRADE_CARD_CONSTANTS = {
   CARD_COUNT: 3,
-  DEFAULT_WAVE_INTERVAL: 1,             // every wave
-  WAVE_INTERVAL_CYCLE: [1, 2, 3, 5] as const,
+  DEFAULT_WAVE_INTERVAL: 4,             // a card every 4th wave (4× effect each)
+  WAVE_INTERVAL_CYCLE: [4, 1, 2, 8] as const,
   SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
   SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
   SALVAGE_CARD_PER_WAVE: 75,

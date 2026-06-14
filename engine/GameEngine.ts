@@ -3681,8 +3681,9 @@ export class GameEngine {
       const amount = SALVAGE_CARD_BASE + SALVAGE_CARD_PER_WAVE * waveNumber;
       return { kind: 'salvage', label: 'Salvage Cache', desc: `+${amount} Salvage`, amount, rarity: 'common' };
     };
-    // Shuffle the not-maxed upgrades and take the first few as stat cards.
-    const pool = UPGRADE_DEFS.filter(d => this.upgradeLevels[d.id] < d.max);
+    // Shuffle ALL upgrades (levels are uncapped) and take the first few as
+    // stat cards — each card grants one level worth 4× the per-level effect.
+    const pool = UPGRADE_DEFS.slice();
     for (let i = pool.length - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -3692,7 +3693,7 @@ export class GameEngine {
       const def = pool[i];
       if (def) {
         const next = this.upgradeLevels[def.id] + 1;
-        cards.push({ kind: 'stat', label: def.label, desc: `${def.desc}  (Lv ${next}/${def.max})`, id: def.id, rarity: 'common' });
+        cards.push({ kind: 'stat', label: def.label, desc: `${def.desc}  (→ Lv ${next})`, id: def.id, rarity: 'common' });
       } else {
         cards.push(salvageCard());
       }
@@ -3720,10 +3721,9 @@ export class GameEngine {
     const card = this.pendingCards[index];
     if (card) {
       if (card.kind === 'stat' && card.id) {
-        const def = UPGRADE_DEFS.find(d => d.id === card.id);
         const id = card.id as UpgradeId;
-        if (def && this.upgradeLevels[id] < def.max) {
-          this.upgradeLevels[id]++;
+        if (this.upgradeLevels[id] !== undefined) {
+          this.upgradeLevels[id]++; // uncapped
           this.applyUpgrades();
         }
       } else if (card.kind === 'salvage') {
@@ -3740,7 +3740,7 @@ export class GameEngine {
   /** DBG: cycle the card-offer wave interval (1 → 2 → 3 → 5 → 1). */
   public cycleCardInterval() {
     const cyc = UPGRADE_CARD_CONSTANTS.WAVE_INTERVAL_CYCLE;
-    const i = cyc.indexOf(this.cardWaveInterval as 1 | 2 | 3 | 5);
+    const i = cyc.indexOf(this.cardWaveInterval as 1 | 2 | 4 | 8);
     this.cardWaveInterval = cyc[(i + 1) % cyc.length];
   }
 

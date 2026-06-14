@@ -330,9 +330,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   render small + muted-red, distinct from gold points.)
 - `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
   spine.  8 leveled stat upgrades (hull / plating / capacitor / engine /
-  thrusters / gunnery / autoloader / magazine) bought with **Salvage**
-  (`GameEngine.credits`, a spendable mirror of score that earns 1:1 in
-  `awardScore`; score stays the high-score).  `GameEngine.applyUpgrades`
+  thrusters / gunnery / autoloader / magazine) earned ONLY from
+  wave-completion cards (every 4th wave); each card grants one level
+  worth 4× the per-level effect and levels are UNCAPPED (`max` on
+  `UpgradeDef` is a DBG-cycle bound only).  Salvage (`GameEngine.credits`,
+  a spendable mirror of score earned 1:1 in `awardScore`) funds the
+  Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
   folds the run's `upgradeLevels` into the player's effective stats —
   maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
   WeaponSystem), `cooldownMult` (WeaponSystem), `maxAmmo` (DropSystem
@@ -358,7 +361,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   "Unlock all" / "Relock" cover testing.  NOTE: per-wave enemy stat
   scaling is still a planned increment.
 - `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
-  `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
+  `cardWaveInterval` waves (DBG "Card int", default 4) `handleWaveCleared`
   calls `GameEngine.openCardChoice`, which pauses the sim
   (`cardChoicePending` short-circuits the loop's accumulator) and offers
   `CARD_COUNT` cards (`UpgradeCard[]` on `EngineStats.cardChoice`).  Pool
