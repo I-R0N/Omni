@@ -69,6 +69,7 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCycleEnemyScale?: () => void;
   onCycleUpgrade?: (id: string) => void;
   onMaxUpgrades?: () => void;
   onResetUpgrades?: () => void;
@@ -144,6 +145,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCycleEnemyScale,
   onCycleUpgrade,
   onMaxUpgrades,
   onResetUpgrades,
@@ -383,6 +385,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
                   'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-wave ramp. The snitch starts at 0.05× player cruise on wave 1 and gains 0.05× each wave (capped at 1.2×); this knob scales that for testing. Lower = easier to catch.')}
+                {ctrlRow('Enemy scale', onCycleEnemyScale,
+                  stats.enemyScaleName ?? '1×',
+                  'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
+                {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
               </>)}
 
               {/* ── Upgrades (progression spine — DBG) ─────────────── */}

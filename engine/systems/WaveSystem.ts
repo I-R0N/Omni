@@ -3,6 +3,8 @@ import {
   DIFFICULTY_STAT_SCALES,
   ENEMY_VARIANTS,
   ENEMY_CONSTANTS,
+  enemyHpMult,
+  enemyDamageMult,
   WAVE_CONSTANTS,
   WAVE_ANNOUNCE_CONSTANTS,
   SCORE_CONSTANTS,
@@ -235,7 +237,11 @@ export class WaveSystem {
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
-    const scaledHealth = Math.max(1, Math.round(config.health * statScale.health));
+    // Per-wave scaling on top of the per-difficulty multipliers (see
+    // ENEMY_SCALING).  HP scales at spawn; damage rides a per-enemy
+    // damageMult read by the ram + projectile paths.
+    const scaledHealth = Math.max(1, Math.round(config.health * statScale.health * enemyHpMult(this.waveIndex)));
+    const dmgMult = (statScale.damage ?? 1) * enemyDamageMult(this.waveIndex);
     entities.push({
       id,
       type: EntityType.ENEMY,
@@ -251,6 +257,7 @@ export class WaveSystem {
       maxHealth: scaledHealth,
       maxSpeed: config.maxSpeed * statScale.speed,
       mass: config.mass,
+      damageMult: dmgMult,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       sprite: config.sprite,
     });

@@ -390,6 +390,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   in `GameEngine.updateSnitch` / `spawnSnitch`.
 - `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
+- `ENEMY_SCALING` / `enemyHpMult()` / `enemyDamageMult()` — per-wave
+  enemy growth on top of difficulty: HP scales at spawn, damage rides a
+  per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
+  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
+  DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)

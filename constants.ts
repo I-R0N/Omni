@@ -2518,13 +2518,45 @@ export const HEALTH_DROP_INTERVAL: Record<number, number> = {
   3: 20,   // Hard — every 20 waves
 };
 
-// Difficulty stat multipliers — scale individual enemy health and speed
-export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number }> = {
-  0: { health: 1.0, speed: 1.0 }, // N/A (no enemies)
-  1: { health: 0.7, speed: 0.8 }, // Low — weaker, slower enemies
-  2: { health: 0.85, speed: 0.9 }, // Moderate
-  3: { health: 1.0, speed: 1.0 }, // Full difficulty
+// Difficulty stat multipliers — scale individual enemy health, speed, damage
+export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number; damage: number }> = {
+  0: { health: 1.0,  speed: 1.0, damage: 1.0 }, // N/A (no enemies)
+  1: { health: 0.7,  speed: 0.8, damage: 0.7 }, // Low — weaker, slower, softer
+  2: { health: 0.85, speed: 0.9, damage: 0.85 }, // Moderate
+  3: { health: 1.0,  speed: 1.0, damage: 1.0 }, // Full difficulty
 };
+
+// ── Enemy scaling (per-wave) ──────────────────────────────────────────────────
+// On top of the per-difficulty multipliers, enemies scale with the wave number
+// so the run stays honest as the player upgrades.  Tuned for a COMFORTABLE
+// lead: growth is gentle (the player out-scales faster), and both terms cap.
+//   Final enemy HP  = baseTierHP × difficulty.health × enemyHpMult(waveIndex)
+//   Final enemy dmg = baseAttackDmg × difficulty.damage × enemyDamageMult(idx)
+// waveIndex is 0-based, so wave 1 (index 0) → ×1.0 (no scaling).
+export const ENEMY_SCALING = {
+  HP_GROWTH_PER_WAVE: 0.06,  // +6% enemy HP per wave …
+  HP_MULT_CAP: 2.5,          // … capped at 2.5×
+  DMG_GROWTH_PER_WAVE: 0.04, // +4% enemy damage per wave …
+  DMG_MULT_CAP: 2.0,         // … capped at 2.0×
+};
+// DBG global multiplier on the per-wave growth (Player ▸ "Enemy scale"):
+// 0 = no wave scaling, 1 = tuned, 2 = double growth.  Feel the margin live.
+export const ENEMY_SCALE_CYCLE: ReadonlyArray<number> = [1, 0, 0.5, 1.5, 2] as const;
+let activeEnemyScaleIndex = 0; // 1×
+export function getActiveEnemyScaleMult(): number { return ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]; }
+export function getActiveEnemyScaleName(): string { return `${ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]}×`; }
+export function cycleEnemyScale(): number {
+  activeEnemyScaleIndex = (activeEnemyScaleIndex + 1) % ENEMY_SCALE_CYCLE.length;
+  return activeEnemyScaleIndex;
+}
+export function enemyHpMult(waveIndex: number): number {
+  return Math.min(ENEMY_SCALING.HP_MULT_CAP,
+    1 + ENEMY_SCALING.HP_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
+}
+export function enemyDamageMult(waveIndex: number): number {
+  return Math.min(ENEMY_SCALING.DMG_MULT_CAP,
+    1 + ENEMY_SCALING.DMG_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
+}
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
@@ -2544,12 +2576,12 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_DRONE,    mass: 10
   },
   [EnemySubtype.RAMMER_2]: {
-    color: '#f97316', size: 28, health: 1,
+    color: '#f97316', size: 28, health: 2,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8
   },
   [EnemySubtype.RAMMER_3]: {
-    color: '#facc15', size: 32, health: 3,
+    color: '#facc15', size: 32, health: 5,
     maxSpeed: 11,  accel: 8,   turnRate: 3.0,
     sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
@@ -2565,7 +2597,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_ORBITER,  mass: 10
   },
   [EnemySubtype.SHOOTER_3]: {
-    color: '#3b82f6', size: 26, health: 2,
+    color: '#3b82f6', size: 26, health: 3,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9
   },

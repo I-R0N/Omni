@@ -1022,6 +1022,9 @@ export interface EngineStats {
   snitchCatchMode?: 'collide' | 'shoot';
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
+  enemyScaleName?: string;
+  enemyScaleInfo?: string;
   // Overlay toggles — all DBG-only renderer gating.  Default false.
   // FF Vectors: per-cell arrows colored by magnitude.
   // FF Cells:   faint cell-grid outlines.

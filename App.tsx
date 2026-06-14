@@ -265,6 +265,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleSnitchSpeed();
   };
 
+  const handleCycleEnemyScale = () => {
+      if (engineRef.current) engineRef.current.cycleEnemyScale();
+  };
+
   const handleCycleUpgrade = (id: string) => {
       if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
   };
@@ -406,6 +410,7 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCycleEnemyScale={handleCycleEnemyScale}
         onCycleUpgrade={handleCycleUpgrade}
         onMaxUpgrades={handleMaxUpgrades}
         onResetUpgrades={handleResetUpgrades}

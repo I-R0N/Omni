@@ -244,7 +244,11 @@ export class WeaponSystem {
       const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+      // Per-wave enemy damage scaling — copy the shared config and scale
+      // its damage by the enemy's stamped multiplier (1× when unset).
+      const dmgMult = enemy.damageMult ?? 1;
+      const shot = dmgMult !== 1 ? { ...weapon, damage: weapon.damage * dmgMult } : weapon;
+      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
 
       // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
       // then wait BURST_RELOAD before starting the next burst.

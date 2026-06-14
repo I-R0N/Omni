@@ -2661,7 +2661,9 @@ export class PhysicsSystem {
               if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
                   // flash already handled by the general contact flash below
               } else {
-                  let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+                  // Per-wave enemy damage scaling rides enemy.damageMult.
+                  const ramBase = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY * (enemy.damageMult ?? 1);
+                  let ramDmg = ramBase;
                   if ((target.shield ?? 0) > 0) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
@@ -2669,7 +2671,7 @@ export class PhysicsSystem {
                       target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                       target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
-                  if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
+                  if (onDamage) onDamage(target.position, ramBase, target);
                   if (ramDmg > 0) {
                       target.health -= ramDmg;
                       target.hitFlash = 0.2;
