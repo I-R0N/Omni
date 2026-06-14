@@ -340,6 +340,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   behaviour-changing UNLOCKS (weapons / shield / overcharge), the
   between-wave Drydock shop UI, and per-wave enemy stat scaling are
   planned next increments not yet built.
+- `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
+  `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
+  calls `GameEngine.openCardChoice`, which pauses the sim
+  (`cardChoicePending` short-circuits the loop's accumulator) and offers
+  `CARD_COUNT` cards (`UpgradeCard[]` on `EngineStats.cardChoice`).  Pool
+  today: stat-upgrade cards (a free level of a not-maxed `UPGRADE_DEFS`
+  entry) + occasional Salvage cards; the `'unlock'` card kind is reserved
+  for the weapons/shield/overcharge unlocks (next).  `selectUpgradeCard`
+  applies the pick and resumes.  Modal lives in `UIOverlay`
+  (`stats.cardChoice`); DBG "Test cards" force-triggers a choice.
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a

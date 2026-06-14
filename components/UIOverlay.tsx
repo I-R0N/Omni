@@ -73,6 +73,9 @@ interface UIOverlayProps {
   onMaxUpgrades?: () => void;
   onResetUpgrades?: () => void;
   onAddCredits?: () => void;
+  onSelectCard?: (index: number) => void;
+  onCycleCardInterval?: () => void;
+  onTestCards?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -142,6 +145,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onMaxUpgrades,
   onResetUpgrades,
   onAddCredits,
+  onSelectCard,
+  onCycleCardInterval,
+  onTestCards,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -271,6 +277,41 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
+      {/* ── Between-wave upgrade card choice (modal; sim is paused) ── */}
+      {stats.cardChoice && stats.cardChoice.length > 0 && (
+        <div className="absolute inset-0 z-50 pointer-events-auto flex flex-col items-center justify-center gap-6 bg-slate-950/70 backdrop-blur-sm">
+          <div className="text-center">
+            <h2 className="text-amber-300 text-2xl font-extrabold tracking-[0.2em]">CHOOSE AN UPGRADE</h2>
+            <p className="text-slate-400 text-[11px] uppercase tracking-widest mt-1">
+              Wave {stats.waveNumber ?? 1} cleared · free pick
+            </p>
+          </div>
+          <div className="flex gap-4 flex-wrap justify-center max-w-3xl px-4">
+            {stats.cardChoice.map((c, i) => {
+              const accent = c.kind === 'salvage'
+                ? 'border-amber-400/70 hover:border-amber-300 hover:shadow-amber-500/30'
+                : c.kind === 'unlock'
+                  ? 'border-violet-400/70 hover:border-violet-300 hover:shadow-violet-500/30'
+                  : 'border-sky-400/70 hover:border-sky-300 hover:shadow-sky-500/30';
+              const badge = c.kind === 'salvage' ? 'text-amber-300' : c.kind === 'unlock' ? 'text-violet-300' : 'text-sky-300';
+              return (
+                <button
+                  key={i}
+                  onClick={() => onSelectCard?.(i)}
+                  className={`w-44 h-56 rounded-xl border-2 bg-slate-900/85 shadow-xl flex flex-col items-center justify-center gap-3 p-4 transition-all hover:scale-105 active:scale-95 ${accent}`}
+                >
+                  <span className={`text-[10px] font-bold uppercase tracking-widest ${badge}`}>
+                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Unlock' : 'Upgrade'}
+                  </span>
+                  <span className="text-white text-lg font-extrabold text-center leading-tight">{c.label}</span>
+                  <span className="text-slate-300 text-xs text-center leading-snug">{c.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
 
@@ -345,6 +386,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {(stats.upgrades ?? []).map(u =>
                   ctrlRow(u.label, () => onCycleUpgrade?.(u.id), `Lv ${u.level}/${u.max}`,
                     `Cycle ${u.label} upgrade level (DBG). Click bumps the level and wraps back to 0 at max; applies live to the player's effective stats.`))}
+                {ctrlRow('Card int', onCycleCardInterval, `every ${stats.cardInterval ?? 1}`,
+                  'Wave interval between free upgrade-card offers (1 / 2 / 3 / 5). 1 = a card pick after every wave.')}
+                {ctrlRow('Test cards', onTestCards, 'Show',
+                  'Force an upgrade-card choice right now (uses the live wave number).')}
                 {ctrlRow('+1k Salv', onAddCredits, 'Grant',
                   'Grant 1000 Salvage for testing the (future) shop.')}
                 {ctrlRow('Max all', onMaxUpgrades, 'Max',

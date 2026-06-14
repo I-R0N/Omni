@@ -17,8 +17,8 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -99,6 +99,12 @@ export class GameEngine {
       hull: 0, plating: 0, capacitor: 0, engine: 0,
       thrusters: 0, gunnery: 0, autoloader: 0, magazine: 0,
   };
+  // Between-wave upgrade-card choice.  When `cardChoicePending` is set the
+  // sim pauses and the UI shows `pendingCards`; picking one applies it and
+  // resumes.  Offered every `cardWaveInterval` waves (DBG-cyclable).
+  private cardChoicePending: boolean = false;
+  private pendingCards: UpgradeCard[] = [];
+  private cardWaveInterval: number = UPGRADE_CARD_CONSTANTS.DEFAULT_WAVE_INTERVAL;
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -1244,6 +1250,8 @@ export class GameEngine {
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       credits: this.credits,
       upgrades: this.upgradeSnapshot(),
+      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
+      cardInterval: this.cardWaveInterval,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1339,6 +1347,8 @@ export class GameEngine {
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
       this.resetUpgrades();
+      this.cardChoicePending = false;
+      this.pendingCards = [];
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -1436,6 +1446,8 @@ export class GameEngine {
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       credits: this.credits,
       upgrades: this.upgradeSnapshot(),
+      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
+      cardInterval: this.cardWaveInterval,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1498,6 +1510,15 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Between-wave card choice freezes the sim (the field stays drawn
+    // behind the React card overlay) until the player picks.
+    if (this.cardChoicePending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -3473,7 +3494,83 @@ export class GameEngine {
       };
       this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
     }
+
+    // Between-wave upgrade card offer — every `cardWaveInterval` waves.
+    // Sets the pending choice; the loop pauses the sim until the player
+    // picks (or the grace countdown is frozen meanwhile).
+    if ((clearedIndex + 1) % this.cardWaveInterval === 0) {
+      this.openCardChoice(clearedIndex + 1);
+    }
   };
+
+  // ── Between-wave upgrade cards ──────────────────────────────────────────
+
+  /** Build the card set for the wave that just cleared and pause for the
+   *  player's pick.  Pool = stat-upgrade cards (a free level of a not-maxed
+   *  upgrade) + occasional Salvage cards; all-maxed falls back to Salvage. */
+  private openCardChoice(waveNumber: number) {
+    const { CARD_COUNT, SALVAGE_CARD_CHANCE, SALVAGE_CARD_BASE, SALVAGE_CARD_PER_WAVE } = UPGRADE_CARD_CONSTANTS;
+    const salvageCard = (): UpgradeCard => {
+      const amount = SALVAGE_CARD_BASE + SALVAGE_CARD_PER_WAVE * waveNumber;
+      return { kind: 'salvage', label: 'Salvage Cache', desc: `+${amount} Salvage`, amount, rarity: 'common' };
+    };
+    // Shuffle the not-maxed upgrades and take the first few as stat cards.
+    const pool = UPGRADE_DEFS.filter(d => this.upgradeLevels[d.id] < d.max);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const cards: UpgradeCard[] = [];
+    for (let i = 0; i < CARD_COUNT; i++) {
+      const def = pool[i];
+      if (def) {
+        const next = this.upgradeLevels[def.id] + 1;
+        cards.push({ kind: 'stat', label: def.label, desc: `${def.desc}  (Lv ${next}/${def.max})`, id: def.id, rarity: 'common' });
+      } else {
+        cards.push(salvageCard());
+      }
+    }
+    // Chance to swap one stat card for a Salvage card for variety.
+    if (cards.length === CARD_COUNT && cards.some(c => c.kind === 'stat') && Math.random() < SALVAGE_CARD_CHANCE) {
+      const statIdxs = cards.map((c, i) => c.kind === 'stat' ? i : -1).filter(i => i >= 0);
+      cards[statIdxs[(Math.random() * statIdxs.length) | 0]] = salvageCard();
+    }
+    this.pendingCards = cards;
+    this.cardChoicePending = true;
+  }
+
+  /** Apply the chosen card and resume play.  Called from the UI. */
+  public selectUpgradeCard(index: number) {
+    if (!this.cardChoicePending) return;
+    const card = this.pendingCards[index];
+    if (card) {
+      if (card.kind === 'stat' && card.id) {
+        const def = UPGRADE_DEFS.find(d => d.id === card.id);
+        const id = card.id as UpgradeId;
+        if (def && this.upgradeLevels[id] < def.max) {
+          this.upgradeLevels[id]++;
+          this.applyUpgrades();
+        }
+      } else if (card.kind === 'salvage') {
+        this.credits += card.amount ?? 0;
+      }
+    }
+    this.cardChoicePending = false;
+    this.pendingCards = [];
+  }
+
+  /** DBG: cycle the card-offer wave interval (1 → 2 → 3 → 5 → 1). */
+  public cycleCardInterval() {
+    const cyc = UPGRADE_CARD_CONSTANTS.WAVE_INTERVAL_CYCLE;
+    const i = cyc.indexOf(this.cardWaveInterval as 1 | 2 | 3 | 5);
+    this.cardWaveInterval = cyc[(i + 1) % cyc.length];
+  }
+
+  /** DBG: force a card choice right now (uses the live wave number). */
+  public debugTriggerCardChoice() {
+    if (this.cardChoicePending) return;
+    this.openCardChoice(this.waveIndex + 1);
+  }
 
   // ── Snitch — quidditch-style bonus target ───────────────────────────────
   //

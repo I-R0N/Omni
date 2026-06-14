@@ -885,6 +885,12 @@ export interface EngineStats {
   credits?: number;
   /** Per-upgrade level snapshot for the DBG Upgrades panel. */
   upgrades?: { id: string; label: string; level: number; max: number }[];
+  /** Pending between-wave upgrade-card choice (undefined when not
+   *  choosing).  The sim is paused while this is set; the player picks
+   *  one card to apply. */
+  cardChoice?: UpgradeCard[];
+  /** Wave interval between card offers (DBG-cyclable; 1 = every wave). */
+  cardInterval?: number;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
@@ -1074,6 +1080,19 @@ export interface DamageText {
   // Per-text render size multiplier (points tier bigger by magnitude;
   // damage chips render small).  Folded into the grow-animation scale.
   fontScale?: number;
+}
+
+// One option in a between-wave upgrade-card choice.  `kind` discriminates
+// the payload: 'stat' bumps an upgrade level (`id`), 'salvage' grants
+// currency (`amount`).  'unlock' is reserved for the weapons/shield/
+// overcharge unlocks (built next) — the card pool is already shaped for it.
+export interface UpgradeCard {
+  kind: 'stat' | 'salvage' | 'unlock';
+  label: string;
+  desc: string;
+  id?: string;       // upgrade id (stat) or unlock id
+  amount?: number;   // salvage granted
+  rarity?: 'common' | 'rare';
 }
 
 // Full-screen wave announcement banner rendered on the canvas.

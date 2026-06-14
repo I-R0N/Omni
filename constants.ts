@@ -2197,6 +2197,20 @@ export const UPGRADE_EFFECTS = {
   MAGAZINE_AMMO_PER_LEVEL: 40,
 };
 
+// ── Between-wave upgrade cards ────────────────────────────────────────────────
+// After every Nth wave (WAVE_INTERVAL, DBG-cyclable) the game pauses and offers
+// a free choice of CARD_COUNT cards.  Pool today: stat-upgrade cards (a free
+// level of one of the UPGRADE_DEFS) + occasional Salvage cards.  Unlock cards
+// (weapons / shield / overcharge) plug into the same pool once unlocks ship.
+export const UPGRADE_CARD_CONSTANTS = {
+  CARD_COUNT: 3,
+  DEFAULT_WAVE_INTERVAL: 1,             // every wave
+  WAVE_INTERVAL_CYCLE: [1, 2, 3, 5] as const,
+  SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
+  SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
+  SALVAGE_CARD_PER_WAVE: 75,
+};
+
 // ── Timed-wave config ────────────────────────────────────────────────────────
 // Waves are timed windows: enemies stream in continuously until the clock
 // runs out.  Killing the full spawn budget before time-up ends the wave

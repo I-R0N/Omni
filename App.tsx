@@ -281,6 +281,18 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.addDebugCredits(1000);
   };
 
+  const handleSelectCard = (index: number) => {
+      if (engineRef.current) engineRef.current.selectUpgradeCard(index);
+  };
+
+  const handleCycleCardInterval = () => {
+      if (engineRef.current) engineRef.current.cycleCardInterval();
+  };
+
+  const handleTestCards = () => {
+      if (engineRef.current) engineRef.current.debugTriggerCardChoice();
+  };
+
   const handleToggleFFOverlayVectors = () => {
       if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
   };
@@ -386,6 +398,9 @@ const App: React.FC = () => {
         onMaxUpgrades={handleMaxUpgrades}
         onResetUpgrades={handleResetUpgrades}
         onAddCredits={handleAddCredits}
+        onSelectCard={handleSelectCard}
+        onCycleCardInterval={handleCycleCardInterval}
+        onTestCards={handleTestCards}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
