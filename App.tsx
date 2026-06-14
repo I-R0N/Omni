@@ -293,10 +293,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugTriggerCardChoice();
   };
 
-  const handlePurchaseUpgrade = (id: string) => {
-      if (engineRef.current) engineRef.current.purchaseUpgrade(id);
-  };
-
   const handlePurchaseUnlock = (id: string) => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
   };
@@ -417,7 +413,6 @@ const App: React.FC = () => {
         onSelectCard={handleSelectCard}
         onCycleCardInterval={handleCycleCardInterval}
         onTestCards={handleTestCards}
-        onPurchaseUpgrade={handlePurchaseUpgrade}
         onPurchaseUnlock={handlePurchaseUnlock}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}

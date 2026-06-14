@@ -345,8 +345,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
   shield, no charged shots); unlocks (Shield, Overcharge, the 6
   non-Blaster weapons) are bought in the **Drydock** (a shop section in
-  the player menu, `GameEngine.purchaseUpgrade` / `purchaseUnlock`
-  spending `credits`) or, rarely, granted free via an `'unlock'` card.
+  the player menu, `GameEngine.purchaseUnlock` spending `credits`) or,
+  rarely, granted free via an `'unlock'` card.  The Drydock sells
+  ONLY these unlocks — the 8 stat upgrades come exclusively from
+  wave-completion cards.
   Unlock state lives on `GameEngine` (`unlockedWeapons` / `shieldUnlocked`
   / `overchargeUnlocked`), synced to the player entity
   (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon

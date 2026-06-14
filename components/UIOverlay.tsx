@@ -76,7 +76,6 @@ interface UIOverlayProps {
   onSelectCard?: (index: number) => void;
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
-  onPurchaseUpgrade?: (id: string) => void;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -152,7 +151,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSelectCard,
   onCycleCardInterval,
   onTestCards,
-  onPurchaseUpgrade,
   onPurchaseUnlock,
   onUnlockAll,
   onResetUnlocks,
@@ -852,50 +850,26 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
-            {/* Drydock — spend Salvage on upgrades + unlocks */}
+            {/* Drydock — spend Salvage on major unlocks (stat upgrades are card-only) */}
             {stats.shop && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3">
-                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · spend Salvage</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-                  {/* Upgrades column */}
-                  <div className="flex flex-col gap-1">
-                    {stats.shop.upgrades.map(u => {
-                      const maxed = u.level >= u.max;
-                      return (
-                        <button
-                          key={u.id}
-                          disabled={maxed || !u.affordable}
-                          onClick={() => onPurchaseUpgrade?.(u.id)}
-                          className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                            maxed ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                              : u.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
-                                : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                          }`}
-                        >
-                          <span className="font-bold">{u.label} <span className="text-slate-400 font-normal">{u.level}/{u.max}</span></span>
-                          <span className="tabular-nums">{maxed ? 'MAX' : `◈${u.cost}`}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {/* Unlocks column */}
-                  <div className="flex flex-col gap-1">
-                    {stats.shop.unlocks.map(u => (
-                      <button
-                        key={u.id}
-                        disabled={u.owned || !u.affordable}
-                        onClick={() => onPurchaseUnlock?.(u.id)}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{u.label}</span>
-                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
-                      </button>
-                    ))}
-                  </div>
+                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · unlocks</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {stats.shop.unlocks.map(u => (
+                    <button
+                      key={u.id}
+                      disabled={u.owned || !u.affordable}
+                      onClick={() => onPurchaseUnlock?.(u.id)}
+                      className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                        u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                          : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                            : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <span className="font-bold">{u.label}</span>
+                      <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}

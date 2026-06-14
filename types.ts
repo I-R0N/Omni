@@ -907,10 +907,9 @@ export interface EngineStats {
   };
   /** Current run unlocks for the player menu (real ownership). */
   unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
-  /** Drydock shop catalog (populated only while paused).  `cost` is the
-   *  next purchase's Salvage price; `affordable` folds in cost + cap. */
+  /** Drydock shop catalog (populated only while paused).  Unlocks only —
+   *  stat upgrades come exclusively from wave-completion cards. */
   shop?: {
-    upgrades: { id: string; label: string; desc: string; level: number; max: number; cost: number; affordable: boolean }[];
     unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
   };
   debugMode?: boolean;
