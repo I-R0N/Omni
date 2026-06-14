@@ -894,6 +894,16 @@ export interface EngineStats {
   cardChoice?: UpgradeCard[];
   /** Wave interval between card offers (DBG-cyclable; 1 = every wave). */
   cardInterval?: number;
+  /** Effective player stats for the player menu (pause screen). */
+  playerStats?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+    damageMult: number; cooldownMult: number; speedMult: number; maxAmmo: number;
+  };
+  /** Current run unlocks for the player menu.  Weapons/shield/overcharge
+   *  are all unlocked today; this reflects real ownership once the unlock
+   *  system ships. */
+  unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

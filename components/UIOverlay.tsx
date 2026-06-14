@@ -762,39 +762,96 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* ── Pause Menu ── */}
-      {stats.gameState === GameState.PAUSED && (
-        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50">
-          <h2 className="text-4xl font-bold text-white mb-8 tracking-widest">PAUSED</h2>
-          <div className="flex flex-col gap-4 w-56">
-            <button
-              onClick={onResume}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-              RESUME
-            </button>
-            <button
-              onClick={onRestart}
-              className="bg-slate-700 hover:bg-red-600 text-slate-200 hover:text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" />
-                <path d="M3 3v9h9" />
-              </svg>
-              RESTART
-            </button>
+      {/* ── Player Menu (pause) ── */}
+      {stats.gameState === GameState.PAUSED && (() => {
+        const ps = stats.playerStats;
+        const fmtMult = (m: number | undefined) => `×${(m ?? 1).toFixed(2)}`;
+        const statLine = (label: string, value: React.ReactNode) => (
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-400">{label}</span>
+            <span className="text-white font-bold tabular-nums">{value}</span>
           </div>
-          {/* Live map picker — selecting one switches maps and drops
-              straight into a fresh run (switch-and-play). */}
-          <div className="mt-10 flex flex-col items-center gap-5">
-            {renderMapGroup('Maps', REAL_MAPS)}
-            {renderMapGroup('Test Maps', TEST_MAPS)}
+        );
+        return (
+        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-white tracking-[0.2em]">PLAYER MENU</h2>
+              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={onResume}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                CONTINUE
+              </button>
+              <button
+                onClick={onRestart}
+                className="flex-1 bg-slate-700 hover:bg-red-600 text-slate-200 hover:text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" /><path d="M3 3v9h9" /></svg>
+                RESTART
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Ship status */}
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+                <div className="flex flex-col gap-1 text-xs">
+                  {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
+                  {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
+                  {statLine('Damage', fmtMult(ps?.damageMult))}
+                  {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
+                  {statLine('Speed', fmtMult(ps?.speedMult))}
+                  {statLine('Max ammo', ps?.maxAmmo ?? 200)}
+                </div>
+              </div>
+
+              {/* Session upgrades */}
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+                <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Upgrades</h3>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  {(stats.upgrades ?? []).map(u => (
+                    <div key={u.id} className="flex justify-between gap-1">
+                      <span className={u.level > 0 ? 'text-slate-200' : 'text-slate-500'}>{u.label}</span>
+                      <span className={`font-bold tabular-nums ${u.level >= u.max ? 'text-amber-300' : u.level > 0 ? 'text-white' : 'text-slate-600'}`}>
+                        {u.level}/{u.max}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Unlocks */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Unlocks</h3>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {(stats.unlocks?.weapons ?? []).map(w => (
+                  <span key={w} className="px-2 py-0.5 rounded bg-slate-700/70 text-slate-200 text-[10px] font-bold uppercase tracking-wide">{w}</span>
+                ))}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.shield ? 'bg-sky-700/70 text-sky-100' : 'bg-slate-800 text-slate-600'}`}>Shield</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600'}`}>Overcharge</span>
+              </div>
+            </div>
+
+            {/* Live map picker — switch-and-play (collapsed by default) */}
+            <details className="text-center">
+              <summary className="cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest list-none select-none hover:text-slate-200">Switch Map ▾</summary>
+              <div className="mt-4 flex flex-col items-center gap-4">
+                {renderMapGroup('Maps', REAL_MAPS)}
+                {renderMapGroup('Test Maps', TEST_MAPS)}
+              </div>
+            </details>
           </div>
         </div>
-      )}
+        );
+      })()}
 
     </div>
   );

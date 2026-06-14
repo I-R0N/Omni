@@ -105,6 +105,9 @@ export class GameEngine {
   private cardChoicePending: boolean = false;
   private pendingCards: UpgradeCard[] = [];
   private cardWaveInterval: number = UPGRADE_CARD_CONSTANTS.DEFAULT_WAVE_INTERVAL;
+  // Display names of every weapon, computed once — fed to the player menu's
+  // unlocks readout (all owned today; real ownership lands with unlocks).
+  private readonly weaponNames: string[] = WEAPON_LIST.map(w => WEAPONS[w].name);
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -1253,6 +1256,17 @@ export class GameEngine {
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
+      playerStats: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: this.player.maxHealth,
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: this.player.maxShield ?? 0,
+        damageMult: this.player.damageMult ?? 1,
+        cooldownMult: this.player.cooldownMult ?? 1,
+        speedMult: this.upgradeSpeedMult(),
+        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
+      },
+      unlocks: { weapons: this.weaponNames, shield: true, overcharge: true },
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1450,6 +1464,17 @@ export class GameEngine {
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
+      playerStats: {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: this.player.maxHealth,
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: this.player.maxShield ?? 0,
+        damageMult: this.player.damageMult ?? 1,
+        cooldownMult: this.player.cooldownMult ?? 1,
+        speedMult: this.upgradeSpeedMult(),
+        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
+      },
+      unlocks: { weapons: this.weaponNames, shield: true, overcharge: true },
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,

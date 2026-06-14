@@ -80,9 +80,11 @@ engine/
                           bouncer, pierce
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
     DropSystem.ts         Ammo + health drop spawn / collection
-    WaveSystem.ts         Timed-wave clock + spawn scheduler, grace
-                          timer, spawn geometry (survivors are never
-                          despawned — they carry into the next wave)
+    WaveSystem.ts         Completion-wave spawn scheduler + grace
+                          timer + spawn geometry.  A wave ends only when
+                          its full budget has spawned AND every spawned
+                          enemy is dead (clear-the-field); the clock just
+                          grades the speed bonus.  Survivors carry over.
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
@@ -148,9 +150,11 @@ Per-frame `loop()`:
      4. `NebulaSystem.update()` — neighbour-count refresh + lazy
         grid-index reset (nebula-specific bookkeeping only;
         merge/regen/shatter all moved to ShardSystem)
-     5. `WaveSystem.update()` — timed-wave tick: spawn stream,
-        time-up / early-clear completion, grace countdown (survivors
-        are never despawned — they carry into the next wave).
+     5. `WaveSystem.update()` — completion-wave tick: spawn stream
+        (the clock is now only the spawn-stream window), wave ends
+        when budget spawned + field cleared, grace countdown
+        (survivors carry into the next wave; clock grades the speed
+        bonus via `onCleared(wave, elapsedSec)`).
         Followed by `updateSnitch()` — persistent-snitch lifecycle:
         burst/coast AI + flow-field steering, comet-tail emission,
         catch check (collide/shoot per DBG toggle), wave-end on catch
