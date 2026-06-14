@@ -76,6 +76,10 @@ interface UIOverlayProps {
   onSelectCard?: (index: number) => void;
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
+  onPurchaseUpgrade?: (id: string) => void;
+  onPurchaseUnlock?: (id: string) => void;
+  onUnlockAll?: () => void;
+  onResetUnlocks?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -148,6 +152,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSelectCard,
   onCycleCardInterval,
   onTestCards,
+  onPurchaseUpgrade,
+  onPurchaseUnlock,
+  onUnlockAll,
+  onResetUnlocks,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -396,6 +404,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Set every upgrade to its max level.')}
                 {ctrlRow('Reset', onResetUpgrades, 'Clear',
                   'Reset every upgrade back to level 0.')}
+                {ctrlRow('Unlock all', onUnlockAll, 'Unlock',
+                  'Unlock every weapon + Shield + Overcharge (DBG).')}
+                {ctrlRow('Relock', onResetUnlocks, 'Lean',
+                  'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
               </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}
@@ -830,15 +842,63 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
             {/* Unlocks */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Unlocks</h3>
+              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Unlocks Owned</h3>
               <div className="flex flex-wrap gap-1.5 items-center">
                 {(stats.unlocks?.weapons ?? []).map(w => (
                   <span key={w} className="px-2 py-0.5 rounded bg-slate-700/70 text-slate-200 text-[10px] font-bold uppercase tracking-wide">{w}</span>
                 ))}
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.shield ? 'bg-sky-700/70 text-sky-100' : 'bg-slate-800 text-slate-600'}`}>Shield</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600'}`}>Overcharge</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.shield ? 'bg-sky-700/70 text-sky-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Shield</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Overcharge</span>
               </div>
             </div>
+
+            {/* Drydock — spend Salvage on upgrades + unlocks */}
+            {stats.shop && (
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3">
+                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · spend Salvage</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                  {/* Upgrades column */}
+                  <div className="flex flex-col gap-1">
+                    {stats.shop.upgrades.map(u => {
+                      const maxed = u.level >= u.max;
+                      return (
+                        <button
+                          key={u.id}
+                          disabled={maxed || !u.affordable}
+                          onClick={() => onPurchaseUpgrade?.(u.id)}
+                          className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                            maxed ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                              : u.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
+                                : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <span className="font-bold">{u.label} <span className="text-slate-400 font-normal">{u.level}/{u.max}</span></span>
+                          <span className="tabular-nums">{maxed ? 'MAX' : `◈${u.cost}`}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Unlocks column */}
+                  <div className="flex flex-col gap-1">
+                    {stats.shop.unlocks.map(u => (
+                      <button
+                        key={u.id}
+                        disabled={u.owned || !u.affordable}
+                        onClick={() => onPurchaseUnlock?.(u.id)}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="font-bold">{u.label}</span>
+                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Live map picker — switch-and-play (collapsed by default) */}
             <details className="text-center">

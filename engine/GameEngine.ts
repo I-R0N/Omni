@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, upgradeCost, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -109,9 +109,13 @@ export class GameEngine {
   // celebration animation plays first.  0 = nothing pending.
   private cardOpenDelaySec: number = 0;
   private pendingCardWaveNum: number = 0;
-  // Display names of every weapon, computed once — fed to the player menu's
-  // unlocks readout (all owned today; real ownership lands with unlocks).
-  private readonly weaponNames: string[] = WEAPON_LIST.map(w => WEAPONS[w].name);
+  // ── Unlocks ─────────────────────────────────────────────────────────────
+  // The run starts LEAN: Blaster only, no shield, no charged shots.  Bought
+  // in the Drydock (Salvage) or, rarely, granted free via a card.  Synced to
+  // the player entity (ownedWeapons / overchargeUnlocked) for WeaponSystem.
+  private unlockedWeapons: Set<WeaponType> = new Set([WeaponType.BLASTER]);
+  private shieldUnlocked: boolean = false;
+  private overchargeUnlocked: boolean = false;
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -1155,6 +1159,7 @@ export class GameEngine {
       shieldRechargeTimer: 0,
       shieldHitFlash: 0
     };
+    this.syncUnlocksToPlayer();
     this.applyUpgrades(); // initialise upgrade-derived stat fields (all at L0)
 
     this.camera = {
@@ -1260,7 +1265,7 @@ export class GameEngine {
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
-      playerStats: {
+      playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
@@ -1269,8 +1274,13 @@ export class GameEngine {
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.upgradeSpeedMult(),
         maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
-      },
-      unlocks: { weapons: this.weaponNames, shield: true, overcharge: true },
+      } : undefined,
+      unlocks: this.gameState === GameState.PAUSED ? {
+        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
+        shield: this.shieldUnlocked,
+        overcharge: this.overchargeUnlocked,
+      } : undefined,
+      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1365,6 +1375,7 @@ export class GameEngine {
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
+      this.resetUnlocks(); // back to lean (Blaster only, no shield/overcharge)
       this.resetUpgrades();
       this.cardChoicePending = false;
       this.pendingCards = [];
@@ -1470,7 +1481,7 @@ export class GameEngine {
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
-      playerStats: {
+      playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
@@ -1479,8 +1490,13 @@ export class GameEngine {
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.upgradeSpeedMult(),
         maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
-      },
-      unlocks: { weapons: this.weaponNames, shield: true, overcharge: true },
+      } : undefined,
+      unlocks: this.gameState === GameState.PAUSED ? {
+        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
+        shield: this.shieldUnlocked,
+        overcharge: this.overchargeUnlocked,
+      } : undefined,
+      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2490,7 +2506,7 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = heldFor > 0
+    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
@@ -2756,7 +2772,12 @@ export class GameEngine {
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
       if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
-      this.player.maxShield = SHIELD_CONSTANTS.MAX_CHARGE + UPGRADE_EFFECTS.PLATING_SHIELD_PER_LEVEL * lv.plating;
+      // Shield is gated behind its unlock — locked → no shield at all
+      // (Plating levels only matter once Shield is owned).
+      this.player.maxShield = this.shieldUnlocked
+          ? SHIELD_CONSTANTS.MAX_CHARGE + UPGRADE_EFFECTS.PLATING_SHIELD_PER_LEVEL * lv.plating
+          : 0;
+      if ((this.player.shield ?? 0) > this.player.maxShield) this.player.shield = this.player.maxShield;
       this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE
           * (1 + UPGRADE_EFFECTS.CAPACITOR_RECHARGE_FRAC_PER_LEVEL * lv.capacitor);
       this.player.damageMult = 1 + UPGRADE_EFFECTS.GUNNERY_DAMAGE_FRAC_PER_LEVEL * lv.gunnery;
@@ -2791,8 +2812,101 @@ export class GameEngine {
       for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = 0;
       this.applyUpgrades();
   }
-  /** DBG: grant Salvage for testing the (future) shop. */
+  /** DBG: grant Salvage for testing the shop. */
   public addDebugCredits(n: number) { this.credits += n; }
+
+  // ── Unlocks + Drydock shop ──────────────────────────────────────────────
+
+  /** Push the unlock state onto the player entity so WeaponSystem can gate
+   *  weapon cycle/select + charged shots without reaching into the engine. */
+  private syncUnlocksToPlayer() {
+      this.player.ownedWeapons = WEAPON_LIST.filter(w => this.unlockedWeapons.has(w));
+      this.player.overchargeUnlocked = this.overchargeUnlocked;
+  }
+
+  private isUnlockOwned(def: UnlockDef): boolean {
+      if (def.kind === 'shield') return this.shieldUnlocked;
+      if (def.kind === 'overcharge') return this.overchargeUnlocked;
+      return def.weapon !== undefined && this.unlockedWeapons.has(def.weapon);
+  }
+
+  /** Grant an unlock (free path: cards / DBG; the shop deducts first). */
+  private applyUnlock(def: UnlockDef) {
+      if (def.kind === 'shield') {
+          this.shieldUnlocked = true;
+          this.applyUpgrades();
+          this.player.shield = this.player.maxShield ?? 0; // hand over a full shield
+      } else if (def.kind === 'overcharge') {
+          this.overchargeUnlocked = true;
+          this.syncUnlocksToPlayer();
+      } else if (def.weapon !== undefined) {
+          this.unlockedWeapons.add(def.weapon);
+          this.syncUnlocksToPlayer();
+          // Auto-equip the freshly unlocked weapon for immediate payoff.
+          this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
+      }
+  }
+
+  /** Buy the next level of a stat upgrade with Salvage. */
+  public purchaseUpgrade(id: string): boolean {
+      const def = UPGRADE_DEFS.find(d => d.id === id);
+      if (!def) return false;
+      const lvl = this.upgradeLevels[def.id];
+      if (lvl >= def.max) return false;
+      const cost = upgradeCost(def, lvl);
+      if (this.credits < cost) return false;
+      this.credits -= cost;
+      this.upgradeLevels[def.id] = lvl + 1;
+      this.applyUpgrades();
+      return true;
+  }
+
+  /** Buy a one-time unlock with Salvage. */
+  public purchaseUnlock(id: string): boolean {
+      const def = UNLOCK_DEFS.find(d => d.id === id);
+      if (!def || this.isUnlockOwned(def) || this.credits < def.cost) return false;
+      this.credits -= def.cost;
+      this.applyUnlock(def);
+      return true;
+  }
+
+  /** DBG: unlock everything (weapons, shield, overcharge). */
+  public debugUnlockAll() {
+      for (const w of WEAPON_LIST) this.unlockedWeapons.add(w);
+      this.shieldUnlocked = true;
+      this.overchargeUnlocked = true;
+      this.syncUnlocksToPlayer();
+      this.applyUpgrades();
+      this.player.shield = this.player.maxShield ?? 0;
+  }
+
+  /** Reset unlocks back to the lean run-start loadout. */
+  private resetUnlocks() {
+      this.unlockedWeapons = new Set([WeaponType.BLASTER]);
+      this.shieldUnlocked = false;
+      this.overchargeUnlocked = false;
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex = 0;
+      this.syncUnlocksToPlayer();
+  }
+  /** DBG: relock everything to the lean loadout. */
+  public debugResetUnlocks() { this.resetUnlocks(); this.applyUpgrades(); }
+
+  /** Drydock catalog snapshot for the player menu (built only while paused). */
+  private shopSnapshot() {
+      return {
+          upgrades: UPGRADE_DEFS.map(d => {
+              const level = this.upgradeLevels[d.id];
+              const maxed = level >= d.max;
+              const cost = maxed ? 0 : upgradeCost(d, level);
+              return { id: d.id, label: d.label, desc: d.desc, level, max: d.max, cost, affordable: !maxed && this.credits >= cost };
+          }),
+          unlocks: UNLOCK_DEFS.map(d => {
+              const owned = this.isUnlockOwned(d);
+              return { id: d.id, label: d.label, desc: d.desc, owned, cost: d.cost, affordable: !owned && this.credits >= d.cost };
+          }),
+      };
+  }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
    *  per COMBO_KILLS_PER_TIER ship kills, capped at COMBO_MAX_MULTIPLIER. */
@@ -3606,6 +3720,14 @@ export class GameEngine {
       const statIdxs = cards.map((c, i) => c.kind === 'stat' ? i : -1).filter(i => i >= 0);
       cards[statIdxs[(Math.random() * statIdxs.length) | 0]] = salvageCard();
     }
+    // Rarely, offer a FREE unlock card (if anything's still unowned).
+    const notOwned = UNLOCK_DEFS.filter(d => !this.isUnlockOwned(d));
+    if (notOwned.length > 0 && Math.random() < UPGRADE_CARD_CONSTANTS.UNLOCK_CARD_CHANCE) {
+      const u = notOwned[(Math.random() * notOwned.length) | 0];
+      cards[(Math.random() * cards.length) | 0] = {
+        kind: 'unlock', label: u.label, desc: `Unlock — ${u.desc}`, id: u.id, rarity: 'rare',
+      };
+    }
     this.pendingCards = cards;
     this.cardChoicePending = true;
   }
@@ -3624,6 +3746,9 @@ export class GameEngine {
         }
       } else if (card.kind === 'salvage') {
         this.credits += card.amount ?? 0;
+      } else if (card.kind === 'unlock' && card.id) {
+        const def = UNLOCK_DEFS.find(d => d.id === card.id);
+        if (def && !this.isUnlockOwned(def)) this.applyUnlock(def); // free (no cost)
       }
     }
     this.cardChoicePending = false;

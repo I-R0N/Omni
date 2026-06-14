@@ -293,6 +293,22 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugTriggerCardChoice();
   };
 
+  const handlePurchaseUpgrade = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseUpgrade(id);
+  };
+
+  const handlePurchaseUnlock = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseUnlock(id);
+  };
+
+  const handleUnlockAll = () => {
+      if (engineRef.current) engineRef.current.debugUnlockAll();
+  };
+
+  const handleResetUnlocks = () => {
+      if (engineRef.current) engineRef.current.debugResetUnlocks();
+  };
+
   const handleToggleFFOverlayVectors = () => {
       if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
   };
@@ -401,6 +417,10 @@ const App: React.FC = () => {
         onSelectCard={handleSelectCard}
         onCycleCardInterval={handleCycleCardInterval}
         onTestCards={handleTestCards}
+        onPurchaseUpgrade={handlePurchaseUpgrade}
+        onPurchaseUnlock={handlePurchaseUnlock}
+        onUnlockAll={handleUnlockAll}
+        onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}

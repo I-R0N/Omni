@@ -2187,6 +2187,34 @@ export const UPGRADE_DEFS: readonly UpgradeDef[] = [
   { id: 'magazine',   label: 'Magazine',   desc: '+40 ammo capacity', max: 5, baseCost: 300, costGrowth: 1.5 },
 ] as const;
 
+// Next-level Salvage cost of a stat upgrade given its current level.
+export function upgradeCost(def: UpgradeDef, currentLevel: number): number {
+  return Math.round(def.baseCost * Math.pow(def.costGrowth, currentLevel));
+}
+
+// ── One-time unlocks ──────────────────────────────────────────────────────────
+// The run starts LEAN — Blaster only, no shield, no charged shots.  These
+// unlocks are bought in the Drydock (Salvage) or, rarely, offered as a free
+// card.  Weapon unlocks map to a WeaponType; shield + overcharge are flags.
+export interface UnlockDef {
+  id: string;
+  kind: 'shield' | 'overcharge' | 'weapon';
+  weapon?: WeaponType;
+  label: string;
+  desc: string;
+  cost: number;
+}
+export const UNLOCK_DEFS: readonly UnlockDef[] = [
+  { id: 'shield',        kind: 'shield',     label: 'Shield',     desc: 'Deflector shield',  cost: 600 },
+  { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 900 },
+  { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 500 },
+  { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 650 },
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 800 },
+  { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 900 },
+  { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 1000 },
+  { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 1200 },
+] as const;
+
 // Per-level effect magnitudes (read by GameEngine.applyUpgrades + the
 // movement hook).  Base values they modify: HP 100, shield SHIELD_CONSTANTS
 // .MAX_CHARGE, recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
@@ -2217,6 +2245,9 @@ export const UPGRADE_CARD_CONSTANTS = {
   // Beat between a wave clearing and the card modal opening, so the
   // wave-clear celebration animation plays before the sim pauses.
   CARD_OPEN_DELAY_SEC: 1.1,
+  // Chance one of the offered cards is a free (rare) unlock, when any
+  // unlock is still unowned.
+  UNLOCK_CARD_CHANCE: 0.18,
 };
 
 // ── Timed-wave config ────────────────────────────────────────────────────────

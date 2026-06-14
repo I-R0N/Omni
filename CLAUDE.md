@@ -340,10 +340,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   multiplied into the movement line.  At all-zero the game is identical
   to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
   testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
-  Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).  NOTE:
-  behaviour-changing UNLOCKS (weapons / shield / overcharge), the
-  between-wave Drydock shop UI, and per-wave enemy stat scaling are
-  planned next increments not yet built.
+  Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).
+- `UNLOCK_DEFS` / `upgradeCost()` — one-time run unlocks + the stat-
+  upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
+  shield, no charged shots); unlocks (Shield, Overcharge, the 6
+  non-Blaster weapons) are bought in the **Drydock** (a shop section in
+  the player menu, `GameEngine.purchaseUpgrade` / `purchaseUnlock`
+  spending `credits`) or, rarely, granted free via an `'unlock'` card.
+  Unlock state lives on `GameEngine` (`unlockedWeapons` / `shieldUnlocked`
+  / `overchargeUnlocked`), synced to the player entity
+  (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon
+  cycle/select + charged shots; `applyUpgrades` gates `maxShield` to 0
+  until Shield is owned.  `EngineStats.shop` / `.unlocks` (built only
+  while paused) drive the player-menu Drydock + Unlocks panels; DBG
+  "Unlock all" / "Relock" cover testing.  NOTE: per-wave enemy stat
+  scaling is still a planned increment.
 - `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
   `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
   calls `GameEngine.openCardChoice`, which pauses the sim

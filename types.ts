@@ -326,6 +326,11 @@ export interface GameEntity {
   damageMult?: number;
   cooldownMult?: number;
   shieldRechargeRate?: number;
+  // Unlock gating (player only; set by GameEngine.syncUnlocksToPlayer):
+  //  - ownedWeapons: which weapons cycle/select may pick (always ≥ Blaster)
+  //  - overchargeUnlocked: whether charged shots are allowed
+  ownedWeapons?: WeaponType[];
+  overchargeUnlocked?: boolean;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -900,10 +905,14 @@ export interface EngineStats {
     shield: number; maxShield: number;
     damageMult: number; cooldownMult: number; speedMult: number; maxAmmo: number;
   };
-  /** Current run unlocks for the player menu.  Weapons/shield/overcharge
-   *  are all unlocked today; this reflects real ownership once the unlock
-   *  system ships. */
+  /** Current run unlocks for the player menu (real ownership). */
   unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
+  /** Drydock shop catalog (populated only while paused).  `cost` is the
+   *  next purchase's Salvage price; `affordable` folds in cost + cap. */
+  shop?: {
+    upgrades: { id: string; label: string; desc: string; level: number; max: number; cost: number; affordable: boolean }[];
+    unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
+  };
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

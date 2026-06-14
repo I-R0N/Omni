@@ -110,7 +110,8 @@ export class WeaponSystem {
 
     // Charged-shot ammo gating: if the pool can't cover chargedAmmoCost,
     // fall back to a normal shot at ammoCost.
-    let isCharged = charged;
+    // Charged shots require the Overcharge unlock.
+    let isCharged = charged && (player.overchargeUnlocked ?? false);
     if (isCharged && baseConfig.chargedAmmoCost > 0 && (player.ammo ?? 0) < baseConfig.chargedAmmoCost) {
       isCharged = false;
     }
@@ -268,6 +269,11 @@ export class WeaponSystem {
    */
   public selectWeapon(player: GameEntity, wType: WeaponType): number {
     const cfg = WEAPONS[wType];
+    // Locked weapons can't be selected (Blaster is always owned).
+    const owned = player.ownedWeapons ?? [WeaponType.BLASTER];
+    if (wType !== WeaponType.BLASTER && !owned.includes(wType)) {
+      return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
+    }
     if (cfg.ammoCost > 0 && (player.ammo ?? 0) < cfg.ammoCost) {
       return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
     }
@@ -290,7 +296,9 @@ export class WeaponSystem {
    */
   public cycleWeapon(player: GameEntity): number {
     const pool = player.ammo ?? 0;
+    const ownedSet = player.ownedWeapons ?? [WeaponType.BLASTER];
     const owned = WEAPON_LIST.filter(w => {
+      if (w !== WeaponType.BLASTER && !ownedSet.includes(w)) return false; // must be unlocked
       const cfg = WEAPONS[w];
       return cfg.ammoCost === 0 || pool >= cfg.ammoCost;
     });
