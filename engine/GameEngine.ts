@@ -105,6 +105,10 @@ export class GameEngine {
   private cardChoicePending: boolean = false;
   private pendingCards: UpgradeCard[] = [];
   private cardWaveInterval: number = UPGRADE_CARD_CONSTANTS.DEFAULT_WAVE_INTERVAL;
+  // Short delay after a wave clears before the card modal opens, so the
+  // celebration animation plays first.  0 = nothing pending.
+  private cardOpenDelaySec: number = 0;
+  private pendingCardWaveNum: number = 0;
   // Display names of every weapon, computed once — fed to the player menu's
   // unlocks readout (all owned today; real ownership lands with unlocks).
   private readonly weaponNames: string[] = WEAPON_LIST.map(w => WEAPONS[w].name);
@@ -1364,6 +1368,8 @@ export class GameEngine {
       this.resetUpgrades();
       this.cardChoicePending = false;
       this.pendingCards = [];
+      this.cardOpenDelaySec = 0;
+      this.pendingCardWaveNum = 0;
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -2197,6 +2203,16 @@ export class GameEngine {
         if (this.comboTimer <= 0) {
             this.comboTimer = 0;
             this.comboCount = 0;
+        }
+    }
+
+    // Deferred card-modal open — fires once the wave-clear celebration
+    // beat has elapsed (the modal then pauses the sim).
+    if (this.cardOpenDelaySec > 0) {
+        this.cardOpenDelaySec -= dt;
+        if (this.cardOpenDelaySec <= 0 && !this.cardChoicePending) {
+            this.openCardChoice(this.pendingCardWaveNum);
+            this.pendingCardWaveNum = 0;
         }
     }
 
@@ -3501,7 +3517,7 @@ export class GameEngine {
   /** Shared wave-completion hook — fires once per wave end on every path
    *  (time-up, early clear, snitch catch).  Pays the early-clear bonus,
    *  retires any uncaught snitch, and drops the milestone health pickup. */
-  private handleWaveCleared = (clearedIndex: number, elapsedSec: number) => {
+  private handleWaveCleared = (clearedIndex: number, elapsedSec: number, bySnitch: boolean = false) => {
     // Completion bonus: flat base + speed-graded bonus from the wave timer.
     // Par = the wave's spawn-stream window; clearing at/under par pays the
     // full speed bonus, decaying to 0 by 2× par.
@@ -3511,6 +3527,10 @@ export class GameEngine {
     const bonus = SCORE_CONSTANTS.WAVE_COMPLETE_BASE
         + Math.round(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * waveNum * speedFrac);
     this.awardScore(bonus, this.player.position);
+
+    // Wave-clear celebration — gold for a snitch catch, green for a
+    // clear-the-field win.  Plays before the card modal (see the delay).
+    this.playWaveClearCelebration(bySnitch);
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
     // (it is never despawned at a wave end), so don't touch it here.
@@ -3526,12 +3546,33 @@ export class GameEngine {
     }
 
     // Between-wave upgrade card offer — every `cardWaveInterval` waves.
-    // Sets the pending choice; the loop pauses the sim until the player
-    // picks (or the grace countdown is frozen meanwhile).
+    // Deferred by CARD_OPEN_DELAY_SEC so the celebration plays first; the
+    // tick in updateGameLogic opens the (sim-pausing) modal when it fires.
     if ((clearedIndex + 1) % this.cardWaveInterval === 0) {
-      this.openCardChoice(clearedIndex + 1);
+      this.pendingCardWaveNum = clearedIndex + 1;
+      this.cardOpenDelaySec = UPGRADE_CARD_CONSTANTS.CARD_OPEN_DELAY_SEC;
     }
   };
+
+  /** Wave-clear celebration FX: two expanding shockwave rings (visual
+   *  only — 0 damage/knockback), a colour-themed particle burst, and a
+   *  camera punch.  Gold for a snitch catch, green for a clear-all win. */
+  private playWaveClearCelebration(bySnitch: boolean) {
+    if (!this.currentMap) return;
+    const pos = this.player.position;
+    const color = bySnitch ? '#fde047' : '#4ade80';
+    this.spawnShockwave(pos, { radius: 540, damage: 0, knockback: 0, color, lifetime: 0.7 });
+    this.spawnShockwave(pos, { radius: 320, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.5 });
+    this.spawnParticles(pos, 64, color, {
+      speedMin: 3, speedMax: 9, sizeMin: 1.5, sizeMax: 3.5,
+      lifetimeMin: 0.5, lifetimeMax: 1.1,
+    });
+    this.spawnParticles(pos, 24, '#ffffff', {
+      speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.4, lifetimeMax: 0.8,
+    });
+    this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+  }
 
   // ── Between-wave upgrade cards ──────────────────────────────────────────
 

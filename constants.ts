@@ -2214,6 +2214,9 @@ export const UPGRADE_CARD_CONSTANTS = {
   SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
   SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
   SALVAGE_CARD_PER_WAVE: 75,
+  // Beat between a wave clearing and the card modal opening, so the
+  // wave-clear celebration animation plays before the sim pauses.
+  CARD_OPEN_DELAY_SEC: 1.1,
 };
 
 // ── Timed-wave config ────────────────────────────────────────────────────────

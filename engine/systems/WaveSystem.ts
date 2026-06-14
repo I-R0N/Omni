@@ -97,7 +97,7 @@ export class WaveSystem {
   public update(
     dt: number,
     ctx: WaveSpawnContext,
-    onCleared: (waveJustCleared: number, elapsedSec: number) => void,
+    onCleared: (waveJustCleared: number, elapsedSec: number, bySnitch: boolean) => void,
   ) {
     if (this.waveState === 'active') {
       this.elapsedSec += dt;
@@ -261,7 +261,7 @@ export class WaveSystem {
   /** Transition to 'cleared' once the field is empty: announce, hand the
    *  elapsed time to the caller (it pays a speed-graded bonus), and start
    *  the grace countdown into the next wave. */
-  private endWave(onCleared: (waveJustCleared: number, elapsedSec: number) => void) {
+  private endWave(onCleared: (waveJustCleared: number, elapsedSec: number, bySnitch: boolean) => void) {
     this.waveState = 'cleared';
     const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     this.announcements.push({
@@ -271,7 +271,7 @@ export class WaveSystem {
       lifetime: life,
       maxLifetime: life,
     });
-    onCleared(this.waveIndex, this.elapsedSec);
+    onCleared(this.waveIndex, this.elapsedSec, false);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
   }
 
@@ -307,7 +307,7 @@ export class WaveSystem {
    */
   public endWaveBySnitch(
     points: number,
-    onCleared: (waveJustCleared: number, elapsedSec: number) => void,
+    onCleared: (waveJustCleared: number, elapsedSec: number, bySnitch: boolean) => void,
   ): boolean {
     if (this.waveState !== 'active') return false;
     this.waveState = 'cleared';
@@ -319,7 +319,7 @@ export class WaveSystem {
       lifetime: life,
       maxLifetime: life,
     });
-    onCleared(this.waveIndex, this.elapsedSec);
+    onCleared(this.waveIndex, this.elapsedSec, true);
     this.waveGraceTimer = WAVE_CONSTANTS.GRACE_PERIOD;
     return true;
   }
