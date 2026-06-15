@@ -289,7 +289,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {stats.cardChoice && stats.cardChoice.length > 0 && (
         <div className="absolute inset-0 z-50 pointer-events-auto flex flex-col items-center justify-center gap-6 bg-slate-950/70 backdrop-blur-sm">
           <div className="text-center">
-            <h2 className="text-amber-300 text-2xl font-extrabold tracking-[0.2em]">CHOOSE AN UPGRADE</h2>
+            <h2 className="text-amber-300 text-2xl font-extrabold tracking-[0.2em]">CHOOSE AN AUGMENT</h2>
             <p className="text-slate-400 text-[11px] uppercase tracking-widest mt-1">
               Wave {stats.waveNumber ?? 1} cleared · free pick
             </p>
@@ -309,7 +309,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   className={`w-44 h-56 rounded-xl border-2 bg-slate-900/85 shadow-xl flex flex-col items-center justify-center gap-3 p-4 transition-all hover:scale-105 active:scale-95 ${accent}`}
                 >
                   <span className={`text-[10px] font-bold uppercase tracking-widest ${badge}`}>
-                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Unlock' : 'Upgrade'}
+                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Module' : 'Augment'}
                   </span>
                   <span className="text-white text-lg font-extrabold text-center leading-tight">{c.label}</span>
                   <span className="text-slate-300 text-xs text-center leading-snug">{c.desc}</span>
@@ -830,7 +830,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
               {/* Session upgrades */}
               <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-                <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Upgrades</h3>
+                <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Augments</h3>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   {(stats.upgrades ?? []).map(u => (
                     <div key={u.id} className="flex justify-between gap-1">
@@ -846,7 +846,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
             {/* Unlocks */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Unlocks Owned</h3>
+              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Modules Installed</h3>
               <div className="flex flex-wrap gap-1.5 items-center">
                 {(stats.unlocks?.weapons ?? []).map(w => (
                   <span key={w} className="px-2 py-0.5 rounded bg-slate-700/70 text-slate-200 text-[10px] font-bold uppercase tracking-wide">{w}</span>
@@ -859,7 +859,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Drydock — spend Salvage on major unlocks (stat upgrades are card-only) */}
             {stats.shop && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3">
-                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · unlocks</h3>
+                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                   {stats.shop.unlocks.map(u => (
                     <button

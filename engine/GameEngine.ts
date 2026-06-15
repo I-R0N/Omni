@@ -3692,9 +3692,11 @@ export class GameEngine {
       const amount = SALVAGE_CARD_BASE + SALVAGE_CARD_PER_WAVE * waveNumber;
       return { kind: 'salvage', label: 'Salvage Cache', desc: `+${amount} Salvage`, amount, rarity: 'common' };
     };
-    // Shuffle ALL upgrades (levels are uncapped) and take the first few as
-    // stat cards — each card grants one level worth 4× the per-level effect.
-    const pool = UPGRADE_DEFS.slice();
+    // Offer only AUGMENTS whose dependency MODULE is installed — never a
+    // card for a system the player can't use yet (e.g. shield Plating /
+    // Capacitor before the Shield module, or Magazine with only the
+    // ammo-free Blaster).  Levels are uncapped, so all eligible stay offerable.
+    const pool = UPGRADE_DEFS.filter(d => this.augmentEligible(d));
     for (let i = pool.length - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -3719,11 +3721,19 @@ export class GameEngine {
     if (notOwned.length > 0 && Math.random() < UPGRADE_CARD_CONSTANTS.UNLOCK_CARD_CHANCE) {
       const u = notOwned[(Math.random() * notOwned.length) | 0];
       cards[(Math.random() * cards.length) | 0] = {
-        kind: 'unlock', label: u.label, desc: `Unlock — ${u.desc}`, id: u.id, rarity: 'rare',
+        kind: 'unlock', label: u.label, desc: `Module — ${u.desc}`, id: u.id, rarity: 'rare',
       };
     }
     this.pendingCards = cards;
     this.cardChoicePending = true;
+  }
+
+  /** Whether an augment card may be offered — gated on its dependency
+   *  module so the player is never shown a card for a system they lack. */
+  private augmentEligible(d: { requires?: 'shield' | 'anyWeapon' }): boolean {
+    if (d.requires === 'shield') return this.shieldUnlocked;
+    if (d.requires === 'anyWeapon') return this.unlockedWeapons.size > 1; // > Blaster
+    return true;
   }
 
   /** Apply the chosen card and resume play.  Called from the UI. */

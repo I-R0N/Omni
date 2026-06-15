@@ -2171,17 +2171,22 @@ export interface UpgradeDef {
   label: string;   // DBG / card / menu label
   desc: string;    // one-line effect of one card (= one level)
   max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
+  // Dependency on a major MODULE — the card is withheld from the pool until
+  // the module is installed (otherwise the augment would do nothing):
+  //   'shield'    → needs the Shield module (Plating / Capacitor)
+  //   'anyWeapon' → needs any non-Blaster weapon (Magazine; Blaster is free)
+  requires?: 'shield' | 'anyWeapon';
 }
 
 export const UPGRADE_DEFS: readonly UpgradeDef[] = [
   { id: 'hull',       label: 'Hull',       desc: '+100 max HP'        , max: 10 },
-  { id: 'plating',    label: 'Plating',    desc: '+60 max shield'     , max: 10 },
-  { id: 'capacitor',  label: 'Capacitor',  desc: '+100% shield regen' , max: 10 },
+  { id: 'plating',    label: 'Plating',    desc: '+60 max shield'     , max: 10, requires: 'shield' },
+  { id: 'capacitor',  label: 'Capacitor',  desc: '+100% shield regen' , max: 10, requires: 'shield' },
   { id: 'engine',     label: 'Engine',     desc: '+32% top speed'     , max: 10 },
   { id: 'thrusters',  label: 'Thrusters',  desc: '+48% acceleration'  , max: 10 },
   { id: 'gunnery',    label: 'Gunnery',    desc: '+48% weapon damage' , max: 10 },
   { id: 'autoloader', label: 'Autoloader', desc: '-32% fire cooldown' , max: 10 },
-  { id: 'magazine',   label: 'Magazine',   desc: '+160 ammo capacity' , max: 10 },
+  { id: 'magazine',   label: 'Magazine',   desc: '+160 ammo capacity' , max: 10, requires: 'anyWeapon' },
 ] as const;
 
 // ── One-time unlocks ──────────────────────────────────────────────────────────

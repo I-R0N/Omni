@@ -344,6 +344,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
   testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
   Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).
+  PLAYER-FACING TERMS: stat-upgrade cards are **Augments**, the one-time
+  unlocks are **Modules**.  An augment with a `requires` (shield /
+  anyWeapon) is withheld from the card pool (`GameEngine.augmentEligible`)
+  until its module is installed — never offer a card for a system the
+  player can't use (Plating/Capacitor need Shield; Magazine needs a
+  non-Blaster weapon).
 - `UNLOCK_DEFS` / `upgradeCost()` — one-time run unlocks + the stat-
   upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
   shield, no charged shots); unlocks (Shield, Overcharge, the 6
