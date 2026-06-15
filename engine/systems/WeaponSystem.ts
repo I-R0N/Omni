@@ -6,6 +6,8 @@ import {
   ENEMY_BURST_CONFIG,
   ENEMY_CONSTANTS,
   ENEMY_ROLE,
+  ENEMY_ATTACK_EFFECTS,
+  CORROSION,
   COLLISION_CONFIG,
   LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
@@ -246,8 +248,16 @@ export class WeaponSystem {
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
       // Per-wave enemy damage scaling — copy the shared config and scale
       // its damage by the enemy's stamped multiplier (1× when unset).
+      // Subtypes in ENEMY_ATTACK_EFFECTS (Orbiter → corrosion) also tag the
+      // shot with a status payload + the effect colour.
       const dmgMult = enemy.damageMult ?? 1;
-      const shot = dmgMult !== 1 ? { ...weapon, damage: weapon.damage * dmgMult } : weapon;
+      const fx = enemy.enemySubtype ? ENEMY_ATTACK_EFFECTS[enemy.enemySubtype] : undefined;
+      let shot = weapon;
+      if (dmgMult !== 1 || fx) {
+        shot = { ...weapon };
+        if (dmgMult !== 1) shot.damage = weapon.damage * dmgMult;
+        if (fx) { shot.appliesEffect = fx; shot.color = CORROSION.COLOR; }
+      }
       this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
 
       // Burst state: fire BURST_SIZE shots with BURST_GAP between them,

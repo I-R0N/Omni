@@ -401,6 +401,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
   Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
   DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
+- `CORROSION` / `ENEMY_ATTACK_EFFECTS` — status-effect framework (v1 =
+  corrosion DoT only, but generic: `StatusEffectKind` / `EffectPayload`
+  / `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
+  (the Orbiter / Shooter-tier-2, green acid rounds) debuffs the player
+  on hit (`GameEngine.handleProjectileHit` → `applyStatusEffect`);
+  `tickStatusEffects` bleeds health past the shield, stacks ×3, refresh
+  on re-hit.  HUD badge + acid drip; DBG "Corrode" self-apply
+  (`EngineStats.statusEffects`).  Duration-only — no mitigation yet.
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)

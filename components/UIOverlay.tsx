@@ -70,6 +70,7 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
+  onApplyCorrosion?: () => void;
   onCycleUpgrade?: (id: string) => void;
   onMaxUpgrades?: () => void;
   onResetUpgrades?: () => void;
@@ -146,6 +147,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCycleEnemyScale,
+  onApplyCorrosion,
   onCycleUpgrade,
   onMaxUpgrades,
   onResetUpgrades,
@@ -389,6 +391,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
+                  'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
               </>)}
 
               {/* ── Upgrades (progression spine — DBG) ─────────────── */}
@@ -690,6 +694,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   )}
                 </div>
               )}
+              {/* Active status effects — e.g. CORROSION ×N, fading as it lapses */}
+              {(stats.statusEffects ?? []).map(e => (
+                <div
+                  key={e.kind}
+                  className="pointer-events-none bg-slate-900/75 border border-lime-500/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right"
+                  style={{ opacity: Math.max(0.45, e.fraction) }}
+                >
+                  <span className="text-lime-300 text-[11px] font-extrabold uppercase tracking-widest tabular-nums">
+                    {e.kind} ×{e.stacks}
+                  </span>
+                </div>
+              ))}
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${

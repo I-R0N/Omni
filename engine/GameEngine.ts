@@ -17,8 +17,8 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -1328,6 +1328,9 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
+        ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
+        : undefined,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -1398,6 +1401,7 @@ export class GameEngine {
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
+      this.player.statusEffects = [];
       this.player.ammo = 0;
       this.player.gold = 0;
       this.score = 0;
@@ -1546,6 +1550,9 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
+        ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
+        : undefined,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -2233,6 +2240,9 @@ export class GameEngine {
         }
     }
 
+    // Player status effects (corrosion DoT, …) tick before the death check.
+    this.tickStatusEffects(dt);
+
     // Deferred card-modal open — fires once the wave-clear celebration
     // beat has elapsed (the modal then pauses the sim).
     if (this.cardOpenDelaySec > 0) {
@@ -2686,6 +2696,10 @@ export class GameEngine {
   }
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Status-effect rounds (e.g. corrosion) debuff the player on hit.
+    if (proj.appliesEffect && target.type === EntityType.PLAYER && !target.isExploding) {
+      this.applyStatusEffect(target, proj.appliesEffect);
+    }
     // Derive impact direction for a slight forward cone bias
     const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
 
@@ -2825,6 +2839,59 @@ export class GameEngine {
   }
   /** DBG: grant Salvage for testing the shop. */
   public addDebugCredits(n: number) { this.credits += n; }
+
+  // ── Status effects ──────────────────────────────────────────────────────
+
+  /** Apply (or refresh + stack) a status effect on an entity (the player
+   *  today).  Re-hits add a stack up to maxStacks and refresh the timer. */
+  private applyStatusEffect(target: GameEntity, payload: EffectPayload) {
+    const list = target.statusEffects ?? (target.statusEffects = []);
+    const existing = list.find(e => e.kind === payload.kind);
+    if (existing) {
+      existing.stacks = Math.min(payload.maxStacks, existing.stacks + 1);
+      existing.remaining = payload.duration;
+      existing.maxDuration = payload.duration;
+      existing.dmgPerStack = payload.dmgPerSec;
+    } else {
+      list.push({
+        kind: payload.kind, remaining: payload.duration, maxDuration: payload.duration,
+        stacks: 1, dmgPerStack: payload.dmgPerSec,
+      });
+    }
+  }
+
+  /** Tick the player's status effects: apply per-step damage, count down,
+   *  drop expired.  Corrosion bleeds health directly (past the shield). */
+  private tickStatusEffects(dt: number) {
+    const list = this.player.statusEffects;
+    if (!list || list.length === 0) return;
+    let acidParticle = false;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (e.kind === 'corrosion' && !this.player.isExploding) {
+        this.player.health -= e.dmgPerStack * e.stacks * dt;
+        acidParticle = true;
+      }
+      e.remaining -= dt;
+      if (e.remaining <= 0) list.splice(i, 1);
+    }
+    // Occasional acid drip on the ship while corroding (throttled).
+    if (acidParticle && Math.random() < 0.4) {
+      this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
+        speedMin: 0.5, speedMax: 2, sizeMin: 1, sizeMax: 2.2,
+        lifetimeMin: 0.3, lifetimeMax: 0.6,
+        positionJitter: this.player.size.x * 0.6,
+      });
+    }
+  }
+
+  /** DBG: drop a corrosion stack on the player to test the effect + HUD. */
+  public debugApplyCorrosion() {
+    this.applyStatusEffect(this.player, {
+      kind: 'corrosion', duration: CORROSION.DURATION,
+      dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
+    });
+  }
 
   // ── Unlocks + Drydock shop ──────────────────────────────────────────────
 
@@ -3202,6 +3269,7 @@ export class GameEngine {
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
+      this.player.statusEffects = [];
       this.player.active = true;
       this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };

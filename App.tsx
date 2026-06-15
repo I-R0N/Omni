@@ -269,6 +269,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleEnemyScale();
   };
 
+  const handleApplyCorrosion = () => {
+      if (engineRef.current) engineRef.current.debugApplyCorrosion();
+  };
+
   const handleCycleUpgrade = (id: string) => {
       if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
   };
@@ -411,6 +415,7 @@ const App: React.FC = () => {
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCycleEnemyScale={handleCycleEnemyScale}
+        onApplyCorrosion={handleApplyCorrosion}
         onCycleUpgrade={handleCycleUpgrade}
         onMaxUpgrades={handleMaxUpgrades}
         onResetUpgrades={handleResetUpgrades}

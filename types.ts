@@ -137,6 +137,29 @@ export enum WeaponType {
   CANNON    = 'CANNON',
 }
 
+// ── Status effects ────────────────────────────────────────────────────────────
+// Generic player debuff framework.  Today only 'corrosion' (a stacking
+// damage-over-time) is wired; the kind union + EffectPayload are shaped so new
+// effects (disables / scramble / slow) drop in without restructuring.
+export type StatusEffectKind = 'corrosion';
+
+// Carried on an attack (WeaponConfig / projectile); applied to the player on hit.
+export interface EffectPayload {
+  kind: StatusEffectKind;
+  duration: number;   // seconds (refreshed on re-hit)
+  dmgPerSec: number;  // per stack (corrosion)
+  maxStacks: number;
+}
+
+// Live instance on the player (GameEntity.statusEffects).
+export interface StatusEffect {
+  kind: StatusEffectKind;
+  remaining: number;
+  maxDuration: number; // for the HUD countdown fraction
+  stacks: number;
+  dmgPerStack: number;
+}
+
 export interface WeaponConfig {
   type: WeaponType;
   name: string;
@@ -179,6 +202,9 @@ export interface WeaponConfig {
   // the projectile so RenderSystem can pick a custom visual (today only
   // the charged Blaster fireball uses it).
   isCharged?: boolean;
+  // Status effect this shot applies to the player on hit (e.g. corrosion).
+  // ProjectileSystem.spawn copies it onto the projectile.
+  appliesEffect?: EffectPayload;
   // When set with count > 1, ProjectileSystem.spawn distributes the
   // projectiles in an equal-angle ring around the aim direction (every
   // 360°/count) instead of a forward-cone fan.  Used by the charged
@@ -331,6 +357,10 @@ export interface GameEntity {
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
   overchargeUnlocked?: boolean;
+  // Status effects: `appliesEffect` is set on a projectile that should debuff
+  // the player on hit; `statusEffects` is the player's live debuff list.
+  appliesEffect?: EffectPayload;
+  statusEffects?: StatusEffect[];
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -1025,6 +1055,8 @@ export interface EngineStats {
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   enemyScaleInfo?: string;
+  // Active player status effects for the HUD (kind, stacks, remaining frac).
+  statusEffects?: { kind: string; stacks: number; fraction: number }[];
   // Overlay toggles — all DBG-only renderer gating.  Default false.
   // FF Vectors: per-cell arrows colored by magnitude.
   // FF Cells:   faint cell-grid outlines.

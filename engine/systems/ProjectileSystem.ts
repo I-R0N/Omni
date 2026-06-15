@@ -194,6 +194,7 @@ export class ProjectileSystem {
         pooled.chainRange = config.chainRange;
         pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
+        pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         entities.push(pooled);
       } else {
         entities.push({
@@ -229,6 +230,7 @@ export class ProjectileSystem {
           chainRange: config.chainRange,
           chainBranches: config.chainBranches,
           isCharged: config.isCharged,
+          appliesEffect: config.appliesEffect,
         });
       }
     }

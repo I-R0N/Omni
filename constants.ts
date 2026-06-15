@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -2605,6 +2605,27 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     color: '#3b82f6', size: 26, health: 3,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9
+  },
+};
+
+// ── Status effects ────────────────────────────────────────────────────────────
+// Corrosion: a stacking damage-over-time the Orbiter (Shooter-tier-2) applies
+// with its acid rounds.  Bleeds health directly (past the shield); each hit
+// adds a stack (capped) and refreshes the duration.  v1 effect — the framework
+// is generic so disables / scramble / slow can join later.
+export const CORROSION = {
+  DMG_PER_SEC: 3,    // per stack
+  DURATION: 4,       // seconds, refreshed on re-hit
+  MAX_STACKS: 3,     // up to 9 dmg/s
+  COLOR: '#a3e635',  // acid green — projectile + HUD badge + ship tint
+};
+
+// Per-subtype attack effect: a shooter whose subtype appears here fires rounds
+// that apply the effect to the player on hit (and render in the effect colour).
+export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> = {
+  [EnemySubtype.SHOOTER_2]: {
+    kind: 'corrosion', duration: CORROSION.DURATION,
+    dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
   },
 };
 
