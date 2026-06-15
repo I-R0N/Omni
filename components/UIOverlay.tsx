@@ -298,12 +298,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
           <div className="flex gap-4 flex-wrap justify-center max-w-3xl px-4">
             {stats.cardChoice.map((c, i) => {
+              const powerful = c.kind === 'stat' && (c.levels ?? 1) > 1;
               const accent = c.kind === 'salvage'
                 ? 'border-amber-400/70 hover:border-amber-300 hover:shadow-amber-500/30'
                 : c.kind === 'unlock'
                   ? 'border-violet-400/70 hover:border-violet-300 hover:shadow-violet-500/30'
-                  : 'border-sky-400/70 hover:border-sky-300 hover:shadow-sky-500/30';
-              const badge = c.kind === 'salvage' ? 'text-amber-300' : c.kind === 'unlock' ? 'text-violet-300' : 'text-sky-300';
+                  : powerful
+                    ? 'border-fuchsia-400/80 hover:border-fuchsia-300 hover:shadow-fuchsia-500/40 ring-1 ring-fuchsia-400/30'
+                    : 'border-sky-400/70 hover:border-sky-300 hover:shadow-sky-500/30';
+              const badge = c.kind === 'salvage' ? 'text-amber-300' : c.kind === 'unlock' ? 'text-violet-300' : powerful ? 'text-fuchsia-300' : 'text-sky-300';
               return (
                 <button
                   key={i}
@@ -311,7 +314,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   className={`w-44 h-56 rounded-xl border-2 bg-slate-900/85 shadow-xl flex flex-col items-center justify-center gap-3 p-4 transition-all hover:scale-105 active:scale-95 ${accent}`}
                 >
                   <span className={`text-[10px] font-bold uppercase tracking-widest ${badge}`}>
-                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Module' : 'Augment'}
+                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Module' : powerful ? `Augment ×${c.levels}` : 'Augment'}
                   </span>
                   <span className="text-white text-lg font-extrabold text-center leading-tight">{c.label}</span>
                   <span className="text-slate-300 text-xs text-center leading-snug">{c.desc}</span>
@@ -386,7 +389,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
-                  'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-wave ramp. The snitch starts at 0.05× player cruise on wave 1 and gains 0.05× each wave (capped at 1.2×); this knob scales that for testing. Lower = easier to catch.')}
+                  'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-CATCH ramp. The first snitch flies at 0.05× player cruise and gains 0.05× each time one is CAUGHT (capped at 1.2×) — deferring the catch keeps it slow. This knob scales that for testing.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

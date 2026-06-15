@@ -1148,6 +1148,7 @@ export interface UpgradeCard {
   desc: string;
   id?: string;       // upgrade id (stat) or unlock id
   amount?: number;   // salvage granted
+  levels?: number;   // stat-card level grant (1 normal; 2–4 on powerful waves)
   rarity?: 'common' | 'rare';
 }
 

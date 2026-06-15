@@ -331,9 +331,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
   spine.  8 leveled stat upgrades (hull / plating / capacitor / engine /
   thrusters / gunnery / autoloader / magazine) earned ONLY from
-  wave-completion cards (every 4th wave); each card grants one level
-  worth 4× the per-level effect and levels are UNCAPPED (`max` on
-  `UpgradeDef` is a DBG-cycle bound only).  Salvage (`GameEngine.credits`,
+  wave-completion cards (every wave); a normal card grants 1 level, and
+  every 4th wave (`POWERFUL_WAVE_INTERVAL`) the cards roll "powerful"
+  variants worth +2/+3/+4 levels (`UpgradeCard.levels`).  Levels are
+  UNCAPPED (`max` on `UpgradeDef` is a DBG-cycle bound only).  Salvage
+  (`GameEngine.credits`,
   a spendable mirror of score earned 1:1 in `awardScore`) funds the
   Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
   folds the run's `upgradeLevels` into the player's effective stats —
@@ -367,7 +369,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   "Unlock all" / "Relock" cover testing.  NOTE: per-wave enemy stat
   scaling is still a planned increment.
 - `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
-  `cardWaveInterval` waves (DBG "Card int", default 4) `handleWaveCleared`
+  `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
   calls `GameEngine.openCardChoice`, which pauses the sim
   (`cardChoicePending` short-circuits the loop's accumulator) and offers
   `CARD_COUNT` cards (`UpgradeCard[]` on `EngineStats.cardChoice`).  Pool
@@ -379,11 +381,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a
-  burst/coast AI.  Speed ramps PER WAVE: headline (dart) speed =
-  0.05× player cruise × wave number (capped at 1.2×), with coast
-  drifting at 0.30× of that — so wave 1 is nearly stationary and it
-  climbs each wave (the persistent snitch reads the live wave
-  counter).  Darts fire on a random timer or when the player closes
+  burst/coast AI.  Speed ramps PER CATCH (not per wave): headline
+  (dart) speed = 0.05× player cruise × (catchCount + 1) (capped at
+  1.2×), with coast drifting at 0.30× of that — so the first snitch is
+  nearly stationary and each CATCH makes the next one faster, letting
+  the player defer the catch to keep it slow.  Darts fire on a random
+  timer or when the player closes
   inside PANIC_RADIUS (panic darts bias away from the player; a
   cooldown guarantees coast windows between them).  The whole ramp is
   scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Player ▸

@@ -228,6 +228,9 @@ export class GameEngine {
   private snitch: GameEntity | null = null;
   // Wander clock for the weave oscillation (sim-time accumulated).
   private snitchTime: number = 0;
+  // Snitches CAUGHT this run — drives the speed ramp (NOT the wave number),
+  // so the player can defer the snitch to keep it slow.  Reset per run.
+  private snitchCatchCount: number = 0;
   // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
   private snitchCatchMode: 'collide' | 'shoot' = 'collide';
   // Burst/coast AI state (see the SNITCH_CONSTANTS doc block) — there is
@@ -1382,6 +1385,7 @@ export class GameEngine {
       // reference so the next wave spawns a fresh one.
       this.snitch = null;
       this.snitchTime = 0;
+      this.snitchCatchCount = 0;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -3769,12 +3773,23 @@ export class GameEngine {
       const j = (Math.random() * (i + 1)) | 0;
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
+    // Every Nth wave the stat cards are "powerful" — each grants a random
+    // 2–4 levels at once (and renders with the rare accent).
+    const { POWERFUL_WAVE_INTERVAL, POWERFUL_MIN_LEVELS, POWERFUL_MAX_LEVELS } = UPGRADE_CARD_CONSTANTS;
+    const powerful = waveNumber % POWERFUL_WAVE_INTERVAL === 0;
     const cards: UpgradeCard[] = [];
     for (let i = 0; i < CARD_COUNT; i++) {
       const def = pool[i];
       if (def) {
-        const next = this.upgradeLevels[def.id] + 1;
-        cards.push({ kind: 'stat', label: def.label, desc: `${def.desc}  (→ Lv ${next})`, id: def.id, rarity: 'common' });
+        const levels = powerful
+          ? POWERFUL_MIN_LEVELS + ((Math.random() * (POWERFUL_MAX_LEVELS - POWERFUL_MIN_LEVELS + 1)) | 0)
+          : 1;
+        const next = this.upgradeLevels[def.id] + levels;
+        const tag = levels > 1 ? ` ×${levels}` : '';
+        cards.push({
+          kind: 'stat', label: def.label, desc: `${def.desc}${tag}  (→ Lv ${next})`,
+          id: def.id, levels, rarity: powerful ? 'rare' : 'common',
+        });
       } else {
         cards.push(salvageCard());
       }
@@ -3812,7 +3827,7 @@ export class GameEngine {
       if (card.kind === 'stat' && card.id) {
         const id = card.id as UpgradeId;
         if (this.upgradeLevels[id] !== undefined) {
-          this.upgradeLevels[id]++; // uncapped
+          this.upgradeLevels[id] += card.levels ?? 1; // uncapped; powerful cards grant 2–4
           this.applyUpgrades();
         }
       } else if (card.kind === 'salvage') {
@@ -3909,7 +3924,7 @@ export class GameEngine {
     // from the wave counter so the persistent snitch speeds up each wave.
     const waveBase = Math.min(
       SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.waves.waveIndex + 1),
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
     );
     const speedTarget = waveBase * (darting ? SNITCH_CONSTANTS.DART_RATIO : SNITCH_CONSTANTS.COAST_RATIO);
     const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
@@ -4034,7 +4049,7 @@ export class GameEngine {
     this.snitchPanicCooldown = 0;
     const waveBase = Math.min(
       SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.waves.waveIndex + 1),
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
     );
     this.snitchSpeedMult = waveBase * SNITCH_CONSTANTS.COAST_RATIO;
     this.snitchDartAway = false;
@@ -4045,6 +4060,7 @@ export class GameEngine {
   private catchSnitch(s: GameEntity) {
     s.active = false;
     this.snitch = null;
+    this.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves
     this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
     this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
       speedMin: 1, speedMax: 6,

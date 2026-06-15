@@ -2157,11 +2157,12 @@ export const SCORE_CONSTANTS = {
 
 // ── Progression: leveled stat upgrades ───────────────────────────────────────
 // In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
-// (every 4th wave); each card grants ONE level worth 4× the old per-level
-// magnitude, and levels are UNCAPPED (a focused build can stack a stat as high
-// as picks allow).  GameEngine.applyUpgrades folds the run's `upgradeLevels`
-// into the player's effective stats.  Unlocks (weapons / shield / overcharge)
-// are the separate Salvage→Drydock economy.
+// (every wave); a normal card grants 1 level, and every 4th wave the cards roll
+// "powerful" variants that grant +2/+3/+4 levels at once.  Levels are UNCAPPED
+// (a focused build can stack a stat as high as picks allow).  GameEngine
+// .applyUpgrades folds the run's `upgradeLevels` into the player's effective
+// stats.  Unlocks (weapons / shield / overcharge) are the separate Salvage→
+// Drydock module economy.
 export type UpgradeId =
   | 'hull' | 'plating' | 'capacitor' | 'engine'
   | 'thrusters' | 'gunnery' | 'autoloader' | 'magazine';
@@ -2179,14 +2180,14 @@ export interface UpgradeDef {
 }
 
 export const UPGRADE_DEFS: readonly UpgradeDef[] = [
-  { id: 'hull',       label: 'Hull',       desc: '+100 max HP'        , max: 10 },
-  { id: 'plating',    label: 'Plating',    desc: '+60 max shield'     , max: 10, requires: 'shield' },
-  { id: 'capacitor',  label: 'Capacitor',  desc: '+100% shield regen' , max: 10, requires: 'shield' },
-  { id: 'engine',     label: 'Engine',     desc: '+32% top speed'     , max: 10 },
-  { id: 'thrusters',  label: 'Thrusters',  desc: '+48% acceleration'  , max: 10 },
-  { id: 'gunnery',    label: 'Gunnery',    desc: '+48% weapon damage' , max: 10 },
-  { id: 'autoloader', label: 'Autoloader', desc: '-32% fire cooldown' , max: 10 },
-  { id: 'magazine',   label: 'Magazine',   desc: '+160 ammo capacity' , max: 10, requires: 'anyWeapon' },
+  { id: 'hull',       label: 'Hull',       desc: '+25 max HP'        , max: 10 },
+  { id: 'plating',    label: 'Plating',    desc: '+15 max shield'    , max: 10, requires: 'shield' },
+  { id: 'capacitor',  label: 'Capacitor',  desc: '+25% shield regen' , max: 10, requires: 'shield' },
+  { id: 'engine',     label: 'Engine',     desc: '+8% top speed'     , max: 10 },
+  { id: 'thrusters',  label: 'Thrusters',  desc: '+12% acceleration' , max: 10 },
+  { id: 'gunnery',    label: 'Gunnery',    desc: '+12% weapon damage', max: 10 },
+  { id: 'autoloader', label: 'Autoloader', desc: '-8% fire cooldown' , max: 10 },
+  { id: 'magazine',   label: 'Magazine',   desc: '+40 ammo capacity' , max: 10, requires: 'anyWeapon' },
 ] as const;
 
 // ── One-time unlocks ──────────────────────────────────────────────────────────
@@ -2202,33 +2203,33 @@ export interface UnlockDef {
   cost: number;
 }
 export const UNLOCK_DEFS: readonly UnlockDef[] = [
-  { id: 'shield',        kind: 'shield',     label: 'Shield',     desc: 'Deflector shield',  cost: 600 },
-  { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 900 },
-  { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 500 },
-  { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 650 },
-  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 800 },
-  { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 900 },
-  { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 1000 },
-  { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 1200 },
+  { id: 'shield',        kind: 'shield',     label: 'Shield',     desc: 'Deflector shield',  cost: 30000 },
+  { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
+  { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
+  { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 40000 },
+  { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
+  { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
+  { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
 ] as const;
 
 // Per-level effect magnitudes (read by GameEngine.applyUpgrades + the
 // movement hook).  Base values they modify: HP 100, shield SHIELD_CONSTANTS
 // .MAX_CHARGE, recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
-// Per-level (= per-card) effect magnitudes — 4× the original per-level values
-// since cards now arrive 4× less often (every 4th wave).  Base values they
-// modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE, recharge SHIELD_CONSTANTS
-// .RECHARGE_RATE, ammo AMMO MAX_POOL.
+// Per-LEVEL effect magnitudes.  A normal card grants 1 level; powerful
+// (every-4th-wave) cards grant +2/+3/+4 levels, so they're worth that many of
+// these.  Base values they modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
+// recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
 export const UPGRADE_EFFECTS = {
-  HULL_HP_PER_LEVEL: 100,
-  PLATING_SHIELD_PER_LEVEL: 60,
-  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 1.0,
-  ENGINE_SPEED_FRAC_PER_LEVEL: 0.32,
-  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.48,
-  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.48,
-  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.32,
+  HULL_HP_PER_LEVEL: 25,
+  PLATING_SHIELD_PER_LEVEL: 15,
+  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 0.25,
+  ENGINE_SPEED_FRAC_PER_LEVEL: 0.08,
+  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.12,
+  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.12,
+  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.08,
   AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
-  MAGAZINE_AMMO_PER_LEVEL: 160,
+  MAGAZINE_AMMO_PER_LEVEL: 40,
 };
 
 // ── Between-wave upgrade cards ────────────────────────────────────────────────
@@ -2238,8 +2239,13 @@ export const UPGRADE_EFFECTS = {
 // (weapons / shield / overcharge) plug into the same pool once unlocks ship.
 export const UPGRADE_CARD_CONSTANTS = {
   CARD_COUNT: 3,
-  DEFAULT_WAVE_INTERVAL: 4,             // a card every 4th wave (4× effect each)
-  WAVE_INTERVAL_CYCLE: [4, 1, 2, 8] as const,
+  DEFAULT_WAVE_INTERVAL: 1,             // a card every wave
+  WAVE_INTERVAL_CYCLE: [1, 2, 4, 8] as const,
+  // Every Nth wave the offered cards are "powerful" — each grants a random
+  // POWERFUL_MIN..POWERFUL_MAX levels instead of 1.
+  POWERFUL_WAVE_INTERVAL: 4,
+  POWERFUL_MIN_LEVELS: 2,
+  POWERFUL_MAX_LEVELS: 4,
   SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
   SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
   SALVAGE_CARD_PER_WAVE: 75,
@@ -2307,14 +2313,14 @@ export const SNITCH_CONSTANTS = {
   // panic darts so a persistent chaser always gets another chance.
   // Speed fractions apply to the friction-limited player cruise
   // (acceleration/(1−friction), clamped by maxSpeed).
-  // Per-wave speed ramp.  The snitch's headline (dart) speed this wave is
-  // WAVE_SPEED_STEP × waveNumber as a fraction of player cruise — wave 1 =
-  // 0.05×, wave 2 = 0.10×, wave 3 = 0.15×, … — capped at WAVE_SPEED_MAX so
-  // it never gets hopelessly uncatchable.  Coast drifts at COAST_RATIO of
-  // that, preserving the burst/coast contrast (and the catch window) at
-  // every wave.  The snitch persists across waves, so it simply speeds up
-  // as the wave counter climbs.  The DBG SNITCH_SPEED_CYCLE multiplier
-  // scales the whole thing on top.
+  // Per-CATCH speed ramp.  The snitch's headline (dart) speed is
+  // WAVE_SPEED_STEP × (catchCount + 1) as a fraction of player cruise — the
+  // FIRST snitch = 0.05×, after one catch = 0.10×, etc. — capped at
+  // WAVE_SPEED_MAX so it never gets hopelessly uncatchable.  Speed ramps
+  // only when the snitch is CAUGHT (not per wave), so the player can defer
+  // it to keep it slow.  Coast drifts at COAST_RATIO of the dart speed,
+  // preserving the burst/coast catch window.  The DBG SNITCH_SPEED_CYCLE
+  // multiplier scales the whole thing on top.
   WAVE_SPEED_STEP: 0.05,
   WAVE_SPEED_MAX: 1.2,
   COAST_RATIO: 0.30,
