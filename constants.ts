@@ -2635,6 +2635,22 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
   },
 };
 
+// ── Enemy counterplay traits ──────────────────────────────────────────────────
+// Soft-counter levers stamped on an enemy at spawn (WaveSystem.spawnEnemy).
+// SOFT by design: a chip weapon still works, just slowly, while the demanded
+// tool trivialises the threat.  v1 = armor only (Tank); evasive / front-shield /
+// regen join with their enemies + the bosses.
+//   armor.chipThreshold — per-hit damage at/above this lands in full
+//   armor.reduction     — fraction cut from hits BELOW the threshold
+// So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
+// Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
+// through.  AoE/explosion damage isn't chip-resisted (it's an answer).
+export const ENEMY_TRAITS: Partial<Record<EnemySubtype, {
+  armor?: { chipThreshold: number; reduction: number };
+}>> = {
+  [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
+};
+
 // Maps each subtype to its role — used by AI routing and shooting logic.
 export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.RAMMER_1]:  EnemyRole.RAMMING,

@@ -121,6 +121,9 @@ export class PhysicsSystem {
   // the entire broadphase + SAT pass is skipped (game-breaking;
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
+  // Debug toggle — gates the enemy counterplay traits (armor chip-resist,
+  // etc.).  Default ON; flip OFF to A/B the soft-counter engine.
+  public traitsEnabled: boolean = true;
   // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
   // collision scan (resolveShardTilePairs).  Default OFF: the main
   // broadphase already skips this pair (shards are excluded from
@@ -2541,6 +2544,11 @@ export class PhysicsSystem {
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
+          // Armored enemies shrug off small per-hit "chip" damage — demands
+          // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
+          if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
+              projDmg *= (1 - target.armor.reduction);
+          }
           if (projDmg > 0) {
               // Indestructible tiles eat the projectile without losing
               // health — flash only, health stays pinned.  Everything
@@ -2601,7 +2609,10 @@ export class PhysicsSystem {
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1, target, proj.position);
+          // Armored enemies show the REDUCED number (chip feedback); others
+          // show the raw projectile damage.
+          const shownDmg = target.armor ? projDmg : (proj.damage || 1);
+          if (onDamage) onDamage(target.position, shownDmg, target, proj.position);
 
           if (target.health <= 0) {
               // Player-attributed kill stamp — handleEntityDeath awards

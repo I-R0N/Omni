@@ -361,6 +361,9 @@ export interface GameEntity {
   // the player on hit; `statusEffects` is the player's live debuff list.
   appliesEffect?: EffectPayload;
   statusEffects?: StatusEffect[];
+  // Counterplay trait: armored enemies shrug off per-hit damage below
+  // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
+  armor?: { chipThreshold: number; reduction: number };
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -1055,6 +1058,8 @@ export interface EngineStats {
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   enemyScaleInfo?: string;
+  // DBG: enemy counterplay traits (armor, …) enabled.
+  traitsEnabled?: boolean;
   // Active player status effects for the HUD (kind, stacks, remaining frac).
   statusEffects?: { kind: string; stacks: number; fraction: number }[];
   // Overlay toggles — all DBG-only renderer gating.  Default false.

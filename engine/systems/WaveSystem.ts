@@ -3,6 +3,7 @@ import {
   DIFFICULTY_STAT_SCALES,
   ENEMY_VARIANTS,
   ENEMY_CONSTANTS,
+  ENEMY_TRAITS,
   enemyHpMult,
   enemyDamageMult,
   WAVE_CONSTANTS,
@@ -258,6 +259,7 @@ export class WaveSystem {
       maxSpeed: config.maxSpeed * statScale.speed,
       mass: config.mass,
       damageMult: dmgMult,
+      armor: ENEMY_TRAITS[subtype]?.armor,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       sprite: config.sprite,
     });

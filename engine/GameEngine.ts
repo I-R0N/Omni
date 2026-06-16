@@ -871,6 +871,11 @@ export class GameEngine {
     cycleEnemyScale();
   }
 
+  /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
+  public toggleTraits() {
+    this.physics.traitsEnabled = !this.physics.traitsEnabled;
+  }
+
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
   public toggleFFOverlayVectors() {
     this.ffOverlayVectors = !this.ffOverlayVectors;
@@ -1331,6 +1336,7 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      traitsEnabled: this.physics.traitsEnabled,
       statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
         ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
         : undefined,
@@ -1554,6 +1560,7 @@ export class GameEngine {
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      traitsEnabled: this.physics.traitsEnabled,
       statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
         ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
         : undefined,

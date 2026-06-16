@@ -71,6 +71,7 @@ interface UIOverlayProps {
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
   onApplyCorrosion?: () => void;
+  onToggleTraits?: () => void;
   onCycleUpgrade?: (id: string) => void;
   onMaxUpgrades?: () => void;
   onResetUpgrades?: () => void;
@@ -148,6 +149,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleSnitchSpeed,
   onCycleEnemyScale,
   onApplyCorrosion,
+  onToggleTraits,
   onCycleUpgrade,
   onMaxUpgrades,
   onResetUpgrades,
@@ -396,6 +398,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
                   'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
+                {ctrlRow('Traits', onToggleTraits,
+                  stats.traitsEnabled === false ? 'Off' : 'On',
+                  'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
               </>)}
 
               {/* ── Upgrades (progression spine — DBG) ─────────────── */}

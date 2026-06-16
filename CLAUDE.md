@@ -404,6 +404,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
   Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
   DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
+- `ENEMY_TRAITS` — enemy counterplay traits (the soft-counter engine).
+  v1 = `armor` only (Tank / RAMMER_3): per-hit damage below
+  `chipThreshold` is cut by `reduction`, so chip weapons (Blaster,
+  Shotgun) plink while heavy hits (Cannon, Lightning, charged, a
+  Gunnery-boosted Blaster past the threshold) punch through.  Stamped
+  at spawn (`WaveSystem.spawnEnemy`), applied in the PhysicsSystem
+  projectile-damage path (gated by `physics.traitsEnabled`, DBG
+  "Traits"); armored enemies show the REDUCED hit number as feedback.
+  evasive / front-shield / regen join with their enemies + the bosses.
 - `CORROSION` / `ENEMY_ATTACK_EFFECTS` — status-effect framework (v1 =
   corrosion DoT only, but generic: `StatusEffectKind` / `EffectPayload`
   / `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
