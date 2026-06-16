@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -2599,6 +2599,15 @@ export class PhysicsSystem {
                   }
               }
               target.hitFlash = 0.1;
+              // Hit feedback — damage-scaled knockback + brief stagger so the
+              // hit reads (post-armor projDmg, so chip hits kick weakly).
+              if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
+                  const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                  const kick = Math.min(HIT_FEEDBACK.MAX_KICK, projDmg * HIT_FEEDBACK.KICK_PER_DMG);
+                  target.velocity.x += (proj.velocity.x / vmag) * kick;
+                  target.velocity.y += (proj.velocity.y / vmag) * kick;
+                  target.hitStun = HIT_FEEDBACK.STUN_SEC;
+              }
           }
 
           if (onShake && target.type !== EntityType.STRUCTURE) {

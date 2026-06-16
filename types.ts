@@ -364,6 +364,9 @@ export interface GameEntity {
   // Counterplay trait: armored enemies shrug off per-hit damage below
   // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
   armor?: { chipThreshold: number; reduction: number };
+  // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
+  // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
+  hitStun?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;

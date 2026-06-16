@@ -1883,9 +1883,19 @@ export const ENEMY_CONSTANTS = {
   SIZE: 20,
   COLOR: '#f87171',
   VISION_RANGE: 2500,
-  ACCELERATION: 100, 
-  MAX_SPEED: 200,    
+  ACCELERATION: 100,
+  MAX_SPEED: 200,
   MASS: 10
+};
+
+// Hit feedback — every projectile hit on an enemy gives a damage-scaled
+// knockback (in the shot's travel direction) plus a brief stagger where the
+// AI applies no movement force, so hits READ.  Chip hits on armored enemies
+// kick weakly (reinforcing "wrong weapon"); heavy hits make them reel.
+export const HIT_FEEDBACK = {
+  KICK_PER_DMG: 0.35, // knockback velocity per point of APPLIED (post-armor) damage …
+  MAX_KICK: 5,        // … capped so enemies reel without flying away
+  STUN_SEC: 0.1,      // brief stagger — no AI movement force while > 0
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {
@@ -2593,7 +2603,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   },
   [EnemySubtype.RAMMER_3]: {
     color: '#facc15', size: 32, health: 5,
-    maxSpeed: 11,  accel: 8,   turnRate: 3.0,
+    maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
     sprite: ASSETS.ENEMY_TANK,     mass: 18
   },
   // ── Shooting — green → cyan → blue ──

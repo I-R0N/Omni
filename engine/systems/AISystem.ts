@@ -58,6 +58,12 @@ export class AISystem {
           enemy.aggroTimer = Math.max(0, enemy.aggroTimer - dt);
       }
 
+      // Hit-stagger: tick down; while > 0 the movement routines apply no
+      // force (the knockback carries it), so a hit reads as a brief reel.
+      if (enemy.hitStun && enemy.hitStun > 0) {
+          enemy.hitStun = Math.max(0, enemy.hitStun - dt);
+      }
+
       // Route by role — add new roles here as needed
       const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
       if (role === EnemyRole.SHOOTING) {
@@ -147,8 +153,11 @@ export class AISystem {
       const aimX = dx + player.velocity.x * leadTime;
       const aimY = dy + player.velocity.y * leadTime;
       let targetAngle = Math.atan2(aimY, aimX);
-      
-      if (dist < PREFERRED_DIST - DEADZONE) {
+
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      if (stunned) {
+          // Staggered — apply no movement force this step (the knockback rides).
+      } else if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
           const fleeX = -dx / dist;
           const fleeY = -dy / dist;
@@ -265,7 +274,9 @@ export class AISystem {
 
       // At long range always seek regardless of idle state, so waves never
       // stall when the player moves away from the initial spawn location.
-      if (enemy.aiState === 'chase' || longRange) {
+      // Skip while staggered — the hit knockback carries the enemy briefly.
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      if ((enemy.aiState === 'chase' || longRange) && !stunned) {
           // ENGAGE: Fly toward the lagged target, blended with the pursuit
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
