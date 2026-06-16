@@ -133,7 +133,7 @@ export class WaveSystem {
     this.durationSec = getWaveDurationSec(index);
 
     const budget = Math.max(1, Math.round(getWaveSpawnBudget(index) * ctx.enemyScale));
-    this.spawnList = buildWaveSpawnList(index, budget);
+    this.spawnList = buildWaveSpawnList(index, budget, ctx.forcedEnemy);
     this.scheduleSpawns(budget);
 
     this.waveState = 'active';
@@ -355,6 +355,8 @@ export interface WaveSpawnContext {
    *  enemy outside the visible window on any aspect ratio.  Computed by the
    *  caller (GameEngine) at spawn time from window size + camera zoom. */
   viewportHalfDiagonal: number;
+  /** DBG enemy-test override: when set, every spawn is this subtype. */
+  forcedEnemy?: EnemySubtype | null;
 }
 
 // Re-export for callers that want to destructure a Vector2 from enemy spawn

@@ -1060,6 +1060,8 @@ export interface EngineStats {
   enemyScaleInfo?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
+  // DBG enemy-test override: the forced spawn subtype (null = normal mix).
+  forcedEnemy?: string | null;
   // Active player status effects for the HUD (kind, stacks, remaining frac).
   statusEffects?: { kind: string; stacks: number; fraction: number }[];
   // Overlay toggles — all DBG-only renderer gating.  Default false.

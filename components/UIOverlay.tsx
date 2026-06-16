@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
+import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype } from '../types';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -11,6 +11,16 @@ const REAL_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.RING,        label: 'Ring World' },
   { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
   { type: MapType.POCKET,      label: 'Pocket' },
+];
+// Enemy-test override — force every wave to spawn one subtype (or Off).
+const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
+  { type: null,                   label: 'Off' },
+  { type: EnemySubtype.RAMMER_1,  label: 'Drone' },
+  { type: EnemySubtype.RAMMER_2,  label: 'Charger' },
+  { type: EnemySubtype.RAMMER_3,  label: 'Tank' },
+  { type: EnemySubtype.SHOOTER_1, label: 'Skirmisher' },
+  { type: EnemySubtype.SHOOTER_2, label: 'Orbiter' },
+  { type: EnemySubtype.SHOOTER_3, label: 'Sniper' },
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
@@ -99,6 +109,7 @@ interface UIOverlayProps {
   onSetDifficulty?: (level: number) => void;
   mapType?: MapType;
   onSetMapType?: (type: MapType) => void;
+  onSetForcedEnemy?: (subtype: string | null) => void;
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -177,6 +188,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSetDifficulty,
   mapType = MapType.UNIVERSE,
   onSetMapType,
+  onSetForcedEnemy,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   const perf = stats.perf;
@@ -200,7 +212,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // backdrop swap on the menu, a live switch-and-play mid-game.
   const renderMapGroup = (heading: string, maps: { type: MapType; label: string }[]) => (
     <div className="flex flex-col items-center gap-2">
-      <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>
+      {heading && <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>}
       <div className="flex flex-wrap justify-center gap-2 max-w-xl">
         {maps.map(opt => (
           <button
@@ -217,6 +229,41 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ))}
       </div>
     </div>
+  );
+  // Enemy-test override row + the collapsed material-field maps.  Shared by
+  // the main menu and the pause player-menu so test-switching is one place.
+  const renderEnemyTestGroup = () => (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-rose-300 text-[11px] uppercase tracking-wider">Enemy Test — force one type</span>
+      <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+        {ENEMY_TEST.map(opt => {
+          const active = (stats.forcedEnemy ?? null) === (opt.type ?? null);
+          return (
+            <button
+              key={opt.label}
+              onClick={() => onSetForcedEnemy && onSetForcedEnemy(opt.type)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                active
+                  ? 'bg-rose-600 border-rose-400 text-white shadow-lg'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-rose-400 hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+  const renderTestPanel = () => (
+    <>
+      {renderMapGroup('Maps', REAL_MAPS)}
+      {renderEnemyTestGroup()}
+      <details className="text-center">
+        <summary className="cursor-pointer text-slate-500 text-[10px] uppercase tracking-widest list-none select-none hover:text-slate-300">Material Field Maps ▾</summary>
+        <div className="mt-3">{renderMapGroup('', TEST_MAPS)}</div>
+      </details>
+    </>
   );
   // Human label for the cycling blend-alpha buttons.  Mirrors the
   // four-step cycle Off / Slow / Med / Fast across both Tile and
@@ -790,8 +837,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           </div>
           <div className="mb-8 flex flex-col items-center gap-5">
-            {renderMapGroup('Maps', REAL_MAPS)}
-            {renderMapGroup('Test Maps', TEST_MAPS)}
+            {renderTestPanel()}
           </div>
           <button
             onClick={onStart}
@@ -904,12 +950,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             )}
 
-            {/* Live map picker — switch-and-play (collapsed by default) */}
+            {/* Live switcher — maps + enemy-test override (collapsed) */}
             <details className="text-center">
-              <summary className="cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest list-none select-none hover:text-slate-200">Switch Map ▾</summary>
+              <summary className="cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest list-none select-none hover:text-slate-200">Switch Map / Test ▾</summary>
               <div className="mt-4 flex flex-col items-center gap-4">
-                {renderMapGroup('Maps', REAL_MAPS)}
-                {renderMapGroup('Test Maps', TEST_MAPS)}
+                {renderTestPanel()}
               </div>
             </details>
           </div>

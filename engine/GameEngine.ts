@@ -17,7 +17,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload } from '../types';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -143,6 +143,10 @@ export class GameEngine {
   private _viewportRect = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private respawnTimer: number = 0;
+  // DBG enemy-test override: when set, every wave spawns ONLY this subtype.
+  // Persists across map switches (a testing setting); applies from the next
+  // wave start.
+  private forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
   // Map the next restart / initial load should build.  Updated from the
@@ -1337,6 +1341,7 @@ export class GameEngine {
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
+      forcedEnemy: this.forcedTestEnemy,
       statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
         ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
         : undefined,
@@ -1561,6 +1566,7 @@ export class GameEngine {
       enemyScaleName: getActiveEnemyScaleName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
+      forcedEnemy: this.forcedTestEnemy,
       statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
         ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
         : undefined,
@@ -3697,7 +3703,15 @@ export class GameEngine {
       enemyScale: this.enemyScale,
       difficultyLevel: this.difficultyLevel,
       viewportHalfDiagonal,
+      forcedEnemy: this.forcedTestEnemy,
     };
+  }
+
+  /** DBG: force every wave to spawn only `subtype` (or clear with null).
+   *  Applies from the next wave; persists across map switches. */
+  public setForcedTestEnemy(subtype: string | null) {
+    this.forcedTestEnemy = (subtype && subtype in EnemySubtype)
+      ? (subtype as EnemySubtype) : null;
   }
 
   /** Shared wave-completion hook — fires once per wave end on every path

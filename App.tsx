@@ -109,6 +109,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.setMapType(type);
   };
 
+  const handleSetForcedEnemy = (subtype: string | null) => {
+      if (engineRef.current) engineRef.current.setForcedTestEnemy(subtype);
+  };
+
   const handleCycleTrailShape = () => {
       if (engineRef.current) engineRef.current.cycleTrailShape();
   };
@@ -447,6 +451,7 @@ const App: React.FC = () => {
         onSetDifficulty={handleSetDifficulty}
         mapType={mapType}
         onSetMapType={handleSetMapType}
+        onSetForcedEnemy={handleSetForcedEnemy}
       />
     </div>
   );

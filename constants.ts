@@ -2731,7 +2731,10 @@ function rollTier(weights: [number, number, number]): number {
  * set.  A variety guarantee re-rolls one slot's role when a random wave with
  * budget ≥ 3 lands all-rammer or all-shooter, so every such wave mixes types.
  */
-export function buildWaveSpawnList(index: number, budget: number): EnemySubtype[] {
+export function buildWaveSpawnList(index: number, budget: number, forced?: EnemySubtype | null): EnemySubtype[] {
+  // DBG enemy-test override: spawn ONLY the forced subtype (ignores the
+  // scripted/weighted mix) so a specific enemy/trait can be tested in isolation.
+  if (forced) return new Array(budget).fill(forced);
   const list: EnemySubtype[] = [];
   if (index < WAVE_DEFINITIONS.length) {
     const flat: EnemySubtype[] = [];
