@@ -1889,13 +1889,15 @@ export const ENEMY_CONSTANTS = {
 };
 
 // Hit feedback — every projectile hit on an enemy gives a damage-scaled
-// knockback (in the shot's travel direction) plus a brief stagger where the
-// AI applies no movement force, so hits READ.  Chip hits on armored enemies
-// kick weakly (reinforcing "wrong weapon"); heavy hits make them reel.
+// knockback (in the shot's travel direction) plus a brief stagger.  The
+// stagger ALSO suspends the AI max-speed clamp, so the knockback actually
+// carries the enemy back instead of being instantly clamped to its slow
+// cruise — that's what makes the impact read.  Uncapped (per testing): the
+// kick is purely KICK_PER_DMG × applied (post-armor) damage, so heavy hits
+// shove hard and chip hits on armor barely nudge.
 export const HIT_FEEDBACK = {
-  KICK_PER_DMG: 0.35, // knockback velocity per point of APPLIED (post-armor) damage …
-  MAX_KICK: 5,        // … capped so enemies reel without flying away
-  STUN_SEC: 0.1,      // brief stagger — no AI movement force while > 0
+  KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
+  STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {

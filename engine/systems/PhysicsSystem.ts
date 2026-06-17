@@ -2599,14 +2599,15 @@ export class PhysicsSystem {
                   }
               }
               target.hitFlash = 0.1;
-              // Hit feedback — damage-scaled knockback + brief stagger so the
-              // hit reads (post-armor projDmg, so chip hits kick weakly).
+              // Hit feedback — uncapped damage-scaled knockback + stagger so
+              // the hit reads (post-armor projDmg, so chip hits kick weakly).
               if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
                   const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
-                  const kick = Math.min(HIT_FEEDBACK.MAX_KICK, projDmg * HIT_FEEDBACK.KICK_PER_DMG);
+                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG;
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   target.hitStun = HIT_FEEDBACK.STUN_SEC;
+                  target.hitFlash = 0.18; // bigger flash + scale-punch on impact
               }
           }
 

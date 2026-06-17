@@ -2472,17 +2472,23 @@ export class RenderSystem {
                   if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
+                  // Hit-punch: enemies briefly swell on impact for a juicy
+                  // reaction (driven by the hit-flash timer).
+                  if (entity.type === EntityType.ENEMY && entity.hitFlash && entity.hitFlash > 0) {
+                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2);
+                  }
 
                   const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
 
-                  // Hit flash: re-draw with brightness instead of filling the bounding box (prevents white square)
+                  // Hit flash: re-draw brighter (whiter) on impact for a
+                  // stronger pop (prevents white-square by re-drawing the sprite)
                   if (entity.hitFlash && entity.hitFlash > 0) {
                       ctx.save();
-                      ctx.globalAlpha = Math.min(1, 0.6 + (entity.hitFlash * 2));
-                      ctx.filter = 'brightness(1.35)';
+                      ctx.globalAlpha = Math.min(1, 0.7 + (entity.hitFlash * 2.5));
+                      ctx.filter = 'brightness(1.8)';
                       ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
                       ctx.filter = 'none';
                       ctx.restore();

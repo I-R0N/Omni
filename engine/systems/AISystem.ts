@@ -177,9 +177,10 @@ export class AISystem {
           enemy.velocity.y += strafeY * (accel * STRAFE_MODIFIER) * dt;
       }
 
-      // Cap Speed
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
@@ -316,9 +317,10 @@ export class AISystem {
       }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
 
-      // Cap Speed
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }

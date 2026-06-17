@@ -2159,15 +2159,23 @@ export class GameEngine {
 
       // Death burst particles — size/color tuned per entity type
       if (entity.type === EntityType.ENEMY) {
-          // Large colored burst matching the enemy's tier color, plus a white core flash
-          this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), entity.color || '#f87171', {
-              speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3.5,
-              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          const ec = entity.color || '#f87171';
+          const r = Math.max(entity.size.x, entity.size.y);
+          // Expanding shockwave ring (visual only) — a satisfying pop sized
+          // to the enemy; bigger enemies pop bigger.
+          this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
+          this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
+          // Big colored debris burst + white core flash.
+          this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+              speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
+              lifetimeMin: 0.3, lifetimeMax: 0.7,
           });
-          this.spawnParticles(entity.position, 5, '#ffffff', {
-              speedMin: 5, speedMax: 14, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          this.spawnParticles(entity.position, 9, '#ffffff', {
+              speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
+              lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+          // Small tier-scaled screen punch (respects the DBG shake toggle).
+          this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
       } else if (entity.type === EntityType.PLAYER) {
           // Cyan energy explosion
           this.spawnParticles(entity.position, 12, '#38bdf8', {
@@ -2722,10 +2730,17 @@ export class GameEngine {
 
     switch (target.type) {
       case EntityType.ENEMY:
-        // Bright sparks in the enemy's own color, spread forward from impact
-        this.spawnParticles(impactPos, 6, target.color || '#f87171', {
-          speedMin: 3, speedMax: 8, sizeMin: 1.5, sizeMax: 3,
+        // Bright sparks in the enemy's own color, spread forward from impact,
+        // plus a few hot white sparks for a punchier impact.
+        this.spawnParticles(impactPos, 10, target.color || '#f87171', {
+          speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3.5,
           spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+          lifetimeMin: 0.2, lifetimeMax: 0.4,
+        });
+        this.spawnParticles(impactPos, 4, '#ffffff', {
+          speedMin: 6, speedMax: 14, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.45,
+          lifetimeMin: 0.1, lifetimeMax: 0.25,
         });
         break;
 
