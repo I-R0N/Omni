@@ -71,6 +71,16 @@ function hexToRgb(hex: string): [number, number, number] {
     return cached;
 }
 
+// Channel-wise lighten/darken toward white/black by fraction f∈[0,1].
+// Module-level (not per-frame closures) so the enemy-body gradient builder
+// in drawEnemyShape allocates nothing extra per entity.
+function liftCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v + (255 - v) * f)));
+}
+function sinkCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v * (1 - f))));
+}
+
 // Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
 // channel is clamped to [0, 255] then 0-padded.  Used by the density
 // tint helper to format a per-(variant, tier) cached colour string.
@@ -2517,7 +2527,7 @@ export class RenderSystem {
       // --- FALLBACK SHAPE RENDERING ---
       if (!drawn) {
           if (entity.type === EntityType.ENEMY) {
-            this.drawEnemyShape(ctx, entity);
+            this.drawEnemyShape(ctx, entity, nowSec);
             drawn = true;
           } else if (entity.type === EntityType.PLAYER) {
              // Fallback player shape
@@ -3646,11 +3656,39 @@ export class RenderSystem {
   // Assumes the canvas transform is already translated to the entity centre
   // and rotated to its facing (shapes point along +x).  Includes the
   // hit-flash scale-punch + whiten and a shield ring when shielded.
-  private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity) {
+  // Local space here has +x pointing along the enemy's nose and the origin
+  // at its centroid (the per-entity transform at the top of the slow path
+  // bakes rotation in), so the tail is at -x.
+  private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
       const baseR = Math.max(entity.size.x, entity.size.y) * 0.62;
       const flash = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
       const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
       const col = entity.color || '#f87171';
+      const [cr, cg, cb] = hexToRgb(col);
+
+      // Speed fraction drives the engine flare brightness + core pulse rate:
+      // a charging rusher glows hot and throbs fast; an idling kiter simmers.
+      const vx = entity.velocity?.x ?? 0, vy = entity.velocity?.y ?? 0;
+      const speedFrac = Math.min(1, Math.hypot(vx, vy) / (entity.maxSpeed || 6));
+
+      // ── Engine exhaust: additive bloom off the tail (-x).  Faint at rest
+      // so an idle enemy still has a soft ember; bright under thrust.
+      {
+          const cxr = -r * 0.9;
+          const er = r * (0.7 + speedFrac * 1.5);
+          const ea = 0.18 + speedFrac * 0.5;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const eg = ctx.createRadialGradient(cxr, 0, 0, cxr, 0, er);
+          eg.addColorStop(0,   `rgba(${cr},${cg},${cb},${ea})`);
+          eg.addColorStop(0.5, `rgba(${cr},${cg},${cb},${ea * 0.4})`);
+          eg.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+          ctx.fillStyle = eg;
+          ctx.beginPath();
+          ctx.arc(cxr, 0, er, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+      }
 
       // Shield bubble (translucent blue ring) when the enemy is shielded.
       if ((entity.maxShield ?? 0) > 0 && (entity.shield ?? 0) > 0) {
@@ -3662,8 +3700,14 @@ export class RenderSystem {
           ctx.stroke();
       }
 
+      // ── Body: a head-lit radial gradient gives the flat polygon volume
+      // (bright toward the nose, darker at the tail/rim).
       this.buildEnemyPath(ctx, entity.enemyShape ?? 'triangle', r);
-      ctx.fillStyle = col;
+      const bodyGrad = ctx.createRadialGradient(r * 0.2, -r * 0.15, r * 0.1, 0, 0, r * 1.15);
+      bodyGrad.addColorStop(0, `rgb(${liftCh(cr,0.45)},${liftCh(cg,0.45)},${liftCh(cb,0.45)})`);
+      bodyGrad.addColorStop(0.55, col);
+      bodyGrad.addColorStop(1, `rgb(${sinkCh(cr,0.45)},${sinkCh(cg,0.45)},${sinkCh(cb,0.45)})`);
+      ctx.fillStyle = bodyGrad;
       ctx.fill();
       // Whiten on hit flash (re-fill the same path).
       if (flash > 0) {
@@ -3672,13 +3716,28 @@ export class RenderSystem {
           ctx.fill();
           ctx.globalAlpha = 1;
       }
-      // Dark outline + a soft core highlight for depth.
+      // Dark outline.
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+
+      // ── Pulsing core "eye": a hot dot that throbs faster the faster the
+      // enemy moves, desynced per entity (stable id-derived phase) so a pack
+      // doesn't blink in unison.
+      if (entity.glowPhase === undefined) {
+          let h = 0; const id = entity.id;
+          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+          entity.glowPhase = (h / 997) * Math.PI * 2;
+      }
+      const pulse = 0.55 + 0.45 * Math.sin(nowSec * (4 + speedFrac * 6) + entity.glowPhase);
+      const coreR = r * (0.22 + 0.06 * pulse);
+      const coreGrad = ctx.createRadialGradient(r * 0.05, 0, 0, r * 0.05, 0, coreR);
+      coreGrad.addColorStop(0,   `rgba(255,255,255,${0.6 + 0.35 * pulse})`);
+      coreGrad.addColorStop(0.5, `rgba(${liftCh(cr,0.6)},${liftCh(cg,0.6)},${liftCh(cb,0.6)},${0.5 + 0.3 * pulse})`);
+      coreGrad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
       ctx.beginPath();
-      ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.arc(r * 0.05, 0, coreR, 0, Math.PI * 2);
+      ctx.fillStyle = coreGrad;
       ctx.fill();
   }
 
