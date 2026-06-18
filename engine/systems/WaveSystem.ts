@@ -261,7 +261,7 @@ export class WaveSystem {
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
-      sprite: config.sprite,
+      enemyShape: config.shape,
     });
 
     this.waveEnemyIds.add(id);

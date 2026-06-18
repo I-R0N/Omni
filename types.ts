@@ -122,6 +122,11 @@ export enum EnemySubtype {
   SHOOTER_3 = 'SHOOTER_3',
 }
 
+// Distinct procedural polygon shapes for native enemy rendering — chosen so
+// each enemy archetype reads as a different silhouette without sprite art.
+export type EnemyShape =
+  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star';
+
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
   SHOOTING = 'SHOOTING',
@@ -367,6 +372,9 @@ export interface GameEntity {
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
+  // Native polygon silhouette for enemy rendering (set at spawn from the
+  // archetype) — RenderSystem draws this instead of a sprite.
+  enemyShape?: EnemyShape;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;

@@ -2516,7 +2516,10 @@ export class RenderSystem {
 
       // --- FALLBACK SHAPE RENDERING ---
       if (!drawn) {
-          if (entity.type === EntityType.PLAYER) {
+          if (entity.type === EntityType.ENEMY) {
+            this.drawEnemyShape(ctx, entity);
+            drawn = true;
+          } else if (entity.type === EntityType.PLAYER) {
              // Fallback player shape
             const size = Math.max(entity.size.x, entity.size.y) * 2.0; 
             ctx.fillStyle = COLORS.PLAYER;
@@ -3627,6 +3630,95 @@ export class RenderSystem {
           ctx.fillStyle = SHIELD_COLOR;
           ctx.fillRect(x, shieldY, width * shieldPct, shieldHeight);
       }
+  }
+
+  // Native enemy rendering — a distinct procedural polygon per archetype
+  // (entity.enemyShape) so types read by silhouette without sprite art.
+  // Assumes the canvas transform is already translated to the entity centre
+  // and rotated to its facing (shapes point along +x).  Includes the
+  // hit-flash scale-punch + whiten and a shield ring when shielded.
+  private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity) {
+      const baseR = Math.max(entity.size.x, entity.size.y) * 0.62;
+      const flash = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+      const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
+      const col = entity.color || '#f87171';
+
+      // Shield bubble (translucent blue ring) when the enemy is shielded.
+      if ((entity.maxShield ?? 0) > 0 && (entity.shield ?? 0) > 0) {
+          const frac = (entity.shield ?? 0) / (entity.maxShield ?? 1);
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac})`;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+      }
+
+      this.buildEnemyPath(ctx, entity.enemyShape ?? 'triangle', r);
+      ctx.fillStyle = col;
+      ctx.fill();
+      // Whiten on hit flash (re-fill the same path).
+      if (flash > 0) {
+          ctx.globalAlpha = Math.min(0.85, flash * 4);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.globalAlpha = 1;
+      }
+      // Dark outline + a soft core highlight for depth.
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fill();
+  }
+
+  private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
+      ctx.beginPath();
+      switch (shape) {
+          case 'arrow':
+              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.4, r * 0.75);
+              ctx.lineTo(-r * 0.15, 0); ctx.lineTo(-r * 0.4, -r * 0.75);
+              break;
+          case 'chevron':
+              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, r * 0.95);
+              ctx.lineTo(-r * 0.3, 0); ctx.lineTo(-r * 0.7, -r * 0.95);
+              break;
+          case 'diamond':
+              ctx.moveTo(r, 0); ctx.lineTo(0, r * 0.85);
+              ctx.lineTo(-r, 0); ctx.lineTo(0, -r * 0.85);
+              break;
+          case 'hexagon': {
+              for (let i = 0; i < 6; i++) {
+                  const a = (i / 6) * Math.PI * 2;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+              }
+              break;
+          }
+          case 'pentagon': {
+              for (let i = 0; i < 5; i++) {
+                  const a = (i / 5) * Math.PI * 2;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+              }
+              break;
+          }
+          case 'star': {
+              for (let i = 0; i < 10; i++) {
+                  const a = (i / 10) * Math.PI * 2;
+                  const rr = i % 2 === 0 ? r : r * 0.45;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * rr, Math.sin(a) * rr);
+              }
+              break;
+          }
+          case 'triangle':
+          default:
+              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);
+              break;
+      }
+      ctx.closePath();
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
