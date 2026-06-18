@@ -3745,8 +3745,14 @@ export class RenderSystem {
       ctx.beginPath();
       switch (shape) {
           case 'arrow':
-              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.4, r * 0.75);
-              ctx.lineTo(-r * 0.15, 0); ctx.lineTo(-r * 0.4, -r * 0.75);
+              // Swept delta-interceptor with a V-notched tail — deliberately
+              // unlike the plain concave cursor/indicator arrow.
+              ctx.moveTo(r, 0);                         // nose
+              ctx.lineTo(-r * 0.75, r * 0.9);           // right wingtip (swept back)
+              ctx.lineTo(-r * 0.45, r * 0.25);          // right tail root
+              ctx.lineTo(-r * 0.65, 0);                 // tail V-notch
+              ctx.lineTo(-r * 0.45, -r * 0.25);         // left tail root
+              ctx.lineTo(-r * 0.75, -r * 0.9);          // left wingtip
               break;
           case 'chevron':
               ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, r * 0.95);

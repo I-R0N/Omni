@@ -576,7 +576,11 @@ export const CAMERA_CONSTANTS = {
 export const SPRITE_CONSTANTS = {
   // Adjust this to align the player ship art with the facing direction.
   PLAYER_ROTATION_OFFSET: Math.PI*(3/4), // Radians
-  ENEMY_ROTATION_OFFSET: Math.PI*(3/4), // Match player art orientation
+  // Enemies render as native polygons whose nose points along +x (= the
+  // entity's facing angle), so no art-alignment offset is needed.  (The old
+  // 3π/4 value was for the retired up-left sprite art and skewed every
+  // polygon off its heading — most visibly on the triangle / arrow.)
+  ENEMY_ROTATION_OFFSET: 0,
   PLAYER_BASE_SIZE: 20 // Default visual/physics size for player (x/y)
 };
 
