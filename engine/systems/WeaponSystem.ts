@@ -231,12 +231,25 @@ export class WeaponSystem {
 
       // Cooldown management
       enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
-      if (enemy.weaponCooldown > 0) continue;
 
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const distSq = dx * dx + dy * dy;
-      if (distSq > rangeSq) continue;
+      const inRange = distSq <= rangeSq;
+
+      // Attack telegraph: ramp aimCharge 0→1 over the archetype's window as
+      // the cooldown winds down, but only while engaged (in range).  Cleared
+      // otherwise so idle / out-of-range enemies show no tell.  (Computed
+      // before the fire early-outs so the wind-up renders even mid-cooldown.)
+      const tw = arch.telegraph;
+      if (tw && inRange && enemy.weaponCooldown <= tw) {
+        enemy.aimCharge = 1 - enemy.weaponCooldown / tw;
+      } else if (enemy.aimCharge) {
+        enemy.aimCharge = 0;
+      }
+
+      if (enemy.weaponCooldown > 0) continue;
+      if (!inRange) continue;
 
       // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
       const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;

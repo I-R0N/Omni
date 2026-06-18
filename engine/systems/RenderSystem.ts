@@ -3796,6 +3796,39 @@ export class RenderSystem {
       ctx.arc(r * 0.05, 0, coreR, 0, Math.PI * 2);
       ctx.fillStyle = coreGrad;
       ctx.fill();
+
+      // ── Attack telegraph: a building muzzle charge glow + forward aim line
+      // (along +x, which faces the player) that grow with aimCharge, so the
+      // slow heavy shooters (Tank/Sniper/Charger) tell you they're about to
+      // fire and where.  Only those archetypes ever set aimCharge.
+      const charge = entity.aimCharge ?? 0;
+      if (charge > 0) {
+          const muzzleX = r * 1.05;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          // Aim line — thin bright beam that lengthens + brightens as it charges.
+          const lineLen = r * (1.5 + 6 * charge);
+          const lg = ctx.createLinearGradient(muzzleX, 0, muzzleX + lineLen, 0);
+          lg.addColorStop(0, `rgba(${liftCh(cr,0.4)},${liftCh(cg,0.4)},${liftCh(cb,0.4)},${0.5 * charge})`);
+          lg.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+          ctx.strokeStyle = lg;
+          ctx.lineWidth = 1 + 1.5 * charge;
+          ctx.beginPath();
+          ctx.moveTo(muzzleX, 0);
+          ctx.lineTo(muzzleX + lineLen, 0);
+          ctx.stroke();
+          // Muzzle charge: a hot dot swelling at the nose toward the shot.
+          const mr = r * (0.1 + 0.35 * charge);
+          const mGrad = ctx.createRadialGradient(muzzleX, 0, 0, muzzleX, 0, mr);
+          mGrad.addColorStop(0,   `rgba(255,255,255,${0.7 * charge})`);
+          mGrad.addColorStop(0.5, `rgba(${liftCh(cr,0.3)},${liftCh(cg,0.3)},${liftCh(cb,0.3)},${0.5 * charge})`);
+          mGrad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+          ctx.fillStyle = mGrad;
+          ctx.beginPath();
+          ctx.arc(muzzleX, 0, mr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+      }
   }
 
   private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {

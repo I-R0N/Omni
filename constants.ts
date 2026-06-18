@@ -2610,6 +2610,13 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // real fire cadence (the old global burst override is gone), so each
   // enemy's rhythm is its own.
   burst?: { size: number; gap: number };
+  // Optional attack telegraph: seconds before a shot lands during which the
+  // enemy visibly winds up (muzzle charge glow + forward aim line, scaled by
+  // a 0→1 `aimCharge` WeaponSystem sets).  Reserved for the slow / heavy
+  // shooters whose shots are worth dodging — Tank, Sniper, Charger.  Must be
+  // ≤ the weapon `cooldown` (it only shows in the final lead-up).  Absent →
+  // no tell (fast peashooters stay snappy and unpredictable).
+  telegraph?: number;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2629,6 +2636,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow',
     shoots: true, contactDamage: 10,
     weapon: { cooldown: 1.15, damage: 7, speed: 9, size: 5, count: 2, spread: 14, color: '#fb923c' },
+    telegraph: 0.3,
   },
   // Tank: a heavy siege slug — slow, big, solid amber shell that hits hard
   // (no glow: it reads as a dense slug, not a plasma ball, and its impact is
@@ -2640,6 +2648,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
     shoots: true, contactDamage: 14,
     weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047' },
+    telegraph: 0.5,
   },
   // ── Skirmishers — keep distance and fire (green → acid → blue) ──
   // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
@@ -2669,6 +2678,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
     shoots: true, contactDamage: 0,
     weapon: { cooldown: 2.0, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
+    telegraph: 0.6,
   },
 };
 

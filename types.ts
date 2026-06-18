@@ -386,6 +386,12 @@ export interface GameEntity {
   // pulsing enemy "core eye", lazily derived from the id on first draw so a
   // pack doesn't throb in unison.  Render-only; never read by the sim.
   glowPhase?: number;
+  // Attack-telegraph charge, 0→1, set by WeaponSystem over the archetype's
+  // `telegraph` window as a shot winds up (and cleared when not charging /
+  // out of range).  RenderSystem draws a muzzle charge glow + forward aim
+  // line scaled by it.  Only telegraphing archetypes (Tank/Sniper/Charger)
+  // ever set it.
+  aimCharge?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
