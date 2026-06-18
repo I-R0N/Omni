@@ -2617,6 +2617,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // ≤ the weapon `cooldown` (it only shows in the final lead-up).  Absent →
   // no tell (fast peashooters stay snappy and unpredictable).
   telegraph?: number;
+  // Sniper-only: draw a full-length lock-on laser to the player during the
+  // telegraph (vs the plain muzzle-charge tell), and hold still while locked
+  // (AISystem brakes to a stop) so it reads as a deliberate camping shooter
+  // rather than a continuous strafing stream.
+  aimLaser?: boolean;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2670,15 +2675,18 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     weapon: { cooldown: 1.5, damage: 5, speed: 8, size: 6, glow: true },
     burst: { size: 2, gap: 0.18 },
   },
-  // Sniper: a railgun — slow charge, then a thin, very fast, bright-blue
-  // high-damage tracer.  Telegraphed and punishing if you stand still.
+  // Sniper: a camping railgun — mostly stationary, holds still and snaps a
+  // lock-on laser onto the player, then fires one thin, very fast, bright-blue
+  // high-damage tracer.  Slow to reposition (low maxSpeed) and slow to fire
+  // (long cooldown) so each shot is a deliberate, dodgeable event, not a
+  // stream.  Punishing if you stand in the laser.
   [EnemySubtype.SHOOTER_3]: {
     color: '#3b82f6', size: 26, health: 3,
-    maxSpeed: 7,   accel: 4,   turnRate: 1.5,
+    maxSpeed: 4,   accel: 3,   turnRate: 1.8,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
     shoots: true, contactDamage: 0,
-    weapon: { cooldown: 2.0, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
-    telegraph: 0.75,
+    weapon: { cooldown: 2.8, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
+    telegraph: 0.75, aimLaser: true,
   },
 };
 

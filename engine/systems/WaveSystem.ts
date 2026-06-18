@@ -263,6 +263,7 @@ export class WaveSystem {
       contactDamage: config.contactDamage,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       enemyShape: config.shape,
+      aimLaser: config.aimLaser,
     });
 
     this.waveEnemyIds.add(id);

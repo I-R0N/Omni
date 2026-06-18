@@ -244,6 +244,9 @@ export class WeaponSystem {
       const tw = arch.telegraph;
       if (tw && inRange && enemy.weaponCooldown <= tw) {
         enemy.aimCharge = 1 - enemy.weaponCooldown / tw;
+        // Laser snipers track the player's live distance so the sight reaches
+        // them; refreshed every charging frame (the sniper rotates to track).
+        if (arch.aimLaser) enemy.aimDist = Math.sqrt(distSq);
       } else if (enemy.aimCharge) {
         enemy.aimCharge = 0;
       }

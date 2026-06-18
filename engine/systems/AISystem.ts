@@ -155,8 +155,15 @@ export class AISystem {
       let targetAngle = Math.atan2(aimY, aimX);
 
       const stunned = (enemy.hitStun ?? 0) > 0;
+      // Laser snipers plant themselves while locked on (aimCharge > 0) so the
+      // shot is a deliberate, telegraphed event from a stationary camper —
+      // brake hard to a stop instead of strafing.
+      const locked = !!enemy.aimLaser && (enemy.aimCharge ?? 0) > 0;
       if (stunned) {
           // Staggered — apply no movement force this step (the knockback rides).
+      } else if (locked) {
+          enemy.velocity.x *= 0.8;
+          enemy.velocity.y *= 0.8;
       } else if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
           const fleeX = -dx / dist;

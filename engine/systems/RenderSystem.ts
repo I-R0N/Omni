@@ -3797,43 +3797,46 @@ export class RenderSystem {
       ctx.fillStyle = coreGrad;
       ctx.fill();
 
-      // ── Attack telegraph: a building muzzle charge glow + forward aim line
-      // (along +x, which faces the player) that grow with aimCharge, so the
-      // slow heavy shooters (Tank/Sniper/Charger) tell you they're about to
-      // fire and where.  Only those archetypes ever set aimCharge.
+      // ── Attack telegraph.  Every telegraphing shooter (Tank/Charger/Sniper)
+      // shows a building muzzle charge glow; only the SNIPER also draws a
+      // full-length lock-on laser to the player (a long aim line on a lobbed
+      // slug read as odd).  Archetypes without a telegraph never set aimCharge.
       const charge = entity.aimCharge ?? 0;
       if (charge > 0) {
           const muzzleX = r * 1.05;
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          // Aim line — a crisp laser sight: a soft colored glow halo under a
-          // bright white core, long and mostly uniform (fades only at the far
-          // tip) so it reads at a glance instead of dissolving into a faint
-          // gradient.
-          const lineLen = r * (2.5 + 9 * charge);
-          const lx2 = muzzleX + lineLen;
-          // Outer glow halo (wide, low alpha, body colour).
-          const lgGlow = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
-          lgGlow.addColorStop(0,    `rgba(${cr},${cg},${cb},${0.35 * charge})`);
-          lgGlow.addColorStop(0.75, `rgba(${cr},${cg},${cb},${0.22 * charge})`);
-          lgGlow.addColorStop(1,    `rgba(${cr},${cg},${cb},0)`);
-          ctx.strokeStyle = lgGlow;
-          ctx.lineWidth = 3 + 3 * charge;
-          ctx.beginPath();
-          ctx.moveTo(muzzleX, 0);
-          ctx.lineTo(lx2, 0);
-          ctx.stroke();
-          // Inner crisp core (thin, near-white, stays bright most of its length).
-          const lgCore = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
-          lgCore.addColorStop(0,    `rgba(255,255,255,${0.9 * charge})`);
-          lgCore.addColorStop(0.75, `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},${0.7 * charge})`);
-          lgCore.addColorStop(1,    `rgba(${cr},${cg},${cb},0)`);
-          ctx.strokeStyle = lgCore;
-          ctx.lineWidth = 1 + charge;
-          ctx.beginPath();
-          ctx.moveTo(muzzleX, 0);
-          ctx.lineTo(lx2, 0);
-          ctx.stroke();
+
+          // Lock-on laser — SNIPER ONLY.  Snapped on at full length the moment
+          // the lock starts (length = the locked distance, so it reaches the
+          // player) and intensifies toward the shot: a crisp white core under a
+          // soft coloured halo so it reads at a glance.
+          if (entity.aimLaser) {
+              const lineLen = entity.aimDist ?? (r * 12);
+              const lx2 = muzzleX + lineLen;
+              const a = 0.55 + 0.4 * charge; // visible from lock start, brightens to fire
+              const lgGlow = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+              lgGlow.addColorStop(0,   `rgba(${cr},${cg},${cb},${0.3 * a})`);
+              lgGlow.addColorStop(0.9, `rgba(${cr},${cg},${cb},${0.16 * a})`);
+              lgGlow.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+              ctx.strokeStyle = lgGlow;
+              ctx.lineWidth = 3 + 2 * charge;
+              ctx.beginPath();
+              ctx.moveTo(muzzleX, 0);
+              ctx.lineTo(lx2, 0);
+              ctx.stroke();
+              const lgCore = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+              lgCore.addColorStop(0,   `rgba(255,255,255,${0.85 * a})`);
+              lgCore.addColorStop(0.9, `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},${0.6 * a})`);
+              lgCore.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+              ctx.strokeStyle = lgCore;
+              ctx.lineWidth = 1 + charge;
+              ctx.beginPath();
+              ctx.moveTo(muzzleX, 0);
+              ctx.lineTo(lx2, 0);
+              ctx.stroke();
+          }
+
           // Muzzle charge: a hot dot swelling at the nose toward the shot.
           const mr = r * (0.1 + 0.35 * charge);
           const mGrad = ctx.createRadialGradient(muzzleX, 0, 0, muzzleX, 0, mr);

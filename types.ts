@@ -388,10 +388,15 @@ export interface GameEntity {
   glowPhase?: number;
   // Attack-telegraph charge, 0→1, set by WeaponSystem over the archetype's
   // `telegraph` window as a shot winds up (and cleared when not charging /
-  // out of range).  RenderSystem draws a muzzle charge glow + forward aim
-  // line scaled by it.  Only telegraphing archetypes (Tank/Sniper/Charger)
-  // ever set it.
+  // out of range).  RenderSystem draws a muzzle charge glow scaled by it on
+  // every telegraphing archetype (Tank/Sniper/Charger).
   aimCharge?: number;
+  // Sniper-only lock-on: when stamped (from the archetype's `aimLaser`), the
+  // enemy holds still while aimCharge > 0 (AISystem) and RenderSystem draws a
+  // full-length laser sight snapped onto the player at `aimDist` (the locked
+  // distance, refreshed by WeaponSystem each charging frame).
+  aimLaser?: boolean;
+  aimDist?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
