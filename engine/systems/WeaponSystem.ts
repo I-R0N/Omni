@@ -3,7 +3,6 @@ import {
   WEAPONS,
   WEAPON_LIST,
   ENEMY_WEAPON,
-  ENEMY_BURST_CONFIG,
   ENEMY_CONSTANTS,
   ENEMY_VARIANTS,
   ENEMY_ATTACK_EFFECTS,
@@ -242,9 +241,6 @@ export class WeaponSystem {
       // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
       const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
 
-      // Lazily init burst state — first trigger starts a fresh burst
-      if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-
       // Slight inaccuracy
       const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
@@ -260,14 +256,21 @@ export class WeaponSystem {
       }
       this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
 
-      // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
-      // then wait BURST_RELOAD before starting the next burst.
-      if (enemy.burstQueue > 1) {
-        enemy.burstQueue--;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+      // Cadence: archetypes with a `burst` fire `size` shots `gap` apart then
+      // reload for the weapon's full `cooldown`; everyone else fires one shot
+      // per `cooldown`.  The per-archetype cooldown IS the fire rate.
+      const burst = arch.burst;
+      if (burst) {
+        if (enemy.burstQueue === undefined || enemy.burstQueue <= 0) enemy.burstQueue = burst.size;
+        if (enemy.burstQueue > 1) {
+          enemy.burstQueue--;
+          enemy.weaponCooldown = burst.gap;
+        } else {
+          enemy.burstQueue = burst.size;
+          enemy.weaponCooldown = weapon.cooldown;
+        }
       } else {
-        enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+        enemy.weaponCooldown = weapon.cooldown;
       }
     }
   }

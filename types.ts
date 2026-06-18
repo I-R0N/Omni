@@ -196,6 +196,10 @@ export interface WeaponConfig {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // Render hint: when true the projectile draws a larger, brighter radial
+  // bloom (used to telegraph heavy / status enemy shots — Tank, Orbiter,
+  // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
+  glow?: boolean;
   // Lightning chain overrides — when set, replaces the default
   // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE / LIGHTNING_CHAIN_BRANCHES
   // constants for the chain triggered by this projectile's impact.  Used
@@ -595,6 +599,9 @@ export interface GameEntity {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // Projectile render hint copied from WeaponConfig.glow — draws a larger,
+  // brighter bloom so heavy / status shots read at a glance.
+  glow?: boolean;
   // Charged-shot render hint — set on the projectile when the charged
   // variant should render with a custom visual (e.g. fireball gradient
   // for charged Blaster).  Other charged variants (Burst / Shotgun /

@@ -3208,23 +3208,32 @@ export class RenderSystem {
                     ctx.restore();
                 } else {
                     // ── Standard projectile: radial gradient glow ──
-                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
-                    const glowR = r * pulse * 3.0;
-
+                    // Both player and enemy shots render with their OWN weapon
+                    // colour now (the enemy branch used to hard-code orange,
+                    // which hid every per-archetype colour + the corrosion
+                    // green).  Enemy shots keep a warmer core; the `glow` hint
+                    // (Tank / Orbiter / Sniper) widens the bloom so heavy and
+                    // status shots read at a glance.
                     const isEnemy = entity.ownerType === EntityType.ENEMY;
-                    const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+                    const glowMult = entity.glow ? 4.2 : 3.0;
+                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * glowMult;
+
+                    const [cr, cg, cb] = hexToRgb(entity.color || (isEnemy ? '#f97316' : '#facc15'));
 
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
 
-                    // Single merged gradient: hot white core → weapon colour → transparent glow.
+                    // Single merged gradient: hot core → weapon colour → transparent glow.
                     const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
                     if (isEnemy) {
-                        grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
-                        grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
-                        grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
-                        grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
-                        grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                        // Warm-white core so the shot still reads as hostile,
+                        // then the archetype's own colour out to the rim.
+                        grad.addColorStop(0,    'rgba(255, 255, 235, 1)');
+                        grad.addColorStop(0.14, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                        grad.addColorStop(0.34, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                        grad.addColorStop(0.60, `rgba(${cr}, ${cg}, ${cb}, 0.16)`);
+                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
                     } else {
                         grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
                         grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);

@@ -2070,12 +2070,6 @@ export const WEAPON_SLOT_LABELS: Record<WeaponType, string> = (() => {
 
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
-export const ENEMY_BURST_CONFIG = {
-  BURST_SIZE: 2,        // shots per burst
-  BURST_GAP: 0.15,      // seconds between shots within a burst
-  BURST_RELOAD: 2.5,    // seconds between bursts
-};
-
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
@@ -2597,44 +2591,70 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number; shape: EnemyShape;
   shoots: boolean; contactDamage: number; weapon?: Partial<WeaponConfig>;
+  // Optional burst pattern: fire `size` shots `gap` seconds apart, then
+  // reload for the archetype weapon's full `cooldown`.  Absent → one shot
+  // per `cooldown` (the common case).  The per-archetype `cooldown` is the
+  // real fire cadence (the old global burst override is gone), so each
+  // enemy's rhythm is its own.
+  burst?: { size: number; gap: number };
 }> = {
-  // ── Rushers — close in and fire (red → orange → yellow) ──
+  // ── Rushers — close in and fire (rose → orange → amber) ──
+  // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
+  // dives at you.  High rate of fire, trivial per-shot damage.
   [EnemySubtype.RAMMER_1]: {
     color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
     sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'triangle',
-    shoots: true, contactDamage: 8, weapon: { cooldown: 0.9, damage: 6, speed: 8 },
+    shoots: true, contactDamage: 8,
+    weapon: { cooldown: 0.7, damage: 5, speed: 9, size: 4, color: '#fb7185' },
   },
+  // Charger: a strafing twin-cannon — fires a 2-shot orange fan on a longer
+  // beat as it lines up a dash.
   [EnemySubtype.RAMMER_2]: {
     color: '#f97316', size: 28, health: 2,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
     sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow',
-    shoots: true, contactDamage: 10, weapon: { cooldown: 1.0, damage: 8, count: 2, spread: 10 },
+    shoots: true, contactDamage: 10,
+    weapon: { cooldown: 1.15, damage: 7, speed: 9, size: 5, count: 2, spread: 14, color: '#fb923c' },
   },
+  // Tank: a heavy siege slug — slow, big, glowing amber shell that hits hard.
+  // The armor trait + this lumbering cannon make it the "bring the right
+  // tool" enemy.
   [EnemySubtype.RAMMER_3]: {
     color: '#facc15', size: 32, health: 5,
     maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
     sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
-    shoots: true, contactDamage: 14, weapon: { cooldown: 2.0, damage: 16, speed: 7, size: 9 },
+    shoots: true, contactDamage: 14,
+    weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047', glow: true },
   },
-  // ── Skirmishers — keep distance and fire (green → cyan → blue) ──
+  // ── Skirmishers — keep distance and fire (green → acid → blue) ──
+  // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
   [EnemySubtype.SHOOTER_1]: {
     color: '#4ade80', size: 28, health: 1,
     maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
     sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12, shape: 'diamond',
     shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.1, damage: 6, speed: 9, size: 5, color: '#4ade80' },
   },
+  // Orbiter: an acid spitter — a glowing double-tap of corrosive rounds
+  // (colour forced to acid-green by the ENEMY_ATTACK_EFFECTS path) on a
+  // burst rhythm.  Low impact, nasty DoT.
   [EnemySubtype.SHOOTER_2]: {
     color: '#22d3ee', size: 28, health: 2,
     maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
     sprite: ASSETS.ENEMY_ORBITER,  mass: 10, shape: 'pentagon',
     shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.5, damage: 5, speed: 8, size: 6, glow: true },
+    burst: { size: 2, gap: 0.18 },
   },
+  // Sniper: a railgun — slow charge, then a thin, very fast, bright-blue
+  // high-damage tracer.  Telegraphed and punishing if you stand still.
   [EnemySubtype.SHOOTER_3]: {
     color: '#3b82f6', size: 26, health: 3,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
-    shoots: true, contactDamage: 0, weapon: { cooldown: 1.8, damage: 14, speed: 14 },
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 2.0, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
   },
 };
 

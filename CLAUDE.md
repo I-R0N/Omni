@@ -303,8 +303,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
   `LIGHTNING_GRAVITY_STRENGTH/RANGE`, `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
-- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS`, `ENEMY_ROLE`, `ENEMY_BURST_CONFIG`,
-  `ENEMY_WEAPON`
+- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
+  optional `burst` fire pattern + `glow` shot hint — the per-archetype
+  `cooldown` is the real fire cadence; the old global burst config is gone),
+  `ENEMY_ROLE`, `ENEMY_WEAPON`
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
