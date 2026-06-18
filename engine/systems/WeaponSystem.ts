@@ -257,8 +257,12 @@ export class WeaponSystem {
       // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
       const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
 
-      // Slight inaccuracy
-      const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+      // Laser snipers fire EXACTLY down the rendered lock-on line (= the ship's
+      // facing) with no spread — the sight is a promise.  Everyone else aims at
+      // the player's current position with the weapon's slight inaccuracy.
+      const aimAngle = arch.aimLaser
+        ? enemy.rotation
+        : Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
       // Per-wave damage scaling + the Orbiter's corrosion payload.

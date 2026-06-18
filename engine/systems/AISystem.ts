@@ -149,10 +149,16 @@ export class AISystem {
       // Movement still tracks the real player position for responsive seek/flee/strafe.
       // Use toroidal delta so enemies near a seam aim at the nearest wrapped
       // copy of the player instead of firing across the entire map.
-      const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
-      const aimX = dx + player.velocity.x * leadTime;
-      const aimY = dy + player.velocity.y * leadTime;
-      let targetAngle = Math.atan2(aimY, aimX);
+      // EXCEPTION: laser snipers aim straight at the player (no lead) so the
+      // rendered lock-on line points exactly where the shot will go — the
+      // WeaponSystem fires down this same facing.
+      let targetAngle: number;
+      if (enemy.aimLaser) {
+          targetAngle = Math.atan2(dy, dx);
+      } else {
+          const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
+          targetAngle = Math.atan2(dy + player.velocity.y * leadTime, dx + player.velocity.x * leadTime);
+      }
 
       const stunned = (enemy.hitStun ?? 0) > 0;
       // Laser snipers plant themselves while locked on (aimCharge > 0) so the
