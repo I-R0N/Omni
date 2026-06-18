@@ -209,6 +209,92 @@ attaches to these. The new requirement is **persisting the player profile**
 (needs §4.4 + accounts), not new core mechanics. Keep it shallow per the
 brief: no base building, no deep crafting.
 
+### 4.6 Real-world points of interest inside seeded maps — **Feasible (Medium)**
+
+An enhancement to §4.1: instead of (or alongside) seed-rolled POI archetypes,
+populate a cell's map with game objects that correspond to **actual nearby
+real-world POIs**. This deepens the "tied to this real place" fantasy and
+feeds the exploration loop directly.
+
+**Data source is a licensing decision, not just a technical one.** Because
+maps must persist for *everyone*, the POI data has to be stored/derived —
+which is exactly what Google Places / Foursquare terms typically forbid.
+**OpenStreetMap** (Overpass API) + **Wikidata** are the right choice: open
+licenses (ODbL) permit storing and transforming the data, coverage is global
+and free, and both are queryable by bounding box / H3-cell area.
+
+**Loose spatial correspondence, not literal terrain.** This is the middle
+ground that respects the torus-vs-sphere caveat (§4.1): take each real POI's
+lat/lng, normalize it to its position *within* the H3 cell, and place the
+corresponding game object at that proportional spot in the map. A museum
+north of the player surfaces in the north of the arena. The **seed still
+drives terrain/hazards; real POIs drive the destinations.** A taxonomy maps
+categories to game objects (museum → archive station, park → garden/nebula
+world, transit hub → warp gate, peak → asteroid cluster, place of worship →
+monument, …). Avoid surfacing private residences.
+
+**Snapshot at first discovery.** External POI data drifts (closures, OSM
+edits). For "same map for everyone forever," snapshot the query result when a
+cell is first discovered and persist *that* as part of the cell metadata — it
+slots straight into the delta-persistence model of §4.4 (the POI list is just
+more cell metadata). OSM/Wikidata licensing permits this snapshot; Google's
+generally would not.
+
+**It directly mitigates the cold-start risk (§7).** POI density is wildly
+uneven — dense cities overflow, oceans/rural are empty. Resolution: use real
+POIs where they exist, and **fall back to seed-generated procedural POIs
+where they are sparse**, guaranteeing "always somewhere to go" anywhere on
+Earth; cap/cluster in dense areas so a city block isn't 500 stations.
+
+**Effort:** Medium — mostly a backend integration workstream (query →
+taxonomy-map → snapshot → persist) layered on Phases 0/1. POIs are public
+data, so it adds little privacy burden beyond the §4.2 location concerns.
+
+### 4.7 Grid transit vs torus wrap — the macro-world — **Feasible (Medium) via gates**
+
+The brief asks whether a player could transit from one location's map to a
+**neighboring** location's map instead of the edge wrapping back on itself
+("maybe only in certain circumstances"). Yes — and the gating instinct is
+both better game design and the cheaper build.
+
+**Keep the torus; it is load-bearing.** CLAUDE.md §8 is explicit — "Torus
+math is non-optional." The renderer, the physics spatial grid, AI vision,
+flow fields, and projectile targeting all assume wrapping. The torus's real
+job is keeping entities in a bounded space with **no dead edges** mid-fight.
+Don't remove it.
+
+**Model transit as gates, not edges.** The hex fit is elegant: an H3 cell has
+exactly **6 neighbors**, so a location-map gets up to **6 warp gates**, one
+per hex direction. Fly into a gate → derive the neighbor's seed from its H3
+index (the h3 library exposes neighbor lookups directly) → load that map →
+spawn at the corresponding opposite gate. The macro-world becomes a hex grid
+of location-maps, each of which is itself a hex-tile arena — hexes all the way
+down. Normal flight past the world bounds still *wraps* (no death); you only
+*leave* via a gate, so the two ideas don't conflict (gates are objects placed
+in the world, not edges — a torus has no edges).
+
+**Cheap because the engine already swaps maps.** `loadMap(buildMap(type))`
+exists today (`GameEngine.ts:1102`, `:3255`). Gated transit adds a seed
+parameter and a spawn-at-gate transition — **not** a simulation rewrite. Gate
+topology is automatically consistent: H3 neighbor relations are symmetric
+(A's east gate ↔ B's west gate), and seed-determinism means backtracking
+regenerates the same neighbor with its persisted state.
+
+**Why "certain circumstances" is the right call:**
+- Gating transit (warp fuel, clear-the-wave-first, must-have-discovered-the-
+  gate) gives the light-RPG economy something to spend on and reuses the
+  dormant `gold`/drop hooks.
+- It keeps the live simulation bounded to **one map at a time** — a major win
+  for performance *and* for the instancing/netcode model (§4.3): you only
+  ever sync one cell's instance.
+
+**Avoid seamless edge streaming.** The alternative — non-wrapping edges that
+stream the neighbor in live — breaks the torus invariant, needs two
+simulations coexisting at the boundary, entities straddling the seam, live
+load/unload, and a camera hand-off. That's an XL effort that fights the
+engine for little benefit over gates. Recommend gates; avoid seamless
+streaming, likely permanently.
+
 ---
 
 ## 5. Cross-cutting requirements (the "platform tax")
@@ -269,7 +355,8 @@ Each phase is independently shippable and de-risks the next.
 | Risk / question | Notes |
 |---|---|
 | **Sim determinism for lockstep** | 232 `Math.random()` sites; floats; not designed for it. Avoid by choosing host-authoritative instancing (§4.3 opt 2) over lockstep. |
-| **Empty-world cold start** | Most H3 cells will never be visited. Need "always somewhere to go" — interesting *unvisited* maps must be generable on demand, and discovery must feel rewarding. Deterministic gen makes this cheap. |
+| **Empty-world cold start** | Most H3 cells will never be visited. Need "always somewhere to go" — interesting *unvisited* maps must be generable on demand, and discovery must feel rewarding. Deterministic gen makes this cheap; real-POI placement with procedural fallback (§4.6) covers both dense and empty regions. |
+| **External POI data licensing/drift** | "Persist for everyone" requires storing derived POI data — use OSM/Wikidata (ODbL), not Google/Foursquare. Snapshot at first discovery to freeze drift (§4.6). |
 | **Location spoofing / griefing** | If location grants ownership/rewards, expect abuse. Needs server-side validation; influences how much authority clients get. |
 | **Privacy/legal** | Storing player locations is regulated PII. Coarsen to H3 cell; minimize retention. |
 | **Mobile input + performance** | Touch controls are net-new; Canvas2D perf on mid-range phones needs validation (`PerfController` helps but is desktop-tuned). |
