@@ -3806,16 +3806,33 @@ export class RenderSystem {
           const muzzleX = r * 1.05;
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          // Aim line — thin bright beam that lengthens + brightens as it charges.
-          const lineLen = r * (1.5 + 6 * charge);
-          const lg = ctx.createLinearGradient(muzzleX, 0, muzzleX + lineLen, 0);
-          lg.addColorStop(0, `rgba(${liftCh(cr,0.4)},${liftCh(cg,0.4)},${liftCh(cb,0.4)},${0.5 * charge})`);
-          lg.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-          ctx.strokeStyle = lg;
-          ctx.lineWidth = 1 + 1.5 * charge;
+          // Aim line — a crisp laser sight: a soft colored glow halo under a
+          // bright white core, long and mostly uniform (fades only at the far
+          // tip) so it reads at a glance instead of dissolving into a faint
+          // gradient.
+          const lineLen = r * (2.5 + 9 * charge);
+          const lx2 = muzzleX + lineLen;
+          // Outer glow halo (wide, low alpha, body colour).
+          const lgGlow = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+          lgGlow.addColorStop(0,    `rgba(${cr},${cg},${cb},${0.35 * charge})`);
+          lgGlow.addColorStop(0.75, `rgba(${cr},${cg},${cb},${0.22 * charge})`);
+          lgGlow.addColorStop(1,    `rgba(${cr},${cg},${cb},0)`);
+          ctx.strokeStyle = lgGlow;
+          ctx.lineWidth = 3 + 3 * charge;
           ctx.beginPath();
           ctx.moveTo(muzzleX, 0);
-          ctx.lineTo(muzzleX + lineLen, 0);
+          ctx.lineTo(lx2, 0);
+          ctx.stroke();
+          // Inner crisp core (thin, near-white, stays bright most of its length).
+          const lgCore = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+          lgCore.addColorStop(0,    `rgba(255,255,255,${0.9 * charge})`);
+          lgCore.addColorStop(0.75, `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},${0.7 * charge})`);
+          lgCore.addColorStop(1,    `rgba(${cr},${cg},${cb},0)`);
+          ctx.strokeStyle = lgCore;
+          ctx.lineWidth = 1 + charge;
+          ctx.beginPath();
+          ctx.moveTo(muzzleX, 0);
+          ctx.lineTo(lx2, 0);
           ctx.stroke();
           // Muzzle charge: a hot dot swelling at the nose toward the shot.
           const mr = r * (0.1 + 0.35 * charge);

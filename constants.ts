@@ -2648,7 +2648,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
     shoots: true, contactDamage: 14,
     weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047' },
-    telegraph: 0.5,
+    telegraph: 0.9,
   },
   // ── Skirmishers — keep distance and fire (green → acid → blue) ──
   // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
@@ -2678,7 +2678,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
     shoots: true, contactDamage: 0,
     weapon: { cooldown: 2.0, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
-    telegraph: 0.6,
+    telegraph: 0.75,
   },
 };
 
