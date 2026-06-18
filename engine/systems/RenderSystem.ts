@@ -3660,32 +3660,70 @@ export class RenderSystem {
   // at its centroid (the per-entity transform at the top of the slow path
   // bakes rotation in), so the tail is at -x.
   private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
-      const baseR = Math.max(entity.size.x, entity.size.y) * 0.62;
+      const shape = entity.enemyShape ?? 'triangle';
+      // The orb (Drone) renders a touch smaller so it reads as a compact,
+      // buzzing craft next to the bigger winged ships.
+      const shapeScale = shape === 'circle' ? 0.82 : 1;
+      const baseR = Math.max(entity.size.x, entity.size.y) * 0.62 * shapeScale;
       const flash = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
       const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
       const col = entity.color || '#f87171';
       const [cr, cg, cb] = hexToRgb(col);
 
-      // Speed fraction drives the engine flare brightness + core pulse rate:
-      // a charging rusher glows hot and throbs fast; an idling kiter simmers.
+      // Stable per-entity phase (id-derived) desyncs the core pulse + flame
+      // flicker so a pack doesn't throb in unison.  Render-only cache.
+      if (entity.glowPhase === undefined) {
+          let h = 0; const id = entity.id;
+          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+          entity.glowPhase = (h / 997) * Math.PI * 2;
+      }
+      const phase = entity.glowPhase;
+
+      // Speed fraction drives the flame length/brightness + core pulse rate:
+      // a charging rusher trails a long hot flame; an idling kiter simmers.
       const vx = entity.velocity?.x ?? 0, vy = entity.velocity?.y ?? 0;
       const speedFrac = Math.min(1, Math.hypot(vx, vy) / (entity.maxSpeed || 6));
 
-      // ── Engine exhaust: additive bloom off the tail (-x).  Faint at rest
-      // so an idle enemy still has a soft ember; bright under thrust.
+      // ── Engine flame: a tapered, flickering plume off the tail (-x).  Two
+      // stacked teardrops (outer colour wash + inner hot core) read as
+      // directional thrust — unlike the old symmetric radial blob.
       {
-          const cxr = -r * 0.9;
-          const er = r * (0.7 + speedFrac * 1.5);
-          const ea = 0.18 + speedFrac * 0.5;
+          // Deterministic two-frequency flicker (no per-frame allocation /
+          // randomness) — gives the flame a live sizzle.
+          const flick = 0.82 + 0.12 * Math.sin(nowSec * 38 + phase)
+                             + 0.06 * Math.sin(nowSec * 71 + phase * 2);
+          const len = r * (0.55 + speedFrac * 1.9) * flick;
+          const mouthX = -r * 0.5;          // attaches just behind the hull
+          const tipX = mouthX - len;
+          const halfW = r * (0.30 + speedFrac * 0.12);
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          const eg = ctx.createRadialGradient(cxr, 0, 0, cxr, 0, er);
-          eg.addColorStop(0,   `rgba(${cr},${cg},${cb},${ea})`);
-          eg.addColorStop(0.5, `rgba(${cr},${cg},${cb},${ea * 0.4})`);
-          eg.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
-          ctx.fillStyle = eg;
+
+          // Outer plume — body colour, fades to transparent at the tip.
+          const og = ctx.createLinearGradient(mouthX, 0, tipX, 0);
+          og.addColorStop(0, `rgba(${cr},${cg},${cb},${0.5 * flick})`);
+          og.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+          ctx.fillStyle = og;
           ctx.beginPath();
-          ctx.arc(cxr, 0, er, 0, Math.PI * 2);
+          ctx.moveTo(mouthX, halfW);
+          ctx.quadraticCurveTo(mouthX - len * 0.5, halfW * 0.55, tipX, 0);
+          ctx.quadraticCurveTo(mouthX - len * 0.5, -halfW * 0.55, mouthX, -halfW);
+          ctx.closePath();
+          ctx.fill();
+
+          // Inner hot core — shorter, white-hot, fades to a bright tint.
+          const iLen = len * 0.55;
+          const iTipX = mouthX - iLen;
+          const iHalf = halfW * 0.55;
+          const ig = ctx.createLinearGradient(mouthX, 0, iTipX, 0);
+          ig.addColorStop(0, `rgba(255,245,220,${0.7 * flick})`);
+          ig.addColorStop(1, `rgba(${liftCh(cr,0.4)},${liftCh(cg,0.4)},${liftCh(cb,0.4)},0)`);
+          ctx.fillStyle = ig;
+          ctx.beginPath();
+          ctx.moveTo(mouthX, iHalf);
+          ctx.quadraticCurveTo(mouthX - iLen * 0.5, iHalf * 0.5, iTipX, 0);
+          ctx.quadraticCurveTo(mouthX - iLen * 0.5, -iHalf * 0.5, mouthX, -iHalf);
+          ctx.closePath();
           ctx.fill();
           ctx.restore();
       }
@@ -3702,7 +3740,7 @@ export class RenderSystem {
 
       // ── Body: a head-lit radial gradient gives the flat polygon volume
       // (bright toward the nose, darker at the tail/rim).
-      this.buildEnemyPath(ctx, entity.enemyShape ?? 'triangle', r);
+      this.buildEnemyPath(ctx, shape, r);
       const bodyGrad = ctx.createRadialGradient(r * 0.2, -r * 0.15, r * 0.1, 0, 0, r * 1.15);
       bodyGrad.addColorStop(0, `rgb(${liftCh(cr,0.45)},${liftCh(cg,0.45)},${liftCh(cb,0.45)})`);
       bodyGrad.addColorStop(0.55, col);
@@ -3721,15 +3759,25 @@ export class RenderSystem {
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // ── Pulsing core "eye": a hot dot that throbs faster the faster the
-      // enemy moves, desynced per entity (stable id-derived phase) so a pack
-      // doesn't blink in unison.
-      if (entity.glowPhase === undefined) {
-          let h = 0; const id = entity.id;
-          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
-          entity.glowPhase = (h / 997) * Math.PI * 2;
+      // ── Orb inlay (Drone): a circle has no silhouette detail, so layer an
+      // inset panel ring + a forward sensor pip for contrast and a heading
+      // cue (the body is otherwise rotationally featureless).
+      if (shape === 'circle') {
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${sinkCh(cr,0.45)},${sinkCh(cg,0.45)},${sinkCh(cb,0.45)},0.9)`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          // Forward sensor pip near the nose (+x).
+          ctx.beginPath();
+          ctx.arc(r * 0.66, 0, r * 0.13, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${liftCh(cr,0.55)},${liftCh(cg,0.55)},${liftCh(cb,0.55)},0.95)`;
+          ctx.fill();
       }
-      const pulse = 0.55 + 0.45 * Math.sin(nowSec * (4 + speedFrac * 6) + entity.glowPhase);
+
+      // ── Pulsing core "eye": a hot dot that throbs faster the faster the
+      // enemy moves.
+      const pulse = 0.55 + 0.45 * Math.sin(nowSec * (4 + speedFrac * 6) + phase);
       const coreR = r * (0.22 + 0.06 * pulse);
       const coreGrad = ctx.createRadialGradient(r * 0.05, 0, 0, r * 0.05, 0, coreR);
       coreGrad.addColorStop(0,   `rgba(255,255,255,${0.6 + 0.35 * pulse})`);
@@ -3744,6 +3792,11 @@ export class RenderSystem {
   private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
       ctx.beginPath();
       switch (shape) {
+          case 'circle':
+              // Orb body — detail is layered on in drawEnemyShape (inset ring
+              // + forward sensor pip), since a bare disc has no silhouette.
+              ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2);
+              return; // already a closed sub-path; skip the closePath below
           case 'arrow':
               // Swept delta-interceptor with a V-notched tail — deliberately
               // unlike the plain concave cursor/indicator arrow.

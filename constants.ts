@@ -2608,7 +2608,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   [EnemySubtype.RAMMER_1]: {
     color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
-    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'triangle',
+    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'circle',
     shoots: true, contactDamage: 8,
     weapon: { cooldown: 0.7, damage: 5, speed: 9, size: 4, color: '#fb7185' },
   },

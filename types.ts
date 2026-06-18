@@ -125,7 +125,7 @@ export enum EnemySubtype {
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star';
+  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
