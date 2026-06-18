@@ -2587,42 +2587,54 @@ export function enemyDamageMult(waveIndex: number): number {
 // To add a new enemy type: add entries to EnemySubtype, EnemyRole, ENEMY_ROLE,
 // and ENEMY_VARIANTS, then reference the new subtype in WAVE_DEFINITIONS.
 
+// Enemy archetype table.  EVERY enemy is now a shooter (`shoots`); variety
+// comes from the movement role (RAMMING = rush in close, SHOOTING = keep
+// distance & strafe), the per-archetype `weapon` override on ENEMY_WEAPON,
+// `contactDamage` (rushers hurt on touch; ranged keep 0), and defenses
+// (ENEMY_TRAITS armor / ENEMY_ATTACK_EFFECTS corrosion).
 export const ENEMY_VARIANTS: Record<EnemySubtype, {
   color: string; size: number; health: number;
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number; shape: EnemyShape;
+  shoots: boolean; contactDamage: number; weapon?: Partial<WeaponConfig>;
 }> = {
-  // ── Ramming — red → orange → yellow ──
+  // ── Rushers — close in and fire (red → orange → yellow) ──
   [EnemySubtype.RAMMER_1]: {
     color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
-    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'triangle'
+    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'triangle',
+    shoots: true, contactDamage: 8, weapon: { cooldown: 0.9, damage: 6, speed: 8 },
   },
   [EnemySubtype.RAMMER_2]: {
     color: '#f97316', size: 28, health: 2,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
-    sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow'
+    sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow',
+    shoots: true, contactDamage: 10, weapon: { cooldown: 1.0, damage: 8, count: 2, spread: 10 },
   },
   [EnemySubtype.RAMMER_3]: {
     color: '#facc15', size: 32, health: 5,
     maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
-    sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon'
+    sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
+    shoots: true, contactDamage: 14, weapon: { cooldown: 2.0, damage: 16, speed: 7, size: 9 },
   },
-  // ── Shooting — green → cyan → blue ──
+  // ── Skirmishers — keep distance and fire (green → cyan → blue) ──
   [EnemySubtype.SHOOTER_1]: {
     color: '#4ade80', size: 28, health: 1,
     maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
-    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12, shape: 'diamond'
+    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12, shape: 'diamond',
+    shoots: true, contactDamage: 0,
   },
   [EnemySubtype.SHOOTER_2]: {
     color: '#22d3ee', size: 28, health: 2,
     maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
-    sprite: ASSETS.ENEMY_ORBITER,  mass: 10, shape: 'pentagon'
+    sprite: ASSETS.ENEMY_ORBITER,  mass: 10, shape: 'pentagon',
+    shoots: true, contactDamage: 0,
   },
   [EnemySubtype.SHOOTER_3]: {
     color: '#3b82f6', size: 26, health: 3,
     maxSpeed: 7,   accel: 4,   turnRate: 1.5,
-    sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron'
+    sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
+    shoots: true, contactDamage: 0, weapon: { cooldown: 1.8, damage: 14, speed: 14 },
   },
 };
 

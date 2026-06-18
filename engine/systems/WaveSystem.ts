@@ -260,6 +260,7 @@ export class WaveSystem {
       mass: config.mass,
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
+      contactDamage: config.contactDamage,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       enemyShape: config.shape,
     });

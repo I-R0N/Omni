@@ -375,6 +375,9 @@ export interface GameEntity {
   // Native polygon silhouette for enemy rendering (set at spawn from the
   // archetype) — RenderSystem draws this instead of a sprite.
   enemyShape?: EnemyShape;
+  // Damage dealt to the player on contact (rushers > 0; ranged enemies 0).
+  // Scaled by the per-wave damageMult in the collision path.
+  contactDamage?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;

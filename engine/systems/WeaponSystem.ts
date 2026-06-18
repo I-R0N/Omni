@@ -1,11 +1,11 @@
-import { GameEntity, EntityType, EnemyRole, Vector2, WeaponType, WeaponConfig } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
   WEAPONS,
   WEAPON_LIST,
   ENEMY_WEAPON,
   ENEMY_BURST_CONFIG,
   ENEMY_CONSTANTS,
-  ENEMY_ROLE,
+  ENEMY_VARIANTS,
   ENEMY_ATTACK_EFFECTS,
   CORROSION,
   COLLISION_CONFIG,
@@ -223,12 +223,12 @@ export class WeaponSystem {
     player: GameEntity,
     dt: number,
   ) {
-    const weapon = ENEMY_WEAPON;
     const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
-      if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
+      const arch = enemy.enemySubtype ? ENEMY_VARIANTS[enemy.enemySubtype] : undefined;
+      if (!arch || !arch.shoots) continue; // every shooting enemy fires its archetype weapon
 
       // Cooldown management
       enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
@@ -239,6 +239,9 @@ export class WeaponSystem {
       const distSq = dx * dx + dy * dy;
       if (distSq > rangeSq) continue;
 
+      // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
+      const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
+
       // Lazily init burst state — first trigger starts a fresh burst
       if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
 
@@ -246,10 +249,7 @@ export class WeaponSystem {
       const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-      // Per-wave enemy damage scaling — copy the shared config and scale
-      // its damage by the enemy's stamped multiplier (1× when unset).
-      // Subtypes in ENEMY_ATTACK_EFFECTS (Orbiter → corrosion) also tag the
-      // shot with a status payload + the effect colour.
+      // Per-wave damage scaling + the Orbiter's corrosion payload.
       const dmgMult = enemy.damageMult ?? 1;
       const fx = enemy.enemySubtype ? ENEMY_ATTACK_EFFECTS[enemy.enemySubtype] : undefined;
       let shot = weapon;

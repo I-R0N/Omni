@@ -2679,11 +2679,14 @@ export class PhysicsSystem {
               const rdy = enemy.velocity.y - target.velocity.y;
               const ramImpact = Math.sqrt(rdx * rdx + rdy * rdy);
               // Below shield damage threshold: contact flash only, no damage
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
+              // Per-archetype contact damage (rushers hurt; ranged enemies
+              // have 0).  No damage below the impact-speed threshold either.
+              const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0) {
                   // flash already handled by the general contact flash below
               } else {
                   // Per-wave enemy damage scaling rides enemy.damageMult.
-                  const ramBase = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY * (enemy.damageMult ?? 1);
+                  const ramBase = contact * (enemy.damageMult ?? 1);
                   let ramDmg = ramBase;
                   if ((target.shield ?? 0) > 0) {
                       const absorbed = Math.min(target.shield!, ramDmg);
