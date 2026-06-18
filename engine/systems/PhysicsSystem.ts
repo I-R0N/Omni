@@ -2612,10 +2612,24 @@ export class PhysicsSystem {
           }
 
           if (onShake && target.type !== EntityType.STRUCTURE) {
-              const shakeAmount = target.type === EntityType.PLAYER
-                  ? COLLISION_CONFIG.SHAKE.MEDIUM
-                  : COLLISION_CONFIG.SHAKE.MICRO;
-              onShake(shakeAmount);
+              if (target.type === EntityType.PLAYER) {
+                  // Heavy shots wallop, chip shots barely register — scale the
+                  // shake AND shove the player along the shot direction by the
+                  // projectile's intrinsic damage (so a slug felt even through
+                  // the shield).
+                  const impactDmg = proj.damage || 1;
+                  onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
+                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG));
+                  if (proj.velocity && !target.isExploding) {
+                      const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
+                      target.velocity.x += (proj.velocity.x / vmag) * kick;
+                      target.velocity.y += (proj.velocity.y / vmag) * kick;
+                      target.hitFlash = Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012));
+                  }
+              } else {
+                  onShake(COLLISION_CONFIG.SHAKE.MICRO);
+              }
           }
 
           if (onHit) onHit(proj.position, proj, target);

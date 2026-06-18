@@ -1902,6 +1902,15 @@ export const ENEMY_CONSTANTS = {
 export const HIT_FEEDBACK = {
   KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
   STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
+  // Player-hit response scales with the incoming shot's intrinsic damage so a
+  // heavy slug (Tank, 16) lands like a wallop and a chip pellet (Drone, 5)
+  // barely registers — both shake and a directional knockback.  Uses the
+  // projectile's own damage (not the post-shield/armor value) so a heavy hit
+  // jolts even when the shield eats it.
+  PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
+  PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
+  PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
+  PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {
@@ -2621,15 +2630,16 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shoots: true, contactDamage: 10,
     weapon: { cooldown: 1.15, damage: 7, speed: 9, size: 5, count: 2, spread: 14, color: '#fb923c' },
   },
-  // Tank: a heavy siege slug — slow, big, glowing amber shell that hits hard.
-  // The armor trait + this lumbering cannon make it the "bring the right
-  // tool" enemy.
+  // Tank: a heavy siege slug — slow, big, solid amber shell that hits hard
+  // (no glow: it reads as a dense slug, not a plasma ball, and its impact is
+  // sold by the damage-scaled player shake/knockback, not brightness).  The
+  // armor trait + this lumbering cannon make it the "bring the right tool" enemy.
   [EnemySubtype.RAMMER_3]: {
     color: '#facc15', size: 32, health: 5,
     maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
     sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
     shoots: true, contactDamage: 14,
-    weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047', glow: true },
+    weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047' },
   },
   // ── Skirmishers — keep distance and fire (green → acid → blue) ──
   // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
