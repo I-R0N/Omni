@@ -81,6 +81,13 @@ function sinkCh(v: number, f: number): number {
     return Math.max(0, Math.min(255, Math.round(v * (1 - f))));
 }
 
+// Engine-flame palette — a FIXED hot ion/plasma colour so the thrust plume
+// reads as exhaust regardless of the enemy's body colour (it used to inherit
+// the body colour and wash out).  White-hot core, cool-blue wash.
+const FLAME_OUTER = '120, 190, 255'; // ion-blue outer wash
+const FLAME_CORE  = '255, 255, 255'; // white-hot core
+const FLAME_TIP   = '150, 210, 255'; // cool-blue fade at the tip
+
 // Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
 // channel is clamped to [0, 255] then 0-padded.  Used by the density
 // tint helper to format a per-(variant, tier) cached colour string.
@@ -3692,17 +3699,19 @@ export class RenderSystem {
           // randomness) — gives the flame a live sizzle.
           const flick = 0.82 + 0.12 * Math.sin(nowSec * 38 + phase)
                              + 0.06 * Math.sin(nowSec * 71 + phase * 2);
-          const len = r * (0.55 + speedFrac * 1.9) * flick;
+          const len = r * (0.6 + speedFrac * 1.9) * flick;
           const mouthX = -r * 0.5;          // attaches just behind the hull
           const tipX = mouthX - len;
-          const halfW = r * (0.30 + speedFrac * 0.12);
+          // Wider than before; the orb's small radius gets an extra boost so
+          // its plume isn't a thin sliver.
+          const halfW = r * (0.40 + speedFrac * 0.15) * (shape === 'circle' ? 1.3 : 1.0);
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
 
-          // Outer plume — body colour, fades to transparent at the tip.
+          // Outer plume — fixed ion-blue wash, fades to transparent at the tip.
           const og = ctx.createLinearGradient(mouthX, 0, tipX, 0);
-          og.addColorStop(0, `rgba(${cr},${cg},${cb},${0.5 * flick})`);
-          og.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+          og.addColorStop(0, `rgba(${FLAME_OUTER},${0.5 * flick})`);
+          og.addColorStop(1, `rgba(${FLAME_OUTER},0)`);
           ctx.fillStyle = og;
           ctx.beginPath();
           ctx.moveTo(mouthX, halfW);
@@ -3711,13 +3720,13 @@ export class RenderSystem {
           ctx.closePath();
           ctx.fill();
 
-          // Inner hot core — shorter, white-hot, fades to a bright tint.
+          // Inner hot core — shorter, white-hot, fades to cool blue.
           const iLen = len * 0.55;
           const iTipX = mouthX - iLen;
           const iHalf = halfW * 0.55;
           const ig = ctx.createLinearGradient(mouthX, 0, iTipX, 0);
-          ig.addColorStop(0, `rgba(255,245,220,${0.7 * flick})`);
-          ig.addColorStop(1, `rgba(${liftCh(cr,0.4)},${liftCh(cg,0.4)},${liftCh(cb,0.4)},0)`);
+          ig.addColorStop(0, `rgba(${FLAME_CORE},${0.78 * flick})`);
+          ig.addColorStop(1, `rgba(${FLAME_TIP},0)`);
           ctx.fillStyle = ig;
           ctx.beginPath();
           ctx.moveTo(mouthX, iHalf);
