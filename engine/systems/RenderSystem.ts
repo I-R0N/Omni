@@ -3012,6 +3012,24 @@ export class RenderSystem {
                         ctx.stroke();
                     }
 
+                    // Damage cracks for metal-tile — the seeded HP-driven
+                    // fracture overlay (shared drawDamageCracks).  metal-tile
+                    // renders here on the slow path every frame (it is NOT in
+                    // the static-tile world cache — see isStaticTileCacheable),
+                    // so the live crack count is always correct without any
+                    // cache invalidation.  maxHealth scales ×densityTier, so a
+                    // dense tile cracks proportionally (capped).  Lower
+                    // frequency than rock — metal is tough (one crack per ~5
+                    // hits, MATERIAL_DAMAGE_CRACKS.metal).  Plastic-tile is
+                    // left to its colour-shift damage cue.
+                    if (entity.shardVariant === 'metal-tile') {
+                        const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+                        this.overlayMaterialCracks(
+                            ctx, entity, rr, buildPath,
+                            METAL_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.metal,
+                        );
+                    }
+
                     // Proximity bloom for plastic — fill-only radial
                     // bloom from the player-facing edge; see
                     // renderProximityBloom().  Painted LAST so the outline
@@ -3131,6 +3149,51 @@ export class RenderSystem {
                         ctx.closePath();
                         ctx.fill();
                     }
+
+                    // Composite damage cracks — clip to the union of lattice
+                    // cells (exact silhouette) and overlay the shared seeded
+                    // metal fracture centred on the composite.  maxHealth is
+                    // the accumulated lattice HP, so a denser blob crosses
+                    // more crack thresholds (capped).  Allocation-free: the
+                    // clip path reuses the cell geometry already computed.
+                    const maxHpC = entity.maxHealth ?? 0;
+                    const hpC = entity.health ?? maxHpC;
+                    if (maxHpC > 1 && hpC < maxHpC) {
+                        const cfgC = MATERIAL_DAMAGE_CRACKS.metal;
+                        const countC = Math.min(cfgC.cap, Math.floor((maxHpC - hpC) / cfgC.freq));
+                        if (countC > 0) {
+                            let radC = 0;
+                            for (let ci = 0; ci < cells.length; ci++) {
+                                const dx = cells[ci].ix * ux - cmx;
+                                const dy = cells[ci].iy * uy - cmy;
+                                const d = Math.sqrt(dx * dx + dy * dy);
+                                if (d > radC) radC = d;
+                            }
+                            radC += R;
+                            ctx.save();
+                            ctx.beginPath();
+                            for (let ci = 0; ci < cells.length; ci++) {
+                                const c = cells[ci];
+                                const ccx = c.ix * ux - cmx;
+                                const ccy = c.iy * uy - cmy;
+                                if (c.up) {
+                                    ctx.moveTo(ccx, ccy - R);
+                                    ctx.lineTo(ccx + ux, ccy + uy);
+                                    ctx.lineTo(ccx - ux, ccy + uy);
+                                } else {
+                                    ctx.moveTo(ccx, ccy + R);
+                                    ctx.lineTo(ccx + ux, ccy - uy);
+                                    ctx.lineTo(ccx - ux, ccy - uy);
+                                }
+                                ctx.closePath();
+                            }
+                            ctx.clip();
+                            const dmgFracC = Math.min(1, Math.max(0, 1 - hpC / maxHpC));
+                            drawDamageCracks(ctx, radC, crackSeedFor(entity), countC, dmgFracC, METAL_CRACK_STYLE);
+                            ctx.restore();
+                        }
+                    }
+
                     ctx.globalAlpha = 1.0;
                     this.drawMetalDebugOutline(ctx, entity);
                     return;
@@ -3291,6 +3354,18 @@ export class RenderSystem {
                         this.overlayMaterialCracks(
                             ctx, entity, rr, buildPath,
                             ROCK_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.rock,
+                        );
+                    } else if (entity.shardVariant === 'metal-shard') {
+                        // Single (non-composite) metal-shard — the metal
+                        // hairline-split style.  Tiny shards rarely cross a
+                        // threshold (low HP) and the LOD path skips the
+                        // smallest entirely; the chunkier / denser ones show
+                        // a split or two.  The grown rigid composite cracks
+                        // in its own branch above.
+                        const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+                        this.overlayMaterialCracks(
+                            ctx, entity, rr, buildPath,
+                            METAL_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.metal,
                         );
                     }
                 }
