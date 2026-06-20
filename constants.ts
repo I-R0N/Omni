@@ -1564,6 +1564,26 @@ export function rockBreakChance(hitsTaken: number, ceiling: number): number {
   return Math.pow(frac, ROCK_BREAK.CURVE);
 }
 
+// ── Rock chipping (conservation of mass) ───────────────────────────────────
+// The base material layer.  Every NON-killing hit on a rock entity (tile or
+// asteroid) cracks (the seeded overlay) and CHIPS one piece off the parent:
+//  - usually pulverised dust — a tinted nebula-shard,
+//  - sometimes (ROCK_FRACTION) a solid rock-shard chunk.
+// Mobile asteroids shrink by the chip's footprint so the rock's mass is
+// ~conserved across its life (static tiles can't move off their hex, so they
+// conserve via the in-place dent); the killing hit breaks the remainder into
+// multiple pieces via the shatter path.  See GameEngine.releaseRockChip.
+export const ROCK_CHIP = {
+  ROCK_FRACTION:    0.25, // P(solid rock-shard chip) per non-killing hit; else dust
+  ROCK_SIZE_FRAC:   0.45, // solid chip diameter ÷ parent effective diameter
+  NEBULA_SIZE_FRAC: 0.5,  // dust-puff diameter ÷ parent effective diameter
+  // Dust is mostly pulverised vapour, so it removes only this fraction of its
+  // footprint from a mobile parent — a shard whittled by dust alone still
+  // slims down, but far slower than one losing solid chunks.
+  NEBULA_MASS_FRAC: 0.25,
+  MIN_SHARD_DIAM:   12,   // never shrink a mobile rock-shard below this diameter
+} as const;
+
 // ── Material damage cracks ─────────────────────────────────────────────────
 // Drives the seeded fracture overlay (RenderSystem.drawDamageCracks) for the
 // rocky / metal destructibles.  Rock now caps at 4-6 hits (ROCK_BREAK), so it

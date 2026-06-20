@@ -18,8 +18,9 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, ROCK_CHIP } from '../constants';
 import { ASSETS } from '../assets';
+import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import type { FlowSampler } from './systems/FlowFieldGrid';
@@ -3087,7 +3088,12 @@ export class GameEngine {
       // enemies) auto-appear without re-touching this gate.
       const isDent = target?.shardVariant !== undefined
           && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
-      if (target && target.health > 0 && !isDent) {
+      // Rock (tiles + asteroids) reads its damage through the crack overlay
+      // and the chip it sheds each hit, not a number — and it takes 1 HP/hit
+      // regardless of weapon, so the raw "4" would mislead.  Suppress like
+      // dent tiles.  (rock-tile is already a dent entity; name the shard.)
+      const suppressNumber = isDent || target?.shardVariant === 'rock-shard';
+      if (target && target.health > 0 && !suppressNumber) {
           const vx = (Math.random() - 0.5) * 10;
           const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
           const popup = this._damageTextPool.pop() ?? ({
@@ -3189,8 +3195,81 @@ export class GameEngine {
                   }
               }
           }
+          // Rock base layer — conservation-of-mass chipping.  Independent of
+          // the dent block above (rock-shards have no dent policy): every
+          // non-killing hit on a rock tile or asteroid chips one piece off
+          // (mostly dust, sometimes a solid chunk) and slims a mobile
+          // asteroid down so its mass is ~conserved over its life.
+          if (impactWorldPos
+              && (target.shardVariant === 'rock-tile' || target.shardVariant === 'rock-shard')) {
+              this.releaseRockChip(target, impactWorldPos);
+          }
       }
   };
+
+  /**
+   * Rock base layer — conservation-of-mass per-hit chipping.  Called for
+   * every NON-killing hit on a rock entity (tile or asteroid).  The rock
+   * cracks (the seeded overlay) and chips one piece off:
+   *  - usually pulverised dust — a tinted nebula-shard,
+   *  - sometimes (ROCK_CHIP.ROCK_FRACTION) a solid rock-shard chunk.
+   * A mobile asteroid then SHRINKS by the chip's footprint (size + mass) so
+   * the rock is ~conserved across its life; a static tile can't move off its
+   * hex, so it conserves via the in-place dent (applyDentStep).  The killing
+   * hit breaks the remainder into multiple pieces via the shatter path.
+   */
+  private releaseRockChip(parent: GameEntity, impactPos: Vector2): void {
+      if (!this.currentMap) return;
+      const entities = this.currentMap.entities;
+      const diam = this.deformedDiameter(parent);
+      const solid = Math.random() < ROCK_CHIP.ROCK_FRACTION;
+      let chipDiam: number;
+      if (solid) {
+          // Solid rock-shard chunk flung from the impact point (sized +
+          // launched by spawnPerHitShard; it inherits the rock break model).
+          chipDiam = diam * ROCK_CHIP.ROCK_SIZE_FRAC;
+          this.drops.spawnPerHitShard(
+              entities, parent,
+              { variant: 'rock-shard', sizeFraction: ROCK_CHIP.ROCK_SIZE_FRAC },
+              impactPos,
+          );
+      } else {
+          // Pulverised dust — a tinted nebula puff drifting off the impact.
+          chipDiam = diam * ROCK_CHIP.NEBULA_SIZE_FRAC;
+          const jitter = diam * 0.15;
+          const puffPos = {
+              x: impactPos.x + (Math.random() - 0.5) * jitter,
+              y: impactPos.y + (Math.random() - 0.5) * jitter,
+          };
+          const comp = randomRockNebulaComposition();
+          this.drops.spawnColoredNebulaShard(
+              entities, puffPos, diam, comp[0].hex,
+              ROCK_CHIP.NEBULA_SIZE_FRAC, parent.lastImpactVelocity, comp,
+              0.45 + Math.random() * 0.2,
+          );
+      }
+      // Conservation: slim a mobile asteroid by the chip's footprint (dust
+      // counts for less — it's mostly vapour).  Static tiles (mass ∞) stay
+      // pinned and conserve through the dent instead.
+      if (parent.mass !== Infinity && parent.shardVariant === 'rock-shard') {
+          const chipArea = solid
+              ? chipDiam * chipDiam
+              : chipDiam * chipDiam * ROCK_CHIP.NEBULA_MASS_FRAC;
+          const parentArea = diam * diam;
+          const ratio = Math.sqrt(Math.max(0, 1 - chipArea / parentArea));
+          const newDiam = Math.max(ROCK_CHIP.MIN_SHARD_DIAM, diam * ratio);
+          const applied = diam > 0 ? newDiam / diam : 1;
+          if (applied < 0.999) {
+              parent.size.x *= applied;
+              parent.size.y *= applied;
+              if (parent.polygonPoints) {
+                  for (const p of parent.polygonPoints) { p.x *= applied; p.y *= applied; }
+              }
+              parent.mass *= applied * applied;
+              invalidateCollisionR(parent);
+          }
+      }
+  }
 
   /**
    * Triangle-delete dent step.  Finds the polygon vertex closest to
