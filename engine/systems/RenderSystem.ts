@@ -81,6 +81,15 @@ function sinkCh(v: number, f: number): number {
     return Math.max(0, Math.min(255, Math.round(v * (1 - f))));
 }
 
+// Deterministic [0,1) hash of a single scalar — the classic sin-fract trick.
+// Used by the enemy damage-state overlay to lay down a STABLE crack pattern
+// (seeded per-entity) that only grows as HP drops, instead of flickering
+// fresh randomness each frame.  No allocation, no per-entity state.
+function hash01(n: number): number {
+    const s = Math.sin(n) * 43758.5453;
+    return s - Math.floor(s);
+}
+
 // Engine-flame palette — a FIXED hot ion/plasma colour so the thrust plume
 // reads as exhaust regardless of the enemy's body colour (it used to inherit
 // the body colour and wash out).  White-hot core, cool-blue wash.
@@ -3793,6 +3802,59 @@ export class RenderSystem {
           ctx.fill();
           ctx.globalAlpha = 1;
       }
+
+      // ── Damage state: a multi-HP enemy that's lost health looks wounded —
+      // a scorch darken over the body fill plus a stable set of crack strokes
+      // that grows by one per HP lost.  Render-only, off health/maxHealth;
+      // 1-HP types (Drone/Skirmisher) never qualify.  The crack pattern is
+      // seeded from the entity's stable glowPhase so it holds still (only new
+      // cracks appear as more hits land) instead of flickering per frame.
+      const maxHp = entity.maxHealth ?? 0;
+      const hp = entity.health ?? maxHp;
+      if (maxHp > 1 && hp < maxHp) {
+          const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
+          const hits = Math.min(6, Math.round(maxHp - hp));
+          const seed = (phase * 1000) + 1;
+          // Clip everything to the body silhouette so scorch + cracks stay
+          // inside the hull.  (save/restore doesn't touch the current path,
+          // so the outline stroke below still reuses the body path.)
+          ctx.save();
+          this.buildEnemyPath(ctx, shape, r);
+          ctx.clip();
+          // Scorch — a charred darken that deepens with damage.
+          ctx.fillStyle = `rgba(14,8,5,${0.15 + 0.4 * dmgFrac})`;
+          ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+          // Cracks — one jagged dark fissure per HP lost, each stable.
+          ctx.lineCap = 'round';
+          for (let i = 0; i < hits; i++) {
+              const a = hash01(seed + i * 1.7) * Math.PI * 2;
+              const ca = Math.cos(a), sa = Math.sin(a);
+              const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
+              // Perpendicular kink at the midpoint for a jagged, non-straight crack.
+              const perp = (hash01(seed + i * 5.1) - 0.5) * r * 0.5;
+              const x0 = ca * r * 0.1,    y0 = sa * r * 0.1;
+              const xm = ca * len * 0.55 - sa * perp, ym = sa * len * 0.55 + ca * perp;
+              const x1 = ca * len,        y1 = sa * len;
+              ctx.beginPath();
+              ctx.moveTo(x0, y0);
+              ctx.lineTo(xm, ym);
+              ctx.lineTo(x1, y1);
+              ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+              ctx.lineWidth = 1.6;
+              ctx.stroke();
+              // Thin hot-edge highlight on the worst damage so deep cracks glint.
+              if (dmgFrac > 0.5) {
+                  ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+                  ctx.lineWidth = 0.7;
+                  ctx.stroke();
+              }
+          }
+          ctx.restore();
+          // The crack loop's beginPath() clobbered the body path; rebuild it
+          // so the outline stroke below still traces the silhouette.
+          this.buildEnemyPath(ctx, shape, r);
+      }
+
       // Dark outline.
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
