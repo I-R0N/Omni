@@ -3346,27 +3346,22 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       scatterHalfCone: 0,
     },
     dent: {
-      // 3 adjacent vertices pulled per hit.  vertexJitter is the
-      // base per-vertex max pull (0.20 = up to 20 % inward).  Two
-      // of the three (the closest-to-impact vertex plus one
-      // randomly-chosen neighbour, via deepVertexCount = 2) draw
-      // jitter × centerVertexJitterMul = 0.20 × 10.0 = up to 2.0
-      // nominal jitter — capped by applyDentStep's K_MIN floor so
-      // an "infinitely deep" roll bottoms out at 5 % of the vertex's
-      // current radius.  Every hit produces two deep notches plus
-      // one softer side warp, reading as a chaotic brittle fracture
-      // (cracks branch unevenly rather than dimpling at a single
-      // point).
-      vertexJitter: 0.20,
-      centerVertexJitterMul: 10.0,
-      pullVertexCount: 3,
-      deepVertexCount: 2,
-      // Each hit also chips off a rock-shard at the impact location.
-      // sizeFraction 0.7 is linear relative to the deformed tile
-      // diameter (~44 at start), so the chip is ~31 wide on hit 1 —
-      // a chunky fragment that reads as a substantial chip flying
-      // off, not a sliver.
-      perHitShard: { variant: 'rock-shard', sizeFraction: 0.7 },
+      // GENTLE dent now that the seeded crack overlay carries the per-hit
+      // damage read (see MATERIAL_DAMAGE_CRACKS / ROCK_BREAK).  The old
+      // settings (jitter 0.20 × mul 10, two vertices pulled to the 5 %
+      // K_MIN floor, plus a chunky per-hit chip) caved the hex in and
+      // flung a ~30 px shard off on the FIRST hit — so a 4-HP tile *looked*
+      // destroyed after one shot.  Now one vertex takes a shallow pull and
+      // the silhouette only erodes slightly across its 4-hit life; the
+      // cracks do the talking, and the tile shatters via breakShards on the
+      // killing hit.
+      vertexJitter: 0.06,
+      centerVertexJitterMul: 2.0,
+      pullVertexCount: 2,
+      deepVertexCount: 1,
+      // No per-hit chip — the crack overlay is the per-hit feedback now, and
+      // a chunk flying off every shot read as the tile breaking.  Freed
+      // material is delivered on the killing hit via breakShards.
       // Final break: 3 rock-shards at sizeFraction 0.75 each (linear
       // fraction of deformed diameter).  Sum of squares = 1.69 so
       // the freed material exceeds the deformed area — visually
@@ -3436,7 +3431,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       countMin: 2, countMax: 3,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
+      // forwardDrag lowered 0.35 → 0.12: shards inherit far less of the
+      // impactor's speed so an asteroid breaks into a gentle outward spread
+      // rather than rocketing the pieces away (a blaster shot at speed 16
+      // used to fling shards at ~6.6; now ~2).  The scatter is also hard-
+      // capped in shatterAsteroidStyle so a fast weapon can't blow it up.
+      forwardDrag: 0.12, perpScatter: 0.0,
       scatterHalfCone: Math.PI * 0.55,
     },
     onShatterParticles: { color: '#94a3b8', count: 5 },

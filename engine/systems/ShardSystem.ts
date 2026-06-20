@@ -102,6 +102,11 @@ interface RegenEntry {
   variantId: ShardVariantId;
 }
 
+// Hard cap on a shatter fragment's outward scatter speed (units/substep).
+// Keeps an asteroid break a gentle outward spread even when struck by a
+// fast projectile — pieces pop apart and drift rather than launching.
+const SHATTER_SCATTER_SPEED_CAP = 2.5;
+
 // Tile-equivalent diameter — the size at which a glass-shard is
 // considered "tile-sized" and triggers the tier-transition roll
 // (glass-tile vs. smaller rock-shard).  Matches the diameter of a
@@ -902,7 +907,11 @@ export class ShardSystem {
       let scatterSpeed: number;
       if (impactAngle !== null) {
         scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-        scatterSpeed = impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2;
+        // Cap the impactor-speed contribution so a fast weapon (Sniper /
+        // Lightning at speed 30) can't fling the fragments — pieces should
+        // pop apart and drift, not launch.  forwardDrag already damps it.
+        scatterSpeed = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
       } else {
         scatterAngle = Math.random() * Math.PI * 2;
         scatterSpeed = 1 + Math.random() * 2;
