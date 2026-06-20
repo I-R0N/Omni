@@ -199,6 +199,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true,
+    // Map menus — controlled (not native <details>) so the dropdown state
+    // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
+    // is the Material Field Maps group (menu + pause); 'switchmap' is the
+    // outer pause-only Switch Map / Test wrapper.
+    fieldmaps: true, switchmap: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -259,10 +264,15 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     <>
       {renderMapGroup('Maps', REAL_MAPS)}
       {renderEnemyTestGroup()}
-      <details className="text-center">
-        <summary className="cursor-pointer text-slate-500 text-[10px] uppercase tracking-widest list-none select-none hover:text-slate-300">Material Field Maps ▾</summary>
-        <div className="mt-3">{renderMapGroup('', TEST_MAPS)}</div>
-      </details>
+      <div className="text-center">
+        <button
+          onClick={() => toggleSection('fieldmaps')}
+          className="pointer-events-auto cursor-pointer text-slate-500 text-[10px] uppercase tracking-widest select-none hover:text-slate-300"
+        >
+          Material Field Maps {collapsed.fieldmaps ? '▸' : '▾'}
+        </button>
+        {!collapsed.fieldmaps && <div className="mt-3">{renderMapGroup('', TEST_MAPS)}</div>}
+      </div>
     </>
   );
   // Human label for the cycling blend-alpha buttons.  Mirrors the
@@ -805,7 +815,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50">
+        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto py-8">
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
             OMNIVERSE
           </h1>
@@ -950,13 +960,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             )}
 
-            {/* Live switcher — maps + enemy-test override (collapsed) */}
-            <details className="text-center">
-              <summary className="cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest list-none select-none hover:text-slate-200">Switch Map / Test ▾</summary>
-              <div className="mt-4 flex flex-col items-center gap-4">
-                {renderTestPanel()}
-              </div>
-            </details>
+            {/* Live switcher — maps + enemy-test override (controlled
+                collapse so it survives the 60 Hz overlay re-render) */}
+            <div className="text-center">
+              <button
+                onClick={() => toggleSection('switchmap')}
+                className="pointer-events-auto cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest select-none hover:text-slate-200"
+              >
+                Switch Map / Test {collapsed.switchmap ? '▸' : '▾'}
+              </button>
+              {!collapsed.switchmap && (
+                <div className="mt-4 flex flex-col items-center gap-4">
+                  {renderTestPanel()}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         );
