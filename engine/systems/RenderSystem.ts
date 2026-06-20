@@ -90,6 +90,42 @@ function hash01(n: number): number {
     return s - Math.floor(s);
 }
 
+// Per-(enemy colour) cache of the FIXED-factor derived colour strings used
+// across drawEnemyShape's body / orb / shape-detail layers.  Enemy colours
+// come from a fixed ~6-entry archetype palette, so this Map warms instantly
+// and eliminates the ~7-11 rgba/rgb template-string allocations that the
+// enemy render path otherwise did per entity PER FRAME (a steady GC source,
+// felt as occasional frame dips in busy / death-heavy moments).  Strings
+// whose alpha varies per frame (flame flicker, core pulse, telegraph charge,
+// hit-flash) are NOT cached here — they stay inline.
+interface EnemyPalette {
+    bodyLift: string;   // body gradient nose stop  — rgb(lift .45)
+    bodySink: string;   // body gradient tail stop  — rgb(sink .45)
+    orbRing: string;    // Drone inset ring          — rgba(sink .45, .9)
+    pip: string;        // forward sensor pip        — rgba(lift .55, .95)
+    detailDk5: string;  // Tank seam/rivets          — rgba(sink .5, .85)
+    detailLt5: string;  // Tank prow / Orbiter pip   — rgba(lift .5, .9)
+    detailDk4: string;  // diamond/pentagon rings    — rgba(sink .4, .85)
+}
+const _enemyPalCache = new Map<string, EnemyPalette>();
+function enemyPalette(col: string): EnemyPalette {
+    let p = _enemyPalCache.get(col);
+    if (!p) {
+        const [r, g, b] = hexToRgb(col);
+        p = {
+            bodyLift: `rgb(${liftCh(r,0.45)},${liftCh(g,0.45)},${liftCh(b,0.45)})`,
+            bodySink: `rgb(${sinkCh(r,0.45)},${sinkCh(g,0.45)},${sinkCh(b,0.45)})`,
+            orbRing: `rgba(${sinkCh(r,0.45)},${sinkCh(g,0.45)},${sinkCh(b,0.45)},0.9)`,
+            pip: `rgba(${liftCh(r,0.55)},${liftCh(g,0.55)},${liftCh(b,0.55)},0.95)`,
+            detailDk5: `rgba(${sinkCh(r,0.5)},${sinkCh(g,0.5)},${sinkCh(b,0.5)},0.85)`,
+            detailLt5: `rgba(${liftCh(r,0.5)},${liftCh(g,0.5)},${liftCh(b,0.5)},0.9)`,
+            detailDk4: `rgba(${sinkCh(r,0.4)},${sinkCh(g,0.4)},${sinkCh(b,0.4)},0.85)`,
+        };
+        _enemyPalCache.set(col, p);
+    }
+    return p;
+}
+
 // Engine-flame palette — a FIXED hot ion/plasma colour so the thrust plume
 // reads as exhaust regardless of the enemy's body colour (it used to inherit
 // the body colour and wash out).  White-hot core, cool-blue wash.
@@ -1846,12 +1882,20 @@ export class RenderSystem {
   ) {
       if (entries.length === 0) return;
       ctx.globalCompositeOperation = 'lighter';
+      // Run-length state tracking: a death burst is dozens of same-colour
+      // discs with near-identical alpha, so skipping redundant fillStyle
+      // (re-parsed each assignment) and globalAlpha writes cuts the canvas
+      // state churn.  Invalidated (set to sentinels) around the special
+      // branches below, which mutate ctx state themselves.
+      let lastColor = '';
+      let lastAlphaQ = -1;
       for (let i = 0; i < entries.length; i++) {
           const { entity: p, rx, ry } = entries[i];
 
           // Lightning arc particles use a dedicated renderer
           if (p.isLightningArc) {
               this.renderLightningArc(ctx, p, camera);
+              lastColor = ''; lastAlphaQ = -1;
               continue;
           }
 
@@ -1885,12 +1929,16 @@ export class RenderSystem {
                   ctx.arc(rx, ry, Math.max(0, radius - 3), 0, Math.PI * 2);
                   ctx.stroke();
               }
+              lastColor = ''; lastAlphaQ = -1;
               continue;
           }
 
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
-          ctx.globalAlpha = lifeRatio;
-          ctx.fillStyle = p.color;
+          // Quantise alpha to 1/64 (imperceptible) so a run of same-fade
+          // particles reuses one globalAlpha write.
+          const aq = (lifeRatio * 64) | 0;
+          if (aq !== lastAlphaQ) { ctx.globalAlpha = aq / 64; lastAlphaQ = aq; }
+          if (p.color !== lastColor) { ctx.fillStyle = p.color; lastColor = p.color; }
           ctx.beginPath();
           ctx.arc(rx, ry, p.size.x, 0, Math.PI * 2);
           ctx.fill();
@@ -3685,6 +3733,7 @@ export class RenderSystem {
       const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
       const col = entity.color || '#f87171';
       const [cr, cg, cb] = hexToRgb(col);
+      const pal = enemyPalette(col);
 
       // Stable per-entity phase (id-derived) desyncs the core pulse + flame
       // flicker so a pack doesn't throb in unison.  Render-only cache.
@@ -3787,12 +3836,22 @@ export class RenderSystem {
       }
 
       // ── Body: a head-lit radial gradient gives the flat polygon volume
-      // (bright toward the nose, darker at the tail/rim).
+      // (bright toward the nose, darker at the tail/rim).  The gradient
+      // object is cached on the entity and reused across frames (gradients
+      // are applied in the current local transform at paint time, so the
+      // origin-centred geometry stays correct as the entity moves); it's
+      // only rebuilt when the radius (hit-flash punch) or colour changes.
       this.buildEnemyPath(ctx, shape, r);
-      const bodyGrad = ctx.createRadialGradient(r * 0.2, -r * 0.15, r * 0.1, 0, 0, r * 1.15);
-      bodyGrad.addColorStop(0, `rgb(${liftCh(cr,0.45)},${liftCh(cg,0.45)},${liftCh(cb,0.45)})`);
-      bodyGrad.addColorStop(0.55, col);
-      bodyGrad.addColorStop(1, `rgb(${sinkCh(cr,0.45)},${sinkCh(cg,0.45)},${sinkCh(cb,0.45)})`);
+      let bodyGrad = entity.enemyBodyGrad;
+      if (bodyGrad === undefined || entity.enemyBodyGradR !== r || entity.enemyBodyGradCol !== col) {
+          bodyGrad = ctx.createRadialGradient(r * 0.2, -r * 0.15, r * 0.1, 0, 0, r * 1.15);
+          bodyGrad.addColorStop(0, pal.bodyLift);
+          bodyGrad.addColorStop(0.55, col);
+          bodyGrad.addColorStop(1, pal.bodySink);
+          entity.enemyBodyGrad = bodyGrad;
+          entity.enemyBodyGradR = r;
+          entity.enemyBodyGradCol = col;
+      }
       ctx.fillStyle = bodyGrad;
       ctx.fill();
       // Whiten on hit flash (re-fill the same path).
@@ -3866,7 +3925,7 @@ export class RenderSystem {
       // faction language: solid, angular, aggressive.  Hexagon vertex 0 is
       // the nose (+x), so the prow sits on the leading point.
       if (isTank) {
-          const dk = `rgba(${sinkCh(cr,0.5)},${sinkCh(cg,0.5)},${sinkCh(cb,0.5)},0.85)`;
+          const dk = pal.detailDk5;
           ctx.beginPath();
           for (let i = 0; i < 6; i++) {
               const a = (i / 6) * Math.PI * 2;
@@ -3886,7 +3945,7 @@ export class RenderSystem {
           ctx.lineTo(r * 0.5, r * 0.22);
           ctx.lineTo(r * 0.5, -r * 0.22);
           ctx.closePath();
-          ctx.fillStyle = `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},0.9)`;
+          ctx.fillStyle = pal.detailLt5;
           ctx.fill();
       }
       if (isTank) ctx.restore();
@@ -3897,13 +3956,13 @@ export class RenderSystem {
       if (shape === 'circle') {
           ctx.beginPath();
           ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${sinkCh(cr,0.45)},${sinkCh(cg,0.45)},${sinkCh(cb,0.45)},0.9)`;
+          ctx.strokeStyle = pal.orbRing;
           ctx.lineWidth = 1.5;
           ctx.stroke();
           // Forward sensor pip near the nose (+x).
           ctx.beginPath();
           ctx.arc(r * 0.66, 0, r * 0.13, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${liftCh(cr,0.55)},${liftCh(cg,0.55)},${liftCh(cb,0.55)},0.95)`;
+          ctx.fillStyle = pal.pip;
           ctx.fill();
       }
 
@@ -3911,7 +3970,7 @@ export class RenderSystem {
       // an inset panel diamond, a thin targeting spine, and a forward sensor
       // pip.  Cool (kiter) faction language: ringed, instrument-like.
       if (shape === 'diamond') {
-          const dk = `rgba(${sinkCh(cr,0.4)},${sinkCh(cg,0.4)},${sinkCh(cb,0.4)},0.85)`;
+          const dk = pal.detailDk4;
           ctx.beginPath();
           ctx.moveTo(r * 0.5, 0); ctx.lineTo(0, r * 0.45);
           ctx.lineTo(-r * 0.5, 0); ctx.lineTo(0, -r * 0.45);
@@ -3922,7 +3981,7 @@ export class RenderSystem {
           ctx.lineWidth = 1; ctx.stroke();
           ctx.beginPath();
           ctx.arc(r * 0.72, 0, r * 0.12, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${liftCh(cr,0.55)},${liftCh(cg,0.55)},${liftCh(cb,0.55)},0.95)`;
+          ctx.fillStyle = pal.pip;
           ctx.fill();
       }
 
@@ -3930,7 +3989,7 @@ export class RenderSystem {
       // ring and a forward nozzle aperture it spits from.  Cool (kiter) faction
       // language.  Pentagon vertex 0 is the nose (+x).
       if (shape === 'pentagon') {
-          const dk = `rgba(${sinkCh(cr,0.4)},${sinkCh(cg,0.4)},${sinkCh(cb,0.4)},0.85)`;
+          const dk = pal.detailDk4;
           ctx.beginPath();
           for (let i = 0; i < 5; i++) {
               const a = (i / 5) * Math.PI * 2;
@@ -3945,7 +4004,7 @@ export class RenderSystem {
           ctx.lineWidth = 1.4; ctx.stroke();
           ctx.beginPath();
           ctx.arc(r * 0.7, 0, r * 0.06, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},0.9)`;
+          ctx.fillStyle = pal.detailLt5;
           ctx.fill();
       }
 
