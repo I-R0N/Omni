@@ -2103,6 +2103,7 @@ export class GameEngine {
                       entity.lastImpactVelocity ?? entity.velocity,
                       comp,
                       0.5,
+                      true, // fromRock — condenses back to rock-shard
                   );
               }
           }
@@ -2133,6 +2134,7 @@ export class GameEngine {
                       entity.lastImpactVelocity,
                       comp,
                       0.5,
+                      true, // fromRock — condenses back to rock-shard
                   );
               }
           }
@@ -3222,7 +3224,10 @@ export class GameEngine {
       if (!this.currentMap) return;
       const entities = this.currentMap.entities;
       const diam = this.deformedDiameter(parent);
-      const solid = Math.random() < ROCK_CHIP.ROCK_FRACTION;
+      // Solid chunks only come off reasonably-sized rock — a tiny shard would
+      // shed a useless sliver, so it puffs dust until it breaks.
+      const solid = diam >= ROCK_CHIP.SOLID_MIN_PARENT_DIAM
+          && Math.random() < ROCK_CHIP.ROCK_FRACTION;
       let chipDiam: number;
       if (solid) {
           // Solid rock-shard chunk flung from the impact point (sized +
@@ -3245,7 +3250,7 @@ export class GameEngine {
           this.drops.spawnColoredNebulaShard(
               entities, puffPos, diam, comp[0].hex,
               ROCK_CHIP.NEBULA_SIZE_FRAC, parent.lastImpactVelocity, comp,
-              0.45 + Math.random() * 0.2,
+              0.45 + Math.random() * 0.2, true, // fromRock — condenses back to rock-shard
           );
       }
       // Conservation: slim a mobile asteroid by the chip's footprint (dust

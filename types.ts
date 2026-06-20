@@ -461,6 +461,12 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // Set on nebula-shards that formed from ROCK material (per-hit chip dust
+  // and rock death bursts).  Propagated through nebula-shard self-merges and
+  // read at condensation time so rock-derived dust condenses into a small
+  // rock-shard instead of the default glass-shard / nebula-tile outcome.
+  fromRock?: boolean;
+
   // Number of base shards that have composed into this entity.
   // Tile-break / shatter spawns start implicitly at 1 (undefined ===
   // 1); composeEntities sums the two parents' counts on every merge

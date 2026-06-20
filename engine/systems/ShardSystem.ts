@@ -3250,7 +3250,9 @@ export class ShardSystem {
     // Adapter hook routes the 50/50 outcome.  Position is the
     // pair's midpoint; velocity is the mass-weighted average so a
     // resulting glass-shard inherits the cloud's drift.
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics);
+    // Rock-derived dust (either source) condenses back to a rock-shard.
+    const fromRock = !!(a.fromRock || b.fromRock);
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock);
   }
 }
 

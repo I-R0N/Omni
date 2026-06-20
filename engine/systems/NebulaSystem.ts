@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, rockHitCeiling } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -622,15 +622,19 @@ export class NebulaSystem {
      * already fading by the time we get here (ShardSystem armed
      * their mergeFadeTimers in composeNebulaShards).
      */
-    private spawnGlassShardAt(
+    private spawnCondensedShardAt(
         entities: GameEntity[],
         position: Vector2,
         velocity: Vector2,
-        _color: string,
+        variantId: 'glass-shard' | 'rock-shard',
     ): void {
-        const variant = SHARD_VARIANTS['glass-shard'];
+        const variant = SHARD_VARIANTS[variantId];
         const spawn = variant.spawn;
-        const targetSize = Math.sqrt(HEX_AREA);
+        // Rock-derived dust condenses into a SMALL rock-shard; glass keeps the
+        // tile-equivalent size it always had.
+        const targetSize = variantId === 'rock-shard'
+            ? Math.sqrt(HEX_AREA) * 0.6
+            : Math.sqrt(HEX_AREA);
 
         const baseR = (targetSize / 2) * 0.8;
         const verts = spawn.polyVerticesOptions
@@ -649,11 +653,15 @@ export class NebulaSystem {
             y: Math.sin(p.angle) * p.r,
         }));
 
-        const hp = targetSize > 30 ? 2 : 1;
+        // Rock-shards follow the probabilistic break model (size hit ceiling);
+        // glass keeps its brittle 1-2 HP.
+        const hp = variantId === 'rock-shard'
+            ? rockHitCeiling(targetSize)
+            : (targetSize > 30 ? 2 : 1);
         entities.push({
             id:            nextId('shard'),
             type:          EntityType.STRUCTURE,
-            shardVariant:  'glass-shard',
+            shardVariant:  variantId,
             position:     { x: position.x, y: position.y },
             velocity:     { x: velocity.x, y: velocity.y },
             size:         { x: targetSize, y: targetSize },
@@ -801,8 +809,16 @@ export class NebulaSystem {
         velocity: Vector2,
         entities: GameEntity[],
         physics: PhysicsSystem,
+        fromRock: boolean,
     ): void {
         const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
+        // Rock-derived dust condenses back into a small rock-shard rather than
+        // the default glass/nebula-tile outcome — the dust came off rock, so
+        // it returns to rock as it re-aggregates.
+        if (fromRock) {
+            this.spawnCondensedShardAt(entities, position, velocity, 'rock-shard');
+            return;
+        }
         if (Math.random() < 0.5) {
             // Tile path may fail if every candidate hex is occupied;
             // in that case the pair-transmute resolves to nothing
@@ -811,7 +827,7 @@ export class NebulaSystem {
             // path when its tile attempt failed.
             this.transmuteToTileAt(entities, position, composition, blendHex, physics);
         } else {
-            this.spawnGlassShardAt(entities, position, velocity, blendHex);
+            this.spawnCondensedShardAt(entities, position, velocity, 'glass-shard');
         }
     }
 

@@ -1574,7 +1574,7 @@ export function rockBreakChance(hitsTaken: number, ceiling: number): number {
 // conserve via the in-place dent); the killing hit breaks the remainder into
 // multiple pieces via the shatter path.  See GameEngine.releaseRockChip.
 export const ROCK_CHIP = {
-  ROCK_FRACTION:    0.25, // P(solid rock-shard chip) per non-killing hit; else dust
+  ROCK_FRACTION:    0.5,  // P(solid rock-shard chip) per non-killing hit; else dust
   ROCK_SIZE_FRAC:   0.45, // solid chip diameter ÷ parent effective diameter
   NEBULA_SIZE_FRAC: 0.5,  // dust-puff diameter ÷ parent effective diameter
   // Dust is mostly pulverised vapour, so it removes only this fraction of its
@@ -1582,6 +1582,9 @@ export const ROCK_CHIP = {
   // slims down, but far slower than one losing solid chunks.
   NEBULA_MASS_FRAC: 0.25,
   MIN_SHARD_DIAM:   12,   // never shrink a mobile rock-shard below this diameter
+  // Below this parent diameter a hit can't shed a SOLID chunk (it would be a
+  // useless sliver) — tiny shards only puff dust until they break.
+  SOLID_MIN_PARENT_DIAM: 30,
 } as const;
 
 // ── Material damage cracks ─────────────────────────────────────────────────

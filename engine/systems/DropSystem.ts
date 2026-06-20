@@ -956,6 +956,7 @@ export class DropSystem {
     inheritVelocity?: Vector2,
     composition?: NebulaColorStop[],
     alphaMul?: number,
+    fromRock: boolean = false,
   ) {
     const variantDef = SHARD_VARIANTS['nebula-shard'];
     const targetSize = Math.max(4, baseSize * sizeFraction);
@@ -1002,6 +1003,9 @@ export class DropSystem {
       id:                  nextId('colored_nebula_shard'),
       type:                EntityType.STRUCTURE,
       shardVariant:        'nebula-shard',
+      // Rock-derived dust condenses back to a rock-shard, not glass (see
+      // NebulaSystem.onComposeNebulaShardPair).
+      fromRock:            fromRock || undefined,
       position:            { x: spawnWorldPos.x, y: spawnWorldPos.y },
       velocity:            {
         x: Math.cos(launchAngle) * launchSpeed,
