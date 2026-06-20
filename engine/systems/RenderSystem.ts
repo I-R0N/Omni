@@ -3703,8 +3703,8 @@ export class RenderSystem {
       // translate without restore — each entity rewrites the transform via
       // setTransform, so this never leaks to the next draw.
       if (shape === 'circle') {
-          const bx = (Math.sin(nowSec * 23 + phase) + Math.sin(nowSec * 37 + phase * 1.7)) * 1.6;
-          const by = (Math.cos(nowSec * 19 + phase * 1.3) + Math.sin(nowSec * 41 + phase)) * 1.6;
+          const bx = (Math.sin(nowSec * 13 + phase) + Math.sin(nowSec * 21 + phase * 1.7)) * 0.8;
+          const by = (Math.cos(nowSec * 11 + phase * 1.3) + Math.sin(nowSec * 23 + phase)) * 0.8;
           ctx.translate(bx, by);
       }
 
