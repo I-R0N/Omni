@@ -17,3 +17,66 @@ drop-loop and tile-gradient fixes already landed.
 - Only recreate the gradient when the trail length or heading changes significantly.
 - Replace with a pre-computed alpha ramp applied to a solid-color polyline (saves gradient
   object creation at the cost of a slightly different look).
+
+---
+
+## Exotic Enemy Types + AI Taxonomy / Wave-Accounting Refactors
+
+**Context:** Wishlist of more "alien/foreign" enemies with richer behavior variety:
+aggro-on-hit-only soft-body bubbles (wander, eat shards, grow, multiply, stick to
+entities and disable weapon/shield only when provoked); a large snake/dragon roamer
+that appears/leaves via portal and consumes tiles/shards to grow; small swarm enemies
+released by a nest entity; static base-defender homing-missile turrets. Feasibility is
+good — the bottleneck is not render/physics but two structural gates plus a few
+reusable mechanics.
+
+**Already-built primitives to reuse:**
+- **Snitch** (`GameEngine.updateSnitch`/`spawnSnitch`): persistent, engine-managed
+  special entity riding the flow field with burst/coast AI, comet tail, and its own
+  appear/leave lifecycle — the template for any roamer (esp. the dragon).
+- **Status framework** (`StatusEffectKind`/`EffectPayload`/`StatusEffect`): already
+  generic; reserved "Disruptor"/EMP kind is the home for weapon/shield disable.
+- **Homing projectiles** (`homing`/`homingStrength`/`targetEntityId`): the turret's
+  missiles are a weapon config away.
+- **Shard merge/grow** (`composeEntities`, `mergeCount`, `densityTier`, TILE_SNAP):
+  model for the bubble/dragon eat→grow→multiply loop.
+- **Aggro hooks** (`aggroTimer`, aggro-on-nearby-death): partial precedent for
+  "provoked on hit."
+- **Tile-destroy → FlowFieldGrid incremental patch**: a dragon eating tiles plugs in.
+- **PACK_SYNC**: half of "swarm" flocking already exists.
+
+**Per-idea verdict (effort, low→high):**
+- *Static homing-missile turret* — easiest, near-buildable today. New work: a no-move
+  AI branch (skip movement, keep aim) + a homing weapon config.
+- *Swarm + nest spawner* — low risk. New work: static spawner entity; **wave-clear
+  accounting** for brood.
+- *Snake/dragon portal roamer* — medium-high; great mini-boss (roadmap wave-8 slot).
+  New work: segmented body + per-segment collision, portal FX. Reuses Snitch lifecycle.
+- *Aggro-on-hit soft-body bubble* — highest (multi-PR). New work: passive/reactive AI,
+  consume-grow, multiply (with hard cap), attach-to-target disable, soft-body render.
+
+**Two structural gates to clear FIRST (so each new enemy doesn't fight the architecture):**
+1. **AI taxonomy is rigid.** Today `ENEMY_ROLE` ∈ {RAMMING, SHOOTING} → exactly two
+   routines (`updateBasicDogfighter`, `updateSkirmisher`) with an idle/chase state
+   machine. Refactor toward a **behavior-dispatch table** (per-subtype
+   movement/targeting/special function map) before adding wildly different behaviors.
+2. **Wave completion accounting.** A wave ends when *budget spawned AND every spawned
+   enemy dead*. Self-replicating bubbles, nest brood, and portal roamers all break
+   "is the field clear?" Add an explicit rule — a `countsTowardWave` flag, or track
+   brood under a parent (kill nest → clear swarm). The Snitch sidesteps this by being a
+   non-enemy INTERACTABLE with its own lifecycle (good model for the dragon).
+
+**Three reusable mechanics to build once (not per-enemy):**
+1. **Provoked flag** stamped in the PhysicsSystem projectile-damage path (passive-until-hit).
+2. **Generalized consume-and-grow** ("A absorbs B → A grows, B deactivates"), as a
+   PerfController-gated neighbor pass with a hard entity cap (`enforceCap`-style) to
+   stop runaway multiplication.
+3. **Attach + disable** — `attachedToId` (snap to target each frame) + a `disable`
+   StatusEffectKind. Generalizes to grapples/EMP later.
+
+**Gotchas:** the world is a torus with no edges — "appears/leaves via portal" is a
+spawn/despawn-with-VFX event, not off-map traversal. All new neighbor scans must use
+`wrapDeltaX/Y` and register a `PERF_TASKS` entry (no private frame counters).
+
+**Suggested sequence:** turret → (AI behavior-dispatch refactor + wave-accounting flag)
+→ swarm+nest → provoked/disable mechanics → bubble → dragon mini-boss.
