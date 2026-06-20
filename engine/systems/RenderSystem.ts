@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -124,6 +124,96 @@ function enemyPalette(col: string): EnemyPalette {
         _enemyPalCache.set(col, p);
     }
     return p;
+}
+
+// Per-overlay tuning for the shared seeded crack pattern.  Enemies get a
+// charred near-black fracture with a hot glint; rocks a slate fracture
+// shadow; metal a brighter, thinner hairline split (both materials darker /
+// quieter than the enemy version so destructibles read as "cracked" not
+// "scorched").  Module-level constants → passed by reference, zero per-call
+// allocation in the draw loop.
+interface CrackStyle {
+    scorchRgb: string;   // "r,g,b" of the charred darken fill
+    scorchBase: number;  // base scorch alpha (at first damage)
+    scorchGain: number;  // extra scorch alpha × dmgFrac
+    crackColor: string;  // stroke colour for each fissure
+    crackWidth: number;  // stroke width
+    glint: boolean;      // thin hot-orange highlight past 50 % damage
+}
+const ENEMY_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '14,8,5', scorchBase: 0.15, scorchGain: 0.4,
+    crackColor: 'rgba(0,0,0,0.6)', crackWidth: 1.6, glint: true,
+};
+// Slate-900 fracture shadow — the rock fill shows through, reads as a
+// natural split rather than an opaque outline.  No hot glint (rock doesn't
+// glow).  Lighter scorch than enemies so the slate body stays readable.
+const ROCK_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '15,23,42', scorchBase: 0.10, scorchGain: 0.28,
+    crackColor: 'rgba(15,23,42,0.7)', crackWidth: 2.0, glint: false,
+};
+// Brighter, thinner hairline split for metal — a precise mechanical
+// fracture against the gray plate, with a faint cold-white inner glint on
+// the worst damage instead of the enemy's hot orange.
+const METAL_CRACK_STYLE: CrackStyle = {
+    scorchRgb: '8,11,18', scorchBase: 0.10, scorchGain: 0.30,
+    crackColor: 'rgba(2,6,12,0.55)', crackWidth: 1.1, glint: false,
+};
+
+// Stable [0,1000) per-entity seed for the crack overlay, lazily derived
+// from the entity id (same id-hash the enemy core-pulse uses for
+// glowPhase) and cached on a render-only field so the fracture pattern
+// holds still frame-to-frame.
+function crackSeedFor(entity: GameEntity): number {
+    if (entity.crackSeed !== undefined) return entity.crackSeed;
+    let h = 0; const id = entity.id;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+    entity.crackSeed = (h / 997) * 1000 + 1;
+    return entity.crackSeed;
+}
+
+// Lay down a STABLE, seeded set of fracture cracks (plus a charred scorch
+// darken) in the current entity-local transform.  The CALLER is responsible
+// for clipping to the silhouette (ctx.save → build path → ctx.clip) and for
+// restoring afterwards — keeping the clip with the caller avoids passing a
+// per-entity path-builder closure into the hot loop.  Deterministic per
+// `seed`; one crack is drawn per unit of `count`, so the fracture only
+// grows as HP drops instead of flickering fresh randomness each frame.
+function drawDamageCracks(
+    ctx: CanvasRenderingContext2D,
+    r: number,
+    seed: number,
+    count: number,
+    dmgFrac: number,
+    s: CrackStyle,
+): void {
+    // Scorch — a charred darken that deepens with damage.
+    ctx.fillStyle = `rgba(${s.scorchRgb},${s.scorchBase + s.scorchGain * dmgFrac})`;
+    ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+    // Cracks — one jagged fissure per unit of count, each stable.
+    ctx.lineCap = 'round';
+    for (let i = 0; i < count; i++) {
+        const a = hash01(seed + i * 1.7) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
+        // Perpendicular kink at the midpoint for a jagged, non-straight crack.
+        const perp = (hash01(seed + i * 5.1) - 0.5) * r * 0.5;
+        const x0 = ca * r * 0.1,    y0 = sa * r * 0.1;
+        const xm = ca * len * 0.55 - sa * perp, ym = sa * len * 0.55 + ca * perp;
+        const x1 = ca * len,        y1 = sa * len;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(xm, ym);
+        ctx.lineTo(x1, y1);
+        ctx.strokeStyle = s.crackColor;
+        ctx.lineWidth = s.crackWidth;
+        ctx.stroke();
+        // Thin hot-edge highlight on the worst damage so deep cracks glint.
+        if (s.glint && dmgFrac > 0.5) {
+            ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+        }
+    }
 }
 
 // Engine-flame palette — a FIXED hot ion/plasma colour so the thrust plume
@@ -881,6 +971,38 @@ export class RenderSystem {
           && e.mass === Infinity
           && (e.shardVariant === 'glass-tile'
               || e.shardVariant === 'indestructible-tile');
+  }
+
+  /**
+   * Overlay the seeded HP-driven damage cracks onto a rocky / metal
+   * destructible.  `buildPath` rebuilds the entity-local silhouette path
+   * (the existing per-entity closure from renderEntities, so no new
+   * allocation); the overlay clips to it so scorch + fissures stay inside
+   * the body.  Crack count comes from MATERIAL_DAMAGE_CRACKS — one crack
+   * per `cfg.freq` HP lost, capped at `cfg.cap`, off the LIVE maxHealth so
+   * density-scaled tiles crack proportionally.  No-op until the entity has
+   * lost enough HP to cross the first threshold.  Caller guarantees the
+   * ctx transform is entity-local (centre + rotation already applied).
+   */
+  private overlayMaterialCracks(
+      ctx: CanvasRenderingContext2D,
+      entity: GameEntity,
+      r: number,
+      buildPath: () => void,
+      style: CrackStyle,
+      cfg: { freq: number; cap: number },
+  ): void {
+      const maxHp = entity.maxHealth ?? 0;
+      const hp = entity.health ?? maxHp;
+      if (maxHp <= 1 || hp >= maxHp || r <= 0) return;
+      const count = Math.min(cfg.cap, Math.floor((maxHp - hp) / cfg.freq));
+      if (count <= 0) return;
+      const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
+      ctx.save();
+      buildPath();
+      ctx.clip();
+      drawDamageCracks(ctx, r, crackSeedFor(entity), count, dmgFrac, style);
+      ctx.restore();
   }
 
   /**
@@ -3154,26 +3276,22 @@ export class RenderSystem {
                         ctx.stroke();
                     }
 
-                    // Damage cracks for rock-tile — accumulate one per
-                    // dent hit via PhysicsSystem.applyDentStep and draw
-                    // here on top of the fill.  Slate-900 at 70 % alpha
-                    // so cracks read as natural fracture shadow rather
-                    // than opaque outlines; the rock fill shows
-                    // through.  Drawn in entity-local space (ctx is
-                    // already translated + rotated to the entity centre
-                    // by the setTransform earlier in renderEntities).
-                    if (entity.shardVariant === 'rock-tile' && entity.damageCracks) {
-                        const cracks = entity.damageCracks;
-                        ctx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
-                        ctx.lineWidth   = 2;
-                        ctx.lineCap     = 'round';
-                        for (let i = 0; i < cracks.length; i++) {
-                            const c = cracks[i];
-                            ctx.beginPath();
-                            ctx.moveTo(c.x1, c.y1);
-                            ctx.lineTo(c.x2, c.y2);
-                            ctx.stroke();
-                        }
+                    // Damage cracks for rock tiles + shards — a seeded,
+                    // HP-driven fracture overlay (slate-900 shadow, the
+                    // rock fill shows through) shared with enemies via
+                    // drawDamageCracks.  Deterministic per entity so the
+                    // pattern holds still and only accrues as HP drops;
+                    // far lower frequency than enemies (one crack per
+                    // ~1.3 hits, see MATERIAL_DAMAGE_CRACKS.rock).  Drawn
+                    // in entity-local space (ctx already translated +
+                    // rotated by the setTransform in renderEntities).
+                    if (entity.shardVariant === 'rock-tile'
+                        || entity.shardVariant === 'rock-shard') {
+                        const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
+                        this.overlayMaterialCracks(
+                            ctx, entity, rr, buildPath,
+                            ROCK_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.rock,
+                        );
                     }
                 }
 
@@ -3876,38 +3994,12 @@ export class RenderSystem {
           const seed = (phase * 1000) + 1;
           // Clip everything to the body silhouette so scorch + cracks stay
           // inside the hull.  (save/restore doesn't touch the current path,
-          // so the outline stroke below still reuses the body path.)
+          // so the outline stroke below still reuses the body path.)  The
+          // shared overlay is seeded one-crack-per-HP-lost for enemies.
           ctx.save();
           this.buildEnemyPath(ctx, shape, r);
           ctx.clip();
-          // Scorch — a charred darken that deepens with damage.
-          ctx.fillStyle = `rgba(14,8,5,${0.15 + 0.4 * dmgFrac})`;
-          ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
-          // Cracks — one jagged dark fissure per HP lost, each stable.
-          ctx.lineCap = 'round';
-          for (let i = 0; i < hits; i++) {
-              const a = hash01(seed + i * 1.7) * Math.PI * 2;
-              const ca = Math.cos(a), sa = Math.sin(a);
-              const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
-              // Perpendicular kink at the midpoint for a jagged, non-straight crack.
-              const perp = (hash01(seed + i * 5.1) - 0.5) * r * 0.5;
-              const x0 = ca * r * 0.1,    y0 = sa * r * 0.1;
-              const xm = ca * len * 0.55 - sa * perp, ym = sa * len * 0.55 + ca * perp;
-              const x1 = ca * len,        y1 = sa * len;
-              ctx.beginPath();
-              ctx.moveTo(x0, y0);
-              ctx.lineTo(xm, ym);
-              ctx.lineTo(x1, y1);
-              ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-              ctx.lineWidth = 1.6;
-              ctx.stroke();
-              // Thin hot-edge highlight on the worst damage so deep cracks glint.
-              if (dmgFrac > 0.5) {
-                  ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
-                  ctx.lineWidth = 0.7;
-                  ctx.stroke();
-              }
-          }
+          drawDamageCracks(ctx, r, seed, hits, dmgFrac, ENEMY_CRACK_STYLE);
           ctx.restore();
           // The crack loop's beginPath() clobbered the body path; rebuild it
           // so the outline stroke below still traces the silhouette.

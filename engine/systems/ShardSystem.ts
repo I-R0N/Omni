@@ -873,7 +873,13 @@ export class ShardSystem {
 
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const baseHp  = newSize > 30 ? 2 : 1;
+      // Rock children get a +1 base-HP bump (still tiny) so the chunkier
+      // ones have room to show a seeded damage crack before they break —
+      // glass / plastic / metal debris keep the original brittle 1-2 HP.
+      const isRockChild = childVariant.id === 'rock-shard';
+      const baseHp  = isRockChild
+        ? (newSize > 30 ? 3 : 2)
+        : (newSize > 30 ? 2 : 1);
       // Density-aware mass + HP for rock children — sqrt(tier + 1)
       // scales HP gently so even top-tier rocks stay breakable
       // (tier 24 ≈ 5× HP); mass scales by the full DENSITY_MULT so

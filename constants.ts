@@ -1506,7 +1506,10 @@ export const STRUCTURE_VARIANTS = {
   // rock-tiles read with the same texture as rock-shards rather than
   // the glass-aesthetic translucent hex.
   rock: {
-    health: 3,
+    // 5 HP (was 3) — modest bump so the seeded damage-crack overlay has
+    // room to accrue a couple of fractures (one per ~1.3 hits, see
+    // MATERIAL_DAMAGE_CRACKS) before the tile shatters.  Still brittle.
+    health: 5,
     mass: Infinity,
     indestructible: false,
     sprite: '',
@@ -1515,6 +1518,25 @@ export const STRUCTURE_VARIANTS = {
 } as const;
 
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
+
+// ── Material damage cracks ─────────────────────────────────────────────────
+// Drives the seeded fracture overlay (RenderSystem.drawDamageCracks) for the
+// rocky / metal destructibles.  Unlike enemies — which draw one crack per HP
+// lost — these get hit far more often, so the crack frequency is deliberately
+// LOWER: one crack per `freq` HP lost, capped at `cap` cracks total.
+//
+//   crackCount = min(cap, floor((maxHealth - health) / freq))
+//
+// `maxHealth` is the LIVE value (metal scales it ×densityTier), so a dense
+// composite cracks proportionally — more thresholds crossed, up to the cap.
+export const MATERIAL_DAMAGE_CRACKS = {
+  // Rock tiles (5 HP) + rock-shards: a crack roughly every ~1.3 hits gives a
+  // clean 0→3 fracture gradient over the tile's life.
+  rock:  { freq: 1.3, cap: 4 },
+  // Metal tiles (24 HP) + metal composites: tough, so cracks accrue slowly —
+  // first split after ~5 hits, capped at 5 so even a dense block stays read.
+  metal: { freq: 5,   cap: 5 },
+} as const;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
