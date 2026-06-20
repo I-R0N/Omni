@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1045,6 +1045,25 @@ export class PhysicsSystem {
   // vertices accumulate inward pulls; the shard spawned at detach
   // time reads its size from the dented polygon's bounding extent
   // (see DropSystem.spawnDentShard).
+  /**
+   * Probabilistic early break for rock tiles / asteroids / rock-shards.
+   * Their `maxHealth` is the size/density hit ceiling (ROCK_BREAK), not a
+   * flat HP: the rock always survives (cracks) on the first hit, and from
+   * the second hit on each hit rolls an early break whose odds climb to a
+   * guaranteed break once the ceiling is reached.  Bigger / denser rocks
+   * have a higher ceiling, so the same hit number is a smaller fraction and
+   * they resist longer.  Zeroes `health` on a successful roll so the
+   * caller's `health <= 0` death path shatters it on this hit.  No-op for
+   * non-rock variants and already-dead entities.
+   */
+  public static maybeRockEarlyBreak(target: GameEntity): void {
+      if (target.health === undefined || target.health <= 0) return;
+      if (target.shardVariant !== 'rock-tile' && target.shardVariant !== 'rock-shard') return;
+      const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
+      const hitsTaken = ceiling - target.health;
+      if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+  }
+
   public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
@@ -2546,8 +2565,15 @@ export class PhysicsSystem {
               // Hardness scales via the entity's health alone.
               const isDentEntity = target.shardVariant !== undefined
                   && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
+              // Rock tiles / asteroids / rock-shards also count "hits, not
+              // damage": their maxHealth is a hit ceiling (ROCK_BREAK), so
+              // every shot costs exactly 1 HP regardless of weapon power and
+              // the probabilistic break rolls per hit.  (rock-tile is already
+              // a dent entity; rock-shard has no dent policy, so name it.)
+              const isHitCounted = isDentEntity
+                  || target.shardVariant === 'rock-shard';
               if (!isIndestructibleTile) {
-                  target.health -= isDentEntity ? 1 : projDmg;
+                  target.health -= isHitCounted ? 1 : projDmg;
                   // Dent-policy entities deform on every damage event,
                   // even the killing blow — the spawned mobile shard
                   // inherits the dented polygon at the post-deformation
@@ -2578,6 +2604,11 @@ export class PhysicsSystem {
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
                   }
+                  // Probabilistic early break for rock tiles / asteroids /
+                  // rock-shards (no-op for other variants).  Zeroes health
+                  // on a successful roll so the shared death check below
+                  // shatters it on this hit.
+                  PhysicsSystem.maybeRockEarlyBreak(target);
               }
               target.hitFlash = 0.1;
               // Hit feedback — uncapped damage-scaled knockback + stagger so
@@ -2814,6 +2845,9 @@ export class PhysicsSystem {
               }
               structure.health -= 1;
               PhysicsSystem.applyDentStep(structure, player.position);
+              // A crash is a hit too — let rock break early on the same
+              // rising-odds roll as a blaster shot (no-op for other tiles).
+              PhysicsSystem.maybeRockEarlyBreak(structure);
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               if (structure.health <= 0) {
                   structure.health = 0;

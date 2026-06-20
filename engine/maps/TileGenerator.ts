@@ -1,6 +1,6 @@
 
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade } from '../../constants';
+import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, rockHitCeiling } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
 import { NEBULA_IMAGES } from '../../assets';
 import { randomNebulaComposition, cloneComposition } from '../NebulaColor';
@@ -248,6 +248,11 @@ export class TileGenerator {
       : variant === 'indestructible'  ? 'indestructible-tile'
       : variant === 'rock'            ? 'rock-tile'
       :                                  'glass-tile';
+    // Rock tiles derive their hit ceiling from tile size (ROCK_BREAK); other
+    // materials keep their flat STRUCTURE_VARIANTS HP.
+    const rockHp = variant === 'rock'
+      ? rockHitCeiling(Math.max(w, h) * 0.95)
+      : undefined;
     return {
         id: nextId(`tile_${r}_${c}`),
         type: EntityType.STRUCTURE,
@@ -265,8 +270,12 @@ export class TileGenerator {
         // plastic shards independently for further variation).
         color: variant === 'plastic' ? randomPlasticShade() : cfg.color,
         active: true,
-        health: cfg.health,
-        maxHealth: cfg.health,
+        // Rock tiles use the probabilistic break model: maxHealth is the
+        // size-scaled hit ceiling (ROCK_BREAK), so a rock tile cracks on the
+        // first hit and rolls an early break thereafter, guaranteed at the
+        // ceiling.  Other materials keep their flat variant HP.
+        health: rockHp ?? cfg.health,
+        maxHealth: rockHp ?? cfg.health,
         mass: cfg.mass,
         polygonPoints: pts,
         sprite: cfg.sprite,

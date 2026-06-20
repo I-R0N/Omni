@@ -1519,20 +1519,65 @@ export const STRUCTURE_VARIANTS = {
 
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 
+// ── Rock break model (probabilistic, size/density-scaled) ──────────────────
+// Rock tiles / asteroids / rock-shards no longer break at a flat HP.  Each
+// entity's maxHealth is repurposed as a HIT CEILING: it always cracks on the
+// first hit (never breaks), and from the second hit on every blaster hit
+// rolls an EARLY break whose odds climb toward a guaranteed break at the
+// ceiling.  The ceiling scales with size (and density), so small rocks cap at
+// MIN_HITS and big / dense boulders ride up to MAX_HITS — bigger rocks resist
+// longer because the same hit number is a smaller fraction of their ceiling.
+//
+//   ceiling      = rockHitCeiling(size, densityTier)   (MIN_HITS..MAX_HITS)
+//   breakChance  = ((hitsTaken - 1) / (ceiling - 1)) ^ CURVE   (0 at hit 1,
+//                  1 at the ceiling)
+export const ROCK_BREAK = {
+  MIN_HITS: 4,   // smallest rock — crack, then ~50/50 break on hits 2-3, forced by 4
+  MAX_HITS: 6,   // largest / densest boulder
+  SIZE_MIN: 20,  // size mapping to MIN_HITS
+  SIZE_MAX: 160, // size mapping to MAX_HITS (linear between, clamped outside)
+  // Density tiers add to the ceiling: +1 hit per this many tiers (clamped
+  // to MAX_HITS).  Keeps condensed rock-shards / merged boulders meatier.
+  DENSITY_TIERS_PER_BONUS: 8,
+  // Break-curve exponent.  1 = linear rise to a guaranteed break at the
+  // ceiling.  >1 delays the odds (rocks resist longer); <1 front-loads them.
+  CURVE: 1.0,
+} as const;
+
+// Size/density → hit ceiling (also the entity's maxHealth).
+export function rockHitCeiling(size: number, densityTier?: number): number {
+  const span = ROCK_BREAK.SIZE_MAX - ROCK_BREAK.SIZE_MIN;
+  const t = Math.max(0, Math.min(1, (size - ROCK_BREAK.SIZE_MIN) / span));
+  let hits = ROCK_BREAK.MIN_HITS + Math.round(t * (ROCK_BREAK.MAX_HITS - ROCK_BREAK.MIN_HITS));
+  if (densityTier !== undefined && densityTier > 0) {
+    hits += Math.floor(densityTier / ROCK_BREAK.DENSITY_TIERS_PER_BONUS);
+  }
+  return Math.max(ROCK_BREAK.MIN_HITS, Math.min(ROCK_BREAK.MAX_HITS, hits));
+}
+
+// Early-break probability after `hitsTaken` hits given the entity's ceiling.
+// 0 on the first hit (always cracks), 1 once the ceiling is reached.
+export function rockBreakChance(hitsTaken: number, ceiling: number): number {
+  if (hitsTaken <= 1) return 0;
+  if (hitsTaken >= ceiling) return 1;
+  const frac = (hitsTaken - 1) / (ceiling - 1);
+  return Math.pow(frac, ROCK_BREAK.CURVE);
+}
+
 // ── Material damage cracks ─────────────────────────────────────────────────
 // Drives the seeded fracture overlay (RenderSystem.drawDamageCracks) for the
-// rocky / metal destructibles.  Unlike enemies — which draw one crack per HP
-// lost — these get hit far more often, so the crack frequency is deliberately
-// LOWER: one crack per `freq` HP lost, capped at `cap` cracks total.
+// rocky / metal destructibles.  Rock now caps at 4-6 hits (ROCK_BREAK), so it
+// shows one crack per hit (freq 1) up to MAX_HITS — the escalating fracture
+// reads the accumulating damage.  Metal stays tough and quiet.
 //
 //   crackCount = min(cap, floor((maxHealth - health) / freq))
 //
-// `maxHealth` is the LIVE value (metal scales it ×densityTier), so a dense
-// composite cracks proportionally — more thresholds crossed, up to the cap.
+// `maxHealth` is the LIVE value (metal scales it ×densityTier; rock's is its
+// hit ceiling), so denser bodies crack proportionally up to the cap.
 export const MATERIAL_DAMAGE_CRACKS = {
-  // Rock tiles (5 HP) + rock-shards: a crack roughly every ~1.3 hits gives a
-  // clean 0→3 fracture gradient over the tile's life.
-  rock:  { freq: 1.3, cap: 4 },
+  // Rock: one crack per hit (maxHealth is the hit ceiling), capped at the
+  // largest ceiling so a 6-hit boulder can show all six fractures.
+  rock:  { freq: 1, cap: ROCK_BREAK.MAX_HITS },
   // Metal tiles (24 HP) + metal composites: tough, so cracks accrue slowly —
   // first split after ~5 hits, capped at 5 so even a dense block stays read.
   metal: { freq: 5,   cap: 5 },
