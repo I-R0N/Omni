@@ -3859,6 +3859,36 @@ export class RenderSystem {
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+
+      // ── Tank (hexagon) internal detail: a heavy-armour read — an inset
+      // plate-seam ring, vertex rivets, and a stout forward ram prow.  Drawn
+      // INSIDE the body-roll frame so it rocks with the hull.  Warm (rusher)
+      // faction language: solid, angular, aggressive.  Hexagon vertex 0 is
+      // the nose (+x), so the prow sits on the leading point.
+      if (isTank) {
+          const dk = `rgba(${sinkCh(cr,0.5)},${sinkCh(cg,0.5)},${sinkCh(cb,0.5)},0.85)`;
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+              const a = (i / 6) * Math.PI * 2;
+              const x = Math.cos(a) * r * 0.6, y = Math.sin(a) * r * 0.6;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.5; ctx.stroke();
+          for (let i = 1; i < 6; i++) { // skip the nose vertex (prow covers it)
+              const a = (i / 6) * Math.PI * 2;
+              ctx.beginPath();
+              ctx.arc(Math.cos(a) * r * 0.82, Math.sin(a) * r * 0.82, r * 0.07, 0, Math.PI * 2);
+              ctx.fillStyle = dk; ctx.fill();
+          }
+          ctx.beginPath();
+          ctx.moveTo(r * 0.98, 0);
+          ctx.lineTo(r * 0.5, r * 0.22);
+          ctx.lineTo(r * 0.5, -r * 0.22);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},0.9)`;
+          ctx.fill();
+      }
       if (isTank) ctx.restore();
 
       // ── Orb inlay (Drone): a circle has no silhouette detail, so layer an
@@ -3874,6 +3904,48 @@ export class RenderSystem {
           ctx.beginPath();
           ctx.arc(r * 0.66, 0, r * 0.13, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(${liftCh(cr,0.55)},${liftCh(cg,0.55)},${liftCh(cb,0.55)},0.95)`;
+          ctx.fill();
+      }
+
+      // ── Skirmisher (diamond) internal detail: a precise sensor-craft read —
+      // an inset panel diamond, a thin targeting spine, and a forward sensor
+      // pip.  Cool (kiter) faction language: ringed, instrument-like.
+      if (shape === 'diamond') {
+          const dk = `rgba(${sinkCh(cr,0.4)},${sinkCh(cg,0.4)},${sinkCh(cb,0.4)},0.85)`;
+          ctx.beginPath();
+          ctx.moveTo(r * 0.5, 0); ctx.lineTo(0, r * 0.45);
+          ctx.lineTo(-r * 0.5, 0); ctx.lineTo(0, -r * 0.45);
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.3; ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(r * 0.1, 0); ctx.lineTo(r * 0.62, 0);
+          ctx.lineWidth = 1; ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(r * 0.72, 0, r * 0.12, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${liftCh(cr,0.55)},${liftCh(cg,0.55)},${liftCh(cb,0.55)},0.95)`;
+          ctx.fill();
+      }
+
+      // ── Orbiter (pentagon) internal detail: an acid-spitter read — an inset
+      // ring and a forward nozzle aperture it spits from.  Cool (kiter) faction
+      // language.  Pentagon vertex 0 is the nose (+x).
+      if (shape === 'pentagon') {
+          const dk = `rgba(${sinkCh(cr,0.4)},${sinkCh(cg,0.4)},${sinkCh(cb,0.4)},0.85)`;
+          ctx.beginPath();
+          for (let i = 0; i < 5; i++) {
+              const a = (i / 5) * Math.PI * 2;
+              const x = Math.cos(a) * r * 0.55, y = Math.sin(a) * r * 0.55;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.3; ctx.stroke();
+          // Forward nozzle aperture at the nose vertex.
+          ctx.beginPath();
+          ctx.arc(r * 0.7, 0, r * 0.14, 0, Math.PI * 2);
+          ctx.lineWidth = 1.4; ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(r * 0.7, 0, r * 0.06, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},0.9)`;
           ctx.fill();
       }
 
