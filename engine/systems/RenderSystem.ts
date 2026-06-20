@@ -3686,6 +3686,19 @@ export class RenderSystem {
       }
       const phase = entity.glowPhase;
 
+      // ── Drone (circle) nervous buzz: a render-only high-frequency
+      // positional jitter so the frantic peashooter visibly shimmies even at
+      // full dive speed (the AI velocity jitter gets eaten by the speed cap
+      // while charging).  Translates the WHOLE craft (flame + body + core)
+      // a couple of px on a two-frequency deterministic noise.  Safe to
+      // translate without restore — each entity rewrites the transform via
+      // setTransform, so this never leaks to the next draw.
+      if (shape === 'circle') {
+          const bx = (Math.sin(nowSec * 23 + phase) + Math.sin(nowSec * 37 + phase * 1.7)) * 1.6;
+          const by = (Math.cos(nowSec * 19 + phase * 1.3) + Math.sin(nowSec * 41 + phase)) * 1.6;
+          ctx.translate(bx, by);
+      }
+
       // Speed fraction drives the flame length/brightness + core pulse rate:
       // a charging rusher trails a long hot flame; an idling kiter simmers.
       const vx = entity.velocity?.x ?? 0, vy = entity.velocity?.y ?? 0;
@@ -3748,13 +3761,21 @@ export class RenderSystem {
       }
 
       // ── Body roll (Tank/hexagon only): a slow render-only rotational sway
-      // so the heavy siege slug rocks menacingly at idle.  Applied to the
-      // SILHOUETTE + internal detail only — the core eye, flame and muzzle
-      // telegraph stay locked to true facing (+x) so aiming reads honestly.
-      const bodyRoll = shape === 'hexagon'
-          ? Math.sin(nowSec * 1.1 + phase) * 0.085 + Math.sin(nowSec * 0.43 + phase) * 0.04
+      // plus a perpendicular squash so the heavy siege slug visibly rocks /
+      // rolls at idle.  Applied to the SILHOUETTE + internal detail only —
+      // the core eye, flame and muzzle telegraph stay locked to true facing
+      // (+x) so aiming reads honestly.
+      const isTank = shape === 'hexagon';
+      const bodyRoll = isTank
+          ? Math.sin(nowSec * 1.3 + phase) * 0.19 + Math.sin(nowSec * 0.5 + phase) * 0.07
           : 0;
-      if (bodyRoll !== 0) { ctx.save(); ctx.rotate(bodyRoll); }
+      if (isTank) {
+          ctx.save();
+          ctx.rotate(bodyRoll);
+          // Breathing squash perpendicular to facing sells the roll as
+          // 3D heft rather than a flat spin.
+          ctx.scale(1, 1 - 0.08 * Math.sin(nowSec * 1.3 + phase + 0.6));
+      }
 
       // ── Body: a head-lit radial gradient gives the flat polygon volume
       // (bright toward the nose, darker at the tail/rim).
@@ -3776,7 +3797,7 @@ export class RenderSystem {
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      if (bodyRoll !== 0) ctx.restore();
+      if (isTank) ctx.restore();
 
       // ── Orb inlay (Drone): a circle has no silhouette detail, so layer an
       // inset panel ring + a forward sensor pip for contrast and a heading

@@ -643,7 +643,7 @@ export const AI_CONFIG = {
   // velocity jitter so the frantic peashooter buzzes/shimmies instead of
   // flying a clean line.  Applied as an accel (×dt) so it's framerate-stable;
   // small enough not to derail the dive.
-  DRONE_JITTER_ACCEL: 22,
+  DRONE_JITTER_ACCEL: 35,
 
   // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
   // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
