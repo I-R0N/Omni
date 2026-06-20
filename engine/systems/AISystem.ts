@@ -165,11 +165,33 @@ export class AISystem {
       // shot is a deliberate, telegraphed event from a stationary camper —
       // brake hard to a stop instead of strafing.
       const locked = !!enemy.aimLaser && (enemy.aimCharge ?? 0) > 0;
+      const isOrbiter = enemy.enemySubtype === EnemySubtype.SHOOTER_2;
       if (stunned) {
           // Staggered — apply no movement force this step (the knockback rides).
       } else if (locked) {
           enemy.velocity.x *= 0.8;
           enemy.velocity.y *= 0.8;
+      } else if (isOrbiter && dist > 1) {
+          // TRUE ORBIT: hold a fixed radius and circle the player.  A radial
+          // term (toward/away) corrects back to ORBITER.RADIUS; a tangential
+          // term drives the actual orbit.  Stable per-entity handedness so a
+          // pack of orbiters fans out instead of stacking on one circle.
+          if (enemy.orbitSpin === undefined) {
+              let h = 0; const id = enemy.id;
+              for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
+              enemy.orbitSpin = (h & 1) ? 1 : -1;
+          }
+          const { RADIUS, RADIAL_DEADZONE, RADIAL_GAIN, TANGENTIAL } = AI_CONFIG.ORBITER;
+          const inX = dx / dist, inY = dy / dist;   // unit vector toward player
+          // Radial pull: + error (too far) steers toward the player, - error
+          // (too close) steers away; saturates over RADIAL_DEADZONE.
+          let radial = (dist - RADIUS) / RADIAL_DEADZONE;
+          if (radial > 1) radial = 1; else if (radial < -1) radial = -1;
+          enemy.velocity.x += inX * radial * accel * RADIAL_GAIN * dt;
+          enemy.velocity.y += inY * radial * accel * RADIAL_GAIN * dt;
+          // Tangential drive: perpendicular to the player vector, signed by spin.
+          enemy.velocity.x += -inY * enemy.orbitSpin * accel * TANGENTIAL * dt;
+          enemy.velocity.y +=  inX * enemy.orbitSpin * accel * TANGENTIAL * dt;
       } else if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
           const fleeX = -dx / dist;
@@ -329,6 +351,16 @@ export class AISystem {
           }
       }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
+
+      // Drone (RAMMER_1) nervous jitter — a constant low-amplitude random
+      // velocity buzz so the frantic peashooter shimmies instead of tracking a
+      // clean line.  Applied as an accel (×dt) for framerate stability; small
+      // enough not to derail the dive, suspended while staggered.
+      if (enemy.enemySubtype === EnemySubtype.RAMMER_1 && !stunned) {
+          const j = AI_CONFIG.DRONE_JITTER_ACCEL;
+          enemy.velocity.x += (Math.random() - 0.5) * j * dt;
+          enemy.velocity.y += (Math.random() - 0.5) * j * dt;
+      }
 
       // Cap Speed — suspended while staggered so the hit knockback carries
       // the enemy back instead of being clamped to cruise.

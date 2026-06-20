@@ -3747,6 +3747,15 @@ export class RenderSystem {
           ctx.stroke();
       }
 
+      // ── Body roll (Tank/hexagon only): a slow render-only rotational sway
+      // so the heavy siege slug rocks menacingly at idle.  Applied to the
+      // SILHOUETTE + internal detail only — the core eye, flame and muzzle
+      // telegraph stay locked to true facing (+x) so aiming reads honestly.
+      const bodyRoll = shape === 'hexagon'
+          ? Math.sin(nowSec * 1.1 + phase) * 0.085 + Math.sin(nowSec * 0.43 + phase) * 0.04
+          : 0;
+      if (bodyRoll !== 0) { ctx.save(); ctx.rotate(bodyRoll); }
+
       // ── Body: a head-lit radial gradient gives the flat polygon volume
       // (bright toward the nose, darker at the tail/rim).
       this.buildEnemyPath(ctx, shape, r);
@@ -3767,6 +3776,7 @@ export class RenderSystem {
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      if (bodyRoll !== 0) ctx.restore();
 
       // ── Orb inlay (Drone): a circle has no silhouette detail, so layer an
       // inset panel ring + a forward sensor pip for contrast and a heading

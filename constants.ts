@@ -625,6 +625,26 @@ export const AI_CONFIG = {
     PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
   },
 
+  // Orbiter (SHOOTER_2) idle locomotion: instead of the generic
+  // seek/flee/strafe kite, it holds a fixed radius and circles the player —
+  // a TRUE orbit so the archetype reads its name.  Radial term softly pulls
+  // it back to RADIUS; tangential term drives the circle (handedness is a
+  // stable per-entity orbitSpin so a pack doesn't all sweep the same way).
+  // Rotation still faces the player (set by the shared aim block), so the
+  // orbit never desyncs facing from aim.
+  ORBITER: {
+    RADIUS: 270,           // held orbit distance (units)
+    RADIAL_DEADZONE: 70,   // error band over which the radial pull saturates
+    RADIAL_GAIN: 1.0,      // radial-correction accel as a fraction of accel
+    TANGENTIAL: 1.0,       // tangential-drive accel as a fraction of accel
+  },
+
+  // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
+  // velocity jitter so the frantic peashooter buzzes/shimmies instead of
+  // flying a clean line.  Applied as an accel (×dt) so it's framerate-stable;
+  // small enough not to derail the dive.
+  DRONE_JITTER_ACCEL: 22,
+
   // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
   // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
   AGGRO_RANGE: 500,
