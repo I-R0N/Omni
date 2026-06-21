@@ -122,6 +122,11 @@ export enum EnemySubtype {
   SHOOTER_3 = 'SHOOTER_3',
 }
 
+// Distinct procedural polygon shapes for native enemy rendering — chosen so
+// each enemy archetype reads as a different silhouette without sprite art.
+export type EnemyShape =
+  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
+
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
   SHOOTING = 'SHOOTING',
@@ -135,6 +140,29 @@ export enum WeaponType {
   LIGHTNING = 'LIGHTNING',
   HOMING    = 'HOMING',
   CANNON    = 'CANNON',
+}
+
+// ── Status effects ────────────────────────────────────────────────────────────
+// Generic player debuff framework.  Today only 'corrosion' (a stacking
+// damage-over-time) is wired; the kind union + EffectPayload are shaped so new
+// effects (disables / scramble / slow) drop in without restructuring.
+export type StatusEffectKind = 'corrosion';
+
+// Carried on an attack (WeaponConfig / projectile); applied to the player on hit.
+export interface EffectPayload {
+  kind: StatusEffectKind;
+  duration: number;   // seconds (refreshed on re-hit)
+  dmgPerSec: number;  // per stack (corrosion)
+  maxStacks: number;
+}
+
+// Live instance on the player (GameEntity.statusEffects).
+export interface StatusEffect {
+  kind: StatusEffectKind;
+  remaining: number;
+  maxDuration: number; // for the HUD countdown fraction
+  stacks: number;
+  dmgPerStack: number;
 }
 
 export interface WeaponConfig {
@@ -168,6 +196,10 @@ export interface WeaponConfig {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // Render hint: when true the projectile draws a larger, brighter radial
+  // bloom (used to telegraph heavy / status enemy shots — Tank, Orbiter,
+  // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
+  glow?: boolean;
   // Lightning chain overrides — when set, replaces the default
   // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE / LIGHTNING_CHAIN_BRANCHES
   // constants for the chain triggered by this projectile's impact.  Used
@@ -179,6 +211,9 @@ export interface WeaponConfig {
   // the projectile so RenderSystem can pick a custom visual (today only
   // the charged Blaster fireball uses it).
   isCharged?: boolean;
+  // Status effect this shot applies to the player on hit (e.g. corrosion).
+  // ProjectileSystem.spawn copies it onto the projectile.
+  appliesEffect?: EffectPayload;
   // When set with count > 1, ProjectileSystem.spawn distributes the
   // projectiles in an equal-angle ring around the aim direction (every
   // 360°/count) instead of a forward-cone fan.  Used by the charged
@@ -316,6 +351,59 @@ export interface GameEntity {
   // Shared ammo pool — single currency consumed by every non-blaster weapon
   // at its per-weapon `ammoCost`.  Blaster is infinite and bypasses this pool.
   ammo?: number;
+  // Upgrade-derived stat modifiers (player only; set by GameEngine
+  // .applyUpgrades from the run's upgrade levels).  Read at the existing
+  // stat-hook sites with a sensible fallback so a fresh entity is unchanged:
+  //  - maxAmmo: ammo-pool cap (DropSystem clamp; default AMMO MAX_POOL)
+  //  - damageMult / cooldownMult: weapon scaling (WeaponSystem; default 1)
+  //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
+  maxAmmo?: number;
+  damageMult?: number;
+  cooldownMult?: number;
+  shieldRechargeRate?: number;
+  // Unlock gating (player only; set by GameEngine.syncUnlocksToPlayer):
+  //  - ownedWeapons: which weapons cycle/select may pick (always ≥ Blaster)
+  //  - overchargeUnlocked: whether charged shots are allowed
+  ownedWeapons?: WeaponType[];
+  overchargeUnlocked?: boolean;
+  // Status effects: `appliesEffect` is set on a projectile that should debuff
+  // the player on hit; `statusEffects` is the player's live debuff list.
+  appliesEffect?: EffectPayload;
+  statusEffects?: StatusEffect[];
+  // Counterplay trait: armored enemies shrug off per-hit damage below
+  // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
+  armor?: { chipThreshold: number; reduction: number };
+  // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
+  // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
+  hitStun?: number;
+  // Native polygon silhouette for enemy rendering (set at spawn from the
+  // archetype) — RenderSystem draws this instead of a sprite.
+  enemyShape?: EnemyShape;
+  // Damage dealt to the player on contact (rushers > 0; ranged enemies 0).
+  // Scaled by the per-wave damageMult in the collision path.
+  contactDamage?: number;
+  // Cosmetic render cache: a stable per-entity phase (radians) for the
+  // pulsing enemy "core eye", lazily derived from the id on first draw so a
+  // pack doesn't throb in unison.  Render-only; never read by the sim.
+  glowPhase?: number;
+  // Cosmetic render cache: the enemy body radial-gradient object, reused
+  // across frames to avoid re-allocating it every draw.  Rebuilt only when
+  // the cached radius/colour key changes (e.g. during a hit-flash scale
+  // punch).  Render-only; never read by the sim.
+  enemyBodyGrad?: CanvasGradient;
+  enemyBodyGradR?: number;
+  enemyBodyGradCol?: string;
+  // Attack-telegraph charge, 0→1, set by WeaponSystem over the archetype's
+  // `telegraph` window as a shot winds up (and cleared when not charging /
+  // out of range).  RenderSystem draws a muzzle charge glow scaled by it on
+  // every telegraphing archetype (Tank/Sniper/Charger).
+  aimCharge?: number;
+  // Sniper-only lock-on: when stamped (from the archetype's `aimLaser`), the
+  // enemy holds still while aimCharge > 0 (AISystem) and RenderSystem draws a
+  // full-length laser sight snapped onto the player at `aimDist` (the locked
+  // distance, refreshed by WeaponSystem each charging frame).
+  aimLaser?: boolean;
+  aimDist?: number;
 
   // Player resources (gold kept for drop-system compat until PR 2)
   gold?: number;
@@ -329,6 +417,22 @@ export interface GameEntity {
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
+
+  // ── Snitch (quidditch-style wave bonus target) ───────────────────────────
+  // Marks the one-per-wave snitch entity (EntityType.INTERACTABLE, no
+  // dropType, so the physics broadphase ignores it entirely).  Steering /
+  // catch logic lives in GameEngine.updateSnitch; RenderSystem keys the
+  // golden-comet draw + trail strip off this flag.
+  isSnitch?: boolean;
+  // Stable per-snitch phase offset (radians) for the wander oscillation so
+  // two consecutive snitches don't weave identically.
+  snitchWanderPhase?: number;
+
+  // Stamped by the damage paths when the killing blow came from the player
+  // (projectile, crash, lightning chain, cannon AoE).  handleEntityDeath
+  // awards shard/tile destruction points only when set, then clears it so
+  // a regen-reused tile entity can't re-award without a fresh player kill.
+  killedByPlayer?: boolean;
 
   // Tile regeneration — regenProgress counts up from 0; tile is a ghost
   // outline when regenProgress < TILE_REGEN_DELAY and active === false.
@@ -517,6 +621,9 @@ export interface GameEntity {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // Projectile render hint copied from WeaponConfig.glow — draws a larger,
+  // brighter bloom so heavy / status shots read at a glance.
+  glow?: boolean;
   // Charged-shot render hint — set on the projectile when the charged
   // variant should render with a custom visual (e.g. fireball gradient
   // for charged Blaster).  Other charged variants (Burst / Shotgun /
@@ -842,8 +949,45 @@ export interface EngineStats {
   difficulty?: number;
   waveNumber?: number;
   waveTotal?: number;
-  waveStatus?: 'active' | 'cleared' | 'complete';
+  waveStatus?: 'active' | 'cleared';
   waveGraceTimer?: number;
+  /** Seconds elapsed in the active wave (count-up scoring timer); undefined
+   *  outside the 'active' phase. */
+  waveElapsedSec?: number;
+  /** Enemies left to destroy this wave (unspawned remainder + alive).
+   *  Completion model: the wave ends only when this reaches 0. */
+  enemiesRemaining?: number;
+  /** Run score — animated integer ticker toward the true run total. */
+  score?: number;
+  /** Kill-combo readout: active multiplier (1 = no combo), the kill
+   *  count feeding it, and the remaining-window fraction for fade. */
+  comboMultiplier?: number;
+  comboCount?: number;
+  comboFraction?: number;
+  /** Spendable Salvage currency (earns 1:1 with score; score stays the
+   *  permanent high-score).  Spent on upgrades / unlocks. */
+  credits?: number;
+  /** Per-upgrade level snapshot for the DBG Upgrades panel. */
+  upgrades?: { id: string; label: string; level: number; max: number }[];
+  /** Pending between-wave upgrade-card choice (undefined when not
+   *  choosing).  The sim is paused while this is set; the player picks
+   *  one card to apply. */
+  cardChoice?: UpgradeCard[];
+  /** Wave interval between card offers (DBG-cyclable; 1 = every wave). */
+  cardInterval?: number;
+  /** Effective player stats for the player menu (pause screen). */
+  playerStats?: {
+    health: number; maxHealth: number;
+    shield: number; maxShield: number;
+    damageMult: number; cooldownMult: number; speedMult: number; maxAmmo: number;
+  };
+  /** Current run unlocks for the player menu (real ownership). */
+  unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
+  /** Drydock shop catalog (populated only while paused).  Unlocks only —
+   *  stat upgrades come exclusively from wave-completion cards. */
+  shop?: {
+    unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
+  };
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
@@ -948,6 +1092,21 @@ export interface EngineStats {
   // (asteroids decay toward zero velocity over a few seconds; only
   // collisions / gravity move them after that).
   asteroidFlowEnabled?: boolean;
+  // Snitch catch mode — DBG-toggleable while playtesting which catch
+  // interaction feels better.  'collide' (default): fly into the snitch.
+  // 'shoot': any player-owned projectile within its catch radius nabs it.
+  snitchCatchMode?: 'collide' | 'shoot';
+  // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
+  snitchSpeedName?: string;
+  // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
+  enemyScaleName?: string;
+  enemyScaleInfo?: string;
+  // DBG: enemy counterplay traits (armor, …) enabled.
+  traitsEnabled?: boolean;
+  // DBG enemy-test override: the forced spawn subtype (null = normal mix).
+  forcedEnemy?: string | null;
+  // Active player status effects for the HUD (kind, stacks, remaining frac).
+  statusEffects?: { kind: string; stacks: number; fraction: number }[];
   // Overlay toggles — all DBG-only renderer gating.  Default false.
   // FF Vectors: per-cell arrows colored by magnitude.
   // FF Cells:   faint cell-grid outlines.
@@ -1020,6 +1179,27 @@ export interface DamageText {
   maxLifetime: number;
   color: string;
   active: boolean;
+  // Set on gold "+N" points popups (vs. white damage chips).  Score
+  // popups merge nearby spawns into one growing total via `scoreValue`.
+  isScore?: boolean;
+  scoreValue?: number;
+  // Per-text render size multiplier (points tier bigger by magnitude;
+  // damage chips render small).  Folded into the grow-animation scale.
+  fontScale?: number;
+}
+
+// One option in a between-wave upgrade-card choice.  `kind` discriminates
+// the payload: 'stat' bumps an upgrade level (`id`), 'salvage' grants
+// currency (`amount`).  'unlock' is reserved for the weapons/shield/
+// overcharge unlocks (built next) — the card pool is already shaped for it.
+export interface UpgradeCard {
+  kind: 'stat' | 'salvage' | 'unlock';
+  label: string;
+  desc: string;
+  id?: string;       // upgrade id (stat) or unlock id
+  amount?: number;   // salvage granted
+  levels?: number;   // stat-card level grant (1 normal; 2–4 on powerful waves)
+  rarity?: 'common' | 'rare';
 }
 
 // Full-screen wave announcement banner rendered on the canvas.

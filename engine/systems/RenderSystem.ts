@@ -71,6 +71,68 @@ function hexToRgb(hex: string): [number, number, number] {
     return cached;
 }
 
+// Channel-wise lighten/darken toward white/black by fraction f∈[0,1].
+// Module-level (not per-frame closures) so the enemy-body gradient builder
+// in drawEnemyShape allocates nothing extra per entity.
+function liftCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v + (255 - v) * f)));
+}
+function sinkCh(v: number, f: number): number {
+    return Math.max(0, Math.min(255, Math.round(v * (1 - f))));
+}
+
+// Deterministic [0,1) hash of a single scalar — the classic sin-fract trick.
+// Used by the enemy damage-state overlay to lay down a STABLE crack pattern
+// (seeded per-entity) that only grows as HP drops, instead of flickering
+// fresh randomness each frame.  No allocation, no per-entity state.
+function hash01(n: number): number {
+    const s = Math.sin(n) * 43758.5453;
+    return s - Math.floor(s);
+}
+
+// Per-(enemy colour) cache of the FIXED-factor derived colour strings used
+// across drawEnemyShape's body / orb / shape-detail layers.  Enemy colours
+// come from a fixed ~6-entry archetype palette, so this Map warms instantly
+// and eliminates the ~7-11 rgba/rgb template-string allocations that the
+// enemy render path otherwise did per entity PER FRAME (a steady GC source,
+// felt as occasional frame dips in busy / death-heavy moments).  Strings
+// whose alpha varies per frame (flame flicker, core pulse, telegraph charge,
+// hit-flash) are NOT cached here — they stay inline.
+interface EnemyPalette {
+    bodyLift: string;   // body gradient nose stop  — rgb(lift .45)
+    bodySink: string;   // body gradient tail stop  — rgb(sink .45)
+    orbRing: string;    // Drone inset ring          — rgba(sink .45, .9)
+    pip: string;        // forward sensor pip        — rgba(lift .55, .95)
+    detailDk5: string;  // Tank seam/rivets          — rgba(sink .5, .85)
+    detailLt5: string;  // Tank prow / Orbiter pip   — rgba(lift .5, .9)
+    detailDk4: string;  // diamond/pentagon rings    — rgba(sink .4, .85)
+}
+const _enemyPalCache = new Map<string, EnemyPalette>();
+function enemyPalette(col: string): EnemyPalette {
+    let p = _enemyPalCache.get(col);
+    if (!p) {
+        const [r, g, b] = hexToRgb(col);
+        p = {
+            bodyLift: `rgb(${liftCh(r,0.45)},${liftCh(g,0.45)},${liftCh(b,0.45)})`,
+            bodySink: `rgb(${sinkCh(r,0.45)},${sinkCh(g,0.45)},${sinkCh(b,0.45)})`,
+            orbRing: `rgba(${sinkCh(r,0.45)},${sinkCh(g,0.45)},${sinkCh(b,0.45)},0.9)`,
+            pip: `rgba(${liftCh(r,0.55)},${liftCh(g,0.55)},${liftCh(b,0.55)},0.95)`,
+            detailDk5: `rgba(${sinkCh(r,0.5)},${sinkCh(g,0.5)},${sinkCh(b,0.5)},0.85)`,
+            detailLt5: `rgba(${liftCh(r,0.5)},${liftCh(g,0.5)},${liftCh(b,0.5)},0.9)`,
+            detailDk4: `rgba(${sinkCh(r,0.4)},${sinkCh(g,0.4)},${sinkCh(b,0.4)},0.85)`,
+        };
+        _enemyPalCache.set(col, p);
+    }
+    return p;
+}
+
+// Engine-flame palette — a FIXED hot ion/plasma colour so the thrust plume
+// reads as exhaust regardless of the enemy's body colour (it used to inherit
+// the body colour and wash out).  White-hot core, cool-blue wash.
+const FLAME_OUTER = '120, 190, 255'; // ion-blue outer wash
+const FLAME_CORE  = '255, 255, 255'; // white-hot core
+const FLAME_TIP   = '150, 210, 255'; // cool-blue fade at the tip
+
 // Convert an [r, g, b] tuple back into a "#rrggbb" hex string.  Each
 // channel is clamped to [0, 255] then 0-padded.  Used by the density
 // tint helper to format a per-(variant, tier) cached colour string.
@@ -1190,10 +1252,12 @@ export class RenderSystem {
         }
 
         if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+            // Enemies are range-UNLIMITED here (live count is capped by the
+            // wave concurrency cap): the maps are big and the chevrons are
+            // how the player finds the stragglers.  renderIndicators fades
+            // far chevrons instead of culling them.
             const distSq = dx*dx + dy*dy;
-            if (entity.type !== EntityType.ENEMY || distSq <= 500 * 500) {
-                this._indicatorBuffer.push({ entity, distSq });
-            }
+            this._indicatorBuffer.push({ entity, distSq });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -1227,7 +1291,9 @@ export class RenderSystem {
 
         // Player trail = independent expanding rings (one is enough to draw);
         // projectile trail = polygon strip (needs at least two points).
-        if (entity.trail && entity.trail.length > 0 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE)) {
+        // The snitch's comet tail rides the projectile-strip path in gold.
+        if (entity.trail && entity.trail.length > 0
+                && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE || entity.isSnitch)) {
             this._trailEntities.push({ entity, rx, ry });
         }
     }
@@ -1538,7 +1604,9 @@ export class RenderSystem {
           if (entity.type === EntityType.PLAYER) {
               if (this.trailShape === TrailShape.NONE) return;
               this.drawPlayerTrail(ctx, entity.trail, camera);
-          } else if (entity.type === EntityType.PROJECTILE && entity.trail.length >= 2) {
+          } else if ((entity.type === EntityType.PROJECTILE || entity.isSnitch) && entity.trail.length >= 2) {
+              // Snitch comet tail reuses the projectile strip — entity.color
+              // is the snitch's gold core colour.
               this.drawTrailStrip(ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
           }
       });
@@ -1814,12 +1882,20 @@ export class RenderSystem {
   ) {
       if (entries.length === 0) return;
       ctx.globalCompositeOperation = 'lighter';
+      // Run-length state tracking: a death burst is dozens of same-colour
+      // discs with near-identical alpha, so skipping redundant fillStyle
+      // (re-parsed each assignment) and globalAlpha writes cuts the canvas
+      // state churn.  Invalidated (set to sentinels) around the special
+      // branches below, which mutate ctx state themselves.
+      let lastColor = '';
+      let lastAlphaQ = -1;
       for (let i = 0; i < entries.length; i++) {
           const { entity: p, rx, ry } = entries[i];
 
           // Lightning arc particles use a dedicated renderer
           if (p.isLightningArc) {
               this.renderLightningArc(ctx, p, camera);
+              lastColor = ''; lastAlphaQ = -1;
               continue;
           }
 
@@ -1853,12 +1929,16 @@ export class RenderSystem {
                   ctx.arc(rx, ry, Math.max(0, radius - 3), 0, Math.PI * 2);
                   ctx.stroke();
               }
+              lastColor = ''; lastAlphaQ = -1;
               continue;
           }
 
           const lifeRatio = (p.lifetime || 0) / (p.maxLifetime || 1);
-          ctx.globalAlpha = lifeRatio;
-          ctx.fillStyle = p.color;
+          // Quantise alpha to 1/64 (imperceptible) so a run of same-fade
+          // particles reuses one globalAlpha write.
+          const aq = (lifeRatio * 64) | 0;
+          if (aq !== lastAlphaQ) { ctx.globalAlpha = aq / 64; lastAlphaQ = aq; }
+          if (p.color !== lastColor) { ctx.fillStyle = p.color; lastColor = p.color; }
           ctx.beginPath();
           ctx.arc(rx, ry, p.size.x, 0, Math.PI * 2);
           ctx.fill();
@@ -2466,17 +2546,23 @@ export class RenderSystem {
                   if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
+                  // Hit-punch: enemies briefly swell on impact for a juicy
+                  // reaction (driven by the hit-flash timer).
+                  if (entity.type === EntityType.ENEMY && entity.hitFlash && entity.hitFlash > 0) {
+                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2);
+                  }
 
                   const drawSize = maxDim * drawScale;
                   const dOffset = -(drawSize / 2);
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
 
-                  // Hit flash: re-draw with brightness instead of filling the bounding box (prevents white square)
+                  // Hit flash: re-draw brighter (whiter) on impact for a
+                  // stronger pop (prevents white-square by re-drawing the sprite)
                   if (entity.hitFlash && entity.hitFlash > 0) {
                       ctx.save();
-                      ctx.globalAlpha = Math.min(1, 0.6 + (entity.hitFlash * 2));
-                      ctx.filter = 'brightness(1.35)';
+                      ctx.globalAlpha = Math.min(1, 0.7 + (entity.hitFlash * 2.5));
+                      ctx.filter = 'brightness(1.8)';
                       ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
                       ctx.filter = 'none';
                       ctx.restore();
@@ -2504,7 +2590,10 @@ export class RenderSystem {
 
       // --- FALLBACK SHAPE RENDERING ---
       if (!drawn) {
-          if (entity.type === EntityType.PLAYER) {
+          if (entity.type === EntityType.ENEMY) {
+            this.drawEnemyShape(ctx, entity, nowSec);
+            drawn = true;
+          } else if (entity.type === EntityType.PLAYER) {
              // Fallback player shape
             const size = Math.max(entity.size.x, entity.size.y) * 2.0; 
             ctx.fillStyle = COLORS.PLAYER;
@@ -3193,23 +3282,32 @@ export class RenderSystem {
                     ctx.restore();
                 } else {
                     // ── Standard projectile: radial gradient glow ──
-                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
-                    const glowR = r * pulse * 3.0;
-
+                    // Both player and enemy shots render with their OWN weapon
+                    // colour now (the enemy branch used to hard-code orange,
+                    // which hid every per-archetype colour + the corrosion
+                    // green).  Enemy shots keep a warmer core; the `glow` hint
+                    // (Tank / Orbiter / Sniper) widens the bloom so heavy and
+                    // status shots read at a glance.
                     const isEnemy = entity.ownerType === EntityType.ENEMY;
-                    const [cr, cg, cb] = hexToRgb(entity.color || '#facc15');
+                    const glowMult = entity.glow ? 4.2 : 3.0;
+                    const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
+                    const glowR = r * pulse * glowMult;
+
+                    const [cr, cg, cb] = hexToRgb(entity.color || (isEnemy ? '#f97316' : '#facc15'));
 
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
 
-                    // Single merged gradient: hot white core → weapon colour → transparent glow.
+                    // Single merged gradient: hot core → weapon colour → transparent glow.
                     const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
                     if (isEnemy) {
-                        grad.addColorStop(0,    'rgba(255, 255, 220, 1)');
-                        grad.addColorStop(0.12, 'rgba(255, 180,  50, 1)');
-                        grad.addColorStop(0.30, 'rgba(249, 115,  22, 0.8)');
-                        grad.addColorStop(0.55, 'rgba(180,  40,   0, 0.25)');
-                        grad.addColorStop(1,    'rgba(180,  40,   0, 0)');
+                        // Warm-white core so the shot still reads as hostile,
+                        // then the archetype's own colour out to the rim.
+                        grad.addColorStop(0,    'rgba(255, 255, 235, 1)');
+                        grad.addColorStop(0.14, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                        grad.addColorStop(0.34, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                        grad.addColorStop(0.60, `rgba(${cr}, ${cg}, ${cb}, 0.16)`);
+                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
                     } else {
                         grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
                         grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
@@ -3401,6 +3499,37 @@ export class RenderSystem {
                 buildShardPath();
                 ctx.stroke();
 
+            } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
+                // ── Snitch — golden comet core ────────────────────────────
+                // The tail is the gold trail strip + sparkle motes emitted by
+                // GameEngine.updateSnitch; this draws the core: wide gold
+                // bloom, solid gold body, hot white-gold centre.  Pulse keyed
+                // to nowSec so the core flickers like a guttering flame.
+                const r = entity.size.x / 2;
+                const pulse = 0.85 + Math.sin(nowSec * 11) * 0.15;
+                const bloomR = r * 4 * pulse;
+                const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
+                bloom.addColorStop(0,    'rgba(253, 224, 71, 0.85)');
+                bloom.addColorStop(0.35, 'rgba(245, 158, 11, 0.40)');
+                bloom.addColorStop(1,    'rgba(245, 158, 11, 0)');
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
+                ctx.globalAlpha = pulse;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fillStyle = '#fde047';
+                ctx.fill();
+
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+                ctx.fillStyle = '#fffbe6';
+                ctx.fill();
+
             } else if (entity.type === EntityType.INTERACTABLE) {
                  const r = entity.size.x / 2;
                  if (Number.isFinite(r) && r > 0) {
@@ -3586,6 +3715,425 @@ export class RenderSystem {
       }
   }
 
+  // Native enemy rendering — a distinct procedural polygon per archetype
+  // (entity.enemyShape) so types read by silhouette without sprite art.
+  // Assumes the canvas transform is already translated to the entity centre
+  // and rotated to its facing (shapes point along +x).  Includes the
+  // hit-flash scale-punch + whiten and a shield ring when shielded.
+  // Local space here has +x pointing along the enemy's nose and the origin
+  // at its centroid (the per-entity transform at the top of the slow path
+  // bakes rotation in), so the tail is at -x.
+  private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
+      const shape = entity.enemyShape ?? 'triangle';
+      // The orb (Drone) renders a touch smaller so it reads as a compact,
+      // buzzing craft next to the bigger winged ships.
+      const shapeScale = shape === 'circle' ? 0.82 : 1;
+      const baseR = Math.max(entity.size.x, entity.size.y) * 0.62 * shapeScale;
+      const flash = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+      const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
+      const col = entity.color || '#f87171';
+      const [cr, cg, cb] = hexToRgb(col);
+      const pal = enemyPalette(col);
+
+      // Stable per-entity phase (id-derived) desyncs the core pulse + flame
+      // flicker so a pack doesn't throb in unison.  Render-only cache.
+      if (entity.glowPhase === undefined) {
+          let h = 0; const id = entity.id;
+          for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+          entity.glowPhase = (h / 997) * Math.PI * 2;
+      }
+      const phase = entity.glowPhase;
+
+      // ── Drone (circle) nervous buzz: a render-only high-frequency
+      // positional jitter so the frantic peashooter visibly shimmies even at
+      // full dive speed (the AI velocity jitter gets eaten by the speed cap
+      // while charging).  Translates the WHOLE craft (flame + body + core)
+      // a couple of px on a two-frequency deterministic noise.  Safe to
+      // translate without restore — each entity rewrites the transform via
+      // setTransform, so this never leaks to the next draw.
+      if (shape === 'circle') {
+          const bx = (Math.sin(nowSec * 13 + phase) + Math.sin(nowSec * 21 + phase * 1.7)) * 0.8;
+          const by = (Math.cos(nowSec * 11 + phase * 1.3) + Math.sin(nowSec * 23 + phase)) * 0.8;
+          ctx.translate(bx, by);
+      }
+
+      // Speed fraction drives the flame length/brightness + core pulse rate:
+      // a charging rusher trails a long hot flame; an idling kiter simmers.
+      const vx = entity.velocity?.x ?? 0, vy = entity.velocity?.y ?? 0;
+      const speedFrac = Math.min(1, Math.hypot(vx, vy) / (entity.maxSpeed || 6));
+
+      // ── Engine flame: a tapered, flickering plume off the tail (-x).  Two
+      // stacked teardrops (outer colour wash + inner hot core) read as
+      // directional thrust — unlike the old symmetric radial blob.
+      {
+          // Deterministic two-frequency flicker (no per-frame allocation /
+          // randomness) — gives the flame a live sizzle.
+          const flick = 0.82 + 0.12 * Math.sin(nowSec * 38 + phase)
+                             + 0.06 * Math.sin(nowSec * 71 + phase * 2);
+          const len = r * (0.6 + speedFrac * 1.9) * flick;
+          const mouthX = -r * 0.5;          // attaches just behind the hull
+          const tipX = mouthX - len;
+          // Wider than before; the orb's small radius gets an extra boost so
+          // its plume isn't a thin sliver.
+          const halfW = r * (0.40 + speedFrac * 0.15) * (shape === 'circle' ? 1.3 : 1.0);
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+
+          // Outer plume — fixed ion-blue wash, fades to transparent at the tip.
+          const og = ctx.createLinearGradient(mouthX, 0, tipX, 0);
+          og.addColorStop(0, `rgba(${FLAME_OUTER},${0.5 * flick})`);
+          og.addColorStop(1, `rgba(${FLAME_OUTER},0)`);
+          ctx.fillStyle = og;
+          ctx.beginPath();
+          ctx.moveTo(mouthX, halfW);
+          ctx.quadraticCurveTo(mouthX - len * 0.5, halfW * 0.55, tipX, 0);
+          ctx.quadraticCurveTo(mouthX - len * 0.5, -halfW * 0.55, mouthX, -halfW);
+          ctx.closePath();
+          ctx.fill();
+
+          // Inner hot core — shorter, white-hot, fades to cool blue.
+          const iLen = len * 0.55;
+          const iTipX = mouthX - iLen;
+          const iHalf = halfW * 0.55;
+          const ig = ctx.createLinearGradient(mouthX, 0, iTipX, 0);
+          ig.addColorStop(0, `rgba(${FLAME_CORE},${0.78 * flick})`);
+          ig.addColorStop(1, `rgba(${FLAME_TIP},0)`);
+          ctx.fillStyle = ig;
+          ctx.beginPath();
+          ctx.moveTo(mouthX, iHalf);
+          ctx.quadraticCurveTo(mouthX - iLen * 0.5, iHalf * 0.5, iTipX, 0);
+          ctx.quadraticCurveTo(mouthX - iLen * 0.5, -iHalf * 0.5, mouthX, -iHalf);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+      }
+
+      // Shield bubble (translucent blue ring) when the enemy is shielded.
+      if ((entity.maxShield ?? 0) > 0 && (entity.shield ?? 0) > 0) {
+          const frac = (entity.shield ?? 0) / (entity.maxShield ?? 1);
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac})`;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+      }
+
+      // ── Body roll (Tank/hexagon only): a slow render-only rotational sway
+      // plus a perpendicular squash so the heavy siege slug visibly rocks /
+      // rolls at idle.  Applied to the SILHOUETTE + internal detail only —
+      // the core eye, flame and muzzle telegraph stay locked to true facing
+      // (+x) so aiming reads honestly.
+      const isTank = shape === 'hexagon';
+      const bodyRoll = isTank
+          ? Math.sin(nowSec * 1.3 + phase) * 0.19 + Math.sin(nowSec * 0.5 + phase) * 0.07
+          : 0;
+      if (isTank) {
+          ctx.save();
+          ctx.rotate(bodyRoll);
+          // Breathing squash perpendicular to facing sells the roll as
+          // 3D heft rather than a flat spin.
+          ctx.scale(1, 1 - 0.08 * Math.sin(nowSec * 1.3 + phase + 0.6));
+      }
+
+      // ── Body: a head-lit radial gradient gives the flat polygon volume
+      // (bright toward the nose, darker at the tail/rim).  The gradient
+      // object is cached on the entity and reused across frames (gradients
+      // are applied in the current local transform at paint time, so the
+      // origin-centred geometry stays correct as the entity moves); it's
+      // only rebuilt when the radius (hit-flash punch) or colour changes.
+      this.buildEnemyPath(ctx, shape, r);
+      let bodyGrad = entity.enemyBodyGrad;
+      if (bodyGrad === undefined || entity.enemyBodyGradR !== r || entity.enemyBodyGradCol !== col) {
+          bodyGrad = ctx.createRadialGradient(r * 0.2, -r * 0.15, r * 0.1, 0, 0, r * 1.15);
+          bodyGrad.addColorStop(0, pal.bodyLift);
+          bodyGrad.addColorStop(0.55, col);
+          bodyGrad.addColorStop(1, pal.bodySink);
+          entity.enemyBodyGrad = bodyGrad;
+          entity.enemyBodyGradR = r;
+          entity.enemyBodyGradCol = col;
+      }
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+      // Whiten on hit flash (re-fill the same path).
+      if (flash > 0) {
+          ctx.globalAlpha = Math.min(0.85, flash * 4);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.globalAlpha = 1;
+      }
+
+      // ── Damage state: a multi-HP enemy that's lost health looks wounded —
+      // a scorch darken over the body fill plus a stable set of crack strokes
+      // that grows by one per HP lost.  Render-only, off health/maxHealth;
+      // 1-HP types (Drone/Skirmisher) never qualify.  The crack pattern is
+      // seeded from the entity's stable glowPhase so it holds still (only new
+      // cracks appear as more hits land) instead of flickering per frame.
+      const maxHp = entity.maxHealth ?? 0;
+      const hp = entity.health ?? maxHp;
+      if (maxHp > 1 && hp < maxHp) {
+          const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
+          const hits = Math.min(6, Math.round(maxHp - hp));
+          const seed = (phase * 1000) + 1;
+          // Clip everything to the body silhouette so scorch + cracks stay
+          // inside the hull.  (save/restore doesn't touch the current path,
+          // so the outline stroke below still reuses the body path.)
+          ctx.save();
+          this.buildEnemyPath(ctx, shape, r);
+          ctx.clip();
+          // Scorch — a charred darken that deepens with damage.
+          ctx.fillStyle = `rgba(14,8,5,${0.15 + 0.4 * dmgFrac})`;
+          ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+          // Cracks — one jagged dark fissure per HP lost, each stable.
+          ctx.lineCap = 'round';
+          for (let i = 0; i < hits; i++) {
+              const a = hash01(seed + i * 1.7) * Math.PI * 2;
+              const ca = Math.cos(a), sa = Math.sin(a);
+              const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
+              // Perpendicular kink at the midpoint for a jagged, non-straight crack.
+              const perp = (hash01(seed + i * 5.1) - 0.5) * r * 0.5;
+              const x0 = ca * r * 0.1,    y0 = sa * r * 0.1;
+              const xm = ca * len * 0.55 - sa * perp, ym = sa * len * 0.55 + ca * perp;
+              const x1 = ca * len,        y1 = sa * len;
+              ctx.beginPath();
+              ctx.moveTo(x0, y0);
+              ctx.lineTo(xm, ym);
+              ctx.lineTo(x1, y1);
+              ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+              ctx.lineWidth = 1.6;
+              ctx.stroke();
+              // Thin hot-edge highlight on the worst damage so deep cracks glint.
+              if (dmgFrac > 0.5) {
+                  ctx.strokeStyle = `rgba(255,150,90,${0.25 * (dmgFrac - 0.5) * 2})`;
+                  ctx.lineWidth = 0.7;
+                  ctx.stroke();
+              }
+          }
+          ctx.restore();
+          // The crack loop's beginPath() clobbered the body path; rebuild it
+          // so the outline stroke below still traces the silhouette.
+          this.buildEnemyPath(ctx, shape, r);
+      }
+
+      // Dark outline.
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // ── Tank (hexagon) internal detail: a heavy-armour read — an inset
+      // plate-seam ring, vertex rivets, and a stout forward ram prow.  Drawn
+      // INSIDE the body-roll frame so it rocks with the hull.  Warm (rusher)
+      // faction language: solid, angular, aggressive.  Hexagon vertex 0 is
+      // the nose (+x), so the prow sits on the leading point.
+      if (isTank) {
+          const dk = pal.detailDk5;
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+              const a = (i / 6) * Math.PI * 2;
+              const x = Math.cos(a) * r * 0.6, y = Math.sin(a) * r * 0.6;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.5; ctx.stroke();
+          for (let i = 1; i < 6; i++) { // skip the nose vertex (prow covers it)
+              const a = (i / 6) * Math.PI * 2;
+              ctx.beginPath();
+              ctx.arc(Math.cos(a) * r * 0.82, Math.sin(a) * r * 0.82, r * 0.07, 0, Math.PI * 2);
+              ctx.fillStyle = dk; ctx.fill();
+          }
+          ctx.beginPath();
+          ctx.moveTo(r * 0.98, 0);
+          ctx.lineTo(r * 0.5, r * 0.22);
+          ctx.lineTo(r * 0.5, -r * 0.22);
+          ctx.closePath();
+          ctx.fillStyle = pal.detailLt5;
+          ctx.fill();
+      }
+      if (isTank) ctx.restore();
+
+      // ── Orb inlay (Drone): a circle has no silhouette detail, so layer an
+      // inset panel ring + a forward sensor pip for contrast and a heading
+      // cue (the body is otherwise rotationally featureless).
+      if (shape === 'circle') {
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+          ctx.strokeStyle = pal.orbRing;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          // Forward sensor pip near the nose (+x).
+          ctx.beginPath();
+          ctx.arc(r * 0.66, 0, r * 0.13, 0, Math.PI * 2);
+          ctx.fillStyle = pal.pip;
+          ctx.fill();
+      }
+
+      // ── Skirmisher (diamond) internal detail: a precise sensor-craft read —
+      // an inset panel diamond, a thin targeting spine, and a forward sensor
+      // pip.  Cool (kiter) faction language: ringed, instrument-like.
+      if (shape === 'diamond') {
+          const dk = pal.detailDk4;
+          ctx.beginPath();
+          ctx.moveTo(r * 0.5, 0); ctx.lineTo(0, r * 0.45);
+          ctx.lineTo(-r * 0.5, 0); ctx.lineTo(0, -r * 0.45);
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.3; ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(r * 0.1, 0); ctx.lineTo(r * 0.62, 0);
+          ctx.lineWidth = 1; ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(r * 0.72, 0, r * 0.12, 0, Math.PI * 2);
+          ctx.fillStyle = pal.pip;
+          ctx.fill();
+      }
+
+      // ── Orbiter (pentagon) internal detail: an acid-spitter read — an inset
+      // ring and a forward nozzle aperture it spits from.  Cool (kiter) faction
+      // language.  Pentagon vertex 0 is the nose (+x).
+      if (shape === 'pentagon') {
+          const dk = pal.detailDk4;
+          ctx.beginPath();
+          for (let i = 0; i < 5; i++) {
+              const a = (i / 5) * Math.PI * 2;
+              const x = Math.cos(a) * r * 0.55, y = Math.sin(a) * r * 0.55;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = dk; ctx.lineWidth = 1.3; ctx.stroke();
+          // Forward nozzle aperture at the nose vertex.
+          ctx.beginPath();
+          ctx.arc(r * 0.7, 0, r * 0.14, 0, Math.PI * 2);
+          ctx.lineWidth = 1.4; ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(r * 0.7, 0, r * 0.06, 0, Math.PI * 2);
+          ctx.fillStyle = pal.detailLt5;
+          ctx.fill();
+      }
+
+      // ── Pulsing core "eye": a hot dot that throbs faster the faster the
+      // enemy moves.
+      const pulse = 0.55 + 0.45 * Math.sin(nowSec * (4 + speedFrac * 6) + phase);
+      const coreR = r * (0.22 + 0.06 * pulse);
+      const coreGrad = ctx.createRadialGradient(r * 0.05, 0, 0, r * 0.05, 0, coreR);
+      coreGrad.addColorStop(0,   `rgba(255,255,255,${0.6 + 0.35 * pulse})`);
+      coreGrad.addColorStop(0.5, `rgba(${liftCh(cr,0.6)},${liftCh(cg,0.6)},${liftCh(cb,0.6)},${0.5 + 0.3 * pulse})`);
+      coreGrad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+      ctx.beginPath();
+      ctx.arc(r * 0.05, 0, coreR, 0, Math.PI * 2);
+      ctx.fillStyle = coreGrad;
+      ctx.fill();
+
+      // ── Attack telegraph.  Every telegraphing shooter (Tank/Charger/Sniper)
+      // shows a building muzzle charge glow; only the SNIPER also draws a
+      // full-length lock-on laser to the player (a long aim line on a lobbed
+      // slug read as odd).  Archetypes without a telegraph never set aimCharge.
+      const charge = entity.aimCharge ?? 0;
+      if (charge > 0) {
+          const muzzleX = r * 1.05;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+
+          // Lock-on laser — SNIPER ONLY.  Snapped on at full length the moment
+          // the lock starts (length = the locked distance, so it reaches the
+          // player) and intensifies toward the shot: a crisp white core under a
+          // soft coloured halo so it reads at a glance.
+          if (entity.aimLaser) {
+              const lineLen = entity.aimDist ?? (r * 12);
+              const lx2 = muzzleX + lineLen;
+              const a = 0.55 + 0.4 * charge; // visible from lock start, brightens to fire
+              const lgGlow = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+              lgGlow.addColorStop(0,   `rgba(${cr},${cg},${cb},${0.3 * a})`);
+              lgGlow.addColorStop(0.9, `rgba(${cr},${cg},${cb},${0.16 * a})`);
+              lgGlow.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+              ctx.strokeStyle = lgGlow;
+              ctx.lineWidth = 3 + 2 * charge;
+              ctx.beginPath();
+              ctx.moveTo(muzzleX, 0);
+              ctx.lineTo(lx2, 0);
+              ctx.stroke();
+              const lgCore = ctx.createLinearGradient(muzzleX, 0, lx2, 0);
+              lgCore.addColorStop(0,   `rgba(255,255,255,${0.85 * a})`);
+              lgCore.addColorStop(0.9, `rgba(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)},${0.6 * a})`);
+              lgCore.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+              ctx.strokeStyle = lgCore;
+              ctx.lineWidth = 1 + charge;
+              ctx.beginPath();
+              ctx.moveTo(muzzleX, 0);
+              ctx.lineTo(lx2, 0);
+              ctx.stroke();
+          }
+
+          // Muzzle charge: a hot dot swelling at the nose toward the shot.
+          const mr = r * (0.1 + 0.35 * charge);
+          const mGrad = ctx.createRadialGradient(muzzleX, 0, 0, muzzleX, 0, mr);
+          mGrad.addColorStop(0,   `rgba(255,255,255,${0.7 * charge})`);
+          mGrad.addColorStop(0.5, `rgba(${liftCh(cr,0.3)},${liftCh(cg,0.3)},${liftCh(cb,0.3)},${0.5 * charge})`);
+          mGrad.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+          ctx.fillStyle = mGrad;
+          ctx.beginPath();
+          ctx.arc(muzzleX, 0, mr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+      }
+  }
+
+  private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
+      ctx.beginPath();
+      switch (shape) {
+          case 'circle':
+              // Orb body — detail is layered on in drawEnemyShape (inset ring
+              // + forward sensor pip), since a bare disc has no silhouette.
+              ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2);
+              return; // already a closed sub-path; skip the closePath below
+          case 'arrow':
+              // Swept delta-interceptor with a V-notched tail — deliberately
+              // unlike the plain concave cursor/indicator arrow.
+              ctx.moveTo(r, 0);                         // nose
+              ctx.lineTo(-r * 0.75, r * 0.9);           // right wingtip (swept back)
+              ctx.lineTo(-r * 0.45, r * 0.25);          // right tail root
+              ctx.lineTo(-r * 0.65, 0);                 // tail V-notch
+              ctx.lineTo(-r * 0.45, -r * 0.25);         // left tail root
+              ctx.lineTo(-r * 0.75, -r * 0.9);          // left wingtip
+              break;
+          case 'chevron':
+              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, r * 0.95);
+              ctx.lineTo(-r * 0.3, 0); ctx.lineTo(-r * 0.7, -r * 0.95);
+              break;
+          case 'diamond':
+              ctx.moveTo(r, 0); ctx.lineTo(0, r * 0.85);
+              ctx.lineTo(-r, 0); ctx.lineTo(0, -r * 0.85);
+              break;
+          case 'hexagon': {
+              for (let i = 0; i < 6; i++) {
+                  const a = (i / 6) * Math.PI * 2;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+              }
+              break;
+          }
+          case 'pentagon': {
+              for (let i = 0; i < 5; i++) {
+                  const a = (i / 5) * Math.PI * 2;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+              }
+              break;
+          }
+          case 'star': {
+              for (let i = 0; i < 10; i++) {
+                  const a = (i / 10) * Math.PI * 2;
+                  const rr = i % 2 === 0 ? r : r * 0.45;
+                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
+                  fn.call(ctx, Math.cos(a) * rr, Math.sin(a) * rr);
+              }
+              break;
+          }
+          case 'triangle':
+          default:
+              ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);
+              break;
+      }
+      ctx.closePath();
+  }
+
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
@@ -3600,8 +4148,10 @@ export class RenderSystem {
           
           const lifeRatio = t.lifetime / t.maxLifetime;
           ctx.globalAlpha = Math.max(0, lifeRatio);
-          
-          const scale = 1 + (1 - lifeRatio) * 0.5;
+
+          // Grow-as-it-fades animation, scaled by the per-text size tier
+          // (points popups bigger by magnitude; damage chips smaller).
+          const scale = (1 + (1 - lifeRatio) * 0.5) * (t.fontScale ?? 1);
           ctx.scale(scale, scale);
 
           ctx.fillStyle = t.color;
@@ -3761,13 +4311,16 @@ export class RenderSystem {
       const playerPos = camera.position;
       if (!Number.isFinite(playerPos.x) || !Number.isFinite(playerPos.y)) return;
 
-      const { RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE } = UI_CONSTANTS.INDICATORS;
+      const {
+          RADIUS, TEXT_THRESHOLD_ENEMY, TEXT_THRESHOLD_POI, MAX_VISIBLE,
+          MAX_VISIBLE_ENEMY, ENEMY_FADE_START, ENEMY_FADE_END, ENEMY_MIN_ALPHA,
+      } = UI_CONSTANTS.INDICATORS;
 
       if (targets.length === 0) return;
 
       const cx = width / 2;
       const cy = height / 2;
-      
+
       // Limit drawing counts per type to avoid clutter, but keep sorted draw order
       let enemiesDrawn = 0;
       let poisDrawn = 0;
@@ -3777,7 +4330,7 @@ export class RenderSystem {
           const t = item.entity;
 
           if (t.type === EntityType.ENEMY) {
-              if (enemiesDrawn >= MAX_VISIBLE) continue;
+              if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
               enemiesDrawn++;
           } else {
               if (poisDrawn >= MAX_VISIBLE) continue;
@@ -3800,6 +4353,12 @@ export class RenderSystem {
           const iy = cy + Math.sin(angle) * RADIUS;
 
           ctx.save();
+          // Far enemies fade toward an alpha floor — still findable, but
+          // a distant straggler doesn't shout like a closing threat.
+          if (t.type === EntityType.ENEMY && dist > ENEMY_FADE_START) {
+              const f = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
+              ctx.globalAlpha = 1 - f * (1 - ENEMY_MIN_ALPHA);
+          }
           ctx.translate(ix, iy);
           ctx.rotate(angle);
 
@@ -4112,10 +4671,37 @@ export class RenderSystem {
       }
 
       // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────
+      // Enemy blips pulse so they pop against the static layer; the phase
+      // uses performance.now() (render-side animation, frame-rate smooth).
+      const blip = MINIMAP_CONSTANTS.ENEMY_BLIP;
+      const pulseT = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * blip.PULSE_HZ * Math.PI * 2);
+      const enemyPulseAlpha = blip.PULSE_MIN_ALPHA + (1 - blip.PULSE_MIN_ALPHA) * pulseT;
+      const clampHalf = currentSize / 2 - blip.EDGE_INSET;
       for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const entity = item.entity;
           if (!entity.active) continue;
+
+          if (entity.type === EntityType.ENEMY) {
+              // Out-of-range enemies clamp to the minimap border (square
+              // clamp, slightly dimmer) instead of vanishing, so a distant
+              // straggler still registers at a glance.
+              let ex = item.dx * scale;
+              let ey = item.dy * scale;
+              const extent = Math.max(Math.abs(ex), Math.abs(ey));
+              const clamped = extent > clampHalf;
+              if (clamped) {
+                  const f = clampHalf / extent;
+                  ex *= f; ey *= f;
+              }
+              ctx.globalAlpha = clamped ? enemyPulseAlpha * blip.CLAMPED_ALPHA_MULT : enemyPulseAlpha;
+              ctx.fillStyle = entity.color;
+              ctx.beginPath();
+              ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              continue;
+          }
 
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
@@ -4126,7 +4712,6 @@ export class RenderSystem {
 
           let dotRadius = 1.5;
           if (entity.type === EntityType.INTERACTABLE) dotRadius = 3;
-          if (entity.type === EntityType.ENEMY) dotRadius = 2;
 
           ctx.beginPath();
           ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);

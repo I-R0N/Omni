@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -576,7 +576,11 @@ export const CAMERA_CONSTANTS = {
 export const SPRITE_CONSTANTS = {
   // Adjust this to align the player ship art with the facing direction.
   PLAYER_ROTATION_OFFSET: Math.PI*(3/4), // Radians
-  ENEMY_ROTATION_OFFSET: Math.PI*(3/4), // Match player art orientation
+  // Enemies render as native polygons whose nose points along +x (= the
+  // entity's facing angle), so no art-alignment offset is needed.  (The old
+  // 3π/4 value was for the retired up-left sprite art and skewed every
+  // polygon off its heading — most visibly on the triangle / arrow.)
+  ENEMY_ROTATION_OFFSET: 0,
   PLAYER_BASE_SIZE: 20 // Default visual/physics size for player (x/y)
 };
 
@@ -620,6 +624,26 @@ export const AI_CONFIG = {
     LEAD_FACTOR: 0.8,      // fraction of perfect aim-lead (0 = no lead, 1 = perfect)
     PROJECTILE_SPEED: 5.0, // must match ENEMY_WEAPON.speed
   },
+
+  // Orbiter (SHOOTER_2) idle locomotion: instead of the generic
+  // seek/flee/strafe kite, it holds a fixed radius and circles the player —
+  // a TRUE orbit so the archetype reads its name.  Radial term softly pulls
+  // it back to RADIUS; tangential term drives the circle (handedness is a
+  // stable per-entity orbitSpin so a pack doesn't all sweep the same way).
+  // Rotation still faces the player (set by the shared aim block), so the
+  // orbit never desyncs facing from aim.
+  ORBITER: {
+    RADIUS: 270,           // held orbit distance (units)
+    RADIAL_DEADZONE: 70,   // error band over which the radial pull saturates
+    RADIAL_GAIN: 1.0,      // radial-correction accel as a fraction of accel
+    TANGENTIAL: 1.0,       // tangential-drive accel as a fraction of accel
+  },
+
+  // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
+  // velocity jitter so the frantic peashooter buzzes/shimmies instead of
+  // flying a clean line.  Applied as an accel (×dt) so it's framerate-stable;
+  // small enough not to derail the dive.
+  DRONE_JITTER_ACCEL: 16,
 
   // Aggro awareness: enemies within AGGRO_RANGE of a killed enemy get a
   // temporary speed boost and shortened idle for AGGRO_DURATION seconds.
@@ -690,7 +714,16 @@ export const UI_CONSTANTS = {
     RADIUS: 120, // Distance from center of screen
     TEXT_THRESHOLD_ENEMY: 250000, // Distance sq to show text
     TEXT_THRESHOLD_POI: 160000,
-    MAX_VISIBLE: 5 // Max arrows per type
+    MAX_VISIBLE: 5, // Max arrows for POIs
+    // Enemy chevrons are range-unlimited (maps are big and live wave
+    // enemies are capped at TIMED_WAVE_CONFIG.MAX_CONCURRENT_ENEMIES),
+    // so every live enemy is always findable.  The cap here only guards
+    // pathological counts; alpha fades with distance to a floor so far
+    // chevrons read as "out there" without shouting.
+    MAX_VISIBLE_ENEMY: 12,
+    ENEMY_FADE_START: 800,   // world units — full opacity inside this
+    ENEMY_FADE_END: 4000,    // world units — alpha floor from here out
+    ENEMY_MIN_ALPHA: 0.35,
   }
 };
 
@@ -719,6 +752,16 @@ export const MINIMAP_CONSTANTS = {
   PLAYER_DOT_COLOR: '#ffffff',
   VIEWPORT_COLOR: 'rgba(56, 189, 248, 0.25)',
   VIEWPORT_BORDER_COLOR: 'rgba(56, 189, 248, 0.8)',
+  // Boosted enemy blips: bigger pulsing dots, and enemies beyond the
+  // minimap range clamp to the border (slightly dimmer) instead of
+  // disappearing, so a distant straggler still registers at a glance.
+  ENEMY_BLIP: {
+    RADIUS: 3,
+    EDGE_INSET: 4,        // px inside the minimap border for clamped blips
+    PULSE_HZ: 1.5,        // pulse cycles per second
+    PULSE_MIN_ALPHA: 0.55,
+    CLAMPED_ALPHA_MULT: 0.75,
+  },
 };
 
 export const INPUT_CONSTANTS = {
@@ -1864,17 +1907,42 @@ export const ENEMY_CONSTANTS = {
   SIZE: 20,
   COLOR: '#f87171',
   VISION_RANGE: 2500,
-  ACCELERATION: 100, 
-  MAX_SPEED: 200,    
+  ACCELERATION: 100,
+  MAX_SPEED: 200,
   MASS: 10
+};
+
+// Hit feedback — every projectile hit on an enemy gives a damage-scaled
+// knockback (in the shot's travel direction) plus a brief stagger.  The
+// stagger ALSO suspends the AI max-speed clamp, so the knockback actually
+// carries the enemy back instead of being instantly clamped to its slow
+// cruise — that's what makes the impact read.  Uncapped (per testing): the
+// kick is purely KICK_PER_DMG × applied (post-armor) damage, so heavy hits
+// shove hard and chip hits on armor barely nudge.
+export const HIT_FEEDBACK = {
+  KICK_PER_DMG: 1.0,  // knockback velocity per point of applied damage (uncapped)
+  STUN_SEC: 0.12,     // stagger: no AI force AND no speed-clamp while > 0
+  // Player-hit response scales with the incoming shot's intrinsic damage so a
+  // heavy slug (Tank, 16) lands like a wallop and a chip pellet (Drone, 5)
+  // barely registers — both shake and a directional knockback.  Uses the
+  // projectile's own damage (not the post-shield/armor value) so a heavy hit
+  // jolts even when the shield eats it.
+  PLAYER_SHAKE_BASE: 4,        // floor shake on any player hit
+  PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
+  PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
+  PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {
   LIFETIME: 1.2, // Seconds
   SPEED: 35, // Pixels per second upward
   SIZE: 14,
-  COLOR: '#ffffff',
-  CRIT_COLOR: '#facc15'
+  // Muted red chip — only shown on NON-lethal hits to multi-HP survivors
+  // now (lethal hits and dent tiles are gated out), so it never collides
+  // with the gold points popups.  Kept distinct from any gold.
+  COLOR: '#fca5a5',
+  CRIT_COLOR: '#fca5a5',
+  DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
@@ -2035,12 +2103,6 @@ export const WEAPON_SLOT_LABELS: Record<WeaponType, string> = (() => {
 
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
-export const ENEMY_BURST_CONFIG = {
-  BURST_SIZE: 2,        // shots per burst
-  BURST_GAP: 0.15,      // seconds between shots within a burst
-  BURST_RELOAD: 2.5,    // seconds between bursts
-};
-
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
   type: WeaponType.BLASTER,
@@ -2089,16 +2151,269 @@ export const WAVE_CONSTANTS = {
   SPAWN_RING_SPREAD: 200,
 };
 
-// Infinite wave scaling — applies to all waves beyond WAVE_DEFINITIONS.
-// The pattern is always: rammer → shooter → mixed (every PATTERN_LENGTH waves).
-// Enemy count starts at INFINITE_BASE_COUNT and grows by INFINITE_COUNT_PER_SET
-// each set (group of PATTERN_LENGTH waves), capped at INFINITE_MAX_COUNT.
-export const WAVE_CONFIG = {
-  PATTERN_LENGTH: 3,           // waves per set (rammer, shooter, mixed)
-  INFINITE_BASE_COUNT: 4,      // enemy count for the first infinite set
-  INFINITE_COUNT_PER_SET: 1,   // +1 enemy per set (every 3 waves)
-  INFINITE_MAX_COUNT: 12,      // hard cap on enemies per wave
+// ── Score system ─────────────────────────────────────────────────────────────
+// Points incentivise hunting enemies down across the big maps.  Kills are
+// tier-scaled; clearing a timed wave's full spawn budget before time-up
+// pays a wave-scaled bonus on top (see WaveSystem early-clear path).
+// Survivors despawned at time-up bypass the death path and award nothing.
+export const SCORE_CONSTANTS = {
+  POINTS_PER_TIER: 100,           // tier-1 kill = 100, tier-2 = 200, tier-3 = 300
+  // Wave completion (kill-all model): a flat base on every clear plus a
+  // speed-graded bonus = SPEED_SCALE × wave × fraction, where the fraction
+  // is 1 when cleared within the wave's spawn-window "par" and decays to 0
+  // at 2× par.  Clearing fast is worth more.
+  WAVE_COMPLETE_BASE: 50,
+  EARLY_CLEAR_BONUS_PER_WAVE: 50, // speed-bonus scale (× wave number)
+  // Shard / tile destruction — player-attributed kills only (see
+  // GameEntity.killedByPlayer; environmental deaths award nothing).
+  // Tiles pay per point of maxHealth so tiered materials (plastic,
+  // metal × densityTier) are worth proportionally more than glass.
+  // Nebula variants are excluded — ambient clouds shatter constantly.
+  SHARD_DESTROY_POINTS: 5,        // flat, per mobile shard
+  TILE_DESTROY_POINTS_PER_HP: 10, // glass 10, plastic 30, metal 10 × tier…
+  // Snitch catch — large flat payout; catching it also ends the wave
+  // immediately (no early-clear bonus stacks on top).  150 × 10: a nod
+  // to quidditch's 150, scaled to sit above a typical full wave's kills.
+  SNITCH_POINTS: 1500,
+  // Catching the snitch also wipes every live enemy on the field, each
+  // worth this fraction of its normal kill value (a board-clear bonus).
+  SNITCH_SWEEP_KILL_FRACTION: 0.5,
+  POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
+  POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
+  // HUD score ticker: the displayed total catches up to the true score by
+  // at least 1 and at most this fraction of the gap per frame, so big
+  // awards (snitch, combos) roll up over ~0.2s instead of snapping.
+  DISPLAY_CATCHUP_FRAC: 0.2,
+  // ── Kill combo ────────────────────────────────────────────────────────
+  // Rapid enemy kills build a combo: every COMBO_KILLS_PER_TIER kills steps
+  // the multiplier up one (capped), and it multiplies enemy-kill points.
+  // The combo resets if no enemy dies for COMBO_WINDOW_SEC.  Shard/tile
+  // kills neither build nor consume it — only ships count.
+  COMBO_WINDOW_SEC: 3.5,
+  COMBO_KILLS_PER_TIER: 3,
+  COMBO_MAX_MULTIPLIER: 5,
 };
+
+// ── Progression: leveled stat upgrades ───────────────────────────────────────
+// In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
+// (every wave); a normal card grants 1 level, and every 4th wave the cards roll
+// "powerful" variants that grant +2/+3/+4 levels at once.  Levels are UNCAPPED
+// (a focused build can stack a stat as high as picks allow).  GameEngine
+// .applyUpgrades folds the run's `upgradeLevels` into the player's effective
+// stats.  Unlocks (weapons / shield / overcharge) are the separate Salvage→
+// Drydock module economy.
+export type UpgradeId =
+  | 'hull' | 'plating' | 'capacitor' | 'engine'
+  | 'thrusters' | 'gunnery' | 'autoloader' | 'magazine';
+
+export interface UpgradeDef {
+  id: UpgradeId;
+  label: string;   // DBG / card / menu label
+  desc: string;    // one-line effect of one card (= one level)
+  max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
+  // Dependency on a major MODULE — the card is withheld from the pool until
+  // the module is installed (otherwise the augment would do nothing):
+  //   'shield'    → needs the Shield module (Plating / Capacitor)
+  //   'anyWeapon' → needs any non-Blaster weapon (Magazine; Blaster is free)
+  requires?: 'shield' | 'anyWeapon';
+}
+
+export const UPGRADE_DEFS: readonly UpgradeDef[] = [
+  { id: 'hull',       label: 'Hull',       desc: '+25 max HP'        , max: 10 },
+  { id: 'plating',    label: 'Plating',    desc: '+15 max shield'    , max: 10, requires: 'shield' },
+  { id: 'capacitor',  label: 'Capacitor',  desc: '+25% shield regen' , max: 10, requires: 'shield' },
+  { id: 'engine',     label: 'Engine',     desc: '+8% top speed'     , max: 10 },
+  { id: 'thrusters',  label: 'Thrusters',  desc: '+12% acceleration' , max: 10 },
+  { id: 'gunnery',    label: 'Gunnery',    desc: '+12% weapon damage', max: 10 },
+  { id: 'autoloader', label: 'Autoloader', desc: '-8% fire cooldown' , max: 10 },
+  { id: 'magazine',   label: 'Magazine',   desc: '+40 ammo capacity' , max: 10, requires: 'anyWeapon' },
+] as const;
+
+// ── One-time unlocks ──────────────────────────────────────────────────────────
+// The run starts LEAN — Blaster only, no shield, no charged shots.  These
+// unlocks are bought in the Drydock (Salvage) or, rarely, offered as a free
+// card.  Weapon unlocks map to a WeaponType; shield + overcharge are flags.
+export interface UnlockDef {
+  id: string;
+  kind: 'shield' | 'overcharge' | 'weapon';
+  weapon?: WeaponType;
+  label: string;
+  desc: string;
+  cost: number;
+}
+export const UNLOCK_DEFS: readonly UnlockDef[] = [
+  { id: 'shield',        kind: 'shield',     label: 'Shield',     desc: 'Deflector shield',  cost: 30000 },
+  { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
+  { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
+  { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 40000 },
+  { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
+  { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
+  { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
+] as const;
+
+// Per-level effect magnitudes (read by GameEngine.applyUpgrades + the
+// movement hook).  Base values they modify: HP 100, shield SHIELD_CONSTANTS
+// .MAX_CHARGE, recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
+// Per-LEVEL effect magnitudes.  A normal card grants 1 level; powerful
+// (every-4th-wave) cards grant +2/+3/+4 levels, so they're worth that many of
+// these.  Base values they modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
+// recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
+export const UPGRADE_EFFECTS = {
+  HULL_HP_PER_LEVEL: 25,
+  PLATING_SHIELD_PER_LEVEL: 15,
+  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 0.25,
+  ENGINE_SPEED_FRAC_PER_LEVEL: 0.08,
+  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.12,
+  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.12,
+  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.08,
+  AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
+  MAGAZINE_AMMO_PER_LEVEL: 40,
+};
+
+// ── Between-wave upgrade cards ────────────────────────────────────────────────
+// After every Nth wave (WAVE_INTERVAL, DBG-cyclable) the game pauses and offers
+// a free choice of CARD_COUNT cards.  Pool today: stat-upgrade cards (a free
+// level of one of the UPGRADE_DEFS) + occasional Salvage cards.  Unlock cards
+// (weapons / shield / overcharge) plug into the same pool once unlocks ship.
+export const UPGRADE_CARD_CONSTANTS = {
+  CARD_COUNT: 3,
+  DEFAULT_WAVE_INTERVAL: 1,             // a card every wave
+  WAVE_INTERVAL_CYCLE: [1, 2, 4, 8] as const,
+  // Every Nth wave the offered cards are "powerful" — each grants a random
+  // POWERFUL_MIN..POWERFUL_MAX levels instead of 1.
+  POWERFUL_WAVE_INTERVAL: 4,
+  POWERFUL_MIN_LEVELS: 2,
+  POWERFUL_MAX_LEVELS: 4,
+  SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
+  SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
+  SALVAGE_CARD_PER_WAVE: 75,
+  // Beat between a wave clearing and the card modal opening, so the
+  // wave-clear celebration animation plays before the sim pauses.
+  CARD_OPEN_DELAY_SEC: 1.1,
+  // Chance one of the offered cards is a free (rare) unlock, when any
+  // unlock is still unowned.
+  UNLOCK_CARD_CHANCE: 0.18,
+};
+
+// ── Timed-wave config ────────────────────────────────────────────────────────
+// Waves are timed windows: enemies stream in continuously until the clock
+// runs out.  Killing the full spawn budget before time-up ends the wave
+// early; survivors at time-up are NEVER despawned — they carry over and
+// keep fighting alongside the next wave's stream.
+export const TIMED_WAVE_CONFIG = {
+  // Duration scaling: wave 1 = BASE, +PER_WAVE each wave, capped.
+  BASE_DURATION_SEC: 30,
+  DURATION_PER_WAVE_SEC: 5,
+  DURATION_CAP_SEC: 90,
+  // Spawn stream: unscaled budget = floor(duration / interval), where the
+  // interval shrinks per wave so later waves are denser as well as longer.
+  // DIFFICULTY_SCALES multiplies the budget (same duration → lower
+  // difficulty = proportionally slower spawn rate; 0 disables waves).
+  BASE_SPAWN_INTERVAL_SEC: 5.0,
+  SPAWN_INTERVAL_DECAY_PER_WAVE: 0.15,
+  MIN_SPAWN_INTERVAL_SEC: 1.8,
+  MAX_SPAWN_BUDGET: 30,        // per-wave ceiling regardless of duration math
+  // Final-quarter crescendo: spawn density multiplier over the last
+  // FRACTION of the wave window (the schedule is precomputed from this
+  // piecewise density, so the budget total is exact).
+  FINAL_QUARTER_FRACTION: 0.25,
+  FINAL_QUARTER_RATE_MULT: 1.5,
+  // Stream pressure valve: scheduled spawns are held while this many wave
+  // enemies are alive; the backlog then drains at most one spawn per
+  // BACKLOG_MIN_GAP_SEC so a freed cap never dumps a clump at once.
+  MAX_CONCURRENT_ENEMIES: 10,
+  BACKLOG_MIN_GAP_SEC: 0.4,
+  // Wave-index → tier-weight row mapping for the weighted-random mix
+  // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
+  TIER_SET_LENGTH: 3,
+};
+
+// ── Snitch ───────────────────────────────────────────────────────────────────
+// A golden-comet snitch rides the asteroid flow field with a burst/coast AI
+// and PERSISTS across waves — one keeps flying until the player catches it.
+// Both speed states sit below the player's cruise, so a steady chase always
+// closes; the weave + panic darts are what keep it slippery.  Catching it
+// (collide or shoot — catch mode is a DBG toggle while playtesting) pays
+// SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave; the next wave
+// spawns a fresh one.
+export const SNITCH_CONSTANTS = {
+  SIZE: 14,              // core diameter (world units)
+  MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
+  // ── Burst/coast AI ────────────────────────────────────────────────────
+  // The snitch alternates between two states instead of flying flat-out:
+  //   coast — lazy drift along the flow at COAST_SPEED_FRACTION of the
+  //           player's terminal cruise; this is the catch window.
+  //   dart  — short, violent acceleration to DART_SPEED_FRACTION (briefly
+  //           faster than the player) before bleeding back down to coast.
+  // Darts fire on a random coast timer AND whenever the player closes
+  // inside PANIC_RADIUS (panic darts bias away from the player by
+  // PANIC_AWAY_BIAS).  PANIC_COOLDOWN guarantees a coast window between
+  // panic darts so a persistent chaser always gets another chance.
+  // Speed fractions apply to the friction-limited player cruise
+  // (acceleration/(1−friction), clamped by maxSpeed).
+  // Per-CATCH speed ramp.  The snitch's headline (dart) speed is
+  // WAVE_SPEED_STEP × (catchCount + 1) as a fraction of player cruise — the
+  // FIRST snitch = 0.05×, after one catch = 0.10×, etc. — capped at
+  // WAVE_SPEED_MAX so it never gets hopelessly uncatchable.  Speed ramps
+  // only when the snitch is CAUGHT (not per wave), so the player can defer
+  // it to keep it slow.  Coast drifts at COAST_RATIO of the dart speed,
+  // preserving the burst/coast catch window.  The DBG SNITCH_SPEED_CYCLE
+  // multiplier scales the whole thing on top.
+  WAVE_SPEED_STEP: 0.05,
+  WAVE_SPEED_MAX: 1.2,
+  COAST_RATIO: 0.30,
+  DART_RATIO: 1.0,
+  SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
+  SPEED_EASE_COAST: 2.0, // 1/s ease back down — visible deceleration tail
+  COAST_STEER_RATE: 0.06, // per-60Hz-frame velocity lerp while coasting
+  DART_STEER_RATE: 0.18,  // snappier course-holding mid-dart
+  COAST_DURATION_MIN: 1.6, // seconds before a spontaneous dart
+  COAST_DURATION_MAX: 3.6,
+  DART_DURATION_MIN: 0.6,
+  DART_DURATION_MAX: 1.0,
+  PANIC_RADIUS: 700,     // world units — player inside this triggers a panic dart
+  PANIC_COOLDOWN: 2.2,   // seconds of guaranteed coast eligibility between panic darts
+  PANIC_AWAY_BIAS: 0.65, // 0..1 blend of away-from-player into the dart direction
+  // Wander: the sampled flow direction is rotated by sin(t·FREQ + phase)·AMP
+  // so the snitch weaves around its streamline instead of railing it.
+  WANDER_AMPLITUDE: 0.9, // radians (~±51°)
+  WANDER_FREQ: 2.2,      // rad/s
+  // Catch geometry.  Collide mode: hull-to-hull contact plus this grace.
+  // Shoot mode: any player-owned projectile core within this radius.
+  COLLIDE_GRACE: 8,
+  SHOOT_RADIUS: 18,
+  // Spawn ring — same off-screen contract as wave-enemy spawns.
+  SPAWN_MARGIN: 240,     // world units beyond the viewport half-diagonal
+  // Visuals — golden comet: hot core (RenderSystem isSnitch branch), gold
+  // trail strip (TrailPoint array, projectile-style strip), sparkle motes.
+  CORE_COLOR: '#fde047',
+  GLOW_COLOR: '#f59e0b',
+  TRAIL_LIFETIME: 0.5,   // seconds per trail point — sets the comet-tail length
+  TRAIL_SCALE: 0.9,
+  SPARKLE_COLORS: ['#fde047', '#fbbf24', '#fff7cc', '#f59e0b'] as string[],
+  CATCH_BURST_COUNT: 40, // gold particle burst on catch
+};
+
+// DBG snitch-speed multiplier on both AI speed states (coast + dart).
+// Cycled live from the DBG panel (Player ▸ Snitch spd) so the chase feel
+// can be tuned without a rebuild.  Multiplies the cruise-relative target
+// speed in GameEngine.updateSnitch, so it scales coast and dart together
+// and tracks player-cruise changes.  Default 1.0× = the base fractions.
+export const SNITCH_SPEED_CYCLE: ReadonlyArray<number> = [
+  0.5, 0.75, 1.0, 1.5, 2.0,
+] as const;
+let activeSnitchSpeedIndex = 2; // 1.0×
+export function getActiveSnitchSpeedMult(): number {
+  return SNITCH_SPEED_CYCLE[activeSnitchSpeedIndex];
+}
+export function getActiveSnitchSpeedName(): string {
+  return `${SNITCH_SPEED_CYCLE[activeSnitchSpeedIndex]}×`;
+}
+export function cycleSnitchSpeed(): number {
+  activeSnitchSpeedIndex = (activeSnitchSpeedIndex + 1) % SNITCH_SPEED_CYCLE.length;
+  return activeSnitchSpeedIndex;
+}
 
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number
 // and provides the canonical pickup colour used by every ammo drop entity
@@ -2253,13 +2568,45 @@ export const HEALTH_DROP_INTERVAL: Record<number, number> = {
   3: 20,   // Hard — every 20 waves
 };
 
-// Difficulty stat multipliers — scale individual enemy health and speed
-export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number }> = {
-  0: { health: 1.0, speed: 1.0 }, // N/A (no enemies)
-  1: { health: 0.7, speed: 0.8 }, // Low — weaker, slower enemies
-  2: { health: 0.85, speed: 0.9 }, // Moderate
-  3: { health: 1.0, speed: 1.0 }, // Full difficulty
+// Difficulty stat multipliers — scale individual enemy health, speed, damage
+export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: number; damage: number }> = {
+  0: { health: 1.0,  speed: 1.0, damage: 1.0 }, // N/A (no enemies)
+  1: { health: 0.7,  speed: 0.8, damage: 0.7 }, // Low — weaker, slower, softer
+  2: { health: 0.85, speed: 0.9, damage: 0.85 }, // Moderate
+  3: { health: 1.0,  speed: 1.0, damage: 1.0 }, // Full difficulty
 };
+
+// ── Enemy scaling (per-wave) ──────────────────────────────────────────────────
+// On top of the per-difficulty multipliers, enemies scale with the wave number
+// so the run stays honest as the player upgrades.  Tuned for a COMFORTABLE
+// lead: growth is gentle (the player out-scales faster), and both terms cap.
+//   Final enemy HP  = baseTierHP × difficulty.health × enemyHpMult(waveIndex)
+//   Final enemy dmg = baseAttackDmg × difficulty.damage × enemyDamageMult(idx)
+// waveIndex is 0-based, so wave 1 (index 0) → ×1.0 (no scaling).
+export const ENEMY_SCALING = {
+  HP_GROWTH_PER_WAVE: 0.06,  // +6% enemy HP per wave …
+  HP_MULT_CAP: 2.5,          // … capped at 2.5×
+  DMG_GROWTH_PER_WAVE: 0.04, // +4% enemy damage per wave …
+  DMG_MULT_CAP: 2.0,         // … capped at 2.0×
+};
+// DBG global multiplier on the per-wave growth (Player ▸ "Enemy scale"):
+// 0 = no wave scaling, 1 = tuned, 2 = double growth.  Feel the margin live.
+export const ENEMY_SCALE_CYCLE: ReadonlyArray<number> = [1, 0, 0.5, 1.5, 2] as const;
+let activeEnemyScaleIndex = 0; // 1×
+export function getActiveEnemyScaleMult(): number { return ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]; }
+export function getActiveEnemyScaleName(): string { return `${ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]}×`; }
+export function cycleEnemyScale(): number {
+  activeEnemyScaleIndex = (activeEnemyScaleIndex + 1) % ENEMY_SCALE_CYCLE.length;
+  return activeEnemyScaleIndex;
+}
+export function enemyHpMult(waveIndex: number): number {
+  return Math.min(ENEMY_SCALING.HP_MULT_CAP,
+    1 + ENEMY_SCALING.HP_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
+}
+export function enemyDamageMult(waveIndex: number): number {
+  return Math.min(ENEMY_SCALING.DMG_MULT_CAP,
+    1 + ENEMY_SCALING.DMG_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
+}
 
 // ── Enemy variant configs ─────────────────────────────────────────────────────
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
@@ -2267,43 +2614,137 @@ export const DIFFICULTY_STAT_SCALES: Record<number, { health: number; speed: num
 // To add a new enemy type: add entries to EnemySubtype, EnemyRole, ENEMY_ROLE,
 // and ENEMY_VARIANTS, then reference the new subtype in WAVE_DEFINITIONS.
 
+// Enemy archetype table.  EVERY enemy is now a shooter (`shoots`); variety
+// comes from the movement role (RAMMING = rush in close, SHOOTING = keep
+// distance & strafe), the per-archetype `weapon` override on ENEMY_WEAPON,
+// `contactDamage` (rushers hurt on touch; ranged keep 0), and defenses
+// (ENEMY_TRAITS armor / ENEMY_ATTACK_EFFECTS corrosion).
 export const ENEMY_VARIANTS: Record<EnemySubtype, {
   color: string; size: number; health: number;
   maxSpeed: number; accel: number; turnRate: number;
-  sprite: string; mass: number;
+  sprite: string; mass: number; shape: EnemyShape;
+  shoots: boolean; contactDamage: number; weapon?: Partial<WeaponConfig>;
+  // Optional burst pattern: fire `size` shots `gap` seconds apart, then
+  // reload for the archetype weapon's full `cooldown`.  Absent → one shot
+  // per `cooldown` (the common case).  The per-archetype `cooldown` is the
+  // real fire cadence (the old global burst override is gone), so each
+  // enemy's rhythm is its own.
+  burst?: { size: number; gap: number };
+  // Optional attack telegraph: seconds before a shot lands during which the
+  // enemy visibly winds up (muzzle charge glow + forward aim line, scaled by
+  // a 0→1 `aimCharge` WeaponSystem sets).  Reserved for the slow / heavy
+  // shooters whose shots are worth dodging — Tank, Sniper, Charger.  Must be
+  // ≤ the weapon `cooldown` (it only shows in the final lead-up).  Absent →
+  // no tell (fast peashooters stay snappy and unpredictable).
+  telegraph?: number;
+  // Sniper-only: draw a full-length lock-on laser to the player during the
+  // telegraph (vs the plain muzzle-charge tell), and hold still while locked
+  // (AISystem brakes to a stop) so it reads as a deliberate camping shooter
+  // rather than a continuous strafing stream.
+  aimLaser?: boolean;
 }> = {
-  // ── Ramming — red → orange → yellow ──
+  // ── Rushers — close in and fire (rose → orange → amber) ──
+  // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
+  // dives at you.  High rate of fire, trivial per-shot damage.
   [EnemySubtype.RAMMER_1]: {
     color: '#ef4444', size: 28, health: 1,
     maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
-    sprite: ASSETS.ENEMY_DRONE,    mass: 10
+    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'circle',
+    shoots: true, contactDamage: 8,
+    weapon: { cooldown: 0.7, damage: 5, speed: 9, size: 4, color: '#fb7185' },
   },
+  // Charger: a strafing twin-cannon — fires a 2-shot orange fan on a longer
+  // beat as it lines up a dash.
   [EnemySubtype.RAMMER_2]: {
-    color: '#f97316', size: 28, health: 1,
+    color: '#f97316', size: 28, health: 2,
     maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
-    sprite: ASSETS.ENEMY_CHARGER,  mass: 8
+    sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow',
+    shoots: true, contactDamage: 10,
+    weapon: { cooldown: 1.15, damage: 7, speed: 9, size: 5, count: 2, spread: 14, color: '#fb923c' },
+    telegraph: 0.3,
   },
+  // Tank: a heavy siege slug — slow, big, solid amber shell that hits hard
+  // (no glow: it reads as a dense slug, not a plasma ball, and its impact is
+  // sold by the damage-scaled player shake/knockback, not brightness).  The
+  // armor trait + this lumbering cannon make it the "bring the right tool" enemy.
   [EnemySubtype.RAMMER_3]: {
-    color: '#facc15', size: 32, health: 3,
-    maxSpeed: 11,  accel: 8,   turnRate: 3.0,
-    sprite: ASSETS.ENEMY_TANK,     mass: 18
+    color: '#facc15', size: 32, health: 5,
+    maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
+    sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
+    shoots: true, contactDamage: 14,
+    weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047' },
+    telegraph: 0.9,
   },
-  // ── Shooting — green → cyan → blue ──
+  // ── Skirmishers — keep distance and fire (green → acid → blue) ──
+  // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
   [EnemySubtype.SHOOTER_1]: {
     color: '#4ade80', size: 28, health: 1,
     maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
-    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12
+    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12, shape: 'diamond',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.1, damage: 6, speed: 9, size: 5, color: '#4ade80' },
   },
+  // Orbiter: an acid spitter — a glowing double-tap of corrosive rounds
+  // (colour forced to acid-green by the ENEMY_ATTACK_EFFECTS path) on a
+  // burst rhythm.  Low impact, nasty DoT.
   [EnemySubtype.SHOOTER_2]: {
     color: '#22d3ee', size: 28, health: 2,
     maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
-    sprite: ASSETS.ENEMY_ORBITER,  mass: 10
+    sprite: ASSETS.ENEMY_ORBITER,  mass: 10, shape: 'pentagon',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.5, damage: 5, speed: 8, size: 6, glow: true },
+    burst: { size: 2, gap: 0.18 },
   },
+  // Sniper: a camping railgun — mostly stationary, holds still and snaps a
+  // lock-on laser onto the player, then fires one thin, very fast, bright-blue
+  // high-damage tracer.  Slow to reposition (low maxSpeed) and slow to fire
+  // (long cooldown) so each shot is a deliberate, dodgeable event, not a
+  // stream.  Punishing if you stand in the laser.
   [EnemySubtype.SHOOTER_3]: {
-    color: '#3b82f6', size: 26, health: 2,
-    maxSpeed: 7,   accel: 4,   turnRate: 1.5,
-    sprite: ASSETS.ENEMY_SNIPER,   mass: 9
+    color: '#3b82f6', size: 26, health: 3,
+    maxSpeed: 4,   accel: 3,   turnRate: 1.8,
+    sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 2.8, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
+    telegraph: 0.75, aimLaser: true,
   },
+};
+
+// ── Status effects ────────────────────────────────────────────────────────────
+// Corrosion: a stacking damage-over-time the Orbiter (Shooter-tier-2) applies
+// with its acid rounds.  Bleeds health directly (past the shield); each hit
+// adds a stack (capped) and refreshes the duration.  v1 effect — the framework
+// is generic so disables / scramble / slow can join later.
+export const CORROSION = {
+  DMG_PER_SEC: 3,    // per stack
+  DURATION: 4,       // seconds, refreshed on re-hit
+  MAX_STACKS: 3,     // up to 9 dmg/s
+  COLOR: '#a3e635',  // acid green — projectile + HUD badge + ship tint
+};
+
+// Per-subtype attack effect: a shooter whose subtype appears here fires rounds
+// that apply the effect to the player on hit (and render in the effect colour).
+export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> = {
+  [EnemySubtype.SHOOTER_2]: {
+    kind: 'corrosion', duration: CORROSION.DURATION,
+    dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
+  },
+};
+
+// ── Enemy counterplay traits ──────────────────────────────────────────────────
+// Soft-counter levers stamped on an enemy at spawn (WaveSystem.spawnEnemy).
+// SOFT by design: a chip weapon still works, just slowly, while the demanded
+// tool trivialises the threat.  v1 = armor only (Tank); evasive / front-shield /
+// regen join with their enemies + the bosses.
+//   armor.chipThreshold — per-hit damage at/above this lands in full
+//   armor.reduction     — fraction cut from hits BELOW the threshold
+// So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
+// Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
+// through.  AoE/explosion damage isn't chip-resisted (it's an answer).
+export const ENEMY_TRAITS: Partial<Record<EnemySubtype, {
+  armor?: { chipThreshold: number; reduction: number };
+}>> = {
+  [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
 };
 
 // Maps each subtype to its role — used by AI routing and shooting logic.
@@ -2317,76 +2758,109 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
-// 18 waves across 6 sets of 3.  Each set: [Ramming-only, Shooting-only, Mixed].
-// Difficulty blend per set:
-//   Set 1: L1       Set 2: ½L1+½L2   Set 3: L2
-//   Set 4: ⅓L1+⅓L2+⅓L3   Set 5: ½L2+½L3   Set 6: L3
+// Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each
+// enemy role gets a clean introduction (ram-only → shoot-only → mixed).  The
+// composition is cycled to fill the timed wave's spawn budget, so counts
+// express the mix ratio, not the absolute spawn total.  Waves 4+ roll a
+// weighted-random mix instead — see buildWaveSpawnList().
 //
-// powerup: weapon dropped when the wave is cleared (null = no drop, auto-advance;
-//          on the final wave null also triggers the victory state).
-export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null }[] = [
-
-  // ── Set 1 — Level 1 only ──────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }], powerup: null },                                                    // W1  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }], powerup: null },                                                    // W2  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }], powerup: WeaponType.BURST },   // W3  Mixed
-
-  // ── Set 2 — ½ L1, ½ L2 ───────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }], powerup: null },     // W4  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: null },     // W5  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }], powerup: WeaponType.SHOTGUN }, // W6  Mixed
-
-  // ── Set 3 — Level 2 only ─────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 4 }], powerup: null },                                                    // W7  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 4 }], powerup: null },                                                    // W8  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }], powerup: WeaponType.HOMING }, // W9  Mixed
-
-  // ── Set 4 — ⅓ L1, ⅓ L2, ⅓ L3 ────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },    // W10 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 2 }, { subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },    // W11 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 1 }, { subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_1, count: 1 }, { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: WeaponType.CANNON }, // W12 Mixed
-
-  // ── Set 5 — ½ L2, ½ L3 ───────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 2 }, { subtype: EnemySubtype.RAMMER_3,  count: 2 }], powerup: null },     // W13 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_2, count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W14 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_2,  count: 1 }, { subtype: EnemySubtype.RAMMER_3,  count: 1 },
-              { subtype: EnemySubtype.SHOOTER_2, count: 1 }, { subtype: EnemySubtype.SHOOTER_3, count: 1 }], powerup: null },     // W15 Mixed
-
-  // ── Set 6 — Level 3 only ─────────────────────────────────────────────────
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 4 }], powerup: null },                                                    // W16 Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_3, count: 4 }], powerup: null },                                                    // W17 Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_3,  count: 2 }, { subtype: EnemySubtype.SHOOTER_3, count: 2 }], powerup: null },     // W18 Mixed
+// (The old per-wave `powerup` field was dead code — powerup drops were removed
+// from DropSystem — and is gone; weapon unlocks return with the (h) bosses.)
+export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[] }[] = [
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
+  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
+  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
 ];
 
-/**
- * Returns the wave definition for any wave index (0-based, infinite).
- *
- * Indices 0–17 map directly to the hand-authored WAVE_DEFINITIONS above.
- * Indices 18+ enter the infinite phase: pure tier-3 enemies, all-rammer →
- * all-shooter → mixed pattern, with enemy count increasing by
- * WAVE_CONFIG.INFINITE_COUNT_PER_SET each set, capped at INFINITE_MAX_COUNT.
- */
-export function generateWaveDef(index: number): { enemies: { subtype: EnemySubtype; count: number }[]; powerup: WeaponType | null } {
-  if (index < WAVE_DEFINITIONS.length) return WAVE_DEFINITIONS[index];
+// Tier-weight progression for the weighted-random waves (index 3+).  Row =
+// min(floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH), last), so the blend
+// walks L1 → ½L1+½L2 → L2 → ⅓ each → ½L2+½L3 → L3 over the first 18 waves
+// and stays pure tier-3 from then on.  Shape: [w_tier1, w_tier2, w_tier3].
+const WAVE_TIER_WEIGHTS: [number, number, number][] = [
+  [1, 0, 0],
+  [0.5, 0.5, 0],
+  [0, 1, 0],
+  [1 / 3, 1 / 3, 1 / 3],
+  [0, 0.5, 0.5],
+  [0, 0, 1],
+];
 
-  const infiniteIdx = index - WAVE_DEFINITIONS.length;
-  const set     = Math.floor(infiniteIdx / WAVE_CONFIG.PATTERN_LENGTH);
-  const pattern = infiniteIdx % WAVE_CONFIG.PATTERN_LENGTH;
+const SUBTYPE_BY_ROLE_TIER: Record<EnemyRole, EnemySubtype[]> = {
+  [EnemyRole.RAMMING]:  [EnemySubtype.RAMMER_1,  EnemySubtype.RAMMER_2,  EnemySubtype.RAMMER_3],
+  [EnemyRole.SHOOTING]: [EnemySubtype.SHOOTER_1, EnemySubtype.SHOOTER_2, EnemySubtype.SHOOTER_3],
+};
 
-  const count = Math.min(
-    WAVE_CONFIG.INFINITE_BASE_COUNT + set * WAVE_CONFIG.INFINITE_COUNT_PER_SET,
-    WAVE_CONFIG.INFINITE_MAX_COUNT,
+/** Length of the timed window for a 0-based wave index, in seconds. */
+export function getWaveDurationSec(index: number): number {
+  return Math.min(
+    TIMED_WAVE_CONFIG.BASE_DURATION_SEC + index * TIMED_WAVE_CONFIG.DURATION_PER_WAVE_SEC,
+    TIMED_WAVE_CONFIG.DURATION_CAP_SEC,
   );
+}
 
-  const half = Math.ceil(count / 2);
-  const enemies: { subtype: EnemySubtype; count: number }[] =
-    pattern === 0 ? [{ subtype: EnemySubtype.RAMMER_3,  count }]
-    : pattern === 1 ? [{ subtype: EnemySubtype.SHOOTER_3, count }]
-    : [{ subtype: EnemySubtype.RAMMER_3, count: half }, { subtype: EnemySubtype.SHOOTER_3, count: count - half }];
+/** Unscaled total spawn budget for a wave (before DIFFICULTY_SCALES). */
+export function getWaveSpawnBudget(index: number): number {
+  const interval = Math.max(
+    TIMED_WAVE_CONFIG.MIN_SPAWN_INTERVAL_SEC,
+    TIMED_WAVE_CONFIG.BASE_SPAWN_INTERVAL_SEC - index * TIMED_WAVE_CONFIG.SPAWN_INTERVAL_DECAY_PER_WAVE,
+  );
+  return Math.min(
+    TIMED_WAVE_CONFIG.MAX_SPAWN_BUDGET,
+    Math.max(1, Math.floor(getWaveDurationSec(index) / interval)),
+  );
+}
 
-  return { enemies, powerup: null };
+/** Roll a 0-based tier from a [w1, w2, w3] weight row. */
+function rollTier(weights: [number, number, number]): number {
+  const r = Math.random() * (weights[0] + weights[1] + weights[2]);
+  if (r < weights[0]) return 0;
+  if (r < weights[0] + weights[1]) return 1;
+  return 2;
+}
+
+/**
+ * Build the ordered subtype list a timed wave will spawn (length = budget).
+ *
+ * Scripted waves (index < WAVE_DEFINITIONS.length) cycle their authored
+ * composition to fill the budget.  Later waves roll each slot independently:
+ * 50/50 ram/shoot role, tier from the WAVE_TIER_WEIGHTS row for the wave's
+ * set.  A variety guarantee re-rolls one slot's role when a random wave with
+ * budget ≥ 3 lands all-rammer or all-shooter, so every such wave mixes types.
+ */
+export function buildWaveSpawnList(index: number, budget: number, forced?: EnemySubtype | null): EnemySubtype[] {
+  // DBG enemy-test override: spawn ONLY the forced subtype (ignores the
+  // scripted/weighted mix) so a specific enemy/trait can be tested in isolation.
+  if (forced) return new Array(budget).fill(forced);
+  const list: EnemySubtype[] = [];
+  if (index < WAVE_DEFINITIONS.length) {
+    const flat: EnemySubtype[] = [];
+    for (const g of WAVE_DEFINITIONS[index].enemies) {
+      for (let i = 0; i < g.count; i++) flat.push(g.subtype);
+    }
+    for (let i = 0; i < budget; i++) list.push(flat[i % flat.length]);
+    return list;
+  }
+
+  const set = Math.min(
+    Math.floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH),
+    WAVE_TIER_WEIGHTS.length - 1,
+  );
+  const weights = WAVE_TIER_WEIGHTS[set];
+  for (let i = 0; i < budget; i++) {
+    const role = Math.random() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
+    list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
+  }
+
+  if (budget >= 3) {
+    const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
+    const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
+    if (!hasRam || !hasShoot) {
+      const k = Math.floor(Math.random() * budget);
+      const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
+      list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
+    }
+  }
+  return list;
 }
 
 /**

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -121,6 +121,9 @@ export class PhysicsSystem {
   // the entire broadphase + SAT pass is skipped (game-breaking;
   // strictly for measuring the isolated cost in the perf overlay).
   public collisionsEnabled: boolean = true;
+  // Debug toggle — gates the enemy counterplay traits (armor chip-resist,
+  // etc.).  Default ON; flip OFF to A/B the soft-counter engine.
+  public traitsEnabled: boolean = true;
   // Debug toggle — gates the dedicated mobile-shard ↔ static-tile
   // collision scan (resolveShardTilePairs).  Default OFF: the main
   // broadphase already skips this pair (shards are excluded from
@@ -469,7 +472,7 @@ export class PhysicsSystem {
       if (entity.shield !== undefined && entity.maxShield !== undefined
           && entity.shield < entity.maxShield
           && (entity.shieldRechargeTimer ?? 0) <= 0) {
-          entity.shield = Math.min(entity.maxShield, entity.shield + SHIELD_CONSTANTS.RECHARGE_RATE * dt);
+          entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
 
       // ORBITAL PHYSICS
@@ -2541,6 +2544,11 @@ export class PhysicsSystem {
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
               target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
           }
+          // Armored enemies shrug off small per-hit "chip" damage — demands
+          // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
+          if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
+              projDmg *= (1 - target.armor.reduction);
+          }
           if (projDmg > 0) {
               // Indestructible tiles eat the projectile without losing
               // health — flash only, health stays pinned.  Everything
@@ -2591,19 +2599,49 @@ export class PhysicsSystem {
                   }
               }
               target.hitFlash = 0.1;
+              // Hit feedback — uncapped damage-scaled knockback + stagger so
+              // the hit reads (post-armor projDmg, so chip hits kick weakly).
+              if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
+                  const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG;
+                  target.velocity.x += (proj.velocity.x / vmag) * kick;
+                  target.velocity.y += (proj.velocity.y / vmag) * kick;
+                  target.hitStun = HIT_FEEDBACK.STUN_SEC;
+                  target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+              }
           }
 
           if (onShake && target.type !== EntityType.STRUCTURE) {
-              const shakeAmount = target.type === EntityType.PLAYER
-                  ? COLLISION_CONFIG.SHAKE.MEDIUM
-                  : COLLISION_CONFIG.SHAKE.MICRO;
-              onShake(shakeAmount);
+              if (target.type === EntityType.PLAYER) {
+                  // Heavy shots wallop, chip shots barely register — scale the
+                  // shake AND shove the player along the shot direction by the
+                  // projectile's intrinsic damage (so a slug felt even through
+                  // the shield).
+                  const impactDmg = proj.damage || 1;
+                  onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
+                      HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG));
+                  if (proj.velocity && !target.isExploding) {
+                      const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                      const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_PER_DMG;
+                      target.velocity.x += (proj.velocity.x / vmag) * kick;
+                      target.velocity.y += (proj.velocity.y / vmag) * kick;
+                      target.hitFlash = Math.max(target.hitFlash ?? 0, Math.min(0.3, 0.08 + impactDmg * 0.012));
+                  }
+              } else {
+                  onShake(COLLISION_CONFIG.SHAKE.MICRO);
+              }
           }
 
           if (onHit) onHit(proj.position, proj, target);
-          if (onDamage) onDamage(target.position, proj.damage || 1, target, proj.position);
+          // Armored enemies show the REDUCED number (chip feedback); others
+          // show the raw projectile damage.
+          const shownDmg = target.armor ? projDmg : (proj.damage || 1);
+          if (onDamage) onDamage(target.position, shownDmg, target, proj.position);
 
           if (target.health <= 0) {
+              // Player-attributed kill stamp — handleEntityDeath awards
+              // shard/tile destruction points only when this is set.
+              if (proj.ownerType === EntityType.PLAYER) target.killedByPlayer = true;
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
               if (target.type === EntityType.STRUCTURE) {
@@ -2655,10 +2693,15 @@ export class PhysicsSystem {
               const rdy = enemy.velocity.y - target.velocity.y;
               const ramImpact = Math.sqrt(rdx * rdx + rdy * rdy);
               // Below shield damage threshold: contact flash only, no damage
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD) {
+              // Per-archetype contact damage (rushers hurt; ranged enemies
+              // have 0).  No damage below the impact-speed threshold either.
+              const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0) {
                   // flash already handled by the general contact flash below
               } else {
-                  let ramDmg = COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
+                  // Per-wave enemy damage scaling rides enemy.damageMult.
+                  const ramBase = contact * (enemy.damageMult ?? 1);
+                  let ramDmg = ramBase;
                   if ((target.shield ?? 0) > 0) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
@@ -2666,7 +2709,7 @@ export class PhysicsSystem {
                       target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                       target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
-                  if (onDamage) onDamage(target.position, COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY, target);
+                  if (onDamage) onDamage(target.position, ramBase, target);
                   if (ramDmg > 0) {
                       target.health -= ramDmg;
                       target.hitFlash = 0.2;
@@ -2794,6 +2837,8 @@ export class PhysicsSystem {
               if (structure.health <= 0) {
                   structure.health = 0;
                   structure.active = false;
+                  // Crash kills are player-attributed for scoring.
+                  structure.killedByPlayer = true;
                   if (structure.mass === Infinity) {
                       this.removeStaticEntity(structure);
                   }

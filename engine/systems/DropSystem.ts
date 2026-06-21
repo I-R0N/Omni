@@ -57,7 +57,7 @@ export class DropSystem {
     if (entity.dropType === 'ammo') {
       const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
       const before = player.ammo ?? 0;
-      player.ammo = Math.min(AMMO_CONSTANTS.MAX_POOL, before + amount);
+      player.ammo = Math.min(player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL, before + amount);
       const gained = player.ammo - before;
       // Shared-pool flash — accumulate amount if picked up in quick succession
       const prev = player.ammoPickupFlash;

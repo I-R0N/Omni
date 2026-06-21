@@ -1,11 +1,12 @@
-import { GameEntity, EntityType, EnemyRole, Vector2, WeaponType, WeaponConfig } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
   WEAPONS,
   WEAPON_LIST,
   ENEMY_WEAPON,
-  ENEMY_BURST_CONFIG,
   ENEMY_CONSTANTS,
-  ENEMY_ROLE,
+  ENEMY_VARIANTS,
+  ENEMY_ATTACK_EFFECTS,
+  CORROSION,
   COLLISION_CONFIG,
   LIGHTNING_CHAIN_BRANCHES,
 } from '../../constants';
@@ -110,7 +111,8 @@ export class WeaponSystem {
 
     // Charged-shot ammo gating: if the pool can't cover chargedAmmoCost,
     // fall back to a normal shot at ammoCost.
-    let isCharged = charged;
+    // Charged shots require the Overcharge unlock.
+    let isCharged = charged && (player.overchargeUnlocked ?? false);
     if (isCharged && baseConfig.chargedAmmoCost > 0 && (player.ammo ?? 0) < baseConfig.chargedAmmoCost) {
       isCharged = false;
     }
@@ -124,8 +126,19 @@ export class WeaponSystem {
       baseConfig = WEAPONS[WeaponType.BLASTER];
     }
 
-    const config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
-    player.weaponCooldown = baseConfig.cooldown; // cooldown read from base — charge variant doesn't change cadence
+    let config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    // Progression: Gunnery scales damage (incl. cannon AoE), Autoloader
+    // scales fire cadence.  Copy the config before scaling so the shared
+    // WEAPONS table is never mutated.
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = {
+        ...config,
+        damage: config.damage * dmgMult,
+        explosionDamage: config.explosionDamage !== undefined ? config.explosionDamage * dmgMult : config.explosionDamage,
+      };
+    }
+    player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
     // Deduct shared-pool ammo (no-op for blaster: ammoCost 0).  Charged
     // shots use chargedAmmoCost; normal shots use ammoCost.
@@ -178,7 +191,11 @@ export class WeaponSystem {
 
     player.burstQueue--;
     const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
-    const config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    let config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
+    const dmgMult = player.damageMult ?? 1;
+    if (dmgMult !== 1) {
+      config = { ...config, damage: config.damage * dmgMult };
+    }
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
@@ -205,39 +222,75 @@ export class WeaponSystem {
     player: GameEntity,
     dt: number,
   ) {
-    const weapon = ENEMY_WEAPON;
     const rangeSq = ENEMY_CONSTANTS.VISION_RANGE * ENEMY_CONSTANTS.VISION_RANGE;
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
-      if (!enemy.enemySubtype || ENEMY_ROLE[enemy.enemySubtype] !== EnemyRole.SHOOTING) continue;
+      const arch = enemy.enemySubtype ? ENEMY_VARIANTS[enemy.enemySubtype] : undefined;
+      if (!arch || !arch.shoots) continue; // every shooting enemy fires its archetype weapon
 
       // Cooldown management
       enemy.weaponCooldown = Math.max(0, (enemy.weaponCooldown ?? 0) - dt);
-      if (enemy.weaponCooldown > 0) continue;
 
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const distSq = dx * dx + dy * dy;
-      if (distSq > rangeSq) continue;
+      const inRange = distSq <= rangeSq;
 
-      // Lazily init burst state — first trigger starts a fresh burst
-      if (enemy.burstQueue === undefined) enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
+      // Attack telegraph: ramp aimCharge 0→1 over the archetype's window as
+      // the cooldown winds down, but only while engaged (in range).  Cleared
+      // otherwise so idle / out-of-range enemies show no tell.  (Computed
+      // before the fire early-outs so the wind-up renders even mid-cooldown.)
+      const tw = arch.telegraph;
+      if (tw && inRange && enemy.weaponCooldown <= tw) {
+        enemy.aimCharge = 1 - enemy.weaponCooldown / tw;
+        // Laser snipers track the player's live distance so the sight reaches
+        // them; refreshed every charging frame (the sniper rotates to track).
+        if (arch.aimLaser) enemy.aimDist = Math.sqrt(distSq);
+      } else if (enemy.aimCharge) {
+        enemy.aimCharge = 0;
+      }
 
-      // Slight inaccuracy
-      const aimAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
+      if (enemy.weaponCooldown > 0) continue;
+      if (!inRange) continue;
+
+      // Per-archetype weapon = ENEMY_WEAPON with the archetype's overrides.
+      const weapon = arch.weapon ? { ...ENEMY_WEAPON, ...arch.weapon } : ENEMY_WEAPON;
+
+      // Laser snipers fire EXACTLY down the rendered lock-on line (= the ship's
+      // facing) with no spread — the sight is a promise.  Everyone else aims at
+      // the player's current position with the weapon's slight inaccuracy.
+      const aimAngle = arch.aimLaser
+        ? enemy.rotation
+        : Math.atan2(dy, dx) + (Math.random() - 0.5) * (weapon.spread * Math.PI / 180);
       const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
       const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
-      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, weapon, EntityType.ENEMY);
+      // Per-wave damage scaling + the Orbiter's corrosion payload.
+      const dmgMult = enemy.damageMult ?? 1;
+      const fx = enemy.enemySubtype ? ENEMY_ATTACK_EFFECTS[enemy.enemySubtype] : undefined;
+      let shot = weapon;
+      if (dmgMult !== 1 || fx) {
+        shot = { ...weapon };
+        if (dmgMult !== 1) shot.damage = weapon.damage * dmgMult;
+        if (fx) { shot.appliesEffect = fx; shot.color = CORROSION.COLOR; }
+      }
+      this.projectiles.spawn(entities, enemy, { x: targetX, y: targetY }, shot, EntityType.ENEMY);
 
-      // Burst state: fire BURST_SIZE shots with BURST_GAP between them,
-      // then wait BURST_RELOAD before starting the next burst.
-      if (enemy.burstQueue > 1) {
-        enemy.burstQueue--;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_GAP;
+      // Cadence: archetypes with a `burst` fire `size` shots `gap` apart then
+      // reload for the weapon's full `cooldown`; everyone else fires one shot
+      // per `cooldown`.  The per-archetype cooldown IS the fire rate.
+      const burst = arch.burst;
+      if (burst) {
+        if (enemy.burstQueue === undefined || enemy.burstQueue <= 0) enemy.burstQueue = burst.size;
+        if (enemy.burstQueue > 1) {
+          enemy.burstQueue--;
+          enemy.weaponCooldown = burst.gap;
+        } else {
+          enemy.burstQueue = burst.size;
+          enemy.weaponCooldown = weapon.cooldown;
+        }
       } else {
-        enemy.burstQueue = ENEMY_BURST_CONFIG.BURST_SIZE;
-        enemy.weaponCooldown = ENEMY_BURST_CONFIG.BURST_RELOAD;
+        enemy.weaponCooldown = weapon.cooldown;
       }
     }
   }
@@ -253,6 +306,11 @@ export class WeaponSystem {
    */
   public selectWeapon(player: GameEntity, wType: WeaponType): number {
     const cfg = WEAPONS[wType];
+    // Locked weapons can't be selected (Blaster is always owned).
+    const owned = player.ownedWeapons ?? [WeaponType.BLASTER];
+    if (wType !== WeaponType.BLASTER && !owned.includes(wType)) {
+      return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
+    }
     if (cfg.ammoCost > 0 && (player.ammo ?? 0) < cfg.ammoCost) {
       return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
     }
@@ -275,7 +333,9 @@ export class WeaponSystem {
    */
   public cycleWeapon(player: GameEntity): number {
     const pool = player.ammo ?? 0;
+    const ownedSet = player.ownedWeapons ?? [WeaponType.BLASTER];
     const owned = WEAPON_LIST.filter(w => {
+      if (w !== WeaponType.BLASTER && !ownedSet.includes(w)) return false; // must be unlocked
       const cfg = WEAPONS[w];
       return cfg.ammoCost === 0 || pool >= cfg.ammoCost;
     });

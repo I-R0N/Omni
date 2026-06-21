@@ -58,6 +58,12 @@ export class AISystem {
           enemy.aggroTimer = Math.max(0, enemy.aggroTimer - dt);
       }
 
+      // Hit-stagger: tick down; while > 0 the movement routines apply no
+      // force (the knockback carries it), so a hit reads as a brief reel.
+      if (enemy.hitStun && enemy.hitStun > 0) {
+          enemy.hitStun = Math.max(0, enemy.hitStun - dt);
+      }
+
       // Route by role — add new roles here as needed
       const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
       if (role === EnemyRole.SHOOTING) {
@@ -143,12 +149,50 @@ export class AISystem {
       // Movement still tracks the real player position for responsive seek/flee/strafe.
       // Use toroidal delta so enemies near a seam aim at the nearest wrapped
       // copy of the player instead of firing across the entire map.
-      const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
-      const aimX = dx + player.velocity.x * leadTime;
-      const aimY = dy + player.velocity.y * leadTime;
-      let targetAngle = Math.atan2(aimY, aimX);
-      
-      if (dist < PREFERRED_DIST - DEADZONE) {
+      // EXCEPTION: laser snipers aim straight at the player (no lead) so the
+      // rendered lock-on line points exactly where the shot will go — the
+      // WeaponSystem fires down this same facing.
+      let targetAngle: number;
+      if (enemy.aimLaser) {
+          targetAngle = Math.atan2(dy, dx);
+      } else {
+          const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
+          targetAngle = Math.atan2(dy + player.velocity.y * leadTime, dx + player.velocity.x * leadTime);
+      }
+
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      // Laser snipers plant themselves while locked on (aimCharge > 0) so the
+      // shot is a deliberate, telegraphed event from a stationary camper —
+      // brake hard to a stop instead of strafing.
+      const locked = !!enemy.aimLaser && (enemy.aimCharge ?? 0) > 0;
+      const isOrbiter = enemy.enemySubtype === EnemySubtype.SHOOTER_2;
+      if (stunned) {
+          // Staggered — apply no movement force this step (the knockback rides).
+      } else if (locked) {
+          enemy.velocity.x *= 0.8;
+          enemy.velocity.y *= 0.8;
+      } else if (isOrbiter && dist > 1) {
+          // TRUE ORBIT: hold a fixed radius and circle the player.  A radial
+          // term (toward/away) corrects back to ORBITER.RADIUS; a tangential
+          // term drives the actual orbit.  Stable per-entity handedness so a
+          // pack of orbiters fans out instead of stacking on one circle.
+          if (enemy.orbitSpin === undefined) {
+              let h = 0; const id = enemy.id;
+              for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
+              enemy.orbitSpin = (h & 1) ? 1 : -1;
+          }
+          const { RADIUS, RADIAL_DEADZONE, RADIAL_GAIN, TANGENTIAL } = AI_CONFIG.ORBITER;
+          const inX = dx / dist, inY = dy / dist;   // unit vector toward player
+          // Radial pull: + error (too far) steers toward the player, - error
+          // (too close) steers away; saturates over RADIAL_DEADZONE.
+          let radial = (dist - RADIUS) / RADIAL_DEADZONE;
+          if (radial > 1) radial = 1; else if (radial < -1) radial = -1;
+          enemy.velocity.x += inX * radial * accel * RADIAL_GAIN * dt;
+          enemy.velocity.y += inY * radial * accel * RADIAL_GAIN * dt;
+          // Tangential drive: perpendicular to the player vector, signed by spin.
+          enemy.velocity.x += -inY * enemy.orbitSpin * accel * TANGENTIAL * dt;
+          enemy.velocity.y +=  inX * enemy.orbitSpin * accel * TANGENTIAL * dt;
+      } else if (dist < PREFERRED_DIST - DEADZONE) {
           // Behavior: BACK OFF (Flee)
           const fleeX = -dx / dist;
           const fleeY = -dy / dist;
@@ -168,9 +212,10 @@ export class AISystem {
           enemy.velocity.y += strafeY * (accel * STRAFE_MODIFIER) * dt;
       }
 
-      // Cap Speed
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }
@@ -265,7 +310,9 @@ export class AISystem {
 
       // At long range always seek regardless of idle state, so waves never
       // stall when the player moves away from the initial spawn location.
-      if (enemy.aiState === 'chase' || longRange) {
+      // Skip while staggered — the hit knockback carries the enemy briefly.
+      const stunned = (enemy.hitStun ?? 0) > 0;
+      if ((enemy.aiState === 'chase' || longRange) && !stunned) {
           // ENGAGE: Fly toward the lagged target, blended with the pursuit
           // flow field so enemies navigate around tile clusters.
           // The flow field uses the player's *current* cell as its goal —
@@ -305,9 +352,20 @@ export class AISystem {
       }
       // Note: In 'idle' state, no force is applied, friction naturally slows the ship (drifting)
 
-      // Cap Speed
+      // Drone (RAMMER_1) nervous jitter — a constant low-amplitude random
+      // velocity buzz so the frantic peashooter shimmies instead of tracking a
+      // clean line.  Applied as an accel (×dt) for framerate stability; small
+      // enough not to derail the dive, suspended while staggered.
+      if (enemy.enemySubtype === EnemySubtype.RAMMER_1 && !stunned) {
+          const j = AI_CONFIG.DRONE_JITTER_ACCEL;
+          enemy.velocity.x += (Math.random() - 0.5) * j * dt;
+          enemy.velocity.y += (Math.random() - 0.5) * j * dt;
+      }
+
+      // Cap Speed — suspended while staggered so the hit knockback carries
+      // the enemy back instead of being clamped to cruise.
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (speed > maxSpeed) {
+      if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }

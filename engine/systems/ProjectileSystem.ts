@@ -64,6 +64,7 @@ export class ProjectileSystem {
     e.explosionRadius = undefined;
     e.explosionDamage = undefined;
     e.explosionKnockback = undefined;
+    e.glow = undefined;
     e.chainCount = undefined;
     e.chainRange = undefined;
     e.chainBranches = undefined;
@@ -190,10 +191,12 @@ export class ProjectileSystem {
         pooled.explosionRadius = config.explosionRadius;
         pooled.explosionDamage = config.explosionDamage;
         pooled.explosionKnockback = config.explosionKnockback;
+        pooled.glow = config.glow;
         pooled.chainCount = config.chainCount;
         pooled.chainRange = config.chainRange;
         pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
+        pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         entities.push(pooled);
       } else {
         entities.push({
@@ -225,10 +228,12 @@ export class ProjectileSystem {
           explosionRadius: config.explosionRadius,
           explosionDamage: config.explosionDamage,
           explosionKnockback: config.explosionKnockback,
+          glow: config.glow,
           chainCount: config.chainCount,
           chainRange: config.chainRange,
           chainBranches: config.chainBranches,
           isCharged: config.isCharged,
+          appliesEffect: config.appliesEffect,
         });
       }
     }

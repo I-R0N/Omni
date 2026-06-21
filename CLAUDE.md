@@ -80,7 +80,11 @@ engine/
                           bouncer, pierce
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
     DropSystem.ts         Ammo + health drop spawn / collection
-    WaveSystem.ts         Wave index, grace timer, spawn geometry
+    WaveSystem.ts         Completion-wave spawn scheduler + grace
+                          timer + spawn geometry.  A wave ends only when
+                          its full budget has spawned AND every spawned
+                          enemy is dead (clear-the-field); the clock just
+                          grades the speed bonus.  Survivors carry over.
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
@@ -146,7 +150,15 @@ Per-frame `loop()`:
      4. `NebulaSystem.update()` — neighbour-count refresh + lazy
         grid-index reset (nebula-specific bookkeeping only;
         merge/regen/shatter all moved to ShardSystem)
-     5. `WaveSystem.update()` — completion check, grace countdown
+     5. `WaveSystem.update()` — completion-wave tick: spawn stream
+        (the clock is now only the spawn-stream window), wave ends
+        when budget spawned + field cleared, grace countdown
+        (survivors carry into the next wave; clock grades the speed
+        bonus via `onCleared(wave, elapsedSec)`).
+        Followed by `updateSnitch()` — persistent-snitch lifecycle:
+        burst/coast AI + flow-field steering, comet-tail emission,
+        catch check (collide/shoot per DBG toggle), wave-end on catch
+        (the snitch entity persists across waves)
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         ammo-drop merge pass (`DropSystem.mergeAmmoDrops`; `dropMerge`
         task)
@@ -291,13 +303,126 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
   `LIGHTNING_GRAVITY_STRENGTH/RANGE`, `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
-- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS`, `ENEMY_ROLE`, `ENEMY_BURST_CONFIG`,
-  `ENEMY_WEAPON`
+- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
+  optional `burst` fire pattern + `glow` shot hint — the per-archetype
+  `cooldown` is the real fire cadence; the old global burst config is gone),
+  `ENEMY_ROLE`, `ENEMY_WEAPON`
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
-- `WAVE_CONSTANTS`, `WAVE_CONFIG`, `WAVE_DEFINITIONS`, `generateWaveDef()`
-- `DIFFICULTY_SCALES` (enemy count), `DIFFICULTY_STAT_SCALES` (per-enemy
+- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
+  teaching waves), `getWaveDurationSec()`, `getWaveSpawnBudget()`,
+  `buildWaveSpawnList()`
+- `SCORE_CONSTANTS` (tier-scaled kill points; player-attributed
+  shard/tile destruction points — flat per shard, per-maxHealth for
+  tiles, nebula variants excluded, attribution via the
+  `GameEntity.killedByPlayer` stamp set by the projectile / crash /
+  lightning / cannon-AoE damage paths; snitch catch payout;
+  early-clear wave bonus.  Gold "+N" popups are magnitude-tiered
+  (`styleScorePopup`) and accumulate into ONE live popup
+  (`_livePointsPopup`, O(1) — no per-award array scan) so
+  cluster/AoE/sweep kills read as one growing total; the HUD chip is
+  an integer ticker (`displayScore` eases toward `score` by
+  `DISPLAY_CATCHUP_FRAC`/frame).  Kill combo: rapid SHIP kills build a
+  points multiplier (`COMBO_*` — steps up per N kills, capped,
+  resets after the window; ship kills only) that scales enemy-kill
+  points and shows next to the score chip.  World damage numbers
+  (`spawnDamageText`) are gated to non-lethal hits on multi-HP
+  survivors — lethal hits and dent tiles show nothing, so the
+  one-shot majority and the kill-frame overlap are gone; damage chips
+  render small + muted-red, distinct from gold points.)
+- `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
+  spine.  8 leveled stat upgrades (hull / plating / capacitor / engine /
+  thrusters / gunnery / autoloader / magazine) earned ONLY from
+  wave-completion cards (every wave); a normal card grants 1 level, and
+  every 4th wave (`POWERFUL_WAVE_INTERVAL`) the cards roll "powerful"
+  variants worth +2/+3/+4 levels (`UpgradeCard.levels`).  Levels are
+  UNCAPPED (`max` on `UpgradeDef` is a DBG-cycle bound only).  Salvage
+  (`GameEngine.credits`,
+  a spendable mirror of score earned 1:1 in `awardScore`) funds the
+  Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
+  folds the run's `upgradeLevels` into the player's effective stats —
+  maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
+  WeaponSystem), `cooldownMult` (WeaponSystem), `maxAmmo` (DropSystem
+  clamp), plus speed/accel via `upgradeSpeedMult()`/`upgradeThrustMult()`
+  multiplied into the movement line.  At all-zero the game is identical
+  to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
+  testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
+  Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).
+  PLAYER-FACING TERMS: stat-upgrade cards are **Augments**, the one-time
+  unlocks are **Modules**.  An augment with a `requires` (shield /
+  anyWeapon) is withheld from the card pool (`GameEngine.augmentEligible`)
+  until its module is installed — never offer a card for a system the
+  player can't use (Plating/Capacitor need Shield; Magazine needs a
+  non-Blaster weapon).
+- `UNLOCK_DEFS` / `upgradeCost()` — one-time run unlocks + the stat-
+  upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
+  shield, no charged shots); unlocks (Shield, Overcharge, the 6
+  non-Blaster weapons) are bought in the **Drydock** (a shop section in
+  the player menu, `GameEngine.purchaseUnlock` spending `credits`) or,
+  rarely, granted free via an `'unlock'` card.  The Drydock sells
+  ONLY these unlocks — the 8 stat upgrades come exclusively from
+  wave-completion cards.
+  Unlock state lives on `GameEngine` (`unlockedWeapons` / `shieldUnlocked`
+  / `overchargeUnlocked`), synced to the player entity
+  (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon
+  cycle/select + charged shots; `applyUpgrades` gates `maxShield` to 0
+  until Shield is owned.  `EngineStats.shop` / `.unlocks` (built only
+  while paused) drive the player-menu Drydock + Unlocks panels; DBG
+  "Unlock all" / "Relock" cover testing.  NOTE: per-wave enemy stat
+  scaling is still a planned increment.
+- `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
+  `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
+  calls `GameEngine.openCardChoice`, which pauses the sim
+  (`cardChoicePending` short-circuits the loop's accumulator) and offers
+  `CARD_COUNT` cards (`UpgradeCard[]` on `EngineStats.cardChoice`).  Pool
+  today: stat-upgrade cards (a free level of a not-maxed `UPGRADE_DEFS`
+  entry) + occasional Salvage cards; the `'unlock'` card kind is reserved
+  for the weapons/shield/overcharge unlocks (next).  `selectUpgradeCard`
+  applies the pick and resumes.  Modal lives in `UIOverlay`
+  (`stats.cardChoice`); DBG "Test cards" force-triggers a choice.
+- `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
+  (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
+  riding the asteroid flow field with a sinusoidal weave and a
+  burst/coast AI.  Speed ramps PER CATCH (not per wave): headline
+  (dart) speed = 0.05× player cruise × (catchCount + 1) (capped at
+  1.2×), with coast drifting at 0.30× of that — so the first snitch is
+  nearly stationary and each CATCH makes the next one faster, letting
+  the player defer the catch to keep it slow.  Darts fire on a random
+  timer or when the player closes
+  inside PANIC_RADIUS (panic darts bias away from the player; a
+  cooldown guarantees coast windows between them).  The whole ramp is
+  scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Player ▸
+  "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`,
+  wipes every live enemy for `SNITCH_SWEEP_KILL_FRACTION` (half) of its
+  normal kill value via the full death path, and ends the current wave
+  via `WaveSystem.endWaveBySnitch` (no early-clear bonus on top); the
+  next wave spawns a fresh one.  Catch mode is the DBG "Snitch catch"
+  toggle, surfaced as `EngineStats.snitchCatchMode`.  Lifecycle lives
+  in `GameEngine.updateSnitch` / `spawnSnitch`.
+- `DIFFICULTY_SCALES` (wave spawn-budget scale), `DIFFICULTY_STAT_SCALES` (per-enemy
   hp/speed/damage)
+- `ENEMY_SCALING` / `enemyHpMult()` / `enemyDamageMult()` — per-wave
+  enemy growth on top of difficulty: HP scales at spawn, damage rides a
+  per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
+  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
+  DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
+- `ENEMY_TRAITS` — enemy counterplay traits (the soft-counter engine).
+  v1 = `armor` only (Tank / RAMMER_3): per-hit damage below
+  `chipThreshold` is cut by `reduction`, so chip weapons (Blaster,
+  Shotgun) plink while heavy hits (Cannon, Lightning, charged, a
+  Gunnery-boosted Blaster past the threshold) punch through.  Stamped
+  at spawn (`WaveSystem.spawnEnemy`), applied in the PhysicsSystem
+  projectile-damage path (gated by `physics.traitsEnabled`, DBG
+  "Traits"); armored enemies show the REDUCED hit number as feedback.
+  evasive / front-shield / regen join with their enemies + the bosses.
+- `CORROSION` / `ENEMY_ATTACK_EFFECTS` — status-effect framework (v1 =
+  corrosion DoT only, but generic: `StatusEffectKind` / `EffectPayload`
+  / `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
+  (the Orbiter / Shooter-tier-2, green acid rounds) debuffs the player
+  on hit (`GameEngine.handleProjectileHit` → `applyStatusEffect`);
+  `tickStatusEffects` bleeds health past the shield, stacks ×3, refresh
+  on re-hit.  HUD badge + acid drip; DBG "Corrode" self-apply
+  (`EngineStats.statusEffects`).  Duration-only — no mitigation yet.
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)

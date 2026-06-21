@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode } from '../types';
+import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype } from '../types';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
 // single-element "Test Maps" showcases (plus the multi-material Tile Heavy
@@ -11,6 +11,16 @@ const REAL_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.RING,        label: 'Ring World' },
   { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
   { type: MapType.POCKET,      label: 'Pocket' },
+];
+// Enemy-test override — force every wave to spawn one subtype (or Off).
+const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
+  { type: null,                   label: 'Off' },
+  { type: EnemySubtype.RAMMER_1,  label: 'Drone' },
+  { type: EnemySubtype.RAMMER_2,  label: 'Charger' },
+  { type: EnemySubtype.RAMMER_3,  label: 'Tank' },
+  { type: EnemySubtype.SHOOTER_1, label: 'Skirmisher' },
+  { type: EnemySubtype.SHOOTER_2, label: 'Orbiter' },
+  { type: EnemySubtype.SHOOTER_3, label: 'Sniper' },
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
@@ -67,6 +77,21 @@ interface UIOverlayProps {
   onCycleShardPairInterval?: () => void;
   onCycleShardTilePairInterval?: () => void;
   onToggleAsteroidFlow?: () => void;
+  onToggleSnitchCatchMode?: () => void;
+  onCycleSnitchSpeed?: () => void;
+  onCycleEnemyScale?: () => void;
+  onApplyCorrosion?: () => void;
+  onToggleTraits?: () => void;
+  onCycleUpgrade?: (id: string) => void;
+  onMaxUpgrades?: () => void;
+  onResetUpgrades?: () => void;
+  onAddCredits?: () => void;
+  onSelectCard?: (index: number) => void;
+  onCycleCardInterval?: () => void;
+  onTestCards?: () => void;
+  onPurchaseUnlock?: (id: string) => void;
+  onUnlockAll?: () => void;
+  onResetUnlocks?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -84,6 +109,7 @@ interface UIOverlayProps {
   onSetDifficulty?: (level: number) => void;
   mapType?: MapType;
   onSetMapType?: (type: MapType) => void;
+  onSetForcedEnemy?: (subtype: string | null) => void;
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({
@@ -130,6 +156,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShardPairInterval,
   onCycleShardTilePairInterval,
   onToggleAsteroidFlow,
+  onToggleSnitchCatchMode,
+  onCycleSnitchSpeed,
+  onCycleEnemyScale,
+  onApplyCorrosion,
+  onToggleTraits,
+  onCycleUpgrade,
+  onMaxUpgrades,
+  onResetUpgrades,
+  onAddCredits,
+  onSelectCard,
+  onCycleCardInterval,
+  onTestCards,
+  onPurchaseUnlock,
+  onUnlockAll,
+  onResetUnlocks,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -147,6 +188,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSetDifficulty,
   mapType = MapType.UNIVERSE,
   onSetMapType,
+  onSetForcedEnemy,
 }) => {
   const isGrace = stats.waveStatus === 'cleared' && (stats.waveGraceTimer ?? 0) > 0;
   const perf = stats.perf;
@@ -155,7 +197,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true,
   }));
   const toggleSection = (name: string) =>
@@ -170,7 +212,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // backdrop swap on the menu, a live switch-and-play mid-game.
   const renderMapGroup = (heading: string, maps: { type: MapType; label: string }[]) => (
     <div className="flex flex-col items-center gap-2">
-      <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>
+      {heading && <span className="text-slate-400 text-[11px] uppercase tracking-wider">{heading}</span>}
       <div className="flex flex-wrap justify-center gap-2 max-w-xl">
         {maps.map(opt => (
           <button
@@ -187,6 +229,41 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         ))}
       </div>
     </div>
+  );
+  // Enemy-test override row + the collapsed material-field maps.  Shared by
+  // the main menu and the pause player-menu so test-switching is one place.
+  const renderEnemyTestGroup = () => (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-rose-300 text-[11px] uppercase tracking-wider">Enemy Test — force one type</span>
+      <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+        {ENEMY_TEST.map(opt => {
+          const active = (stats.forcedEnemy ?? null) === (opt.type ?? null);
+          return (
+            <button
+              key={opt.label}
+              onClick={() => onSetForcedEnemy && onSetForcedEnemy(opt.type)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                active
+                  ? 'bg-rose-600 border-rose-400 text-white shadow-lg'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-rose-400 hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+  const renderTestPanel = () => (
+    <>
+      {renderMapGroup('Maps', REAL_MAPS)}
+      {renderEnemyTestGroup()}
+      <details className="text-center">
+        <summary className="cursor-pointer text-slate-500 text-[10px] uppercase tracking-widest list-none select-none hover:text-slate-300">Material Field Maps ▾</summary>
+        <div className="mt-3">{renderMapGroup('', TEST_MAPS)}</div>
+      </details>
+    </>
   );
   // Human label for the cycling blend-alpha buttons.  Mirrors the
   // four-step cycle Off / Slow / Med / Fast across both Tile and
@@ -259,6 +336,44 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
+      {/* ── Between-wave upgrade card choice (modal; sim is paused) ── */}
+      {stats.cardChoice && stats.cardChoice.length > 0 && (
+        <div className="absolute inset-0 z-50 pointer-events-auto flex flex-col items-center justify-center gap-6 bg-slate-950/70 backdrop-blur-sm">
+          <div className="text-center">
+            <h2 className="text-amber-300 text-2xl font-extrabold tracking-[0.2em]">CHOOSE AN AUGMENT</h2>
+            <p className="text-slate-400 text-[11px] uppercase tracking-widest mt-1">
+              Wave {stats.waveNumber ?? 1} cleared · free pick
+            </p>
+          </div>
+          <div className="flex gap-4 flex-wrap justify-center max-w-3xl px-4">
+            {stats.cardChoice.map((c, i) => {
+              const powerful = c.kind === 'stat' && (c.levels ?? 1) > 1;
+              const accent = c.kind === 'salvage'
+                ? 'border-amber-400/70 hover:border-amber-300 hover:shadow-amber-500/30'
+                : c.kind === 'unlock'
+                  ? 'border-violet-400/70 hover:border-violet-300 hover:shadow-violet-500/30'
+                  : powerful
+                    ? 'border-fuchsia-400/80 hover:border-fuchsia-300 hover:shadow-fuchsia-500/40 ring-1 ring-fuchsia-400/30'
+                    : 'border-sky-400/70 hover:border-sky-300 hover:shadow-sky-500/30';
+              const badge = c.kind === 'salvage' ? 'text-amber-300' : c.kind === 'unlock' ? 'text-violet-300' : powerful ? 'text-fuchsia-300' : 'text-sky-300';
+              return (
+                <button
+                  key={i}
+                  onClick={() => onSelectCard?.(i)}
+                  className={`w-44 h-56 rounded-xl border-2 bg-slate-900/85 shadow-xl flex flex-col items-center justify-center gap-3 p-4 transition-all hover:scale-105 active:scale-95 ${accent}`}
+                >
+                  <span className={`text-[10px] font-bold uppercase tracking-widest ${badge}`}>
+                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Module' : powerful ? `Augment ×${c.levels}` : 'Augment'}
+                  </span>
+                  <span className="text-white text-lg font-extrabold text-center leading-tight">{c.label}</span>
+                  <span className="text-slate-300 text-xs text-center leading-snug">{c.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
 
@@ -290,6 +405,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('FPS', stats.fps)}
                 {statRow('Wave', stats.waveNumber ?? 1)}
                 {statRow('State', stats.waveStatus ?? '—')}
+                {statRow('Wave timer', stats.waveTimeRemaining !== undefined ? `${stats.waveTimeRemaining}s` : '—')}
                 {/* Total entity count with a display-only filter:
                     total / active (awake) / asleep (dynamic-sleeping). */}
                 <div className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
@@ -317,6 +433,44 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Player THRUST multiplier (0.75 / 1 / 1.25 / 1.5×) applied live to the per-map acceleration. Terminal cruise = acceleration/(1−friction), so this is the knob that actually changes everyday top speed.')}
                 {ctrlRow('Speed', onCyclePlayerSpeed, stats.playerSpeedName ?? '1×',
                   'Player SPEED multiplier (0.5 / 0.75 / 1 / 1.5 / 2 / 3×) applied live to the per-map maxSpeed cap. Only changes top speed when the cap falls below the friction-limited terminal velocity (or thrust raises cruise above it).')}
+                {ctrlRow('Snitch catch', onToggleSnitchCatchMode,
+                  stats.snitchCatchMode === 'shoot' ? 'Shoot' : 'Collide',
+                  'How the golden snitch is caught (testing toggle). Collide: fly into it hull-to-hull. Shoot: any player shot within its catch radius nabs it. Either way the catch pays the snitch bonus and ends the wave immediately.')}
+                {ctrlRow('Snitch spd', onCycleSnitchSpeed,
+                  stats.snitchSpeedName ?? '1×',
+                  'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-CATCH ramp. The first snitch flies at 0.05× player cruise and gains 0.05× each time one is CAUGHT (capped at 1.2×) — deferring the catch keeps it slow. This knob scales that for testing.')}
+                {ctrlRow('Enemy scale', onCycleEnemyScale,
+                  stats.enemyScaleName ?? '1×',
+                  'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
+                {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
+                  'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
+                {ctrlRow('Traits', onToggleTraits,
+                  stats.traitsEnabled === false ? 'Off' : 'On',
+                  'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
+              </>)}
+
+              {/* ── Upgrades (progression spine — DBG) ─────────────── */}
+              {renderSectionHeader('upgrades', 'Upgrades')}
+              {!collapsed.upgrades && (<>
+                {statRow('Salvage', (stats.credits ?? 0).toLocaleString(), 'text-amber-300')}
+                {(stats.upgrades ?? []).map(u =>
+                  ctrlRow(u.label, () => onCycleUpgrade?.(u.id), `Lv ${u.level}/${u.max}`,
+                    `Cycle ${u.label} upgrade level (DBG). Click bumps the level and wraps back to 0 at max; applies live to the player's effective stats.`))}
+                {ctrlRow('Card int', onCycleCardInterval, `every ${stats.cardInterval ?? 1}`,
+                  'Wave interval between free upgrade-card offers (1 / 2 / 3 / 5). 1 = a card pick after every wave.')}
+                {ctrlRow('Test cards', onTestCards, 'Show',
+                  'Force an upgrade-card choice right now (uses the live wave number).')}
+                {ctrlRow('+1k Salv', onAddCredits, 'Grant',
+                  'Grant 1000 Salvage for testing the (future) shop.')}
+                {ctrlRow('Max all', onMaxUpgrades, 'Max',
+                  'Set every upgrade to its max level.')}
+                {ctrlRow('Reset', onResetUpgrades, 'Clear',
+                  'Reset every upgrade back to level 0.')}
+                {ctrlRow('Unlock all', onUnlockAll, 'Unlock',
+                  'Unlock every weapon + Shield + Overcharge (DBG).')}
+                {ctrlRow('Relock', onResetUnlocks, 'Lean',
+                  'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
               </>)}
 
               {/* ── Visual ─────────────────────────────────────────── */}
@@ -573,6 +727,40 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           {/* Wave info — only while playing */}
           {stats.gameState === GameState.PLAYING && (
             <div className="flex flex-col items-end gap-1">
+              {/* Run score */}
+              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-amber-300 text-xs font-bold tracking-widest tabular-nums">
+                  {(stats.score ?? 0).toLocaleString()} PTS
+                </span>
+              </div>
+              {/* Kill-combo multiplier — fades out as the window lapses */}
+              {(stats.comboMultiplier ?? 1) > 1 && (
+                <div
+                  className="pointer-events-none text-right -mt-0.5"
+                  style={{ opacity: Math.max(0.3, stats.comboFraction ?? 1) }}
+                >
+                  <span className="text-orange-400 text-sm font-extrabold tracking-wider tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    ×{stats.comboMultiplier} combo
+                  </span>
+                  {(stats.comboCount ?? 0) > 0 && (
+                    <span className="text-orange-300/70 text-[10px] font-bold ml-1">
+                      {stats.comboCount} kills
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Active status effects — e.g. CORROSION ×N, fading as it lapses */}
+              {(stats.statusEffects ?? []).map(e => (
+                <div
+                  key={e.kind}
+                  className="pointer-events-none bg-slate-900/75 border border-lime-500/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right"
+                  style={{ opacity: Math.max(0.45, e.fraction) }}
+                >
+                  <span className="text-lime-300 text-[11px] font-extrabold uppercase tracking-widest tabular-nums">
+                    {e.kind} ×{e.stacks}
+                  </span>
+                </div>
+              ))}
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
@@ -583,6 +771,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               >
                 <span className="text-slate-300 text-xs font-bold uppercase tracking-widest">
                   Wave {stats.waveNumber ?? 1}
+                  {stats.enemiesRemaining !== undefined && (
+                    <span className="text-rose-300"> · {stats.enemiesRemaining} left</span>
+                  )}
+                  {stats.waveElapsedSec !== undefined && (
+                    <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
+                  )}
                 </span>
                 {isGrace && (
                   <p className="text-emerald-400 text-[10px] font-bold mt-0.5 animate-pulse">
@@ -643,8 +837,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </div>
           </div>
           <div className="mb-8 flex flex-col items-center gap-5">
-            {renderMapGroup('Maps', REAL_MAPS)}
-            {renderMapGroup('Test Maps', TEST_MAPS)}
+            {renderTestPanel()}
           </div>
           <button
             onClick={onStart}
@@ -655,39 +848,119 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       )}
 
-      {/* ── Pause Menu ── */}
-      {stats.gameState === GameState.PAUSED && (
-        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50">
-          <h2 className="text-4xl font-bold text-white mb-8 tracking-widest">PAUSED</h2>
-          <div className="flex flex-col gap-4 w-56">
-            <button
-              onClick={onResume}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-              RESUME
-            </button>
-            <button
-              onClick={onRestart}
-              className="bg-slate-700 hover:bg-red-600 text-slate-200 hover:text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" />
-                <path d="M3 3v9h9" />
-              </svg>
-              RESTART
-            </button>
+      {/* ── Player Menu (pause) ── */}
+      {stats.gameState === GameState.PAUSED && (() => {
+        const ps = stats.playerStats;
+        const fmtMult = (m: number | undefined) => `×${(m ?? 1).toFixed(2)}`;
+        const statLine = (label: string, value: React.ReactNode) => (
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-400">{label}</span>
+            <span className="text-white font-bold tabular-nums">{value}</span>
           </div>
-          {/* Live map picker — selecting one switches maps and drops
-              straight into a fresh run (switch-and-play). */}
-          <div className="mt-10 flex flex-col items-center gap-5">
-            {renderMapGroup('Maps', REAL_MAPS)}
-            {renderMapGroup('Test Maps', TEST_MAPS)}
+        );
+        return (
+        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-white tracking-[0.2em]">PLAYER MENU</h2>
+              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={onResume}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                CONTINUE
+              </button>
+              <button
+                onClick={onRestart}
+                className="flex-1 bg-slate-700 hover:bg-red-600 text-slate-200 hover:text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12" /><path d="M3 3v9h9" /></svg>
+                RESTART
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Ship status */}
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+                <div className="flex flex-col gap-1 text-xs">
+                  {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
+                  {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
+                  {statLine('Damage', fmtMult(ps?.damageMult))}
+                  {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
+                  {statLine('Speed', fmtMult(ps?.speedMult))}
+                  {statLine('Max ammo', ps?.maxAmmo ?? 200)}
+                </div>
+              </div>
+
+              {/* Session upgrades */}
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+                <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Augments</h3>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  {(stats.upgrades ?? []).map(u => (
+                    <div key={u.id} className="flex justify-between gap-1">
+                      <span className={u.level > 0 ? 'text-slate-200' : 'text-slate-500'}>{u.label}</span>
+                      <span className={`font-bold tabular-nums ${u.level >= 4 ? 'text-amber-300' : u.level > 0 ? 'text-white' : 'text-slate-600'}`}>
+                        Lv {u.level}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Unlocks */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Modules Installed</h3>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {(stats.unlocks?.weapons ?? []).map(w => (
+                  <span key={w} className="px-2 py-0.5 rounded bg-slate-700/70 text-slate-200 text-[10px] font-bold uppercase tracking-wide">{w}</span>
+                ))}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.shield ? 'bg-sky-700/70 text-sky-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Shield</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Overcharge</span>
+              </div>
+            </div>
+
+            {/* Drydock — spend Salvage on major unlocks (stat upgrades are card-only) */}
+            {stats.shop && (
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3">
+                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {stats.shop.unlocks.map(u => (
+                    <button
+                      key={u.id}
+                      disabled={u.owned || !u.affordable}
+                      onClick={() => onPurchaseUnlock?.(u.id)}
+                      className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                        u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                          : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                            : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <span className="font-bold">{u.label}</span>
+                      <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Live switcher — maps + enemy-test override (collapsed) */}
+            <details className="text-center">
+              <summary className="cursor-pointer text-slate-400 text-[11px] uppercase tracking-widest list-none select-none hover:text-slate-200">Switch Map / Test ▾</summary>
+              <div className="mt-4 flex flex-col items-center gap-4">
+                {renderTestPanel()}
+              </div>
+            </details>
           </div>
         </div>
-      )}
+        );
+      })()}
 
     </div>
   );

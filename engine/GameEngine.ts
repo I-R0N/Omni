@@ -17,8 +17,8 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION } from '../constants';
 import { ASSETS } from '../assets';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 import { FlowPattern, samplePattern } from './systems/FlowField';
@@ -79,6 +79,47 @@ export class GameEngine {
   private camera: CameraState;
   
   private damageTexts: DamageText[] = [];
+  // Run score — tier-scaled enemy-kill points + early-clear wave bonuses.
+  // Reset with the rest of the run state in resetAndLoadSelectedMap.
+  private score: number = 0;
+  // HUD ticker — eases up toward `score` by integer steps each frame so
+  // big awards roll up instead of snapping.  Display only; `score` is truth.
+  private displayScore: number = 0;
+  // Kill combo — `comboCount` rapid ship kills within `comboTimer`'s window
+  // build a points multiplier (see comboMultiplier()).  Reset when the
+  // window lapses.  Ship kills only; shard/tile kills don't touch it.
+  private comboCount: number = 0;
+  private comboTimer: number = 0;
+  // ── Progression ─────────────────────────────────────────────────────────
+  // Spendable Salvage currency (earns 1:1 with score) and per-upgrade levels.
+  // applyUpgrades() folds the levels into the player's effective stats; all
+  // reset per run.  Behaviour-changing unlocks + shop UI build on top.
+  private credits: number = 0;
+  private upgradeLevels: Record<UpgradeId, number> = {
+      hull: 0, plating: 0, capacitor: 0, engine: 0,
+      thrusters: 0, gunnery: 0, autoloader: 0, magazine: 0,
+  };
+  // Between-wave upgrade-card choice.  When `cardChoicePending` is set the
+  // sim pauses and the UI shows `pendingCards`; picking one applies it and
+  // resumes.  Offered every `cardWaveInterval` waves (DBG-cyclable).
+  private cardChoicePending: boolean = false;
+  private pendingCards: UpgradeCard[] = [];
+  private cardWaveInterval: number = UPGRADE_CARD_CONSTANTS.DEFAULT_WAVE_INTERVAL;
+  // Short delay after a wave clears before the card modal opens, so the
+  // celebration animation plays first.  0 = nothing pending.
+  private cardOpenDelaySec: number = 0;
+  private pendingCardWaveNum: number = 0;
+  // ── Unlocks ─────────────────────────────────────────────────────────────
+  // The run starts LEAN: Blaster only, no shield, no charged shots.  Bought
+  // in the Drydock (Salvage) or, rarely, granted free via a card.  Synced to
+  // the player entity (ownedWeapons / overchargeUnlocked) for WeaponSystem.
+  private unlockedWeapons: Set<WeaponType> = new Set([WeaponType.BLASTER]);
+  private shieldUnlocked: boolean = false;
+  private overchargeUnlocked: boolean = false;
+  // The one live "+N" points popup, if any.  New awards accumulate into it
+  // (O(1)) so a burst of kills reads as one growing number instead of a
+  // pile — and without scanning the damage-text array per award.
+  private _livePointsPopup: DamageText | null = null;
   // Damage-text object pool — see ParticleSystem._pool for the same
   // pattern in entity-space.  Damage texts spawn a few per impact and
   // expire on lifetime; reusing the objects across the spawn/despawn
@@ -102,6 +143,10 @@ export class GameEngine {
   private _viewportRect = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private respawnTimer: number = 0;
+  // DBG enemy-test override: when set, every wave spawns ONLY this subtype.
+  // Persists across map switches (a testing setting); applies from the next
+  // wave start.
+  private forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
   // Map the next restart / initial load should build.  Updated from the
@@ -158,10 +203,8 @@ export class GameEngine {
   // call sites that still read/write them directly.
   private get waveIndex(): number { return this.waves.waveIndex; }
   private set waveIndex(v: number) { this.waves.waveIndex = v; }
-  private get waveEnemyIds(): Set<string> { return this.waves.waveEnemyIds; }
-  private set waveEnemyIds(v: Set<string>) { this.waves.waveEnemyIds = v; }
-  private get waveState(): 'inactive' | 'active' | 'cleared' | 'complete' { return this.waves.waveState; }
-  private set waveState(v: 'inactive' | 'active' | 'cleared' | 'complete') { this.waves.waveState = v; }
+  private get waveState(): 'inactive' | 'active' | 'cleared' { return this.waves.waveState; }
+  private set waveState(v: 'inactive' | 'active' | 'cleared') { this.waves.waveState = v; }
   private get waveGraceTimer(): number { return this.waves.waveGraceTimer; }
   private set waveGraceTimer(v: number) { this.waves.waveGraceTimer = v; }
 
@@ -180,6 +223,31 @@ export class GameEngine {
   // toward zero velocity over a few seconds and then only move when
   // collided with or pulled by gravity.  Default true.
   private asteroidFlowEnabled: boolean = true;
+
+  // ── Snitch state ──────────────────────────────────────────────────────
+  // One quidditch-style snitch that persists across waves: rides the
+  // asteroid flow field with a burst/coast AI; catching it pays
+  // SCORE_CONSTANTS.SNITCH_POINTS and ends the current wave (see
+  // updateSnitch / catchSnitch).  A fresh one spawns for the next wave.
+  private snitch: GameEntity | null = null;
+  // Wander clock for the weave oscillation (sim-time accumulated).
+  private snitchTime: number = 0;
+  // Snitches CAUGHT this run — drives the speed ramp (NOT the wave number),
+  // so the player can defer the snitch to keep it slow.  Reset per run.
+  private snitchCatchCount: number = 0;
+  // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
+  private snitchCatchMode: 'collide' | 'shoot' = 'collide';
+  // Burst/coast AI state (see the SNITCH_CONSTANTS doc block) — there is
+  // only ever one live snitch, so engine-level fields suffice; all of
+  // these are re-seeded in spawnSnitch().
+  private snitchAiState: 'coast' | 'dart' = 'coast';
+  private snitchAiTimer: number = 0;        // countdown to the next state flip
+  private snitchPanicCooldown: number = 0;  // guaranteed coast window between panic darts
+  private snitchSpeedMult: number = 0;      // eased current speed (fraction of player cruise)
+  private snitchDartAway: boolean = false;  // current dart is a panic dart (away-bias active)
+  private snitchDartAwayX: number = 0;
+  private snitchDartAwayY: number = 0;
+
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
   private ffOverlayVectors:   boolean = false;
@@ -788,6 +856,30 @@ export class GameEngine {
     this.asteroidFlowEnabled = !this.asteroidFlowEnabled;
   }
 
+  /** Toggle the snitch catch interaction (collide ↔ shoot) — DBG aid for
+   *  playtesting which catch mode feels better. */
+  public toggleSnitchCatchMode() {
+    this.snitchCatchMode = this.snitchCatchMode === 'collide' ? 'shoot' : 'collide';
+  }
+
+  /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
+   *  both AI speed states live so the chase feel can be tuned in-game. */
+  public cycleSnitchSpeed() {
+    cycleSnitchSpeed();
+  }
+
+  /** Cycle the DBG enemy-scaling multiplier (ENEMY_SCALE_CYCLE) — scales
+   *  the per-wave HP+damage growth live to feel the comfortable-lead margin.
+   *  Applies to enemies spawned after the change. */
+  public cycleEnemyScale() {
+    cycleEnemyScale();
+  }
+
+  /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
+  public toggleTraits() {
+    this.physics.traitsEnabled = !this.physics.traitsEnabled;
+  }
+
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
   public toggleFFOverlayVectors() {
     this.ffOverlayVectors = !this.ffOverlayVectors;
@@ -1086,6 +1178,8 @@ export class GameEngine {
       shieldRechargeTimer: 0,
       shieldHitFlash: 0
     };
+    this.syncUnlocksToPlayer();
+    this.applyUpgrades(); // initialise upgrade-derived stat fields (all at L0)
 
     this.camera = {
       position: { x: 0, y: 0 },
@@ -1180,6 +1274,32 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveStatus: 'active',
       waveGraceTimer: undefined,
+      waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
+      enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      score: Math.round(this.displayScore),
+      comboMultiplier: this.comboMultiplier(),
+      comboCount: this.comboCount,
+      comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
+      credits: this.credits,
+      upgrades: this.upgradeSnapshot(),
+      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
+      cardInterval: this.cardWaveInterval,
+      playerStats: this.gameState === GameState.PAUSED ? {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: this.player.maxHealth,
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: this.player.maxShield ?? 0,
+        damageMult: this.player.damageMult ?? 1,
+        cooldownMult: this.player.cooldownMult ?? 1,
+        speedMult: this.upgradeSpeedMult(),
+        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
+      } : undefined,
+      unlocks: this.gameState === GameState.PAUSED ? {
+        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
+        shield: this.shieldUnlocked,
+        overcharge: this.overchargeUnlocked,
+      } : undefined,
+      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1216,6 +1336,15 @@ export class GameEngine {
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
+      snitchCatchMode: this.snitchCatchMode,
+      snitchSpeedName: getActiveSnitchSpeedName(),
+      enemyScaleName: getActiveEnemyScaleName(),
+      enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      traitsEnabled: this.physics.traitsEnabled,
+      forcedEnemy: this.forcedTestEnemy,
+      statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
+        ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
+        : undefined,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -1263,7 +1392,22 @@ export class GameEngine {
       this.wasThrustingLastFrame = false;
       this.chainBreakPending = false;
       this.waveAnnouncements = [];
+      // Snitch entity dies with the old map's entity list — just drop the
+      // reference so the next wave spawns a fresh one.
+      this.snitch = null;
+      this.snitchTime = 0;
+      this.snitchCatchCount = 0;
       this.loadMap(this.buildMap(this.selectedMapType));
+
+      // Per-run progression reset — must precede the health/shield refill
+      // below so maxHealth/maxShield are back at base before they're topped.
+      this.credits = 0;
+      this.resetUnlocks(); // back to lean (Blaster only, no shield/overcharge)
+      this.resetUpgrades();
+      this.cardChoicePending = false;
+      this.pendingCards = [];
+      this.cardOpenDelaySec = 0;
+      this.pendingCardWaveNum = 0;
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -1272,8 +1416,14 @@ export class GameEngine {
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
+      this.player.statusEffects = [];
       this.player.ammo = 0;
       this.player.gold = 0;
+      this.score = 0;
+      this.displayScore = 0;
+      this.comboCount = 0;
+      this.comboTimer = 0;
+      this._livePointsPopup = null;
       this.player.trail = [];
       this.trailEmitAccumulator = 0;
       this.wasThrustingLastFrame = false;
@@ -1319,9 +1469,24 @@ export class GameEngine {
     const frameTime = (time - this.lastTime) / 1000;
     this.lastTime = time;
 
+    // HUD score ticker — roll the displayed total up toward the true
+    // score by integer steps (≥1, ≤ a fraction of the gap) so awards
+    // animate up rather than snapping.  Pure display; `score` is truth.
+    if (this.displayScore !== this.score) {
+      if (this.displayScore < this.score) {
+        const diff = this.score - this.displayScore;
+        this.displayScore = Math.min(
+          this.score,
+          this.displayScore + Math.max(1, Math.ceil(diff * SCORE_CONSTANTS.DISPLAY_CATCHUP_FRAC)),
+        );
+      } else {
+        this.displayScore = this.score; // score only ever resets downward
+      }
+    }
+
     // Report stats
-    const wsMap: Record<string, 'active' | 'cleared' | 'complete'> = {
-      inactive: 'active', active: 'active', cleared: 'cleared', complete: 'complete'
+    const wsMap: Record<string, 'active' | 'cleared'> = {
+      inactive: 'active', active: 'active', cleared: 'cleared'
     };
     this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
@@ -1334,6 +1499,32 @@ export class GameEngine {
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
+      waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
+      enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      score: Math.round(this.displayScore),
+      comboMultiplier: this.comboMultiplier(),
+      comboCount: this.comboCount,
+      comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
+      credits: this.credits,
+      upgrades: this.upgradeSnapshot(),
+      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
+      cardInterval: this.cardWaveInterval,
+      playerStats: this.gameState === GameState.PAUSED ? {
+        health: Math.max(0, Math.round(this.player.health)),
+        maxHealth: this.player.maxHealth,
+        shield: Math.max(0, Math.round(this.player.shield ?? 0)),
+        maxShield: this.player.maxShield ?? 0,
+        damageMult: this.player.damageMult ?? 1,
+        cooldownMult: this.player.cooldownMult ?? 1,
+        speedMult: this.upgradeSpeedMult(),
+        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
+      } : undefined,
+      unlocks: this.gameState === GameState.PAUSED ? {
+        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
+        shield: this.shieldUnlocked,
+        overcharge: this.overchargeUnlocked,
+      } : undefined,
+      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1370,6 +1561,15 @@ export class GameEngine {
       playerThrustName: getActivePlayerThrustName(),
       playerSpeedName: getActivePlayerSpeedName(),
       asteroidFlowEnabled: this.asteroidFlowEnabled,
+      snitchCatchMode: this.snitchCatchMode,
+      snitchSpeedName: getActiveSnitchSpeedName(),
+      enemyScaleName: getActiveEnemyScaleName(),
+      enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
+      traitsEnabled: this.physics.traitsEnabled,
+      forcedEnemy: this.forcedTestEnemy,
+      statusEffects: (this.player.statusEffects && this.player.statusEffects.length > 0)
+        ? this.player.statusEffects.map(e => ({ kind: e.kind, stacks: e.stacks, fraction: Math.max(0, e.remaining / e.maxDuration) }))
+        : undefined,
       ffOverlayVectors:   this.ffOverlayVectors,
       ffOverlayCells:     this.ffOverlayCells,
       ffOverlayObstacles: this.ffOverlayObstacles,
@@ -1394,6 +1594,15 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Between-wave card choice freezes the sim (the field stays drawn
+    // behind the React card overlay) until the player picks.
+    if (this.cardChoicePending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -1780,7 +1989,23 @@ export class GameEngine {
       this.currentMap.entities.length = writeIdx;
   }
 
-  private handleEntityDeath = (entity: GameEntity) => {
+  private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+      // Score before startExplosion flips isExploding — the flag doubles
+      // as the already-scored guard if a second death dispatch slips in.
+      // Survivors retired at time-up never reach this path (WaveSystem
+      // flips `active` directly), so they correctly award nothing.
+      // scoreScale (default 1) lets the snitch board-clear pay a fraction
+      // of the normal kill value per swept enemy.
+      if (entity.type === EntityType.ENEMY && !entity.isExploding) {
+          // Ship kills build the combo and are paid at the resulting
+          // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
+          const mult = this.registerComboKill();
+          const scale = opts?.scoreScale ?? 1;
+          this.awardScore(
+              Math.round(SCORE_CONSTANTS.POINTS_PER_TIER * (entity.enemyTier ?? 1) * scale * mult),
+              entity.position,
+          );
+      }
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
       }
@@ -1804,6 +2029,21 @@ export class GameEngine {
               entity.health = entity.maxHealth;
               entity.active = true;
               return;
+          }
+          // Shard/tile destruction points — player-attributed kills only
+          // (flag stamped by the projectile / crash / lightning / AoE
+          // damage paths).  Cleared immediately so a regen-reused tile
+          // entity can't re-award without a fresh player kill.  Nebula
+          // variants are excluded: ambient clouds shatter constantly and
+          // would spam micro-payouts.
+          if (entity.killedByPlayer) {
+              entity.killedByPlayer = undefined;
+              if (!isNebula) {
+                  const points = isStaticTile
+                      ? SCORE_CONSTANTS.TILE_DESTROY_POINTS_PER_HP * Math.max(1, Math.round(entity.maxHealth))
+                      : SCORE_CONSTANTS.SHARD_DESTROY_POINTS;
+                  this.awardScore(points, entity.position);
+              }
           }
           // Tile destruction patches the analytical flow field so
           // pursuing enemies don't path through holes that closed
@@ -1919,15 +2159,23 @@ export class GameEngine {
 
       // Death burst particles — size/color tuned per entity type
       if (entity.type === EntityType.ENEMY) {
-          // Large colored burst matching the enemy's tier color, plus a white core flash
-          this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), entity.color || '#f87171', {
-              speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3.5,
-              lifetimeMin: 0.3, lifetimeMax: 0.6,
+          const ec = entity.color || '#f87171';
+          const r = Math.max(entity.size.x, entity.size.y);
+          // Expanding shockwave ring (visual only) — a satisfying pop sized
+          // to the enemy; bigger enemies pop bigger.
+          this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
+          this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
+          // Big colored debris burst + white core flash.
+          this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+              speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
+              lifetimeMin: 0.3, lifetimeMax: 0.7,
           });
-          this.spawnParticles(entity.position, 5, '#ffffff', {
-              speedMin: 5, speedMax: 14, sizeMin: 1, sizeMax: 2,
-              lifetimeMin: 0.15, lifetimeMax: 0.3,
+          this.spawnParticles(entity.position, 9, '#ffffff', {
+              speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
+              lifetimeMin: 0.15, lifetimeMax: 0.35,
           });
+          // Small tier-scaled screen punch (respects the DBG shake toggle).
+          this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
       } else if (entity.type === EntityType.PLAYER) {
           // Cyan energy explosion
           this.spawnParticles(entity.position, 12, '#38bdf8', {
@@ -2007,6 +2255,28 @@ export class GameEngine {
 
   private updateGameLogic(dt: number) {
     if (!this.currentMap) return;
+
+    // Kill-combo window — lapses if no ship dies for COMBO_WINDOW_SEC.
+    if (this.comboTimer > 0) {
+        this.comboTimer -= dt;
+        if (this.comboTimer <= 0) {
+            this.comboTimer = 0;
+            this.comboCount = 0;
+        }
+    }
+
+    // Player status effects (corrosion DoT, …) tick before the death check.
+    this.tickStatusEffects(dt);
+
+    // Deferred card-modal open — fires once the wave-clear celebration
+    // beat has elapsed (the modal then pauses the sim).
+    if (this.cardOpenDelaySec > 0) {
+        this.cardOpenDelaySec -= dt;
+        if (this.cardOpenDelaySec <= 0 && !this.cardChoicePending) {
+            this.openCardChoice(this.pendingCardWaveNum);
+            this.pendingCardWaveNum = 0;
+        }
+    }
 
     // Update Shake.  Mutate shakeOffset in place rather than replacing the
     // object — the field is read by reference downstream and a fresh object
@@ -2102,25 +2372,19 @@ export class GameEngine {
         return; // Skip controls while exploding
     }
 
-    // Wave completion + grace-period countdown — delegated to WaveSystem.
-    // On wave clear we drop a health pickup every Nth wave (difficulty-scaled).
+    // Timed-wave tick — spawn stream, time-up / early-clear completion,
+    // survivor cleanup, grace countdown into the next wave.  On wave end we
+    // drop a health pickup every Nth wave (difficulty-scaled).
     if (this.currentMap) {
-      this.waves.checkCompletion(this.currentMap.entities, (clearedIndex) => {
-        const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
-        if ((clearedIndex + 1) % healthInterval === 0) {
-          const hAngle = Math.random() * Math.PI * 2;
-          const hDist  = 20 + Math.random() * 80; // 20–100 units from player
-          const hPos   = {
-            x: this.player.position.x + Math.cos(hAngle) * hDist,
-            y: this.player.position.y + Math.sin(hAngle) * hDist,
-          };
-          this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
-        }
-      });
-
-      const graceCtx = this.waveContext();
-      if (graceCtx) this.waves.tickGrace(dt, graceCtx);
+      const waveCtx = this.waveContext();
+      if (waveCtx) {
+        this.waves.update(dt, waveCtx, this.handleWaveCleared);
+      }
     }
+
+    // Snitch tick — spawn for a fresh wave, steer along the flow field,
+    // run the catch check (collide / shoot per the DBG toggle).
+    this.updateSnitch(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -2134,8 +2398,8 @@ export class GameEngine {
     this.player.inputVector = moveDir; // Debug visualization assignment
     
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult();
-    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult();
+    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.upgradeThrustMult();
+    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.upgradeSpeedMult();
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -2288,7 +2552,7 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = heldFor > 0
+    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
@@ -2457,15 +2721,26 @@ export class GameEngine {
   }
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
+    // Status-effect rounds (e.g. corrosion) debuff the player on hit.
+    if (proj.appliesEffect && target.type === EntityType.PLAYER && !target.isExploding) {
+      this.applyStatusEffect(target, proj.appliesEffect);
+    }
     // Derive impact direction for a slight forward cone bias
     const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
 
     switch (target.type) {
       case EntityType.ENEMY:
-        // Bright sparks in the enemy's own color, spread forward from impact
-        this.spawnParticles(impactPos, 6, target.color || '#f87171', {
-          speedMin: 3, speedMax: 8, sizeMin: 1.5, sizeMax: 3,
+        // Bright sparks in the enemy's own color, spread forward from impact,
+        // plus a few hot white sparks for a punchier impact.
+        this.spawnParticles(impactPos, 10, target.color || '#f87171', {
+          speedMin: 4, speedMax: 11, sizeMin: 1.5, sizeMax: 3.5,
           spreadAngle: impactAngle, spreadCone: Math.PI * 0.6,
+          lifetimeMin: 0.2, lifetimeMax: 0.4,
+        });
+        this.spawnParticles(impactPos, 4, '#ffffff', {
+          speedMin: 6, speedMax: 14, sizeMin: 1, sizeMax: 2,
+          spreadAngle: impactAngle, spreadCone: Math.PI * 0.45,
+          lifetimeMin: 0.1, lifetimeMax: 0.25,
         });
         break;
 
@@ -2534,6 +2809,261 @@ export class GameEngine {
     }
   };
 
+  // ── Progression: upgrade application + DBG controls ─────────────────────
+
+  /** Engine/Thrusters levels feed the per-frame movement multipliers
+   *  alongside the existing DBG thrust/speed cycles. */
+  private upgradeSpeedMult(): number {
+      return 1 + UPGRADE_EFFECTS.ENGINE_SPEED_FRAC_PER_LEVEL * this.upgradeLevels.engine;
+  }
+  private upgradeThrustMult(): number {
+      return 1 + UPGRADE_EFFECTS.THRUSTERS_ACCEL_FRAC_PER_LEVEL * this.upgradeLevels.thrusters;
+  }
+
+  /** Recompute every upgrade-derived player stat from the current levels.
+   *  Called at construction, on any level change, and on run reset.  Hull
+   *  heals the HP it adds so a purchase is felt immediately. */
+  private applyUpgrades() {
+      const lv = this.upgradeLevels;
+      const newMaxHp = 100 + UPGRADE_EFFECTS.HULL_HP_PER_LEVEL * lv.hull;
+      const hpDelta = newMaxHp - this.player.maxHealth;
+      this.player.maxHealth = newMaxHp;
+      if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
+      // Shield is gated behind its unlock — locked → no shield at all
+      // (Plating levels only matter once Shield is owned).
+      this.player.maxShield = this.shieldUnlocked
+          ? SHIELD_CONSTANTS.MAX_CHARGE + UPGRADE_EFFECTS.PLATING_SHIELD_PER_LEVEL * lv.plating
+          : 0;
+      if ((this.player.shield ?? 0) > this.player.maxShield) this.player.shield = this.player.maxShield;
+      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE
+          * (1 + UPGRADE_EFFECTS.CAPACITOR_RECHARGE_FRAC_PER_LEVEL * lv.capacitor);
+      this.player.damageMult = 1 + UPGRADE_EFFECTS.GUNNERY_DAMAGE_FRAC_PER_LEVEL * lv.gunnery;
+      this.player.cooldownMult = Math.max(
+          UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FLOOR,
+          1 - UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL * lv.autoloader,
+      );
+      this.player.maxAmmo = AMMO_CONSTANTS.MAX_POOL + UPGRADE_EFFECTS.MAGAZINE_AMMO_PER_LEVEL * lv.magazine;
+  }
+
+  /** Per-upgrade snapshot for the DBG panel + (future) shop. */
+  private upgradeSnapshot() {
+      return UPGRADE_DEFS.map(d => ({
+          id: d.id, label: d.label, level: this.upgradeLevels[d.id], max: d.max,
+      }));
+  }
+
+  /** DBG: bump an upgrade one level, wrapping max → 0, then re-apply. */
+  public cycleUpgrade(id: UpgradeId) {
+      const def = UPGRADE_DEFS.find(d => d.id === id);
+      if (!def) return;
+      this.upgradeLevels[id] = (this.upgradeLevels[id] + 1) % (def.max + 1);
+      this.applyUpgrades();
+  }
+  /** DBG: max every upgrade. */
+  public maxAllUpgrades() {
+      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = d.max;
+      this.applyUpgrades();
+  }
+  /** DBG: clear every upgrade back to L0. */
+  public resetUpgrades() {
+      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = 0;
+      this.applyUpgrades();
+  }
+  /** DBG: grant Salvage for testing the shop. */
+  public addDebugCredits(n: number) { this.credits += n; }
+
+  // ── Status effects ──────────────────────────────────────────────────────
+
+  /** Apply (or refresh + stack) a status effect on an entity (the player
+   *  today).  Re-hits add a stack up to maxStacks and refresh the timer. */
+  private applyStatusEffect(target: GameEntity, payload: EffectPayload) {
+    const list = target.statusEffects ?? (target.statusEffects = []);
+    const existing = list.find(e => e.kind === payload.kind);
+    if (existing) {
+      existing.stacks = Math.min(payload.maxStacks, existing.stacks + 1);
+      existing.remaining = payload.duration;
+      existing.maxDuration = payload.duration;
+      existing.dmgPerStack = payload.dmgPerSec;
+    } else {
+      list.push({
+        kind: payload.kind, remaining: payload.duration, maxDuration: payload.duration,
+        stacks: 1, dmgPerStack: payload.dmgPerSec,
+      });
+    }
+  }
+
+  /** Tick the player's status effects: apply per-step damage, count down,
+   *  drop expired.  Corrosion bleeds health directly (past the shield). */
+  private tickStatusEffects(dt: number) {
+    const list = this.player.statusEffects;
+    if (!list || list.length === 0) return;
+    let acidParticle = false;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (e.kind === 'corrosion' && !this.player.isExploding) {
+        this.player.health -= e.dmgPerStack * e.stacks * dt;
+        acidParticle = true;
+      }
+      e.remaining -= dt;
+      if (e.remaining <= 0) list.splice(i, 1);
+    }
+    // Occasional acid drip on the ship while corroding (throttled).
+    if (acidParticle && Math.random() < 0.4) {
+      this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
+        speedMin: 0.5, speedMax: 2, sizeMin: 1, sizeMax: 2.2,
+        lifetimeMin: 0.3, lifetimeMax: 0.6,
+        positionJitter: this.player.size.x * 0.6,
+      });
+    }
+  }
+
+  /** DBG: drop a corrosion stack on the player to test the effect + HUD. */
+  public debugApplyCorrosion() {
+    this.applyStatusEffect(this.player, {
+      kind: 'corrosion', duration: CORROSION.DURATION,
+      dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
+    });
+  }
+
+  // ── Unlocks + Drydock shop ──────────────────────────────────────────────
+
+  /** Push the unlock state onto the player entity so WeaponSystem can gate
+   *  weapon cycle/select + charged shots without reaching into the engine. */
+  private syncUnlocksToPlayer() {
+      this.player.ownedWeapons = WEAPON_LIST.filter(w => this.unlockedWeapons.has(w));
+      this.player.overchargeUnlocked = this.overchargeUnlocked;
+  }
+
+  private isUnlockOwned(def: UnlockDef): boolean {
+      if (def.kind === 'shield') return this.shieldUnlocked;
+      if (def.kind === 'overcharge') return this.overchargeUnlocked;
+      return def.weapon !== undefined && this.unlockedWeapons.has(def.weapon);
+  }
+
+  /** Grant an unlock (free path: cards / DBG; the shop deducts first). */
+  private applyUnlock(def: UnlockDef) {
+      if (def.kind === 'shield') {
+          this.shieldUnlocked = true;
+          this.applyUpgrades();
+          this.player.shield = this.player.maxShield ?? 0; // hand over a full shield
+      } else if (def.kind === 'overcharge') {
+          this.overchargeUnlocked = true;
+          this.syncUnlocksToPlayer();
+      } else if (def.weapon !== undefined) {
+          this.unlockedWeapons.add(def.weapon);
+          this.syncUnlocksToPlayer();
+          // Auto-equip the freshly unlocked weapon for immediate payoff.
+          this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
+      }
+  }
+
+  /** Buy a one-time unlock with Salvage.  (Stat upgrades are NOT sold here
+   *  — they come exclusively from wave-completion cards.) */
+  public purchaseUnlock(id: string): boolean {
+      const def = UNLOCK_DEFS.find(d => d.id === id);
+      if (!def || this.isUnlockOwned(def) || this.credits < def.cost) return false;
+      this.credits -= def.cost;
+      this.applyUnlock(def);
+      return true;
+  }
+
+  /** DBG: unlock everything (weapons, shield, overcharge). */
+  public debugUnlockAll() {
+      for (const w of WEAPON_LIST) this.unlockedWeapons.add(w);
+      this.shieldUnlocked = true;
+      this.overchargeUnlocked = true;
+      this.syncUnlocksToPlayer();
+      this.applyUpgrades();
+      this.player.shield = this.player.maxShield ?? 0;
+  }
+
+  /** Reset unlocks back to the lean run-start loadout. */
+  private resetUnlocks() {
+      this.unlockedWeapons = new Set([WeaponType.BLASTER]);
+      this.shieldUnlocked = false;
+      this.overchargeUnlocked = false;
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex = 0;
+      this.syncUnlocksToPlayer();
+  }
+  /** DBG: relock everything to the lean loadout. */
+  public debugResetUnlocks() { this.resetUnlocks(); this.applyUpgrades(); }
+
+  /** Drydock catalog snapshot for the player menu (built only while paused).
+   *  Unlocks only — stat upgrades are card-only. */
+  private shopSnapshot() {
+      return {
+          unlocks: UNLOCK_DEFS.map(d => {
+              const owned = this.isUnlockOwned(d);
+              return { id: d.id, label: d.label, desc: d.desc, owned, cost: d.cost, affordable: !owned && this.credits >= d.cost };
+          }),
+      };
+  }
+
+  /** Current kill-combo points multiplier (1 = no combo).  Steps up one
+   *  per COMBO_KILLS_PER_TIER ship kills, capped at COMBO_MAX_MULTIPLIER. */
+  private comboMultiplier(): number {
+      if (this.comboTimer <= 0 || this.comboCount <= 0) return 1;
+      return Math.min(
+          SCORE_CONSTANTS.COMBO_MAX_MULTIPLIER,
+          Math.max(1, Math.ceil(this.comboCount / SCORE_CONSTANTS.COMBO_KILLS_PER_TIER)),
+      );
+  }
+
+  /** Register a ship kill against the combo: bump the count and refresh
+   *  the window.  Returns the multiplier in effect AFTER the bump so the
+   *  awarding caller scales this kill's points by it. */
+  private registerComboKill(): number {
+      this.comboCount++;
+      this.comboTimer = SCORE_CONSTANTS.COMBO_WINDOW_SEC;
+      return this.comboMultiplier();
+  }
+
+  /** Style a gold "+N" points popup: text + magnitude-tiered colour/size
+   *  so a +5 chip reads differently from a +100 kill or a +1500 snitch. */
+  private styleScorePopup(t: DamageText, value: number) {
+      t.text = `+${value}`;
+      if (value >= 1000)     { t.color = '#fde047'; t.fontScale = 1.7; }
+      else if (value >= 300) { t.color = '#fbbf24'; t.fontScale = 1.35; }
+      else if (value >= 100) { t.color = '#facc15'; t.fontScale = 1.15; }
+      else                   { t.color = '#fcd34d'; t.fontScale = 0.9; }
+  }
+
+  /** Add points to the run score and float a gold "+N" popup.  A burst of
+   *  awards (AoE / chain / sweep / rapid kills) accumulates into the one
+   *  live popup — O(1), no array scan — so it reads as a growing total. */
+  private awardScore(points: number, popupPos?: Vector2) {
+      this.score += points;
+      this.credits += points; // Salvage earns 1:1 with score (score stays the high-score)
+      if (!popupPos || points === 0) return;
+
+      // Fold into the current popup if it's still floating.
+      const live = this._livePointsPopup;
+      if (live && live.isScore && live.lifetime > 0) {
+          live.scoreValue = (live.scoreValue ?? 0) + points;
+          this.styleScorePopup(live, live.scoreValue);
+          return;
+      }
+
+      const vx = (Math.random() - 0.5) * 10;
+      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+      const popup = this._damageTextPool.pop() ?? ({
+          id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
+          text: '', lifetime: 0, maxLifetime: 0, color: '', active: true,
+      } as DamageText);
+      popup.id = nextId('score');
+      popup.position.x = popupPos.x; popup.position.y = popupPos.y;
+      popup.velocity.x = vx; popup.velocity.y = vy;
+      popup.lifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+      popup.maxLifetime = SCORE_CONSTANTS.POPUP_LIFETIME;
+      popup.isScore = true;
+      popup.scoreValue = points;
+      popup.active = true;
+      this.styleScorePopup(popup, points);
+      this.damageTexts.push(popup);
+      this._livePointsPopup = popup;
+  }
+
   private spawnDamageText = (pos: Vector2, amount: number, target?: GameEntity, impactWorldPos?: Vector2) => {
       // Player damage goes to the HUD list, not the world-space float
       if (target?.type === EntityType.PLAYER) {
@@ -2545,32 +3075,37 @@ export class GameEngine {
           );
           return;
       }
-      const isCrit = amount > 3;
-      const vx = (Math.random() - 0.5) * 10;
-      const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
-      const color = isCrit ? DAMAGE_TEXT_CONSTANTS.CRIT_COLOR : DAMAGE_TEXT_CONSTANTS.COLOR;
-      const pooled = this._damageTextPool.pop();
-      if (pooled) {
-          pooled.id = nextId('dmg');
-          pooled.position.x = pos.x; pooled.position.y = pos.y;
-          pooled.text = Math.round(amount).toString();
-          pooled.velocity.x = vx; pooled.velocity.y = vy;
-          pooled.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
-          pooled.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
-          pooled.color = color;
-          pooled.active = true;
-          this.damageTexts.push(pooled);
-      } else {
-          this.damageTexts.push({
-              id: nextId('dmg'),
-              position: { x: pos.x, y: pos.y },
-              text: Math.round(amount).toString(),
-              velocity: { x: vx, y: vy },
-              lifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-              maxLifetime: DAMAGE_TEXT_CONSTANTS.LIFETIME,
-              color,
-              active: true,
-          });
+      // World-space damage numbers only show on a genuine SURVIVOR of the
+      // hit — the case where the number carries information:
+      //  - lethal hits (health <= 0) show nothing; the destruction FX and
+      //    the gold points popup are the feedback (also kills the literal
+      //    "999" asteroid-crush number),
+      //  - dent tiles (plastic / metal) lose 1 HP per hit regardless of
+      //    weapon, so the raw weapon-damage number is misleading and the
+      //    visible deformation already telegraphs progress — skip them.
+      // The remaining numbers (multi-HP survivors, e.g. future tanky
+      // enemies) auto-appear without re-touching this gate.
+      const isDent = target?.shardVariant !== undefined
+          && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
+      if (target && target.health > 0 && !isDent) {
+          const vx = (Math.random() - 0.5) * 10;
+          const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
+          const popup = this._damageTextPool.pop() ?? ({
+              id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
+              text: '', lifetime: 0, maxLifetime: 0, color: '', active: true,
+          } as DamageText);
+          popup.id = nextId('dmg');
+          popup.position.x = pos.x; popup.position.y = pos.y;
+          popup.text = Math.round(amount).toString();
+          popup.velocity.x = vx; popup.velocity.y = vy;
+          popup.lifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          popup.maxLifetime = DAMAGE_TEXT_CONSTANTS.LIFETIME;
+          popup.color = DAMAGE_TEXT_CONSTANTS.COLOR;
+          popup.isScore = false;
+          popup.scoreValue = undefined;
+          popup.fontScale = DAMAGE_TEXT_CONSTANTS.DAMAGE_FONT_SCALE;
+          popup.active = true;
+          this.damageTexts.push(popup);
       }
 
       // Dent-policy post-damage hooks — fire only while the tile is
@@ -2766,6 +3301,7 @@ export class GameEngine {
       this.player.shield = this.player.maxShield;
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
+      this.player.statusEffects = [];
       this.player.active = true;
       this.player.sprite = ASSETS.PLAYER_SHIP;
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
@@ -2936,6 +3472,9 @@ export class GameEngine {
 
               if (target.health <= 0 && !target.isExploding) {
                   target.lastImpactDamage = dmg;
+                  // Lightning is a player-only weapon — chain kills are
+                  // player-attributed for shard/tile scoring.
+                  target.killedByPlayer = true;
                   this.handleEntityDeath(target);
               }
           }
@@ -3134,6 +3673,7 @@ export class GameEngine {
                   this.spawnDamageText(e.position, applied, e);
                   if (e.health <= 0 && !e.isExploding) {
                       e.lastImpactDamage = applied;
+                      if (ring.ownerType === EntityType.PLAYER) e.killedByPlayer = true;
                       if (e.type === EntityType.STRUCTURE && dist > 0) {
                           e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
                       }
@@ -3160,8 +3700,8 @@ export class GameEngine {
   // --- WAVE SYSTEM ---
 
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
-   *  tiny helper so every wave entry point (init / grace tick / skip) goes
-   *  through the same factory. */
+   *  tiny helper so every wave entry point (init / update tick / skip)
+   *  goes through the same factory. */
   private waveContext(): WaveSpawnContext | null {
     if (!this.currentMap) return null;
     // Read the live window size + camera zoom at spawn time so a recent
@@ -3178,20 +3718,413 @@ export class GameEngine {
       enemyScale: this.enemyScale,
       difficultyLevel: this.difficultyLevel,
       viewportHalfDiagonal,
+      forcedEnemy: this.forcedTestEnemy,
     };
   }
 
-  // Thin wrappers kept for internal call-site compatibility — delegate to WaveSystem.
+  /** DBG: force every wave to spawn only `subtype` (or clear with null).
+   *  Applies from the next wave; persists across map switches. */
+  public setForcedTestEnemy(subtype: string | null) {
+    this.forcedTestEnemy = (subtype && subtype in EnemySubtype)
+      ? (subtype as EnemySubtype) : null;
+  }
+
+  /** Shared wave-completion hook — fires once per wave end on every path
+   *  (time-up, early clear, snitch catch).  Pays the early-clear bonus,
+   *  retires any uncaught snitch, and drops the milestone health pickup. */
+  private handleWaveCleared = (clearedIndex: number, elapsedSec: number, bySnitch: boolean = false) => {
+    // Completion bonus: flat base + speed-graded bonus from the wave timer.
+    // Par = the wave's spawn-stream window; clearing at/under par pays the
+    // full speed bonus, decaying to 0 by 2× par.
+    const waveNum = clearedIndex + 1;
+    const par = Math.max(1, getWaveDurationSec(clearedIndex));
+    const speedFrac = Math.max(0, Math.min(1, 1 - Math.max(0, elapsedSec - par) / par));
+    const bonus = SCORE_CONSTANTS.WAVE_COMPLETE_BASE
+        + Math.round(SCORE_CONSTANTS.EARLY_CLEAR_BONUS_PER_WAVE * waveNum * speedFrac);
+    this.awardScore(bonus, this.player.position);
+
+    // Wave-clear celebration — gold for a snitch catch, green for a
+    // clear-the-field win.  Plays before the card modal (see the delay).
+    this.playWaveClearCelebration(bySnitch);
+    // The snitch is wave bookkeeping only in that it pays out + ends the
+    // wave on catch; the entity itself persists across wave boundaries
+    // (it is never despawned at a wave end), so don't touch it here.
+    const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
+    if ((clearedIndex + 1) % healthInterval === 0) {
+      const hAngle = Math.random() * Math.PI * 2;
+      const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+      const hPos   = {
+        x: this.player.position.x + Math.cos(hAngle) * hDist,
+        y: this.player.position.y + Math.sin(hAngle) * hDist,
+      };
+      this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
+    }
+
+    // Between-wave upgrade card offer — every `cardWaveInterval` waves.
+    // Deferred by CARD_OPEN_DELAY_SEC so the celebration plays first; the
+    // tick in updateGameLogic opens the (sim-pausing) modal when it fires.
+    if ((clearedIndex + 1) % this.cardWaveInterval === 0) {
+      this.pendingCardWaveNum = clearedIndex + 1;
+      this.cardOpenDelaySec = UPGRADE_CARD_CONSTANTS.CARD_OPEN_DELAY_SEC;
+    }
+  };
+
+  /** Wave-clear celebration FX: two expanding shockwave rings (visual
+   *  only — 0 damage/knockback), a colour-themed particle burst, and a
+   *  camera punch.  Gold for a snitch catch, green for a clear-all win. */
+  private playWaveClearCelebration(bySnitch: boolean) {
+    if (!this.currentMap) return;
+    const pos = this.player.position;
+    const color = bySnitch ? '#fde047' : '#4ade80';
+    this.spawnShockwave(pos, { radius: 540, damage: 0, knockback: 0, color, lifetime: 0.7 });
+    this.spawnShockwave(pos, { radius: 320, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.5 });
+    this.spawnParticles(pos, 64, color, {
+      speedMin: 3, speedMax: 9, sizeMin: 1.5, sizeMax: 3.5,
+      lifetimeMin: 0.5, lifetimeMax: 1.1,
+    });
+    this.spawnParticles(pos, 24, '#ffffff', {
+      speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.5,
+      lifetimeMin: 0.4, lifetimeMax: 0.8,
+    });
+    this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+  }
+
+  // ── Between-wave upgrade cards ──────────────────────────────────────────
+
+  /** Build the card set for the wave that just cleared and pause for the
+   *  player's pick.  Pool = stat-upgrade cards (a free level of a not-maxed
+   *  upgrade) + occasional Salvage cards; all-maxed falls back to Salvage. */
+  private openCardChoice(waveNumber: number) {
+    const { CARD_COUNT, SALVAGE_CARD_CHANCE, SALVAGE_CARD_BASE, SALVAGE_CARD_PER_WAVE } = UPGRADE_CARD_CONSTANTS;
+    const salvageCard = (): UpgradeCard => {
+      const amount = SALVAGE_CARD_BASE + SALVAGE_CARD_PER_WAVE * waveNumber;
+      return { kind: 'salvage', label: 'Salvage Cache', desc: `+${amount} Salvage`, amount, rarity: 'common' };
+    };
+    // Offer only AUGMENTS whose dependency MODULE is installed — never a
+    // card for a system the player can't use yet (e.g. shield Plating /
+    // Capacitor before the Shield module, or Magazine with only the
+    // ammo-free Blaster).  Levels are uncapped, so all eligible stay offerable.
+    const pool = UPGRADE_DEFS.filter(d => this.augmentEligible(d));
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    // Every Nth wave the stat cards are "powerful" — each grants a random
+    // 2–4 levels at once (and renders with the rare accent).
+    const { POWERFUL_WAVE_INTERVAL, POWERFUL_MIN_LEVELS, POWERFUL_MAX_LEVELS } = UPGRADE_CARD_CONSTANTS;
+    const powerful = waveNumber % POWERFUL_WAVE_INTERVAL === 0;
+    const cards: UpgradeCard[] = [];
+    for (let i = 0; i < CARD_COUNT; i++) {
+      const def = pool[i];
+      if (def) {
+        const levels = powerful
+          ? POWERFUL_MIN_LEVELS + ((Math.random() * (POWERFUL_MAX_LEVELS - POWERFUL_MIN_LEVELS + 1)) | 0)
+          : 1;
+        const next = this.upgradeLevels[def.id] + levels;
+        const tag = levels > 1 ? ` ×${levels}` : '';
+        cards.push({
+          kind: 'stat', label: def.label, desc: `${def.desc}${tag}  (→ Lv ${next})`,
+          id: def.id, levels, rarity: powerful ? 'rare' : 'common',
+        });
+      } else {
+        cards.push(salvageCard());
+      }
+    }
+    // Chance to swap one stat card for a Salvage card for variety.
+    if (cards.length === CARD_COUNT && cards.some(c => c.kind === 'stat') && Math.random() < SALVAGE_CARD_CHANCE) {
+      const statIdxs = cards.map((c, i) => c.kind === 'stat' ? i : -1).filter(i => i >= 0);
+      cards[statIdxs[(Math.random() * statIdxs.length) | 0]] = salvageCard();
+    }
+    // Rarely, offer a FREE unlock card (if anything's still unowned).
+    const notOwned = UNLOCK_DEFS.filter(d => !this.isUnlockOwned(d));
+    if (notOwned.length > 0 && Math.random() < UPGRADE_CARD_CONSTANTS.UNLOCK_CARD_CHANCE) {
+      const u = notOwned[(Math.random() * notOwned.length) | 0];
+      cards[(Math.random() * cards.length) | 0] = {
+        kind: 'unlock', label: u.label, desc: `Module — ${u.desc}`, id: u.id, rarity: 'rare',
+      };
+    }
+    this.pendingCards = cards;
+    this.cardChoicePending = true;
+  }
+
+  /** Whether an augment card may be offered — gated on its dependency
+   *  module so the player is never shown a card for a system they lack. */
+  private augmentEligible(d: { requires?: 'shield' | 'anyWeapon' }): boolean {
+    if (d.requires === 'shield') return this.shieldUnlocked;
+    if (d.requires === 'anyWeapon') return this.unlockedWeapons.size > 1; // > Blaster
+    return true;
+  }
+
+  /** Apply the chosen card and resume play.  Called from the UI. */
+  public selectUpgradeCard(index: number) {
+    if (!this.cardChoicePending) return;
+    const card = this.pendingCards[index];
+    if (card) {
+      if (card.kind === 'stat' && card.id) {
+        const id = card.id as UpgradeId;
+        if (this.upgradeLevels[id] !== undefined) {
+          this.upgradeLevels[id] += card.levels ?? 1; // uncapped; powerful cards grant 2–4
+          this.applyUpgrades();
+        }
+      } else if (card.kind === 'salvage') {
+        this.credits += card.amount ?? 0;
+      } else if (card.kind === 'unlock' && card.id) {
+        const def = UNLOCK_DEFS.find(d => d.id === card.id);
+        if (def && !this.isUnlockOwned(def)) this.applyUnlock(def); // free (no cost)
+      }
+    }
+    this.cardChoicePending = false;
+    this.pendingCards = [];
+  }
+
+  /** DBG: cycle the card-offer wave interval (1 → 2 → 3 → 5 → 1). */
+  public cycleCardInterval() {
+    const cyc = UPGRADE_CARD_CONSTANTS.WAVE_INTERVAL_CYCLE;
+    const i = cyc.indexOf(this.cardWaveInterval as 1 | 2 | 4 | 8);
+    this.cardWaveInterval = cyc[(i + 1) % cyc.length];
+  }
+
+  /** DBG: force a card choice right now (uses the live wave number). */
+  public debugTriggerCardChoice() {
+    if (this.cardChoicePending) return;
+    this.openCardChoice(this.waveIndex + 1);
+  }
+
+  // ── Snitch — quidditch-style bonus target ───────────────────────────────
+  //
+  // The snitch rides the asteroid flow field with a burst/coast AI and
+  // PERSISTS across wave boundaries — one keeps flying until the player
+  // catches it.  Catching it (colliding with it or shooting it, per the
+  // DBG-toggleable catch mode) pays SCORE_CONSTANTS.SNITCH_POINTS and ends
+  // the current wave; the next wave then spawns a fresh one.
+
+  /** Per-sim-step snitch tick: lifecycle, flow-field steering, comet-tail
+   *  emission, and the catch check.  Called from updateGameLogic after the
+   *  wave tick so waveState is fresh. */
+  private updateSnitch(dt: number) {
+    if (!this.currentMap) return;
+    this.snitchTime += dt;
+
+    // Persist across wave boundaries: the snitch is never despawned at a
+    // wave end, so an uncaught one keeps flying into the next wave.  A
+    // fresh one only spawns when a wave is active and none is live — the
+    // first wave, or the wave after a catch removed the previous snitch.
+    if (this.waves.waveState === 'active' && (!this.snitch || !this.snitch.active)) {
+      this.spawnSnitch();
+    }
+
+    const s = this.snitch;
+    if (!s || !s.active) return;
+
+    // ── Burst/coast AI ──────────────────────────────────────────────────
+    // The snitch is interactive prey, not a constant-speed rail rider:
+    // it coasts slow enough to close on (the catch window), then darts —
+    // on a random timer, or the moment the player gets near (panic dart,
+    // biased away from the player).  See the SNITCH_CONSTANTS doc block.
+    this.snitchPanicCooldown = Math.max(0, this.snitchPanicCooldown - dt);
+    this.snitchAiTimer -= dt;
+    const toPlayerX = wrapDeltaX(s.position.x, this.player.position.x);
+    const toPlayerY = wrapDeltaY(s.position.y, this.player.position.y);
+    const playerDistSq = toPlayerX * toPlayerX + toPlayerY * toPlayerY;
+    if (this.snitchAiState === 'coast') {
+      const panic = this.snitchPanicCooldown <= 0
+          && !this.player.isExploding
+          && playerDistSq < SNITCH_CONSTANTS.PANIC_RADIUS * SNITCH_CONSTANTS.PANIC_RADIUS;
+      if (panic || this.snitchAiTimer <= 0) {
+        this.snitchAiState = 'dart';
+        this.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
+            + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
+        this.snitchDartAway = false;
+        if (panic) {
+          this.snitchPanicCooldown = SNITCH_CONSTANTS.PANIC_COOLDOWN;
+          const d = Math.sqrt(playerDistSq);
+          if (d > 1e-4) {
+            this.snitchDartAwayX = -toPlayerX / d;
+            this.snitchDartAwayY = -toPlayerY / d;
+            this.snitchDartAway = true;
+          }
+        }
+      }
+    } else if (this.snitchAiTimer <= 0) {
+      this.snitchAiState = 'coast';
+      this.snitchDartAway = false;
+      this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
+          + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+    }
+    // Speed eases toward the state target — near-instant on the way up
+    // (the burst), visibly slower on the way back down (the catch window
+    // opens gradually as the dart bleeds off).
+    const darting = this.snitchAiState === 'dart';
+    // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
+    // cruise per wave, capped; coast is a fixed fraction of it.  Read live
+    // from the wave counter so the persistent snitch speeds up each wave.
+    const waveBase = Math.min(
+      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
+    );
+    const speedTarget = waveBase * (darting ? SNITCH_CONSTANTS.DART_RATIO : SNITCH_CONSTANTS.COAST_RATIO);
+    const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
+    this.snitchSpeedMult += (speedTarget - this.snitchSpeedMult) * Math.min(1, ease * dt);
+
+    // Steering: sampled flow direction rotated by the wander oscillation;
+    // panic darts blend the away-from-player escape vector on top.  Speed
+    // derives from the player's friction-limited terminal cruise (same
+    // formula as the DBG thrust tooltip: acceleration/(1−friction),
+    // clamped by maxSpeed) so the chase tracks thrust-mult changes.
+    const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+    const wob = Math.sin(this.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
+        * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
+    const cosW = Math.cos(wob), sinW = Math.sin(wob);
+    let dirX = flow.x * cosW - flow.y * sinW;
+    let dirY = flow.x * sinW + flow.y * cosW;
+    if (this.snitchDartAway) {
+      const b = SNITCH_CONSTANTS.PANIC_AWAY_BIAS;
+      const bx = dirX * (1 - b) + this.snitchDartAwayX * b;
+      const by = dirY * (1 - b) + this.snitchDartAwayY * b;
+      const bm = Math.sqrt(bx * bx + by * by) || 1;
+      dirX = bx / bm;
+      dirY = by / bm;
+    }
+    const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+    const cruise = Math.min(
+      moveCfg.maxSpeed,
+      (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction),
+    );
+    const targetSpeed = cruise * this.snitchSpeedMult * getActiveSnitchSpeedMult();
+    const steerRate = darting ? SNITCH_CONSTANTS.DART_STEER_RATE : SNITCH_CONSTANTS.COAST_STEER_RATE;
+    const alpha = Math.min(1, steerRate * dt * 60);
+    s.velocity.x += (dirX * targetSpeed - s.velocity.x) * alpha;
+    s.velocity.y += (dirY * targetSpeed - s.velocity.y) * alpha;
+    s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+
+    // Comet tail: decay + emit trail-strip points (rendered like a
+    // projectile trail in gold) and sprinkle sparkle motes behind the core.
+    if (!s.trail) s.trail = [];
+    this.trails.tickTrail(s.trail, dt);
+    const last = s.trail.length > 0 ? s.trail[s.trail.length - 1] : null;
+    const tdx = last ? wrapDeltaX(last.x, s.position.x) : 1;
+    const tdy = last ? wrapDeltaY(last.y, s.position.y) : 1;
+    if (!last || tdx * tdx + tdy * tdy > TRAIL_CONSTANTS.MIN_DISTANCE_SQ) {
+      s.trail.push({
+        x: s.position.x,
+        y: s.position.y,
+        lifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
+        maxLifetime: SNITCH_CONSTANTS.TRAIL_LIFETIME,
+        scale: SNITCH_CONSTANTS.TRAIL_SCALE,
+      });
+    }
+    const sparkColors = SNITCH_CONSTANTS.SPARKLE_COLORS;
+    this.spawnParticles(s.position, 1, sparkColors[(Math.random() * sparkColors.length) | 0], {
+      speedMin: 0, speedMax: 1.5,
+      sizeMin: 0.5, sizeMax: 1.6,
+      lifetimeMin: 0.15, lifetimeMax: 0.4,
+      positionJitter: SNITCH_CONSTANTS.SIZE * 0.5,
+    });
+
+    // Catch check (toPlayer deltas already computed by the AI block above).
+    if (this.snitchCatchMode === 'collide') {
+      if (this.player.isExploding) return;
+      const r = Math.max(this.player.size.x, this.player.size.y) / 2
+          + SNITCH_CONSTANTS.SIZE / 2 + SNITCH_CONSTANTS.COLLIDE_GRACE;
+      if (playerDistSq <= r * r) this.catchSnitch(s);
+    } else {
+      const r = SNITCH_CONSTANTS.SHOOT_RADIUS;
+      const projs = this.entityIndex.projectiles;
+      for (let i = 0; i < projs.length; i++) {
+        const p = projs[i];
+        if (!p.active || p.ownerType !== EntityType.PLAYER) continue;
+        const dx = wrapDeltaX(s.position.x, p.position.x);
+        const dy = wrapDeltaY(s.position.y, p.position.y);
+        if (dx * dx + dy * dy <= r * r) {
+          p.active = false; // the shot is spent on the catch
+          this.catchSnitch(s);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Spawn a snitch on the off-screen ring around the player (same
+   *  viewport-derived contract as wave-enemy spawns).  Non-drop
+   *  INTERACTABLE → the physics broadphase ignores it entirely; it flies
+   *  through everything and only the manual catch check can end it. */
+  private spawnSnitch() {
+    if (!this.currentMap) return;
+    const zoom = this.camera.zoom || 1;
+    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    const angle = Math.random() * Math.PI * 2;
+    const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
+    const pos = {
+      x: this.player.position.x + Math.cos(angle) * dist,
+      y: this.player.position.y + Math.sin(angle) * dist,
+    };
+    wrapPosition(pos);
+    const s: GameEntity = {
+      id: nextId('snitch'),
+      type: EntityType.INTERACTABLE,
+      isSnitch: true,
+      snitchWanderPhase: Math.random() * Math.PI * 2,
+      position: pos,
+      velocity: { x: 0, y: 0 },
+      size: { x: SNITCH_CONSTANTS.SIZE, y: SNITCH_CONSTANTS.SIZE },
+      rotation: 0,
+      color: SNITCH_CONSTANTS.CORE_COLOR,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: SNITCH_CONSTANTS.MASS,
+      trail: [],
+    };
+    this.currentMap.entities.push(s);
+    this.snitch = s;
+    // Re-seed the burst/coast AI for the fresh snitch: open on a coast
+    // window so the spawn reads as a wandering glint, not an escape.
+    this.snitchAiState = 'coast';
+    this.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
+        + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+    this.snitchPanicCooldown = 0;
+    const waveBase = Math.min(
+      SNITCH_CONSTANTS.WAVE_SPEED_MAX,
+      SNITCH_CONSTANTS.WAVE_SPEED_STEP * (this.snitchCatchCount + 1),
+    );
+    this.snitchSpeedMult = waveBase * SNITCH_CONSTANTS.COAST_RATIO;
+    this.snitchDartAway = false;
+  }
+
+  /** Snitch caught: big gold payout + burst, then end the wave through
+   *  the shared cleared path (no early-clear bonus stacks on top). */
+  private catchSnitch(s: GameEntity) {
+    s.active = false;
+    this.snitch = null;
+    this.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves
+    this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
+    this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
+      speedMin: 1, speedMax: 6,
+      sizeMin: 1, sizeMax: 3,
+      lifetimeMin: 0.3, lifetimeMax: 0.8,
+    });
+    // Board clear: the catch wipes every live enemy on the field, each
+    // worth half its normal kill value (full death path — explosions,
+    // enemy shards, half-point "+N" popups).  Snapshot the count first so
+    // the shards/particles those deaths append aren't re-scanned.
+    if (this.currentMap) {
+      const ents = this.currentMap.entities;
+      const n = ents.length;
+      for (let i = 0; i < n; i++) {
+        const e = ents[i];
+        if (e.type === EntityType.ENEMY && e.active && !e.isExploding) {
+          this.handleEntityDeath(e, { scoreScale: SCORE_CONSTANTS.SNITCH_SWEEP_KILL_FRACTION });
+        }
+      }
+    }
+    this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
+  }
+
+  // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
     this.waves.init(ctx);
-  }
-
-  private spawnWave(index: number) {
-    const ctx = this.waveContext();
-    if (!ctx) return;
-    this.waves.spawn(index, ctx);
   }
 
 

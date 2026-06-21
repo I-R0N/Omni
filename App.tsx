@@ -109,6 +109,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.setMapType(type);
   };
 
+  const handleSetForcedEnemy = (subtype: string | null) => {
+      if (engineRef.current) engineRef.current.setForcedTestEnemy(subtype);
+  };
+
   const handleCycleTrailShape = () => {
       if (engineRef.current) engineRef.current.cycleTrailShape();
   };
@@ -257,6 +261,66 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleAsteroidFlow();
   };
 
+  const handleToggleSnitchCatchMode = () => {
+      if (engineRef.current) engineRef.current.toggleSnitchCatchMode();
+  };
+
+  const handleCycleSnitchSpeed = () => {
+      if (engineRef.current) engineRef.current.cycleSnitchSpeed();
+  };
+
+  const handleCycleEnemyScale = () => {
+      if (engineRef.current) engineRef.current.cycleEnemyScale();
+  };
+
+  const handleApplyCorrosion = () => {
+      if (engineRef.current) engineRef.current.debugApplyCorrosion();
+  };
+
+  const handleToggleTraits = () => {
+      if (engineRef.current) engineRef.current.toggleTraits();
+  };
+
+  const handleCycleUpgrade = (id: string) => {
+      if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
+  };
+
+  const handleMaxUpgrades = () => {
+      if (engineRef.current) engineRef.current.maxAllUpgrades();
+  };
+
+  const handleResetUpgrades = () => {
+      if (engineRef.current) engineRef.current.resetUpgrades();
+  };
+
+  const handleAddCredits = () => {
+      if (engineRef.current) engineRef.current.addDebugCredits(1000);
+  };
+
+  const handleSelectCard = (index: number) => {
+      if (engineRef.current) engineRef.current.selectUpgradeCard(index);
+  };
+
+  const handleCycleCardInterval = () => {
+      if (engineRef.current) engineRef.current.cycleCardInterval();
+  };
+
+  const handleTestCards = () => {
+      if (engineRef.current) engineRef.current.debugTriggerCardChoice();
+  };
+
+  const handlePurchaseUnlock = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseUnlock(id);
+  };
+
+  const handleUnlockAll = () => {
+      if (engineRef.current) engineRef.current.debugUnlockAll();
+  };
+
+  const handleResetUnlocks = () => {
+      if (engineRef.current) engineRef.current.debugResetUnlocks();
+  };
+
   const handleToggleFFOverlayVectors = () => {
       if (engineRef.current) engineRef.current.toggleFFOverlayVectors();
   };
@@ -356,6 +420,21 @@ const App: React.FC = () => {
         onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
         onCycleColorBlendInterval={handleCycleColorBlendInterval}
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
+        onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
+        onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCycleEnemyScale={handleCycleEnemyScale}
+        onApplyCorrosion={handleApplyCorrosion}
+        onToggleTraits={handleToggleTraits}
+        onCycleUpgrade={handleCycleUpgrade}
+        onMaxUpgrades={handleMaxUpgrades}
+        onResetUpgrades={handleResetUpgrades}
+        onAddCredits={handleAddCredits}
+        onSelectCard={handleSelectCard}
+        onCycleCardInterval={handleCycleCardInterval}
+        onTestCards={handleTestCards}
+        onPurchaseUnlock={handlePurchaseUnlock}
+        onUnlockAll={handleUnlockAll}
+        onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
@@ -372,6 +451,7 @@ const App: React.FC = () => {
         onSetDifficulty={handleSetDifficulty}
         mapType={mapType}
         onSetMapType={handleSetMapType}
+        onSetForcedEnemy={handleSetForcedEnemy}
       />
     </div>
   );
