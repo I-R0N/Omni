@@ -992,10 +992,16 @@ export class RenderSystem {
       buildPath: () => void,
       style: CrackStyle,
       cfg: { freq: number; cap: number },
+      apparentScale: number,
   ): void {
       const maxHp = entity.maxHealth ?? 0;
       const hp = entity.health ?? maxHp;
       if (maxHp <= 1 || hp >= maxHp || r <= 0) return;
+      // LOD: hairline cracks are imperceptible once the body shrinks below a
+      // few screen pixels — skip the save/clip/scorch/stroke work entirely for
+      // tiny or distant damaged bodies (the proliferating rock/metal chips).
+      // Pure render saving; the silhouette + base fill still draw normally.
+      if (r * apparentScale < SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX) return;
       const count = Math.min(cfg.cap, Math.floor((maxHp - hp) / cfg.freq));
       if (count <= 0) return;
       const dmgFrac = Math.min(1, Math.max(0, 1 - hp / maxHp));
@@ -3028,6 +3034,7 @@ export class RenderSystem {
                         this.overlayMaterialCracks(
                             ctx, entity, rr, buildPath,
                             METAL_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.metal,
+                            camera.zoom,
                         );
                     }
 
@@ -3355,6 +3362,7 @@ export class RenderSystem {
                         this.overlayMaterialCracks(
                             ctx, entity, rr, buildPath,
                             ROCK_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.rock,
+                            camera.zoom,
                         );
                     } else if (entity.shardVariant === 'metal-shard') {
                         // Single (non-composite) metal-shard — the metal
@@ -3367,6 +3375,7 @@ export class RenderSystem {
                         this.overlayMaterialCracks(
                             ctx, entity, rr, buildPath,
                             METAL_CRACK_STYLE, MATERIAL_DAMAGE_CRACKS.metal,
+                            camera.zoom,
                         );
                     }
                 }
