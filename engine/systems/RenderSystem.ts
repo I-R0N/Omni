@@ -191,8 +191,9 @@ function drawDamageCracks(
     ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
     // Cracks — one jagged fissure per unit of count, each stable.
     ctx.lineCap = 'round';
+    const TAU = Math.PI * 2;
     for (let i = 0; i < count; i++) {
-        const a = hash01(seed + i * 1.7) * Math.PI * 2;
+        const a = hash01(seed + i * 1.7) * TAU;
         const ca = Math.cos(a), sa = Math.sin(a);
         const len = r * (0.55 + 0.4 * hash01(seed + i * 3.3));
         // Perpendicular kink at the midpoint for a jagged, non-straight crack.
@@ -4271,16 +4272,16 @@ export class RenderSystem {
           case 'hexagon': {
               for (let i = 0; i < 6; i++) {
                   const a = (i / 6) * Math.PI * 2;
-                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
-                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+                  const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               }
               break;
           }
           case 'pentagon': {
               for (let i = 0; i < 5; i++) {
                   const a = (i / 5) * Math.PI * 2;
-                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
-                  fn.call(ctx, Math.cos(a) * r, Math.sin(a) * r);
+                  const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               }
               break;
           }
@@ -4288,8 +4289,8 @@ export class RenderSystem {
               for (let i = 0; i < 10; i++) {
                   const a = (i / 10) * Math.PI * 2;
                   const rr = i % 2 === 0 ? r : r * 0.45;
-                  const fn = i === 0 ? ctx.moveTo : ctx.lineTo;
-                  fn.call(ctx, Math.cos(a) * rr, Math.sin(a) * rr);
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               }
               break;
           }
