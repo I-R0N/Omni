@@ -883,8 +883,11 @@ export class DropSystem {
     const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
     const shardPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
     const mass = variantDef.spawn.sizeToMass(targetSize);
+    // Resolve the inherited density tier once — reused for chip HP and the
+    // entity's densityTier below.
+    const densityTier = this.inheritedTileDensityTier(tile, spec.variant);
     const chipHealth = spec.variant === 'rock-shard'
-      ? rockHitCeiling(targetSize, this.inheritedTileDensityTier(tile, spec.variant))
+      ? rockHitCeiling(targetSize, densityTier)
       : 1;
 
     const iv = tile.lastImpactVelocity;
@@ -917,7 +920,7 @@ export class DropSystem {
       mass,
       // Match the parent tile's shade so chips off a dark interior tile
       // don't pop to base (tint only — see inheritedTileDensityTier).
-      densityTier:   this.inheritedTileDensityTier(tile, spec.variant),
+      densityTier,
       polygonPoints: shardPts,
       // Per-hit chip — also exempt from instant re-collapse.
       collapseGraceTimer: getActiveShatterGraceDelay(),
