@@ -461,6 +461,12 @@ export interface GameEntity {
   // See docs/SHARD_SYSTEM.md.
   shardVariant?: ShardVariantId;
 
+  // Set on nebula-shards that formed from ROCK material (per-hit chip dust
+  // and rock death bursts).  Propagated through nebula-shard self-merges and
+  // read at condensation time so rock-derived dust condenses into a small
+  // rock-shard instead of the default glass-shard / nebula-tile outcome.
+  fromRock?: boolean;
+
   // Number of base shards that have composed into this entity.
   // Tile-break / shatter spawns start implicitly at 1 (undefined ===
   // 1); composeEntities sums the two parents' counts on every merge
@@ -817,15 +823,13 @@ export interface GameEntity {
   // renderEntities; absent values default to 1.0 (no change).
   nebulaAlphaMul?: number;
 
-  // Accumulated damage cracks for rock-tile.  Each crack is an entity-
-  // local line segment (rotation is baked in at generation, position is
-  // the tile centre).  Appended once per dent hit by PhysicsSystem
-  // .applyDentStep and drawn by RenderSystem.stampRockTileToCache on
-  // top of the polygon fill so accumulating hits read as visible damage
-  // even though rock-tile suppresses hit-flash and renders no edge
-  // outline.  Persists for the tile's lifetime — rock-tile has no
-  // regen, so cracks don't need to clear on resurrection.
-  damageCracks?: Array<{ x1: number; y1: number; x2: number; y2: number }>;
+  // Cosmetic render cache: a stable per-entity seed for the material
+  // damage-crack overlay (rock / metal tiles + shards), lazily derived
+  // from the id on first draw.  Mirrors the enemy `glowPhase` seed but
+  // for the shared seeded crack pattern in RenderSystem.drawDamageCracks
+  // so fractures hold still frame-to-frame and only accrue as HP drops.
+  // Render-only; never read by the sim.
+  crackSeed?: number;
 }
 
 export interface CameraState {

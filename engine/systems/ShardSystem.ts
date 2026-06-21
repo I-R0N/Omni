@@ -22,6 +22,7 @@ import {
   CLEANUP_CONSTANTS,
   LOCAL_MERGE_CONSTANTS,
   ROCK_CONDENSE,
+  rockHitCeiling,
   StructureVariant,
   getRockShardFreeSpawn,
   nebulaFadeRateScale,
@@ -100,6 +101,11 @@ interface RegenEntry {
   delaySeconds: number;
   variantId: ShardVariantId;
 }
+
+// Hard cap on a shatter fragment's outward scatter speed (units/substep).
+// Keeps an asteroid break a gentle outward spread even when struck by a
+// fast projectile — pieces pop apart and drift rather than launching.
+const SHATTER_SCATTER_SPEED_CAP = 2.5;
 
 // Tile-equivalent diameter — the size at which a glass-shard is
 // considered "tile-sized" and triggers the tier-transition roll
@@ -873,25 +879,39 @@ export class ShardSystem {
 
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
-      const baseHp  = newSize > 30 ? 2 : 1;
-      // Density-aware mass + HP for rock children — sqrt(tier + 1)
-      // scales HP gently so even top-tier rocks stay breakable
-      // (tier 24 ≈ 5× HP); mass scales by the full DENSITY_MULT so
-      // dense fragments feel heavy on impact and resist push.
+      const isRockChild = childVariant.id === 'rock-shard';
+      // Density-aware mass: dense fragments feel heavy on impact and resist
+      // push.  HP is resolved per-family below.
       let childMass = childSpawn.sizeToMass(newSize);
-      let hp = baseHp;
       let densityTier: number | undefined = undefined;
       if (childDensityTiers !== null) {
         densityTier = childDensityTiers[i];
         childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
-        hp = Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)));
+      }
+      let hp: number;
+      if (isRockChild) {
+        // Rock children follow the same probabilistic crack→break model as
+        // free-spawn asteroids and rock tiles: maxHealth is the size/density
+        // hit ceiling (ROCK_BREAK), not a flat HP.
+        hp = rockHitCeiling(newSize, densityTier);
+      } else {
+        // glass / plastic / metal debris keep the original brittle 1-2 HP,
+        // gently scaled by density (sqrt) when condensed.
+        const baseHp = newSize > 30 ? 2 : 1;
+        hp = densityTier !== undefined
+          ? Math.max(1, Math.round(baseHp * Math.sqrt(densityTier + 1)))
+          : baseHp;
       }
 
       let scatterAngle: number;
       let scatterSpeed: number;
       if (impactAngle !== null) {
         scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
-        scatterSpeed = impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2;
+        // Cap the impactor-speed contribution so a fast weapon (Sniper /
+        // Lightning at speed 30) can't fling the fragments — pieces should
+        // pop apart and drift, not launch.  forwardDrag already damps it.
+        scatterSpeed = Math.min(SHATTER_SCATTER_SPEED_CAP,
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
       } else {
         scatterAngle = Math.random() * Math.PI * 2;
         scatterSpeed = 1 + Math.random() * 2;
@@ -3076,18 +3096,19 @@ export class ShardSystem {
       a.mass   = newMass;
       a.position.x = nmx; a.position.y = nmy;
       a.velocity.x = nvx; a.velocity.y = nvy;
-      // Rock-only HP cap scales with density tier — denser rocks
-      // take more damage to destroy.  Cap = MAX_HP × sqrt(tier+1),
-      // so tier 0 keeps the flat MAX_HP, tier 5 ≈ 14.7, top tier 24
-      // = 30.  Summed HP from both parents clamps to that cap so a
-      // rock that's accumulated through many merges accrues HP up
-      // to the cap dictated by its current density tier.  Other
-      // variants use the flat MAX_HP unchanged.
-      const hpCap = isRockResult
-        ? Math.max(MAX_HP, Math.round(MAX_HP * Math.sqrt((newTier ?? 0) + 1)))
-        : MAX_HP;
-      a.health     = Math.min(hpCap, a.health + b.health);
-      a.maxHealth  = Math.min(hpCap, a.maxHealth + b.maxHealth);
+      // Rock follows the probabilistic break model (ROCK_BREAK): its
+      // maxHealth is the size/density HIT CEILING, not summed HP.  A merged
+      // rock is a fresh, bigger solid body, so recompute the ceiling from
+      // its new diameter + density tier (bounded to ROCK_BREAK.MAX_HITS) and
+      // refill it.  Other variants keep the flat summed MAX_HP model.
+      if (isRockResult) {
+        const ceiling = rockHitCeiling(newDiam, newTier);
+        a.health    = ceiling;
+        a.maxHealth = ceiling;
+      } else {
+        a.health     = Math.min(MAX_HP, a.health + b.health);
+        a.maxHealth  = Math.min(MAX_HP, a.maxHealth + b.maxHealth);
+      }
       a.dropComposition = composition.length > 0 ? composition : undefined;
       // Density bookkeeping — invalidate the per-entity tint cache so
       // the renderer picks up the darker tier on its next draw, then
@@ -3229,7 +3250,9 @@ export class ShardSystem {
     // Adapter hook routes the 50/50 outcome.  Position is the
     // pair's midpoint; velocity is the mass-weighted average so a
     // resulting glass-shard inherits the cloud's drift.
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics);
+    // Rock-derived dust (either source) condenses back to a rock-shard.
+    const fromRock = !!(a.fromRock || b.fromRock);
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock);
   }
 }
 

@@ -573,6 +573,20 @@ k. After N waves, spawn a portal to a new map.
     e. Touches the `breakShards` policy on rock-tile +
        new shatter pathway in ShardSystem.
     f. Estimated 1–2 sessions. Slots into Phase 3 polish.
+    **Partially covered by PR #65 (material-damage-cracks).** That
+    session shipped the `ROCK_BREAK` + `ROCK_CHIP` model: a rock
+    entity takes several hits before breaking (size/density hit
+    ceiling, 4–6), every non-killing hit chips a piece off (dust
+    nebula-shard or solid rock-shard) while the tile/asteroid stays
+    mostly intact, and the killing hit breaks the remainder into
+    multiple pieces — satisfying (b)/(c) and the (d) "chunkier
+    polygon-decomposition, same feel" fallback for the chip-off
+    behaviour. **Still wanted (user direction): the true Voronoi cell
+    decomposition (a)** — geometric sector chips carved out of the
+    tile's own polygon, rather than the separate chip entities PR #65
+    spawns alongside an intact tile. Keep this entry QUEUED; the user
+    wants to consider the full Voronoi version as a future
+    implementation.
 
 27. **Parked items — not in plan, considered but deferred
     indefinitely.** Items the user listed but decided
@@ -990,7 +1004,7 @@ of the items in Phase 1 follow-ups.
 | ID | Task | Notes |
 |----|------|-------|
 | orbital-fields-moons | Orbital flow fields + moving moons with gravity | New mechanic. Flow fields that create circular orbits around a central planet entity; moving moons rendered in the background that contribute gravitational pull like the central planet. Touches FlowField + FlowFieldGrid + BackgroundManager + LOCAL_GRAVITY_CONSTANTS. Likely 2+ sessions. Fits between Phase 2 (k) and Phase 3, or alongside Pair B/C polish. See decision #25. |
-| voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. See decision #26. |
+| voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
 
 ---
 

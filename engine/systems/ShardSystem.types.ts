@@ -672,6 +672,7 @@ export interface ShardAdapter {
     velocity: import('../../types').Vector2,
     entities: import('../../types').GameEntity[],
     physics: import('./PhysicsSystem').PhysicsSystem,
+    fromRock: boolean,
   ): void;
 }
 

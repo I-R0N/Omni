@@ -921,6 +921,11 @@ export const SHARD_SLEEP_CONSTANTS = {
 // 28-world-unit shard — i.e. the small chips a dense field is made of.
 export const SHARD_LOD_CONSTANTS = {
   MIN_APPARENT_RADIUS_PX: 9,
+  // Rock chips below THIS apparent radius collapse to a cached solid-disc
+  // blit (full polygon + tint render skipped).  Smaller than the metal
+  // threshold above so a rock keeps its jagged silhouette until it's only a
+  // few screen pixels — by then the shape is imperceptible anyway.
+  CHIP_LOD_RADIUS_PX: 6,
   // Offscreen disc bitmap resolution.  Blitted downscaled to a handful
   // of pixels, so 48² is ample and keeps each cached colour tiny.
   DISC_BITMAP_SIZE: 48,
@@ -1506,7 +1511,10 @@ export const STRUCTURE_VARIANTS = {
   // rock-tiles read with the same texture as rock-shards rather than
   // the glass-aesthetic translucent hex.
   rock: {
-    health: 3,
+    // 5 HP (was 3) — modest bump so the seeded damage-crack overlay has
+    // room to accrue a couple of fractures (one per ~1.3 hits, see
+    // MATERIAL_DAMAGE_CRACKS) before the tile shatters.  Still brittle.
+    health: 5,
     mass: Infinity,
     indestructible: false,
     sprite: '',
@@ -1515,6 +1523,102 @@ export const STRUCTURE_VARIANTS = {
 } as const;
 
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
+
+// ── Rock break model (probabilistic, size/density-scaled) ──────────────────
+// Rock tiles / asteroids / rock-shards no longer break at a flat HP.  Each
+// entity's maxHealth is repurposed as a HIT CEILING: it always cracks on the
+// first hit (never breaks), and from the second hit on every blaster hit
+// rolls an EARLY break whose odds climb toward a guaranteed break at the
+// ceiling.  The ceiling scales with size (and density), so small rocks cap at
+// MIN_HITS and big / dense boulders ride up to MAX_HITS — bigger rocks resist
+// longer because the same hit number is a smaller fraction of their ceiling.
+//
+//   ceiling      = rockHitCeiling(size, densityTier)   (MIN_HITS..MAX_HITS)
+//   breakChance  = ((hitsTaken - 1) / (ceiling - 1)) ^ CURVE   (0 at hit 1,
+//                  1 at the ceiling)
+export const ROCK_BREAK = {
+  MIN_HITS: 4,   // smallest rock — crack, then ~50/50 break on hits 2-3, forced by 4
+  MAX_HITS: 6,   // largest / densest boulder
+  SIZE_MIN: 20,  // size mapping to MIN_HITS
+  SIZE_MAX: 160, // size mapping to MAX_HITS (linear between, clamped outside)
+  // Density tiers add to the ceiling: +1 hit per this many tiers (clamped
+  // to MAX_HITS).  Keeps condensed rock-shards / merged boulders meatier.
+  DENSITY_TIERS_PER_BONUS: 8,
+  // Break-curve exponent.  1 = linear rise to a guaranteed break at the
+  // ceiling.  >1 delays the odds (rocks resist longer); <1 front-loads them.
+  CURVE: 1.0,
+} as const;
+
+// Size/density → hit ceiling (also the entity's maxHealth).
+export function rockHitCeiling(size: number, densityTier?: number): number {
+  const span = ROCK_BREAK.SIZE_MAX - ROCK_BREAK.SIZE_MIN;
+  const t = Math.max(0, Math.min(1, (size - ROCK_BREAK.SIZE_MIN) / span));
+  let hits = ROCK_BREAK.MIN_HITS + Math.round(t * (ROCK_BREAK.MAX_HITS - ROCK_BREAK.MIN_HITS));
+  if (densityTier !== undefined && densityTier > 0) {
+    hits += Math.floor(densityTier / ROCK_BREAK.DENSITY_TIERS_PER_BONUS);
+  }
+  return Math.max(ROCK_BREAK.MIN_HITS, Math.min(ROCK_BREAK.MAX_HITS, hits));
+}
+
+// Early-break probability after `hitsTaken` hits given the entity's ceiling.
+// 0 on the first hit (always cracks), 1 once the ceiling is reached.
+export function rockBreakChance(hitsTaken: number, ceiling: number): number {
+  if (hitsTaken <= 1) return 0;
+  if (hitsTaken >= ceiling) return 1;
+  const frac = (hitsTaken - 1) / (ceiling - 1);
+  return Math.pow(frac, ROCK_BREAK.CURVE);
+}
+
+// ── Rock chipping (conservation of mass) ───────────────────────────────────
+// The base material layer.  Every NON-killing hit on a rock entity (tile or
+// asteroid) cracks (the seeded overlay) and CHIPS one piece off the parent:
+//  - usually pulverised dust — a tinted nebula-shard,
+//  - sometimes (ROCK_FRACTION) a solid rock-shard chunk.
+// Mobile asteroids shrink by the chip's footprint so the rock's mass is
+// ~conserved across its life (static tiles can't move off their hex, so they
+// conserve via the in-place dent); the killing hit breaks the remainder into
+// multiple pieces via the shatter path.  See GameEngine.releaseRockChip.
+export const ROCK_CHIP = {
+  // Perf: not every non-killing hit shedds a chip — most just crack (the
+  // overlay).  Lower this to thin the chip-entity stream (render + sim cost);
+  // raise toward 1 for the old "chip every hit" feel.  "Sometimes chips."
+  CHIP_CHANCE:      0.7,  // P(a non-killing hit emits ANY chip; else just cracks)
+  ROCK_FRACTION:    0.5,  // of emitting hits: P(solid rock-shard chunk); else dust roll
+  // Dust nebula-shards are the priciest entity to render (tinted sprites) and
+  // they accumulate (no lifetime — only clear via merge/shot), so a dust roll
+  // only actually puffs this fraction of the time.  Keeps occasional ambient
+  // dust without flooding the field.
+  DUST_CHANCE:      0.5,
+  ROCK_SIZE_FRAC:   0.45, // solid chip diameter ÷ parent effective diameter
+  NEBULA_SIZE_FRAC: 0.5,  // dust-puff diameter ÷ parent effective diameter
+  // Dust is mostly pulverised vapour, so it removes only this fraction of its
+  // footprint from a mobile parent — a shard whittled by dust alone still
+  // slims down, but far slower than one losing solid chunks.
+  NEBULA_MASS_FRAC: 0.25,
+  MIN_SHARD_DIAM:   12,   // never shrink a mobile rock-shard below this diameter
+  // Below this parent diameter a hit can't shed a SOLID chunk (it would be a
+  // useless sliver) — tiny shards only puff dust until they break.
+  SOLID_MIN_PARENT_DIAM: 30,
+} as const;
+
+// ── Material damage cracks ─────────────────────────────────────────────────
+// Drives the seeded fracture overlay (RenderSystem.drawDamageCracks) for the
+// rocky / metal destructibles.  Rock now caps at 4-6 hits (ROCK_BREAK), so it
+// shows one crack per hit (freq 1) up to MAX_HITS — the escalating fracture
+// reads the accumulating damage.  Metal stays tough and quiet.
+//
+//   crackCount = min(cap, floor((maxHealth - health) / freq))
+//
+// `maxHealth` is the LIVE value (metal scales it ×densityTier; rock's is its
+// hit ceiling), so denser bodies crack proportionally up to the cap.
+export const MATERIAL_DAMAGE_CRACKS = {
+  // Rock: one crack per hit (maxHealth is the hit ceiling), capped at the
+  // largest ceiling so a 6-hit boulder can show all six fractures.
+  rock:  { freq: 1, cap: ROCK_BREAK.MAX_HITS },
+  // Metal tiles (24 HP) + metal composites: tough, so cracks accrue slowly —
+  // first split after ~5 hits, capped at 5 so even a dense block stays read.
+  metal: { freq: 5,   cap: 5 },
+} as const;
 
 // ── Nebula tile configuration ──────────────────────────────────────────────
 // Nebula tiles share the same hex grid as glass (STRUCTURE) tiles but are
@@ -3279,27 +3383,22 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       scatterHalfCone: 0,
     },
     dent: {
-      // 3 adjacent vertices pulled per hit.  vertexJitter is the
-      // base per-vertex max pull (0.20 = up to 20 % inward).  Two
-      // of the three (the closest-to-impact vertex plus one
-      // randomly-chosen neighbour, via deepVertexCount = 2) draw
-      // jitter × centerVertexJitterMul = 0.20 × 10.0 = up to 2.0
-      // nominal jitter — capped by applyDentStep's K_MIN floor so
-      // an "infinitely deep" roll bottoms out at 5 % of the vertex's
-      // current radius.  Every hit produces two deep notches plus
-      // one softer side warp, reading as a chaotic brittle fracture
-      // (cracks branch unevenly rather than dimpling at a single
-      // point).
-      vertexJitter: 0.20,
-      centerVertexJitterMul: 10.0,
-      pullVertexCount: 3,
-      deepVertexCount: 2,
-      // Each hit also chips off a rock-shard at the impact location.
-      // sizeFraction 0.7 is linear relative to the deformed tile
-      // diameter (~44 at start), so the chip is ~31 wide on hit 1 —
-      // a chunky fragment that reads as a substantial chip flying
-      // off, not a sliver.
-      perHitShard: { variant: 'rock-shard', sizeFraction: 0.7 },
+      // GENTLE dent now that the seeded crack overlay carries the per-hit
+      // damage read (see MATERIAL_DAMAGE_CRACKS / ROCK_BREAK).  The old
+      // settings (jitter 0.20 × mul 10, two vertices pulled to the 5 %
+      // K_MIN floor, plus a chunky per-hit chip) caved the hex in and
+      // flung a ~30 px shard off on the FIRST hit — so a 4-HP tile *looked*
+      // destroyed after one shot.  Now one vertex takes a shallow pull and
+      // the silhouette only erodes slightly across its 4-hit life; the
+      // cracks do the talking, and the tile shatters via breakShards on the
+      // killing hit.
+      vertexJitter: 0.06,
+      centerVertexJitterMul: 2.0,
+      pullVertexCount: 2,
+      deepVertexCount: 1,
+      // No per-hit chip — the crack overlay is the per-hit feedback now, and
+      // a chunk flying off every shot read as the tile breaking.  Freed
+      // material is delivered on the killing hit via breakShards.
       // Final break: 3 rock-shards at sizeFraction 0.75 each (linear
       // fraction of deformed diameter).  Sum of squares = 1.69 so
       // the freed material exceeds the deformed area — visually
@@ -3369,7 +3468,12 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       countMin: 2, countMax: 3,
       alphaMin: 0.4, alphaMax: 2.0,
       childVariant: 'rock-shard',
-      forwardDrag: 0.35, perpScatter: 0.0,
+      // forwardDrag lowered 0.35 → 0.12: shards inherit far less of the
+      // impactor's speed so an asteroid breaks into a gentle outward spread
+      // rather than rocketing the pieces away (a blaster shot at speed 16
+      // used to fling shards at ~6.6; now ~2).  The scatter is also hard-
+      // capped in shatterAsteroidStyle so a fast weapon can't blow it up.
+      forwardDrag: 0.12, perpScatter: 0.0,
       scatterHalfCone: Math.PI * 0.55,
     },
     onShatterParticles: { color: '#94a3b8', count: 5 },

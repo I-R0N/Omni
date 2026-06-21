@@ -11,6 +11,7 @@ import {
   getActiveShatterGraceDelay,
   METAL_ASSEMBLY,
   METAL_BREAK_SHARDS_PER_TIER,
+  rockHitCeiling,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -640,21 +641,29 @@ export class DropSystem {
       // (rock-shard spawned from rock-tile's breakShards) keep
       // single-hit destruction, matching today's rock-shard /
       // glass-shard HP.
+      // Seed the density tier that reproduces the parent tile's shade so
+      // the fragment doesn't pop from the tile's aggregated shade back to
+      // base.  Uniform across the burst — the tile was one shade, so its
+      // fragments are too.  (See inheritedTileDensityTier.)
+      const densityTier = this.inheritedTileDensityTier(tile, spec.variant);
+
+      // Shard durability.  rock-shards follow the probabilistic break model
+      // (ROCK_BREAK): their maxHealth is a size/density hit ceiling, so a
+      // chipped / freed rock-shard cracks then breaks over several hits just
+      // like a free-spawn asteroid — not the legacy single hit.  Dent shards
+      // (plastic / metal) inherit the parent tile's HP unless the variant
+      // overrides it; everything else stays single-hit.
       const shardHealth = shardHealthOverride !== undefined
         ? shardHealthOverride
-        : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
+        : spec.variant === 'rock-shard'
+          ? rockHitCeiling(targetSize, densityTier)
+          : (variantDef.dent !== undefined ? (tile.maxHealth || 1) : 1);
 
       // Resolve colour once — plastic re-rolls its shade per shard,
       // everything else inherits from the tile.
       const shardColor = spec.variant === 'plastic-shard'
         ? randomPlasticShardShade()
         : tile.color;
-
-      // Seed the density tier that reproduces the parent tile's shade so
-      // the fragment doesn't pop from the tile's aggregated shade back to
-      // base.  Uniform across the burst — the tile was one shade, so its
-      // fragments are too.  (See inheritedTileDensityTier.)
-      const densityTier = this.inheritedTileDensityTier(tile, spec.variant);
 
       entities.push({
         id:            nextId('dent_shard'),
@@ -874,6 +883,12 @@ export class DropSystem {
     const targetSize = Math.max(2, deformedDiameter * spec.sizeFraction);
     const shardPts = this.generateMaterialShardPolygon(spec.variant, targetSize);
     const mass = variantDef.spawn.sizeToMass(targetSize);
+    // Resolve the inherited density tier once — reused for chip HP and the
+    // entity's densityTier below.
+    const densityTier = this.inheritedTileDensityTier(tile, spec.variant);
+    const chipHealth = spec.variant === 'rock-shard'
+      ? rockHitCeiling(targetSize, densityTier)
+      : 1;
 
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
@@ -897,12 +912,15 @@ export class DropSystem {
       rotationSpeed: (Math.random() - 0.5) * (1.5 / Math.max(1, targetSize / 30)),
       color:         tile.color,
       active:        true,
-      health:        1,
-      maxHealth:     1,
+      // rock-shard chips follow the probabilistic break model (size/density
+      // hit ceiling) so a chipped rock cracks then breaks over several hits
+      // like any other asteroid; non-rock chips stay single-hit.
+      health:        chipHealth,
+      maxHealth:     chipHealth,
       mass,
       // Match the parent tile's shade so chips off a dark interior tile
       // don't pop to base (tint only — see inheritedTileDensityTier).
-      densityTier:   this.inheritedTileDensityTier(tile, spec.variant),
+      densityTier,
       polygonPoints: shardPts,
       // Per-hit chip — also exempt from instant re-collapse.
       collapseGraceTimer: getActiveShatterGraceDelay(),
@@ -941,6 +959,7 @@ export class DropSystem {
     inheritVelocity?: Vector2,
     composition?: NebulaColorStop[],
     alphaMul?: number,
+    fromRock: boolean = false,
   ) {
     const variantDef = SHARD_VARIANTS['nebula-shard'];
     const targetSize = Math.max(4, baseSize * sizeFraction);
@@ -987,6 +1006,9 @@ export class DropSystem {
       id:                  nextId('colored_nebula_shard'),
       type:                EntityType.STRUCTURE,
       shardVariant:        'nebula-shard',
+      // Rock-derived dust condenses back to a rock-shard, not glass (see
+      // NebulaSystem.onComposeNebulaShardPair).
+      fromRock:            fromRock || undefined,
       position:            { x: spawnWorldPos.x, y: spawnWorldPos.y },
       velocity:            {
         x: Math.cos(launchAngle) * launchSpeed,

@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -160,7 +160,11 @@ export abstract class BaseMapLayer {
     }
 
     const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
-    const hp = size > 30 ? 2 : 1;
+    // maxHealth is the size-scaled hit ceiling for the probabilistic break
+    // model (ROCK_BREAK): the asteroid cracks on hit 1 and from hit 2 on
+    // rolls an early break that's guaranteed by the ceiling.  Bigger rocks
+    // get a higher ceiling, so they resist longer.
+    const hp = rockHitCeiling(size);
 
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
     // This seeds the asteroid into the vortex streamlines from spawn.
