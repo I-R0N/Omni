@@ -921,6 +921,11 @@ export const SHARD_SLEEP_CONSTANTS = {
 // 28-world-unit shard — i.e. the small chips a dense field is made of.
 export const SHARD_LOD_CONSTANTS = {
   MIN_APPARENT_RADIUS_PX: 9,
+  // Rock chips below THIS apparent radius collapse to a cached solid-disc
+  // blit (full polygon + tint render skipped).  Smaller than the metal
+  // threshold above so a rock keeps its jagged silhouette until it's only a
+  // few screen pixels — by then the shape is imperceptible anyway.
+  CHIP_LOD_RADIUS_PX: 6,
   // Offscreen disc bitmap resolution.  Blitted downscaled to a handful
   // of pixels, so 48² is ample and keeps each cached colour tiny.
   DISC_BITMAP_SIZE: 48,
@@ -1574,7 +1579,16 @@ export function rockBreakChance(hitsTaken: number, ceiling: number): number {
 // conserve via the in-place dent); the killing hit breaks the remainder into
 // multiple pieces via the shatter path.  See GameEngine.releaseRockChip.
 export const ROCK_CHIP = {
-  ROCK_FRACTION:    0.5,  // P(solid rock-shard chip) per non-killing hit; else dust
+  // Perf: not every non-killing hit shedds a chip — most just crack (the
+  // overlay).  Lower this to thin the chip-entity stream (render + sim cost);
+  // raise toward 1 for the old "chip every hit" feel.  "Sometimes chips."
+  CHIP_CHANCE:      0.7,  // P(a non-killing hit emits ANY chip; else just cracks)
+  ROCK_FRACTION:    0.5,  // of emitting hits: P(solid rock-shard chunk); else dust roll
+  // Dust nebula-shards are the priciest entity to render (tinted sprites) and
+  // they accumulate (no lifetime — only clear via merge/shot), so a dust roll
+  // only actually puffs this fraction of the time.  Keeps occasional ambient
+  // dust without flooding the field.
+  DUST_CHANCE:      0.5,
   ROCK_SIZE_FRAC:   0.45, // solid chip diameter ÷ parent effective diameter
   NEBULA_SIZE_FRAC: 0.5,  // dust-puff diameter ÷ parent effective diameter
   // Dust is mostly pulverised vapour, so it removes only this fraction of its

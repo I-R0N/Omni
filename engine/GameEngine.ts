@@ -3222,6 +3222,9 @@ export class GameEngine {
    */
   private releaseRockChip(parent: GameEntity, impactPos: Vector2): void {
       if (!this.currentMap) return;
+      // Perf: most non-killing hits just crack (the overlay) — only some shed
+      // a chip entity.  Thins the chip stream that drives render/sim cost.
+      if (Math.random() >= ROCK_CHIP.CHIP_CHANCE) return;
       const entities = this.currentMap.entities;
       const diam = this.deformedDiameter(parent);
       // Solid chunks only come off reasonably-sized rock — a tiny shard would
@@ -3239,6 +3242,11 @@ export class GameEngine {
               impactPos,
           );
       } else {
+          // Dust is the priciest chip to render (tinted sprite) and it
+          // accumulates (no lifetime), so only actually puff some of the
+          // time.  No puff this hit → nothing chips (the crack already
+          // telegraphed the damage); skip the conservation shrink too.
+          if (Math.random() >= ROCK_CHIP.DUST_CHANCE) return;
           // Pulverised dust — a tinted nebula puff drifting off the impact.
           chipDiam = diam * ROCK_CHIP.NEBULA_SIZE_FRAC;
           const jitter = diam * 0.15;

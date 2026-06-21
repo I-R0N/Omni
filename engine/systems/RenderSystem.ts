@@ -3238,6 +3238,24 @@ export class RenderSystem {
                     this.lastLodShardCount++;
                     return;
                 }
+                // Rock chips: the conservation-chip system spawns many small
+                // rock-shards, so collapse the tiniest ones (below the
+                // chip-LOD radius, smaller than the metal threshold) to the
+                // same cached solid blob — skips the full polygon + density
+                // tint + (already LOD-gated) crack render.  Their jagged
+                // silhouette is imperceptible at this apparent size.
+                if (this.shardLodEnabled
+                    && entity.shardVariant === 'rock-shard'
+                    && !isFlash
+                    && glowColor === undefined
+                    && lodR * camera.zoom < SHARD_LOD_CONSTANTS.CHIP_LOD_RADIUS_PX) {
+                    const blob = this.getSolidTriangleBitmap(densityTintForRender(entity, entity.color));
+                    ctx.globalAlpha = shardMergeFadeAlpha(entity);
+                    ctx.drawImage(blob, -lodR, -lodR, lodR * 2, lodR * 2);
+                    ctx.globalAlpha = 1.0;
+                    this.lastLodShardCount++;
+                    return;
+                }
 
                 if (isTileShard) {
                     // ── Tile shard — glass-like translucent panels with optional glow
