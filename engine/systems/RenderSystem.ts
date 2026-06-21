@@ -486,6 +486,17 @@ export class RenderSystem {
   // content's visual centre lands on the rotation pivot.  Prevents
   // sprite "orbiting" when the art isn't perfectly centred in its frame.
   private _spriteCentroids: Map<string, { dx: number, dy: number }> = new Map();
+  // Projectile glow gradient cache.  Every standard / charged shot used to
+  // rebuild a createRadialGradient + 5-6 addColorStop (each parses a CSS
+  // colour string) PER PROJECTILE PER FRAME — the dominant per-frame cost in
+  // shot-heavy combat (cap 600, frustum-culled).  Instead we build the glow
+  // ONCE as a unit-radius (r=1) radial gradient keyed by owner+colour; the
+  // colour stops sit at RELATIVE radii, so filling the unit gradient under
+  // ctx.scale(glowR, glowR) reproduces any glow radius with identical pixels.
+  // Keyed "E<col>" / "P<col>" (enemy/player); the charged fireball is a
+  // single static entry.  Warms to ~10 entries.
+  private _projGlowCache: Map<string, CanvasGradient> = new Map();
+  private _chargedGlow: CanvasGradient | null = null;
   // Render buffers.  Each entry carries the entity AND its camera-local
   // render coords (rx, ry) — computed once at cull time so the draw pass
   // can translate to the right shifted position without recomputing.
@@ -3487,16 +3498,24 @@ export class RenderSystem {
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
 
-                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                    grad.addColorStop(0,    'rgba(255, 255, 235, 1)');    // hot white core
-                    grad.addColorStop(0.10, 'rgba(255, 220, 100, 1)');    // pale yellow inner
-                    grad.addColorStop(0.25, 'rgba(251, 146,  60, 1)');    // orange (orange-400)
-                    grad.addColorStop(0.45, 'rgba(239,  68,  68, 0.85)'); // red (red-500)
-                    grad.addColorStop(0.75, 'rgba(220,  38,  38, 0.25)'); // deep red glow
-                    grad.addColorStop(1,    'rgba(220,  38,  38, 0)');
+                    // Unit-radius gradient (colour stops at relative radii) built
+                    // once; ctx.scale(glowR) maps it to this shot's glow size with
+                    // identical pixels — no per-frame gradient rebuild.
+                    let grad = this._chargedGlow;
+                    if (!grad) {
+                        grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+                        grad.addColorStop(0,    'rgba(255, 255, 235, 1)');    // hot white core
+                        grad.addColorStop(0.10, 'rgba(255, 220, 100, 1)');    // pale yellow inner
+                        grad.addColorStop(0.25, 'rgba(251, 146,  60, 1)');    // orange (orange-400)
+                        grad.addColorStop(0.45, 'rgba(239,  68,  68, 0.85)'); // red (red-500)
+                        grad.addColorStop(0.75, 'rgba(220,  38,  38, 0.25)'); // deep red glow
+                        grad.addColorStop(1,    'rgba(220,  38,  38, 0)');
+                        this._chargedGlow = grad;
+                    }
 
+                    ctx.scale(glowR, glowR);
                     ctx.beginPath();
-                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.arc(0, 0, 1, 0, Math.PI * 2);
                     ctx.fillStyle = grad;
                     ctx.fill();
 
@@ -3514,30 +3533,42 @@ export class RenderSystem {
                     const pulse = 0.88 + Math.sin(nowSec * 14 + r * 1.3) * 0.12;
                     const glowR = r * pulse * glowMult;
 
-                    const [cr, cg, cb] = hexToRgb(entity.color || (isEnemy ? '#f97316' : '#facc15'));
+                    const col = entity.color || (isEnemy ? '#f97316' : '#facc15');
+
+                    // Single merged gradient: hot core → weapon colour → transparent
+                    // glow.  Built ONCE per owner+colour as a unit-radius gradient
+                    // (stops at relative radii) and reused across every shot of that
+                    // colour; ctx.scale(glowR) below maps it to this shot's size with
+                    // identical pixels — no per-projectile per-frame rebuild / string
+                    // parse / hexToRgb alloc.
+                    const key = (isEnemy ? 'E' : 'P') + col;
+                    let grad = this._projGlowCache.get(key);
+                    if (!grad) {
+                        const [cr, cg, cb] = hexToRgb(col);
+                        grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+                        if (isEnemy) {
+                            // Warm-white core so the shot still reads as hostile,
+                            // then the archetype's own colour out to the rim.
+                            grad.addColorStop(0,    'rgba(255, 255, 235, 1)');
+                            grad.addColorStop(0.14, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                            grad.addColorStop(0.34, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                            grad.addColorStop(0.60, `rgba(${cr}, ${cg}, ${cb}, 0.16)`);
+                            grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                        } else {
+                            grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
+                            grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                            grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
+                            grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
+                            grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                        }
+                        this._projGlowCache.set(key, grad);
+                    }
 
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, lifetimeFrac);
-
-                    // Single merged gradient: hot core → weapon colour → transparent glow.
-                    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-                    if (isEnemy) {
-                        // Warm-white core so the shot still reads as hostile,
-                        // then the archetype's own colour out to the rim.
-                        grad.addColorStop(0,    'rgba(255, 255, 235, 1)');
-                        grad.addColorStop(0.14, `rgba(${cr}, ${cg}, ${cb}, 1)`);
-                        grad.addColorStop(0.34, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
-                        grad.addColorStop(0.60, `rgba(${cr}, ${cg}, ${cb}, 0.16)`);
-                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
-                    } else {
-                        grad.addColorStop(0,    'rgba(255, 255, 255, 1)');
-                        grad.addColorStop(0.12, `rgba(${cr}, ${cg}, ${cb}, 1)`);
-                        grad.addColorStop(0.30, `rgba(${cr}, ${cg}, ${cb}, 0.55)`);
-                        grad.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, 0.15)`);
-                        grad.addColorStop(1,    `rgba(${cr}, ${cg}, ${cb}, 0)`);
-                    }
+                    ctx.scale(glowR, glowR);
                     ctx.beginPath();
-                    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+                    ctx.arc(0, 0, 1, 0, Math.PI * 2);
                     ctx.fillStyle = grad;
                     ctx.fill();
 
