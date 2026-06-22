@@ -3234,7 +3234,10 @@ export const ROCK_AGGREGATION_TINT_FLOOR = 0.55;
 // NOTE: rock-origin dust (the `fromRock` flag) bypasses this map and
 // always returns to rock — only ambient cloud / glass-dust / enemy-puff
 // nebula-shards (which carry real hues) get spread across materials.
-export const NEBULA_MATERIAL_BANDS: ReadonlyArray<{ hueMax: number; variant: ShardVariantId }> = [
+// The four solid materials a nebula cloud can crystallise into.
+export type NebulaCondenseMaterial = 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard';
+
+export const NEBULA_MATERIAL_BANDS: ReadonlyArray<{ hueMax: number; variant: NebulaCondenseMaterial }> = [
   { hueMax: 45,  variant: 'rock-shard'    }, //   0– 45  red → orange
   { hueMax: 160, variant: 'plastic-shard' }, //  45–160  yellow → green
   { hueMax: 255, variant: 'glass-shard'   }, // 160–255  cyan → blue
@@ -3243,7 +3246,7 @@ export const NEBULA_MATERIAL_BANDS: ReadonlyArray<{ hueMax: number; variant: Sha
 ];
 
 // Pick the condensed-shard material for a blended nebula hue (degrees).
-export function nebulaHueToShardVariant(hueDeg: number): ShardVariantId {
+export function nebulaHueToShardVariant(hueDeg: number): NebulaCondenseMaterial {
   const h = ((hueDeg % 360) + 360) % 360;
   for (let i = 0; i < NEBULA_MATERIAL_BANDS.length; i++) {
     if (h < NEBULA_MATERIAL_BANDS[i].hueMax) return NEBULA_MATERIAL_BANDS[i].variant;
@@ -3275,6 +3278,16 @@ export const NEBULA_CONDENSE: Record<
   'plastic-shard': { units: 4, hp: 6 },
   'metal-shard':   { units: 6, hp: 12 },
 };
+
+// Anti-stuck patience: a cloud LOCKS its target material once it starts
+// growing (so off-hue bonds can't cheap-crystallise it).  But to avoid an
+// expensive target (metal) ballooning forever in a thin field, after this
+// many coalescences without reaching the target's cost the cloud
+// force-crystallises into its committed material with whatever mass it has.
+// Any surplus over the cost is split off as a leftover nebula-shard
+// carrying the off-target "remainder" colours (which then seed other
+// materials), so mass and colour are conserved.
+export const NEBULA_CONDENSE_STALL_BONDS = 6;
 
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {

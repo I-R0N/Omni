@@ -819,12 +819,15 @@ export class NebulaSystem {
      */
     /**
      * ShardAdapter pair-transmute hook.  Called after a nebula-shard
-     * ↔ nebula-shard bond resolves and ShardSystem has already
-     * faded both sources.  Rolls 50/50 between:
-     *   - nebula-tile  at the nearest free hex cell (may no-op if
-     *                  every candidate is occupied).
-     *   - glass-shard  at the supplied midpoint position with the
-     *                  pair's averaged velocity.
+     * ↔ nebula-shard bond resolves AND the cloud has accumulated enough
+     * mass to crystallise (ShardSystem owns the commit/accumulate gate).
+     * Rolls 50/50 between:
+     *   - nebula-tile   at the nearest free hex cell (cloud thickening;
+     *                   skipped for rock-derived dust).
+     *   - the COMMITTED material shard at the midpoint, plus — when the
+     *     cloud overshot the material's cost — a leftover nebula-shard
+     *     carrying the off-target "remainder" colours (excess-split), so
+     *     surplus mass + colour are conserved and re-seed other materials.
      */
     public onComposeNebulaShardPair(
         composition: NebulaColorStop[] | undefined,
@@ -833,30 +836,79 @@ export class NebulaSystem {
         entities: GameEntity[],
         physics: PhysicsSystem,
         fromRock: boolean,
+        material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+        excessUnits: number,
     ): void {
         const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
-        // Rock-derived dust condenses back into a small rock-shard rather than
-        // the default glass/nebula-tile outcome — the dust came off rock, so
-        // it returns to rock as it re-aggregates.
-        if (fromRock) {
-            this.spawnCondensedShardAt(entities, position, velocity, 'rock-shard');
+
+        // Tile outcome — the cloud thickens back into a nebula-tile.  Skipped
+        // for rock-derived dust (it returns to rock, never a nebula tile).
+        // May no-op if every candidate hex is occupied; acceptable (both
+        // source shards are already fading).
+        if (!fromRock && Math.random() < 0.5) {
+            this.transmuteToTileAt(entities, position, composition, blendHex, physics);
             return;
         }
-        if (Math.random() < 0.5) {
-            // Tile path may fail if every candidate hex is occupied;
-            // in that case the pair-transmute resolves to nothing
-            // (both source shards are already fading).  Acceptable —
-            // matches the previous behaviour of the area-accumulator
-            // path when its tile attempt failed.
-            this.transmuteToTileAt(entities, position, composition, blendHex, physics);
-        } else {
-            // The blended cloud HUE drives which solid material the dust
-            // crystallises into (rock / plastic / glass / metal) — see
-            // NEBULA_MATERIAL_BANDS.  Replaces the old fixed glass outcome,
-            // spreading every material type across the nebula's colours.
-            const material = nebulaHueToShardVariant(hexToHueDeg(blendHex));
-            this.spawnCondensedShardAt(entities, position, velocity, material);
+
+        // Material outcome — crystallise the COMMITTED material (lock-in:
+        // ShardSystem already resolved which material this cloud is destined
+        // for, so a late hue drift can't change it here).
+        this.spawnCondensedShardAt(entities, position, velocity, material);
+
+        // Excess-split: hand surplus mass back as a leftover nebula-shard
+        // carrying the off-target remainder colours.
+        if (excessUnits >= 1 && composition && composition.length > 0) {
+            const remainder = this.remainderComposition(composition, material);
+            this.spawnLeftoverNebulaShard(entities, position, velocity, remainder, excessUnits);
         }
+    }
+
+    /**
+     * The "remainder colours" of a composition relative to a crystallised
+     * material: the stops whose hue does NOT map to that material's band,
+     * renormalised.  When the cloud was hue-pure (every stop in-band) there
+     * is no off-band remainder, so the full composition is returned (the
+     * leftover is then genuine same-colour excess).
+     */
+    private remainderComposition(
+        composition: NebulaColorStop[],
+        material: string,
+    ): NebulaColorStop[] {
+        const off = composition.filter(
+            s => nebulaHueToShardVariant(hexToHueDeg(s.hex)) !== material,
+        );
+        const src = off.length > 0 ? off : composition;
+        const total = src.reduce((sum, s) => sum + s.weight, 0) || 1;
+        return src.map(s => ({ hex: s.hex, weight: s.weight / total }));
+    }
+
+    /**
+     * Release the excess-split leftover as a fresh nebula-shard carrying the
+     * remainder colours + the surplus condense-units, so it re-enters the
+     * coalescence cycle and seeds a (usually different) material.  Size is
+     * area-scaled by the surplus so mass reads conserved.
+     */
+    private spawnLeftoverNebulaShard(
+        entities: GameEntity[],
+        position: Vector2,
+        velocity: Vector2,
+        composition: NebulaColorStop[],
+        excessUnits: number,
+    ): void {
+        // ~20px reference diameter per unit, area-scaled by the surplus.
+        const baseSize = 20 * Math.sqrt(Math.max(1, excessUnits));
+        this.drops.spawnColoredNebulaShard(
+            entities,
+            position,
+            baseSize,
+            blendCompositionToHex(composition),
+            1,                  // sizeFraction — baseSize already final
+            velocity,
+            composition,
+            0.5,                // wispy puff, matching the other condense dust
+            false,              // not rock-origin — these are remainder colours
+            excessUnits,        // carries the surplus condense-units forward
+        );
     }
 
     public onNeighborhoodBlendRegen(entity: GameEntity, entities: GameEntity[]): void {

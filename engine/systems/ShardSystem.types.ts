@@ -673,6 +673,8 @@ export interface ShardAdapter {
     entities: import('../../types').GameEntity[],
     physics: import('./PhysicsSystem').PhysicsSystem,
     fromRock: boolean,
+    material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+    excessUnits: number,
   ): void;
 }
 

@@ -36,6 +36,7 @@ import {
   getActiveShatterGraceDelay,
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
+  NEBULA_CONDENSE_STALL_BONDS,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -3230,35 +3231,42 @@ export class ShardSystem {
     const tint = blendCompositionToHex(composition);
     const midpoint: Vector2 = { x: mx, y: my };
 
-    // ── Conservation of mass: accumulate-then-crystallise ──────────────
-    // The blended hue names the candidate material; NEBULA_CONDENSE gives
-    // how many base nebula-shards' worth of mass that material costs.
-    // Rock-derived dust always returns to rock (its grey hue would land
-    // there anyway, but pin it for robustness).
+    // ── Conservation of mass: commit → accumulate → crystallise ────────
+    // LOCK-IN: the bigger party's committed target carries forward; if
+    // neither has committed yet, commit to the blended hue's material now
+    // (rock-derived dust always commits to rock).  The crystallise gate
+    // uses the COMMITTED material's cost, so a later off-hue bond can't
+    // drag the cloud into a cheaper material mid-accumulation.
     const fromRock = !!(a.fromRock || b.fromRock);
-    const material = fromRock
-      ? 'rock-shard'
-      : nebulaHueToShardVariant(hexToHueDeg(tint));
+    const committed = a.nebulaTargetMaterial ?? b.nebulaTargetMaterial;
+    const material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard' =
+      committed ?? (fromRock ? 'rock-shard' : nebulaHueToShardVariant(hexToHueDeg(tint)));
     const combinedUnits = (a.nebulaCondenseUnits ?? 1) + (b.nebulaCondenseUnits ?? 1);
-    const requiredUnits = NEBULA_CONDENSE[material as keyof typeof NEBULA_CONDENSE].units;
+    const requiredUnits = NEBULA_CONDENSE[material].units;
 
-    if (combinedUnits < requiredUnits) {
+    // ANTI-STUCK: count coalescences spent waiting on this target; past the
+    // patience cap, force-crystallise with whatever mass we have so an
+    // expensive target can't balloon forever in a thin field.
+    const stall = Math.max(a.nebulaStallCount ?? 0, b.nebulaStallCount ?? 0) + 1;
+    const stalledOut = stall >= NEBULA_CONDENSE_STALL_BONDS;
+
+    if (combinedUnits < requiredUnits && !stalledOut) {
       // Not enough nebula yet — coalesce the pair into ONE larger nebula-
-      // shard that carries the summed units, and wait for more.  Only the
-      // smaller retires; mass is conserved, nothing crystallises.  A small
-      // glimmer marks the coalescence.
+      // shard that carries the summed units + committed target, and wait
+      // for more.  Only the smaller retires; mass is conserved, nothing
+      // crystallises.  A small glimmer marks the coalescence.
       this.particles.spawn(entities, midpoint, 2, tint, {
         speedMin: 0.1, speedMax: 0.4,
         sizeMin: 0.3, sizeMax: 0.9,
         lifetimeMin: 0.4, lifetimeMax: 0.8,
         positionJitter: Math.max(a.size.x, b.size.x) * 0.5,
       });
-      this.growNebulaShard(a, b, composition, combinedUnits, midpoint, { x: nvx, y: nvy });
+      this.growNebulaShard(a, b, composition, combinedUnits, material, stall, midpoint, { x: nvx, y: nvy });
       return;
     }
 
-    // Enough nebula accumulated — crystallise.  Glittery glimmer burst at
-    // the merge point — same visual feedback the old grow-larger path had.
+    // Crystallise.  Glittery glimmer burst at the merge point — same visual
+    // feedback the old grow-larger path had.
     const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
     this.particles.spawn(entities, midpoint, 3, '#ffffff', {
       speedMin: 0.1, speedMax: 0.5,
@@ -3278,11 +3286,17 @@ export class ShardSystem {
     this.startMergeFadeOut(a);
     this.startMergeFadeOut(b);
 
+    // EXCESS-SPLIT: mass over the committed cost is handed back to the
+    // adapter so it can release a leftover nebula-shard carrying the
+    // off-target "remainder" colours (conserves mass + colour).  Clamped
+    // at 0 when we force-crystallised under the target cost.
+    const excessUnits = Math.max(0, combinedUnits - requiredUnits);
+
     // Adapter hook routes the 50/50 tile-vs-material outcome.  Position is
     // the pair's midpoint; velocity is the mass-weighted average so a
-    // resulting shard inherits the cloud's drift.  It re-derives the same
-    // material from the composition hue (and honours fromRock).
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock);
+    // resulting shard inherits the cloud's drift.  Material is the COMMITTED
+    // target (honouring fromRock).
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock, material, excessUnits);
   }
 
   /**
@@ -3297,6 +3311,8 @@ export class ShardSystem {
     consumed: GameEntity,
     composition: NebulaColorStop[] | undefined,
     units: number,
+    target: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+    stall: number,
     position: Vector2,
     velocity: Vector2,
   ): void {
@@ -3318,6 +3334,8 @@ export class ShardSystem {
     survivor.velocity.x = velocity.x;
     survivor.velocity.y = velocity.y;
     survivor.nebulaCondenseUnits = units;
+    survivor.nebulaTargetMaterial = target;   // lock-in carries forward
+    survivor.nebulaStallCount = stall;         // patience carries forward
     survivor.fromRock = (survivor.fromRock || consumed.fromRock) || undefined;
     if (composition) survivor.nebulaColorComposition = composition;
     survivor.color = blendCompositionToHex(survivor.nebulaColorComposition);

@@ -960,6 +960,7 @@ export class DropSystem {
     composition?: NebulaColorStop[],
     alphaMul?: number,
     fromRock: boolean = false,
+    condenseUnits?: number,
   ) {
     const variantDef = SHARD_VARIANTS['nebula-shard'];
     const targetSize = Math.max(4, baseSize * sizeFraction);
@@ -1039,6 +1040,10 @@ export class DropSystem {
       // variant-default 0.45 base, without touching the nebula
       // variant config globally.
       nebulaAlphaMul: alphaMul,
+      // Surplus condense-units carried forward by an excess-split leftover
+      // so it re-enters the coalescence cycle pre-charged (undefined → the
+      // shard starts at the implicit base of 1 unit).
+      nebulaCondenseUnits: condenseUnits,
     });
   }
 

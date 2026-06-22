@@ -655,6 +655,18 @@ export interface GameEntity {
   // crystallise into the hue's solid material, so tougher materials
   // (metal / plastic) cost more nebula than rock / glass.
   nebulaCondenseUnits?: number;
+  // Committed condensation target — once a coalescing cloud is big enough
+  // to matter it LOCKS the material its dominant hue points at, so later
+  // off-hue bonds can't drag it into a cheaper material (hue-drift
+  // cheap-out).  The crystallise gate then uses the committed material's
+  // cost, not the live hue.
+  nebulaTargetMaterial?: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard';
+  // Anti-stuck "patience": coalescences this cloud has made without
+  // reaching its committed target's cost.  Past NEBULA_CONDENSE_STALL_BONDS
+  // the cloud force-crystallises into its committed material with whatever
+  // it has, so an expensive target (metal) in a thin field can't balloon
+  // forever without resolving.
+  nebulaStallCount?: number;
   // Render-time cache of blendCompositionToHex(nebulaColorComposition).
   // Populated lazily by RenderSystem on first draw and invalidated by
   // NebulaSystem whenever the composition mutates (merge, regen).
