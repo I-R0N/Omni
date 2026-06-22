@@ -3251,6 +3251,31 @@ export function nebulaHueToShardVariant(hueDeg: number): ShardVariantId {
   return 'rock-shard';
 }
 
+// ── Conservation of mass: nebula → material build cost ────────────────
+// Crystallising a solid shard out of a nebula cloud isn't free.  A
+// condensing cloud must accumulate `units` worth of nebula-shards (base
+// shard = 1 unit; coalescing sums the units of both parties) BEFORE it
+// can crystallise into the hue's material — until then each bond just
+// grows a single bigger nebula-shard.  Cost rises with the material's
+// toughness, so a metal or plastic shard takes far more nebula than a
+// rock or glass one.  The condensed shard's HP tracks the same scale, so
+// what you spend to build it ≈ what it takes to destroy it (conservation
+// of energy too).  Rock is the cheapest solid AND crystallises at the
+// LOWEST density tier.
+//   glass : 2 units (1 pair),  hp  1  — brittle, cheapest
+//   rock  : 2 units (1 pair),  hp  3  — lowest density
+//   plastic: 4 units (2 pairs), hp  6  — springy, pricier
+//   metal : 6 units (3 pairs),  hp 12  — most nebula, toughest
+export const NEBULA_CONDENSE: Record<
+  'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+  { units: number; hp: number }
+> = {
+  'glass-shard':   { units: 2, hp: 1 },
+  'rock-shard':    { units: 2, hp: 3 },
+  'plastic-shard': { units: 4, hp: 6 },
+  'metal-shard':   { units: 6, hp: 12 },
+};
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,

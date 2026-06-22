@@ -648,6 +648,13 @@ export interface GameEntity {
   // colour composition and the total polygon area (in world units²) that
   // drives the coalescence merge threshold.
   nebulaColorComposition?: NebulaColorStop[];
+  // Conservation-of-mass accumulator for the nebula→material condense
+  // path: how many base nebula-shards' worth of mass this shard carries
+  // (base shard = 1; grows by summing when two nebula-shards coalesce).
+  // A cloud must accumulate NEBULA_CONDENSE[material].units before it can
+  // crystallise into the hue's solid material, so tougher materials
+  // (metal / plastic) cost more nebula than rock / glass.
+  nebulaCondenseUnits?: number;
   // Render-time cache of blendCompositionToHex(nebulaColorComposition).
   // Populated lazily by RenderSystem on first draw and invalidated by
   // NebulaSystem whenever the composition mutates (merge, regen).

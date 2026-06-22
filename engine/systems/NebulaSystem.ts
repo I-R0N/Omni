@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, rockHitCeiling, randomPlasticShardShade, nebulaHueToShardVariant } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -653,30 +653,30 @@ export class NebulaSystem {
             y: Math.sin(p.angle) * p.r,
         }));
 
-        // Per-variant durability + colour.  Rock-shards follow the
-        // probabilistic break model (size hit ceiling); glass keeps its
-        // brittle 1-2 HP; plastic / metal condense as small brittle
-        // fragments that re-enter their own merge / assembly cycle.  Colour
-        // reads as the material so a freshly condensed shard is legible
-        // before it aggregates (plastic re-rolls a palette shade; metal
-        // takes its gunmetal body; rock / glass keep the slate dust look).
-        let hp: number;
+        // Per-variant durability + colour.  HP comes from NEBULA_CONDENSE
+        // (conservation of energy: what it cost in nebula to build ≈ what
+        // it takes to destroy), so tougher materials that cost more nebula
+        // are also harder to break.  Colour reads as the material so a
+        // freshly condensed shard is legible before it aggregates (plastic
+        // re-rolls a palette shade; metal takes its gunmetal body; rock /
+        // glass keep the slate dust look).
+        const hp = NEBULA_CONDENSE[variantId].hp;
         let color: string;
+        // Rock condenses at the LOWEST density tier (the cheapest, least
+        // dense solid the cloud can form).
+        let densityTier: number | undefined;
         switch (variantId) {
             case 'rock-shard':
-                hp = rockHitCeiling(targetSize);
                 color = COLORS.ASTEROID;
+                densityTier = 0;
                 break;
             case 'glass-shard':
-                hp = targetSize > 30 ? 2 : 1;
                 color = COLORS.ASTEROID;
                 break;
             case 'plastic-shard':
-                hp = 2;
                 color = randomPlasticShardShade();
                 break;
             case 'metal-shard':
-                hp = 2;
                 color = COLORS.STRUCTURE_METAL;
                 break;
         }
@@ -693,6 +693,7 @@ export class NebulaSystem {
             active:        true,
             health:        hp,
             maxHealth:     hp,
+            densityTier,
             polygonPoints,
             mass:          spawn.sizeToMass(targetSize),
         });
