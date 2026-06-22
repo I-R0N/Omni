@@ -3216,6 +3216,41 @@ const SHARD_SPAWN_SHAPE_METAL = {
 // Keep them locked here rather than tuning two separate numbers.
 export const ROCK_AGGREGATION_TINT_FLOOR = 0.55;
 
+// ── Nebula → material condensation map ────────────────────────────────
+// When two nebula-shards bond and condense into a SOLID shard (the
+// non-tile outcome of NebulaSystem.onComposeNebulaShardPair), the blended
+// cloud HUE selects which material the dust crystallises into — so the
+// nebula's COLOUR, not a fixed flag, spreads the four solid materials
+// across the field.  Bands are scanned in order; the first whose upper
+// bound the hue falls under wins (lower bound = previous band's hueMax,
+// wrapping at 360).  Desaturated greys read as hue 0 → first band.
+// Together the bands must cover [0, 360); reorder / resize freely to
+// retune which colours yield which material.
+//   red / orange   → rock      (warm, mineral)
+//   yellow / green  → plastic    (matches plastic's greens + ambers)
+//   cyan / blue     → glass      (cool, glassy)
+//   indigo / violet → metal      (cold steel sheen)
+//   magenta wrap    → rock       (closes the wheel back to red)
+// NOTE: rock-origin dust (the `fromRock` flag) bypasses this map and
+// always returns to rock — only ambient cloud / glass-dust / enemy-puff
+// nebula-shards (which carry real hues) get spread across materials.
+export const NEBULA_MATERIAL_BANDS: ReadonlyArray<{ hueMax: number; variant: ShardVariantId }> = [
+  { hueMax: 45,  variant: 'rock-shard'    }, //   0– 45  red → orange
+  { hueMax: 160, variant: 'plastic-shard' }, //  45–160  yellow → green
+  { hueMax: 255, variant: 'glass-shard'   }, // 160–255  cyan → blue
+  { hueMax: 345, variant: 'metal-shard'   }, // 255–345  indigo → violet
+  { hueMax: 360, variant: 'rock-shard'    }, // 345–360  magenta wrap → rock
+];
+
+// Pick the condensed-shard material for a blended nebula hue (degrees).
+export function nebulaHueToShardVariant(hueDeg: number): ShardVariantId {
+  const h = ((hueDeg % 360) + 360) % 360;
+  for (let i = 0; i < NEBULA_MATERIAL_BANDS.length; i++) {
+    if (h < NEBULA_MATERIAL_BANDS[i].hueMax) return NEBULA_MATERIAL_BANDS[i].variant;
+  }
+  return 'rock-shard';
+}
+
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,

@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, rockHitCeiling } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, rockHitCeiling, randomPlasticShardShade, nebulaHueToShardVariant } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -626,12 +626,12 @@ export class NebulaSystem {
         entities: GameEntity[],
         position: Vector2,
         velocity: Vector2,
-        variantId: 'glass-shard' | 'rock-shard',
+        variantId: 'glass-shard' | 'rock-shard' | 'plastic-shard' | 'metal-shard',
     ): void {
         const variant = SHARD_VARIANTS[variantId];
         const spawn = variant.spawn;
-        // Rock-derived dust condenses into a SMALL rock-shard; glass keeps the
-        // tile-equivalent size it always had.
+        // Rock-derived dust condenses into a SMALL rock-shard; the other
+        // materials keep the tile-equivalent size they always had.
         const targetSize = variantId === 'rock-shard'
             ? Math.sqrt(HEX_AREA) * 0.6
             : Math.sqrt(HEX_AREA);
@@ -653,11 +653,33 @@ export class NebulaSystem {
             y: Math.sin(p.angle) * p.r,
         }));
 
-        // Rock-shards follow the probabilistic break model (size hit ceiling);
-        // glass keeps its brittle 1-2 HP.
-        const hp = variantId === 'rock-shard'
-            ? rockHitCeiling(targetSize)
-            : (targetSize > 30 ? 2 : 1);
+        // Per-variant durability + colour.  Rock-shards follow the
+        // probabilistic break model (size hit ceiling); glass keeps its
+        // brittle 1-2 HP; plastic / metal condense as small brittle
+        // fragments that re-enter their own merge / assembly cycle.  Colour
+        // reads as the material so a freshly condensed shard is legible
+        // before it aggregates (plastic re-rolls a palette shade; metal
+        // takes its gunmetal body; rock / glass keep the slate dust look).
+        let hp: number;
+        let color: string;
+        switch (variantId) {
+            case 'rock-shard':
+                hp = rockHitCeiling(targetSize);
+                color = COLORS.ASTEROID;
+                break;
+            case 'glass-shard':
+                hp = targetSize > 30 ? 2 : 1;
+                color = COLORS.ASTEROID;
+                break;
+            case 'plastic-shard':
+                hp = 2;
+                color = randomPlasticShardShade();
+                break;
+            case 'metal-shard':
+                hp = 2;
+                color = COLORS.STRUCTURE_METAL;
+                break;
+        }
         entities.push({
             id:            nextId('shard'),
             type:          EntityType.STRUCTURE,
@@ -667,7 +689,7 @@ export class NebulaSystem {
             size:         { x: targetSize, y: targetSize },
             rotation:      Math.random() * Math.PI * 2,
             rotationSpeed: (Math.random() - 0.5) * 1.0,
-            color:         COLORS.ASTEROID,
+            color,
             active:        true,
             health:        hp,
             maxHealth:     hp,
@@ -827,7 +849,12 @@ export class NebulaSystem {
             // path when its tile attempt failed.
             this.transmuteToTileAt(entities, position, composition, blendHex, physics);
         } else {
-            this.spawnCondensedShardAt(entities, position, velocity, 'glass-shard');
+            // The blended cloud HUE drives which solid material the dust
+            // crystallises into (rock / plastic / glass / metal) — see
+            // NEBULA_MATERIAL_BANDS.  Replaces the old fixed glass outcome,
+            // spreading every material type across the nebula's colours.
+            const material = nebulaHueToShardVariant(hexToHueDeg(blendHex));
+            this.spawnCondensedShardAt(entities, position, velocity, material);
         }
     }
 
