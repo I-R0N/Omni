@@ -9,6 +9,7 @@ import {
   WAVE_CONSTANTS,
   WAVE_ANNOUNCE_CONSTANTS,
   SCORE_CONSTANTS,
+  SHIELD_CONSTANTS,
   TIMED_WAVE_CONFIG,
   getWaveDurationSec,
   getWaveSpawnBudget,
@@ -235,6 +236,7 @@ export class WaveSystem {
       RAMMER_1: 1, SHOOTER_1: 1,
       RAMMER_2: 2, SHOOTER_2: 2,
       RAMMER_3: 3, SHOOTER_3: 3,
+      KAMIKAZE: 2, BULWARK: 2,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -243,7 +245,7 @@ export class WaveSystem {
     // damageMult read by the ram + projectile paths.
     const scaledHealth = Math.max(1, Math.round(config.health * statScale.health * enemyHpMult(this.waveIndex)));
     const dmgMult = (statScale.damage ?? 1) * enemyDamageMult(this.waveIndex);
-    entities.push({
+    const enemy: GameEntity = {
       id,
       type: EntityType.ENEMY,
       enemySubtype: subtype,
@@ -264,7 +266,30 @@ export class WaveSystem {
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       enemyShape: config.shape,
       aimLaser: config.aimLaser,
-    });
+    };
+
+    // Bulwark shield (Stage 0): seed shield + maxShield + slow regen.  The
+    // generalized PhysicsSystem absorption path soaks hits for any shielded
+    // entity; recharge ticks already run for any entity in updatePhysics.
+    if (config.shield !== undefined) {
+      enemy.shield = config.shield;
+      enemy.maxShield = config.shield;
+      enemy.shieldRechargeRate = config.shieldRegen ?? SHIELD_CONSTANTS.RECHARGE_RATE;
+      enemy.shieldRechargeTimer = 0;
+    }
+
+    // Kamikaze detonation payload (Stage 0): stamp the AoE config + the
+    // pre-detonation tell length.  Blast damage rides the per-wave damageMult,
+    // matching how the ram + projectile paths scale.
+    if (config.detonate) {
+      const d = config.detonate;
+      enemy.explosionRadius = d.radius;
+      enemy.explosionDamage = d.damage * dmgMult;
+      enemy.explosionKnockback = d.knockback;
+      enemy.armDuration = d.tell;
+    }
+
+    entities.push(enemy);
 
     this.waveEnemyIds.add(id);
   }

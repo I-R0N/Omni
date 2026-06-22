@@ -2384,6 +2384,10 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
+    // Tick armed kamikaze bombers — detonate any whose pre-detonation tell
+    // has elapsed (spawns the AoE shockwave processed by updateExplosionRings).
+    this.updateEnemyDetonations(dt);
+
     const tRings = performance.now();
     this.updateExplosionRings();
     this.lastExplosionRingsMs = performance.now() - tRings;
@@ -3647,6 +3651,38 @@ export class GameEngine {
   // pre-populated into hitEntityIds so it isn't double-damaged (it
   // already took config.damage from the projectile collision upstream).
   // Player is also pre-populated to prevent self-damage.
+  // ─── Kamikaze detonation tick (Stage 0) ────────────────────────────────
+  //
+  // A bomber arms on first contact with the player (PhysicsSystem stamps
+  // armTimer = armDuration).  Here we tick the tell down; when it elapses the
+  // bomber detonates: a damaging AoE shockwave (radius/damage/knockback
+  // stamped at spawn, ENEMY-owned so it threatens the player — shield-
+  // respecting in updateExplosionRings — and catches nearby enemies as
+  // collateral) plus the normal enemy death-explosion via handleEntityDeath.
+  // Bombers killed before they touch the player never arm, so they pop
+  // harmlessly — the kill-early counter.  O(enemies) per step; the index is
+  // tiny so no PerfController gate is needed (matches the AI/shooting passes).
+  private updateEnemyDetonations(dt: number) {
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.armTimer === undefined || e.isExploding) continue;
+          e.armTimer -= dt;
+          if (e.armTimer > 0) continue;
+          e.armTimer = undefined;
+          this.spawnShockwave(e.position, {
+              radius: e.explosionRadius ?? 120,
+              damage: e.explosionDamage ?? 0,
+              knockback: e.explosionKnockback ?? 0,
+              color: e.color || '#e879f9',
+              ownerType: EntityType.ENEMY,
+          });
+          // handleEntityDeath flips isExploding (so the explosionTimer loop
+          // culls it) — do NOT set active=false here or the boom won't render.
+          this.handleEntityDeath(e);
+      }
+  }
+
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
       if (!this.currentMap) return;
 
@@ -3788,8 +3824,18 @@ export class GameEngine {
               const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
 
               if (dmg > 0) {
-                  const applied = dmg * falloff;
+                  let applied = dmg * falloff;
                   const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
+                  // Player shield soaks the blast first (kamikaze AoE and any
+                  // future enemy-owned explosion) so an AoE hit isn't a raw
+                  // shield-bypass — mirrors the projectile / ram absorption.
+                  if (e.id === 'player' && (e.shield ?? 0) > 0) {
+                      const absorbed = Math.min(e.shield!, applied);
+                      e.shield! -= absorbed;
+                      applied -= absorbed;
+                      e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                      e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  }
                   if (!isIndestructible) e.health -= applied;
                   e.hitFlash = 0.12;
                   this.spawnDamageText(e.position, applied, e);

@@ -2759,6 +2759,17 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // (AISystem brakes to a stop) so it reads as a deliberate camping shooter
   // rather than a continuous strafing stream.
   aimLaser?: boolean;
+  // Kamikaze self-destruct payload (Stage 0).  When set, the enemy stamps
+  // explosionRadius/Damage/Knockback + armDuration at spawn; on first contact
+  // with the player it deals `contactDamage`, arms (a `tell`-second flash +
+  // expand), then detonates an AoE shockwave (GameEngine.updateEnemyDetonations).
+  detonate?: { radius: number; damage: number; knockback: number; tell: number };
+  // Defensive shield (Stage 0, Bulwark).  `shield` seeds both shield and
+  // maxShield at spawn; `shieldRegen` is the per-second recharge (slow, so the
+  // shield is a soft barrier the player burns through, not an invuln).  The
+  // generalized PhysicsSystem absorption path lets any shielded enemy soak hits.
+  shield?: number;
+  shieldRegen?: number;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2825,6 +2836,31 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     weapon: { cooldown: 2.8, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
     telegraph: 0.75, aimLaser: true,
   },
+  // ── Core-roster additions (Stage 0) ──
+  // Kamikaze: a frail magenta star that screams in on a hard, fast dive and
+  // self-destructs on contact — a modest contact bite plus a detonation AoE.
+  // Low HP + a readable pre-detonation tell make it a kill-early-or-peel-away
+  // threat: pop it before it reaches you, or boost clear of the blast.  Does
+  // not shoot.
+  [EnemySubtype.KAMIKAZE]: {
+    color: '#e879f9', size: 26, health: 2,
+    maxSpeed: 9, accel: 7, turnRate: 4.0,
+    sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
+    shoots: false, contactDamage: 10,
+    detonate: { radius: 150, damage: 26, knockback: 9, tell: 0.22 },
+  },
+  // Bulwark: a slow violet octagon fortress behind a regenerating shield,
+  // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
+  // demands burst-through / flanking — a soft counter, not a hard wall.
+  [EnemySubtype.BULWARK]: {
+    color: '#a78bfa', size: 34, health: 4,
+    maxSpeed: 3.5, accel: 2.2, turnRate: 1.1,
+    sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.8, damage: 7, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
+    shield: 18, shieldRegen: 4,
+    telegraph: 0.5,
+  },
 };
 
 // ── Status effects ────────────────────────────────────────────────────────────
@@ -2872,6 +2908,8 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.SHOOTER_1]: EnemyRole.SHOOTING,
   [EnemySubtype.SHOOTER_2]: EnemyRole.SHOOTING,
   [EnemySubtype.SHOOTER_3]: EnemyRole.SHOOTING,
+  [EnemySubtype.KAMIKAZE]:  EnemyRole.RAMMING,
+  [EnemySubtype.BULWARK]:   EnemyRole.SHOOTING,
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
@@ -2887,6 +2925,8 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
   { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
   { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
+  { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
+  { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

@@ -21,6 +21,8 @@ const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
   { type: EnemySubtype.SHOOTER_1, label: 'Skirmisher' },
   { type: EnemySubtype.SHOOTER_2, label: 'Orbiter' },
   { type: EnemySubtype.SHOOTER_3, label: 'Sniper' },
+  { type: EnemySubtype.KAMIKAZE,  label: 'Kamikaze' },
+  { type: EnemySubtype.BULWARK,   label: 'Bulwark' },
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },

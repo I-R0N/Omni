@@ -120,12 +120,17 @@ export enum EnemySubtype {
   SHOOTER_1 = 'SHOOTER_1',
   SHOOTER_2 = 'SHOOTER_2',
   SHOOTER_3 = 'SHOOTER_3',
+  // Core-roster additions (Stage 0) — no new AI role:
+  //  - KAMIKAZE: a RAMMING suicide bomber that self-destructs on contact (AoE).
+  //  - BULWARK:  a SHOOTING fan-gunner behind a regenerating shield.
+  KAMIKAZE = 'KAMIKAZE',
+  BULWARK  = 'BULWARK',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
@@ -376,6 +381,15 @@ export interface GameEntity {
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
+  // Kamikaze self-destruct (Stage 0).  `armDuration` is stamped at spawn as
+  // the pre-detonation tell length; `armTimer` is set to it the frame the
+  // bomber first touches the player (PhysicsSystem contact path) and ticks
+  // down in GameEngine.updateEnemyDetonations.  At 0 the bomber detonates:
+  // a shockwave AoE (radius/damage/knockback read from explosionRadius/
+  // explosionDamage/explosionKnockback) + the normal enemy death-explosion.
+  // RenderSystem reads armTimer/armDuration to draw the flash + expand tell.
+  armTimer?: number;
+  armDuration?: number;
   // Native polygon silhouette for enemy rendering (set at spawn from the
   // archetype) — RenderSystem draws this instead of a sprite.
   enemyShape?: EnemyShape;

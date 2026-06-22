@@ -2536,8 +2536,11 @@ export class PhysicsSystem {
 
           let projDmg = proj.damage || 1;
 
-          // Shield absorbs damage for the player
-          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+          // Shield absorbs damage — generalized from player-only to ANY
+          // shielded entity (Stage 0 Bulwark): the enemy shield soaks the hit
+          // and re-arms its recharge delay exactly like the player's.  Entities
+          // without a shield (shield undefined) fall straight through.
+          if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
@@ -2708,7 +2711,11 @@ export class PhysicsSystem {
               // Per-archetype contact damage (rushers hurt; ranged enemies
               // have 0).  No damage below the impact-speed threshold either.
               const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0) {
+              // Skip contact damage for an already-armed kamikaze so it bites
+              // the player exactly once (on first touch) instead of every frame
+              // of its tell — the rest of the threat is the detonation AoE.
+              const armedBomber = enemy.explosionRadius !== undefined && enemy.armTimer !== undefined;
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding || armedBomber) {
                   // flash already handled by the general contact flash below
               } else {
                   // Per-wave enemy damage scaling rides enemy.damageMult.
@@ -2730,6 +2737,14 @@ export class PhysicsSystem {
                   if (target.health <= 0 && onDeath) {
                       onDeath(target);
                   }
+              }
+              // Kamikaze arming (Stage 0): a bomber that reaches the player
+              // arms its pre-detonation tell on FIRST touch (explosionRadius is
+              // the kamikaze marker; armDuration was stamped at spawn).  The
+              // countdown + AoE detonation run in GameEngine.updateEnemyDetonations
+              // — gating on armTimer===undefined makes contact damage land once.
+              if (enemy.explosionRadius && enemy.armTimer === undefined && !enemy.isExploding) {
+                  enemy.armTimer = enemy.armDuration ?? 0.2;
               }
           }
       }

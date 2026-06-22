@@ -4299,6 +4299,29 @@ export class RenderSystem {
           ctx.fill();
           ctx.restore();
       }
+
+      // ── Kamikaze pre-detonation tell.  Once armed (armTimer set on first
+      // player contact) the bomber strobes white and an expanding warning ring
+      // blooms over the tell window — the readable "get clear" cue before the
+      // AoE.  Render-only; rotation-invariant so it ignores the body facing.
+      if (entity.armTimer !== undefined && entity.armTimer > 0) {
+          const dur = entity.armDuration ?? 0.22;
+          const p = Math.max(0, Math.min(1, 1 - entity.armTimer / dur));
+          const strobe = 0.5 + 0.5 * Math.sin(nowSec * 50);
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${(0.2 + 0.5 * p) * strobe})`;
+          ctx.fill();
+          const ringR = r * (1.1 + p * 1.4);
+          ctx.beginPath();
+          ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255,${110 + Math.floor(120 * (1 - p))},255,${0.35 + 0.5 * p})`;
+          ctx.lineWidth = 2 + 2 * p;
+          ctx.stroke();
+          ctx.restore();
+      }
   }
 
   private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
@@ -4330,6 +4353,16 @@ export class RenderSystem {
           case 'hexagon': {
               for (let i = 0; i < 6; i++) {
                   const a = (i / 6) * Math.PI * 2;
+                  const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              break;
+          }
+          case 'octagon': {
+              // Bulwark fortress — a chunky 8-gon, rotated half a facet so a
+              // flat face points forward (reads as a shielded prow, not a spike).
+              for (let i = 0; i < 8; i++) {
+                  const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
                   const x = Math.cos(a) * r, y = Math.sin(a) * r;
                   if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
               }
