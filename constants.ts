@@ -2016,6 +2016,19 @@ export const ENEMY_CONSTANTS = {
   MASS: 10
 };
 
+// Enemy death dust: on death an enemy releases a handful of nebula-shards
+// (cloud fragments) tinted to its own body colour, mirroring the rock-tile
+// death burst.  Purely cosmetic — the puffs drift, fade in, and feed the
+// normal nebula merge/condense system like any other nebula-shard.  The
+// burst is gated by MAX_COUNT > 0; set it to 0 to disable.
+export const ENEMY_NEBULA_BURST = {
+  MIN_COUNT: 2,
+  MAX_COUNT: 4,
+  SIZE_FRACTION: 0.6,   // shard diameter relative to the enemy diameter
+  ALPHA_MUL: 0.5,       // per-shard alpha (wispy cloud, matches rock burst)
+  SPREAD_JITTER: 0.5,   // position scatter as a fraction of the enemy diameter
+};
+
 // Hit feedback — every projectile hit on an enemy gives a damage-scaled
 // knockback (in the shot's travel direction) plus a brief stagger.  The
 // stagger ALSO suspends the AI max-speed clamp, so the knockback actually
