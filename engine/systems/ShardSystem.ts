@@ -12,7 +12,7 @@
 // (Stage 4), then the EntityType collapse + cross-variant absorb
 // (Stage 5).  See docs/SHARD_SYSTEM.md.
 
-import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry } from '../../types';
+import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry, NebulaColorStop } from '../../types';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import {
   SHARD_VARIANTS,
@@ -34,6 +34,9 @@ import {
   METAL_ASSEMBLY,
   METAL_MAX_DENSITY_TIER,
   getActiveShatterGraceDelay,
+  nebulaHueToShardVariant,
+  NEBULA_CONDENSE,
+  NEBULA_CONDENSE_STALL_BONDS,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -46,6 +49,7 @@ import {
   blendCompositionToHex,
   blendCompositions,
   cloneComposition,
+  hexToHueDeg,
 } from '../NebulaColor';
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
@@ -3224,11 +3228,46 @@ export class ShardSystem {
     const nvx = (a.velocity.x * a.mass + b.velocity.x * b.mass) / totalMass;
     const nvy = (a.velocity.y * a.mass + b.velocity.y * b.mass) / totalMass;
 
-    // Glittery glimmer burst at the merge point — same visual
-    // feedback the old grow-larger path had.
     const tint = blendCompositionToHex(composition);
-    const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
     const midpoint: Vector2 = { x: mx, y: my };
+
+    // ── Conservation of mass: commit → accumulate → crystallise ────────
+    // LOCK-IN: the bigger party's committed target carries forward; if
+    // neither has committed yet, commit to the blended hue's material now
+    // (rock-derived dust always commits to rock).  The crystallise gate
+    // uses the COMMITTED material's cost, so a later off-hue bond can't
+    // drag the cloud into a cheaper material mid-accumulation.
+    const fromRock = !!(a.fromRock || b.fromRock);
+    const committed = a.nebulaTargetMaterial ?? b.nebulaTargetMaterial;
+    const material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard' =
+      committed ?? (fromRock ? 'rock-shard' : nebulaHueToShardVariant(hexToHueDeg(tint)));
+    const combinedUnits = (a.nebulaCondenseUnits ?? 1) + (b.nebulaCondenseUnits ?? 1);
+    const requiredUnits = NEBULA_CONDENSE[material].units;
+
+    // ANTI-STUCK: count coalescences spent waiting on this target; past the
+    // patience cap, force-crystallise with whatever mass we have so an
+    // expensive target can't balloon forever in a thin field.
+    const stall = Math.max(a.nebulaStallCount ?? 0, b.nebulaStallCount ?? 0) + 1;
+    const stalledOut = stall >= NEBULA_CONDENSE_STALL_BONDS;
+
+    if (combinedUnits < requiredUnits && !stalledOut) {
+      // Not enough nebula yet — coalesce the pair into ONE larger nebula-
+      // shard that carries the summed units + committed target, and wait
+      // for more.  Only the smaller retires; mass is conserved, nothing
+      // crystallises.  A small glimmer marks the coalescence.
+      this.particles.spawn(entities, midpoint, 2, tint, {
+        speedMin: 0.1, speedMax: 0.4,
+        sizeMin: 0.3, sizeMax: 0.9,
+        lifetimeMin: 0.4, lifetimeMax: 0.8,
+        positionJitter: Math.max(a.size.x, b.size.x) * 0.5,
+      });
+      this.growNebulaShard(a, b, composition, combinedUnits, material, stall, midpoint, { x: nvx, y: nvy });
+      return;
+    }
+
+    // Crystallise.  Glittery glimmer burst at the merge point — same visual
+    // feedback the old grow-larger path had.
+    const glimmerR = Math.max(a.size.x, b.size.x) * 0.6;
     this.particles.spawn(entities, midpoint, 3, '#ffffff', {
       speedMin: 0.1, speedMax: 0.5,
       sizeMin: 0.3, sizeMax: 0.9,
@@ -3243,16 +3282,71 @@ export class ShardSystem {
     });
 
     // Both source shards retire — the adapter spawns the output
-    // (tile or glass-shard) as a brand-new entity.
+    // (tile or material shard) as a brand-new entity.
     this.startMergeFadeOut(a);
     this.startMergeFadeOut(b);
 
-    // Adapter hook routes the 50/50 outcome.  Position is the
-    // pair's midpoint; velocity is the mass-weighted average so a
-    // resulting glass-shard inherits the cloud's drift.
-    // Rock-derived dust (either source) condenses back to a rock-shard.
-    const fromRock = !!(a.fromRock || b.fromRock);
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock);
+    // EXCESS-SPLIT: mass over the committed cost is handed back to the
+    // adapter so it can release a leftover nebula-shard carrying the
+    // off-target "remainder" colours (conserves mass + colour).  Clamped
+    // at 0 when we force-crystallised under the target cost.
+    const excessUnits = Math.max(0, combinedUnits - requiredUnits);
+
+    // Adapter hook routes the 50/50 tile-vs-material outcome.  Position is
+    // the pair's midpoint; velocity is the mass-weighted average so a
+    // resulting shard inherits the cloud's drift.  Material is the COMMITTED
+    // target (honouring fromRock).
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock, material, excessUnits);
+  }
+
+  /**
+   * Conservation-of-mass coalescence: fold the smaller nebula-shard into
+   * the larger one instead of crystallising, accumulating mass toward the
+   * material's NEBULA_CONDENSE threshold.  Area-conserving size growth
+   * (so the cloud visibly fattens), composition blended, units summed,
+   * render caches invalidated.  Only `consumed` retires.
+   */
+  private growNebulaShard(
+    survivor: GameEntity,
+    consumed: GameEntity,
+    composition: NebulaColorStop[] | undefined,
+    units: number,
+    target: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+    stall: number,
+    position: Vector2,
+    velocity: Vector2,
+  ): void {
+    const sR = getCollisionR(survivor);
+    const cR = getCollisionR(consumed);
+    const newDiam = 2 * Math.sqrt(sR * sR + cR * cR); // area-conserving
+    const ratio = survivor.size.x > 0 ? newDiam / survivor.size.x : 1;
+    survivor.size.x = newDiam;
+    survivor.size.y = newDiam;
+    invalidateCollisionR(survivor);
+    if (survivor.polygonPoints && ratio !== 1) {
+      for (let i = 0; i < survivor.polygonPoints.length; i++) {
+        survivor.polygonPoints[i].x *= ratio;
+        survivor.polygonPoints[i].y *= ratio;
+      }
+    }
+    survivor.position.x = position.x;
+    survivor.position.y = position.y;
+    survivor.velocity.x = velocity.x;
+    survivor.velocity.y = velocity.y;
+    survivor.nebulaCondenseUnits = units;
+    survivor.nebulaTargetMaterial = target;   // lock-in carries forward
+    survivor.nebulaStallCount = stall;         // patience carries forward
+    survivor.fromRock = (survivor.fromRock || consumed.fromRock) || undefined;
+    if (composition) survivor.nebulaColorComposition = composition;
+    survivor.color = blendCompositionToHex(survivor.nebulaColorComposition);
+    // Composition + size changed — drop the nebula render caches so the
+    // grown shard repaints with the new blend and dimensions.
+    survivor.nebulaBlendedHex = undefined;
+    survivor.nebulaTintedKey = undefined;
+    // Throttle the next coalescence so accumulation reads as discrete
+    // steps rather than collapsing a whole cluster in one frame.
+    survivor.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
+    this.startMergeFadeOut(consumed);
   }
 }
 

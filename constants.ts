@@ -2016,6 +2016,19 @@ export const ENEMY_CONSTANTS = {
   MASS: 10
 };
 
+// Enemy death dust: on death an enemy releases a handful of nebula-shards
+// (cloud fragments) tinted to its own body colour, mirroring the rock-tile
+// death burst.  Purely cosmetic — the puffs drift, fade in, and feed the
+// normal nebula merge/condense system like any other nebula-shard.  The
+// burst is gated by MAX_COUNT > 0; set it to 0 to disable.
+export const ENEMY_NEBULA_BURST = {
+  MIN_COUNT: 2,
+  MAX_COUNT: 4,
+  SIZE_FRACTION: 0.6,   // shard diameter relative to the enemy diameter
+  ALPHA_MUL: 0.5,       // per-shard alpha (wispy cloud, matches rock burst)
+  SPREAD_JITTER: 0.5,   // position scatter as a fraction of the enemy diameter
+};
+
 // Hit feedback — every projectile hit on an enemy gives a damage-scaled
 // knockback (in the shot's travel direction) plus a brief stagger.  The
 // stagger ALSO suspends the AI max-speed clamp, so the knockback actually
@@ -3202,6 +3215,79 @@ const SHARD_SPAWN_SHAPE_METAL = {
 // a packed tile interior and a max-density shard reach identical darkness.
 // Keep them locked here rather than tuning two separate numbers.
 export const ROCK_AGGREGATION_TINT_FLOOR = 0.55;
+
+// ── Nebula → material condensation map ────────────────────────────────
+// When two nebula-shards bond and condense into a SOLID shard (the
+// non-tile outcome of NebulaSystem.onComposeNebulaShardPair), the blended
+// cloud HUE selects which material the dust crystallises into — so the
+// nebula's COLOUR, not a fixed flag, spreads the four solid materials
+// across the field.  Bands are scanned in order; the first whose upper
+// bound the hue falls under wins (lower bound = previous band's hueMax,
+// wrapping at 360).  Desaturated greys read as hue 0 → first band.
+// Together the bands must cover [0, 360); reorder / resize freely to
+// retune which colours yield which material.
+//   red / orange   → rock      (warm, mineral)
+//   yellow / green  → plastic    (matches plastic's greens + ambers)
+//   cyan / blue     → glass      (cool, glassy)
+//   indigo / violet → metal      (cold steel sheen)
+//   magenta wrap    → rock       (closes the wheel back to red)
+// NOTE: rock-origin dust (the `fromRock` flag) bypasses this map and
+// always returns to rock — only ambient cloud / glass-dust / enemy-puff
+// nebula-shards (which carry real hues) get spread across materials.
+// The four solid materials a nebula cloud can crystallise into.
+export type NebulaCondenseMaterial = 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard';
+
+export const NEBULA_MATERIAL_BANDS: ReadonlyArray<{ hueMax: number; variant: NebulaCondenseMaterial }> = [
+  { hueMax: 45,  variant: 'rock-shard'    }, //   0– 45  red → orange
+  { hueMax: 160, variant: 'plastic-shard' }, //  45–160  yellow → green
+  { hueMax: 255, variant: 'glass-shard'   }, // 160–255  cyan → blue
+  { hueMax: 345, variant: 'metal-shard'   }, // 255–345  indigo → violet
+  { hueMax: 360, variant: 'rock-shard'    }, // 345–360  magenta wrap → rock
+];
+
+// Pick the condensed-shard material for a blended nebula hue (degrees).
+export function nebulaHueToShardVariant(hueDeg: number): NebulaCondenseMaterial {
+  const h = ((hueDeg % 360) + 360) % 360;
+  for (let i = 0; i < NEBULA_MATERIAL_BANDS.length; i++) {
+    if (h < NEBULA_MATERIAL_BANDS[i].hueMax) return NEBULA_MATERIAL_BANDS[i].variant;
+  }
+  return 'rock-shard';
+}
+
+// ── Conservation of mass: nebula → material build cost ────────────────
+// Crystallising a solid shard out of a nebula cloud isn't free.  A
+// condensing cloud must accumulate `units` worth of nebula-shards (base
+// shard = 1 unit; coalescing sums the units of both parties) BEFORE it
+// can crystallise into the hue's material — until then each bond just
+// grows a single bigger nebula-shard.  Cost rises with the material's
+// toughness, so a metal or plastic shard takes far more nebula than a
+// rock or glass one.  The condensed shard's HP tracks the same scale, so
+// what you spend to build it ≈ what it takes to destroy it (conservation
+// of energy too).  Rock is the cheapest solid AND crystallises at the
+// LOWEST density tier.
+//   glass : 2 units (1 pair),  hp  1  — brittle, cheapest
+//   rock  : 2 units (1 pair),  hp  3  — lowest density
+//   plastic: 4 units (2 pairs), hp  6  — springy, pricier
+//   metal : 6 units (3 pairs),  hp 12  — most nebula, toughest
+export const NEBULA_CONDENSE: Record<
+  'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
+  { units: number; hp: number }
+> = {
+  'glass-shard':   { units: 2, hp: 1 },
+  'rock-shard':    { units: 2, hp: 3 },
+  'plastic-shard': { units: 4, hp: 6 },
+  'metal-shard':   { units: 6, hp: 12 },
+};
+
+// Anti-stuck patience: a cloud LOCKS its target material once it starts
+// growing (so off-hue bonds can't cheap-crystallise it).  But to avoid an
+// expensive target (metal) ballooning forever in a thin field, after this
+// many coalescences without reaching the target's cost the cloud
+// force-crystallises into its committed material with whatever mass it has.
+// Any surplus over the cost is split off as a leftover nebula-shard
+// carrying the off-target "remainder" colours (which then seed other
+// materials), so mass and colour are conserved.
+export const NEBULA_CONDENSE_STALL_BONDS = 6;
 
 export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> = {
   'glass-tile': {

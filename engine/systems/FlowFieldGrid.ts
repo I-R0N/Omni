@@ -88,6 +88,12 @@ const WALL_REPULSE = 1.2;
 // FlowField.ts's _flowScratch may be returned depending on whether
 // the grid had a baked vector or fell back to the analytical sampler.
 const _gridFlowScratch: FlowVector = { x: 0, y: 0 };
+// Dedicated scratch for the enemy-pursuit + wall-repulsion samplers (called
+// once per chasing enemy per AI step).  Separate from _gridFlowScratch so a
+// sampleAsteroidFlow call in the same frame can't clobber an in-flight enemy
+// sample.  Callers must consume the returned vector synchronously.
+const _eneFlowScratch: FlowVector = { x: 0, y: 0 };
+const _repulScratch: FlowVector = { x: 0, y: 0 };
 
 // Default wall-kernel radius (cells).  R = 0 reproduces the legacy
 // 4-cardinal-only scan for A/B testing; R ≥ 1 enables the extended
@@ -622,8 +628,10 @@ export class FlowFieldGrid {
    */
   sampleEnemyFlow(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
-    if (idx < 0) return { x: 0, y: 0 };
-    return { x: this.eneFlowX[idx], y: this.eneFlowY[idx] };
+    if (idx < 0) { _eneFlowScratch.x = 0; _eneFlowScratch.y = 0; return _eneFlowScratch; }
+    _eneFlowScratch.x = this.eneFlowX[idx];
+    _eneFlowScratch.y = this.eneFlowY[idx];
+    return _eneFlowScratch;
   }
 
   /**
@@ -635,7 +643,7 @@ export class FlowFieldGrid {
    */
   sampleWallRepulsion(wx: number, wy: number): FlowVector {
     const idx = this.worldToCell(wx, wy);
-    if (idx < 0) return { x: 0, y: 0 };
+    if (idx < 0) { _repulScratch.x = 0; _repulScratch.y = 0; return _repulScratch; }
     const row = (idx / FF_COLS) | 0;
     const col =  idx % FF_COLS;
     let rx = 0, ry = 0;
@@ -647,7 +655,9 @@ export class FlowFieldGrid {
         ry -= DR4[k];
       }
     }
-    return { x: rx, y: ry };
+    _repulScratch.x = rx;
+    _repulScratch.y = ry;
+    return _repulScratch;
   }
 
   // ─── internal BFS ────────────────────────────────────────────────────────
