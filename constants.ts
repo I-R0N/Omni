@@ -2870,7 +2870,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
     shoots: true, contactDamage: 0,
     weapon: { cooldown: 1.8, damage: 3.5, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
-    shield: 54, shieldRegen: 4, shieldArc: { deg: 90, slew: 2.2 },
+    shield: 54, shieldRegen: 4, shieldArc: { deg: 150, slew: 2.8 },
     telegraph: 0.5,
   },
 };

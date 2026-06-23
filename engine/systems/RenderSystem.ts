@@ -4071,7 +4071,7 @@ export class RenderSystem {
           if (entity.shieldArcHalfWidth !== undefined) {
               const half = entity.shieldArcHalfWidth;
               const mid = (entity.shieldArcAngle ?? 0) - entity.rotation; // local frame
-              const rr = r * 1.45;
+              const rr = r * 1.6;
               ctx.save();
               // Faint full guide ring so the gap reads as "shield is elsewhere".
               ctx.beginPath();
