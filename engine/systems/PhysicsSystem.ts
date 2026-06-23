@@ -474,6 +474,12 @@ export class PhysicsSystem {
           && (entity.shieldRechargeTimer ?? 0) <= 0) {
           entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
+      // Rotating directional arc shield (Bulwark): sweep the covered sector.
+      if (entity.shieldArcSpin !== undefined && entity.shieldArcAngle !== undefined) {
+          entity.shieldArcAngle += entity.shieldArcSpin * dt;
+          if (entity.shieldArcAngle > Math.PI) entity.shieldArcAngle -= Math.PI * 2;
+          else if (entity.shieldArcAngle < -Math.PI) entity.shieldArcAngle += Math.PI * 2;
+      }
 
       // ORBITAL PHYSICS
       if (entity.orbitCenter && entity.orbitRadius && entity.orbitSpeed !== undefined && entity.orbitAngle !== undefined) {
@@ -1062,6 +1068,24 @@ export class PhysicsSystem {
       const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
       const hitsTaken = ceiling - target.health;
       if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+  }
+
+  /**
+   * Directional arc-shield gate.  Returns true if the shield should absorb a
+   * hit incoming from `hitPos` — always true for a full bubble (no
+   * shieldArcHalfWidth), and true for an arc shield only when the bearing from
+   * the target to the impact falls within ±halfWidth of the sweeping
+   * shieldArcAngle.  Toroidal-correct.  Flank the gap and the shot lands.
+   */
+  public static shieldCoversHit(target: GameEntity, hitPos: Vector2): boolean {
+      const half = target.shieldArcHalfWidth;
+      if (half === undefined) return true; // full bubble
+      const dx = wrapDeltaX(target.position.x, hitPos.x);
+      const dy = wrapDeltaY(target.position.y, hitPos.y);
+      let d = Math.atan2(dy, dx) - (target.shieldArcAngle ?? 0);
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return Math.abs(d) <= half;
   }
 
   public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
@@ -2539,8 +2563,11 @@ export class PhysicsSystem {
           // Shield absorbs damage — generalized from player-only to ANY
           // shielded entity (Stage 0 Bulwark): the enemy shield soaks the hit
           // and re-arms its recharge delay exactly like the player's.  Entities
-          // without a shield (shield undefined) fall straight through.
-          if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0) {
+          // without a shield (shield undefined) fall straight through.  A
+          // directional arc shield only absorbs hits from the covered sector
+          // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.
+          if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
+              && PhysicsSystem.shieldCoversHit(target, proj.position)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
@@ -2711,11 +2738,10 @@ export class PhysicsSystem {
               // Per-archetype contact damage (rushers hurt; ranged enemies
               // have 0).  No damage below the impact-speed threshold either.
               const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              // Skip contact damage for an already-armed kamikaze so it bites
-              // the player exactly once (on first touch) instead of every frame
-              // of its tell — the rest of the threat is the detonation AoE.
-              const armedBomber = enemy.explosionRadius !== undefined && enemy.armTimer !== undefined;
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding || armedBomber) {
+              // An exploding enemy deals no further contact damage (a kamikaze
+              // flips isExploding the instant it touches the player, so its
+              // contact bite lands exactly once).
+              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding) {
                   // flash already handled by the general contact flash below
               } else {
                   // Per-wave enemy damage scaling rides enemy.damageMult.
@@ -2738,13 +2764,14 @@ export class PhysicsSystem {
                       onDeath(target);
                   }
               }
-              // Kamikaze arming (Stage 0): a bomber that reaches the player
-              // arms its pre-detonation tell on FIRST touch (explosionRadius is
-              // the kamikaze marker; armDuration was stamped at spawn).  The
-              // countdown + AoE detonation run in GameEngine.updateEnemyDetonations
-              // — gating on armTimer===undefined makes contact damage land once.
-              if (enemy.explosionRadius && enemy.armTimer === undefined && !enemy.isExploding) {
-                  enemy.armTimer = enemy.armDuration ?? 0.2;
+              // Kamikaze detonation (Stage 0): a bomber that reaches the player
+              // detonates INSTANTLY at the contact point — flag it and route the
+              // death now (handleEntityDeath fires the AoE shockwave), so it
+              // never bounces away to explode at a distance.  explosionRadius is
+              // the bomber marker; the !isExploding guard fires this exactly once.
+              if (enemy.explosionRadius !== undefined && !enemy.isExploding) {
+                  enemy.detonateOnDeath = true;
+                  if (onDeath) onDeath(enemy);
               }
           }
       }

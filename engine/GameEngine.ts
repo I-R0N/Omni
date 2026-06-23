@@ -2011,6 +2011,22 @@ export class GameEngine {
           this.startExplosion(entity);
       }
 
+      // Kamikaze detonation (Stage 0): a bomber flagged by the PhysicsSystem
+      // contact path fires its AoE shockwave at the contact point — instant,
+      // ENEMY-owned (threatens the player, shield-respecting in
+      // updateExplosionRings) + catches nearby enemies/structures as
+      // collateral.  Killed-early bombers never set the flag, so no boom.
+      if (entity.detonateOnDeath && entity.explosionRadius !== undefined) {
+          entity.detonateOnDeath = false;
+          this.spawnShockwave(entity.position, {
+              radius: entity.explosionRadius,
+              damage: entity.explosionDamage ?? 0,
+              knockback: entity.explosionKnockback ?? 0,
+              color: entity.color || '#e879f9',
+              ownerType: EntityType.ENEMY,
+          });
+      }
+
       // Stage 5: shard-family death dispatches by variant id rather
       // than EntityType.  The unified carrier (EntityType.STRUCTURE)
       // covers tiles (mass=Infinity) and mobile shards (finite mass)
@@ -2384,10 +2400,6 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
-    // Tick armed kamikaze bombers — detonate any whose pre-detonation tell
-    // has elapsed (spawns the AoE shockwave processed by updateExplosionRings).
-    this.updateEnemyDetonations(dt);
-
     const tRings = performance.now();
     this.updateExplosionRings();
     this.lastExplosionRingsMs = performance.now() - tRings;
@@ -3651,38 +3663,6 @@ export class GameEngine {
   // pre-populated into hitEntityIds so it isn't double-damaged (it
   // already took config.damage from the projectile collision upstream).
   // Player is also pre-populated to prevent self-damage.
-  // ─── Kamikaze detonation tick (Stage 0) ────────────────────────────────
-  //
-  // A bomber arms on first contact with the player (PhysicsSystem stamps
-  // armTimer = armDuration).  Here we tick the tell down; when it elapses the
-  // bomber detonates: a damaging AoE shockwave (radius/damage/knockback
-  // stamped at spawn, ENEMY-owned so it threatens the player — shield-
-  // respecting in updateExplosionRings — and catches nearby enemies as
-  // collateral) plus the normal enemy death-explosion via handleEntityDeath.
-  // Bombers killed before they touch the player never arm, so they pop
-  // harmlessly — the kill-early counter.  O(enemies) per step; the index is
-  // tiny so no PerfController gate is needed (matches the AI/shooting passes).
-  private updateEnemyDetonations(dt: number) {
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          if (e.armTimer === undefined || e.isExploding) continue;
-          e.armTimer -= dt;
-          if (e.armTimer > 0) continue;
-          e.armTimer = undefined;
-          this.spawnShockwave(e.position, {
-              radius: e.explosionRadius ?? 120,
-              damage: e.explosionDamage ?? 0,
-              knockback: e.explosionKnockback ?? 0,
-              color: e.color || '#e879f9',
-              ownerType: EntityType.ENEMY,
-          });
-          // handleEntityDeath flips isExploding (so the explosionTimer loop
-          // culls it) — do NOT set active=false here or the boom won't render.
-          this.handleEntityDeath(e);
-      }
-  }
-
   private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
       if (!this.currentMap) return;
 

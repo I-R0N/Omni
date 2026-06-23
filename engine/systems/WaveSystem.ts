@@ -276,17 +276,23 @@ export class WaveSystem {
       enemy.maxShield = config.shield;
       enemy.shieldRechargeRate = config.shieldRegen ?? SHIELD_CONSTANTS.RECHARGE_RATE;
       enemy.shieldRechargeTimer = 0;
+      // Rotating directional arc (Bulwark): seed the sector half-width + spin
+      // and a random start angle so a pack of bulwarks desyncs.
+      if (config.shieldArc) {
+        enemy.shieldArcHalfWidth = (config.shieldArc.deg * Math.PI / 180) / 2;
+        enemy.shieldArcSpin = config.shieldArc.spin;
+        enemy.shieldArcAngle = Math.random() * Math.PI * 2;
+      }
     }
 
-    // Kamikaze detonation payload (Stage 0): stamp the AoE config + the
-    // pre-detonation tell length.  Blast damage rides the per-wave damageMult,
-    // matching how the ram + projectile paths scale.
+    // Kamikaze detonation payload (Stage 0): stamp the AoE config.  Blast
+    // damage rides the per-wave damageMult, matching how the ram + projectile
+    // paths scale.  Detonation itself is instant on contact (PhysicsSystem).
     if (config.detonate) {
       const d = config.detonate;
       enemy.explosionRadius = d.radius;
       enemy.explosionDamage = d.damage * dmgMult;
       enemy.explosionKnockback = d.knockback;
-      enemy.armDuration = d.tell;
     }
 
     entities.push(enemy);

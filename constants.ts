@@ -2760,16 +2760,21 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // rather than a continuous strafing stream.
   aimLaser?: boolean;
   // Kamikaze self-destruct payload (Stage 0).  When set, the enemy stamps
-  // explosionRadius/Damage/Knockback + armDuration at spawn; on first contact
-  // with the player it deals `contactDamage`, arms (a `tell`-second flash +
-  // expand), then detonates an AoE shockwave (GameEngine.updateEnemyDetonations).
-  detonate?: { radius: number; damage: number; knockback: number; tell: number };
+  // explosionRadius/Damage/Knockback at spawn; on first contact with the
+  // player it deals `contactDamage` and detonates an AoE shockwave instantly
+  // at the contact point (GameEngine.handleEntityDeath via detonateOnDeath).
+  detonate?: { radius: number; damage: number; knockback: number };
   // Defensive shield (Stage 0, Bulwark).  `shield` seeds both shield and
   // maxShield at spawn; `shieldRegen` is the per-second recharge (slow, so the
-  // shield is a soft barrier the player burns through, not an invuln).  The
-  // generalized PhysicsSystem absorption path lets any shielded enemy soak hits.
+  // shield is a soft barrier the player burns through, not an invuln).  When
+  // `shieldArc` is set the shield is a rotating directional sector (covering
+  // `shieldArc.deg` degrees, sweeping at `shieldArc.spin` rad/s) — only hits
+  // from the covered side are absorbed, so flanking / timing the gap beats it.
+  // Absent → a full bubble.  The generalized PhysicsSystem absorption path
+  // applies the arc gate; recharge is shared with the player tick.
   shield?: number;
   shieldRegen?: number;
+  shieldArc?: { deg: number; spin: number };
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2847,7 +2852,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 9, accel: 7, turnRate: 4.0,
     sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
     shoots: false, contactDamage: 10,
-    detonate: { radius: 150, damage: 26, knockback: 9, tell: 0.22 },
+    detonate: { radius: 150, damage: 26, knockback: 9 },
   },
   // Bulwark: a slow violet octagon fortress behind a regenerating shield,
   // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
@@ -2858,7 +2863,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
     shoots: true, contactDamage: 0,
     weapon: { cooldown: 1.8, damage: 7, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
-    shield: 18, shieldRegen: 4,
+    shield: 18, shieldRegen: 4, shieldArc: { deg: 90, spin: 1.6 },
     telegraph: 0.5,
   },
 };

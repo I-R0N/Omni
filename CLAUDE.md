@@ -308,12 +308,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `cooldown` is the real fire cadence; the old global burst config is gone),
   `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
   (RAMMER_1-3 / SHOOTER_1-3) plus 2 core-roster additions — KAMIKAZE
-  (RAMMING star bomber, `detonate` AoE on contact via a pre-detonation
-  tell; `shoots:false`) and BULWARK (SHOOTING octagon fortress with a
-  `shield`/`shieldRegen` and a 3-shot fan).  Two optional ENEMY_VARIANTS
-  fields drive them: `detonate: {radius,damage,knockback,tell}` (stamped at
-  spawn onto `explosionRadius/Damage/Knockback` + `armDuration`) and
-  `shield`/`shieldRegen` (seeds `shield`/`maxShield`/`shieldRechargeRate`).
+  (RAMMING star bomber that detonates an AoE shockwave INSTANTLY on player
+  contact; `shoots:false`) and BULWARK (SHOOTING octagon fortress with a
+  rotating directional arc shield + a 3-shot fan).  Optional ENEMY_VARIANTS
+  fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
+  onto `explosionRadius/Damage/Knockback`) and `shield`/`shieldRegen`
+  (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
+  `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
+  `shieldArcAngle` — a sweeping sector that only absorbs hits from the
+  covered side).
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
@@ -611,12 +614,17 @@ button in `UIOverlay.tsx`.
   `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
   player.  This is what makes the Bulwark's shield soak hits; the
   shield-recharge tick in `updatePhysics` was already entity-agnostic.
-- **Kamikaze detonation.** A KAMIKAZE arms on first player contact
-  (PhysicsSystem stamps `armTimer = armDuration`); the tell ticks down
-  in `GameEngine.updateEnemyDetonations` (an O(enemies) pass, no
-  PerfController gate — matches the AI/shooting passes), then detonates
-  an ENEMY-owned AoE shockwave + the normal death-explosion.  Bombers
-  killed before they touch the player never arm, so they pop harmlessly.
+  A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
+  whose bearing falls in the swept sector (`PhysicsSystem.shieldCoversHit`,
+  toroidal); the sector angle rotates each step in `updatePhysics`.  Flank
+  the gap and the shot lands — the Bulwark's soft counter.
+- **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
+  player: the PhysicsSystem contact path deals contact damage, sets
+  `detonateOnDeath`, and routes the death immediately, so
+  `GameEngine.handleEntityDeath` fires the ENEMY-owned AoE shockwave at the
+  contact point (no bounce-away) + the normal death-explosion.  Bombers
+  killed before they touch the player never set the flag, so they pop
+  harmlessly — the kill-early counter.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when

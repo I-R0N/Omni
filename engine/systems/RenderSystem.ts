@@ -4060,14 +4060,41 @@ export class RenderSystem {
           ctx.restore();
       }
 
-      // Shield bubble (translucent blue ring) when the enemy is shielded.
+      // Shield (translucent blue) when the enemy is shielded.  A directional
+      // arc shield (shieldArcHalfWidth set, Bulwark) draws a thick rotating
+      // sector — drawn in the entity's LOCAL frame, so undo the body rotation
+      // and use the world-space shieldArcAngle the sim sweeps — plus a faint
+      // full guide ring.  A full-bubble shield draws the original ring.
       if ((entity.maxShield ?? 0) > 0 && (entity.shield ?? 0) > 0) {
           const frac = (entity.shield ?? 0) / (entity.maxShield ?? 1);
-          ctx.beginPath();
-          ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac})`;
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
+          const flash = (entity.shieldHitFlash ?? 0) > 0 ? 0.35 : 0;
+          if (entity.shieldArcHalfWidth !== undefined) {
+              const half = entity.shieldArcHalfWidth;
+              const mid = (entity.shieldArcAngle ?? 0) - entity.rotation; // local frame
+              const rr = r * 1.45;
+              ctx.save();
+              // Faint full guide ring so the gap reads as "shield is elsewhere".
+              ctx.beginPath();
+              ctx.arc(0, 0, rr, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(96,165,250,${0.10 + 0.10 * frac})`;
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+              // The active sector — bright, with a soft outer glow.
+              ctx.beginPath();
+              ctx.arc(0, 0, rr, mid - half, mid + half);
+              ctx.strokeStyle = `rgba(${147 + Math.floor(60 * flash)},197,253,${0.55 + 0.4 * frac})`;
+              ctx.lineWidth = 4;
+              ctx.shadowColor = 'rgba(147,197,253,0.9)';
+              ctx.shadowBlur = 8;
+              ctx.stroke();
+              ctx.restore();
+          } else {
+              ctx.beginPath();
+              ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac + flash})`;
+              ctx.lineWidth = 2.5;
+              ctx.stroke();
+          }
       }
 
       // ── Body roll (Tank/hexagon only): a slow render-only rotational sway
@@ -4300,26 +4327,23 @@ export class RenderSystem {
           ctx.restore();
       }
 
-      // ── Kamikaze pre-detonation tell.  Once armed (armTimer set on first
-      // player contact) the bomber strobes white and an expanding warning ring
-      // blooms over the tell window — the readable "get clear" cue before the
-      // AoE.  Render-only; rotation-invariant so it ignores the body facing.
-      if (entity.armTimer !== undefined && entity.armTimer > 0) {
-          const dur = entity.armDuration ?? 0.22;
-          const p = Math.max(0, Math.min(1, 1 - entity.armTimer / dur));
-          const strobe = 0.5 + 0.5 * Math.sin(nowSec * 50);
+      // ── Kamikaze danger aura.  A bomber (explosionRadius stamped) is a live
+      // warhead — it detonates the instant it touches you, so it gets a steady
+      // pulsing magenta warning glow to read as "kill me or dodge me" at a
+      // glance (the boom itself is its own big shockwave).  Render-only.
+      if (entity.type === EntityType.ENEMY && entity.explosionRadius !== undefined) {
+          const pulseA = 0.35 + 0.25 * Math.sin(nowSec * 7 + phase);
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
+          const auraR = r * 1.25;
+          const ag = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, auraR);
+          ag.addColorStop(0, `rgba(232,121,249,0)`);
+          ag.addColorStop(0.7, `rgba(232,121,249,${0.18 * pulseA})`);
+          ag.addColorStop(1, `rgba(232,121,249,${0.45 * pulseA})`);
+          ctx.fillStyle = ag;
           ctx.beginPath();
-          ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${(0.2 + 0.5 * p) * strobe})`;
+          ctx.arc(0, 0, auraR, 0, Math.PI * 2);
           ctx.fill();
-          const ringR = r * (1.1 + p * 1.4);
-          ctx.beginPath();
-          ctx.arc(0, 0, ringR, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255,${110 + Math.floor(120 * (1 - p))},255,${0.35 + 0.5 * p})`;
-          ctx.lineWidth = 2 + 2 * p;
-          ctx.stroke();
           ctx.restore();
       }
   }

@@ -381,15 +381,22 @@ export interface GameEntity {
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
-  // Kamikaze self-destruct (Stage 0).  `armDuration` is stamped at spawn as
-  // the pre-detonation tell length; `armTimer` is set to it the frame the
-  // bomber first touches the player (PhysicsSystem contact path) and ticks
-  // down in GameEngine.updateEnemyDetonations.  At 0 the bomber detonates:
-  // a shockwave AoE (radius/damage/knockback read from explosionRadius/
-  // explosionDamage/explosionKnockback) + the normal enemy death-explosion.
-  // RenderSystem reads armTimer/armDuration to draw the flash + expand tell.
-  armTimer?: number;
-  armDuration?: number;
+  // Kamikaze self-destruct (Stage 0).  A bomber stamps explosionRadius/
+  // explosionDamage/explosionKnockback at spawn; the moment it touches the
+  // player (PhysicsSystem contact path) it deals `contactDamage`, sets
+  // `detonateOnDeath`, and routes its death immediately — handleEntityDeath
+  // fires the AoE shockwave at the contact point (instant, no bounce-away).
+  // Bombers killed before they touch the player never set the flag, so they
+  // pop harmlessly — the kill-early counter.
+  detonateOnDeath?: boolean;
+  // Directional arc shield (Stage 0 Bulwark).  When `shieldArcHalfWidth` is
+  // set the shield only absorbs hits arriving within ±halfWidth of
+  // `shieldArcAngle` (a sweeping sector, not a full bubble); `shieldArcSpin`
+  // rotates the sector each step (PhysicsSystem).  Absent → the shield is a
+  // full bubble (player).  Ties the "flank the Bulwark" counter to its visual.
+  shieldArcAngle?: number;
+  shieldArcHalfWidth?: number;
+  shieldArcSpin?: number;
   // Native polygon silhouette for enemy rendering (set at spawn from the
   // archetype) — RenderSystem draws this instead of a sprite.
   enemyShape?: EnemyShape;
