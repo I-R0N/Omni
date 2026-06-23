@@ -2869,11 +2869,17 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 3.5, accel: 2.2, turnRate: 1.1,
     sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
     shoots: true, contactDamage: 0,
-    weapon: { cooldown: 1.8, damage: 7, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
-    shield: 18, shieldRegen: 4, shieldArc: { deg: 90, slew: 2.2 },
+    weapon: { cooldown: 1.8, damage: 3.5, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
+    shield: 54, shieldRegen: 4, shieldArc: { deg: 90, slew: 2.2 },
     telegraph: 0.5,
   },
 };
+
+// Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
+// BEFORE its hull would actually touch the player (added on top of the two
+// half-sizes), so the blast goes off slightly ahead of contact rather than on
+// overlap.  Tuned per-frame in GameEngine.updateKamikazeProximity.
+export const KAMIKAZE_DETONATE_BUFFER = 36;
 
 // ── Status effects ────────────────────────────────────────────────────────────
 // Corrosion: a stacking damage-over-time the Orbiter (Shooter-tier-2) applies

@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, ROCK_CHIP, ENEMY_NEBULA_BURST } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2408,6 +2408,11 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
+    // Kamikaze proximity fuse — detonate any bomber that has closed inside its
+    // trigger radius of the player, so the blast goes off slightly BEFORE
+    // contact (the on-contact path stays as a fallback).
+    this.updateKamikazeProximity();
+
     const tRings = performance.now();
     this.updateExplosionRings();
     this.lastExplosionRingsMs = performance.now() - tRings;
@@ -3685,6 +3690,31 @@ export class GameEngine {
   // pre-populated into hitEntityIds so it isn't double-damaged (it
   // already took config.damage from the projectile collision upstream).
   // Player is also pre-populated to prevent self-damage.
+  // ─── Kamikaze proximity fuse ───────────────────────────────────────────
+  //
+  // Each step, detonate any bomber (explosionRadius stamped) that has closed
+  // inside (player half-size + bomber half-size + KAMIKAZE_DETONATE_BUFFER) of
+  // the player, so the blast goes off a hair BEFORE the hulls touch rather than
+  // on overlap.  O(enemies); no PerfController gate (matches the AI pass).  The
+  // on-contact detonation in PhysicsSystem remains as a fallback.
+  private updateKamikazeProximity() {
+      const p = this.player;
+      if (p.isExploding) return;
+      const enemies = this.entityIndex.enemies;
+      const pr = Math.max(p.size.x, p.size.y) / 2;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.explosionRadius === undefined || e.isExploding) continue;
+          const dx = wrapDeltaX(e.position.x, p.position.x);
+          const dy = wrapDeltaY(e.position.y, p.position.y);
+          const trigger = pr + Math.max(e.size.x, e.size.y) / 2 + KAMIKAZE_DETONATE_BUFFER;
+          if (dx * dx + dy * dy <= trigger * trigger) {
+              e.detonateOnDeath = true;
+              this.handleEntityDeath(e);
+          }
+      }
+  }
+
   // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
   //
   // Applied at detonation (handleEntityDeath) so the launch + damage land the
