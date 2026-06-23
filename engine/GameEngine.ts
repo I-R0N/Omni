@@ -2025,6 +2025,8 @@ export class GameEngine {
               color: entity.color || '#e879f9',
               ownerType: EntityType.ENEMY,
           });
+          // Heavy screen punch — the detonation should feel like a real blast.
+          this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       }
 
       // Stage 5: shard-family death dispatches by variant id rather

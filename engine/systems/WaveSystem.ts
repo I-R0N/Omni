@@ -276,11 +276,12 @@ export class WaveSystem {
       enemy.maxShield = config.shield;
       enemy.shieldRechargeRate = config.shieldRegen ?? SHIELD_CONSTANTS.RECHARGE_RATE;
       enemy.shieldRechargeTimer = 0;
-      // Rotating directional arc (Bulwark): seed the sector half-width + spin
-      // and a random start angle so a pack of bulwarks desyncs.
+      // Player-tracking directional arc (Bulwark): seed the sector half-width
+      // + max slew rate and a random start angle (AISystem then slews it
+      // toward the player each step).
       if (config.shieldArc) {
         enemy.shieldArcHalfWidth = (config.shieldArc.deg * Math.PI / 180) / 2;
-        enemy.shieldArcSpin = config.shieldArc.spin;
+        enemy.shieldArcSpin = config.shieldArc.slew;
         enemy.shieldArcAngle = Math.random() * Math.PI * 2;
       }
     }

@@ -71,6 +71,28 @@ export class AISystem {
       } else {
           this.updateBasicDogfighter(dt, enemy, player, flowField);
       }
+
+      // Directional arc shield (Bulwark): slew the covered sector toward the
+      // player at a capped rate so it ATTEMPTS to face the threat — flank it
+      // faster than it can turn and the hull is exposed.  Toroidal bearing.
+      if (enemy.shieldArcHalfWidth !== undefined && enemy.shieldArcSpin !== undefined) {
+          const want = Math.atan2(
+              wrapDeltaY(enemy.position.y, player.position.y),
+              wrapDeltaX(enemy.position.x, player.position.x),
+          );
+          const cur = enemy.shieldArcAngle ?? want;
+          let d = want - cur;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          const step = enemy.shieldArcSpin * dt;
+          if (Math.abs(d) <= step) {
+              enemy.shieldArcAngle = want;
+          } else {
+              let a = cur + Math.sign(d) * step;
+              if (a > Math.PI) a -= Math.PI * 2; else if (a < -Math.PI) a += Math.PI * 2;
+              enemy.shieldArcAngle = a;
+          }
+      }
     }
 
     // Pack sync: idle rammers near a chasing rammer get pulled into the charge.

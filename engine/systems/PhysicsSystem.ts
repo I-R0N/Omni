@@ -474,12 +474,9 @@ export class PhysicsSystem {
           && (entity.shieldRechargeTimer ?? 0) <= 0) {
           entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
-      // Rotating directional arc shield (Bulwark): sweep the covered sector.
-      if (entity.shieldArcSpin !== undefined && entity.shieldArcAngle !== undefined) {
-          entity.shieldArcAngle += entity.shieldArcSpin * dt;
-          if (entity.shieldArcAngle > Math.PI) entity.shieldArcAngle -= Math.PI * 2;
-          else if (entity.shieldArcAngle < -Math.PI) entity.shieldArcAngle += Math.PI * 2;
-      }
+      // The directional arc-shield angle (Bulwark) is steered toward the
+      // player by AISystem (it has the player reference) — not auto-rotated
+      // here.
 
       // ORBITAL PHYSICS
       if (entity.orbitCenter && entity.orbitRadius && entity.orbitSpeed !== undefined && entity.orbitAngle !== undefined) {

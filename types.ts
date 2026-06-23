@@ -391,9 +391,10 @@ export interface GameEntity {
   detonateOnDeath?: boolean;
   // Directional arc shield (Stage 0 Bulwark).  When `shieldArcHalfWidth` is
   // set the shield only absorbs hits arriving within ±halfWidth of
-  // `shieldArcAngle` (a sweeping sector, not a full bubble); `shieldArcSpin`
-  // rotates the sector each step (PhysicsSystem).  Absent → the shield is a
-  // full bubble (player).  Ties the "flank the Bulwark" counter to its visual.
+  // `shieldArcAngle` (a sector, not a full bubble).  AISystem slews
+  // `shieldArcAngle` toward the player bearing at up to `shieldArcSpin` rad/s
+  // (the max turn rate), so the shield tries to face the threat but a fast
+  // flank gets behind it.  Absent → a full bubble (player).
   shieldArcAngle?: number;
   shieldArcHalfWidth?: number;
   shieldArcSpin?: number;

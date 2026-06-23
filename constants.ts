@@ -2767,14 +2767,16 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // Defensive shield (Stage 0, Bulwark).  `shield` seeds both shield and
   // maxShield at spawn; `shieldRegen` is the per-second recharge (slow, so the
   // shield is a soft barrier the player burns through, not an invuln).  When
-  // `shieldArc` is set the shield is a rotating directional sector (covering
-  // `shieldArc.deg` degrees, sweeping at `shieldArc.spin` rad/s) — only hits
-  // from the covered side are absorbed, so flanking / timing the gap beats it.
-  // Absent → a full bubble.  The generalized PhysicsSystem absorption path
-  // applies the arc gate; recharge is shared with the player tick.
+  // `shieldArc` is set the shield is a directional sector (covering
+  // `shieldArc.deg` degrees) that ATTEMPTS to track the player — AISystem
+  // slews `shieldArcAngle` toward the player bearing at up to `shieldArc.slew`
+  // rad/s, so out-maneuvering the slew (flanking fast) exposes the hull.  Only
+  // hits from the covered side are absorbed.  Absent → a full bubble.  The
+  // generalized PhysicsSystem absorption path applies the arc gate; recharge
+  // is shared with the player tick.
   shield?: number;
   shieldRegen?: number;
-  shieldArc?: { deg: number; spin: number };
+  shieldArc?: { deg: number; slew: number };
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2852,7 +2854,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 9, accel: 7, turnRate: 4.0,
     sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
     shoots: false, contactDamage: 10,
-    detonate: { radius: 150, damage: 26, knockback: 9 },
+    detonate: { radius: 170, damage: 34, knockback: 40 },
   },
   // Bulwark: a slow violet octagon fortress behind a regenerating shield,
   // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
@@ -2863,7 +2865,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
     shoots: true, contactDamage: 0,
     weapon: { cooldown: 1.8, damage: 7, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
-    shield: 18, shieldRegen: 4, shieldArc: { deg: 90, spin: 1.6 },
+    shield: 18, shieldRegen: 4, shieldArc: { deg: 90, slew: 2.2 },
     telegraph: 0.5,
   },
 };
