@@ -1069,17 +1069,31 @@ export class PhysicsSystem {
 
   /**
    * Directional arc-shield gate.  Returns true if the shield should absorb a
-   * hit incoming from `hitPos` — always true for a full bubble (no
-   * shieldArcHalfWidth), and true for an arc shield only when the bearing from
-   * the target to the impact falls within ±halfWidth of the sweeping
-   * shieldArcAngle.  Toroidal-correct.  Flank the gap and the shot lands.
+   * hit from projectile `proj` — always true for a full bubble (no
+   * shieldArcHalfWidth), and true for an arc shield only when the shot's
+   * INCOMING bearing falls within ±halfWidth of the sweeping shieldArcAngle.
+   *
+   * The incoming bearing is taken from the projectile's reversed velocity (the
+   * side it came FROM), not its current position: a fast shot can overshoot
+   * deep past the shield in one step, so its position at the collision frame
+   * may sit on the far side of the hull and give the wrong side — the travel
+   * direction does not.  Falls back to the position bearing only if the
+   * projectile has no usable velocity.  Toroidal.
    */
-  public static shieldCoversHit(target: GameEntity, hitPos: Vector2): boolean {
+  public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
       const half = target.shieldArcHalfWidth;
       if (half === undefined) return true; // full bubble
-      const dx = wrapDeltaX(target.position.x, hitPos.x);
-      const dy = wrapDeltaY(target.position.y, hitPos.y);
-      let d = Math.atan2(dy, dx) - (target.shieldArcAngle ?? 0);
+      let bearing: number;
+      const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
+      if (vx * vx + vy * vy > 1e-6) {
+          bearing = Math.atan2(-vy, -vx); // direction the shot came from
+      } else {
+          bearing = Math.atan2(
+              wrapDeltaY(target.position.y, proj.position.y),
+              wrapDeltaX(target.position.x, proj.position.x),
+          );
+      }
+      let d = bearing - (target.shieldArcAngle ?? 0);
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       return Math.abs(d) <= half;
@@ -2564,7 +2578,7 @@ export class PhysicsSystem {
           // directional arc shield only absorbs hits from the covered sector
           // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.
           if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
-              && PhysicsSystem.shieldCoversHit(target, proj.position)) {
+              && PhysicsSystem.shieldCoversHit(target, proj)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
