@@ -615,8 +615,13 @@ button in `UIOverlay.tsx`.
   player.  This is what makes the Bulwark's shield soak hits; the
   shield-recharge tick in `updatePhysics` was already entity-agnostic.
   A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
-  whose bearing falls in the covered sector (`PhysicsSystem.shieldCoversHit`,
-  toroidal); AISystem slews `shieldArcAngle` toward the player at up to
+  whose bearing falls in the covered sector — gated by the shot's TRAVEL
+  direction, not its position, so a fast bolt that overshoots can't tunnel
+  past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
+  is intercepted AT THE RING (`tryArcShieldIntercept`, broadphase reach
+  extended via `arcShieldReach`) so it visibly stops at the shield instead
+  of reaching the hull; open-side shots fall through to the normal body
+  hit.  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
 - **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the

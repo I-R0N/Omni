@@ -1099,6 +1099,57 @@ export class PhysicsSystem {
       return Math.abs(d) <= half;
   }
 
+  /** World-unit radius of an arc shield's interception ring (matches the
+   *  rendered ring).  Used by the broadphase reach + tryArcShieldIntercept. */
+  public static arcShieldReach(e: GameEntity): number {
+      return Math.max(e.size.x, e.size.y) * SHIELD_CONSTANTS.ARC_REACH_FACTOR;
+  }
+
+  /**
+   * Directional arc-shield interception (Bulwark).  When an incoming hostile
+   * projectile crosses the shield ring within the covered sector, the shield
+   * eats it AT THE RING — the bolt is consumed there (visible block) instead of
+   * tunneling to the hull.  Returns true if the pair was handled (caller skips
+   * the body SAT).  Returns false — letting the shot proceed to the hull — when:
+   *   - the pair isn't projectile-vs-arc-shield,
+   *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
+   *   - the shot's damage exceeds the remaining shield (it punches through; the
+   *     shield drains to 0 and the remainder lands on the hull via SAT).
+   */
+  private tryArcShieldIntercept(
+      a: GameEntity,
+      b: GameEntity,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): boolean {
+      let proj: GameEntity, shielded: GameEntity;
+      if (a.type === EntityType.PROJECTILE && b.shieldArcHalfWidth !== undefined) { proj = a; shielded = b; }
+      else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
+      else return false;
+      if ((shielded.shield ?? 0) <= 0) return false;
+      // Don't let the shield eat its owner's own fire (same-team projectile).
+      if (proj.ownerType === shielded.type) return false;
+
+      const reach = PhysicsSystem.arcShieldReach(shielded);
+      const dx = wrapDeltaX(shielded.position.x, proj.position.x);
+      const dy = wrapDeltaY(shielded.position.y, proj.position.y);
+      if (dx * dx + dy * dy > reach * reach) return false;        // not at the ring yet
+      if (!PhysicsSystem.shieldCoversHit(shielded, proj)) return false; // open side → hull
+
+      // Covered + shield can fully eat this shot: consume it at the ring.  A
+      // shot bigger than the remaining shield breaks through — return false and
+      // let the body-SAT path do the existing partial absorb (drain the
+      // remaining shield, land the remainder on the hull), so the shield is
+      // never double-counted.
+      const projDmg = proj.damage || 1;
+      if (projDmg > shielded.shield!) return false;
+      shielded.shield! -= projDmg;
+      shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+      shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      proj.active = false;
+      if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
+      return true;
+  }
+
   public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
@@ -2020,6 +2071,11 @@ export class PhysicsSystem {
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      // Extend reach to the arc-shield ring (Bulwark) so an incoming shot is
+      // considered out to the visible ring — tryArcShieldIntercept then absorbs
+      // a covered shot there instead of letting it tunnel to the hull.
+      if ((a.shield ?? 0) > 0 && a.shieldArcHalfWidth !== undefined) rA = Math.max(rA, PhysicsSystem.arcShieldReach(a));
+      if ((b.shield ?? 0) > 0 && b.shieldArcHalfWidth !== undefined) rB = Math.max(rB, PhysicsSystem.arcShieldReach(b));
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
@@ -2038,6 +2094,14 @@ export class PhysicsSystem {
       if (shifted) {
           b.position.x += offsetX;
           b.position.y += offsetY;
+      }
+
+      // Arc-shield interception: a covered enemy shot is absorbed at the ring
+      // (before SAT), so it visibly stops at the shield instead of reaching the
+      // hull.  Open-side shots fall through to the normal SAT body hit.
+      if (this.tryArcShieldIntercept(a, b, onHit)) {
+          if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
+          return;
       }
 
       // 1. SAT Collision Detection (Alloc-Free).  A metal composite collides

@@ -2255,6 +2255,11 @@ export const SHIELD_CONSTANTS = {
   COLOR: '#60a5fa',          // Blue-400
   COLLISION_MULTIPLIER: 1.8, // Player collision radius multiplier when shield > 0
   DAMAGE_THRESHOLD: 2.0,     // Min impact speed to actually drain shield (below = flash only)
+  // Directional arc shield (Bulwark): the interception ring radius as a
+  // fraction of the entity's max size.  Matches the rendered ring
+  // (baseR 0.62 × 1.6 ≈ 0.99·size) so a covered shot is absorbed AT the
+  // visible arc instead of tunneling to the hull.
+  ARC_REACH_FACTOR: 0.99,
 };
 
 export const WAVE_CONSTANTS = {
