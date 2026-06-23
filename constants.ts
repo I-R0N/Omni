@@ -2048,6 +2048,11 @@ export const HIT_FEEDBACK = {
   PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
   PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
   PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
+  // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
+  // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
+  // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
+  // and accelerates away instead of the hard speed-cap eating the impulse.
+  PLAYER_KNOCKBACK_DECAY: 0.95,
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {
@@ -2854,7 +2859,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 9, accel: 7, turnRate: 4.0,
     sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
     shoots: false, contactDamage: 10,
-    detonate: { radius: 170, damage: 34, knockback: 40 },
+    detonate: { radius: 170, damage: 34, knockback: 150 },
   },
   // Bulwark: a slow violet octagon fortress behind a regenerating shield,
   // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it

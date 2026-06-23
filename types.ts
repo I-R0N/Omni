@@ -371,6 +371,11 @@ export interface GameEntity {
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
   overchargeUnlocked?: boolean;
+  // Explosion-knockback overshoot allowance (player).  An AoE blast can drive
+  // the player above the normal maxSpeed cap; this holds the temporarily-raised
+  // cap, which decays back to maxSpeed each step (updatePlayerMovement) so the
+  // launch bleeds off instead of being snapped away by the hard cap.
+  overSpeedAllow?: number;
   // Status effects: `appliesEffect` is set on a projectile that should debuff
   // the player on hit; `statusEffects` is the player's live debuff list.
   appliesEffect?: EffectPayload;
