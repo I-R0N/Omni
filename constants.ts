@@ -2859,7 +2859,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 9, accel: 7, turnRate: 4.0,
     sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
     shoots: false, contactDamage: 10,
-    detonate: { radius: 170, damage: 34, knockback: 150 },
+    detonate: { radius: 170, damage: 34, knockback: 1.5 },
   },
   // Bulwark: a slow violet octagon fortress behind a regenerating shield,
   // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
