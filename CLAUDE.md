@@ -622,9 +622,12 @@ button in `UIOverlay.tsx`.
 - **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
   player: the PhysicsSystem contact path deals contact damage, sets
   `detonateOnDeath`, and routes the death immediately, so
-  `GameEngine.handleEntityDeath` fires the ENEMY-owned AoE shockwave at the
-  contact point (no bounce-away) + the normal death-explosion.  Bombers
-  killed before they touch the player never set the flag, so they pop
+  `GameEngine.handleEntityDeath` detonates.  The PLAYER is hit DIRECTLY
+  (`applyKamikazeBlastToPlayer`: shield-respecting damage + a launch via the
+  `overSpeedAllow` cap-overshoot) so the shove lands instantly at the contact
+  point; the ENEMY-owned AoE shockwave (player excluded) only sweeps
+  collateral onto nearby enemies/structures + the normal death-explosion.
+  Bombers killed before they touch the player never set the flag, so they pop
   harmlessly — the kill-early counter.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn

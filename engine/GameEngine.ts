@@ -2018,13 +2018,19 @@ export class GameEngine {
       // collateral.  Killed-early bombers never set the flag, so no boom.
       if (entity.detonateOnDeath && entity.explosionRadius !== undefined) {
           entity.detonateOnDeath = false;
+          // Ring handles collateral (nearby enemies/structures) + visuals; the
+          // PLAYER is hit DIRECTLY (below) so the launch + damage land instantly
+          // and reliably at the contact point, not gated on the ring sweep
+          // reaching them — hence the player is excluded from the ring.
           this.spawnShockwave(entity.position, {
               radius: entity.explosionRadius,
               damage: entity.explosionDamage ?? 0,
               knockback: entity.explosionKnockback ?? 0,
               color: entity.color || '#e879f9',
               ownerType: EntityType.ENEMY,
+              excludeIds: ['player'],
           });
+          this.applyKamikazeBlastToPlayer(entity);
           // Heavy screen punch — the detonation should feel like a real blast.
           this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       }
@@ -3679,8 +3685,54 @@ export class GameEngine {
   // pre-populated into hitEntityIds so it isn't double-damaged (it
   // already took config.damage from the projectile collision upstream).
   // Player is also pre-populated to prevent self-damage.
-  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
-      if (!this.currentMap) return;
+  // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
+  //
+  // Applied at detonation (handleEntityDeath) so the launch + damage land the
+  // same frame at the contact point, independent of the expanding ring (which
+  // only sweeps collateral onto other entities).  Damage is shield-respecting;
+  // the knockback drives the player past the speed cap via `overSpeedAllow` so
+  // it reads as a real shove (the hard cap would otherwise eat it).  Falloff
+  // floors at 0.3 so a point-blank bomber always throws you.
+  private applyKamikazeBlastToPlayer(bomb: GameEntity) {
+      const p = this.player;
+      if (p.isExploding) return;
+      const radius = bomb.explosionRadius ?? 0;
+      if (radius <= 0) return;
+      const dx = wrapDeltaX(bomb.position.x, p.position.x);
+      const dy = wrapDeltaY(bomb.position.y, p.position.y);
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius) return;
+      const falloff = Math.max(0.3, 1 - dist / radius);
+
+      // Damage (shield first, then hull) — mirrors the projectile/ram paths.
+      let dmg = (bomb.explosionDamage ?? 0) * falloff;
+      if ((p.shield ?? 0) > 0) {
+          const absorbed = Math.min(p.shield!, dmg);
+          p.shield! -= absorbed;
+          dmg -= absorbed;
+          p.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+          p.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      }
+      if (dmg > 0) {
+          p.health -= dmg;
+          this.spawnDamageText(p.position, dmg, p);
+      }
+      p.hitFlash = 0.2;
+
+      // Launch: shove along the bomb→player vector (away from the blast) and
+      // raise the overshoot allowance so the cap doesn't clamp the impulse.
+      const k = (bomb.explosionKnockback ?? 0) * falloff;
+      let nx: number, ny: number;
+      if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
+      else { const a = Math.random() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
+      p.velocity.x += nx * k;
+      p.velocity.y += ny * k;
+      p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, Math.hypot(p.velocity.x, p.velocity.y));
+
+      if (p.health <= 0 && !p.isExploding) this.handleEntityDeath(p);
+  }
+
+  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!this.currentMap) return;
 
       // Impact-frame visuals (instant): bright spark burst + screen shake.
       // These don't wait for the wavefront — the player should feel the
