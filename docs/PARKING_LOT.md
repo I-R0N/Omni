@@ -5,6 +5,56 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Bulwark difficulty note (level design)
+
+**Context:** The BULWARK enemy (Stage 0 core roster) is a comparatively HARD
+enemy and should be placed deliberately. Its rotating 150° arc shield (54
+points, slow regen) tracks the player and DEFLECTS covered shots — so a
+player attacking head-on with a chip weapon makes little progress and must
+either flank to the open ~210° rear/sides or burn the shield down. Deflected
+bolts also ricochet into nearby entities. Implications for future waves:
+
+- Don't stack multiple Bulwarks facing a chokepoint — overlapping arcs can
+  wall off an approach entirely for a low-DPS loadout.
+- Pairs well as an "anchor" behind squishier shooters (the player must commit
+  to a flank, exposing them to the escorts).
+- Tune presence by count, not by nerfing the shield — it's a soft counter by
+  design (flank / AoE / burst-through all beat it).
+- Difficulty knobs live on the `BULWARK` ENEMY_VARIANTS entry: `shield`,
+  `shieldRegen`, `shieldArc.deg` (coverage), `shieldArc.slew` (track speed).
+
+---
+
+## Generalize the projectile-deflection function
+
+**Context:** `PhysicsSystem.tryArcShieldIntercept` currently hard-codes the
+deflection logic to the Bulwark's directional arc shield: it reflects a
+covered projectile's velocity about the radial normal, snaps it to the ring,
+drains the shield, and sparks. The *deflection mechanic itself* (reflect a
+projectile off a surface, re-own it, FX) is reusable and worth extracting.
+
+**Future use cases:**
+- A player-side **deflector / parry** ability or a reflective shield module
+  that bounces enemy fire back at its source (re-owning the bolt to PLAYER).
+- **Reflective tiles / hazards** (mirror walls) that ricochet any projectile.
+- A boss **spin-reflect** phase, or an enemy that parries on a timing window.
+- Deflect-with-redirect (home the reflected bolt at the nearest hostile)
+  rather than a pure mirror.
+
+**Shape to aim for:** a small helper like
+`deflectProjectile(proj, surfaceNormal, opts)` that does the reflect + snap +
+rotation + optional re-own / speed-scale / spread, with the caller deciding
+when it fires (arc-shield gate, tile SAT normal, parry window, …). The bouncer
+weapon's tile-reflection math (`resolveCollision` isBouncer branch) is a
+second existing reflection implementation — fold both onto the shared helper.
+
+**Gotchas:** keep it toroidal-safe (snap position relative to the surface
+owner, re-wrap after), preserve `hitEntityIds`/`pierce` semantics, and avoid
+immediate re-trigger (the arc version gates on `v·n < 0` so an outward bolt
+isn't re-deflected).
+
+---
+
 ## Trail Gradient Caching
 
 **Context:** `renderTrails` in `RenderSystem.ts` calls `ctx.createLinearGradient` every frame
