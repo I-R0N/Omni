@@ -447,6 +447,15 @@ export interface GameEntity {
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
+  // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
+  // "is the field clear?" UNLESS this is explicitly false.  Set false for
+  // entities spawned BY other entities or that replicate — nest brood, bubble
+  // offspring — so they don't keep a wave open forever (the wave ends when the
+  // counted enemies, e.g. the nests / original bubbles, are dead; leftover
+  // brood carry over as survivors).  Absent → counts (every current enemy).
+  // Non-enemy roamers (Snitch, the future dragon) are EntityType.INTERACTABLE
+  // and never tracked, so they bypass this entirely.
+  countsTowardWave?: boolean;
 
   // ── Snitch (quidditch-style wave bonus target) ───────────────────────────
   // Marks the one-per-wave snitch entity (EntityType.INTERACTABLE, no

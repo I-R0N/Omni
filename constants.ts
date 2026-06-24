@@ -2951,6 +2951,37 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.TURRET]:    EnemyRole.SHOOTING, // stationary (no-move guard in AISystem)
 };
 
+// ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
+// Per-subtype movement strategy.  AISystem routes each enemy through the named
+// strategy via a lookup table instead of an `ENEMY_ROLE`-keyed if/else, so a
+// new behavior is a TABLE ENTRY (add a strategy fn in AISystem + a row here),
+// not a growing switch.  The value is an object so future per-subtype knobs
+// (targeting mode, an optional special-tick) drop in without restructuring.
+//
+// Today every subtype maps to one of the two original routines exactly as
+// ENEMY_ROLE did (RAMMING → 'dogfighter', SHOOTING → 'skirmisher'), so play is
+// byte-for-byte identical; the per-subtype quirks (Drone jitter, Orbiter true-
+// orbit, Sniper lock, Turret no-move) still live inside those routines.
+export type EnemyMovement = 'dogfighter' | 'skirmisher';
+export interface EnemyBehaviorDef {
+  /** Which AISystem movement/targeting routine runs for this subtype. */
+  move: EnemyMovement;
+  // Extension points (add here + a matching strategy/handler in AISystem):
+  //   target?: 'player' | 'nearestEnemy' | …
+  //   special?: 'arcShieldSlew' | 'boids' | 'nestSpawn' | …
+}
+export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
+  [EnemySubtype.RAMMER_1]:  { move: 'dogfighter' },
+  [EnemySubtype.RAMMER_2]:  { move: 'dogfighter' },
+  [EnemySubtype.RAMMER_3]:  { move: 'dogfighter' },
+  [EnemySubtype.KAMIKAZE]:  { move: 'dogfighter' },
+  [EnemySubtype.SHOOTER_1]: { move: 'skirmisher' },
+  [EnemySubtype.SHOOTER_2]: { move: 'skirmisher' },
+  [EnemySubtype.SHOOTER_3]: { move: 'skirmisher' },
+  [EnemySubtype.BULWARK]:   { move: 'skirmisher' },
+  [EnemySubtype.TURRET]:    { move: 'skirmisher' },
+};
+
 // ── Wave definitions ──────────────────────────────────────────────────────────
 // Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each
 // enemy role gets a clean introduction (ram-only → shoot-only → mixed).  The

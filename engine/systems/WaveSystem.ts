@@ -187,13 +187,25 @@ export class WaveSystem {
     }
   }
 
-  /** Count tracked wave enemies still alive (exploding ones count as dead,
-   *  matching the old kill-all completion semantics). */
+  /** Count tracked wave enemies still alive that gate completion (exploding
+   *  ones count as dead, matching the old kill-all semantics).
+   *
+   *  Stage 2b: an enemy with `countsTowardWave === false` is skipped — these
+   *  are entities spawned BY other entities / that replicate (nest brood,
+   *  bubble offspring).  The wave ends when the COUNTED enemies (the ones
+   *  streamed from the spawn budget — nests, original bubbles, etc.) are all
+   *  dead; uncounted brood may still be alive and simply carry over as
+   *  survivors.  Non-enemy roamers (Snitch / dragon) are INTERACTABLEs and
+   *  never enter `waveEnemyIds`, so they never gate a wave at all.
+   *
+   *  This also gates the live concurrency cap in emitDueSpawns, so uncounted
+   *  brood don't throttle the wave's own spawn stream. */
   private countLiveTracked(entities: GameEntity[]): number {
     let live = 0;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding) live++;
+      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding
+          && e.countsTowardWave !== false) live++;
     }
     return live;
   }

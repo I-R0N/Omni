@@ -1,7 +1,7 @@
 
 
 import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, ENEMY_ROLE, AI_CONFIG } from '../../constants';
+import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -25,6 +25,17 @@ export class AISystem {
   // Perf instrumentation — wall-time (ms) of the most recent update() call.
   // Written by update() and read by GameEngine for the dev perf overlay.
   public lastUpdateMs: number = 0;
+
+  // Behavior-dispatch table (Stage 2a): maps a movement-strategy id (from
+  // ENEMY_BEHAVIOR) to the routine that implements it.  Adding a new behavior
+  // is a new entry here + a row in ENEMY_BEHAVIOR — no growing if/else.  The
+  // two current strategies are the original RAMMING/SHOOTING routines, so the
+  // existing roster dispatches identically.  Class-field arrows so `this` binds.
+  private readonly moveStrategies: Record<EnemyMovement,
+    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) => void> = {
+    dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
+    skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
+  };
 
   /**
    * Advance every enemy's AI by one sim step.
@@ -64,13 +75,10 @@ export class AISystem {
           enemy.hitStun = Math.max(0, enemy.hitStun - dt);
       }
 
-      // Route by role — add new roles here as needed
-      const role = enemy.enemySubtype ? ENEMY_ROLE[enemy.enemySubtype] : EnemyRole.RAMMING;
-      if (role === EnemyRole.SHOOTING) {
-          this.updateSkirmisher(dt, enemy, player);
-      } else {
-          this.updateBasicDogfighter(dt, enemy, player, flowField);
-      }
+      // Route through the behavior-dispatch table (Stage 2a).  Defaults to the
+      // dogfighter (matches the old "no subtype → RAMMING" fallback).
+      const move: EnemyMovement = enemy.enemySubtype ? ENEMY_BEHAVIOR[enemy.enemySubtype].move : 'dogfighter';
+      this.moveStrategies[move](dt, enemy, player, flowField);
 
       // Directional arc shield (Bulwark): slew the covered sector toward the
       // player at a capped rate so it ATTEMPTS to face the threat — flank it

@@ -71,9 +71,10 @@ engine/
                           collision resolution, gravity, per-entity damping
     RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
                           wave banner, minimap
-    AISystem.ts           Per-enemy state machine (states currently used:
-                          'idle', 'chase' — see §8); reaction-time lag
-                          targets, pack-sync, stuck detection
+    AISystem.ts           Per-enemy behavior-dispatch table (ENEMY_BEHAVIOR →
+                          moveStrategies); idle/chase state machine,
+                          reaction-time lag targets, pack-sync, stuck
+                          detection, arc-shield slew
     ParticleSystem.ts     Pooled particle FX
     TrailSystem.ts        Generic trail point management
     ProjectileSystem.ts   Projectile lifetime, homing, lightning gravity,
@@ -83,7 +84,8 @@ engine/
     WaveSystem.ts         Completion-wave spawn scheduler + grace
                           timer + spawn geometry.  A wave ends only when
                           its full budget has spawned AND every spawned
-                          enemy is dead (clear-the-field); the clock just
+                          COUNTED enemy is dead (clear-the-field;
+                          `countsTowardWave !== false`); the clock just
                           grades the speed bonus.  Survivors carry over.
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
@@ -564,12 +566,28 @@ button in `UIOverlay.tsx`.
 - **AI states currently used in code are `'idle'` and `'chase'`.** The
   `aiState` type union in `types.ts` lists more, but the others have no
   active branches in `AISystem.ts`. Don't assume a missing state is wired.
+- **AI routing is a behavior-dispatch table.** `AISystem.update` routes each
+  enemy through `ENEMY_BEHAVIOR[subtype].move` (a movement-strategy id) via the
+  `moveStrategies` lookup map — NOT an `ENEMY_ROLE` if/else.  Adding a new
+  behavior is a row in `ENEMY_BEHAVIOR` (constants) + a strategy fn in the
+  `moveStrategies` table, not a growing switch.  The two strategies today are
+  the original `updateBasicDogfighter` (`'dogfighter'`) and `updateSkirmisher`
+  (`'skirmisher'`); the per-subtype quirks (Drone jitter, Orbiter true-orbit,
+  Sniper lock, Turret no-move) still live INSIDE those routines.  `ENEMY_ROLE`
+  is still the RAMMING/SHOOTING category used by pack-sync + wave-building.
 - **Stationary enemies use the no-move guard.** `AISystem.updateSkirmisher`
   branches on `config.maxSpeed === 0` (Turret): it applies no thrust, bleeds
   residual velocity, and skips the speed cap, but still runs the
-  rotate-to-aim + telegraph block.  (Stage 2 will replace the role switch
-  with a per-subtype behavior table; until then this is the one special
-  case.)
+  rotate-to-aim + telegraph block.  (A sub-behavior of the skirmisher
+  strategy, not its own table entry.)
+- **Wave completion honors `countsTowardWave`.** `WaveSystem.countLiveTracked`
+  (which gates both completion AND the spawn-stream concurrency cap) skips
+  tracked enemies with `countsTowardWave === false` — entities spawned by other
+  entities / that replicate (nest brood, bubble offspring).  A wave ends when
+  the COUNTED enemies are dead; uncounted brood carry over as survivors.
+  Non-enemy roamers (Snitch, future dragon) are `EntityType.INTERACTABLE` and
+  never enter `waveEnemyIds`, so they never gate a wave.  Every current enemy
+  leaves the flag unset (counts), so the existing roster is unaffected.
 - **Homing is owner-aware.** `ProjectileSystem.updateHoming` steers
   PLAYER-owned homing shots toward the nearest enemy (acquire range) and
   ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
