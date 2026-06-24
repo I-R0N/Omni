@@ -160,6 +160,11 @@ export class AISystem {
       const maxSpeed = aggroed ? baseMaxSpeed * AI_CONFIG.AGGRO_SPEED_MULT : baseMaxSpeed;
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 1.5;
+      // Stationary emplacements (Turret, maxSpeed 0) take the NO-MOVE path:
+      // apply no movement force, bleed any residual velocity (e.g. from being
+      // rammed) to a stop, and fall straight through to the rotate-to-aim block
+      // so they still track the player and telegraph.
+      const stationary = config.maxSpeed === 0;
 
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
@@ -188,7 +193,11 @@ export class AISystem {
       // brake hard to a stop instead of strafing.
       const locked = !!enemy.aimLaser && (enemy.aimCharge ?? 0) > 0;
       const isOrbiter = enemy.enemySubtype === EnemySubtype.SHOOTER_2;
-      if (stunned) {
+      if (stationary) {
+          // No-move: bleed residual velocity, never apply thrust.
+          enemy.velocity.x *= 0.6;
+          enemy.velocity.y *= 0.6;
+      } else if (stunned) {
           // Staggered — apply no movement force this step (the knockback rides).
       } else if (locked) {
           enemy.velocity.x *= 0.8;
@@ -235,9 +244,10 @@ export class AISystem {
       }
 
       // Cap Speed — suspended while staggered so the hit knockback carries
-      // the enemy back instead of being clamped to cruise.
+      // the enemy back instead of being clamped to cruise.  Skipped for
+      // stationary turrets (the no-move bleed above handles their velocity).
       const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
-      if (!stunned && speed > maxSpeed) {
+      if (!stationary && !stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
       }

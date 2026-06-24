@@ -2878,6 +2878,21 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shield: 54, shieldRegen: 4, shieldArc: { deg: 150, slew: 2.8 },
     telegraph: 0.5,
   },
+  // ── Stage 1 ──
+  // Turret: a stationary steel emplacement (maxSpeed 0 → AISystem no-move
+  // branch) that rotates to track the player and lobs SLOW HOMING missiles on
+  // a long, telegraphed beat.  It can't chase, so it's a position-denial /
+  // priority-target threat: dodge the missiles by juking (their turn rate is
+  // gentle) or close in and destroy it.  Tanky + heavy so it reads as fixed.
+  [EnemySubtype.TURRET]: {
+    color: '#94a3b8', size: 36, health: 8,
+    maxSpeed: 0, accel: 0, turnRate: 1.8,
+    sprite: ASSETS.ENEMY_TANK, mass: 50, shape: 'cross',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 2.6, damage: 12, speed: 5, size: 7, color: '#fb7185',
+              homing: true, homingStrength: 0.5, glow: true },
+    telegraph: 0.7,
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -2933,6 +2948,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.SHOOTER_3]: EnemyRole.SHOOTING,
   [EnemySubtype.KAMIKAZE]:  EnemyRole.RAMMING,
   [EnemySubtype.BULWARK]:   EnemyRole.SHOOTING,
+  [EnemySubtype.TURRET]:    EnemyRole.SHOOTING, // stationary (no-move guard in AISystem)
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
@@ -2950,6 +2966,7 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
   { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
   { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
+  { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

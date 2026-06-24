@@ -307,10 +307,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
   `cooldown` is the real fire cadence; the old global burst config is gone),
   `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
-  (RAMMER_1-3 / SHOOTER_1-3) plus 2 core-roster additions — KAMIKAZE
+  (RAMMER_1-3 / SHOOTER_1-3) plus 3 additions — KAMIKAZE
   (RAMMING star bomber that detonates an AoE shockwave INSTANTLY on player
-  contact; `shoots:false`) and BULWARK (SHOOTING octagon fortress with a
-  rotating directional arc shield + a 3-shot fan).  Optional ENEMY_VARIANTS
+  contact; `shoots:false`), BULWARK (SHOOTING octagon fortress with a
+  rotating directional arc shield + a 3-shot fan), and TURRET (Stage 1: a
+  STATIONARY SHOOTING cross emplacement — `maxSpeed:0` → AISystem no-move
+  branch — that rotates to aim and lobs slow HOMING missiles).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`) and `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
@@ -562,6 +564,16 @@ button in `UIOverlay.tsx`.
 - **AI states currently used in code are `'idle'` and `'chase'`.** The
   `aiState` type union in `types.ts` lists more, but the others have no
   active branches in `AISystem.ts`. Don't assume a missing state is wired.
+- **Stationary enemies use the no-move guard.** `AISystem.updateSkirmisher`
+  branches on `config.maxSpeed === 0` (Turret): it applies no thrust, bleeds
+  residual velocity, and skips the speed cap, but still runs the
+  rotate-to-aim + telegraph block.  (Stage 2 will replace the role switch
+  with a per-subtype behavior table; until then this is the one special
+  case.)
+- **Homing is owner-aware.** `ProjectileSystem.updateHoming` steers
+  PLAYER-owned homing shots toward the nearest enemy (acquire range) and
+  ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
+  so it takes the player entity as an argument.
 - **Drop types currently shipped: `'ammo'` and `'health'`** (collected by
   the player). `'glass'` is a `dropType` value used internally for
   shattered structure visuals; there is no fuel, gold-pickup, or

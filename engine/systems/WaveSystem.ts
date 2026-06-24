@@ -236,7 +236,7 @@ export class WaveSystem {
       RAMMER_1: 1, SHOOTER_1: 1,
       RAMMER_2: 2, SHOOTER_2: 2,
       RAMMER_3: 3, SHOOTER_3: 3,
-      KAMIKAZE: 2, BULWARK: 2,
+      KAMIKAZE: 2, BULWARK: 2, TURRET: 3,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 

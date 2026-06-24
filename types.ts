@@ -125,12 +125,15 @@ export enum EnemySubtype {
   //  - BULWARK:  a SHOOTING fan-gunner behind a regenerating shield.
   KAMIKAZE = 'KAMIKAZE',
   BULWARK  = 'BULWARK',
+  // Stage 1 — TURRET: a stationary SHOOTING emplacement (maxSpeed 0, no-move
+  // AI branch) that rotates to aim and lobs slow homing missiles.
+  TURRET   = 'TURRET',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',

@@ -3519,7 +3519,7 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, dt);
+      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, this.player, dt);
   }
 
   private updateLightningGravity(dt: number) {

@@ -4409,6 +4409,18 @@ export class RenderSystem {
               }
               break;
           }
+          case 'cross': {
+              // Turret emplacement — a chunky 12-vertex plus/cross with the
+              // forward arm (+x) reading as the gun barrel.  t = arm half-width.
+              const t = r * 0.34;
+              ctx.moveTo(r, -t);   ctx.lineTo(r, t);      // forward arm tip (barrel)
+              ctx.lineTo(t, t);    ctx.lineTo(t, r);      // down arm
+              ctx.lineTo(-t, r);   ctx.lineTo(-t, t);
+              ctx.lineTo(-r, t);   ctx.lineTo(-r, -t);    // rear arm
+              ctx.lineTo(-t, -t);  ctx.lineTo(-t, -r);    // up arm
+              ctx.lineTo(t, -r);   ctx.lineTo(t, -t);
+              break;
+          }
           case 'triangle':
           default:
               ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);
