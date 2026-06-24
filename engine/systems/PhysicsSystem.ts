@@ -1108,13 +1108,16 @@ export class PhysicsSystem {
   /**
    * Directional arc-shield interception (Bulwark).  When an incoming hostile
    * projectile crosses the shield ring within the covered sector, the shield
-   * eats it AT THE RING — the bolt is consumed there (visible block) instead of
-   * tunneling to the hull.  Returns true if the pair was handled (caller skips
-   * the body SAT).  Returns false — letting the shot proceed to the hull — when:
+   * DEFLECTS it off the ring surface (reflects its velocity about the radial
+   * normal) and drains by the shot's damage — so the bolt ricochets away
+   * (readable, and a hazard to other enemies) instead of vanishing, while the
+   * shield still wears down.  Returns true if the pair was handled (caller
+   * skips the body SAT).  Returns false — letting the shot proceed to the
+   * hull — when:
    *   - the pair isn't projectile-vs-arc-shield,
    *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
    *   - the shot's damage exceeds the remaining shield (it punches through; the
-   *     shield drains to 0 and the remainder lands on the hull via SAT).
+   *     body-SAT path drains the remaining shield and lands the remainder).
    */
   private tryArcShieldIntercept(
       a: GameEntity,
@@ -1126,26 +1129,42 @@ export class PhysicsSystem {
       else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
       else return false;
       if ((shielded.shield ?? 0) <= 0) return false;
-      // Don't let the shield eat its owner's own fire (same-team projectile).
+      // Don't let the shield deflect its owner's own fire (same-team projectile).
       if (proj.ownerType === shielded.type) return false;
 
       const reach = PhysicsSystem.arcShieldReach(shielded);
       const dx = wrapDeltaX(shielded.position.x, proj.position.x);
       const dy = wrapDeltaY(shielded.position.y, proj.position.y);
-      if (dx * dx + dy * dy > reach * reach) return false;        // not at the ring yet
+      const distSq = dx * dx + dy * dy;
+      if (distSq > reach * reach) return false;                  // not at the ring yet
       if (!PhysicsSystem.shieldCoversHit(shielded, proj)) return false; // open side → hull
 
-      // Covered + shield can fully eat this shot: consume it at the ring.  A
-      // shot bigger than the remaining shield breaks through — return false and
-      // let the body-SAT path do the existing partial absorb (drain the
-      // remaining shield, land the remainder on the hull), so the shield is
-      // never double-counted.
+      // A shot bigger than the remaining shield punches through — let the body
+      // SAT path do the existing partial absorb so the shield isn't double-
+      // counted.
       const projDmg = proj.damage || 1;
       if (projDmg > shielded.shield!) return false;
+
+      // Radial normal at the impact (outward from the shield centre).  Only
+      // deflect shots actually travelling INTO the shield; an outward-moving
+      // bolt (already deflected) falls through harmlessly.
+      const dist = Math.sqrt(distSq) || 1;
+      const nx = dx / dist, ny = dy / dist;
+      const vdotn = proj.velocity.x * nx + proj.velocity.y * ny;
+      if (vdotn >= 0) return false;
+
+      // Reflect velocity about the normal: v' = v − 2(v·n)n, then snap the bolt
+      // to the ring surface so it rides outward and can't re-trigger / SAT the
+      // hull on the next step.
+      proj.velocity.x -= 2 * vdotn * nx;
+      proj.velocity.y -= 2 * vdotn * ny;
+      proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+      proj.position.x = shielded.position.x + nx * (reach + 1);
+      proj.position.y = shielded.position.y + ny * (reach + 1);
+
       shielded.shield! -= projDmg;
       shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
       shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
-      proj.active = false;
       if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
       return true;
   }

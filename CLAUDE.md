@@ -618,10 +618,12 @@ button in `UIOverlay.tsx`.
   whose bearing falls in the covered sector — gated by the shot's TRAVEL
   direction, not its position, so a fast bolt that overshoots can't tunnel
   past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
-  is intercepted AT THE RING (`tryArcShieldIntercept`, broadphase reach
-  extended via `arcShieldReach`) so it visibly stops at the shield instead
-  of reaching the hull; open-side shots fall through to the normal body
-  hit.  AISystem slews `shieldArcAngle` toward the player at up to
+  is DEFLECTED off the ring (`tryArcShieldIntercept`, broadphase reach
+  extended via `arcShieldReach`): its velocity reflects about the radial
+  normal and the shield drains by the shot's damage, so the bolt ricochets
+  away (and can hit other enemies) while the shield still wears down.
+  Open-side shots — and shots bigger than the remaining shield — fall
+  through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
 - **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
