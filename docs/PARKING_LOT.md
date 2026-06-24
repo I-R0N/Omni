@@ -55,6 +55,61 @@ isn't re-deflected).
 
 ---
 
+## Tile-mounted turret emplacements (Turret v2)
+
+**Context:** Mount TURRET enemies (Stage 1) to the EXTERIOR tiles of clusters
+on *designed* maps (not wave spawns) to make them terrain-integrated puzzle
+emplacements rather than free-standing shooters. A mounted turret sits against
+the exposed face of an exterior tile, can only fire OUTWARD (away from its
+tile), and is only vulnerable from that same exposed arc — the tile/cluster
+armors its back and flanks. Three clean counters:
+
+1. **Flank** into the exposed arc and shoot it normally.
+2. **Demolish the mount tile** → the turret loses its protection and dies to a
+   single base-blaster shot ("exposed" state). Tiles regen, so this opens a
+   timed window, then it re-armors.
+3. **Lightning / AoE** hit it from any angle without breaking the tile (they
+   bypass the directional gate — consistent with "AoE is the answer").
+
+**Reuses what's already built:**
+- **Directional gate, inverted.** `PhysicsSystem.shieldCoversHit` /
+  `tryArcShieldIntercept` (Bulwark arc shield) already gate whether a shot
+  connects by bearing. A mounted turret is the same sector flipped to a
+  *vulnerable* arc facing the exposed normal: shots from OUTSIDE the arc spark
+  off the armored casing (deflect/no-op), shots from inside land. Best built
+  on top of the parked "generalize the projectile-deflection function" helper.
+- **Stationary AI.** Turret is already `maxSpeed:0` with the no-move branch —
+  fixed mount position needs no physics changes. Aim is just clamped to the
+  outward arc (it already rotates to track; bound the rotation so it holds fire
+  when the player is behind the cluster).
+- **Lightning/AoE bypass.** AoE already ignores shields; extend the same
+  exemption (plus lightning) to the turret's directional gate.
+
+**Genuinely new work:**
+- **Tile↔turret link.** Add `mountTileId` (+ outward normal angle) on the
+  turret; each step it reads the mount tile's alive state to toggle
+  protected/exposed. VERIFY FIRST: does ShardSystem regen REUSE the same tile
+  entity id (link survives) or spawn a fresh one (link breaks → re-acquire by
+  position)? Pick the approach after checking.
+- **Map placement.** No "place enemy X on tile Y" authoring path exists today
+  (maps populate procedurally in `MapClasses.populate`). Add a pass that finds
+  exterior cluster tiles (≥1 empty hex neighbour), picks an exposed face, and
+  spawns a turret there facing the outward normal — density/placement as a
+  per-map knob, since these are designed hazards.
+- **Exposed-kill state.** A flag that, while the mount tile is gone, drops the
+  directional gate AND makes the turret take full damage (≈1-shot feel).
+- **Wave accounting.** As map features they must NOT count toward wave
+  completion — depends on the planned **Stage-2b `countsTowardWave`** flag
+  (non-wave entities). Slot this after that refactor lands.
+
+**Gotchas:** torus-correct the mount normal + bearing math (`wrapDeltaX/Y`);
+mount on a predictable-regen tile variant (rock/metal) so the exposure window
+behaves; a turret whose tile never regens (e.g. nebula-off) stays a one-shot
+kill once broken — fine, but intentional. Sequence: do the deflection-helper
+generalization + Stage-2b accounting first, then this is mostly composition.
+
+---
+
 ## Trail Gradient Caching
 
 **Context:** `renderTrails` in `RenderSystem.ts` calls `ctx.createLinearGradient` every frame
