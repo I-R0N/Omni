@@ -1915,18 +1915,16 @@ export class GameEngine {
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
 
-      // Ammo drops follow the same asteroid flow field — the wind
-      // that catches loose shards also drags drops along, so a wave
-      // kill's drops drift with the local current toward the player
-      // instead of sitting where they spawned.  Magnetised drops
-      // skip the pass so the player-magnet trajectory isn't tugged
-      // sideways; health drops have mass=Infinity (static pickups)
-      // and aren't iterated here either.
+      // Collectible drops (ammo + health) follow the same asteroid flow
+      // field — the wind that catches loose shards also drags drops along,
+      // so a wave kill's drops drift with the local current toward the
+      // player instead of sitting where they spawned.  Magnetised drops
+      // skip the pass so the player-magnet trajectory isn't tugged sideways.
       if (flowEnabled) {
           for (let i = 0; i < this.activeDrops.length; i++) {
               const d = this.activeDrops[i];
               if (!d.active) continue;
-              if (d.dropType !== 'ammo') continue;
+              if (d.dropType !== 'ammo' && d.dropType !== 'health') continue;
               if (d.magnetized) continue;
               const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
@@ -2709,8 +2707,6 @@ export class GameEngine {
           drop.active = false;
           continue;
         }
-        // Health drops are static — skip the magnet pull.
-        if (drop.dropType === 'health') continue;
         // Latch on first entry into pull range; once latched the drop
         // keeps homing regardless of distance (guaranteed collection).
         if (!drop.magnetized) {

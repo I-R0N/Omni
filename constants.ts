@@ -2576,7 +2576,13 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
-  HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
+  HEALTH_HEAL_AMOUNT:        100,   // HP restored per milestone (wave-clear) health drop
+  // Enemy-kill health drops (added because the expanded roster hits harder).
+  // Rolled INDEPENDENTLY at the same two chances as the ammo slots above, so
+  // enemy-kill pickups roughly double and split ~50/50 ammo/health.  Each heals
+  // this much (merges sum, like ammo) — modest so frequent drops sustain rather
+  // than trivialise.
+  HEALTH_PER_ENEMY:           15,
   // General
   COLLECT_RADIUS:             30,   // world units
   MAGNET_RANGE:              150,   // world units — a drop only starts pulling

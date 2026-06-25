@@ -593,17 +593,29 @@ button in `UIOverlay.tsx`.
   ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
   so it takes the player entity as an argument.
 - **Drop types currently shipped: `'ammo'` and `'health'`** (collected by
-  the player). `'glass'` is a `dropType` value used internally for
+  the player). Both are collectible drops with the SAME physics — finite
+  mass, scatter off the kill, asteroid-flow drift, player magnetisation,
+  and same-type merge. `'glass'` is a `dropType` value used internally for
   shattered structure visuals; there is no fuel, gold-pickup, or
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
+- **Health drops mirror the ammo economy.** `spawnEnemyShards` rolls a
+  health drop INDEPENDENTLY at the same two chances as each ammo slot, so
+  enemy-kill pickups roughly double and split ~50/50 ammo/health (added
+  because the expanded roster hits harder). Each heals
+  `DROP_CONFIG.HEALTH_PER_ENEMY` (merges sum it); the wave-clear milestone
+  drop still heals `HEALTH_HEAL_AMOUNT`. Health drops render as a red
+  circle shard (`generateShardPolygon('health')` is a 16-gon; RenderSystem
+  drop-shard branch tints it red) — the old static glowing heart is gone.
+  Drops (ammo + health) are excluded from the minimap to avoid clutter.
 - **Ammo drops carry value 1 and merge.** `DropSystem.spawnAmmoDrop`
   hard-forces value = 1 (the per-source `amount` argument and
   `AMMO_PER_*` tunables are intentionally ignored). Nearby drops
-  mutually attract, damp, and fuse via `mergeAmmoDrops`
-  (`AMMO_DROP_PULL`), conserving total ammo — a wave-kill cluster
-  collapses into one fatter pickup. Non-magnetised ammo drops also
+  mutually attract, damp, and fuse via `mergeAmmoDrops` (now generalized
+  to fuse any same-type collectible, ammo↔ammo / health↔health;
+  `AMMO_DROP_PULL`), conserving total value — a wave-kill cluster
+  collapses into one fatter pickup. Non-magnetised drops also
   drift with the asteroid flow field.
 - **Periodic passes route through PerfController.** Any new skippable
   per-frame work (scans, cosmetic ticks, O(N²) passes) must register
