@@ -334,19 +334,28 @@ Each phase is independently shippable and de-risks the next.
   and see *their* named station. *(Pillars 2, 3; Medium-High — first real
   infra.)*
 
-- **Phase 2 — Async/social shared world.**
-  Discovery feeds, leaderboards, ghost traces, persistent map mutations
+- **Phase 2 — World structure: hubs, portals & game modes.**
+  The core single-player game (see §10). GPS-anchored **hub maps** (safe,
+  sparse, market + refit), **travel portals** to neighboring hubs, **run
+  portals** into instanced gameplay maps with game modes (waves / maze /
+  capture / assassinate / explore), and the **salvage economy**. This is the
+  bulk of the playable game and is built **before** multiplayer — it also
+  lays the hub-vs-instance seams that co-op plugs into. *(Medium-High.)*
+
+- **Phase 3 — Async/social shared world.**
+  Discovery feeds, leaderboards, ghost traces, persistent hub mutations
   (diff log). "Multiplayer" in the Journey/Death-Stranding sense, no
   real-time netcode. *(Pillar 4 option 1; Medium.)*
 
-- **Phase 3 — Mobile + touch.**
+- **Phase 4 — Mobile + touch.**
   First-class phone client. Can overlap earlier phases. *(Cross-cutting;
   Medium.)*
 
-- **Phase 4 — Real-time co-op instances.**
-  Host-authoritative small-group instances with prediction/interpolation.
-  The big netcode lift, attempted only after the platform is proven.
-  *(Pillar 4 option 2; High.)*
+- **Phase 5 — Real-time co-op (after the world structure exists).**
+  Host-authoritative co-op instances of gameplay-map runs; the hub becomes a
+  shared social space (§9, §10.5). The big netcode lift, attempted only once
+  the hub/portal/instance structure (Phase 2) is in place. *(Pillar 4 option
+  2; High.)*
 
 ---
 
@@ -524,3 +533,82 @@ time-consuming. Realistic co-op MVP (M1–M2): **~2–3 months** of focused work
 for someone comfortable with real-time netcode, on top of Phases 0–1.
 Running cost stays near **$0** (signaling + STUN) until TURN-relay and/or
 dedicated servers are needed at scale.
+
+---
+
+## 10. World structure: hubs, portals & game modes
+
+The single-player game (Phase 2) is organised as a **hub-and-spoke** world —
+the proven town-and-dungeon pattern (Destiny's Tower → strikes, Monster
+Hunter's village → quests, Hades' house → runs). It also pre-builds the
+hub-vs-instance seams that multiplayer (§9) plugs into, which is why it
+ships **before** co-op.
+
+### 10.1 Two kinds of map
+
+| | **Hub maps** | **Gameplay maps** |
+|---|---|---|
+| Anchored to | a real-world GPS location (H3 cell) | a portal + run, not a place |
+| Seed | H3 cell index | per-run: `hash(cell + portal + run#)` |
+| Lifetime | **persistent & shared** (same hub for everyone) | **ephemeral** — regenerated each entry |
+| Population | safe, sparse, 0–few enemies | combat/objectives scaled to a game mode |
+| Contains | market + refit/fitting bay + portals | the challenge content; salvage rewards |
+| Purpose | town / travel nexus / economy | renewable **salvage** farming |
+
+**Persistent hubs, regenerating runs.** This gives a durable shared universe
+*and* infinite replayable content while keeping the persistence footprint
+tiny (store hub state + player profile; runs are disposable). The existing
+maps (`UniverseMap`, `RingMap`, the showcase fields, …) become **biome
+templates** for gameplay runs rather than the whole game.
+
+### 10.2 Portals (two flavours)
+
+A portal is an interactable entity that calls the existing
+`loadMap(buildMap(...))` transition (`GameEngine.ts:1102`, `:3255`) with a
+target descriptor:
+
+- **Travel portals** → a neighbouring GPS **hub** (one of the 6 H3 neighbours
+  — this supersedes/locates the §4.7 gate idea). Travel may be gated (warp
+  fuel / discovery).
+- **Run portals** → an instanced **gameplay map**, parameterised by
+  `(biome template, game mode, seed, difficulty)`.
+
+### 10.3 Game modes
+
+A `GameMode` is an objective layer — **(win condition + spawn rules +
+scoring)** — over a biome template. Most reuse existing systems:
+
+| Mode | Reuses | New work |
+|---|---|---|
+| **Waves** (survive N) | `WaveSystem` | — |
+| **Maze** (reach the exit) | tile maps; indestructible tiles as walls | maze-gen + goal |
+| **Capture** (collect N items) | drop/collection (`activeDrops`) | objective items + counter |
+| **Assassinate** (destroy marked targets) | enemies + `AISystem` | marked-target + win check |
+| **Explore** (reach beacons) | POIs + traversal | beacon objectives, low combat |
+
+### 10.4 The salvage economy
+
+One economic spine: **run a gameplay map → score salvage → return to hub →
+spend salvage on equipment / ammo / upgrades → harder runs & new GPS hubs.**
+"Salvage" is the primary currency (subsumes the dormant `gold` field). The
+rare module drops and crafting materials from the ship/build system layer on
+top as the *premium* rewards above baseline salvage. Salvage and profile
+unlocks persist to the BaaS (Phase 1).
+
+### 10.5 Why this is built before multiplayer
+
+The hub/instance split **is** the "persist the world, instance the action"
+model (§9.5) made concrete: hubs are the persistent shared GPS world;
+gameplay-map runs are the instanceable action. Building it single-player
+first means co-op (§9) becomes "host an instance of a run" + "render other
+players in the hub," not a from-scratch architecture. Multiplayer is
+explicitly sequenced **after** Phase 2 for this reason.
+
+### 10.6 New engine work vs reused
+
+- **Reused:** every existing map (as biome templates), `WaveSystem`,
+  enemies/`AISystem`, drops/collection, and the `loadMap`/`buildMap`
+  transition (portals just call it with parameters).
+- **New:** a **hub map archetype** (new `MapType`), **portal entities**, the
+  **`GameMode`** objective/scoring system, **per-run seeding**, and
+  **salvage scoring** banked to the player profile.
