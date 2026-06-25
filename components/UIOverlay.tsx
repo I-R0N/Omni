@@ -85,6 +85,7 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
+  onCycleSwarmMove?: () => void;
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
@@ -165,6 +166,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCycleEnemyScale,
+  onCycleSwarmMove,
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
@@ -460,6 +462,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Gnat move', onCycleSwarmMove, stats.swarmMoveName ?? 'boids',
+                  'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine) → burst (coast + telegraphed dash). Applies live to all gnats.')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
                   'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
                 {ctrlRow('Disable', onApplyDisable, 'EMP',

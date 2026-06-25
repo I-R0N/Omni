@@ -587,8 +587,10 @@ button in `UIOverlay.tsx`.
   behavior is a row in `ENEMY_BEHAVIOR` (constants) + a strategy fn in the
   `moveStrategies` table, not a growing switch.  The two strategies today are
   the original `updateBasicDogfighter` (`'dogfighter'`), `updateSkirmisher`
-  (`'skirmisher'`), and `updateSwarm` (`'swarm'` — a light boids seek +
-  separation + jitter flock, Stage 4); the per-subtype quirks (Drone jitter,
+  (`'skirmisher'`), and `updateSwarm` (`'swarm'` — Stage 4; separation + jitter
+  flock with a DBG-selectable base steer via `getActiveSwarmMove`: boids /
+  vortex (orbit + dart) / weave (serpentine) / burst (coast + telegraphed
+  dash), cycled by the Player ▸ "Gnat move" DBG row); the per-subtype quirks (Drone jitter,
   Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
   routines.  Strategies receive the filtered `enemies` list so a flock can scan
   neighbours.  `ENEMY_ROLE` is still the RAMMING/SHOOTING category used by

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG } from '../../constants';
+import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -275,31 +275,93 @@ export class AISystem {
   }
 
   /**
-   * Swarm AI (Stage 4): a light boids flock — seek the player + separation from
-   * nearby swarm units (so they spread into a darting cloud instead of stacking
-   * on one line) + a little random jitter for life.  Cheap and stateless; the
-   * neighbour scan is over the already-filtered `enemies` list, limited to other
-   * SWARM units (population hard-capped by the nest's maxBrood).  Toroidal.
+   * Swarm AI (Stage 4): a light flock whose base steer is DBG-selectable
+   * (`getActiveSwarmMove`) — 'boids' (seek), 'vortex' (orbit + dart), 'weave'
+   * (serpentine approach), 'burst' (coast + telegraphed dash).  Separation from
+   * nearby swarm units + a little jitter apply in EVERY mode, so the cloud never
+   * stacks.  Cheap and (mostly) stateless; the neighbour scan is over the
+   * already-filtered `enemies` list, limited to other SWARM units (population
+   * hard-capped by the nest's maxBrood).  Toroidal.
    */
   private updateSwarm(dt: number, enemy: GameEntity, player: GameEntity, enemies: GameEntity[]) {
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SWARM];
       const aggroed = (enemy.aggroTimer ?? 0) > 0;
-      const maxSpeed = (enemy.maxSpeed ?? config.maxSpeed ?? 9) * (aggroed ? AI_CONFIG.AGGRO_SPEED_MULT : 1);
+      const baseMaxSpeed = (enemy.maxSpeed ?? config.maxSpeed ?? 9) * (aggroed ? AI_CONFIG.AGGRO_SPEED_MULT : 1);
       const accel = config.accel || 8;
       const turnRate = config.turnRate || 4;
       const stunned = (enemy.hitStun ?? 0) > 0;
 
-      // Seek the player (unit vector toward, toroidal).
       const dx = wrapDeltaX(enemy.position.x, player.position.x);
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      let ax = (dx / dist) * accel;
-      let ay = (dy / dist) * accel;
+      const toX = dx / dist, toY = dy / dist; // unit toward player
 
-      // Separation: push away from nearby swarm units, stronger the closer they
-      // are (1 − d/range), so the flock fans out into a cloud.
-      const { SEPARATION_RANGE, SEPARATION_STRENGTH, JITTER_ACCEL } = AI_CONFIG.SWARM;
-      const sepSq = SEPARATION_RANGE * SEPARATION_RANGE;
+      // ── Base steer by mode ──
+      let ax = 0, ay = 0;
+      let speedCap = baseMaxSpeed;
+      const mode = getActiveSwarmMove();
+      const S = AI_CONFIG.SWARM;
+      if (mode === 'vortex') {
+          // Orbit at a radius (radial correction + tangential swirl), darting
+          // inward on a per-gnat cadence to bite then peeling back out.
+          if (enemy.orbitSpin === undefined) {
+              let h = 0; const id = enemy.id;
+              for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
+              enemy.orbitSpin = (h & 1) ? 1 : -1;
+          }
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.VORTEX.DART_INTERVAL;
+          enemy.swarmTimer -= dt;
+          const darting = enemy.swarmTimer <= 0;
+          if (enemy.swarmTimer <= -S.VORTEX.DART_DURATION) {
+              enemy.swarmTimer = S.VORTEX.DART_INTERVAL + Math.random() * S.VORTEX.DART_VAR;
+          }
+          const targetR = darting ? S.VORTEX.RADIUS * S.VORTEX.DART_RADIUS_FRAC : S.VORTEX.RADIUS;
+          let radial = (dist - targetR) / S.VORTEX.DEADZONE;
+          if (radial > 1) radial = 1; else if (radial < -1) radial = -1;
+          // Kill the swirl during a dart so it's a clean inward lunge.
+          const tang = darting ? 0 : S.VORTEX.TANGENTIAL;
+          ax = toX * radial * accel * S.VORTEX.RADIAL_GAIN - toY * enemy.orbitSpin * accel * tang;
+          ay = toY * radial * accel * S.VORTEX.RADIAL_GAIN + toX * enemy.orbitSpin * accel * tang;
+      } else if (mode === 'weave') {
+          // Seek, but offset perpendicular by a sine so the approach serpentines.
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * Math.PI * 2;
+          enemy.swarmTimer += dt * S.WEAVE.FREQ;
+          const amp = S.WEAVE.AMP * Math.min(1, dist / S.WEAVE.CLOSE_DAMP); // straighten out up close
+          const w = Math.sin(enemy.swarmTimer) * amp;
+          let mx = toX - toY * w; // perpendicular = (-toY, toX)
+          let my = toY + toX * w;
+          const mmag = Math.sqrt(mx * mx + my * my) || 1;
+          ax = (mx / mmag) * accel;
+          ay = (my / mmag) * accel;
+      } else if (mode === 'burst') {
+          // Coast slowly, then fire a quick telegraphed dash at the player.
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.BURST.COAST_INTERVAL;
+          enemy.swarmTimer -= dt;
+          const dashing = enemy.swarmTimer <= 0 && enemy.swarmTimer > -S.BURST.DASH_DURATION;
+          if (enemy.swarmTimer <= -S.BURST.DASH_DURATION) {
+              enemy.swarmTimer = S.BURST.COAST_INTERVAL + Math.random() * S.BURST.COAST_VAR;
+          }
+          if (dashing) {
+              ax = toX * accel * S.BURST.DASH_ACCEL_MULT;
+              ay = toY * accel * S.BURST.DASH_ACCEL_MULT;
+              speedCap = baseMaxSpeed * S.BURST.DASH_SPEED_MULT;
+          } else {
+              ax = toX * accel * 0.2; // gentle drift toward
+              ay = toY * accel * 0.2;
+              speedCap = baseMaxSpeed * S.BURST.COAST_SPEED_MULT;
+              if (!stunned) { enemy.velocity.x *= S.BURST.COAST_DAMP; enemy.velocity.y *= S.BURST.COAST_DAMP; }
+              // Pre-dash wind-up flash (telegraph) in the last moments of coast.
+              if (enemy.swarmTimer < S.BURST.TELEGRAPH) enemy.hitFlash = Math.max(enemy.hitFlash ?? 0, 0.12);
+          }
+      } else {
+          // 'boids' (default): straight seek.
+          ax = toX * accel;
+          ay = toY * accel;
+      }
+
+      // ── Separation (all modes): push away from nearby swarm units, stronger
+      // the closer they are, so the flock fans out instead of stacking.
+      const sepSq = S.SEPARATION_RANGE * S.SEPARATION_RANGE;
       let sx = 0, sy = 0;
       for (let i = 0; i < enemies.length; i++) {
           const o = enemies[i];
@@ -309,24 +371,24 @@ export class AISystem {
           const d2 = ox * ox + oy * oy;
           if (d2 > sepSq || d2 < 1e-3) continue;
           const d = Math.sqrt(d2);
-          const w = (1 - d / SEPARATION_RANGE) / d;
+          const w = (1 - d / S.SEPARATION_RANGE) / d;
           sx -= ox * w;
           sy -= oy * w;
       }
-      ax += sx * accel * SEPARATION_STRENGTH;
-      ay += sy * accel * SEPARATION_STRENGTH;
+      ax += sx * accel * S.SEPARATION_STRENGTH;
+      ay += sy * accel * S.SEPARATION_STRENGTH;
 
       // A little jitter so the cloud shimmers (framerate-stable accel).
-      ax += (Math.random() - 0.5) * JITTER_ACCEL;
-      ay += (Math.random() - 0.5) * JITTER_ACCEL;
+      ax += (Math.random() - 0.5) * S.JITTER_ACCEL;
+      ay += (Math.random() - 0.5) * S.JITTER_ACCEL;
 
       if (!stunned) {
           enemy.velocity.x += ax * dt;
           enemy.velocity.y += ay * dt;
           const speed = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
-          if (speed > maxSpeed) {
-              enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
-              enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
+          if (speed > speedCap) {
+              enemy.velocity.x = (enemy.velocity.x / speed) * speedCap;
+              enemy.velocity.y = (enemy.velocity.y / speed) * speedCap;
           }
       }
 

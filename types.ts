@@ -498,6 +498,10 @@ export interface GameEntity {
   // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
   // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
   spawnTimer?: number;
+  // Swarm movement scratch (Stage 4): per-gnat timer/phase reused by the
+  // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
+  // burst coast/dash cadence) — see AISystem.updateSwarm.
+  swarmTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble
@@ -1214,6 +1218,7 @@ export interface EngineStats {
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   enemyScaleInfo?: string;
+  swarmMoveName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

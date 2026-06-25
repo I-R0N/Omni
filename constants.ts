@@ -639,14 +639,45 @@ export const AI_CONFIG = {
     TANGENTIAL: 1.0,       // tangential-drive accel as a fraction of accel
   },
 
-  // Swarm (Stage 4) light boids: seek the player + separation from nearby
-  // swarm units (so they spread into a darting cloud, not a stack) + a little
-  // jitter for life.  SEPARATION_RANGE is the radius the repulsion acts over;
-  // STRENGTH is its weight relative to the seek accel.
+  // Swarm (Stage 4) movement.  Base flock: seek the player + separation from
+  // nearby swarm units (so they spread into a darting cloud, not a stack) + a
+  // little jitter.  Separation + jitter apply in EVERY mode; the per-mode
+  // blocks below set the base seek/steer.  Mode is the DBG `cycleSwarmMove`.
   SWARM: {
     SEPARATION_RANGE: 46,
     SEPARATION_STRENGTH: 1.4,
     JITTER_ACCEL: 10,
+    // Orbiting vortex: hold a radius and swirl, periodically darting inward to
+    // bite then peeling back out.
+    VORTEX: {
+      RADIUS: 150,          // held swirl radius (units)
+      DEADZONE: 80,         // radial-error band over which the pull saturates
+      RADIAL_GAIN: 1.1,     // radial-correction accel (× accel)
+      TANGENTIAL: 1.25,     // swirl drive (× accel)
+      DART_RADIUS_FRAC: 0.0,  // dart drives all the way into the player (to bite)
+      DART_INTERVAL: 2.4,   // seconds between darts (+ up to VAR)
+      DART_VAR: 1.6,
+      DART_DURATION: 0.5,   // seconds the inward dart lasts
+    },
+    // Sine-weave: approach on a serpentine weave around the bee-line to the
+    // player so they juke and are hard to pin.
+    WEAVE: {
+      FREQ: 7,              // weave angular frequency (rad/s)
+      AMP: 1.1,             // perpendicular weave amplitude (fraction of seek)
+      CLOSE_DAMP: 220,      // weave amplitude fades to 0 within this distance
+    },
+    // Burst-dash: coast slowly, then fire a quick telegraphed lunge at the
+    // player, with dodge windows between darts.
+    BURST: {
+      COAST_INTERVAL: 1.6,  // seconds of coast between dashes (+ up to VAR)
+      COAST_VAR: 1.0,
+      DASH_DURATION: 0.45,  // seconds a dash lasts
+      DASH_ACCEL_MULT: 3.0, // accel toward player during a dash (× accel)
+      DASH_SPEED_MULT: 1.8, // speed cap during a dash (× maxSpeed)
+      COAST_SPEED_MULT: 0.35, // speed cap while coasting
+      COAST_DAMP: 0.92,     // per-step velocity damping while coasting
+      TELEGRAPH: 0.18,      // pre-dash wind-up flash (seconds)
+    },
   },
 
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
@@ -2555,6 +2586,23 @@ export function getActiveSnitchSpeedName(): string {
 export function cycleSnitchSpeed(): number {
   activeSnitchSpeedIndex = (activeSnitchSpeedIndex + 1) % SNITCH_SPEED_CYCLE.length;
   return activeSnitchSpeedIndex;
+}
+
+// DBG: gnat (Swarm) movement mode — cycle to feel each behavior side-by-side.
+// 'boids' = the default flock; the others are the picked alternatives.  See
+// AISystem.updateSwarm.
+export const SWARM_MOVE_MODES = ['boids', 'vortex', 'weave', 'burst'] as const;
+export type SwarmMove = typeof SWARM_MOVE_MODES[number];
+let activeSwarmMoveIndex = 0;
+export function getActiveSwarmMove(): SwarmMove {
+  return SWARM_MOVE_MODES[activeSwarmMoveIndex];
+}
+export function getActiveSwarmMoveName(): string {
+  return SWARM_MOVE_MODES[activeSwarmMoveIndex];
+}
+export function cycleSwarmMove(): number {
+  activeSwarmMoveIndex = (activeSwarmMoveIndex + 1) % SWARM_MOVE_MODES.length;
+  return activeSwarmMoveIndex;
 }
 
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number
