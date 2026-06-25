@@ -317,7 +317,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   branch — that rotates to aim and lobs slow HOMING missiles), and the Stage-4
   pair SWARM (cheap fast 'swarm'-boids gnat that POPS on contact —
   `diesOnContact`: deals its small bite once then dies, a discrete hit + light
-  pop instead of a clinging friction-chip; skips debris/drop spray) + NEST
+  pop instead of a clinging friction-chip; skips debris/drop spray.  For a big
+  flock to stay cheap, a `diesOnContact` gnat is simplified across systems:
+  collision is skipped for every pair except player + player-projectile
+  (`PhysicsSystem.checkAndResolveCollision` early-out — gnats phase through
+  terrain + each other), the render is a flat-fill silhouette with no flame/
+  gradients (`RenderSystem.drawEnemyShape` early path), and off-screen
+  indicator chevrons are suppressed (minimap still shows them)) + NEST
   (near-static hive whose `spawner` config births SWARM brood via
   `GameEngine.updateNests` → `WaveSystem.spawnAt(..., counts:false)`, capped at
   `maxBrood`).  Optional ENEMY_VARIANTS

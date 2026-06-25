@@ -1391,7 +1391,13 @@ export class RenderSystem {
             this._attractors.push(entity);
         }
 
-        if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+        // Off-screen indicator chevrons — for enemies and non-drop POIs.  Gnats
+        // (diesOnContact, Swarm) are EXCLUDED: a cloud of them would crowd the
+        // screen with chevrons bigger than the gnats themselves, and they seek
+        // the player anyway (so they arrive on their own); the minimap still
+        // shows them for finding stragglers.
+        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
+                || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
             // Enemies are range-UNLIMITED here (live count is capped by the
             // wave concurrency cap): the maps are big and the chevrons are
             // how the player finds the stragglers.  renderIndicators fades
@@ -3929,6 +3935,26 @@ export class RenderSystem {
   // bakes rotation in), so the tail is at -x.
   private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
       const shape = entity.enemyShape ?? 'triangle';
+      // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
+      // appears in large clouds, so it skips the full ship treatment (flame
+      // plume + cached body gradient + core eye + per-frame radial gradients) —
+      // just a flat colour-filled silhouette with a tiny bright nose, drawn with
+      // ZERO gradient allocations per frame.  Keeps a big flock cheap.
+      if (entity.diesOnContact === true) {
+          const flashG = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          const rg = Math.max(entity.size.x, entity.size.y) * 0.62 * (1 + Math.min(0.4, flashG * 2.2));
+          this.buildEnemyPath(ctx, shape, rg);
+          ctx.fillStyle = flashG > 0 ? '#ffffff' : (entity.color || '#2dd4bf');
+          ctx.fill();
+          // Tiny bright nose pip so facing reads.
+          ctx.beginPath();
+          ctx.arc(rg * 0.35, 0, rg * 0.22, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = 0.7;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          return;
+      }
       // The orb (Drone) renders a touch smaller so it reads as a compact,
       // buzzing craft next to the bigger winged ships.
       const shapeScale = shape === 'circle' ? 0.82 : 1;

@@ -2084,6 +2084,19 @@ export class PhysicsSystem {
       // Non-nebula shards (metal / rock / glass) never collide with nebula.
       if (this.nebulaPassThroughPair(a, b)) return;
 
+      // Lightweight gnat collision (Stage 4 perf): a die-on-contact gnat (Swarm)
+      // only needs to collide with the PLAYER (to pop) and with PLAYER
+      // PROJECTILES (to be shot).  Skipping every other pair — gnat↔gnat, ↔tile,
+      // ↔asteroid, ↔enemy — before the broadphase/SAT is a big win for a dense
+      // flock (the boids separation already handles spacing; gnats just phase
+      // through terrain).  Cheap boolean test up front.
+      if (a.diesOnContact === true || b.diesOnContact === true) {
+          const other = a.diesOnContact === true ? b : a;
+          const ok = other.type === EntityType.PLAYER
+              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
+          if (!ok) return; // gnat vs non-player/non-shot (incl. gnat↔gnat) → skip
+      }
+
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
