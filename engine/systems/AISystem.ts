@@ -36,6 +36,7 @@ export class AISystem {
     dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
     swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
+    bubble:     (dt, enemy, player) => this.updateBubble(dt, enemy, player),
   };
 
   /**
@@ -393,6 +394,62 @@ export class AISystem {
       }
 
       // Face travel direction.
+      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      let angleDiff = targetAngle - enemy.rotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      const turnStep = turnRate * dt;
+      enemy.rotation = Math.abs(angleDiff) < turnStep ? targetAngle : enemy.rotation + Math.sign(angleDiff) * turnStep;
+  }
+
+  /**
+   * Bubble AI (Stage 5): a passive soft-body blob with two regimes keyed off
+   * the sticky `provoked` flag (set the first time a shot/AoE damages it).
+   *  - UNprovoked: lazy wander — a slowly-slewing random heading at a low coast
+   *    speed; it ignores the player entirely (so a field of them just drifts,
+   *    eating shards via GameEngine.updateConsumers and splitting).
+   *  - provoked: a floaty seek — accelerate toward the player up to the variant
+   *    maxSpeed, low turn so it wobbles in rather than darting.
+   * While LATCHED (attachedToId set) movement is skipped — GameEngine.update-
+   * Attachments owns the position.  Toroidal.
+   */
+  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity) {
+      // Latched onto a target → the attach pass drives position; don't fight it.
+      if (enemy.attachedToId !== undefined) return;
+
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.BUBBLE];
+      const B = AI_CONFIG.BUBBLE;
+      const accel = config.accel || 2.4;
+      const turnRate = config.turnRate || 1.6;
+      const stunned = (enemy.hitStun ?? 0) > 0;
+
+      if (enemy.provoked) {
+          // ── Seek the player (floaty) ──
+          const dx = wrapDeltaX(enemy.position.x, player.position.x);
+          const dy = wrapDeltaY(enemy.position.y, player.position.y);
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          if (!stunned) {
+              enemy.velocity.x += (dx / dist) * accel * B.SEEK_ACCEL_MULT * dt;
+              enemy.velocity.y += (dy / dist) * accel * B.SEEK_ACCEL_MULT * dt;
+              const cap = (enemy.maxSpeed ?? config.maxSpeed) * B.PROVOKED_SPEED_MULT;
+              const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+              if (spd > cap) { enemy.velocity.x = (enemy.velocity.x / spd) * cap; enemy.velocity.y = (enemy.velocity.y / spd) * cap; }
+          }
+      } else {
+          // ── Lazy wander (ignores the player) ──
+          if (enemy.bubbleWanderAngle === undefined) enemy.bubbleWanderAngle = Math.random() * Math.PI * 2;
+          enemy.bubbleWanderAngle += (Math.random() - 0.5) * B.WANDER_JITTER * dt;
+          // Gentle heading slew (drift the actual velocity toward the heading).
+          const hx = Math.cos(enemy.bubbleWanderAngle), hy = Math.sin(enemy.bubbleWanderAngle);
+          if (!stunned) {
+              enemy.velocity.x += hx * B.WANDER_TURN * dt;
+              enemy.velocity.y += hy * B.WANDER_TURN * dt;
+              const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+              if (spd > B.WANDER_SPEED) { enemy.velocity.x = (enemy.velocity.x / spd) * B.WANDER_SPEED; enemy.velocity.y = (enemy.velocity.y / spd) * B.WANDER_SPEED; }
+          }
+      }
+
+      // Face travel direction (the membrane highlight tracks heading).
       const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
       let angleDiff = targetAngle - enemy.rotation;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;

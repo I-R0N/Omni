@@ -326,18 +326,31 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   indicator chevrons are suppressed (minimap still shows them)) + NEST
   (near-static hive whose `spawner` config births SWARM brood via
   `GameEngine.updateNests` → `WaveSystem.spawnAt(..., counts:false)`, capped at
-  `maxBrood`).  Optional ENEMY_VARIANTS
+  `maxBrood`), and the Stage-5 BUBBLE (a PASSIVE soft-body blob, 'bubble'
+  behavior: it lazily wanders, eats nearby mobile shards via the consume-and-
+  grow pass (`consume` config → `GameEngine.updateConsumers`), and once grown to
+  `multiply.atSize` SPLITS into two base-size bubbles — `GameEngine.updateBubbles`,
+  population-capped at `multiply.maxPopulation`, offspring `counts:false`.  It
+  ignores the player until SHOT: a hit sets the sticky `provoked` flag (Stage
+  3a), after which it homes in and, on contact, LATCHES onto the player
+  (`attachedToId='player'` → `updateAttachments` snaps it on) for
+  `BUBBLE_CONSTANTS.LATCH_DURATION`, EMPing weapon + shield (`'disable'` status,
+  re-applied each step at `EMP_REFRESH` so the lockout ends with the latch) +
+  draining `LATCH_DPS`, then releases and pops (`popBubble` — splash + deactivate,
+  no score; shoot it off for the normal kill/drops instead).  Provoked bubbles
+  stop breeding.  Feel tuning lives in `AI_CONFIG.BUBBLE` (wander vs seek),
+  engagement payload in `BUBBLE_CONSTANTS`).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
-  onto `explosionRadius/Damage/Knockback`) and `shield`/`shieldRegen`
+  onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
   `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
   `shieldArcAngle` — a sweeping sector that only absorbs hits from the
-  covered side).
+  covered side), and `consume`/`multiply` (the bubble's eat-grow-split).
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
-- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
-  teaching waves), `getWaveDurationSec()`, `getWaveSpawnBudget()`,
-  `buildWaveSpawnList()`
+- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (8 scripted
+  teaching waves, one per enemy-archetype intro), `getWaveDurationSec()`,
+  `getWaveSpawnBudget()`, `buildWaveSpawnList()`
 - `SCORE_CONSTANTS` (tier-scaled kill points; player-attributed
   shard/tile destruction points — flat per shard, per-maxHealth for
   tiles, nebula variants excluded, attribution via the
@@ -585,12 +598,15 @@ button in `UIOverlay.tsx`.
   enemy through `ENEMY_BEHAVIOR[subtype].move` (a movement-strategy id) via the
   `moveStrategies` lookup map — NOT an `ENEMY_ROLE` if/else.  Adding a new
   behavior is a row in `ENEMY_BEHAVIOR` (constants) + a strategy fn in the
-  `moveStrategies` table, not a growing switch.  The two strategies today are
+  `moveStrategies` table, not a growing switch.  The strategies today are
   the original `updateBasicDogfighter` (`'dogfighter'`), `updateSkirmisher`
-  (`'skirmisher'`), and `updateSwarm` (`'swarm'` — Stage 4; separation + jitter
-  flock with a DBG-selectable base steer via `getActiveSwarmMove`: boids /
-  vortex (orbit + dart) / weave (serpentine) / burst (coast + telegraphed
-  dash), cycled by the Player ▸ "Gnat move" DBG row); the per-subtype quirks (Drone jitter,
+  (`'skirmisher'`), `updateSwarm` (`'swarm'` — Stage 4; separation + jitter
+  flock with a DBG-selectable base steer via `getActiveSwarmMove`: weave
+  (serpentine — the default) / boids / vortex (orbit + dart) / burst (coast +
+  telegraphed dash), cycled by the Player ▸ "Gnat move" DBG row), and
+  `updateBubble` (`'bubble'` — Stage 5; lazy random wander while UNprovoked,
+  floaty player-seek once `provoked`, skipped entirely while latched); the
+  per-subtype quirks (Drone jitter,
   Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
   routines.  Strategies receive the filtered `enemies` list so a flock can scan
   neighbours.  `ENEMY_ROLE` is still the RAMMING/SHOOTING category used by
@@ -694,21 +710,23 @@ button in `UIOverlay.tsx`.
   through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
-- **Stage-3 reusable mechanics (infrastructure; no enemy wires them yet).**
+- **Stage-3 reusable mechanics (all three now wired by the Stage-5 BUBBLE).**
   Three build-once primitives for the exotic enemies:
   (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
-  ring stamp `entity.provoked = true` on any ENEMY they damage; a
-  passive-until-provoked enemy reads it (unread by the current roster).
+  ring stamp `entity.provoked = true` on any ENEMY they damage; the BUBBLE
+  reads this sticky flag to flip from passive wander to player-seek.
   (3b) **Consume-and-grow** — `GameEngine.updateConsumers` (PerfController
   `consume` task) grows an entity carrying a `consume` ConsumeConfig by
-  eating nearby shards (`eats:'shard'`) or tiles (`eats:'tile'`, routed
-  through the tile-destroy + flow-field patch), capped at `maxSize`; the
-  entity-COUNT cap for self-replication is `enforceTypeCap` at the
-  child-spawn site.
+  eating nearby shards (`eats:'shard'` — the bubble) or tiles (`eats:'tile'`,
+  routed through the tile-destroy + flow-field patch — the future dragon),
+  capped at `maxSize`; the entity-COUNT cap for self-replication is a live-
+  subtype census at the child-spawn site (`updateBubbles` for the bubble,
+  `updateNests` for nest brood — both pattern-match `enforceTypeCap`).
   (3c) **Attach + disable** — `GameEntity.attachedToId` snaps an entity onto
   its target each frame (`updateAttachments`, over the enemies index); the
   `'disable'` status effect EMPs the target (see the status-framework note).
-  All three are exercised by Stage 4/5/6 (swarm/nest/bubble/dragon).
+  The bubble uses both (latch onto player + EMP).  All three are exercised by
+  Stage 4/5 (swarm/nest/bubble); the dragon (Stage 6) will reuse 3b for tiles.
 - **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
   player: the PhysicsSystem contact path deals contact damage, sets
   `detonateOnDeath`, and routes the death immediately, so

@@ -266,7 +266,7 @@ export class WaveSystem {
       RAMMER_2: 2, SHOOTER_2: 2,
       RAMMER_3: 3, SHOOTER_3: 3,
       KAMIKAZE: 2, BULWARK: 2, TURRET: 3,
-      SWARM: 1, NEST: 3,
+      SWARM: 1, NEST: 3, BUBBLE: 2,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -322,6 +322,13 @@ export class WaveSystem {
     // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
     if (config.spawner) {
       enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+    }
+
+    // Bubble consumer (Stage 5): copy the consume config onto the entity so
+    // GameEngine.updateConsumers feeds it nearby shards (clone so per-entity
+    // growth never mutates the shared variant table).
+    if (config.consume) {
+      enemy.consume = { ...config.consume };
     }
 
     // Kamikaze detonation payload (Stage 0): stamp the AoE config.  Blast

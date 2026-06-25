@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2432,6 +2432,10 @@ export class GameEngine {
     // contact (the on-contact path stays as a fallback).
     this.updateKamikazeProximity();
 
+    // Stage 5: bubbles form/tick player latches and split when fat.  Runs
+    // BEFORE updateAttachments so a latch formed this step snaps the same frame.
+    this.updateBubbles(dt);
+
     // Stage 3 reusable mechanics: snap grapples to their targets, and run the
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
     // attachedToId / consume (Stage 4/5/6).
@@ -3772,6 +3776,98 @@ export class GameEngine {
               lifetimeMin: 0.25, lifetimeMax: 0.55,
           });
       }
+  }
+
+  // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
+  //
+  // For each BUBBLE enemy: (1) a PASSIVE bubble grown to its multiply.atSize
+  // SPLITS — it resets to base size and births one offspring (counts=false),
+  // capped at multiply.maxPopulation live bubbles; (2) a PROVOKED bubble LATCHES
+  // onto the player on contact — attach (Stage 3c) + EMP (disable status) + a
+  // light drain — and after BUBBLE.LATCH_DURATION releases and pops.  O(enemies)
+  // with a one-shot population census only on a split frame; ungated (bubbles
+  // are few), matching the kamikaze/nest passes.  Toroidal.
+  private updateBubbles(dt: number) {
+      if (!this.currentMap) return;
+      const p = this.player;
+      const enemies = this.entityIndex.enemies;
+      const B = BUBBLE_CONSTANTS;
+      const pr = Math.max(p.size.x, p.size.y) / 2;
+      let ctx: WaveSpawnContext | null = null;
+
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
+          const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
+
+          // ── Latched: refresh the EMP + drain, tick the clinging timer, pop ──
+          if (e.attachedToId !== undefined) {
+              if (!p.isExploding) {
+                  this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                  p.health -= B.LATCH_DPS * dt;
+                  if (p.health <= 0 && !p.isExploding) this.handleEntityDeath(p);
+              }
+              e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
+              if (e.bubbleLatchTimer <= 0 || p.isExploding) {
+                  e.attachedToId = undefined;
+                  this.popBubble(e);
+              }
+              continue;
+          }
+
+          // ── Provoked + in contact → latch on ──
+          if (e.provoked) {
+              const dx = wrapDeltaX(e.position.x, p.position.x);
+              const dy = wrapDeltaY(e.position.y, p.position.y);
+              const reach = pr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
+              if (dx * dx + dy * dy <= reach * reach && !p.isExploding) {
+                  e.attachedToId = 'player';
+                  e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
+                  e.bubbleLatchTimer = B.LATCH_DURATION;
+                  this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                  this.spawnParticles(p.position, 10, e.color || '#67e8f9', {
+                      speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
+                      lifetimeMin: 0.2, lifetimeMax: 0.5,
+                  });
+              }
+              continue; // a provoked bubble doesn't breed
+          }
+
+          // ── Passive + fat enough → split into two base-size bubbles ──
+          const mult = cfg.multiply;
+          if (mult && Math.max(e.size.x, e.size.y) >= mult.atSize) {
+              let pop = 0;
+              for (let k = 0; k < enemies.length; k++) {
+                  const o = enemies[k];
+                  if (o.enemySubtype === EnemySubtype.BUBBLE && o.active && !o.isExploding) pop++;
+              }
+              if (pop >= mult.maxPopulation) continue;
+              ctx = ctx ?? this.waveContext();
+              if (!ctx) continue;
+              const base = cfg.size;
+              e.size.x = base; e.size.y = base;
+              const a = Math.random() * Math.PI * 2;
+              e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
+              e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
+              const child = this.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
+              child.velocity.x = -Math.cos(a) * B.SPLIT_SPEED;
+              child.velocity.y = -Math.sin(a) * B.SPLIT_SPEED;
+              this.spawnParticles(e.position, 8, e.color || '#67e8f9', {
+                  speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.2, lifetimeMax: 0.5,
+              });
+          }
+      }
+  }
+
+  /** Pop a spent bubble: a translucent splash + deactivate.  No score/drops —
+   *  it released its EMP and dissolved, it wasn't shot down. */
+  private popBubble(e: GameEntity) {
+      this.spawnParticles(e.position, 14, e.color || '#67e8f9', {
+          speedMin: 3, speedMax: 9, sizeMin: 1.5, sizeMax: 3.5,
+          lifetimeMin: 0.25, lifetimeMax: 0.6,
+      });
+      e.active = false;
   }
 
   // ─── Kamikaze proximity fuse ───────────────────────────────────────────

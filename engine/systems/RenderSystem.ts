@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -3955,6 +3955,58 @@ export class RenderSystem {
           ctx.globalAlpha = 1;
           return;
       }
+      // ── Reactive bubble (Stage 5): a translucent wobbling membrane — no
+      // engine flame.  A specular highlight + a pulsing nucleus sell the soft
+      // body; once provoked the membrane flushes angry-red and wobbles faster.
+      if (shape === 'bubble') {
+          const flashB = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          const rb = Math.max(entity.size.x, entity.size.y) * 0.6 * (1 + Math.min(0.4, flashB * 2.2));
+          if (entity.glowPhase === undefined) {
+              let h = 0; const id = entity.id;
+              for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+              entity.glowPhase = (h / 997) * Math.PI * 2;
+          }
+          const ph = entity.glowPhase;
+          const provoked = entity.provoked === true;
+          const baseCol = provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED : (entity.color || '#67e8f9');
+          const [br, bg, bb] = hexToRgb(baseCol);
+          const wob = provoked ? 0.16 : 0.10;  // membrane wobble amplitude
+          const spd = provoked ? 6 : 2.4;       // wobble + pulse speed
+
+          // Wobbling membrane outline (12 verts, two-frequency radius noise).
+          ctx.beginPath();
+          const N = 12;
+          for (let i = 0; i < N; i++) {
+              const a = (i / N) * Math.PI * 2;
+              const rr = rb * (1 + wob * (Math.sin(nowSec * spd + ph + i * 1.7) * 0.6 + Math.sin(nowSec * spd * 0.6 + i) * 0.4));
+              const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          // Translucent fill: faint core → brighter rim (a soap-film look).
+          const grad = ctx.createRadialGradient(0, 0, rb * 0.2, 0, 0, rb);
+          grad.addColorStop(0, `rgba(${br},${bg},${bb},0.10)`);
+          grad.addColorStop(0.7, `rgba(${br},${bg},${bb},0.22)`);
+          grad.addColorStop(1, `rgba(${br},${bg},${bb},0.5)`);
+          ctx.fillStyle = grad;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 + flashB)})`;
+          ctx.stroke();
+          // Inner nucleus — a small denser blob that pulses.
+          const nuc = rb * (0.30 + 0.05 * Math.sin(nowSec * spd + ph));
+          ctx.beginPath();
+          ctx.arc(0, 0, nuc, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${br},${bg},${bb},0.55)`;
+          ctx.fill();
+          // Specular highlight (upper-left), brighter on a hit.
+          ctx.beginPath();
+          ctx.arc(-rb * 0.32, -rb * 0.34, rb * 0.16, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.5 + flashB)})`;
+          ctx.fill();
+          return;
+      }
+
       // The orb (Drone) renders a touch smaller so it reads as a compact,
       // buzzing craft next to the bigger winged ships.
       const shapeScale = shape === 'circle' ? 0.82 : 1;
@@ -4409,6 +4461,18 @@ export class RenderSystem {
               ctx.lineTo(-r, t);   ctx.lineTo(-r, -t);    // rear arm
               ctx.lineTo(-t, -t);  ctx.lineTo(-t, -r);    // up arm
               ctx.lineTo(t, -r);   ctx.lineTo(t, -t);
+              break;
+          }
+          case 'bubble': {
+              // Soft round blob (gentle 12-vertex wobble) — fallback path for
+              // any consumer outside drawEnemyShape's bespoke membrane render.
+              const N = 12;
+              for (let i = 0; i < N; i++) {
+                  const a = (i / N) * Math.PI * 2;
+                  const rr = r * (i % 2 === 0 ? 1 : 0.92);
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
               break;
           }
           case 'triangle':

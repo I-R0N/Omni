@@ -132,12 +132,16 @@ export enum EnemySubtype {
   //           NEST:  a near-static spawner that periodically births SWARM brood.
   SWARM    = 'SWARM',
   NEST     = 'NEST',
+  // Stage 5 — BUBBLE: a passive soft-body blob that wanders, eats shards, grows
+  //           and splits — until SHOT, after which it homes in and latches onto
+  //           the player, EMPing weapon + shield ('bubble' behavior).
+  BUBBLE   = 'BUBBLE',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -502,6 +506,13 @@ export interface GameEntity {
   // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
   // burst coast/dash cadence) — see AISystem.updateSwarm.
   swarmTimer?: number;
+  // Reactive bubble (Stage 5).  `bubbleWanderAngle` is the passive drift
+  // heading the bubble lazily slews while UNprovoked (AISystem 'bubble'
+  // strategy).  `bubbleLatchTimer` counts down the seconds a provoked bubble
+  // stays latched onto the player (attachedToId='player') EMPing it, after
+  // which it releases and pops — ticked by GameEngine.updateBubbles.
+  bubbleWanderAngle?: number;
+  bubbleLatchTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

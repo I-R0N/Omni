@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -678,6 +678,20 @@ export const AI_CONFIG = {
       COAST_DAMP: 0.92,     // per-step velocity damping while coasting
       TELEGRAPH: 0.18,      // pre-dash wind-up flash (seconds)
     },
+  },
+
+  // Bubble (Stage 5) movement.  Two regimes keyed off `provoked`:
+  //  - PASSIVE (unprovoked): a lazy random drift — the heading slews by small
+  //    random steps and the blob coasts at WANDER_SPEED, ignoring the player.
+  //  - PROVOKED (shot): a soft-body seek — accelerate toward the player up to
+  //    the variant maxSpeed, floaty (low turn) so it reads as a wobbling blob
+  //    chasing you, not a crisp interceptor.
+  BUBBLE: {
+    WANDER_SPEED: 1.6,        // coast speed while passive (units/step cap)
+    WANDER_TURN: 0.5,         // heading slew rate while passive (rad/s)
+    WANDER_JITTER: 0.9,       // random heading kick (rad/s, scaled by dt)
+    SEEK_ACCEL_MULT: 1.0,     // accel toward player when provoked (× accel)
+    PROVOKED_SPEED_MULT: 1.0, // speed cap when provoked (× maxSpeed)
   },
 
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
@@ -2589,11 +2603,11 @@ export function cycleSnitchSpeed(): number {
 }
 
 // DBG: gnat (Swarm) movement mode — cycle to feel each behavior side-by-side.
-// 'boids' = the default flock; the others are the picked alternatives.  See
-// AISystem.updateSwarm.
+// 'weave' (serpentine dive) is the default; the others are the picked
+// alternatives kept for live DBG comparison.  See AISystem.updateSwarm.
 export const SWARM_MOVE_MODES = ['boids', 'vortex', 'weave', 'burst'] as const;
 export type SwarmMove = typeof SWARM_MOVE_MODES[number];
-let activeSwarmMoveIndex = 0;
+let activeSwarmMoveIndex = SWARM_MOVE_MODES.indexOf('weave');
 export function getActiveSwarmMove(): SwarmMove {
   return SWARM_MOVE_MODES[activeSwarmMoveIndex];
 }
@@ -2889,6 +2903,15 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // self-replicating population).  Brood are spawned at the nest and DON'T gate
   // wave completion (Stage 2b countsTowardWave=false).
   spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
+  // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
+  // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
+  // consumer.
+  consume?: ConsumeConfig;
+  // Self-replication (Stage 5, bubble): an UNprovoked consumer that has grown
+  // to `atSize` splits — it resets to base size and births one offspring (so
+  // eat→grow→split is a cycle), capped at `maxPopulation` live units of the
+  // subtype.  Offspring don't gate wave completion.  Absent → never multiplies.
+  multiply?: { atSize: number; maxPopulation: number };
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -3017,6 +3040,24 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shoots: false, contactDamage: 0,
     spawner: { subtype: EnemySubtype.SWARM, interval: 4.0, batch: 2, maxBrood: 10 },
   },
+  // ── Stage 5 ──
+  // Bubble: a translucent soft-body blob.  PASSIVE by default — it drifts
+  // lazily, eats nearby mobile shards to grow (`consume`), and once fat enough
+  // SPLITS in two (`multiply`), so an ignored field of them quietly breeds.  It
+  // takes no notice of the player until SHOT: a hit sets `provoked` (Stage 3a),
+  // and from then on it homes in, latches onto the player on contact (Stage 3c
+  // attach), and EMPs weapon + shield ('disable' status) for a few seconds
+  // before releasing and popping.  Fragile (low HP) so you can shoot it off —
+  // but provoking the field stops the breeding and turns it on you.  RAMMING
+  // role (rush when provoked).  Cyan-violet membrane; no engine flame.
+  [EnemySubtype.BUBBLE]: {
+    color: '#67e8f9', size: 30, health: 3,
+    maxSpeed: 3.2, accel: 2.4, turnRate: 1.6,
+    sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
+    shoots: false, contactDamage: 0,
+    consume: { eats: 'shard', range: 70, growthPerEat: 6, maxSize: 58, hpPerEat: 1 },
+    multiply: { atSize: 52, maxPopulation: 14 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3044,6 +3085,23 @@ export const CORROSION = {
 export const DISABLE = {
   DURATION: 2.5,     // seconds
   COLOR: '#f59e0b',  // amber — HUD badge + ship tint
+};
+
+// Reactive bubble (Stage 5): the latch / contact / multiply behaviour run by
+// GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
+// AI_CONFIG.BUBBLE; this block is the engagement payload.
+export const BUBBLE_CONSTANTS = {
+  // Latch: when a provoked bubble touches the player it attaches and EMPs.
+  CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
+  LATCH_DURATION: 2.6,    // seconds the bubble clings (≈ the disable window)
+  LATCH_DPS: 4,           // health/sec drained from the player while latched
+  // EMP refresh window applied each latched step.  Kept short so the disable
+  // ends ~immediately when the bubble pops/detaches (the latch IS the lockout —
+  // no long tail past it).  Re-applied every step, so it never lapses mid-latch.
+  EMP_REFRESH: 0.4,       // seconds
+  // Multiply: a passive bubble that has grown to its `multiply.atSize` splits.
+  SPLIT_SPEED: 3.5,       // outward speed imparted to parent + child on a split
+  COLOR_PROVOKED: '#fb7185', // angry membrane tint once provoked (render)
 };
 
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
@@ -3084,6 +3142,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.TURRET]:    EnemyRole.SHOOTING, // stationary (no-move guard in AISystem)
   [EnemySubtype.SWARM]:     EnemyRole.RAMMING,
   [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
+  [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3097,7 +3156,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
 // ENEMY_ROLE did (RAMMING → 'dogfighter', SHOOTING → 'skirmisher'), so play is
 // byte-for-byte identical; the per-subtype quirks (Drone jitter, Orbiter true-
 // orbit, Sniper lock, Turret no-move) still live inside those routines.
-export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm';
+export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm' | 'bubble';
 export interface EnemyBehaviorDef {
   /** Which AISystem movement/targeting routine runs for this subtype. */
   move: EnemyMovement;
@@ -3117,6 +3176,7 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.TURRET]:    { move: 'skirmisher' },
   [EnemySubtype.SWARM]:     { move: 'swarm' },
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
+  [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
@@ -3136,6 +3196,7 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
   { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
   { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
+  { enemies: [{ subtype: EnemySubtype.BUBBLE,    count: 3 }, { subtype: EnemySubtype.SHOOTER_1, count: 1 }] }, // W8  Bubble intro (shoot them to provoke; otherwise they breed)
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

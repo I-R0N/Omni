@@ -26,6 +26,7 @@ const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
   { type: EnemySubtype.TURRET,    label: 'Turret' },
   { type: EnemySubtype.SWARM,     label: 'Swarm' },
   { type: EnemySubtype.NEST,      label: 'Nest' },
+  { type: EnemySubtype.BUBBLE,    label: 'Bubble' },
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
