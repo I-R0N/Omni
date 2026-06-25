@@ -312,9 +312,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (RAMMER_1-3 / SHOOTER_1-3) plus 3 additions — KAMIKAZE
   (RAMMING star bomber that detonates an AoE shockwave INSTANTLY on player
   contact; `shoots:false`), BULWARK (SHOOTING octagon fortress with a
-  rotating directional arc shield + a 3-shot fan), and TURRET (Stage 1: a
+  rotating directional arc shield + a 3-shot fan), TURRET (Stage 1: a
   STATIONARY SHOOTING cross emplacement — `maxSpeed:0` → AISystem no-move
-  branch — that rotates to aim and lobs slow HOMING missiles).  Optional ENEMY_VARIANTS
+  branch — that rotates to aim and lobs slow HOMING missiles), and the Stage-4
+  pair SWARM (cheap fast 'swarm'-boids gnat) + NEST (near-static hive whose
+  `spawner` config births SWARM brood via `GameEngine.updateNests` →
+  `WaveSystem.spawnAt(..., counts:false)`, capped at `maxBrood`).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`) and `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
@@ -574,10 +577,13 @@ button in `UIOverlay.tsx`.
   `moveStrategies` lookup map — NOT an `ENEMY_ROLE` if/else.  Adding a new
   behavior is a row in `ENEMY_BEHAVIOR` (constants) + a strategy fn in the
   `moveStrategies` table, not a growing switch.  The two strategies today are
-  the original `updateBasicDogfighter` (`'dogfighter'`) and `updateSkirmisher`
-  (`'skirmisher'`); the per-subtype quirks (Drone jitter, Orbiter true-orbit,
-  Sniper lock, Turret no-move) still live INSIDE those routines.  `ENEMY_ROLE`
-  is still the RAMMING/SHOOTING category used by pack-sync + wave-building.
+  the original `updateBasicDogfighter` (`'dogfighter'`), `updateSkirmisher`
+  (`'skirmisher'`), and `updateSwarm` (`'swarm'` — a light boids seek +
+  separation + jitter flock, Stage 4); the per-subtype quirks (Drone jitter,
+  Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
+  routines.  Strategies receive the filtered `enemies` list so a flock can scan
+  neighbours.  `ENEMY_ROLE` is still the RAMMING/SHOOTING category used by
+  pack-sync + wave-building.
 - **Stationary enemies use the no-move guard.** `AISystem.updateSkirmisher`
   branches on `config.maxSpeed === 0` (Turret): it applies no thrust, bleeds
   residual velocity, and skips the speed cap, but still runs the

@@ -128,12 +128,16 @@ export enum EnemySubtype {
   // Stage 1 — TURRET: a stationary SHOOTING emplacement (maxSpeed 0, no-move
   // AI branch) that rotates to aim and lobs slow homing missiles.
   TURRET   = 'TURRET',
+  // Stage 4 — SWARM: a cheap, weak, fast flocker (boids 'swarm' behavior).
+  //           NEST:  a near-static spawner that periodically births SWARM brood.
+  SWARM    = 'SWARM',
+  NEST     = 'NEST',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -487,6 +491,9 @@ export interface GameEntity {
   // grows.  Config drives GameEngine.updateConsumers (a PerfController-gated
   // neighbour pass).  Absent → not a consumer.
   consume?: ConsumeConfig;
+  // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
+  // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
+  spawnTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

@@ -219,8 +219,7 @@ export class WaveSystem {
    * world coords so seam spawns don't land at ±MAP_WIDTH off the map.
    */
   private spawnEnemy(subtype: EnemySubtype, ctx: WaveSpawnContext) {
-    const { entities, player, physics, difficultyLevel, viewportHalfDiagonal } = ctx;
-    const statScale = DIFFICULTY_STAT_SCALES[difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const { entities, player, physics, viewportHalfDiagonal } = ctx;
     const config = ENEMY_VARIANTS[subtype];
     const enemyHalfSize = config.size / 2;
     const safeRadius = enemyHalfSize + 30;
@@ -243,12 +242,31 @@ export class WaveSystem {
       if (physics.isPositionClear(x, y, safeRadius)) break;
     }
     const id = nextId(`wave_${this.waveIndex}_${this.nextSpawnIdx}`);
+    const enemy = this.buildEnemy(id, subtype, x, y, ctx, true);
+    entities.push(enemy);
+    this.waveEnemyIds.add(id);
+  }
+
+  /**
+   * Construct an enemy entity at (x, y) with the per-difficulty + per-wave
+   * stat scaling and the per-archetype field stamping (shield / arc / detonate)
+   * — shared by the offscreen-ring wave spawn and the nest brood spawn.  Does
+   * NOT push or track; the caller does.  `counts` → wave-completion accounting
+   * (Stage 2b): false marks brood that don't gate the wave.
+   */
+  private buildEnemy(
+    id: string, subtype: EnemySubtype, x: number, y: number,
+    ctx: WaveSpawnContext, counts: boolean,
+  ): GameEntity {
+    const statScale = DIFFICULTY_STAT_SCALES[ctx.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const config = ENEMY_VARIANTS[subtype];
 
     const tierMap: Partial<Record<string, number>> = {
       RAMMER_1: 1, SHOOTER_1: 1,
       RAMMER_2: 2, SHOOTER_2: 2,
       RAMMER_3: 3, SHOOTER_3: 3,
       KAMIKAZE: 2, BULWARK: 2, TURRET: 3,
+      SWARM: 1, NEST: 3,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -279,6 +297,8 @@ export class WaveSystem {
       enemyShape: config.shape,
       aimLaser: config.aimLaser,
     };
+    // Stage 2b: brood (nest-spawned) don't gate wave completion.
+    if (!counts) enemy.countsTowardWave = false;
 
     // Bulwark shield (Stage 0): seed shield + maxShield + slow regen.  The
     // generalized PhysicsSystem absorption path soaks hits for any shielded
@@ -298,6 +318,11 @@ export class WaveSystem {
       }
     }
 
+    // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
+    if (config.spawner) {
+      enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+    }
+
     // Kamikaze detonation payload (Stage 0): stamp the AoE config.  Blast
     // damage rides the per-wave damageMult, matching how the ram + projectile
     // paths scale.  Detonation itself is instant on contact (PhysicsSystem).
@@ -308,9 +333,25 @@ export class WaveSystem {
       enemy.explosionKnockback = d.knockback;
     }
 
-    entities.push(enemy);
+    return enemy;
+  }
 
+  /**
+   * Spawn an enemy at a given world position (nest brood) rather than the
+   * offscreen ring.  `counts` defaults false → the brood don't gate wave
+   * completion (Stage 2b).  Scatters slightly off `pos`.  Returns the entity.
+   */
+  public spawnAt(subtype: EnemySubtype, pos: Vector2, ctx: WaveSpawnContext, counts: boolean = false): GameEntity {
+    const id = nextId(`brood_${this.waveIndex}`);
+    const jitter = ENEMY_VARIANTS[subtype].size;
+    const x = pos.x + (Math.random() - 0.5) * jitter;
+    const y = pos.y + (Math.random() - 0.5) * jitter;
+    const enemy = this.buildEnemy(id, subtype, x, y, ctx, counts);
+    enemy.velocity.x = (Math.random() - 0.5) * 4;
+    enemy.velocity.y = (Math.random() - 0.5) * 4;
+    ctx.entities.push(enemy);
     this.waveEnemyIds.add(id);
+    return enemy;
   }
 
   /** Transition to 'cleared' once the field is empty: announce, hand the

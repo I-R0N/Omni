@@ -639,6 +639,16 @@ export const AI_CONFIG = {
     TANGENTIAL: 1.0,       // tangential-drive accel as a fraction of accel
   },
 
+  // Swarm (Stage 4) light boids: seek the player + separation from nearby
+  // swarm units (so they spread into a darting cloud, not a stack) + a little
+  // jitter for life.  SEPARATION_RANGE is the radius the repulsion acts over;
+  // STRENGTH is its weight relative to the seek accel.
+  SWARM: {
+    SEPARATION_RANGE: 46,
+    SEPARATION_STRENGTH: 1.4,
+    JITTER_ACCEL: 10,
+  },
+
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
   // velocity jitter so the frantic peashooter buzzes/shimmies instead of
   // flying a clean line.  Applied as an accel (×dt) so it's framerate-stable;
@@ -2826,6 +2836,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   shield?: number;
   shieldRegen?: number;
   shieldArc?: { deg: number; slew: number };
+  // Nest spawner (Stage 4): periodically births `batch` `subtype` brood every
+  // `interval` seconds, up to `maxBrood` live brood (a hard cap on the
+  // self-replicating population).  Brood are spawned at the nest and DON'T gate
+  // wave completion (Stage 2b countsTowardWave=false).
+  spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2932,6 +2947,28 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
               homing: true, homingStrength: 0.5, glow: true },
     telegraph: 0.7,
   },
+  // ── Stage 4 ──
+  // Swarm: a cheap, weak, fast gnat (1 HP, tiny) that flocks toward the player
+  // with a light boids tick ('swarm' behavior — seek + separation + jitter), so
+  // a pack reads as a darting cloud rather than a clean line.  Low contact bite;
+  // the threat is numbers.  RAMMING role (rush in).
+  [EnemySubtype.SWARM]: {
+    color: '#2dd4bf', size: 16, health: 1,
+    maxSpeed: 9, accel: 8, turnRate: 4.5,
+    sprite: ASSETS.ENEMY_DRONE, mass: 4, shape: 'triangle',
+    shoots: false, contactDamage: 5,
+  },
+  // Nest: a near-static fleshy hive (high HP, heavy, maxSpeed 0 → no-move
+  // branch; doesn't shoot) that periodically births SWARM brood until killed.
+  // A priority target — clear the nest to stop the bleeding.  Its brood don't
+  // gate wave completion (Stage 2b); killing the nest just stops new ones.
+  [EnemySubtype.NEST]: {
+    color: '#0d9488', size: 46, health: 14,
+    maxSpeed: 0, accel: 0, turnRate: 0.6,
+    sprite: ASSETS.ENEMY_TANK, mass: 60, shape: 'nest',
+    shoots: false, contactDamage: 0,
+    spawner: { subtype: EnemySubtype.SWARM, interval: 3.2, batch: 2, maxBrood: 12 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -2997,6 +3034,8 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.KAMIKAZE]:  EnemyRole.RAMMING,
   [EnemySubtype.BULWARK]:   EnemyRole.SHOOTING,
   [EnemySubtype.TURRET]:    EnemyRole.SHOOTING, // stationary (no-move guard in AISystem)
+  [EnemySubtype.SWARM]:     EnemyRole.RAMMING,
+  [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3010,7 +3049,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
 // ENEMY_ROLE did (RAMMING → 'dogfighter', SHOOTING → 'skirmisher'), so play is
 // byte-for-byte identical; the per-subtype quirks (Drone jitter, Orbiter true-
 // orbit, Sniper lock, Turret no-move) still live inside those routines.
-export type EnemyMovement = 'dogfighter' | 'skirmisher';
+export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm';
 export interface EnemyBehaviorDef {
   /** Which AISystem movement/targeting routine runs for this subtype. */
   move: EnemyMovement;
@@ -3028,6 +3067,8 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.SHOOTER_3]: { move: 'skirmisher' },
   [EnemySubtype.BULWARK]:   { move: 'skirmisher' },
   [EnemySubtype.TURRET]:    { move: 'skirmisher' },
+  [EnemySubtype.SWARM]:     { move: 'swarm' },
+  [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
@@ -3046,6 +3087,7 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
   { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
   { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
+  { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

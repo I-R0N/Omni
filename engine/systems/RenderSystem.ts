@@ -4361,6 +4361,18 @@ export class RenderSystem {
               }
               break;
           }
+          case 'nest': {
+              // Fleshy hive — a lumpy 18-vertex blob (alternating radius) so it
+              // reads as an organic spawner, not a clean polygon.
+              const N = 18;
+              for (let i = 0; i < N; i++) {
+                  const a = (i / N) * Math.PI * 2;
+                  const rr = r * (i % 2 === 0 ? 1 : 0.82);
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              break;
+          }
           case 'cross': {
               // Turret emplacement — a chunky 12-vertex plus/cross with the
               // forward arm (+x) reading as the gun barrel.  t = arm half-width.

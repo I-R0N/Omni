@@ -32,9 +32,10 @@ export class AISystem {
   // two current strategies are the original RAMMING/SHOOTING routines, so the
   // existing roster dispatches identically.  Class-field arrows so `this` binds.
   private readonly moveStrategies: Record<EnemyMovement,
-    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid) => void> = {
+    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, enemies: GameEntity[]) => void> = {
     dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
+    swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
   };
 
   /**
@@ -78,7 +79,7 @@ export class AISystem {
       // Route through the behavior-dispatch table (Stage 2a).  Defaults to the
       // dogfighter (matches the old "no subtype → RAMMING" fallback).
       const move: EnemyMovement = enemy.enemySubtype ? ENEMY_BEHAVIOR[enemy.enemySubtype].move : 'dogfighter';
-      this.moveStrategies[move](dt, enemy, player, flowField);
+      this.moveStrategies[move](dt, enemy, player, flowField, enemies);
 
       // Directional arc shield (Bulwark): slew the covered sector toward the
       // player at a capped rate so it ATTEMPTS to face the threat — flank it
@@ -271,6 +272,71 @@ export class AISystem {
       } else {
           enemy.rotation += Math.sign(angleDiff) * turnStep;
       }
+  }
+
+  /**
+   * Swarm AI (Stage 4): a light boids flock — seek the player + separation from
+   * nearby swarm units (so they spread into a darting cloud instead of stacking
+   * on one line) + a little random jitter for life.  Cheap and stateless; the
+   * neighbour scan is over the already-filtered `enemies` list, limited to other
+   * SWARM units (population hard-capped by the nest's maxBrood).  Toroidal.
+   */
+  private updateSwarm(dt: number, enemy: GameEntity, player: GameEntity, enemies: GameEntity[]) {
+      const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.SWARM];
+      const aggroed = (enemy.aggroTimer ?? 0) > 0;
+      const maxSpeed = (enemy.maxSpeed ?? config.maxSpeed ?? 9) * (aggroed ? AI_CONFIG.AGGRO_SPEED_MULT : 1);
+      const accel = config.accel || 8;
+      const turnRate = config.turnRate || 4;
+      const stunned = (enemy.hitStun ?? 0) > 0;
+
+      // Seek the player (unit vector toward, toroidal).
+      const dx = wrapDeltaX(enemy.position.x, player.position.x);
+      const dy = wrapDeltaY(enemy.position.y, player.position.y);
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      let ax = (dx / dist) * accel;
+      let ay = (dy / dist) * accel;
+
+      // Separation: push away from nearby swarm units, stronger the closer they
+      // are (1 − d/range), so the flock fans out into a cloud.
+      const { SEPARATION_RANGE, SEPARATION_STRENGTH, JITTER_ACCEL } = AI_CONFIG.SWARM;
+      const sepSq = SEPARATION_RANGE * SEPARATION_RANGE;
+      let sx = 0, sy = 0;
+      for (let i = 0; i < enemies.length; i++) {
+          const o = enemies[i];
+          if (o === enemy || o.enemySubtype !== EnemySubtype.SWARM) continue;
+          const ox = wrapDeltaX(enemy.position.x, o.position.x);
+          const oy = wrapDeltaY(enemy.position.y, o.position.y);
+          const d2 = ox * ox + oy * oy;
+          if (d2 > sepSq || d2 < 1e-3) continue;
+          const d = Math.sqrt(d2);
+          const w = (1 - d / SEPARATION_RANGE) / d;
+          sx -= ox * w;
+          sy -= oy * w;
+      }
+      ax += sx * accel * SEPARATION_STRENGTH;
+      ay += sy * accel * SEPARATION_STRENGTH;
+
+      // A little jitter so the cloud shimmers (framerate-stable accel).
+      ax += (Math.random() - 0.5) * JITTER_ACCEL;
+      ay += (Math.random() - 0.5) * JITTER_ACCEL;
+
+      if (!stunned) {
+          enemy.velocity.x += ax * dt;
+          enemy.velocity.y += ay * dt;
+          const speed = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+          if (speed > maxSpeed) {
+              enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
+              enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
+          }
+      }
+
+      // Face travel direction.
+      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      let angleDiff = targetAngle - enemy.rotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      const turnStep = turnRate * dt;
+      enemy.rotation = Math.abs(angleDiff) < turnStep ? targetAngle : enemy.rotation + Math.sign(angleDiff) * turnStep;
   }
 
   /**
