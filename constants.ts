@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -2559,6 +2559,34 @@ export const AMMO_CONSTANTS = {
   MAX_POOL:    200,
   DROP_COLOR: '#facc15', // canonical ammo-pickup yellow
 };
+
+// ── Drop-type registry ────────────────────────────────────────────────────────
+// Single source of truth for per-drop-type properties.  `collectible` marks a
+// magnet/proximity PICKUP (ammo / health): kept OUT of the dynamic collision
+// grid (projectiles + ships pass through; collection is the GameEngine drop
+// scan) and carried by the flow-drift / merge passes.  Non-collectible drops
+// (glass) are environmental debris and full physics participants.
+//
+// To add a future drop type: extend the DropType union (types.ts), add a row
+// here, and add its effect (DropSystem.applyDropEffect) + render style
+// (RenderSystem drop-shard branch).  The cross-cutting physics/flow/merge sites
+// route through `isCollectibleDrop` and need no edits.
+export interface DropTypeDef {
+  collectible: boolean;
+}
+export const DROP_TYPES: Record<DropType, DropTypeDef> = {
+  ammo:   { collectible: true },
+  health: { collectible: true },
+  glass:  { collectible: false },
+};
+/** True for a magnet/proximity pickup drop (the non-physics, non-shootable
+ *  kind).  The cross-cutting test used by the collision-grid skip, the
+ *  flow-drift pass, and the same-type merge. */
+export function isCollectibleDrop(e: GameEntity): boolean {
+  return e.type === EntityType.INTERACTABLE
+    && e.dropType !== undefined
+    && DROP_TYPES[e.dropType].collectible;
+}
 
 export const DROP_CONFIG = {
   // Per-pickup ammo amounts — chosen to keep today's per-encounter expected

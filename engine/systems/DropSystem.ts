@@ -12,6 +12,7 @@ import {
   METAL_ASSEMBLY,
   METAL_BREAK_SHARDS_PER_TIER,
   rockHitCeiling,
+  isCollectibleDrop,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -128,8 +129,11 @@ export class DropSystem {
       // via ShardSystem.shatter; nebula-tile skips drops via
       // variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
-    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
-      // Drop was destroyed by a player projectile — apply its reward immediately.
+    } else if (isCollectibleDrop(entity)) {
+      // A collectible drop reached the death path (e.g. defensively, if one is
+      // ever destroyed) — apply its reward immediately.  (Pickups are normally
+      // collected by the GameEngine magnet scan; they're grid-excluded so
+      // projectiles pass through them.)
       this.applyDropEffect(player, entity, onMessage);
     } else if (isMobileShard) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
@@ -1116,10 +1120,10 @@ export class DropSystem {
     const pullStrength = AMMO_DROP_PULL.STRENGTH;
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
-      // Generalized to any collectible drop (ammo / health) — drops only fuse
-      // with their OWN type, so an ammo cluster and a health cluster each
-      // consolidate independently.
-      if (!a.active || (a.dropType !== 'ammo' && a.dropType !== 'health')) continue;
+      // Generalized to any collectible drop (DROP_TYPES.collectible) — drops
+      // only fuse with their OWN type, so an ammo cluster and a health cluster
+      // each consolidate independently.
+      if (!a.active || !isCollectibleDrop(a)) continue;
       const aR = a.size.x * 0.5;
       for (let j = i + 1; j < activeDrops.length; j++) {
         const b = activeDrops[j];

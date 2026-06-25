@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -814,13 +814,15 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
-        // Collectible drops (ammo + health) are non-physics bodies: magnet-
-        // pulled + proximity-collected only (see GameEngine drop scan).  Keeping
-        // them out of the dynamic grid removes their collision cost AND their
-        // contribution to lastMaxCellDensity / lastDynamicCount, so a lingering
-        // drop pile no longer pins the PerfController load — and, crucially,
-        // means projectiles pass THROUGH them (they can't be shot / destroyed).
-        if (e.type === EntityType.INTERACTABLE && (e.dropType === 'ammo' || e.dropType === 'health')) continue;
+        // Collectible drops (ammo / health / any future pickup) are non-physics
+        // bodies: magnet-pulled + proximity-collected only (see GameEngine drop
+        // scan).  Keeping them out of the dynamic grid removes their collision
+        // cost AND their contribution to lastMaxCellDensity / lastDynamicCount,
+        // so a lingering drop pile no longer pins the PerfController load — and,
+        // crucially, means projectiles pass THROUGH them (they can't be shot).
+        // Routed through the DROP_TYPES registry so new pickup types are covered
+        // automatically.
+        if (isCollectibleDrop(e)) continue;
 
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;

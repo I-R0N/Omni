@@ -598,10 +598,13 @@ button in `UIOverlay.tsx`.
 - **Drop types currently shipped: `'ammo'` and `'health'`** (collected by
   the player). Both are collectible drops with the SAME physics — finite
   mass, scatter off the kill, asteroid-flow drift, player magnetisation,
-  and same-type merge — and both are kept OUT of the dynamic collision grid
-  (a `dropType` skip in the grid build), so projectiles/ships pass through
-  them and they can't be shot or destroyed; collection is purely the
-  GameEngine magnet/proximity scan. `'glass'` is a `dropType` value used internally for
+  and same-type merge — and both are kept OUT of the dynamic collision grid,
+  so projectiles/ships pass through them and they can't be shot or destroyed;
+  collection is purely the GameEngine magnet/proximity scan. The
+  "collectible" rule is centralized: `DROP_TYPES` (constants) is the
+  per-drop-type registry and `isCollectibleDrop(e)` is the single predicate
+  the cross-cutting sites (grid skip, flow-drift, merge) call — so a new drop
+  type is one registry row + its effect/render, not a hunt across systems. `'glass'` is a `dropType` value used internally for
   shattered structure visuals; there is no fuel, gold-pickup, or
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold

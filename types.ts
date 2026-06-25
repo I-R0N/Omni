@@ -135,6 +135,11 @@ export enum EnemySubtype {
 export type EnemyShape =
   | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle';
 
+// Drop item kinds.  Per-type properties (collectible vs environmental debris,
+// …) live in the DROP_TYPES registry in constants.ts — the single source of
+// truth so a new drop type is one table entry, not a hunt across systems.
+export type DropType = 'ammo' | 'health' | 'glass';
+
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
   SHOOTING = 'SHOOTING',
@@ -454,7 +459,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'ammo' | 'health' | 'glass';
+  dropType?: DropType;
   dropValue?: number;
   // Magnet latch: set once a drop first enters the player's pull range.
   // Thereafter it homes to completion regardless of distance.
