@@ -385,3 +385,142 @@ cleanly:
 Recommend proceeding to **Phase 0** as a spike: it's low-risk, validates the
 seed→location→map loop end-to-end, and forces the determinism boundary that
 every later phase depends on.
+
+---
+
+## 9. Multiplayer implementation deep-dive
+
+Expands Phase 4 / §4.3. The flagship social feature is **small-group co-op**
+(2–4 players) sharing a live instance of a location. This section is the
+concrete "how."
+
+### 9.1 Netcode model: host-authoritative state-sync (not lockstep)
+
+Of the three models in §4.3, the recommended build is **host-authoritative
+state synchronization** over a peer-to-peer connection:
+
+- **One device is the authority** (the "host") and runs the full simulation —
+  enemies, asteroids, shards, drops, collisions, waves. Clients send their
+  **inputs** to the host and receive **state snapshots** back.
+- **Why not lockstep?** The App-Store target is mixed devices (iOS / Android)
+  over the Internet, where transcendental-float divergence makes lockstep
+  fragile (§4.3, prior determinism analysis). State-sync needs **no
+  determinism at all** — the host is the single source of truth, so float
+  drift on clients is irrelevant.
+- **Why not a dedicated server (yet)?** Host-authoritative P2P costs ~$0 to
+  run (only a signaling broker + STUN, see §9.4). A dedicated authoritative
+  server means running the engine headless in Node and paying for game
+  servers — defer to M4, and only if competitive integrity / anti-cheat
+  demands it.
+- **One netcode, not two.** Use the same state-sync model for LAN, Bluetooth,
+  and Internet rather than maintaining a separate lockstep path for local
+  play. Transport only changes latency/bandwidth, not the model.
+
+### 9.2 The key optimization: don't sync the map, sync the deltas
+
+Because the static map is **seed-deterministic** (Phase 0), every client
+regenerates the *identical* tile/asteroid layout locally from the cell seed.
+The host therefore never transmits the map. Over the wire it sends only:
+
+- **The dynamic layer** — player ships, enemies, projectiles, active drops,
+  mobile shards (positions/velocities/health at the snapshot tick).
+- **Destruction/mutation events** on the static layer — "tile #123 shattered,"
+  "nebula cluster transmuted" — replayed identically on each client.
+
+This is the same insight that shrank persistence (§4.4), reused for bandwidth:
+the determinism work pays off a second time. An arena full of static tiles
+costs nothing to "sync."
+
+### 9.3 Engine changes required
+
+The engine is single-player to the bone (`GameEngine` owns exactly one
+`this.player`, the camera is locked to it, `WaveSystem` spawns relative to
+it). The invasive work:
+
+1. **Singleton player → player collection.** Introduce `localPlayer` +
+   `remotePlayers[]`. The `GameEntity` model already supports arbitrary
+   entities; the work is unpicking the hardcoded `this.player` assumptions in
+   the `GameEngine` god-class. Camera follows `localPlayer`.
+2. **Entity ownership + ID namespacing.** `IdAllocator` is monotonic-local;
+   host-authoritative play sidesteps collisions cleanly by having **the host
+   allocate all entity IDs**. Each entity carries an owner/authority tag.
+3. **Input as the network primitive.** `InputSystem` reads local
+   keyboard/mouse/touch; serialize a compact **input frame** (thrust, aim
+   angle, fire, ability) per tick. Local input drives prediction *and* is sent
+   to the host; remote inputs drive remote ships on the host.
+4. **Snapshot serialization.** Define the networked subset of `GameEntity`
+   (position, velocity, rotation, health, active, type + key role fields) and
+   a delta-snapshot encoder at ~10–20 Hz.
+5. **Client-side prediction + reconciliation** for the local ship (predict
+   movement immediately, correct on snapshot) so it feels responsive; **entity
+   interpolation** for remote ships and enemies (render ~100 ms in the past
+   from a snapshot buffer). Standard Source/Overwatch-style netcode — and the
+   single largest polish cost.
+6. **Host-only simulation.** AI, physics, waves, shards, drops run **only on
+   the host**; clients render snapshots + their own prediction. This is what
+   lets us skip determinism entirely.
+7. **Multi-player wave scaling.** `WaveSystem` spawns relative to the group
+   (and scales count/difficulty with player count).
+
+The torus renderer is already multiplayer-friendly: each client renders its
+own camera over the shared wrapped world via the existing `forEachWrapOffset`
+path — independent cameras need no new work.
+
+### 9.4 Networking stack
+
+- **Transport:** **WebRTC DataChannel** — P2P over LAN *and* Internet, runs
+  inside the Capacitor WebView. Use unreliable/unordered for state snapshots,
+  a reliable channel for events (joins, destruction, chat).
+- **Signaling:** a tiny WebSocket broker to exchange the WebRTC handshake
+  (SDP/ICE). Cheap — a serverless function, or reuse the BaaS realtime channel
+  (e.g. Supabase Realtime) so there's no separate service.
+- **NAT traversal:** STUN (free) for direct connections; a **TURN** relay
+  fallback (self-hosted `coturn` or a provider — small cost) for the ~10–20 %
+  of networks that block direct P2P.
+- **Matchmaking is location-native:** players in the same H3 cell instance can
+  join each other; plus invite-by-room-code for friends. Lobby state lives in
+  the BaaS.
+
+### 9.5 Integration with the persistent world
+
+Clean split — **persist the world (async, BaaS); instance the action
+(real-time, WebRTC):**
+
+1. Players load the same cell: identical seeded map + persisted deltas
+   (§4.4) pulled from the BaaS.
+2. They play a live host-authoritative session over WebRTC.
+3. On session end, the resulting mutations (destroyed structures, claimed
+   loot, market changes) write back to the BaaS — **server-validated** to
+   prevent loot-dupe/host-cheat on persistent rewards.
+
+### 9.6 Milestones
+
+- **M1 — 2-player co-op, invite-by-code.** Host-authoritative, same cell,
+  movement + shooting synced, no persistence write-back. Proves the netcode.
+- **M2 — 4-player + location matchmaking.** Join others in your cell; prediction/
+  interpolation polish; graceful host-leave (session pause/end).
+- **M3 — persistence write-back + drop-in/drop-out.** Session mutations →
+  BaaS with server validation; shared-loot rules.
+- **M4 (later) — dedicated authoritative servers / PvP.** Only if anti-cheat,
+  competitive integrity, or PvP demand it. PvP is a separate design axis from
+  co-op; co-op first.
+
+### 9.7 Hard problems to budget for
+
+| Problem | Mitigation |
+|---|---|
+| **Host advantage / cheating** in P2P | Acceptable for friendly co-op; never for PvP or persistent rewards without server-side write-back validation. |
+| **Host migration / disconnect** | MVP: session pauses/ends when host leaves. Later: migrate authority to another peer. |
+| **Latency feel** | Prediction + interpolation are mandatory, not optional — the real polish cost. |
+| **Bandwidth** | Solved largely by §9.2 (sync deltas, not the map); cap synced dynamic-entity counts if needed. |
+| **Wave/loot balance for N players** | New tuning pass; scale spawns and rewards with party size. |
+
+### 9.8 Effort
+
+The largest single workstream in the project. The §9.3 engine refactor
+(singleton → multi-player) is invasive to the `GameEngine` god-class, and
+netcode polish (prediction/interpolation/desync-handling) is notoriously
+time-consuming. Realistic co-op MVP (M1–M2): **~2–3 months** of focused work
+for someone comfortable with real-time netcode, on top of Phases 0–1.
+Running cost stays near **$0** (signaling + STUN) until TURN-relay and/or
+dedicated servers are needed at scale.
