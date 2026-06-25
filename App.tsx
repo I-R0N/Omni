@@ -277,6 +277,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
   };
 
+  const handleApplyDisable = () => {
+      if (engineRef.current) engineRef.current.debugApplyDisable();
+  };
+
   const handleToggleTraits = () => {
       if (engineRef.current) engineRef.current.toggleTraits();
   };
@@ -424,6 +428,7 @@ const App: React.FC = () => {
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCycleEnemyScale={handleCycleEnemyScale}
         onApplyCorrosion={handleApplyCorrosion}
+        onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}
         onCycleUpgrade={handleCycleUpgrade}
         onMaxUpgrades={handleMaxUpgrades}

@@ -151,10 +151,11 @@ export enum WeaponType {
 }
 
 // ── Status effects ────────────────────────────────────────────────────────────
-// Generic player debuff framework.  Today only 'corrosion' (a stacking
-// damage-over-time) is wired; the kind union + EffectPayload are shaped so new
-// effects (disables / scramble / slow) drop in without restructuring.
-export type StatusEffectKind = 'corrosion';
+// Generic player debuff framework.  Today: 'corrosion' (a stacking
+// damage-over-time) and 'disable' (weapon + shield offline for a duration —
+// an EMP, used by the reactive bubble).  The kind union + EffectPayload are
+// shaped so new effects (scramble / slow) drop in without restructuring.
+export type StatusEffectKind = 'corrosion' | 'disable';
 
 // Carried on an attack (WeaponConfig / projectile); applied to the player on hit.
 export interface EffectPayload {
@@ -162,6 +163,20 @@ export interface EffectPayload {
   duration: number;   // seconds (refreshed on re-hit)
   dmgPerSec: number;  // per stack (corrosion)
   maxStacks: number;
+}
+
+// Consume-and-grow config (Stage 3b).  A consumer absorbs nearby consumable
+// entities and grows.  `eats` selects the candidate family:
+//   'shard' — mobile shard-family STRUCTURE entities (finite mass) — the bubble
+//   'tile'  — static tiles (mass Infinity), routed through the tile-destroy
+//             patch — the dragon
+export interface ConsumeConfig {
+  eats: 'shard' | 'tile';
+  range: number;          // eat radius (world units, toroidal)
+  growthPerEat: number;   // size (diameter) added per consumed entity
+  maxSize: number;        // growth cap on size.x / size.y
+  hpPerEat?: number;      // optional max-health gained per eat
+  massPerEat?: number;    // optional mass gained per eat (Infinity-safe: skip)
 }
 
 // Live instance on the player (GameEntity.statusEffects).
@@ -447,6 +462,26 @@ export interface GameEntity {
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
+  // ── Stage 3 reusable mechanics (infrastructure; wired by Stage 4/5/6) ────
+  // Provoked-on-hit (3a): set true the first time the entity takes damage
+  // (PhysicsSystem projectile path + AoE).  A passive-until-provoked enemy
+  // (the bubble) wanders until this flips, then engages.  Harmless on every
+  // other enemy (unread).
+  provoked?: boolean;
+  // Attach + disable (3c): when set, GameEngine.updateAttachments snaps this
+  // entity's position onto the target every frame (a latch/grapple).  Cleared
+  // when the target dies.  `attachOffset` is an optional fixed world offset.
+  attachedToId?: string;
+  attachOffset?: Vector2;
+  // Derived each tick from an active 'disable' status effect
+  // (GameEngine.tickStatusEffects): while true the entity's weapon can't fire
+  // and its shield neither absorbs nor recharges.  Read in hot paths so they
+  // don't rescan statusEffects.
+  systemsDisabled?: boolean;
+  // Consume-and-grow (3b): a consumer eats nearby consumable shards/tiles and
+  // grows.  Config drives GameEngine.updateConsumers (a PerfController-gated
+  // neighbour pass).  Absent → not a consumer.
+  consume?: ConsumeConfig;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

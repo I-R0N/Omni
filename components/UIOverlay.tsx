@@ -84,6 +84,7 @@ interface UIOverlayProps {
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
   onApplyCorrosion?: () => void;
+  onApplyDisable?: () => void;
   onToggleTraits?: () => void;
   onCycleUpgrade?: (id: string) => void;
   onMaxUpgrades?: () => void;
@@ -163,6 +164,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleSnitchSpeed,
   onCycleEnemyScale,
   onApplyCorrosion,
+  onApplyDisable,
   onToggleTraits,
   onCycleUpgrade,
   onMaxUpgrades,
@@ -458,6 +460,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
                   'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
+                {ctrlRow('Disable', onApplyDisable, 'EMP',
+                  'EMP the player (DBG) to test the weapon + shield disable (Stage 3c): firing is blocked and the shield goes offline (no absorb / no recharge) for the effect duration. Surfaces as a HUD badge.')}
                 {ctrlRow('Traits', onToggleTraits,
                   stats.traitsEnabled === false ? 'Off' : 'On',
                   'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
@@ -762,18 +766,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   )}
                 </div>
               )}
-              {/* Active status effects — e.g. CORROSION ×N, fading as it lapses */}
-              {(stats.statusEffects ?? []).map(e => (
+              {/* Active status effects — e.g. CORROSION ×N / DISABLE, fading as it lapses */}
+              {(stats.statusEffects ?? []).map(e => {
+                const amber = e.kind === 'disable';
+                return (
                 <div
                   key={e.kind}
-                  className="pointer-events-none bg-slate-900/75 border border-lime-500/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right"
+                  className={`pointer-events-none bg-slate-900/75 border rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right ${amber ? 'border-amber-500/50' : 'border-lime-500/50'}`}
                   style={{ opacity: Math.max(0.45, e.fraction) }}
                 >
-                  <span className="text-lime-300 text-[11px] font-extrabold uppercase tracking-widest tabular-nums">
-                    {e.kind} ×{e.stacks}
+                  <span className={`text-[11px] font-extrabold uppercase tracking-widest tabular-nums ${amber ? 'text-amber-300' : 'text-lime-300'}`}>
+                    {e.kind === 'disable' ? 'DISABLED' : `${e.kind} ×${e.stacks}`}
                   </span>
                 </div>
-              ))}
+              );})}
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${

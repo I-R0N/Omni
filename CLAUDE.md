@@ -429,14 +429,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   projectile-damage path (gated by `physics.traitsEnabled`, DBG
   "Traits"); armored enemies show the REDUCED hit number as feedback.
   evasive / front-shield / regen join with their enemies + the bosses.
-- `CORROSION` / `ENEMY_ATTACK_EFFECTS` — status-effect framework (v1 =
-  corrosion DoT only, but generic: `StatusEffectKind` / `EffectPayload`
-  / `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
+- `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
+  framework (generic: `StatusEffectKind` / `EffectPayload` /
+  `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
   (the Orbiter / Shooter-tier-2, green acid rounds) debuffs the player
   on hit (`GameEngine.handleProjectileHit` → `applyStatusEffect`);
-  `tickStatusEffects` bleeds health past the shield, stacks ×3, refresh
-  on re-hit.  HUD badge + acid drip; DBG "Corrode" self-apply
-  (`EngineStats.statusEffects`).  Duration-only — no mitigation yet.
+  `tickStatusEffects` applies per-kind effects, counts down, drops
+  expired.  Two kinds today: `'corrosion'` (stacking DoT, bleeds past
+  the shield, ×3) and `'disable'` (EMP — sets the derived
+  `systemsDisabled` flag so the weapon can't fire and the shield neither
+  absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
+  "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)
@@ -668,6 +671,21 @@ button in `UIOverlay.tsx`.
   through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
   `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
   flank gets behind it — the Bulwark's soft counter.
+- **Stage-3 reusable mechanics (infrastructure; no enemy wires them yet).**
+  Three build-once primitives for the exotic enemies:
+  (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
+  ring stamp `entity.provoked = true` on any ENEMY they damage; a
+  passive-until-provoked enemy reads it (unread by the current roster).
+  (3b) **Consume-and-grow** — `GameEngine.updateConsumers` (PerfController
+  `consume` task) grows an entity carrying a `consume` ConsumeConfig by
+  eating nearby shards (`eats:'shard'`) or tiles (`eats:'tile'`, routed
+  through the tile-destroy + flow-field patch), capped at `maxSize`; the
+  entity-COUNT cap for self-replication is `enforceTypeCap` at the
+  child-spawn site.
+  (3c) **Attach + disable** — `GameEntity.attachedToId` snaps an entity onto
+  its target each frame (`updateAttachments`, over the enemies index); the
+  `'disable'` status effect EMPs the target (see the status-framework note).
+  All three are exercised by Stage 4/5/6 (swarm/nest/bubble/dragon).
 - **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
   player: the PhysicsSystem contact path deals contact damage, sets
   `detonateOnDeath`, and routes the death immediately, so

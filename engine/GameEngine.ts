@@ -17,8 +17,8 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2411,6 +2411,12 @@ export class GameEngine {
     // contact (the on-contact path stays as a fallback).
     this.updateKamikazeProximity();
 
+    // Stage 3 reusable mechanics: snap grapples to their targets, and run the
+    // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
+    // attachedToId / consume (Stage 4/5/6).
+    this.updateAttachments();
+    if (this.perfController.shouldRun('consume')) this.updateConsumers();
+
     const tRings = performance.now();
     this.updateExplosionRings();
     this.lastExplosionRingsMs = performance.now() - tRings;
@@ -2626,13 +2632,14 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0)
+    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
-    // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
+    // EMP-disabled (Stage 3c) so an in-flight burst halts too.
     const tWeapons = performance.now();
-    if (this.currentMap) {
+    if (this.currentMap && !this.player.systemsDisabled) {
         this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
@@ -2967,6 +2974,10 @@ export class GameEngine {
   /** Tick the player's status effects: apply per-step damage, count down,
    *  drop expired.  Corrosion bleeds health directly (past the shield). */
   private tickStatusEffects(dt: number) {
+    // Derived disable flag is recomputed every tick (set below if an active
+    // 'disable' effect is present), so clear it up front even on the empty
+    // early-out so it can't stick after the effect lapses.
+    this.player.systemsDisabled = false;
     const list = this.player.statusEffects;
     if (!list || list.length === 0) return;
     let acidParticle = false;
@@ -2975,6 +2986,10 @@ export class GameEngine {
       if (e.kind === 'corrosion' && !this.player.isExploding) {
         this.player.health -= e.dmgPerStack * e.stacks * dt;
         acidParticle = true;
+      } else if (e.kind === 'disable') {
+        // EMP: weapon + shield offline while active (read in the fire + shield
+        // hot paths via systemsDisabled).
+        this.player.systemsDisabled = true;
       }
       e.remaining -= dt;
       if (e.remaining <= 0) list.splice(i, 1);
@@ -2994,6 +3009,13 @@ export class GameEngine {
     this.applyStatusEffect(this.player, {
       kind: 'corrosion', duration: CORROSION.DURATION,
       dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
+    });
+  }
+
+  /** DBG: EMP the player to test the weapon/shield disable + HUD badge. */
+  public debugApplyDisable() {
+    this.applyStatusEffect(this.player, {
+      kind: 'disable', duration: DISABLE.DURATION, dmgPerSec: 0, maxStacks: 1,
     });
   }
 
@@ -3483,6 +3505,8 @@ export class GameEngine {
 
   private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
+      // Weapon offline while EMP-disabled (Stage 3c).
+      if (this.player.systemsDisabled) return;
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
@@ -3711,6 +3735,97 @@ export class GameEngine {
       }
   }
 
+  // ─── Attach pass (Stage 3c) ────────────────────────────────────────────
+  //
+  // Snap every attached entity onto its target each frame (a latch / grapple).
+  // Runs in updateGameLogic AFTER physics so it tracks the target's post-move
+  // position.  If the target is gone (dead / inactive / missing) the attachment
+  // releases.  Iterates the (small) enemies index — the only attachers today
+  // are enemies (the bubble grappling the player); revisit if a non-enemy ever
+  // needs to attach.
+  private updateAttachments() {
+      const ents = this.entityIndex.enemies;
+      for (let i = 0; i < ents.length; i++) {
+          const e = ents[i];
+          if (!e.active || e.attachedToId === undefined) continue;
+          const target = this.entityById(e.attachedToId);
+          if (!target || !target.active || target.isExploding) {
+              e.attachedToId = undefined;
+              continue;
+          }
+          e.position.x = target.position.x + (e.attachOffset?.x ?? 0);
+          e.position.y = target.position.y + (e.attachOffset?.y ?? 0);
+          wrapPosition(e.position);
+          e.velocity.x = target.velocity.x;
+          e.velocity.y = target.velocity.y;
+      }
+  }
+
+  /** Linear lookup of an active entity by id (small N; attachments are rare). */
+  private entityById(id: string): GameEntity | undefined {
+      const ents = this.currentMap?.entities;
+      if (!ents) return undefined;
+      if (id === 'player') return this.player;
+      for (let i = 0; i < ents.length; i++) if (ents[i].id === id) return ents[i];
+      return undefined;
+  }
+
+  // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
+  //
+  // For each consumer (an entity carrying a `consume` config — none today;
+  // wired by the bubble / dragon), absorb nearby consumable shards/tiles within
+  // range and grow the consumer (size + optional hp/mass), capped at
+  // `consume.maxSize`.  PerfController-gated ('consume'); torus-correct.  The
+  // ENTITY-COUNT cap that stops runaway MULTIPLICATION lives at the child-spawn
+  // site (enforceTypeCap, Stage 5) — this pass only caps a single consumer's
+  // GROWTH.
+  private updateConsumers() {
+      if (!this.currentMap) return;
+      const enemies = this.entityIndex.enemies;
+      // Candidates: mobile shards (asteroids index) and/or static tiles.
+      const shards = this.entityIndex.asteroids;
+      for (let c = 0; c < enemies.length; c++) {
+          const consumer = enemies[c];
+          const cfg = consumer.consume;
+          if (!cfg || !consumer.active || consumer.isExploding) continue;
+          const rangeSq = cfg.range * cfg.range;
+          for (let k = 0; k < shards.length; k++) {
+              const cand = shards[k];
+              if (!cand.active || cand.isExploding) continue;
+              const wantTile = cfg.eats === 'tile';
+              const isTile = cand.mass === Infinity;
+              if (wantTile !== isTile) continue;
+              const dx = wrapDeltaX(consumer.position.x, cand.position.x);
+              const dy = wrapDeltaY(consumer.position.y, cand.position.y);
+              if (dx * dx + dy * dy > rangeSq) continue;
+              this.consumeEntity(consumer, cand, cfg);
+          }
+      }
+  }
+
+  /** Consume `cand` into `consumer`: grow the consumer (capped) and retire the
+   *  candidate.  Tiles route through the death/flow-field patch; mobile shards
+   *  deactivate directly.  Shared by the bubble (shards) + dragon (tiles). */
+  private consumeEntity(consumer: GameEntity, cand: GameEntity, cfg: ConsumeConfig) {
+      const cur = Math.max(consumer.size.x, consumer.size.y);
+      if (cur < cfg.maxSize) {
+          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat);
+          const scale = grown / (cur || 1);
+          consumer.size.x *= scale;
+          consumer.size.y *= scale;
+          if (cfg.hpPerEat) { consumer.health += cfg.hpPerEat; consumer.maxHealth += cfg.hpPerEat; }
+          if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat;
+      }
+      // Retire the candidate.  Static tiles go through the full death path so
+      // the FlowFieldGrid patch + regen bookkeeping fire; mobile shards just
+      // deactivate (cheap, no score/regen — they're eaten, not destroyed).
+      if (cand.mass === Infinity) {
+          this.physics.removeStaticEntity(cand);
+          this.flowField.onTileDestroyed(cand.position.x, cand.position.y);
+      }
+      cand.active = false;
+  }
+
   // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
   //
   // Applied at detonation (handleEntityDeath) so the launch + damage land the
@@ -3903,7 +4018,7 @@ export class GameEngine {
                   // Player shield soaks the blast first (kamikaze AoE and any
                   // future enemy-owned explosion) so an AoE hit isn't a raw
                   // shield-bypass — mirrors the projectile / ram absorption.
-                  if (e.id === 'player' && (e.shield ?? 0) > 0) {
+                  if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
                       const absorbed = Math.min(e.shield!, applied);
                       e.shield! -= absorbed;
                       applied -= absorbed;
@@ -3911,6 +4026,7 @@ export class GameEngine {
                       e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
                   if (!isIndestructible) e.health -= applied;
+                  if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
                   e.hitFlash = 0.12;
                   this.spawnDamageText(e.position, applied, e);
                   if (e.health <= 0 && !e.isExploding) {

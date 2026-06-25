@@ -471,7 +471,8 @@ export class PhysicsSystem {
       }
       if (entity.shield !== undefined && entity.maxShield !== undefined
           && entity.shield < entity.maxShield
-          && (entity.shieldRechargeTimer ?? 0) <= 0) {
+          && (entity.shieldRechargeTimer ?? 0) <= 0
+          && !entity.systemsDisabled) { // EMP-disabled shield doesn't recharge (Stage 3c)
           entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
       // The directional arc-shield angle (Bulwark) is steered toward the
@@ -2659,8 +2660,10 @@ export class PhysicsSystem {
           // and re-arms its recharge delay exactly like the player's.  Entities
           // without a shield (shield undefined) fall straight through.  A
           // directional arc shield only absorbs hits from the covered sector
-          // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.
+          // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.  An
+          // EMP-disabled shield (Stage 3c) is offline and absorbs nothing.
           if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
+              && !target.systemsDisabled
               && PhysicsSystem.shieldCoversHit(target, proj)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
@@ -2744,6 +2747,7 @@ export class PhysicsSystem {
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   target.hitStun = HIT_FEEDBACK.STUN_SEC;
                   target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+                  target.provoked = true; // Stage 3a: a hit aggros a passive enemy
               }
           }
 
@@ -2841,7 +2845,7 @@ export class PhysicsSystem {
                   // Per-wave enemy damage scaling rides enemy.damageMult.
                   const ramBase = contact * (enemy.damageMult ?? 1);
                   let ramDmg = ramBase;
-                  if ((target.shield ?? 0) > 0) {
+                  if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
                       ramDmg -= absorbed;

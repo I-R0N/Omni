@@ -1068,6 +1068,11 @@ export const PERF_TASKS = {
   // 4-step cadence at peak load drops cost ~75 % while staying
   // visually responsive.
   dropMerge:        { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
+  // Consume-and-grow neighbour scan (GameEngine.updateConsumers, Stage 3b).
+  // O(consumers × nearby candidates); only non-empty once a consumer (bubble /
+  // dragon) is on the field, so it early-outs cheaply most of the time and a
+  // few-step cadence is imperceptible (eating settles over frames).
+  consume:          { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
 } as const;
 
 export type PerfTaskId = keyof typeof PERF_TASKS;
@@ -2917,6 +2922,15 @@ export const CORROSION = {
   DURATION: 4,       // seconds, refreshed on re-hit
   MAX_STACKS: 3,     // up to 9 dmg/s
   COLOR: '#a3e635',  // acid green — projectile + HUD badge + ship tint
+};
+
+// Disable / EMP (Stage 3c): a status effect that takes the player's weapon AND
+// shield offline for a duration (no firing, no absorb, no recharge).  Applied
+// by the reactive bubble on attach; DBG-self-appliable.  Single non-stacking
+// instance, refreshed on re-hit.
+export const DISABLE = {
+  DURATION: 2.5,     // seconds
+  COLOR: '#f59e0b',  // amber — HUD badge + ship tint
 };
 
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
