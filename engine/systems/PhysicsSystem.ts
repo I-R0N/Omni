@@ -814,12 +814,13 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
-        // Collectible ammo drops are non-physics bodies: magnet-pulled +
-        // proximity-collected only (see GameEngine drop scan).  Keeping
-        // them out of the dynamic grid removes their collision cost AND
-        // their contribution to lastMaxCellDensity / lastDynamicCount, so
-        // a lingering drop pile no longer pins the PerfController load.
-        if (e.type === EntityType.INTERACTABLE && e.dropType === 'ammo') continue;
+        // Collectible drops (ammo + health) are non-physics bodies: magnet-
+        // pulled + proximity-collected only (see GameEngine drop scan).  Keeping
+        // them out of the dynamic grid removes their collision cost AND their
+        // contribution to lastMaxCellDensity / lastDynamicCount, so a lingering
+        // drop pile no longer pins the PerfController load — and, crucially,
+        // means projectiles pass THROUGH them (they can't be shot / destroyed).
+        if (e.type === EntityType.INTERACTABLE && (e.dropType === 'ammo' || e.dropType === 'health')) continue;
 
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
@@ -2500,10 +2501,12 @@ export class PhysicsSystem {
       // - Glass shards are full physics participants — they interact with everything
       //   (player, enemies, projectiles, asteroids, structures).  They are environmental
       //   debris and should deflect shots and bounce off ships.
-      // - Non-glass collectible drops: only physically collide with asteroids and
-      //   structures.  Player collection is handled by the magnetic logic in GameEngine,
-      //   not by physics contact, so we skip those pairs here to avoid accidental
-      //   collection via direct collision.
+      // - Collectible drops (ammo + health) are kept OUT of the dynamic grid
+      //   entirely (see the dropType skip in the grid build), so they never
+      //   reach this resolver — projectiles + ships pass through them and
+      //   collection is purely the GameEngine magnet/proximity scan.  The
+      //   non-glass branch below is a defensive guard in case one is ever
+      //   re-added to the grid.
       if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
           const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
           const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
