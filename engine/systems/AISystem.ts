@@ -32,11 +32,11 @@ export class AISystem {
   // two current strategies are the original RAMMING/SHOOTING routines, so the
   // existing roster dispatches identically.  Class-field arrows so `this` binds.
   private readonly moveStrategies: Record<EnemyMovement,
-    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, enemies: GameEntity[]) => void> = {
+    (dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, enemies: GameEntity[], shards: GameEntity[]) => void> = {
     dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
     swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
-    bubble:     (dt, enemy, player) => this.updateBubble(dt, enemy, player),
+    bubble:     (dt, enemy, player, flowField, _enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards),
   };
 
   /**
@@ -49,7 +49,7 @@ export class AISystem {
    * full-entity scans) into an O(enemies²) walk on a handful of entries
    * instead of O(allEntities²) with filtering.
    */
-  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid) {
+  public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[] = []) {
     const t0 = performance.now();
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
@@ -80,7 +80,7 @@ export class AISystem {
       // Route through the behavior-dispatch table (Stage 2a).  Defaults to the
       // dogfighter (matches the old "no subtype → RAMMING" fallback).
       const move: EnemyMovement = enemy.enemySubtype ? ENEMY_BEHAVIOR[enemy.enemySubtype].move : 'dogfighter';
-      this.moveStrategies[move](dt, enemy, player, flowField, enemies);
+      this.moveStrategies[move](dt, enemy, player, flowField, enemies, shards);
 
       // Directional arc shield (Bulwark): slew the covered sector toward the
       // player at a capped rate so it ATTEMPTS to face the threat — flank it
@@ -403,49 +403,57 @@ export class AISystem {
   }
 
   /**
-   * Bubble AI (Stage 5): a passive soft-body blob with two regimes keyed off
-   * the sticky `provoked` flag (set the first time a shot/AoE damages it).
-   *  - UNprovoked: lazy wander — a slowly-slewing random heading at a low coast
-   *    speed; it ignores the player entirely (so a field of them just drifts,
-   *    eating shards via GameEngine.updateConsumers and splitting).
-   *  - provoked: a floaty seek — accelerate toward the player up to the variant
-   *    maxSpeed, low turn so it wobbles in rather than darting.
+   * Bubble AI (Stage 5): ambient soft-body fauna with three regimes.
+   *  - DRIFT (passive, no shard near): ride the asteroid flow field — steer the
+   *    velocity toward the local current so a field of them streams along the
+   *    same lanes as the asteroids.
+   *  - CHASE (passive, a shard within SHARD_VISION): peel off the flow and seek
+   *    the nearest eatable (finite-mass) shard; the consume pass eats it on
+   *    contact and it resumes drifting.
+   *  - SEEK (provoked / shot — the sticky `provoked` flag): floaty pursuit of
+   *    the player up to maxSpeed.
    * While LATCHED (attachedToId set) movement is skipped — GameEngine.update-
    * Attachments owns the position.  Toroidal.
    */
-  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity) {
+  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[]) {
       // Latched onto a target → the attach pass drives position; don't fight it.
       if (enemy.attachedToId !== undefined) return;
 
       const config = ENEMY_VARIANTS[enemy.enemySubtype || EnemySubtype.BUBBLE];
       const B = AI_CONFIG.BUBBLE;
-      const accel = config.accel || 2.4;
+      const accel = config.accel || 3;
       const turnRate = config.turnRate || 1.6;
       const stunned = (enemy.hitStun ?? 0) > 0;
+      const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
 
-      if (enemy.provoked) {
+      if (stunned) {
+          // A hit reels it; the knockback carries — no thrust this step.
+      } else if (enemy.provoked) {
           // ── Seek the player (floaty) ──
           const dx = wrapDeltaX(enemy.position.x, player.position.x);
           const dy = wrapDeltaY(enemy.position.y, player.position.y);
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          if (!stunned) {
-              enemy.velocity.x += (dx / dist) * accel * B.SEEK_ACCEL_MULT * dt;
-              enemy.velocity.y += (dy / dist) * accel * B.SEEK_ACCEL_MULT * dt;
-              const cap = (enemy.maxSpeed ?? config.maxSpeed) * B.PROVOKED_SPEED_MULT;
-              const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
-              if (spd > cap) { enemy.velocity.x = (enemy.velocity.x / spd) * cap; enemy.velocity.y = (enemy.velocity.y / spd) * cap; }
-          }
+          enemy.velocity.x += (dx / dist) * accel * B.SEEK_ACCEL_MULT * dt;
+          enemy.velocity.y += (dy / dist) * accel * B.SEEK_ACCEL_MULT * dt;
+          this.capSpeed(enemy, maxSpeed * B.PROVOKED_SPEED_MULT);
       } else {
-          // ── Lazy wander (ignores the player) ──
-          if (enemy.bubbleWanderAngle === undefined) enemy.bubbleWanderAngle = Math.random() * Math.PI * 2;
-          enemy.bubbleWanderAngle += (Math.random() - 0.5) * B.WANDER_JITTER * dt;
-          // Gentle heading slew (drift the actual velocity toward the heading).
-          const hx = Math.cos(enemy.bubbleWanderAngle), hy = Math.sin(enemy.bubbleWanderAngle);
-          if (!stunned) {
-              enemy.velocity.x += hx * B.WANDER_TURN * dt;
-              enemy.velocity.y += hy * B.WANDER_TURN * dt;
-              const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
-              if (spd > B.WANDER_SPEED) { enemy.velocity.x = (enemy.velocity.x / spd) * B.WANDER_SPEED; enemy.velocity.y = (enemy.velocity.y / spd) * B.WANDER_SPEED; }
+          // ── Passive: chase the nearest eatable shard, else ride the flow ──
+          const target = this.nearestEatableShard(enemy, shards, B.SHARD_VISION);
+          if (target) {
+              const dx = wrapDeltaX(enemy.position.x, target.position.x);
+              const dy = wrapDeltaY(enemy.position.y, target.position.y);
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              enemy.velocity.x += (dx / dist) * accel * dt;
+              enemy.velocity.y += (dy / dist) * accel * dt;
+              this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT);
+          } else {
+              // Drift: lerp velocity toward the local flow current.
+              const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+              const tx = flow.x * B.DRIFT_SPEED, ty = flow.y * B.DRIFT_SPEED;
+              const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
+              enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
+              enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
+              this.capSpeed(enemy, B.DRIFT_SPEED);
           }
       }
 
@@ -456,6 +464,29 @@ export class AISystem {
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
       const turnStep = turnRate * dt;
       enemy.rotation = Math.abs(angleDiff) < turnStep ? targetAngle : enemy.rotation + Math.sign(angleDiff) * turnStep;
+  }
+
+  /** Nearest active finite-mass (mobile) shard within `range` of the bubble, or
+   *  null.  Toroidal.  O(shards) — the bubble count is tiny so this stays cheap. */
+  private nearestEatableShard(bubble: GameEntity, shards: GameEntity[], range: number): GameEntity | null {
+      const rangeSq = range * range;
+      let best: GameEntity | null = null;
+      let bestSq = rangeSq;
+      for (let i = 0; i < shards.length; i++) {
+          const s = shards[i];
+          if (!s.active || s.isExploding || s.mass === Infinity) continue;
+          const dx = wrapDeltaX(bubble.position.x, s.position.x);
+          const dy = wrapDeltaY(bubble.position.y, s.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestSq) { bestSq = d2; best = s; }
+      }
+      return best;
+  }
+
+  /** Clamp an entity's speed to `cap` in place (no-op when under). */
+  private capSpeed(e: GameEntity, cap: number) {
+      const spd = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
+      if (spd > cap && spd > 0) { e.velocity.x = (e.velocity.x / spd) * cap; e.velocity.y = (e.velocity.y / spd) * cap; }
   }
 
   /**

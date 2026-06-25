@@ -26,7 +26,9 @@ const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
   { type: EnemySubtype.TURRET,    label: 'Turret' },
   { type: EnemySubtype.SWARM,     label: 'Swarm' },
   { type: EnemySubtype.NEST,      label: 'Nest' },
-  { type: EnemySubtype.BUBBLE,    label: 'Bubble' },
+  // BUBBLE is ambient fauna (always present in normal play), not a forceable
+  // wave enemy — so it's intentionally absent here.  Any force-selection below
+  // suppresses the ambient bubbles for clean single-type isolation.
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },

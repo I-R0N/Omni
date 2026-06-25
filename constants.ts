@@ -680,16 +680,19 @@ export const AI_CONFIG = {
     },
   },
 
-  // Bubble (Stage 5) movement.  Two regimes keyed off `provoked`:
-  //  - PASSIVE (unprovoked): a lazy random drift — the heading slews by small
-  //    random steps and the blob coasts at WANDER_SPEED, ignoring the player.
-  //  - PROVOKED (shot): a soft-body seek — accelerate toward the player up to
-  //    the variant maxSpeed, floaty (low turn) so it reads as a wobbling blob
-  //    chasing you, not a crisp interceptor.
+  // Bubble (Stage 5) movement.  Ambient fauna with three regimes:
+  //  - DRIFT (passive, no shard in sight): ride the asteroid flow field — steer
+  //    the velocity toward the local current at DRIFT_SPEED, so a field of them
+  //    streams along the same lanes as the asteroids.
+  //  - CHASE (passive, a shard within SHARD_VISION): peel OFF the flow and seek
+  //    the nearest eatable shard at CHASE_SPEED_MULT× maxSpeed, then eat it on
+  //    contact (the consume pass) and resume drifting.
+  //  - SEEK (provoked / shot): floaty pursuit of the player up to maxSpeed.
   BUBBLE: {
-    WANDER_SPEED: 1.6,        // coast speed while passive (units/step cap)
-    WANDER_TURN: 0.5,         // heading slew rate while passive (rad/s)
-    WANDER_JITTER: 0.9,       // random heading kick (rad/s, scaled by dt)
+    DRIFT_SPEED: 2.4,         // cruise speed while riding the flow (units/step cap)
+    DRIFT_CORRECTION: 1.4,    // lerp rate of velocity toward the flow target (×dt)
+    SHARD_VISION: 280,        // range at which a passive bubble spots + chases a shard
+    CHASE_SPEED_MULT: 1.0,    // speed cap while chasing a shard (× maxSpeed)
     SEEK_ACCEL_MULT: 1.0,     // accel toward player when provoked (× accel)
     PROVOKED_SPEED_MULT: 1.0, // speed cap when provoked (× maxSpeed)
   },
@@ -2912,6 +2915,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // eat→grow→split is a cycle), capped at `maxPopulation` live units of the
   // subtype.  Offspring don't gate wave completion.  Absent → never multiplies.
   multiply?: { atSize: number; maxPopulation: number };
+  // Ambient fauna (Stage 5, bubble): NOT a wave enemy.  An `ambient` archetype
+  // never gates wave completion (countsTowardWave forced false at spawn however
+  // it's built) and is kept present in the world by GameEngine.maintainAmbient-
+  // Bubbles instead of the wave spawner.  Absent → a normal wave enemy.
+  ambient?: boolean;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -3052,11 +3060,12 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // role (rush when provoked).  Cyan-violet membrane; no engine flame.
   [EnemySubtype.BUBBLE]: {
     color: '#67e8f9', size: 30, health: 3,
-    maxSpeed: 3.2, accel: 2.4, turnRate: 1.6,
+    maxSpeed: 4.5, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
     consume: { eats: 'shard', range: 70, growthPerEat: 6, maxSize: 58, hpPerEat: 1 },
     multiply: { atSize: 52, maxPopulation: 14 },
+    ambient: true,
   },
 };
 
@@ -3102,6 +3111,13 @@ export const BUBBLE_CONSTANTS = {
   // Multiply: a passive bubble that has grown to its `multiply.atSize` splits.
   SPLIT_SPEED: 3.5,       // outward speed imparted to parent + child on a split
   COLOR_PROVOKED: '#fb7185', // angry membrane tint once provoked (render)
+  // Ambient population: bubbles are always-present fauna, not wave enemies.
+  // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
+  // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below
+  // it (breeding can carry the count higher, up to multiply.maxPopulation).
+  AMBIENT_POPULATION: 5,
+  AMBIENT_RESPAWN_INTERVAL: 4,  // seconds between top-up spawns while short
+  SPAWN_MARGIN: 220,            // units past the viewport edge to spawn a fresh bubble
 };
 
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
@@ -3196,7 +3212,8 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
   { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
   { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
-  { enemies: [{ subtype: EnemySubtype.BUBBLE,    count: 3 }, { subtype: EnemySubtype.SHOOTER_1, count: 1 }] }, // W8  Bubble intro (shoot them to provoke; otherwise they breed)
+  // NOTE: BUBBLE is ambient fauna (always-present, never a wave enemy) — it's
+  // maintained by GameEngine.maintainAmbientBubbles, not spawned by waves.
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

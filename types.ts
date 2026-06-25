@@ -506,12 +506,11 @@ export interface GameEntity {
   // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
   // burst coast/dash cadence) — see AISystem.updateSwarm.
   swarmTimer?: number;
-  // Reactive bubble (Stage 5).  `bubbleWanderAngle` is the passive drift
-  // heading the bubble lazily slews while UNprovoked (AISystem 'bubble'
-  // strategy).  `bubbleLatchTimer` counts down the seconds a provoked bubble
-  // stays latched onto the player (attachedToId='player') EMPing it, after
-  // which it releases and pops — ticked by GameEngine.updateBubbles.
-  bubbleWanderAngle?: number;
+  // Reactive bubble (Stage 5).  `bubbleLatchTimer` counts down the seconds a
+  // provoked bubble stays latched onto the player (attachedToId='player')
+  // EMPing it, after which it releases and pops — ticked by
+  // GameEngine.updateBubbles.  (Passive movement rides the asteroid flow field
+  // / chases shards directly in AISystem.updateBubble — no stored heading.)
   bubbleLatchTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for

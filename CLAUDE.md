@@ -326,30 +326,39 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   indicator chevrons are suppressed (minimap still shows them)) + NEST
   (near-static hive whose `spawner` config births SWARM brood via
   `GameEngine.updateNests` → `WaveSystem.spawnAt(..., counts:false)`, capped at
-  `maxBrood`), and the Stage-5 BUBBLE (a PASSIVE soft-body blob, 'bubble'
-  behavior: it lazily wanders, eats nearby mobile shards via the consume-and-
-  grow pass (`consume` config → `GameEngine.updateConsumers`), and once grown to
-  `multiply.atSize` SPLITS into two base-size bubbles — `GameEngine.updateBubbles`,
-  population-capped at `multiply.maxPopulation`, offspring `counts:false`.  It
-  ignores the player until SHOT: a hit sets the sticky `provoked` flag (Stage
-  3a), after which it homes in and, on contact, LATCHES onto the player
-  (`attachedToId='player'` → `updateAttachments` snaps it on) for
-  `BUBBLE_CONSTANTS.LATCH_DURATION`, EMPing weapon + shield (`'disable'` status,
-  re-applied each step at `EMP_REFRESH` so the lockout ends with the latch) +
-  draining `LATCH_DPS`, then releases and pops (`popBubble` — splash + deactivate,
-  no score; shoot it off for the normal kill/drops instead).  Provoked bubbles
-  stop breeding.  Feel tuning lives in `AI_CONFIG.BUBBLE` (wander vs seek),
-  engagement payload in `BUBBLE_CONSTANTS`).  Optional ENEMY_VARIANTS
+  `maxBrood`), and the Stage-5 BUBBLE (an AMBIENT PASSIVE soft-body blob,
+  'bubble' behavior — `ambient:true`, so it's ALWAYS-PRESENT fauna, NOT a wave
+  enemy: `countsTowardWave` is forced false however it spawns, and
+  `GameEngine.maintainAmbientBubbles` keeps `BUBBLE_CONSTANTS.AMBIENT_POPULATION`
+  alive — seeded in `startGame`, topped up offscreen on a timer, suppressed
+  while a DBG enemy-test forces another type).  Passive movement
+  (`AISystem.updateBubble`) rides the asteroid flow field
+  (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
+  nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
+  via `GameEngine.updateConsumers`); once grown to `multiply.atSize` it SPLITS
+  into two base-size bubbles (`updateBubbles`, capped at
+  `multiply.maxPopulation`).  It ignores the player until SHOT: a hit sets the
+  sticky `provoked` flag (Stage 3a), after which it homes in and, on contact,
+  LATCHES onto the player (`attachedToId='player'` → `updateAttachments` snaps it
+  on) for `BUBBLE_CONSTANTS.LATCH_DURATION`, EMPing weapon + shield (`'disable'`
+  status, re-applied each step at `EMP_REFRESH` so the lockout ends with the
+  latch) + draining `LATCH_DPS`, then releases and pops (`popBubble` — splash +
+  deactivate, no score; shoot it off for the normal kill/drops instead).
+  Provoked bubbles stop breeding.  Feel tuning lives in `AI_CONFIG.BUBBLE`
+  (drift / chase / seek), engagement + ambient payload in `BUBBLE_CONSTANTS`).
+  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
   `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
   `shieldArcAngle` — a sweeping sector that only absorbs hits from the
-  covered side), and `consume`/`multiply` (the bubble's eat-grow-split).
+  covered side), and `consume`/`multiply`/`ambient` (the bubble's
+  eat-grow-split + always-present fauna flag).
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
-- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (8 scripted
-  teaching waves, one per enemy-archetype intro), `getWaveDurationSec()`,
+- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (7 scripted
+  teaching waves, one per wave-enemy archetype; the BUBBLE is ambient fauna,
+  not a wave enemy, so it has no intro wave), `getWaveDurationSec()`,
   `getWaveSpawnBudget()`, `buildWaveSpawnList()`
 - `SCORE_CONSTANTS` (tier-scaled kill points; player-attributed
   shard/tile destruction points — flat per shard, per-maxHealth for
@@ -604,13 +613,14 @@ button in `UIOverlay.tsx`.
   flock with a DBG-selectable base steer via `getActiveSwarmMove`: weave
   (serpentine — the default) / boids / vortex (orbit + dart) / burst (coast +
   telegraphed dash), cycled by the Player ▸ "Gnat move" DBG row), and
-  `updateBubble` (`'bubble'` — Stage 5; lazy random wander while UNprovoked,
-  floaty player-seek once `provoked`, skipped entirely while latched); the
+  `updateBubble` (`'bubble'` — Stage 5; passive flow-field drift / shard-chase
+  while UNprovoked, floaty player-seek once `provoked`, skipped entirely while
+  latched — receives the `shards` list so it can target food); the
   per-subtype quirks (Drone jitter,
   Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
-  routines.  Strategies receive the filtered `enemies` list so a flock can scan
-  neighbours.  `ENEMY_ROLE` is still the RAMMING/SHOOTING category used by
-  pack-sync + wave-building.
+  routines.  Strategies receive the filtered `enemies` list (so a flock can scan
+  neighbours) AND the `shards` list (so the bubble can target food).  `ENEMY_ROLE`
+  is still the RAMMING/SHOOTING category used by pack-sync + wave-building.
 - **Stationary enemies use the no-move guard.** `AISystem.updateSkirmisher`
   branches on `config.maxSpeed === 0` (Turret): it applies no thrust, bleeds
   residual velocity, and skips the speed cap, but still runs the
@@ -619,11 +629,14 @@ button in `UIOverlay.tsx`.
 - **Wave completion honors `countsTowardWave`.** `WaveSystem.countLiveTracked`
   (which gates both completion AND the spawn-stream concurrency cap) skips
   tracked enemies with `countsTowardWave === false` — entities spawned by other
-  entities / that replicate (nest brood, bubble offspring).  A wave ends when
-  the COUNTED enemies are dead; uncounted brood carry over as survivors.
-  Non-enemy roamers (Snitch, future dragon) are `EntityType.INTERACTABLE` and
-  never enter `waveEnemyIds`, so they never gate a wave.  Every current enemy
-  leaves the flag unset (counts), so the existing roster is unaffected.
+  entities / that replicate (nest brood) and the AMBIENT bubble fauna (every
+  bubble, via the `ambient` variant flag → `buildEnemy` forces the flag false
+  however it spawns).  A wave ends when the COUNTED enemies are dead; uncounted
+  brood / bubbles carry over.  Non-enemy roamers (Snitch, future dragon) are
+  `EntityType.INTERACTABLE` and never enter `waveEnemyIds`, so they never gate a
+  wave; the bubble stays `EntityType.ENEMY` (it takes damage / attacks / eats —
+  all the enemy machinery) but opts out of wave accounting via the flag.  Every
+  WAVE enemy leaves the flag unset (counts).
 - **Homing is owner-aware.** `ProjectileSystem.updateHoming` steers
   PLAYER-owned homing shots toward the nearest enemy (acquire range) and
   ENEMY-owned homing missiles (Turret) toward the player (no range gate) —

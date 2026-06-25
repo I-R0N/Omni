@@ -298,8 +298,9 @@ export class WaveSystem {
       enemyShape: config.shape,
       aimLaser: config.aimLaser,
     };
-    // Stage 2b: brood (nest-spawned) don't gate wave completion.
-    if (!counts) enemy.countsTowardWave = false;
+    // Stage 2b: brood (nest-spawned) don't gate wave completion.  Ambient
+    // fauna (Stage 5 bubble) NEVER gate, however they're built.
+    if (!counts || config.ambient) enemy.countsTowardWave = false;
 
     // Bulwark shield (Stage 0): seed shield + maxShield + slow regen.  The
     // generalized PhysicsSystem absorption path soaks hits for any shielded

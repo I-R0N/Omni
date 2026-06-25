@@ -249,6 +249,12 @@ export class GameEngine {
   private snitchDartAwayX: number = 0;
   private snitchDartAwayY: number = 0;
 
+  // ── Ambient bubble fauna (Stage 5) ────────────────────────────────────────
+  // Bubbles are always-present roamers, not wave enemies.  maintainAmbient-
+  // Bubbles keeps at least BUBBLE_CONSTANTS.AMBIENT_POPULATION alive, spawning
+  // one offscreen each time this top-up timer elapses while the field is short.
+  private ambientBubbleTimer: number = 0;
+
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
   private ffOverlayVectors:   boolean = false;
@@ -1261,6 +1267,7 @@ export class GameEngine {
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
+    this.seedAmbientBubbles(); // always-present fauna, ready from frame one
   }
 
   public skipWave() {
@@ -1785,7 +1792,7 @@ export class GameEngine {
       // step, so enemies coast smoothly between AI updates (no snap).
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
-          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField);
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField, this.entityIndex.asteroids);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -2435,6 +2442,8 @@ export class GameEngine {
     // Stage 5: bubbles form/tick player latches and split when fat.  Runs
     // BEFORE updateAttachments so a latch formed this step snaps the same frame.
     this.updateBubbles(dt);
+    // Ambient fauna: keep the always-present bubble population topped up.
+    this.maintainAmbientBubbles(dt);
 
     // Stage 3 reusable mechanics: snap grapples to their targets, and run the
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
@@ -3868,6 +3877,61 @@ export class GameEngine {
           lifetimeMin: 0.25, lifetimeMax: 0.6,
       });
       e.active = false;
+  }
+
+  // ─── Ambient bubble population (Stage 5) ───────────────────────────────
+  //
+  // Bubbles are always-present fauna, not wave enemies — keep at least
+  // BUBBLE_CONSTANTS.AMBIENT_POPULATION alive at all times by topping up
+  // offscreen on a timer while the field is short (breeding can carry the count
+  // higher on its own).  Skipped while a DIFFERENT enemy is force-selected in
+  // the DBG enemy-test so that isolation stays clean.  O(enemies) census.
+  private maintainAmbientBubbles(dt: number) {
+      if (!this.currentMap || this.gameState !== GameState.PLAYING) return;
+      // A DBG enemy-test forcing a single type suppresses the ambient fauna so
+      // that type is seen in isolation.
+      if (this.forcedTestEnemy) return;
+
+      let count = 0;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.enemySubtype === EnemySubtype.BUBBLE && e.active && !e.isExploding) count++;
+      }
+      if (count >= BUBBLE_CONSTANTS.AMBIENT_POPULATION) {
+          this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+          return;
+      }
+      this.ambientBubbleTimer -= dt;
+      if (this.ambientBubbleTimer > 0) return;
+      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+      this.spawnAmbientBubble();
+  }
+
+  /** Seed the ambient bubble population in one shot (called on entering play so
+   *  the fauna is present from the first frame, not trickled in). */
+  private seedAmbientBubbles() {
+      if (!this.currentMap || this.forcedTestEnemy) return;
+      for (let i = 0; i < BUBBLE_CONSTANTS.AMBIENT_POPULATION; i++) this.spawnAmbientBubble();
+      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+  }
+
+  /** Spawn one ambient bubble just outside the viewport (so it drifts in rather
+   *  than popping into view).  counts=false + the `ambient` variant flag keep it
+   *  out of wave accounting. */
+  private spawnAmbientBubble(): GameEntity | null {
+      const ctx = this.waveContext();
+      if (!ctx) return null;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + Math.random() * 240;
+      const pos = {
+          x: this.player.position.x + Math.cos(angle) * dist,
+          y: this.player.position.y + Math.sin(angle) * dist,
+      };
+      wrapPosition(pos);
+      return this.waves.spawnAt(EnemySubtype.BUBBLE, pos, ctx, false);
   }
 
   // ─── Kamikaze proximity fuse ───────────────────────────────────────────
