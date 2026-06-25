@@ -2841,10 +2841,27 @@ export class PhysicsSystem {
               // Per-archetype contact damage (rushers hurt; ranged enemies
               // have 0).  No damage below the impact-speed threshold either.
               const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              // An exploding enemy deals no further contact damage (a kamikaze
-              // flips isExploding the instant it touches the player, so its
-              // contact bite lands exactly once).
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding) {
+              // Die-on-contact gnats (Swarm): pop on the FIRST touch, dealing
+              // their small bite once (regardless of impact speed, so a clinging
+              // gnat can't friction-chip), then die — a discrete hit + visible
+              // pop instead of an endless cling, and it self-clears the cloud.
+              if (enemy.diesOnContact && !enemy.isExploding) {
+                  if (contact > 0) {
+                      let bite = contact * (enemy.damageMult ?? 1);
+                      if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
+                          const absorbed = Math.min(target.shield!, bite);
+                          target.shield! -= absorbed;
+                          bite -= absorbed;
+                          target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                          target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                      }
+                      if (bite > 0) { target.health -= bite; target.hitFlash = 0.2; }
+                      if (onShake) onShake(COLLISION_CONFIG.SHAKE.MICRO);
+                      if (target.health <= 0 && onDeath) onDeath(target);
+                  }
+                  enemy.health = 0;
+                  if (onDeath) onDeath(enemy); // pop (death FX + score)
+              } else if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding) {
                   // flash already handled by the general contact flash below
               } else {
                   // Per-wave enemy damage scaling rides enemy.damageMult.

@@ -436,6 +436,10 @@ export interface GameEntity {
   // Damage dealt to the player on contact (rushers > 0; ranged enemies 0).
   // Scaled by the per-wave damageMult in the collision path.
   contactDamage?: number;
+  // Die-on-contact (Stage 4 Swarm): the enemy pops on its first touch of the
+  // player — deals `contactDamage` once (ignoring the impact-speed threshold)
+  // then dies.  A discrete hit + pop instead of a clinging friction-chip.
+  diesOnContact?: boolean;
   // Cosmetic render cache: a stable per-entity phase (radians) for the
   // pulsing enemy "core eye", lazily derived from the id on first draw so a
   // pack doesn't throb in unison.  Render-only; never read by the sim.

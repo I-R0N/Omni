@@ -315,9 +315,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   rotating directional arc shield + a 3-shot fan), TURRET (Stage 1: a
   STATIONARY SHOOTING cross emplacement — `maxSpeed:0` → AISystem no-move
   branch — that rotates to aim and lobs slow HOMING missiles), and the Stage-4
-  pair SWARM (cheap fast 'swarm'-boids gnat) + NEST (near-static hive whose
-  `spawner` config births SWARM brood via `GameEngine.updateNests` →
-  `WaveSystem.spawnAt(..., counts:false)`, capped at `maxBrood`).  Optional ENEMY_VARIANTS
+  pair SWARM (cheap fast 'swarm'-boids gnat that POPS on contact —
+  `diesOnContact`: deals its small bite once then dies, a discrete hit + light
+  pop instead of a clinging friction-chip; skips debris/drop spray) + NEST
+  (near-static hive whose `spawner` config births SWARM brood via
+  `GameEngine.updateNests` → `WaveSystem.spawnAt(..., counts:false)`, capped at
+  `maxBrood`).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`) and `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional

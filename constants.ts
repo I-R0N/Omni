@@ -2799,7 +2799,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   color: string; size: number; health: number;
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number; shape: EnemyShape;
-  shoots: boolean; contactDamage: number; weapon?: Partial<WeaponConfig>;
+  shoots: boolean; contactDamage: number; diesOnContact?: boolean; weapon?: Partial<WeaponConfig>;
   // Optional burst pattern: fire `size` shots `gap` seconds apart, then
   // reload for the archetype weapon's full `cooldown`.  Absent → one shot
   // per `cooldown` (the common case).  The per-archetype `cooldown` is the
@@ -2954,9 +2954,9 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // the threat is numbers.  RAMMING role (rush in).
   [EnemySubtype.SWARM]: {
     color: '#2dd4bf', size: 16, health: 1,
-    maxSpeed: 9, accel: 8, turnRate: 4.5,
+    maxSpeed: 7.5, accel: 7, turnRate: 4.5,
     sprite: ASSETS.ENEMY_DRONE, mass: 4, shape: 'triangle',
-    shoots: false, contactDamage: 5,
+    shoots: false, contactDamage: 3, diesOnContact: true,
   },
   // Nest: a near-static fleshy hive (high HP, heavy, maxSpeed 0 → no-move
   // branch; doesn't shoot) that periodically births SWARM brood until killed.
@@ -2967,7 +2967,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 0, accel: 0, turnRate: 0.6,
     sprite: ASSETS.ENEMY_TANK, mass: 60, shape: 'nest',
     shoots: false, contactDamage: 0,
-    spawner: { subtype: EnemySubtype.SWARM, interval: 3.2, batch: 2, maxBrood: 12 },
+    spawner: { subtype: EnemySubtype.SWARM, interval: 4.0, batch: 2, maxBrood: 10 },
   },
 };
 

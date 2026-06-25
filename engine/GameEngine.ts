@@ -2178,7 +2178,10 @@ export class GameEngine {
           this.shards.queueRegen(entity);
       }
 
-      if (entity.type === EntityType.ENEMY) {
+      // Tiny pop-on-contact gnats (Swarm) die in bulk — skip the heavy debris/
+      // drop spray + nebula dust so a popping cloud doesn't flood the field with
+      // shards, drops, and puffs.  They're a cheap threat, not a loot source.
+      if (entity.type === EntityType.ENEMY && !entity.diesOnContact) {
           this.spawnEnemyShards(entity);
 
           // Enemy death dust — a handful of nebula-shards tinted to the
@@ -2216,21 +2219,32 @@ export class GameEngine {
       if (entity.type === EntityType.ENEMY) {
           const ec = entity.color || '#f87171';
           const r = Math.max(entity.size.x, entity.size.y);
-          // Expanding shockwave ring (visual only) — a satisfying pop sized
-          // to the enemy; bigger enemies pop bigger.
-          this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
-          this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-          // Big colored debris burst + white core flash.
-          this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
-              speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
-              lifetimeMin: 0.3, lifetimeMax: 0.7,
-          });
-          this.spawnParticles(entity.position, 9, '#ffffff', {
-              speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
-              lifetimeMin: 0.15, lifetimeMax: 0.35,
-          });
-          // Small tier-scaled screen punch (respects the DBG shake toggle).
-          this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+          // Tiny pop-on-contact gnats (Swarm) die in bulk, so they get a
+          // deliberately LIGHT burst — one small ring + a few sparks, no screen
+          // shake — to avoid particle/shake spam when a cloud goes down at once.
+          if (entity.diesOnContact) {
+              this.spawnShockwave(entity.position, { radius: r * 1.6, damage: 0, knockback: 0, color: ec, lifetime: 0.2 });
+              this.spawnParticles(entity.position, 5, ec, {
+                  speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.18, lifetimeMax: 0.4,
+              });
+          } else {
+              // Expanding shockwave ring (visual only) — a satisfying pop sized
+              // to the enemy; bigger enemies pop bigger.
+              this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
+              this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
+              // Big colored debris burst + white core flash.
+              this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+                  speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
+                  lifetimeMin: 0.3, lifetimeMax: 0.7,
+              });
+              this.spawnParticles(entity.position, 9, '#ffffff', {
+                  speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.15, lifetimeMax: 0.35,
+              });
+              // Small tier-scaled screen punch (respects the DBG shake toggle).
+              this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+          }
       } else if (entity.type === EntityType.PLAYER) {
           // Cyan energy explosion
           this.spawnParticles(entity.position, 12, '#38bdf8', {

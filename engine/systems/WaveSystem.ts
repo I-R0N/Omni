@@ -293,6 +293,7 @@ export class WaveSystem {
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
       contactDamage: config.contactDamage,
+      diesOnContact: config.diesOnContact,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       enemyShape: config.shape,
       aimLaser: config.aimLaser,
