@@ -754,7 +754,15 @@ button in `UIOverlay.tsx`.
   mobile candidates are PULLED inward (`cfg.pull` tug) and only SWALLOWED on
   MEMBRANE CONTACT (radii overlap) — `consumeEntity` then sprays an inward
   shard-colour implosion + a membrane feed-bulge (`bubbleFeedTimer`), so shards
-  stream in and pop on contact instead of vanishing from afar.  The entity-COUNT
+  stream in and pop on contact instead of vanishing from afar.  Shards (bubble)
+  are then DIGESTED over `BUBBLE_CONSTANTS.DIGEST_DURATION` (`beginDigest` →
+  ticked in `updateBubbles` → `growConsumer`): the shard is swallowed
+  (deactivated, its look snapshotted onto `bubbleDigest*`) and RenderSystem draws
+  a shrinking ghost of it INSIDE the transparent membrane, one meal at a time.
+  This mirrors the LATCH (a held target processed over a timer); the bubble just
+  can't engulf the too-big player/enemy, so that path clings to the hull
+  (squash-cling render + EMP-arc crackle on the player) and drains instead.
+  Tiles (the future dragon) are eaten instantly (`consumeTile`).  The entity-COUNT
   cap for self-replication is a live-subtype census at the child-spawn site
   (`updateBubbles` for the bubble, `updateNests` for nest brood — both
   pattern-match `enforceTypeCap`).

@@ -3812,10 +3812,32 @@ export class GameEngine {
           const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
           if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
 
+          // ── Digesting a held shard: tick it down, then grow (the eat). The
+          // shrinking ghost is drawn inside the membrane by RenderSystem.  The
+          // bubble keeps moving/behaving normally while it digests. ──
+          if ((e.bubbleDigestTimer ?? 0) > 0) {
+              e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
+              if (Math.random() < 0.25) {
+                  this.spawnParticles(e.position, 1, e.bubbleDigestColor || '#a8a29e', {
+                      speedMin: 0.5, speedMax: 2, sizeMin: 0.8, sizeMax: 1.8,
+                      lifetimeMin: 0.2, lifetimeMax: 0.45, positionJitter: Math.max(e.size.x, e.size.y) * 0.3,
+                  });
+              }
+              if (e.bubbleDigestTimer <= 0) {
+                  this.growConsumer(e, cfg.consume!);
+                  e.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE; // final gulp bulge
+                  e.bubbleDigestTimer = 0;
+                  e.bubbleDigestColor = undefined;
+                  e.bubbleDigestSize0 = undefined;
+              }
+          }
+
           // ── Latched: drain (EMP the player), tick the clinging timer, release ──
           if (e.attachedToId !== undefined) {
               const victim = this.resolveAggroTarget(e.attachedToId);
               const onPlayer = e.attachedToId === 'player';
+              // Face the target so the membrane squashes against its hull (render).
+              e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
               if (victim && !victim.isExploding) {
                   if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
                   victim.health -= B.LATCH_DPS * dt;
@@ -4044,6 +4066,9 @@ export class GameEngine {
           const consumer = enemies[c];
           const cfg = consumer.consume;
           if (!cfg || !consumer.active || consumer.isExploding) continue;
+          // One meal at a time: a bubble busy digesting (or clinging to a
+          // latch target) doesn't pull or capture more.
+          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined) continue;
           const rangeSq = cfg.range * cfg.range;
           const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
           for (let k = 0; k < shards.length; k++) {
@@ -4059,7 +4084,11 @@ export class GameEngine {
               const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
               const contact = consumerR + candR;
               if (d2 <= contact * contact) {
-                  this.consumeEntity(consumer, cand, cfg, dx, dy); // swallow on contact
+                  // SWALLOW on membrane contact.  Mobile shards are engulfed and
+                  // DIGESTED over time (held inside the bubble); static tiles
+                  // (the future dragon) are eaten instantly.
+                  if (isTile) this.consumeTile(consumer, cand, cfg, dx, dy);
+                  else { this.beginDigest(consumer, cand, dx, dy); break; }
               } else if (!isTile && cfg.pull) {
                   // Suck-in: tug the mobile shard toward the membrane, stronger
                   // the closer it is (so a near shard accelerates into the mouth).
@@ -4073,41 +4102,51 @@ export class GameEngine {
       }
   }
 
-  /** Consume `cand` into `consumer`: grow the consumer (capped), animate the
-   *  swallow, and retire the candidate.  Tiles route through the death/flow-field
-   *  patch; mobile shards deactivate directly.  Shared by the bubble (shards) +
-   *  dragon (tiles).  `dx/dy` is the consumer→candidate toroidal delta (for the
-   *  inward-implosion particle direction). */
-  private consumeEntity(consumer: GameEntity, cand: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
+  /** Grow a consumer by one eat (size + optional hp/mass), capped at maxSize.
+   *  Shared by the shard-digest finish (updateBubbles) and the instant tile eat. */
+  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig) {
       const cur = Math.max(consumer.size.x, consumer.size.y);
-      if (cur < cfg.maxSize) {
-          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat);
-          const scale = grown / (cur || 1);
-          consumer.size.x *= scale;
-          consumer.size.y *= scale;
-          if (cfg.hpPerEat) { consumer.health += cfg.hpPerEat; consumer.maxHealth += cfg.hpPerEat; }
-          if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat;
-      }
+      if (cur >= cfg.maxSize) return;
+      const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat);
+      const scale = grown / (cur || 1);
+      consumer.size.x *= scale;
+      consumer.size.y *= scale;
+      if (cfg.hpPerEat) { consumer.health += cfg.hpPerEat; consumer.maxHealth += cfg.hpPerEat; }
+      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat;
+  }
 
-      // Swallow FX: the shard bursts into its own colour, sprayed INWARD toward
-      // the consumer (cand→consumer is -(dx,dy)), so it reads as sucked into the
-      // membrane rather than vanishing; the membrane bulges (feed pulse).
+  /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
+   *  it (deactivate), and spray a brief inward implosion.  The bubble renders the
+   *  shard as a shrinking ghost INSIDE its transparent membrane until the digest
+   *  timer finishes (updateBubbles), then grows.  `dx/dy` is consumer→shard. */
+  private beginDigest(consumer: GameEntity, shard: GameEntity, dx: number, dy: number) {
+      consumer.bubbleDigestTimer = BUBBLE_CONSTANTS.DIGEST_DURATION;
+      consumer.bubbleDigestColor = shard.color || '#a8a29e';
+      consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
+      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
+      const inward = Math.atan2(-dy, -dx); // shard → bubble
+      this.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
+          spreadAngle: inward, spreadCone: 0.8,
+          speedMin: 2.5, speedMax: 6, sizeMin: 1, sizeMax: 2.4,
+          lifetimeMin: 0.1, lifetimeMax: 0.26,
+      });
+      shard.active = false; // swallowed (no score/regen — it's eaten, not destroyed)
+  }
+
+  /** Instant tile eat (the future dragon): grow + route the tile through the
+   *  death/flow-field patch + an inward implosion.  `dx/dy` is consumer→tile. */
+  private consumeTile(consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
+      this.growConsumer(consumer, cfg);
       const inward = Math.atan2(-dy, -dx);
-      this.spawnParticles(cand.position, 9, cand.color || '#a8a29e', {
+      this.spawnParticles(tile.position, 9, tile.color || '#a8a29e', {
           spreadAngle: inward, spreadCone: 0.9,
           speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,
           lifetimeMin: 0.12, lifetimeMax: 0.3,
       });
       consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
-
-      // Retire the candidate.  Static tiles go through the full death path so
-      // the FlowFieldGrid patch + regen bookkeeping fire; mobile shards just
-      // deactivate (cheap, no score/regen — they're eaten, not destroyed).
-      if (cand.mass === Infinity) {
-          this.physics.removeStaticEntity(cand);
-          this.flowField.onTileDestroyed(cand.position.x, cand.position.y);
-      }
-      cand.active = false;
+      this.physics.removeStaticEntity(tile);
+      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
+      tile.active = false;
   }
 
   // ─── Kamikaze blast → player (direct, instant) ─────────────────────────

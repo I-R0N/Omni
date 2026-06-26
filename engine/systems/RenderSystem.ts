@@ -3975,13 +3975,21 @@ export class RenderSystem {
           }
           const ph = entity.glowPhase;
           const provoked = entity.provoked === true;
+          const latched = entity.attachedToId !== undefined;       // clinging to a hull
+          const digesting = (entity.bubbleDigestTimer ?? 0) > 0;   // holding a shard inside
+          const engaged = provoked || digesting;                   // actively doing something
           const baseCol = provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED : (entity.color || '#67e8f9');
           const [br, bg, bb] = hexToRgb(baseCol);
-          const wob = provoked ? 0.16 : 0.10;  // membrane wobble amplitude
-          const spd = provoked ? 6 : 2.4;       // wobble + pulse speed
-          // Calm bubbles render faint (easy to miss); provoked ones are full
-          // opacity.  A hit-flash adds on top regardless so a shot still reads.
-          const vis = provoked ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
+          const wob = engaged ? 0.16 : 0.10;  // membrane wobble amplitude
+          const spd = engaged ? 5.5 : 2.4;    // wobble + pulse speed
+          // Calm bubbles render faint (easy to miss); an engaged one (provoked or
+          // feeding) is full opacity.  A hit-flash adds on top so a shot reads.
+          const vis = engaged ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
+          // Squash-cling: while latched the membrane flattens against the hull.
+          // updateBubbles points rotation at the target, so local +x is the
+          // contact normal — flatten x, spread y (the "splatted goo" read).
+          const squash = latched ? 0.34 : 0;
+          const sxx = 1 - squash, syy = 1 + squash * 0.7;
 
           // Wobbling membrane outline (12 verts, two-frequency radius noise).
           ctx.beginPath();
@@ -3989,7 +3997,7 @@ export class RenderSystem {
           for (let i = 0; i < N; i++) {
               const a = (i / N) * Math.PI * 2;
               const rr = rb * (1 + wob * (Math.sin(nowSec * spd + ph + i * 1.7) * 0.6 + Math.sin(nowSec * spd * 0.6 + i) * 0.4));
-              const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+              const x = Math.cos(a) * rr * sxx, y = Math.sin(a) * rr * syy;
               if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
           }
           ctx.closePath();
@@ -4003,17 +4011,56 @@ export class RenderSystem {
           ctx.lineWidth = 1.5;
           ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 * vis + flashB)})`;
           ctx.stroke();
-          // Inner nucleus — a small denser blob that pulses.
-          const nuc = rb * (0.30 + 0.05 * Math.sin(nowSec * spd + ph));
-          ctx.beginPath();
-          ctx.arc(0, 0, nuc, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${br},${bg},${bb},${0.55 * vis})`;
-          ctx.fill();
+
+          // Held meal (digesting): a shrinking ghost of the swallowed shard in
+          // its own colour, sitting INSIDE the transparent membrane — the eat
+          // read.  Replaces the idle nucleus while feeding.
+          if (digesting) {
+              const dp = entity.bubbleDigestTimer! / BUBBLE_CONSTANTS.DIGEST_DURATION; // 1 → 0
+              const ir = Math.min((entity.bubbleDigestSize0 ?? rb) * 0.5, rb * 0.6) * (0.32 + 0.68 * dp);
+              const [dr, dg, dbb] = hexToRgb(entity.bubbleDigestColor || '#a8a29e');
+              ctx.beginPath();
+              const M = 9;
+              for (let i = 0; i < M; i++) {
+                  const a = (i / M) * Math.PI * 2;
+                  const rr = ir * (1 + 0.15 * Math.sin(nowSec * 6 + ph + i * 1.3));
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              ctx.closePath();
+              ctx.fillStyle = `rgba(${dr},${dg},${dbb},${0.25 + 0.6 * dp})`; // fades as it dissolves
+              ctx.fill();
+          } else {
+              // Inner nucleus — a small denser blob that pulses.
+              const nuc = rb * (0.30 + 0.05 * Math.sin(nowSec * spd + ph));
+              ctx.beginPath();
+              ctx.arc(0, 0, nuc, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(${br},${bg},${bb},${0.55 * vis})`;
+              ctx.fill();
+          }
           // Specular highlight (upper-left), brighter on a hit.
           ctx.beginPath();
           ctx.arc(-rb * 0.32, -rb * 0.34, rb * 0.16, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.5 * vis + flashB)})`;
           ctx.fill();
+
+          // EMP crackle (player latch only): amber zig-zags arcing off the
+          // contact face (+x) into the hull, selling the weapon/shield disable.
+          if (latched && entity.attachedToId === 'player') {
+              ctx.lineWidth = 1.4;
+              for (let k = 0; k < 3; k++) {
+                  ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * Math.random()})`;
+                  ctx.beginPath();
+                  let ax = rb * sxx * 0.7, ay = (Math.random() - 0.5) * rb * 0.8;
+                  ctx.moveTo(ax, ay);
+                  for (let s = 0; s < 3; s++) {
+                      ax += rb * 0.5 * (0.6 + Math.random() * 0.6);
+                      ay += (Math.random() - 0.5) * rb * 0.7;
+                      ctx.lineTo(ax, ay);
+                  }
+                  ctx.stroke();
+              }
+          }
           return;
       }
 

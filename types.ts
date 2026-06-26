@@ -537,6 +537,15 @@ export interface GameEntity {
   // Feed pulse: stamped when a bubble swallows a shard; the membrane briefly
   // bulges (RenderSystem) while it ticks down in GameEngine.updateBubbles.
   bubbleFeedTimer?: number;
+  // Digest (Stage 5): a bubble holding a shard inside it.  On membrane contact
+  // the shard is swallowed (deactivated) and its look snapshotted here; the
+  // bubble renders a shrinking ghost of it INSIDE the transparent membrane while
+  // the timer runs, then grows.  Mirrors the latch (a held target processed over
+  // a timer) — the bubble just can't engulf the too-big player/enemy, so that
+  // path clings + EMPs instead.  Ticked in GameEngine.updateBubbles.
+  bubbleDigestTimer?: number;
+  bubbleDigestColor?: string;
+  bubbleDigestSize0?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

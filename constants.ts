@@ -3128,6 +3128,8 @@ export const BUBBLE_CONSTANTS = {
                           // to miss) — provoked bubbles render at full opacity
                           // (a hit-flash still cuts through so shots read)
   FEED_PULSE: 0.22,       // seconds the membrane bulges after swallowing a shard
+  DIGEST_DURATION: 0.95,  // seconds a swallowed shard takes to dissolve inside
+                          // the bubble (slow, readable) — one meal at a time
   // Ambient population: bubbles are always-present fauna, not wave enemies.
   // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
   // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below
