@@ -1392,12 +1392,12 @@ export class RenderSystem {
         }
 
         // Off-screen indicator chevrons — for enemies and non-drop POIs.  Gnats
-        // (diesOnContact, Swarm) are EXCLUDED: a cloud of them would crowd the
-        // screen with chevrons bigger than the gnats themselves, and they seek
-        // the player anyway (so they arrive on their own); the minimap still
+        // (diesOnContact, Swarm) and bubbles (ambient fauna) are EXCLUDED: a
+        // cloud of them would crowd the screen with chevrons, and they aren't
+        // wave threats the player needs steering toward; the minimap still
         // shows them for finding stragglers.
-        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
-                || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true && entity.enemyShape !== 'bubble')
+                || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
             // Enemies are range-UNLIMITED here (live count is capped by the
             // wave concurrency cap): the maps are big and the chevrons are
             // how the player finds the stragglers.  renderIndicators fades
