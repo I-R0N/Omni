@@ -3975,17 +3975,21 @@ export class RenderSystem {
           }
           const ph = entity.glowPhase;
           const provoked = entity.provoked === true;
+          const sick = (entity.bubbleSickTimer ?? 0) > 0;          // queasy → green
           const latched = entity.attachedToId !== undefined;       // clinging to a hull
           const digesting = (entity.bubbleDigestTimer ?? 0) > 0;   // holding a shard inside
-          const baseCol = provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED : (entity.color || '#67e8f9');
+          const baseCol = sick ? BUBBLE_CONSTANTS.SICK_COLOR
+                        : provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED
+                        : (entity.color || '#67e8f9');
           const [br, bg, bb] = hexToRgb(baseCol);
-          // Brightness / liveliness track AGGRO only (provoked) — feeding does
-          // NOT change the membrane brightness (the held meal reads it instead).
-          const wob = provoked ? 0.16 : 0.10;  // membrane wobble amplitude
-          const spd = provoked ? 5.5 : 2.4;    // wobble + pulse speed
-          // Calm bubbles render faint (easy to miss); provoked ones full opacity.
+          // Brightness / liveliness track AGGRO + sickness — feeding does NOT
+          // change the membrane brightness (the held meal reads it instead).
+          // Sick = a slow queasy throb; provoked = fast; calm = gentle.
+          const wob = sick ? 0.14 : provoked ? 0.16 : 0.10; // membrane wobble amplitude
+          const spd = sick ? 3.0 : provoked ? 5.5 : 2.4;    // wobble + pulse speed
+          // Calm bubbles render faint (easy to miss); provoked/sick full opacity.
           // A hit-flash adds on top so a shot reads.
-          const vis = provoked ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
+          const vis = (provoked || sick) ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
           // Squash-cling: while latched the membrane flattens against the hull.
           // updateBubbles points rotation at the target, so local +x is the
           // contact normal — flatten x, spread y (the "splatted goo" read).
@@ -4017,7 +4021,7 @@ export class RenderSystem {
           // its own colour, sitting INSIDE the transparent membrane — the eat
           // read.  Replaces the idle nucleus while feeding.
           if (digesting) {
-              const dp = entity.bubbleDigestTimer! / BUBBLE_CONSTANTS.DIGEST_DURATION; // 1 → 0
+              const dp = entity.bubbleDigestTimer! / (entity.bubbleDigestDuration ?? BUBBLE_CONSTANTS.DIGEST_DURATION); // 1 → 0
               const ir = Math.min((entity.bubbleDigestSize0 ?? rb) * 0.5, rb * 0.6) * (0.32 + 0.68 * dp);
               const [dr, dg, dbb] = hexToRgb(entity.bubbleDigestColor || '#a8a29e');
               ctx.beginPath();

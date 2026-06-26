@@ -3804,6 +3804,9 @@ export class GameEngine {
       const p = this.player;
       const enemies = this.entityIndex.enemies;
       const B = BUBBLE_CONSTANTS;
+      const baseSize = ENEMY_VARIANTS[EnemySubtype.BUBBLE].size;
+      // Terrain-slam window (player smacked a tile/asteroid fast) ticks down here.
+      if (p.terrainSlamTimer) p.terrainSlamTimer = Math.max(0, p.terrainSlamTimer - dt);
       let ctx: WaveSpawnContext | null = null;
 
       for (let i = 0; i < enemies.length; i++) {
@@ -3811,10 +3814,11 @@ export class GameEngine {
           if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
           const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
           if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
+          if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
+          const sick = (e.bubbleSickTimer ?? 0) > 0;
 
-          // ── Digesting a held shard: tick it down, then grow (the eat). The
-          // shrinking ghost is drawn inside the membrane by RenderSystem.  The
-          // bubble keeps moving/behaving normally while it digests. ──
+          // ── Digesting a held shard: tick down, then grow + heal (the eat). The
+          // shrinking ghost is drawn inside the membrane by RenderSystem. ──
           if ((e.bubbleDigestTimer ?? 0) > 0) {
               e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
               if (Math.random() < 0.25) {
@@ -3824,15 +3828,19 @@ export class GameEngine {
                   });
               }
               if (e.bubbleDigestTimer <= 0) {
-                  this.growConsumer(e, cfg.consume!);
-                  e.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE; // final gulp bulge
+                  // Recover the richness from the stored per-shard duration.
+                  const rich = (e.bubbleDigestDuration ?? B.DIGEST_DURATION) / B.DIGEST_DURATION;
+                  this.growConsumer(e, cfg.consume!, rich);
+                  e.bubbleFeedTimer = B.FEED_PULSE; // final gulp bulge
                   e.bubbleDigestTimer = 0;
+                  e.bubbleDigestDuration = undefined;
                   e.bubbleDigestColor = undefined;
                   e.bubbleDigestSize0 = undefined;
               }
           }
 
-          // ── Latched: drain (EMP the player), tick the clinging timer, release ──
+          // ── Latched: EMP + size-scaled drain; falls off (→ sick) on the timer,
+          // a projectile hit, or a player terrain slam.  No longer dies. ──
           if (e.attachedToId !== undefined) {
               const victim = this.resolveAggroTarget(e.attachedToId);
               const onPlayer = e.attachedToId === 'player';
@@ -3840,21 +3848,20 @@ export class GameEngine {
               e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
               if (victim && !victim.isExploding) {
                   if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                  victim.health -= B.LATCH_DPS * dt;
+                  const drain = B.LATCH_DPS * (Math.max(e.size.x, e.size.y) / baseSize); // bigger bubble bites harder
+                  victim.health -= drain * dt;
                   if (victim.health <= 0 && !victim.isExploding) this.handleEntityDeath(victim);
               }
               e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
-              if (e.bubbleLatchTimer <= 0 || !victim || victim.isExploding) {
-                  e.attachedToId = undefined;
-                  if (onPlayer) {
-                      this.popBubble(e); // spent its EMP charge on the player
-                  } else {
-                      e.aggroTargetId = undefined; // done chewing → re-evaluate / calm
-                      e.provoked = false;
-                  }
+              const shaken = e.bubbleKnockFree === true || (onPlayer && (p.terrainSlamTimer ?? 0) > 0);
+              if (e.bubbleLatchTimer <= 0 || shaken || !victim || victim.isExploding) {
+                  e.bubbleKnockFree = undefined;
+                  this.detachLatch(e); // fall off + go sick + lose aggro (no death)
               }
               continue;
           }
+
+          if (sick) continue; // sluggish + can't hunt/latch/breed (AISystem drifts it)
 
           // ── Provoked + in contact with the aggro target → latch on ──
           const target = e.aggroTargetId ? this.resolveAggroTarget(e.aggroTargetId) : (e.provoked ? p : null);
@@ -3883,8 +3890,9 @@ export class GameEngine {
           }
 
           // ── Passive + fat enough → split into two base-size bubbles ──
+          // (not while digesting a meal).
           const mult = cfg.multiply;
-          if (mult && Math.max(e.size.x, e.size.y) >= mult.atSize) {
+          if (mult && (e.bubbleDigestTimer ?? 0) <= 0 && Math.max(e.size.x, e.size.y) >= mult.atSize) {
               let pop = 0;
               for (let k = 0; k < enemies.length; k++) {
                   const o = enemies[k];
@@ -3921,14 +3929,49 @@ export class GameEngine {
       return null;
   }
 
-  /** Pop a spent bubble: a translucent splash + deactivate.  No score/drops —
-   *  it released its EMP and dissolved, it wasn't shot down. */
-  private popBubble(e: GameEntity) {
-      this.spawnParticles(e.position, 14, e.color || '#67e8f9', {
-          speedMin: 3, speedMax: 9, sizeMin: 1.5, sizeMax: 3.5,
-          lifetimeMin: 0.25, lifetimeMax: 0.6,
+  /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
+   *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
+  private detachLatch(e: GameEntity) {
+      e.attachedToId = undefined;
+      e.attachOffset = undefined;
+      e.bubbleLatchTimer = 0;
+      e.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
+      e.aggroTargetId = undefined;
+      e.provoked = false; // calm down after the bite
+      this.spawnParticles(e.position, 12, BUBBLE_CONSTANTS.SICK_COLOR, {
+          speedMin: 2, speedMax: 7, sizeMin: 1.5, sizeMax: 3.2,
+          lifetimeMin: 0.2, lifetimeMax: 0.55,
       });
-      e.active = false;
+  }
+
+  /** Richness of a shard for mass/energy-conserved eating (shardRichness):
+   *  denser/bigger shards score higher → longer digest + more growth/health.
+   *  Clamped to BUBBLE_CONSTANTS.RICH_MIN..RICH_MAX. */
+  private shardRichness(shard: GameEntity): number {
+      const sizeR = Math.max(shard.size.x, shard.size.y) / 26; // ≈ a baseline shard
+      let dens = 1;
+      switch (shard.shardVariant) {
+          case 'metal-shard':   dens = 1.7;  break;
+          case 'rock-shard':    dens = 1.35; break;
+          case 'glass-shard':   dens = 0.9;  break;
+          case 'plastic-shard': dens = 0.9;  break;
+          case 'nebula-shard':  dens = 0.8;  break;
+      }
+      return Math.max(BUBBLE_CONSTANTS.RICH_MIN, Math.min(BUBBLE_CONSTANTS.RICH_MAX, sizeR * dens));
+    }
+
+  /** Toxic shards make the bubble sick on eating: plastic, or a GREEN nebula
+   *  shard (green-dominant blended colour). */
+  private isToxicShard(shard: GameEntity): boolean {
+      if (shard.shardVariant === 'plastic-shard') return true;
+      if (shard.shardVariant === 'nebula-shard') {
+          const hex = shard.nebulaBlendedHex || shard.color || '';
+          if (hex.length >= 7) {
+              const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+              return g > r * 1.1 && g > b * 1.1 && g > 90; // green-dominant
+          }
+      }
+      return false;
   }
 
   // ─── Ambient bubble population (Stage 5) ───────────────────────────────
@@ -4066,9 +4109,10 @@ export class GameEngine {
           const consumer = enemies[c];
           const cfg = consumer.consume;
           if (!cfg || !consumer.active || consumer.isExploding) continue;
-          // One meal at a time: a bubble busy digesting (or clinging to a
-          // latch target) doesn't pull or capture more.
-          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined) continue;
+          // Only a calm, idle bubble feeds: a hunting (provoked), latched,
+          // digesting, or SICK bubble doesn't pull or capture shards.
+          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined
+              || consumer.provoked || (consumer.bubbleSickTimer ?? 0) > 0) continue;
           const rangeSq = cfg.range * cfg.range;
           const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
           for (let k = 0; k < shards.length; k++) {
@@ -4102,28 +4146,39 @@ export class GameEngine {
       }
   }
 
-  /** Grow a consumer by one eat (size + optional hp/mass), capped at maxSize.
-   *  Shared by the shard-digest finish (updateBubbles) and the instant tile eat. */
-  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig) {
+  /** Grow a consumer by one eat (size + maxHealth + heal + optional mass),
+   *  scaled by `scale` (the shard's richness — mass/energy conserved), capped at
+   *  maxSize.  Shared by the shard-digest finish + the instant tile eat. */
+  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig, scale: number = 1) {
       const cur = Math.max(consumer.size.x, consumer.size.y);
-      if (cur >= cfg.maxSize) return;
-      const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat);
-      const scale = grown / (cur || 1);
-      consumer.size.x *= scale;
-      consumer.size.y *= scale;
-      if (cfg.hpPerEat) { consumer.health += cfg.hpPerEat; consumer.maxHealth += cfg.hpPerEat; }
-      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat;
+      if (cur < cfg.maxSize) {
+          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat * scale);
+          const s = grown / (cur || 1);
+          consumer.size.x *= s;
+          consumer.size.y *= s;
+      }
+      // Energy conserved: a denser meal raises maxHealth more AND heals more.
+      if (cfg.hpPerEat) consumer.maxHealth += cfg.hpPerEat * scale;
+      consumer.health = Math.min(consumer.maxHealth, consumer.health + BUBBLE_CONSTANTS.HEAL_PER_RICH * scale);
+      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat * scale;
   }
 
   /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
-   *  it (deactivate), and spray a brief inward implosion.  The bubble renders the
-   *  shard as a shrinking ghost INSIDE its transparent membrane until the digest
-   *  timer finishes (updateBubbles), then grows.  `dx/dy` is consumer→shard. */
+   *  it (deactivate), and spray a brief inward implosion.  Digest TIME scales
+   *  with the shard's richness (denser = slower), stored on the bubble so the
+   *  finish (updateBubbles) recovers the same richness for the heal/grow.  A
+   *  TOXIC shard (plastic / green-nebula) also makes the bubble sick.  The bubble
+   *  renders the shard as a shrinking ghost INSIDE its membrane until done.
+   *  `dx/dy` is consumer→shard. */
   private beginDigest(consumer: GameEntity, shard: GameEntity, dx: number, dy: number) {
-      consumer.bubbleDigestTimer = BUBBLE_CONSTANTS.DIGEST_DURATION;
+      const rich = this.shardRichness(shard);
+      const dur = BUBBLE_CONSTANTS.DIGEST_DURATION * rich;
+      consumer.bubbleDigestTimer = dur;
+      consumer.bubbleDigestDuration = dur;
       consumer.bubbleDigestColor = shard.color || '#a8a29e';
       consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
       consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
+      if (this.isToxicShard(shard)) consumer.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
       const inward = Math.atan2(-dy, -dx); // shard → bubble
       this.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
           spreadAngle: inward, spreadCone: 0.8,

@@ -335,24 +335,32 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`AISystem.updateBubble`) rides the asteroid flow field
   (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
-  via `GameEngine.updateConsumers`); once grown to `multiply.atSize` it SPLITS
-  into two base-size bubbles (`updateBubbles`, capped at
-  `multiply.maxPopulation`).  It's a TRUE THIRD PARTY (`thirdParty:true`):
-  passive until ATTACKED — by the player OR another enemy.  Enemy fire can hit
-  it (the PhysicsSystem friendly-fire filter is bypassed for `thirdParty`
-  targets), and any damaging hit stamps `aggroTargetId` to the attacker
-  (`proj.ownerId`, or the AoE ring's `ownerId`) — so it retaliates against
-  whoever last hit it, the player as `'player'` or an enemy by id, retargeting
-  on each new hit (`AISystem.resolveBubbleTarget`; when the attacker dies it
-  calms back to passive).  Once provoked it homes its target and, on contact,
-  LATCHES (`attachedToId` → `updateAttachments` snaps it on) for
-  `BUBBLE_CONSTANTS.LATCH_DURATION`, draining `LATCH_DPS`; on the PLAYER it also
-  EMPs weapon + shield (`'disable'` status, re-applied each step at `EMP_REFRESH`
-  so the lockout ends with the latch) and then pops (`popBubble` — spent its
-  charge; shoot it off for the normal kill/drops); on an ENEMY it just chews and
-  releases (survives to re-engage).  Provoked bubbles stop breeding.  Higher HP
-  (10) so an enemy shot chips rather than one-shots it, leaving room to
-  retaliate.  Locomotion: SLOW while passive (drift / shard-chase); only when
+  via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
+  (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
+  scaled by size) take proportionally LONGER to digest
+  (`DIGEST_DURATION × richness`) and give more growth + maxHealth + heal
+  (`growConsumer(…, rich)`) — so a bubble heals from feeding and slowly tanks up.
+  PLASTIC and GREEN-nebula shards are TOXIC (`isToxicShard`): eating one makes
+  the bubble SICK (`bubbleSickTimer`) — it turns green, goes sluggish
+  (`SICK_SPEED_MULT`), and can't eat until it recovers.  It starts SMALL
+  (half-size) and grows slowly; once grown to `multiply.atSize` it SPLITS into
+  two base-size bubbles (`updateBubbles`, capped at `multiply.maxPopulation`).
+  It's a TRUE THIRD PARTY (`thirdParty:true`): passive until ATTACKED — by the
+  player OR another enemy.  Enemy fire can hit it (the PhysicsSystem
+  friendly-fire filter is bypassed for `thirdParty` targets), and any damaging
+  hit stamps `aggroTargetId` to the attacker (`proj.ownerId`, or the AoE ring's
+  `ownerId`) — so it retaliates against whoever last hit it, retargeting on each
+  new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
+  past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
+  target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
+  `LATCH_DURATION`, draining `LATCH_DPS × size/baseSize` (a bigger bubble bites
+  harder); on the PLAYER it also EMPs weapon + shield (`'disable'`, re-applied at
+  `EMP_REFRESH`).  The latch breaks — and the bubble falls off + goes SICK
+  (`detachLatch`, it NO LONGER dies) — on the timer, on ANY projectile hit
+  (`bubbleKnockFree`, PhysicsSystem), or when the player SLAMS a tile/asteroid at
+  ≥ `KNOCK_SPEED` (`terrainSlamTimer`).  Provoked bubbles stop breeding/eating.
+  Tanky (`health` 24, +maxHealth per eat) so it takes real damage to kill.
+  Locomotion: SLOW while passive (drift / shard-chase); only when
   HUNTING (provoked/aggro) does it move fast — a high sustained cap
   (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
   run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does

@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -2118,6 +2118,16 @@ export class PhysicsSystem {
 
       if (distSq > (rA + rB + 10)**2) return;
 
+      // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
+      // a short window GameEngine.updateBubbles reads to shake a latched bubble
+      // free.  STRUCTURE covers static tiles + mobile shards.
+      if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
+          const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
+          if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
+              ply.terrainSlamTimer = 0.12;
+          }
+      }
+
       // SAT works on absolute vertex positions.  If A and B sit on
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
       // a's frame for the duration of this check so vertex math stays
@@ -2773,6 +2783,9 @@ export class PhysicsSystem {
                   // attacker (player or the firing enemy), retargeting on each
                   // new hit.
                   if (target.thirdParty && proj.ownerId) target.aggroTargetId = proj.ownerId;
+                  // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
+                  // GameEngine.updateBubbles.
+                  if (target.attachedToId !== undefined) target.bubbleKnockFree = true;
               }
           }
 

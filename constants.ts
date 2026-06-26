@@ -3074,12 +3074,15 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // but provoking the field stops the breeding and turns it on you.  RAMMING
   // role (rush when provoked).  Cyan-violet membrane; no engine flame.
   [EnemySubtype.BUBBLE]: {
-    color: '#67e8f9', size: 30, health: 10,
+    color: '#67e8f9', size: 15, health: 24,
     maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
-    consume: { eats: 'shard', range: 150, growthPerEat: 6, maxSize: 58, hpPerEat: 1, pull: 14 },
-    multiply: { atSize: 52, maxPopulation: 14 },
+    // growthPerEat / hpPerEat / the digest time are all SCALED per-eat by the
+    // shard's richness (mass/energy conserved — see shardRichness): denser/
+    // stronger shards take longer to digest and give more growth + health.
+    consume: { eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14 },
+    multiply: { atSize: 50, maxPopulation: 14 },
     ambient: true, thirdParty: true,
   },
 };
@@ -3117,12 +3120,32 @@ export const DISABLE = {
 export const BUBBLE_CONSTANTS = {
   // Latch: when a provoked bubble touches the player it attaches and EMPs.
   CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
-  LATCH_DURATION: 2.6,    // seconds the bubble clings (≈ the disable window)
-  LATCH_DPS: 4,           // health/sec drained from the player while latched
+  LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
+  LATCH_DPS: 3,           // BASE health/sec drained, scaled UP by the bubble's
+                          // size (bigger/older bubble = harder bite — see
+                          // updateBubbles): drain = LATCH_DPS × size / baseSize
   // EMP refresh window applied each latched step.  Kept short so the disable
-  // ends ~immediately when the bubble pops/detaches (the latch IS the lockout —
-  // no long tail past it).  Re-applied every step, so it never lapses mid-latch.
+  // ends ~immediately when the bubble detaches (the latch IS the lockout — no
+  // long tail past it).  Re-applied every step, so it never lapses mid-latch.
   EMP_REFRESH: 0.4,       // seconds
+  // Knock-off: a latched bubble falls off (→ sick) on the LATCH_DURATION timer,
+  // OR early if it's shot (any projectile hit) OR if the player slams a tile /
+  // asteroid at ≥ KNOCK_SPEED (a deliberate shake-it-off counter).
+  KNOCK_SPEED: 6,         // player impact speed that shakes a latched bubble free
+  // Sickness: after breaking a latch, OR after eating a TOXIC shard (plastic /
+  // green-nebula), the bubble turns green + goes sluggish and can't eat for a
+  // while — and loses aggro.  This replaces the old latch-death.
+  SICK_DURATION: 2.8,     // seconds
+  SICK_SPEED_MULT: 0.3,   // movement-speed multiplier while sick (sluggish)
+  SICK_COLOR: '#84cc16',  // queasy lime — membrane tint while sick
+  // Aggro leash: a hunting bubble gives up if its target gets this far away.
+  AGGRO_LOSE_RANGE: 950,
+  // Mass/energy-conserved eating: each eat's digest time, growth and health are
+  // scaled by the shard's RICHNESS (shardRichness), clamped to this band.  A
+  // dense metal shard (high) takes longer + feeds more than a light glass one.
+  RICH_MIN: 0.6,
+  RICH_MAX: 2.0,
+  HEAL_PER_RICH: 6,       // current-HP healed per eat (× richness; capped at maxHP)
   // Multiply: a passive bubble that has grown to its `multiply.atSize` splits.
   SPLIT_SPEED: 3.5,       // outward speed imparted to parent + child on a split
   COLOR_PROVOKED: '#fb7185', // angry membrane tint once provoked (render)
@@ -3130,8 +3153,8 @@ export const BUBBLE_CONSTANTS = {
                           // to miss) — provoked bubbles render at full opacity
                           // (a hit-flash still cuts through so shots read)
   FEED_PULSE: 0.22,       // seconds the membrane bulges after swallowing a shard
-  DIGEST_DURATION: 5.5,   // seconds a swallowed shard takes to dissolve inside
-                          // the bubble (deliberately slow) — one meal at a time
+  DIGEST_DURATION: 5.5,   // BASE seconds to digest a shard (× richness) — slow,
+                          // one meal at a time
   // Ambient population: bubbles are always-present fauna, not wave enemies.
   // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
   // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below

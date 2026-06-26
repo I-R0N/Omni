@@ -1,7 +1,7 @@
 
 
 import { GameEntity, EnemySubtype, EnemyRole, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove } from '../../constants';
+import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -427,7 +427,17 @@ export class AISystem {
       const stunned = (enemy.hitStun ?? 0) > 0;
       const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
 
-      const aggro = enemy.provoked ? this.resolveBubbleTarget(enemy, player, enemies) : null;
+      const sick = (enemy.bubbleSickTimer ?? 0) > 0; // queasy: sluggish, no hunt
+      let aggro = (!sick && enemy.provoked) ? this.resolveBubbleTarget(enemy, player, enemies) : null;
+      // Aggro leash: give up on a target that has fled out of the local area.
+      if (aggro) {
+          const lx = wrapDeltaX(enemy.position.x, aggro.position.x);
+          const ly = wrapDeltaY(enemy.position.y, aggro.position.y);
+          if (lx * lx + ly * ly > BUBBLE_CONSTANTS.AGGRO_LOSE_RANGE * BUBBLE_CONSTANTS.AGGRO_LOSE_RANGE) {
+              this.clearBubbleAggro(enemy);
+              aggro = null;
+          }
+      }
 
       // Burst/coast cadence — ONLY while hunting (aggro).  A provoked bubble
       // coasts fast and periodically LUNGES to run a target down; passive
@@ -448,6 +458,15 @@ export class AISystem {
 
       if (stunned) {
           // A hit reels it; the knockback carries — no thrust this step.
+      } else if (sick) {
+          // ── Sick: sluggish drift only (can't hunt or chase while queasy) ──
+          const ds = B.DRIFT_SPEED * BUBBLE_CONSTANTS.SICK_SPEED_MULT;
+          const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+          const tx = flow.x * ds, ty = flow.y * ds;
+          const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
+          enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
+          enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
+          this.capSpeed(enemy, ds);
       } else if (aggro) {
           // ── Hunt the aggro target: fast seek + lunges so it can catch it ──
           const dx = wrapDeltaX(enemy.position.x, aggro.position.x);

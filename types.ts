@@ -543,9 +543,23 @@ export interface GameEntity {
   // the timer runs, then grows.  Mirrors the latch (a held target processed over
   // a timer) — the bubble just can't engulf the too-big player/enemy, so that
   // path clings + EMPs instead.  Ticked in GameEngine.updateBubbles.
+  // `bubbleDigestDuration` is the per-shard digest time (= DIGEST_DURATION ×
+  // richness) — stored for the render progress ratio AND to recover the richness
+  // at finish (heal/grow scale).
   bubbleDigestTimer?: number;
+  bubbleDigestDuration?: number;
   bubbleDigestColor?: string;
   bubbleDigestSize0?: number;
+  // Sickness (Stage 5): set after breaking a latch or eating a toxic shard —
+  // the bubble turns green, moves sluggishly, and can't eat until it ticks out
+  // (GameEngine.updateBubbles).  Loses aggro on entry.
+  bubbleSickTimer?: number;
+  // Set on a LATCHED bubble when a projectile hits it (PhysicsSystem) so
+  // updateBubbles shakes it loose next tick.  Consumed there.
+  bubbleKnockFree?: boolean;
+  // Stamped on the PLAYER when it slams a tile/asteroid at ≥ KNOCK_SPEED
+  // (PhysicsSystem); updateBubbles reads it to shake any latched bubble free.
+  terrainSlamTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble
