@@ -3076,7 +3076,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
-    consume: { eats: 'shard', range: 70, growthPerEat: 6, maxSize: 58, hpPerEat: 1 },
+    consume: { eats: 'shard', range: 150, growthPerEat: 6, maxSize: 58, hpPerEat: 1, pull: 14 },
     multiply: { atSize: 52, maxPopulation: 14 },
     ambient: true, thirdParty: true,
   },
@@ -3127,6 +3127,7 @@ export const BUBBLE_CONSTANTS = {
   CALM_VISIBILITY: 0.45,  // membrane alpha multiplier while passive (faint, easy
                           // to miss) — provoked bubbles render at full opacity
                           // (a hit-flash still cuts through so shots read)
+  FEED_PULSE: 0.22,       // seconds the membrane bulges after swallowing a shard
   // Ambient population: bubbles are always-present fauna, not wave enemies.
   // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
   // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below

@@ -3963,7 +3963,11 @@ export class RenderSystem {
       // body; once provoked the membrane flushes angry-red and wobbles faster.
       if (shape === 'bubble') {
           const flashB = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
-          const rb = Math.max(entity.size.x, entity.size.y) * 0.6 * (1 + Math.min(0.4, flashB * 2.2));
+          // Feed pulse: a brief outward membrane bulge right after a swallow
+          // (BUBBLE_CONSTANTS.FEED_PULSE), eased out as the timer decays.
+          const feed = (entity.bubbleFeedTimer ?? 0) > 0
+              ? (entity.bubbleFeedTimer! / BUBBLE_CONSTANTS.FEED_PULSE) * 0.18 : 0;
+          const rb = Math.max(entity.size.x, entity.size.y) * 0.6 * (1 + Math.min(0.4, flashB * 2.2) + feed);
           if (entity.glowPhase === undefined) {
               let h = 0; const id = entity.id;
               for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;

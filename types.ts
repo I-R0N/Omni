@@ -185,11 +185,16 @@ export interface EffectPayload {
 //             patch — the dragon
 export interface ConsumeConfig {
   eats: 'shard' | 'tile';
-  range: number;          // eat radius (world units, toroidal)
+  range: number;          // SENSE radius (world units, toroidal): within it a
+                          // mobile candidate is pulled (see `pull`); the actual
+                          // eat only fires on MEMBRANE CONTACT (radii overlap).
   growthPerEat: number;   // size (diameter) added per consumed entity
   maxSize: number;        // growth cap on size.x / size.y
   hpPerEat?: number;      // optional max-health gained per eat
   massPerEat?: number;    // optional mass gained per eat (Infinity-safe: skip)
+  pull?: number;          // optional inward tug (accel) on mobile candidates in
+                          // sense range — the suck-in before the swallow.  Tiles
+                          // (static) are never pulled.
 }
 
 // Live instance on the player (GameEntity.statusEffects).
@@ -529,6 +534,9 @@ export interface GameEntity {
   // down through a slow coast then a short fast dart, so a bubble normally
   // creeps but periodically lunges.
   bubbleBurstTimer?: number;
+  // Feed pulse: stamped when a bubble swallows a shard; the membrane briefly
+  // bulges (RenderSystem) while it ticks down in GameEngine.updateBubbles.
+  bubbleFeedTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

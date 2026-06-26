@@ -2450,7 +2450,7 @@ export class GameEngine {
     // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
     // attachedToId / consume (Stage 4/5/6).
     this.updateAttachments();
-    if (this.perfController.shouldRun('consume')) this.updateConsumers();
+    if (this.perfController.shouldRun('consume')) this.updateConsumers(dt);
 
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
@@ -3810,6 +3810,7 @@ export class GameEngine {
           const e = enemies[i];
           if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
           const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
+          if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
 
           // ── Latched: drain (EMP the player), tick the clinging timer, release ──
           if (e.attachedToId !== undefined) {
@@ -4025,14 +4026,16 @@ export class GameEngine {
 
   // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
   //
-  // For each consumer (an entity carrying a `consume` config — none today;
-  // wired by the bubble / dragon), absorb nearby consumable shards/tiles within
-  // range and grow the consumer (size + optional hp/mass), capped at
-  // `consume.maxSize`.  PerfController-gated ('consume'); torus-correct.  The
-  // ENTITY-COUNT cap that stops runaway MULTIPLICATION lives at the child-spawn
-  // site (enforceTypeCap, Stage 5) — this pass only caps a single consumer's
-  // GROWTH.
-  private updateConsumers() {
+  // For each consumer (an entity carrying a `consume` config — the bubble; the
+  // dragon later), two-phase feeding within the SENSE radius (`cfg.range`):
+  // mobile candidates outside membrane contact are PULLED inward (a suck-in tug,
+  // `cfg.pull`), and a candidate that has reached MEMBRANE CONTACT (radii
+  // overlap) is SWALLOWED — grow + animate (consumeEntity).  This replaces the
+  // old eat-on-sight-at-range so shards visibly stream in and pop on contact
+  // instead of vanishing from afar.  PerfController-gated ('consume');
+  // torus-correct.  Growth is capped at `cfg.maxSize`; the self-replication
+  // entity cap lives at the child-spawn site (updateBubbles, Stage 5).
+  private updateConsumers(dt: number) {
       if (!this.currentMap) return;
       const enemies = this.entityIndex.enemies;
       // Candidates: mobile shards (asteroids index) and/or static tiles.
@@ -4042,24 +4045,40 @@ export class GameEngine {
           const cfg = consumer.consume;
           if (!cfg || !consumer.active || consumer.isExploding) continue;
           const rangeSq = cfg.range * cfg.range;
+          const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
           for (let k = 0; k < shards.length; k++) {
               const cand = shards[k];
               if (!cand.active || cand.isExploding) continue;
               const wantTile = cfg.eats === 'tile';
               const isTile = cand.mass === Infinity;
               if (wantTile !== isTile) continue;
-              const dx = wrapDeltaX(consumer.position.x, cand.position.x);
+              const dx = wrapDeltaX(consumer.position.x, cand.position.x); // consumer→cand
               const dy = wrapDeltaY(consumer.position.y, cand.position.y);
-              if (dx * dx + dy * dy > rangeSq) continue;
-              this.consumeEntity(consumer, cand, cfg);
+              const d2 = dx * dx + dy * dy;
+              if (d2 > rangeSq) continue;
+              const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
+              const contact = consumerR + candR;
+              if (d2 <= contact * contact) {
+                  this.consumeEntity(consumer, cand, cfg, dx, dy); // swallow on contact
+              } else if (!isTile && cfg.pull) {
+                  // Suck-in: tug the mobile shard toward the membrane, stronger
+                  // the closer it is (so a near shard accelerates into the mouth).
+                  const d = Math.sqrt(d2) || 1;
+                  const prox = 1 - d / cfg.range;          // 0 at the rim → 1 at contact
+                  const a = cfg.pull * (0.3 + 0.7 * prox) * dt;
+                  cand.velocity.x -= (dx / d) * a;
+                  cand.velocity.y -= (dy / d) * a;
+              }
           }
       }
   }
 
-  /** Consume `cand` into `consumer`: grow the consumer (capped) and retire the
-   *  candidate.  Tiles route through the death/flow-field patch; mobile shards
-   *  deactivate directly.  Shared by the bubble (shards) + dragon (tiles). */
-  private consumeEntity(consumer: GameEntity, cand: GameEntity, cfg: ConsumeConfig) {
+  /** Consume `cand` into `consumer`: grow the consumer (capped), animate the
+   *  swallow, and retire the candidate.  Tiles route through the death/flow-field
+   *  patch; mobile shards deactivate directly.  Shared by the bubble (shards) +
+   *  dragon (tiles).  `dx/dy` is the consumer→candidate toroidal delta (for the
+   *  inward-implosion particle direction). */
+  private consumeEntity(consumer: GameEntity, cand: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
       const cur = Math.max(consumer.size.x, consumer.size.y);
       if (cur < cfg.maxSize) {
           const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat);
@@ -4069,6 +4088,18 @@ export class GameEngine {
           if (cfg.hpPerEat) { consumer.health += cfg.hpPerEat; consumer.maxHealth += cfg.hpPerEat; }
           if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat;
       }
+
+      // Swallow FX: the shard bursts into its own colour, sprayed INWARD toward
+      // the consumer (cand→consumer is -(dx,dy)), so it reads as sucked into the
+      // membrane rather than vanishing; the membrane bulges (feed pulse).
+      const inward = Math.atan2(-dy, -dx);
+      this.spawnParticles(cand.position, 9, cand.color || '#a8a29e', {
+          spreadAngle: inward, spreadCone: 0.9,
+          speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,
+          lifetimeMin: 0.12, lifetimeMax: 0.3,
+      });
+      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
+
       // Retire the candidate.  Static tiles go through the full death path so
       // the FlowFieldGrid patch + regen bookkeeping fire; mobile shards just
       // deactivate (cheap, no score/regen — they're eaten, not destroyed).

@@ -750,9 +750,14 @@ button in `UIOverlay.tsx`.
   `consume` task) grows an entity carrying a `consume` ConsumeConfig by
   eating nearby shards (`eats:'shard'` — the bubble) or tiles (`eats:'tile'`,
   routed through the tile-destroy + flow-field patch — the future dragon),
-  capped at `maxSize`; the entity-COUNT cap for self-replication is a live-
-  subtype census at the child-spawn site (`updateBubbles` for the bubble,
-  `updateNests` for nest brood — both pattern-match `enforceTypeCap`).
+  capped at `maxSize`.  Two-phase feeding inside the SENSE radius (`cfg.range`):
+  mobile candidates are PULLED inward (`cfg.pull` tug) and only SWALLOWED on
+  MEMBRANE CONTACT (radii overlap) — `consumeEntity` then sprays an inward
+  shard-colour implosion + a membrane feed-bulge (`bubbleFeedTimer`), so shards
+  stream in and pop on contact instead of vanishing from afar.  The entity-COUNT
+  cap for self-replication is a live-subtype census at the child-spawn site
+  (`updateBubbles` for the bubble, `updateNests` for nest brood — both
+  pattern-match `enforceTypeCap`).
   (3c) **Attach + disable** — `GameEntity.attachedToId` snaps an entity onto
   its target each frame (`updateAttachments`, over the enemies index); the
   `'disable'` status effect EMPs the target (see the status-framework note).
