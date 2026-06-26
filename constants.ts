@@ -689,12 +689,20 @@ export const AI_CONFIG = {
   //    contact (the consume pass) and resume drifting.
   //  - SEEK (provoked / shot): floaty pursuit of the player up to maxSpeed.
   BUBBLE: {
-    DRIFT_SPEED: 2.4,         // cruise speed while riding the flow (units/step cap)
+    DRIFT_SPEED: 2.2,         // cruise speed while riding the flow (units/step cap)
     DRIFT_CORRECTION: 1.4,    // lerp rate of velocity toward the flow target (×dt)
     SHARD_VISION: 280,        // range at which a passive bubble spots + chases a shard
     CHASE_SPEED_MULT: 1.0,    // speed cap while chasing a shard (× maxSpeed)
     SEEK_ACCEL_MULT: 1.0,     // accel toward player when provoked (× accel)
     PROVOKED_SPEED_MULT: 1.0, // speed cap when provoked (× maxSpeed)
+    // Burst/coast: a bubble normally creeps, then periodically LUNGES — a short
+    // fast dart that raises the speed cap + accel — across every regime (drift /
+    // chase / seek).  So it's slow to track but can suddenly close distance.
+    BURST_INTERVAL: 2.0,      // seconds of slow coast between bursts (+ up to VAR)
+    BURST_VAR: 1.4,
+    BURST_DURATION: 0.55,     // seconds a burst lasts
+    BURST_SPEED_MULT: 2.5,    // speed-cap multiplier during a burst
+    BURST_ACCEL_MULT: 2.4,    // accel multiplier during a burst
   },
 
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
@@ -3065,7 +3073,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // role (rush when provoked).  Cyan-violet membrane; no engine flame.
   [EnemySubtype.BUBBLE]: {
     color: '#67e8f9', size: 30, health: 10,
-    maxSpeed: 4.5, accel: 3.0, turnRate: 1.6,
+    maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
     consume: { eats: 'shard', range: 70, growthPerEat: 6, maxSize: 58, hpPerEat: 1 },
@@ -3116,6 +3124,9 @@ export const BUBBLE_CONSTANTS = {
   // Multiply: a passive bubble that has grown to its `multiply.atSize` splits.
   SPLIT_SPEED: 3.5,       // outward speed imparted to parent + child on a split
   COLOR_PROVOKED: '#fb7185', // angry membrane tint once provoked (render)
+  CALM_VISIBILITY: 0.45,  // membrane alpha multiplier while passive (faint, easy
+                          // to miss) — provoked bubbles render at full opacity
+                          // (a hit-flash still cuts through so shots read)
   // Ambient population: bubbles are always-present fauna, not wave enemies.
   // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
   // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below

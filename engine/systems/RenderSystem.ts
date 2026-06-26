@@ -3883,6 +3883,9 @@ export class RenderSystem {
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
       // Only render for Player and Enemies
       if ((entity.type !== EntityType.PLAYER && entity.type !== EntityType.ENEMY) || entity.maxHealth <= 0) return;
+      // Bubbles (ambient fauna) carry no health bar — keep them reading as
+      // neutral blobs, not tracked combatants.
+      if (entity.enemyShape === 'bubble') return;
 
       const { PLAYER_WIDTH, PLAYER_HEIGHT, ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
 
@@ -3972,6 +3975,9 @@ export class RenderSystem {
           const [br, bg, bb] = hexToRgb(baseCol);
           const wob = provoked ? 0.16 : 0.10;  // membrane wobble amplitude
           const spd = provoked ? 6 : 2.4;       // wobble + pulse speed
+          // Calm bubbles render faint (easy to miss); provoked ones are full
+          // opacity.  A hit-flash adds on top regardless so a shot still reads.
+          const vis = provoked ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
 
           // Wobbling membrane outline (12 verts, two-frequency radius noise).
           ctx.beginPath();
@@ -3985,24 +3991,24 @@ export class RenderSystem {
           ctx.closePath();
           // Translucent fill: faint core → brighter rim (a soap-film look).
           const grad = ctx.createRadialGradient(0, 0, rb * 0.2, 0, 0, rb);
-          grad.addColorStop(0, `rgba(${br},${bg},${bb},0.10)`);
-          grad.addColorStop(0.7, `rgba(${br},${bg},${bb},0.22)`);
-          grad.addColorStop(1, `rgba(${br},${bg},${bb},0.5)`);
+          grad.addColorStop(0, `rgba(${br},${bg},${bb},${0.10 * vis})`);
+          grad.addColorStop(0.7, `rgba(${br},${bg},${bb},${0.22 * vis})`);
+          grad.addColorStop(1, `rgba(${br},${bg},${bb},${0.5 * vis})`);
           ctx.fillStyle = grad;
           ctx.fill();
           ctx.lineWidth = 1.5;
-          ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 + flashB)})`;
+          ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 * vis + flashB)})`;
           ctx.stroke();
           // Inner nucleus — a small denser blob that pulses.
           const nuc = rb * (0.30 + 0.05 * Math.sin(nowSec * spd + ph));
           ctx.beginPath();
           ctx.arc(0, 0, nuc, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${br},${bg},${bb},0.55)`;
+          ctx.fillStyle = `rgba(${br},${bg},${bb},${0.55 * vis})`;
           ctx.fill();
           // Specular highlight (upper-left), brighter on a hit.
           ctx.beginPath();
           ctx.arc(-rb * 0.32, -rb * 0.34, rb * 0.16, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.5 + flashB)})`;
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.5 * vis + flashB)})`;
           ctx.fill();
           return;
       }

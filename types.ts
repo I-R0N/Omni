@@ -525,6 +525,10 @@ export interface GameEntity {
   // GameEngine.updateBubbles.  (Passive movement rides the asteroid flow field
   // / chases shards directly in AISystem.updateBubble — no stored heading.)
   bubbleLatchTimer?: number;
+  // Burst/coast cadence for bubble locomotion (AISystem.updateBubble): counts
+  // down through a slow coast then a short fast dart, so a bubble normally
+  // creeps but periodically lunges.
+  bubbleBurstTimer?: number;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble
