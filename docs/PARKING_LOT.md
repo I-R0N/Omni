@@ -185,3 +185,73 @@ spawn/despawn-with-VFX event, not off-map traversal. All new neighbor scans must
 
 **Suggested sequence:** turret → (AI behavior-dispatch refactor + wave-accounting flag)
 → swarm+nest → provoked/disable mechanics → bubble → dragon mini-boss.
+
+---
+
+## Damage-triggered health / shield bars (remove always-on bars)
+
+**Context:** Every player and enemy currently draws a persistent floating
+health bar (and the player a shield bar) every frame via
+`RenderSystem.renderHealthBar(entity, rx, ry)`. They're always on, even at full
+health and even on trivial one-shot enemies, which clutters the screen and
+reads as "tracked HUD" rather than world feedback. The goal: **stop drawing
+bars by default** and instead **flash a bar in only when the entity takes
+damage**, fading it back out shortly after — so a bar is a hit reaction, not a
+permanent label.
+
+The bubble already set the precedent for per-entity suppression
+(`renderHealthBar` early-returns on `enemyShape === 'bubble'`, plus gnats are
+implicitly fine since they're 1-HP). This generalizes that idea to everyone.
+
+**Already-built hooks to reuse:**
+- **`RenderSystem.renderHealthBar`** — single draw site for player + enemy bars;
+  gate its body on a visibility timer instead of always drawing.
+- **`hitFlash`** (and player **`shieldHitFlash`**) — already stamped on the
+  entity at most damage sites and decays each frame. The bar's appear-on-damage
+  trigger wants the *same* stamp sites but a *longer* linger than the brief
+  whiten flash, so add a dedicated `healthBarTimer` rather than overloading
+  `hitFlash` (whose short lifetime drives the scale-punch/whiten).
+- **`UI_CONSTANTS.HEALTH_BAR`** — already the home for widths/heights/offsets;
+  add `SHOW_DURATION` + `FADE_DURATION` here.
+- **Generalized shields** — `shield`/`maxShield` now live on any entity (Bulwark),
+  and shield absorption is entity-agnostic (PhysicsSystem + AoE). So the shield
+  bar should show for ANY shielded entity on a shield hit, not just the player.
+- **Player HUD** — `EngineStats.playerStats` already feeds a persistent
+  health/shield readout in `UIOverlay`, so the player's *floating* bar is
+  redundant; it can become on-hit juice only, or be dropped entirely for the
+  player (HUD is the canonical readout) while enemies keep the transient bar.
+
+**Proposed system:**
+1. Add `healthBarTimer?: number` to `GameEntity`. Stamp it to
+   `HEALTH_BAR.SHOW_DURATION` at every site that reduces `health` OR `shield`.
+2. Centralize the stamp: a one-line `markDamaged(entity)` helper (sets
+   `hitFlash` + `healthBarTimer` together) called from the damage paths —
+   PhysicsSystem projectile-damage path, the AoE shockwave loop
+   (`updateExplosionRings`), ram/crash damage, kamikaze blast, the corrosion /
+   bubble-latch drains, lightning. (These sites already set `hitFlash`
+   piecemeal; folding both into one helper is the minimal viable
+   centralization — a full `applyDamage(entity, amount, opts)` is a bigger
+   refactor and optional.)
+3. Tick `healthBarTimer` down each frame (a cheap pass, or decay inside
+   `renderHealthBar` using `dt`/`performance.now()` like other render timers).
+4. `renderHealthBar` draws only while `healthBarTimer > 0`, easing alpha over
+   the last `FADE_DURATION`. Draw the shield bar for any `maxShield > 0` entity
+   (drop the player-only gate). Keep the bubble / gnat suppression.
+
+**Considerations / edge cases:**
+- **Bosses / priority targets**: some enemies *should* keep a persistent bar.
+  Add an opt-in `alwaysShowHealthBar?: boolean` (or a per-archetype flag) so the
+  dragon / future bosses bypass the timer.
+- **Full-health never-hit** entities show nothing (desired) — the bar only ever
+  appears post-damage.
+- **Regen enemies** (planned trait): a bar refilling after the timer expired is
+  invisible; that's fine (the player only needs the readout during/after a
+  trade), but if it feels off, re-stamp the timer on regen ticks too.
+- **Player floating bar**: decide explicitly — remove it (rely on the HUD) or
+  keep it as a brief on-hit flash. The HUD already covers the persistent need.
+- **Perf**: this is a net *reduction* in draw calls (most entities draw no bar
+  most frames); the only new cost is a per-entity timer decrement.
+
+**Tuning knobs:** `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION` /
+`FADE_DURATION`; the existing width/height/offset entries; the optional
+`alwaysShowHealthBar` flag for bosses.
