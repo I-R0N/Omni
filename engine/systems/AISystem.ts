@@ -36,7 +36,7 @@ export class AISystem {
     dogfighter: (dt, enemy, player, flowField) => this.updateBasicDogfighter(dt, enemy, player, flowField),
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
     swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
-    bubble:     (dt, enemy, player, flowField, _enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards),
+    bubble:     (dt, enemy, player, flowField, enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards, enemies),
   };
 
   /**
@@ -410,12 +410,13 @@ export class AISystem {
    *  - CHASE (passive, a shard within SHARD_VISION): peel off the flow and seek
    *    the nearest eatable (finite-mass) shard; the consume pass eats it on
    *    contact and it resumes drifting.
-   *  - SEEK (provoked / shot — the sticky `provoked` flag): floaty pursuit of
-   *    the player up to maxSpeed.
+   *  - SEEK (provoked): floaty pursuit of its AGGRO TARGET — whoever last
+   *    attacked it (the player OR an enemy), resolved from `aggroTargetId`; a
+   *    true third party.  If that target is gone it calms back to passive.
    * While LATCHED (attachedToId set) movement is skipped — GameEngine.update-
    * Attachments owns the position.  Toroidal.
    */
-  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[]) {
+  private updateBubble(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[], enemies: GameEntity[]) {
       // Latched onto a target → the attach pass drives position; don't fight it.
       if (enemy.attachedToId !== undefined) return;
 
@@ -426,12 +427,13 @@ export class AISystem {
       const stunned = (enemy.hitStun ?? 0) > 0;
       const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
 
+      const aggro = enemy.provoked ? this.resolveBubbleTarget(enemy, player, enemies) : null;
       if (stunned) {
           // A hit reels it; the knockback carries — no thrust this step.
-      } else if (enemy.provoked) {
-          // ── Seek the player (floaty) ──
-          const dx = wrapDeltaX(enemy.position.x, player.position.x);
-          const dy = wrapDeltaY(enemy.position.y, player.position.y);
+      } else if (aggro) {
+          // ── Seek the aggro target (floaty) ──
+          const dx = wrapDeltaX(enemy.position.x, aggro.position.x);
+          const dy = wrapDeltaY(enemy.position.y, aggro.position.y);
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
           enemy.velocity.x += (dx / dist) * accel * B.SEEK_ACCEL_MULT * dt;
           enemy.velocity.y += (dy / dist) * accel * B.SEEK_ACCEL_MULT * dt;
@@ -487,6 +489,27 @@ export class AISystem {
   private capSpeed(e: GameEntity, cap: number) {
       const spd = Math.sqrt(e.velocity.x * e.velocity.x + e.velocity.y * e.velocity.y);
       if (spd > cap && spd > 0) { e.velocity.x = (e.velocity.x / spd) * cap; e.velocity.y = (e.velocity.y / spd) * cap; }
+  }
+
+  /** Resolve a provoked bubble's `aggroTargetId` to a live entity to chase — the
+   *  player or an enemy by id — for the SEEK regime.  If the attacker is gone,
+   *  clear the aggro so the bubble calms back to passive (drift / breeding).  An
+   *  unknown/unset id while provoked falls back to the player. */
+  private resolveBubbleTarget(bubble: GameEntity, player: GameEntity, enemies: GameEntity[]): GameEntity | null {
+      const id = bubble.aggroTargetId;
+      if (!id || id === 'player') return player;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.id === id) return (e.active && !e.isExploding) ? e : this.clearBubbleAggro(bubble);
+      }
+      return this.clearBubbleAggro(bubble);
+  }
+
+  /** Drop a bubble's aggro (attacker gone) → back to passive.  Returns null. */
+  private clearBubbleAggro(bubble: GameEntity): null {
+      bubble.aggroTargetId = undefined;
+      bubble.provoked = false;
+      return null;
   }
 
   /**

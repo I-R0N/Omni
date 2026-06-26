@@ -2920,6 +2920,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // it's built) and is kept present in the world by GameEngine.maintainAmbient-
   // Bubbles instead of the wave spawner.  Absent → a normal wave enemy.
   ambient?: boolean;
+  // Third party / neutral (Stage 5, bubble): stamped onto the entity so enemy
+  // fire can damage it (friendly-fire filter bypassed) and it retaliates
+  // against whoever attacks it — player OR enemy.  Absent → a normal enemy that
+  // only fights the player and ignores enemy fire.
+  thirdParty?: boolean;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -3059,13 +3064,13 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // but provoking the field stops the breeding and turns it on you.  RAMMING
   // role (rush when provoked).  Cyan-violet membrane; no engine flame.
   [EnemySubtype.BUBBLE]: {
-    color: '#67e8f9', size: 30, health: 3,
+    color: '#67e8f9', size: 30, health: 10,
     maxSpeed: 4.5, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
     consume: { eats: 'shard', range: 70, growthPerEat: 6, maxSize: 58, hpPerEat: 1 },
     multiply: { atSize: 52, maxPopulation: 14 },
-    ambient: true,
+    ambient: true, thirdParty: true,
   },
 };
 

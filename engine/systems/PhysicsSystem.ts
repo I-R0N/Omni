@@ -2546,10 +2546,13 @@ export class PhysicsSystem {
           const proj = a.type === EntityType.PROJECTILE ? a : b;
           const target = a.type === EntityType.PROJECTILE ? b : a;
 
-          // Ignore friendly fire and projectile-projectile
+          // Ignore friendly fire and projectile-projectile.  EXCEPTION: a
+          // third-party entity (the bubble) is fair game for everyone — enemy
+          // fire can hit it (Stage 5), so the enemy-vs-enemy filter is bypassed
+          // when the target is neutral.
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
-          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
+          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY && !target.thirdParty) return;
 
           // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
           // (today's "tile shards"); they pass through every other shard
@@ -2766,6 +2769,10 @@ export class PhysicsSystem {
                   target.hitStun = HIT_FEEDBACK.STUN_SEC;
                   target.hitFlash = 0.18; // bigger flash + scale-punch on impact
                   target.provoked = true; // Stage 3a: a hit aggros a passive enemy
+                  // Third-party retaliation (Stage 5): the bubble targets its
+                  // attacker (player or the firing enemy), retargeting on each
+                  // new hit.
+                  if (target.thirdParty && proj.ownerId) target.aggroTargetId = proj.ownerId;
               }
           }
 

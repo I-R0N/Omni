@@ -485,6 +485,19 @@ export interface GameEntity {
   // (the bubble) wanders until this flips, then engages.  Harmless on every
   // other enemy (unread).
   provoked?: boolean;
+  // Third-party / neutral (Stage 5, bubble): a `thirdParty` entity can be
+  // damaged by projectiles of ANY owner (the friendly-fire filter is bypassed,
+  // so enemy fire hits it too) and RETALIATES against whoever last hit it.
+  // `aggroTargetId` is that current target — the id of the most recent attacker
+  // (the player as 'player', or an enemy by id).  The bubble seeks + latches
+  // this target instead of always the player, switching as new attackers hit
+  // it.  Cleared when the target dies (→ back to passive).
+  thirdParty?: boolean;
+  aggroTargetId?: string;
+  // Firing entity id stamped on a projectile (ProjectileSystem.spawn) so a
+  // third-party victim can blame the exact shooter.  'player' for player shots,
+  // the enemy's id for enemy shots.
+  ownerId?: string;
   // Attach + disable (3c): when set, GameEngine.updateAttachments snaps this
   // entity's position onto the target every frame (a latch/grapple).  Cleared
   // when the target dies.  `attachOffset` is an optional fixed world offset.

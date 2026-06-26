@@ -337,15 +337,23 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
   via `GameEngine.updateConsumers`); once grown to `multiply.atSize` it SPLITS
   into two base-size bubbles (`updateBubbles`, capped at
-  `multiply.maxPopulation`).  It ignores the player until SHOT: a hit sets the
-  sticky `provoked` flag (Stage 3a), after which it homes in and, on contact,
-  LATCHES onto the player (`attachedToId='player'` → `updateAttachments` snaps it
-  on) for `BUBBLE_CONSTANTS.LATCH_DURATION`, EMPing weapon + shield (`'disable'`
-  status, re-applied each step at `EMP_REFRESH` so the lockout ends with the
-  latch) + draining `LATCH_DPS`, then releases and pops (`popBubble` — splash +
-  deactivate, no score; shoot it off for the normal kill/drops instead).
-  Provoked bubbles stop breeding.  Feel tuning lives in `AI_CONFIG.BUBBLE`
-  (drift / chase / seek), engagement + ambient payload in `BUBBLE_CONSTANTS`).
+  `multiply.maxPopulation`).  It's a TRUE THIRD PARTY (`thirdParty:true`):
+  passive until ATTACKED — by the player OR another enemy.  Enemy fire can hit
+  it (the PhysicsSystem friendly-fire filter is bypassed for `thirdParty`
+  targets), and any damaging hit stamps `aggroTargetId` to the attacker
+  (`proj.ownerId`, or the AoE ring's `ownerId`) — so it retaliates against
+  whoever last hit it, the player as `'player'` or an enemy by id, retargeting
+  on each new hit (`AISystem.resolveBubbleTarget`; when the attacker dies it
+  calms back to passive).  Once provoked it homes its target and, on contact,
+  LATCHES (`attachedToId` → `updateAttachments` snaps it on) for
+  `BUBBLE_CONSTANTS.LATCH_DURATION`, draining `LATCH_DPS`; on the PLAYER it also
+  EMPs weapon + shield (`'disable'` status, re-applied each step at `EMP_REFRESH`
+  so the lockout ends with the latch) and then pops (`popBubble` — spent its
+  charge; shoot it off for the normal kill/drops); on an ENEMY it just chews and
+  releases (survives to re-engage).  Provoked bubbles stop breeding.  Higher HP
+  (10) so an enemy shot chips rather than one-shots it, leaving room to
+  retaliate.  Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek),
+  engagement + ambient payload in `BUBBLE_CONSTANTS`).
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
@@ -727,7 +735,13 @@ button in `UIOverlay.tsx`.
   Three build-once primitives for the exotic enemies:
   (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
   ring stamp `entity.provoked = true` on any ENEMY they damage; the BUBBLE
-  reads this sticky flag to flip from passive wander to player-seek.
+  reads this sticky flag to flip from passive to hostile.  A `thirdParty` entity
+  (the bubble) ALSO records WHO hit it (`aggroTargetId = proj.ownerId` / the AoE
+  ring's `ownerId`) and can be damaged by ANY owner — the PhysicsSystem
+  friendly-fire filter (`ENEMY + ownerType ENEMY`) is bypassed for `thirdParty`
+  targets, so enemy fire hits it and it retaliates against the attacker (player
+  or enemy), a genuine third party.  Projectiles carry `ownerId` (the firing
+  entity's id, `'player'` for the player) for exactly this.
   (3b) **Consume-and-grow** — `GameEngine.updateConsumers` (PerfController
   `consume` task) grows an entity carrying a `consume` ConsumeConfig by
   eating nearby shards (`eats:'shard'` — the bubble) or tiles (`eats:'tile'`,

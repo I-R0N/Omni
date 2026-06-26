@@ -183,6 +183,7 @@ export class ProjectileSystem {
         pooled.homing = config.homing;
         pooled.homingStrength = config.homingStrength;
         pooled.ownerType = ownerType;
+        pooled.ownerId = shooter.id; // for third-party retaliation (Stage 5)
         pooled.pierceCount = config.pierce;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
@@ -220,6 +221,7 @@ export class ProjectileSystem {
           homing: config.homing,
           homingStrength: config.homingStrength,
           ownerType,
+          ownerId: shooter.id, // for third-party retaliation (Stage 5)
           pierceCount: config.pierce,
           trail: [],
           isLightningProjectile: isLight,

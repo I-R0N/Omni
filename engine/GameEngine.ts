@@ -2040,6 +2040,7 @@ export class GameEngine {
               knockback: entity.explosionKnockback ?? 0,
               color: entity.color || '#e879f9',
               ownerType: EntityType.ENEMY,
+              ownerId: entity.id, // a caught bubble blames the bomber (Stage 5)
               excludeIds: ['player'],
           });
           this.applyKamikazeBlastToPlayer(entity);
@@ -3792,16 +3793,17 @@ export class GameEngine {
   // For each BUBBLE enemy: (1) a PASSIVE bubble grown to its multiply.atSize
   // SPLITS — it resets to base size and births one offspring (counts=false),
   // capped at multiply.maxPopulation live bubbles; (2) a PROVOKED bubble LATCHES
-  // onto the player on contact — attach (Stage 3c) + EMP (disable status) + a
-  // light drain — and after BUBBLE.LATCH_DURATION releases and pops.  O(enemies)
-  // with a one-shot population census only on a split frame; ungated (bubbles
-  // are few), matching the kamikaze/nest passes.  Toroidal.
+  // onto its AGGRO TARGET (the last thing to attack it — the player OR an enemy)
+  // on contact — attach (Stage 3c) + drain, and an EMP (disable status) when the
+  // target is the player.  Against the player the latch ends in a pop (spent
+  // charge); against an enemy it releases and the bubble survives to re-engage.
+  // O(enemies) with a one-shot population census only on a split frame; ungated
+  // (bubbles are few), matching the kamikaze/nest passes.  Toroidal.
   private updateBubbles(dt: number) {
       if (!this.currentMap) return;
       const p = this.player;
       const enemies = this.entityIndex.enemies;
       const B = BUBBLE_CONSTANTS;
-      const pr = Math.max(p.size.x, p.size.y) / 2;
       let ctx: WaveSpawnContext | null = null;
 
       for (let i = 0; i < enemies.length; i++) {
@@ -3809,37 +3811,52 @@ export class GameEngine {
           if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
           const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
 
-          // ── Latched: refresh the EMP + drain, tick the clinging timer, pop ──
+          // ── Latched: drain (EMP the player), tick the clinging timer, release ──
           if (e.attachedToId !== undefined) {
-              if (!p.isExploding) {
-                  this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                  p.health -= B.LATCH_DPS * dt;
-                  if (p.health <= 0 && !p.isExploding) this.handleEntityDeath(p);
+              const victim = this.resolveAggroTarget(e.attachedToId);
+              const onPlayer = e.attachedToId === 'player';
+              if (victim && !victim.isExploding) {
+                  if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                  victim.health -= B.LATCH_DPS * dt;
+                  if (victim.health <= 0 && !victim.isExploding) this.handleEntityDeath(victim);
               }
               e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
-              if (e.bubbleLatchTimer <= 0 || p.isExploding) {
+              if (e.bubbleLatchTimer <= 0 || !victim || victim.isExploding) {
                   e.attachedToId = undefined;
-                  this.popBubble(e);
+                  if (onPlayer) {
+                      this.popBubble(e); // spent its EMP charge on the player
+                  } else {
+                      e.aggroTargetId = undefined; // done chewing → re-evaluate / calm
+                      e.provoked = false;
+                  }
               }
               continue;
           }
 
-          // ── Provoked + in contact → latch on ──
-          if (e.provoked) {
-              const dx = wrapDeltaX(e.position.x, p.position.x);
-              const dy = wrapDeltaY(e.position.y, p.position.y);
-              const reach = pr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
-              if (dx * dx + dy * dy <= reach * reach && !p.isExploding) {
-                  e.attachedToId = 'player';
-                  e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
-                  e.bubbleLatchTimer = B.LATCH_DURATION;
-                  this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
-                  this.spawnParticles(p.position, 10, e.color || '#67e8f9', {
-                      speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
-                      lifetimeMin: 0.2, lifetimeMax: 0.5,
-                  });
+          // ── Provoked + in contact with the aggro target → latch on ──
+          const target = e.aggroTargetId ? this.resolveAggroTarget(e.aggroTargetId) : (e.provoked ? p : null);
+          if (target) {
+              if (!target.active || target.isExploding) {
+                  // Attacker gone → calm down (back to ambient drift / breeding).
+                  e.aggroTargetId = undefined;
+                  e.provoked = false;
+              } else {
+                  const tr = Math.max(target.size.x, target.size.y) / 2;
+                  const dx = wrapDeltaX(e.position.x, target.position.x);
+                  const dy = wrapDeltaY(e.position.y, target.position.y);
+                  const reach = tr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
+                  if (dx * dx + dy * dy <= reach * reach) {
+                      e.attachedToId = target.id;
+                      e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
+                      e.bubbleLatchTimer = B.LATCH_DURATION;
+                      if (target.id === 'player') this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                      this.spawnParticles(target.position, 10, e.color || '#67e8f9', {
+                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
+                          lifetimeMin: 0.2, lifetimeMax: 0.5,
+                      });
+                  }
+                  continue; // a provoked bubble doesn't breed
               }
-              continue; // a provoked bubble doesn't breed
           }
 
           // ── Passive + fat enough → split into two base-size bubbles ──
@@ -3867,6 +3884,18 @@ export class GameEngine {
               });
           }
       }
+  }
+
+  /** Resolve a bubble's aggro/latch target id to a live entity — the player
+   *  ('player') or an active enemy by id — or null if it's gone.  Cheap: the
+   *  player is special-cased and enemies come from the small filtered index. */
+  private resolveAggroTarget(id: string): GameEntity | null {
+      if (id === 'player') return this.player;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          if (enemies[i].id === id) return enemies[i].active ? enemies[i] : null;
+      }
+      return null;
   }
 
   /** Pop a spent bubble: a translucent splash + deactivate.  No score/drops —
@@ -4120,6 +4149,7 @@ export class GameEngine {
           knockback: proj.explosionKnockback ?? 0,
           color: WEAPONS[WeaponType.CANNON].color,
           ownerType: proj.ownerType,
+          ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
           excludeIds: [directTarget.id, 'player'],
       });
   }
@@ -4139,6 +4169,7 @@ export class GameEngine {
       color: string;
       lifetime?: number;
       ownerType?: GameEntity['ownerType'];
+      ownerId?: string;
       excludeIds?: string[];
   }) {
       if (!this.currentMap) return;
@@ -4179,6 +4210,7 @@ export class GameEngine {
           explosionDamage: opts.damage,
           explosionKnockback: opts.knockback,
           ownerType: opts.ownerType,
+          ownerId: opts.ownerId,
           hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
           validHitIds,
       });
@@ -4251,6 +4283,9 @@ export class GameEngine {
                   }
                   if (!isIndestructible) e.health -= applied;
                   if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
+                  // Third-party retaliation (Stage 5): an AoE that catches a
+                  // bubble makes it target the blast's owner.
+                  if (e.thirdParty && ring.ownerId) e.aggroTargetId = ring.ownerId;
                   e.hitFlash = 0.12;
                   this.spawnDamageText(e.position, applied, e);
                   if (e.health <= 0 && !e.isExploding) {

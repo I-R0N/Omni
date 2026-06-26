@@ -331,6 +331,9 @@ export class WaveSystem {
     if (config.consume) {
       enemy.consume = { ...config.consume };
     }
+    // Third-party fauna (Stage 5): enemy fire can hit it + it retaliates against
+    // any attacker.
+    if (config.thirdParty) enemy.thirdParty = true;
 
     // Kamikaze detonation payload (Stage 0): stamp the AoE config.  Blast
     // damage rides the per-wave damageMult, matching how the ram + projectile
