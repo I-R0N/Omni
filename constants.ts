@@ -693,16 +693,18 @@ export const AI_CONFIG = {
     DRIFT_CORRECTION: 1.4,    // lerp rate of velocity toward the flow target (×dt)
     SHARD_VISION: 280,        // range at which a passive bubble spots + chases a shard
     CHASE_SPEED_MULT: 1.0,    // speed cap while chasing a shard (× maxSpeed)
-    SEEK_ACCEL_MULT: 1.0,     // accel toward player when provoked (× accel)
-    PROVOKED_SPEED_MULT: 1.0, // speed cap when provoked (× maxSpeed)
-    // Burst/coast: a bubble normally creeps, then periodically LUNGES — a short
-    // fast dart that raises the speed cap + accel — across every regime (drift /
-    // chase / seek).  So it's slow to track but can suddenly close distance.
-    BURST_INTERVAL: 2.0,      // seconds of slow coast between bursts (+ up to VAR)
-    BURST_VAR: 1.4,
-    BURST_DURATION: 0.55,     // seconds a burst lasts
-    BURST_SPEED_MULT: 2.5,    // speed-cap multiplier during a burst
-    BURST_ACCEL_MULT: 2.4,    // accel multiplier during a burst
+    SEEK_ACCEL_MULT: 1.4,     // accel toward target when provoked (× accel)
+    PROVOKED_SPEED_MULT: 2.2, // sustained speed cap when provoked (× maxSpeed) —
+                              // high enough to RUN DOWN a fleeing enemy/player
+    // Burst/coast — ONLY while provoked (aggro): a hunting bubble coasts fast
+    // and periodically LUNGES even faster to close the gap.  Passive bubbles
+    // (drift / shard-chase) never burst, so they stay slow and easy to ignore
+    // until shot.
+    BURST_INTERVAL: 1.6,      // seconds of fast coast between lunges (+ up to VAR)
+    BURST_VAR: 1.2,
+    BURST_DURATION: 0.6,      // seconds a lunge lasts
+    BURST_SPEED_MULT: 1.7,    // speed-cap multiplier during a lunge
+    BURST_ACCEL_MULT: 2.2,    // accel multiplier during a lunge
   },
 
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
@@ -3128,8 +3130,8 @@ export const BUBBLE_CONSTANTS = {
                           // to miss) — provoked bubbles render at full opacity
                           // (a hit-flash still cuts through so shots read)
   FEED_PULSE: 0.22,       // seconds the membrane bulges after swallowing a shard
-  DIGEST_DURATION: 0.95,  // seconds a swallowed shard takes to dissolve inside
-                          // the bubble (slow, readable) — one meal at a time
+  DIGEST_DURATION: 5.5,   // seconds a swallowed shard takes to dissolve inside
+                          // the bubble (deliberately slow) — one meal at a time
   // Ambient population: bubbles are always-present fauna, not wave enemies.
   // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
   // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below

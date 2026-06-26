@@ -352,12 +352,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   charge; shoot it off for the normal kill/drops); on an ENEMY it just chews and
   releases (survives to re-engage).  Provoked bubbles stop breeding.  Higher HP
   (10) so an enemy shot chips rather than one-shots it, leaving room to
-  retaliate.  Locomotion is a burst/coast cadence (slow creep, short fast
-  LUNGE) across every regime (`AI_CONFIG.BUBBLE.BURST_*`).  Renders with NO
-  health bar or off-screen chevron, and at a reduced membrane opacity while
-  calm (`BUBBLE_CONSTANTS.CALM_VISIBILITY` — full opacity once provoked; a
-  hit-flash always reads).  Feel tuning lives in `AI_CONFIG.BUBBLE` (drift /
-  chase / seek / burst), engagement + ambient payload in `BUBBLE_CONSTANTS`).
+  retaliate.  Locomotion: SLOW while passive (drift / shard-chase); only when
+  HUNTING (provoked/aggro) does it move fast — a high sustained cap
+  (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
+  run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
+  NOT brighten the membrane (the held meal reads instead); calm bubbles render
+  faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
+  hit-flash always reads.  Renders with NO health bar or off-screen chevron.
+  Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
+  engagement + ambient payload in `BUBBLE_CONSTANTS`).
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`

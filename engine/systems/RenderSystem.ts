@@ -3977,14 +3977,15 @@ export class RenderSystem {
           const provoked = entity.provoked === true;
           const latched = entity.attachedToId !== undefined;       // clinging to a hull
           const digesting = (entity.bubbleDigestTimer ?? 0) > 0;   // holding a shard inside
-          const engaged = provoked || digesting;                   // actively doing something
           const baseCol = provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED : (entity.color || '#67e8f9');
           const [br, bg, bb] = hexToRgb(baseCol);
-          const wob = engaged ? 0.16 : 0.10;  // membrane wobble amplitude
-          const spd = engaged ? 5.5 : 2.4;    // wobble + pulse speed
-          // Calm bubbles render faint (easy to miss); an engaged one (provoked or
-          // feeding) is full opacity.  A hit-flash adds on top so a shot reads.
-          const vis = engaged ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
+          // Brightness / liveliness track AGGRO only (provoked) — feeding does
+          // NOT change the membrane brightness (the held meal reads it instead).
+          const wob = provoked ? 0.16 : 0.10;  // membrane wobble amplitude
+          const spd = provoked ? 5.5 : 2.4;    // wobble + pulse speed
+          // Calm bubbles render faint (easy to miss); provoked ones full opacity.
+          // A hit-flash adds on top so a shot reads.
+          const vis = provoked ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
           // Squash-cling: while latched the membrane flattens against the hull.
           // updateBubbles points rotation at the target, so local +x is the
           // contact normal — flatten x, spread y (the "splatted goo" read).

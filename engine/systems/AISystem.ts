@@ -427,23 +427,29 @@ export class AISystem {
       const stunned = (enemy.hitStun ?? 0) > 0;
       const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
 
-      // Burst/coast cadence: a slow creep punctuated by short fast lunges, so a
-      // bubble is hard to track but can suddenly close distance.  The boost
-      // raises both the speed cap and the accel across every regime.
-      if (enemy.bubbleBurstTimer === undefined) enemy.bubbleBurstTimer = Math.random() * B.BURST_INTERVAL;
-      enemy.bubbleBurstTimer -= dt;
-      const bursting = enemy.bubbleBurstTimer <= 0 && enemy.bubbleBurstTimer > -B.BURST_DURATION;
-      if (enemy.bubbleBurstTimer <= -B.BURST_DURATION) {
-          enemy.bubbleBurstTimer = B.BURST_INTERVAL + Math.random() * B.BURST_VAR;
-      }
-      const acc = accel * (bursting ? B.BURST_ACCEL_MULT : 1);
-      const sBoost = bursting ? B.BURST_SPEED_MULT : 1;
-
       const aggro = enemy.provoked ? this.resolveBubbleTarget(enemy, player, enemies) : null;
+
+      // Burst/coast cadence — ONLY while hunting (aggro).  A provoked bubble
+      // coasts fast and periodically LUNGES to run a target down; passive
+      // bubbles never burst, so they stay slow and easy to ignore until shot.
+      let acc = accel, sBoost = 1;
+      if (aggro) {
+          if (enemy.bubbleBurstTimer === undefined) enemy.bubbleBurstTimer = Math.random() * B.BURST_INTERVAL;
+          enemy.bubbleBurstTimer -= dt;
+          const bursting = enemy.bubbleBurstTimer <= 0 && enemy.bubbleBurstTimer > -B.BURST_DURATION;
+          if (enemy.bubbleBurstTimer <= -B.BURST_DURATION) {
+              enemy.bubbleBurstTimer = B.BURST_INTERVAL + Math.random() * B.BURST_VAR;
+          }
+          acc = accel * (bursting ? B.BURST_ACCEL_MULT : 1);
+          sBoost = bursting ? B.BURST_SPEED_MULT : 1;
+      } else {
+          enemy.bubbleBurstTimer = undefined; // reset so the next hunt opens on a coast
+      }
+
       if (stunned) {
           // A hit reels it; the knockback carries — no thrust this step.
       } else if (aggro) {
-          // ── Seek the aggro target (floaty) ──
+          // ── Hunt the aggro target: fast seek + lunges so it can catch it ──
           const dx = wrapDeltaX(enemy.position.x, aggro.position.x);
           const dy = wrapDeltaY(enemy.position.y, aggro.position.y);
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -451,25 +457,23 @@ export class AISystem {
           enemy.velocity.y += (dy / dist) * acc * B.SEEK_ACCEL_MULT * dt;
           this.capSpeed(enemy, maxSpeed * B.PROVOKED_SPEED_MULT * sBoost);
       } else {
-          // ── Passive: chase the nearest eatable shard, else ride the flow ──
+          // ── Passive (slow): chase the nearest eatable shard, else ride flow ──
           const target = this.nearestEatableShard(enemy, shards, B.SHARD_VISION);
           if (target) {
               const dx = wrapDeltaX(enemy.position.x, target.position.x);
               const dy = wrapDeltaY(enemy.position.y, target.position.y);
               const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              enemy.velocity.x += (dx / dist) * acc * dt;
-              enemy.velocity.y += (dy / dist) * acc * dt;
-              this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT * sBoost);
+              enemy.velocity.x += (dx / dist) * accel * dt;
+              enemy.velocity.y += (dy / dist) * accel * dt;
+              this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT);
           } else {
-              // Drift: lerp velocity toward the local flow current (faster glide
-              // during a burst).
-              const driftSpeed = B.DRIFT_SPEED * sBoost;
+              // Drift: lerp velocity toward the local flow current.
               const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
-              const tx = flow.x * driftSpeed, ty = flow.y * driftSpeed;
+              const tx = flow.x * B.DRIFT_SPEED, ty = flow.y * B.DRIFT_SPEED;
               const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
               enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
               enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
-              this.capSpeed(enemy, driftSpeed);
+              this.capSpeed(enemy, B.DRIFT_SPEED);
           }
       }
 
