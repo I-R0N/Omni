@@ -348,8 +348,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   It's a TRUE THIRD PARTY (`thirdParty:true`): passive until ATTACKED — by the
   player OR another enemy.  Enemy fire can hit it (the PhysicsSystem
   friendly-fire filter is bypassed for `thirdParty` targets), and any damaging
-  hit stamps `aggroTargetId` to the attacker (`proj.ownerId`, or the AoE ring's
-  `ownerId`) — so it retaliates against whoever last hit it, retargeting on each
+  hit — OR a MODERATE body collision (relative impact ≥ `COLLIDE_AGGRO_SPEED`,
+  `PhysicsSystem.maybeBubbleCollisionAggro`) — stamps `aggroTargetId` to the
+  attacker/collider (`proj.ownerId`, the AoE ring's `ownerId`, or the rammer's
+  id) — so it retaliates against whoever last hit/rammed it, retargeting on each
   new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
   past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
   target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
@@ -359,7 +361,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (`detachLatch`, it NO LONGER dies) — on the timer, on ANY projectile hit
   (`bubbleKnockFree`, PhysicsSystem), or when the player SLAMS a tile/asteroid at
   ≥ `KNOCK_SPEED` (`terrainSlamTimer`).  Provoked bubbles stop breeding/eating.
-  Tanky (`health` 24, +maxHealth per eat) so it takes real damage to kill.
+  Tanky: base `health` 50 with maxHealth scaling LINEARLY with size as it grows
+  (`syncBubbleMaxHealth`), so a big well-fed bubble takes real damage to kill.
   Locomotion: SLOW while passive (drift / shard-chase); only when
   HUNTING (provoked/aggro) does it move fast — a high sustained cap
   (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can

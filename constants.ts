@@ -3074,7 +3074,8 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // but provoking the field stops the breeding and turns it on you.  RAMMING
   // role (rush when provoked).  Cyan-violet membrane; no engine flame.
   [EnemySubtype.BUBBLE]: {
-    color: '#67e8f9', size: 15, health: 24,
+    color: '#67e8f9', size: 15, health: 50, // maxHealth then scales LINEARLY
+                                            // with size as it grows (updateBubbles.syncBubbleMaxHealth)
     maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
     sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
     shoots: false, contactDamage: 0,
@@ -3121,9 +3122,12 @@ export const BUBBLE_CONSTANTS = {
   // Latch: when a provoked bubble touches the player it attaches and EMPs.
   CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
   LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
-  LATCH_DPS: 3,           // BASE health/sec drained, scaled UP by the bubble's
-                          // size (bigger/older bubble = harder bite — see
-                          // updateBubbles): drain = LATCH_DPS × size / baseSize
+  LATCH_DPS: 6,           // BASE health/sec drained at base size, scaled UP
+                          // LINEARLY by the bubble's size (bigger/older bubble =
+                          // harder bite): drain = LATCH_DPS × size / baseSize
+  // A MODERATE collision (more than a light touch) with the player or an enemy
+  // aggros a passive bubble onto the collider — relative impact speed ≥ this.
+  COLLIDE_AGGRO_SPEED: 3.5,
   // EMP refresh window applied each latched step.  Kept short so the disable
   // ends ~immediately when the bubble detaches (the latch IS the lockout — no
   // long tail past it).  Re-applied every step, so it never lapses mid-latch.

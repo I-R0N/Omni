@@ -2157,6 +2157,9 @@ export class PhysicsSystem {
                      || (b.metalCells !== undefined && b.metalCells.length > 0);
       const hit = composite ? this.compositeSAT(a, b) : this.checkCollisionSAT(a, b);
       if (hit) {
+          // A moderate body collision aggros a passive bubble onto the collider
+          // (before resolve, so we read the true impact velocities).
+          PhysicsSystem.maybeBubbleCollisionAggro(a, b);
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
 
@@ -2166,6 +2169,24 @@ export class PhysicsSystem {
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
+  }
+
+  /** Stage 5: a MODERATE body collision (relative impact speed ≥
+   *  COLLIDE_AGGRO_SPEED) between a passive third-party bubble and the player /
+   *  an enemy aggros the bubble onto the collider.  A light graze (slow drift
+   *  contact) is below threshold and ignored.  Skipped while the bubble is
+   *  latched or sick.  Bubble↔bubble is ignored. */
+  private static maybeBubbleCollisionAggro(a: GameEntity, b: GameEntity) {
+      const bubble = a.thirdParty ? a : (b.thirdParty ? b : null);
+      if (!bubble || bubble.attachedToId !== undefined || (bubble.bubbleSickTimer ?? 0) > 0) return;
+      const other = bubble === a ? b : a;
+      if (other.thirdParty) return; // bubble ↔ bubble
+      if (other.type !== EntityType.PLAYER && other.type !== EntityType.ENEMY) return;
+      const rvx = a.velocity.x - b.velocity.x;
+      const rvy = a.velocity.y - b.velocity.y;
+      if (rvx * rvx + rvy * rvy < BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED * BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED) return;
+      bubble.provoked = true;
+      bubble.aggroTargetId = other.id; // 'player' for the player, else the enemy id
   }
 
   /**

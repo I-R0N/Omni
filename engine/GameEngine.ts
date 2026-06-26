@@ -3831,6 +3831,7 @@ export class GameEngine {
                   // Recover the richness from the stored per-shard duration.
                   const rich = (e.bubbleDigestDuration ?? B.DIGEST_DURATION) / B.DIGEST_DURATION;
                   this.growConsumer(e, cfg.consume!, rich);
+                  this.syncBubbleMaxHealth(e); // maxHP scales with the new size
                   e.bubbleFeedTimer = B.FEED_PULSE; // final gulp bulge
                   e.bubbleDigestTimer = 0;
                   e.bubbleDigestDuration = undefined;
@@ -3903,6 +3904,7 @@ export class GameEngine {
               if (!ctx) continue;
               const base = cfg.size;
               e.size.x = base; e.size.y = base;
+              this.syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
               const a = Math.random() * Math.PI * 2;
               e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
               e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
@@ -4146,9 +4148,10 @@ export class GameEngine {
       }
   }
 
-  /** Grow a consumer by one eat (size + maxHealth + heal + optional mass),
-   *  scaled by `scale` (the shard's richness — mass/energy conserved), capped at
-   *  maxSize.  Shared by the shard-digest finish + the instant tile eat. */
+  /** Grow a consumer by one eat (size + heal + optional mass), scaled by `scale`
+   *  (the shard's richness — mass/energy conserved), capped at maxSize.  Shared
+   *  by the shard-digest finish + the instant tile eat.  (The bubble's maxHealth
+   *  is recomputed from its new size by syncBubbleMaxHealth, called after.) */
   private growConsumer(consumer: GameEntity, cfg: ConsumeConfig, scale: number = 1) {
       const cur = Math.max(consumer.size.x, consumer.size.y);
       if (cur < cfg.maxSize) {
@@ -4157,10 +4160,21 @@ export class GameEngine {
           consumer.size.x *= s;
           consumer.size.y *= s;
       }
-      // Energy conserved: a denser meal raises maxHealth more AND heals more.
-      if (cfg.hpPerEat) consumer.maxHealth += cfg.hpPerEat * scale;
+      // Heal from eating (a denser meal heals more) — caps at the current maxHP;
+      // size-driven maxHP growth is applied by syncBubbleMaxHealth afterwards.
       consumer.health = Math.min(consumer.maxHealth, consumer.health + BUBBLE_CONSTANTS.HEAL_PER_RICH * scale);
       if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat * scale;
+  }
+
+  /** Keep a bubble's maxHealth LINEAR with its size (anchored at the variant's
+   *  base health @ base size).  Growing raises the ceiling AND fills the new HP
+   *  (mass conserved); shrinking on a split caps current HP to the new ceiling. */
+  private syncBubbleMaxHealth(e: GameEntity) {
+      const v = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
+      const newMax = v.health * (Math.max(e.size.x, e.size.y) / v.size);
+      const delta = newMax - e.maxHealth;
+      e.maxHealth = newMax;
+      e.health = delta > 0 ? Math.min(newMax, e.health + delta) : Math.min(e.health, newMax);
   }
 
   /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
