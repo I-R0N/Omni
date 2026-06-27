@@ -53,6 +53,8 @@ interface DragonInstance {
   time: number;                          // weave clock
   gnatTimer: number;                     // countdown to the next brood spit
   missileTimer: number;                  // countdown to the next homing missile
+  portal?: { x: number; y: number };     // exit-portal centre (leave state only)
+  headThrough?: boolean;                  // head has crossed the exit portal
 }
 
 export class GameEngine {
@@ -4933,15 +4935,28 @@ export class GameEngine {
           if (!d.active) { this.dragons.splice(n, 1); continue; }
           inst.time += dt;
 
-          // ── Flow-weave steering (slow + majestic) ──
-          const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
-          const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
-          const cosW = Math.cos(wob), sinW = Math.sin(wob);
-          const dirX = flow.x * cosW - flow.y * sinW;
-          const dirY = flow.x * sinW + flow.y * cosW;
-          const speedMul = inst.state === 'leave' ? 1.5 : 1; // dive out faster
+          // ── Steering ── while LEAVING, drive STRAIGHT toward the exit portal
+          // (then keep going straight once the head is through, so the whole
+          // body follows it through); otherwise the slow flow-weave roam.
+          let dirX: number, dirY: number, speedMul: number;
+          if (inst.state === 'leave' && inst.portal) {
+              if (!inst.headThrough) {
+                  const px = wrapDeltaX(d.position.x, inst.portal.x), py = wrapDeltaY(d.position.y, inst.portal.y);
+                  const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm;
+              } else {
+                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1; dirX = d.velocity.x / vm; dirY = d.velocity.y / vm; // continue straight
+              }
+              speedMul = D.LEAVE_SPEED_MULT;
+          } else {
+              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+              const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
+              const cosW = Math.cos(wob), sinW = Math.sin(wob);
+              dirX = flow.x * cosW - flow.y * sinW;
+              dirY = flow.x * sinW + flow.y * cosW;
+              speedMul = 1;
+          }
           const target = cruise * D.SPEED_FRAC * speedMul;
-          const alpha = Math.min(1, D.STEER_RATE * dt * 60);
+          const alpha = Math.min(1, D.STEER_RATE * dt * 60 * (inst.state === 'leave' ? 4 : 1));
           d.velocity.x += (dirX * target - d.velocity.x) * alpha;
           d.velocity.y += (dirY * target - d.velocity.y) * alpha;
           d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
@@ -4974,6 +4989,38 @@ export class GameEngine {
           // ── Chain-follow: snap each body segment along the head's path ──
           this.positionDragonBody(inst);
 
+          // ── Leaving: the dragon flies INTO the exit portal and is consumed
+          // HEAD→TAIL — each part vanishes (puff) as it crosses the portal, the
+          // body trailing through behind the (now-hidden) head. ──
+          if (inst.state === 'leave' && inst.portal) {
+              const cr = D.PORTAL_CONSUME_RADIUS, crSq = cr * cr;
+              if (!inst.headThrough) {
+                  const hx = wrapDeltaX(d.position.x, inst.portal.x), hy = wrapDeltaY(d.position.y, inst.portal.y);
+                  if (hx * hx + hy * hy <= crSq) {
+                      inst.headThrough = true;
+                      d.dragonHidden = true;        // head "entered" — stop drawing it
+                      d.contactDamage = 0;          // and stop hurting on contact
+                      this.spawnParticles(d.position, 14, D.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
+                  }
+              }
+              let remaining = 0;
+              for (let i = 0; i < inst.body.length; i++) {
+                  const s = inst.body[i];
+                  if (!s.active) continue;
+                  const sx = wrapDeltaX(s.position.x, inst.portal.x), sy = wrapDeltaY(s.position.y, inst.portal.y);
+                  if (sx * sx + sy * sy <= crSq) {
+                      s.active = false;
+                      this.spawnParticles(s.position, 9, s.color || D.PORTAL_COLOR, { speedMin: 2, speedMax: 7, sizeMin: 1.2, sizeMax: 3, lifetimeMin: 0.15, lifetimeMax: 0.5 });
+                  } else remaining++;
+              }
+              // Fully through (or the safety timer expired) → gone.
+              if ((inst.headThrough && remaining === 0) || inst.stateTimer <= 0) {
+                  this.despawnDragon(inst);
+                  this.dragons.splice(n, 1);
+                  continue;
+              }
+          }
+
           // ── Provoke-on-attack (third party): head shot stamps `provoked`
           // (PhysicsSystem); a BODY-segment hit provokes too (default player). ──
           if (!d.provoked) {
@@ -5002,18 +5049,23 @@ export class GameEngine {
               }
           }
 
-          // ── Lifecycle ──
+          // ── Lifecycle ── (leave COMPLETION is handled by the portal-consume
+          // pass above; here we only advance enter→roam→leave and open the exit
+          // rift AHEAD of the head so it flies into it.) ──
           inst.stateTimer -= dt;
           if (inst.state === 'enter') {
               if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = D.ROAM_DURATION; }
           } else if (inst.state === 'roam') {
               if (inst.stateTimer <= 0) {
                   inst.state = 'leave';
-                  inst.stateTimer = D.LEAVE_DURATION;
-                  this.openDragonPortal(d.position);
+                  inst.stateTimer = D.LEAVE_DURATION; // safety cap only
+                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1;
+                  const portal = { x: d.position.x + (d.velocity.x / vm) * D.PORTAL_AHEAD, y: d.position.y + (d.velocity.y / vm) * D.PORTAL_AHEAD };
+                  wrapPosition(portal);
+                  inst.portal = portal;
+                  inst.headThrough = false;
+                  this.openDragonPortal(portal);
               }
-          } else { // leave
-              if (inst.stateTimer <= 0) { this.despawnDragon(inst); this.dragons.splice(n, 1); }
           }
       }
   }

@@ -582,6 +582,10 @@ export interface GameEntity {
   // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
   // consume leave it alone.  Cleared when it's severed off (→ free shard).
   dragonSegment?: boolean;
+  // Dragon leave animation (Stage 6): the head has crossed its exit portal and
+  // is being swallowed tail-first — RenderSystem stops drawing it while the body
+  // segments collapse through the portal one by one.
+  dragonHidden?: boolean;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

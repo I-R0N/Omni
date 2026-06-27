@@ -4077,6 +4077,7 @@ export class RenderSystem {
       // eyes + swept horns — no engine flame.  Body segments render separately
       // (renderDragonBodies).  Local +x faces travel.
       if (shape === 'dragon') {
+          if (entity.dragonHidden) return; // head has crossed the exit portal — gone
           const flashD = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
           const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.3, flashD * 2));
           const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);

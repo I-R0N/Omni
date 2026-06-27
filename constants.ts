@@ -3198,7 +3198,11 @@ export const DRAGON_CONSTANTS = {
   MISSILE: { speed: 4.5, damage: 12, size: 7, lifetime: 6, color: '#fb7185', homingStrength: 0.55 },
   ENTER_DURATION: 1.1,     // seconds of portal emergence before it starts roaming
   ROAM_DURATION: 28,       // seconds roaming before it heads out (if not killed)
-  LEAVE_DURATION: 1.6,     // seconds collapsing into the exit portal
+  LEAVE_DURATION: 9,       // safety cap: seconds before the leave is force-finished
+                          // (the real exit is the head+tail crossing the portal)
+  PORTAL_AHEAD: 320,       // units ahead of the head to open the exit portal
+  PORTAL_CONSUME_RADIUS: 70, // head/segment within this of the portal centre → swallowed
+  LEAVE_SPEED_MULT: 1.8,   // speed boost while diving for the exit portal
   PATH_SPACING: 11,        // world units between recorded head-path points
   PATH_MAX: 200,           // cap on stored path points (enough for MAX_SEGMENTS)
   // Snake body: each tile the dragon eats is appended as a real chain-followed
