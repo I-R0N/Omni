@@ -504,7 +504,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
               {renderSectionHeader('dragon', 'Dragon')}
               {!collapsed.dragon && (
-                <div className="flex flex-wrap gap-2 px-1 py-1">
+                <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
                   {['glass', 'rock', 'plastic', 'metal', 'mixed'].map(t => (
                     <button
                       key={t}
