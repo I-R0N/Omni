@@ -5118,35 +5118,43 @@ export class GameEngine {
       return seg;
   }
 
-  /** Snap each body segment onto the head's recorded path, SEGMENT_SPACING apart
-   *  by arc length, oriented along the body — the Snake chain. */
+  /** Snap each body segment onto the head's path, SEGMENT_SPACING apart by arc
+   *  length, oriented along the body — the Snake chain.  The walk is ANCHORED to
+   *  the head's LIVE position (not the last recorded path point, which only
+   *  updates every PATH_SPACING and made the whole body jump), so the chain
+   *  tracks the smoothly-moving head jitter-free. */
   private positionDragonBody(head: GameEntity) {
       const body = this.dragonBody;
       const path = head.dragonPath;
-      if (body.length === 0 || !path || path.length < 2) return;
+      if (body.length === 0 || !path || path.length < 1) return;
       const SP = DRAGON_CONSTANTS.SEGMENT_SPACING;
+      let prevX = head.position.x, prevY = head.position.y; // live anchor
       let acc = 0, seg = 0, target = SP;
-      for (let i = 1; i < path.length && seg < body.length; i++) {
-          const prev = path[i - 1], cur = path[i];
-          const vx = wrapDeltaX(prev.x, cur.x), vy = wrapDeltaY(prev.y, cur.y); // prev → cur
-          const len = Math.hypot(vx, vy) || 1e-3;
-          while (seg < body.length && acc + len >= target) {
-              const t = (target - acc) / len;
-              const s = body[seg];
-              s.position.x = prev.x + vx * t;
-              s.position.y = prev.y + vy * t;
-              wrapPosition(s.position);
-              s.rotation = Math.atan2(vy, vx);
-              s.velocity.x = 0; s.velocity.y = 0;
-              seg++; target += SP;
+      for (let i = 0; i < path.length && seg < body.length; i++) {
+          const cur = path[i];
+          const vx = wrapDeltaX(prevX, cur.x), vy = wrapDeltaY(prevY, cur.y); // prev → cur
+          const len = Math.hypot(vx, vy);
+          if (len > 1e-4) {
+              while (seg < body.length && acc + len >= target) {
+                  const t = (target - acc) / len;
+                  const s = body[seg];
+                  s.position.x = prevX + vx * t;
+                  s.position.y = prevY + vy * t;
+                  wrapPosition(s.position);
+                  s.rotation = Math.atan2(vy, vx);
+                  s.velocity.x = 0; s.velocity.y = 0;
+                  seg++; target += SP;
+              }
+              acc += len;
           }
-          acc += len;
+          prevX = cur.x; prevY = cur.y;
       }
       // Path too short for the whole body — stack the rest at the tail end.
-      const tailP = path[path.length - 1];
+      const tail = path[path.length - 1];
       for (; seg < body.length; seg++) {
           const s = body[seg];
-          s.position.x = tailP.x; s.position.y = tailP.y;
+          s.position.x = tail.x; s.position.y = tail.y;
+          wrapPosition(s.position);
           s.velocity.x = 0; s.velocity.y = 0;
       }
   }
