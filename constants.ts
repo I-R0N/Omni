@@ -3186,10 +3186,16 @@ export const BUBBLE_CONSTANTS = {
 // leave (portal), or die when its head HP runs out.  The body is a chain of
 // segments drawn by RenderSystem along the head's recorded path.
 export const DRAGON_CONSTANTS = {
-  SPEED_FRAC: 0.34,        // cruise speed as a fraction of the player's terminal cruise
-  WEAVE_FREQ: 1.3,         // serpentine weave frequency (rad/s)
+  SPEED_FRAC: 0.13,        // cruise speed as a fraction of the player's terminal cruise
+                          // — deliberately slow + ponderous (a roaming siege beast)
+  WEAVE_FREQ: 1.1,         // serpentine weave frequency (rad/s)
   WEAVE_AMP: 0.55,         // weave amplitude (radians, rotates the flow heading)
-  STEER_RATE: 0.05,        // velocity easing toward the target heading (×dt×60)
+  STEER_RATE: 0.04,        // velocity easing toward the target heading (×dt×60)
+  // Head attacks (Stage 6): periodically spits a SWARM gnat and lobs a slow
+  // HOMING missile at the player while roaming.
+  GNAT_INTERVAL: 3.2,      // seconds between brood spits (+ up to half, random)
+  MISSILE_INTERVAL: 2.6,   // seconds between homing missiles
+  MISSILE: { speed: 4.5, damage: 12, size: 7, lifetime: 6, color: '#fb7185', homingStrength: 0.55 },
   ENTER_DURATION: 1.1,     // seconds of portal emergence before it starts roaming
   ROAM_DURATION: 28,       // seconds roaming before it heads out (if not killed)
   LEAVE_DURATION: 1.6,     // seconds collapsing into the exit portal

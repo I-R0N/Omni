@@ -264,6 +264,8 @@ export class GameEngine {
   private dragonStateTimer: number = 0;   // seconds left in the current state
   private dragonTime: number = 0;          // weave clock
   private dragonContactCd: number = 0;     // body-contact damage cooldown
+  private dragonGnatTimer: number = 0;     // countdown to the next brood spit
+  private dragonMissileTimer: number = 0;  // countdown to the next homing missile
   private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
@@ -4954,6 +4956,26 @@ export class GameEngine {
           }
       }
 
+      // ── Head attacks (roam only): spit gnats + lob homing missiles ──
+      if (this.dragonState === 'roam') {
+          this.dragonGnatTimer -= dt;
+          if (this.dragonGnatTimer <= 0) {
+              this.dragonGnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
+              const ctx = this.waveContext();
+              if (ctx) {
+                  this.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
+                  this.spawnParticles(d.position, 7, '#2dd4bf', {
+                      speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.2, lifetimeMax: 0.5,
+                  });
+              }
+          }
+          this.dragonMissileTimer -= dt;
+          if (this.dragonMissileTimer <= 0 && !this.player.isExploding) {
+              this.dragonMissileTimer = D.MISSILE_INTERVAL;
+              this.fireDragonMissile(d);
+          }
+      }
+
       // ── Lifecycle ──
       this.dragonStateTimer -= dt;
       if (this.dragonState === 'enter') {
@@ -5008,6 +5030,20 @@ export class GameEngine {
       this.dragonState = 'enter';
       this.dragonStateTimer = DRAGON_CONSTANTS.ENTER_DURATION;
       this.dragonTime = 0;
+      this.dragonGnatTimer = DRAGON_CONSTANTS.GNAT_INTERVAL;
+      this.dragonMissileTimer = DRAGON_CONSTANTS.MISSILE_INTERVAL;
+  }
+
+  /** Fire one slow HOMING missile from the dragon head at the player. */
+  private fireDragonMissile(d: GameEntity) {
+      const M = DRAGON_CONSTANTS.MISSILE;
+      const cfg = {
+          type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
+          speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
+          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+          homing: true, homingStrength: M.homingStrength, glow: true,
+      } as WeaponConfig;
+      this.spawnProjectileFromConfig(d, this.player.position, cfg, EntityType.ENEMY);
   }
 
   /** Dragon killed: big payoff + score + collapse the rift. */
