@@ -3199,8 +3199,13 @@ export const DRAGON_CONSTANTS = {
   ENTER_DURATION: 1.1,     // seconds of portal emergence before it starts roaming
   ROAM_DURATION: 28,       // seconds roaming before it heads out (if not killed)
   LEAVE_DURATION: 1.6,     // seconds collapsing into the exit portal
-  PATH_SPACING: 13,        // world units between recorded head-path points
-  PATH_MAX: 80,            // cap on stored path points
+  PATH_SPACING: 11,        // world units between recorded head-path points
+  PATH_MAX: 200,           // cap on stored path points (enough for MAX_SEGMENTS)
+  // Snake body: each tile the dragon eats is appended as a real chain-followed
+  // segment, spaced SEGMENT_SPACING apart, up to MAX_SEGMENTS.
+  SEGMENT_SPACING: 36,     // world units between body segments
+  MAX_SEGMENTS: 28,        // body length cap (further tiles are just devoured)
+  SEGMENT_MASS: 6,         // finite mass so a segment is dynamic + shootable
   SEGMENTS: 16,            // body segments at base size (grows with size)
   SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
   SEGMENT_STRIDE: 2,       // path points between consecutive rendered segments

@@ -260,6 +260,7 @@ export class GameEngine {
   // (damageable / dealt with by handleEntityDeath); its lifecycle + movement +
   // body-path live here (see spawnDragon / updateDragon).
   private dragon: GameEntity | null = null;
+  private dragonBody: GameEntity[] = [];   // eaten tiles, head→tail (Snake-style)
   private dragonState: 'enter' | 'roam' | 'leave' = 'enter';
   private dragonStateTimer: number = 0;   // seconds left in the current state
   private dragonTime: number = 0;          // weave clock
@@ -1425,6 +1426,7 @@ export class GameEngine {
       this.snitchTime = 0;
       this.snitchCatchCount = 0;
       this.dragon = null; // dies with the old map's entity list
+      this.dragonBody = [];
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -2020,6 +2022,8 @@ export class GameEngine {
       // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
       // not the normal enemy explosion/shard/drop path.
       if (entity === this.dragon && !entity.isExploding) { this.dragonDeath(entity); return; }
+      // A body segment shot off: sever the tail + dissolve it (no regen/drops).
+      if (entity.dragonSegment === true) { this.dragonSegmentDeath(entity); return; }
       // Score before startExplosion flips isExploding — the flag doubles
       // as the already-scored guard if a second death dispatch slips in.
       // Survivors retired at time-up never reach this path (WaveSystem
@@ -4938,23 +4942,27 @@ export class GameEngine {
           if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
       }
 
-      // ── Devour tiles in the head's path (static tiles aren't in the consume
-      // index, so query the static grid directly).  Collect THEN eat so we
-      // don't mutate the grid mid-iteration.  Not while leaving. ──
-      if (this.dragonState !== 'leave' && d.consume) {
+      // ── Devour tiles in the head's path → APPEND each as a body segment
+      // (Snake growth, material-matched).  Static tiles aren't in the consume
+      // index, so query the static grid directly; collect THEN eat so we don't
+      // mutate the grid mid-iteration.  Not while leaving. ──
+      if (this.dragonState !== 'leave') {
           const headR = Math.max(d.size.x, d.size.y) * 0.6;
           const buf = this._dragonEatBuf;
           buf.length = 0;
-          this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 60, (t) => buf.push(t));
+          this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 40, (t) => buf.push(t));
           for (let i = 0; i < buf.length; i++) {
               const t = buf[i];
               if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
               const tdx = wrapDeltaX(d.position.x, t.position.x);
               const tdy = wrapDeltaY(d.position.y, t.position.y);
               const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
-              if (tdx * tdx + tdy * tdy <= contact * contact) this.consumeTile(d, t, d.consume!, tdx, tdy);
+              if (tdx * tdx + tdy * tdy <= contact * contact) this.appendDragonSegment(t, tdx, tdy);
           }
       }
+
+      // ── Chain-follow: snap each body segment along the head's recorded path ──
+      this.positionDragonBody(d);
 
       // ── Head attacks (roam only): spit gnats + lob homing missiles ──
       if (this.dragonState === 'roam') {
@@ -5027,6 +5035,7 @@ export class GameEngine {
       };
       this.currentMap.entities.push(d);
       this.dragon = d;
+      this.dragonBody = [];
       this.dragonState = 'enter';
       this.dragonStateTimer = DRAGON_CONSTANTS.ENTER_DURATION;
       this.dragonTime = 0;
@@ -5046,6 +5055,100 @@ export class GameEngine {
       this.spawnProjectileFromConfig(d, this.player.position, cfg, EntityType.ENEMY);
   }
 
+  /** Devour a static tile → APPEND it as a body segment (Snake growth).  Beyond
+   *  MAX_SEGMENTS the tile is just destroyed (the dragon still carves a path). */
+  private appendDragonSegment(tile: GameEntity, dx: number, dy: number) {
+      this.physics.removeStaticEntity(tile);
+      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
+      if (this.dragonBody.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
+          const inward = Math.atan2(-dy, -dx);
+          this.spawnParticles(tile.position, 6, tile.color || '#94a3b8', {
+              spreadAngle: inward, spreadCone: 0.9, speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.1, lifetimeMax: 0.3,
+          });
+          tile.active = false;
+          return;
+      }
+      tile.mass = DRAGON_CONSTANTS.SEGMENT_MASS; // finite → dynamic + shootable
+      tile.dragonSegment = true;
+      tile.phasesTerrain = true; // glides through terrain/each other; still solid to player + shots
+      if (!tile.velocity) tile.velocity = { x: 0, y: 0 }; else { tile.velocity.x = 0; tile.velocity.y = 0; }
+      this.dragonBody.push(tile);
+  }
+
+  /** Snap each body segment onto the head's recorded path, SEGMENT_SPACING apart
+   *  by arc length, oriented along the body — the Snake chain. */
+  private positionDragonBody(head: GameEntity) {
+      const body = this.dragonBody;
+      const path = head.dragonPath;
+      if (body.length === 0 || !path || path.length < 2) return;
+      const SP = DRAGON_CONSTANTS.SEGMENT_SPACING;
+      let acc = 0, seg = 0, target = SP;
+      for (let i = 1; i < path.length && seg < body.length; i++) {
+          const prev = path[i - 1], cur = path[i];
+          const vx = wrapDeltaX(prev.x, cur.x), vy = wrapDeltaY(prev.y, cur.y); // prev → cur
+          const len = Math.hypot(vx, vy) || 1e-3;
+          while (seg < body.length && acc + len >= target) {
+              const t = (target - acc) / len;
+              const s = body[seg];
+              s.position.x = prev.x + vx * t;
+              s.position.y = prev.y + vy * t;
+              wrapPosition(s.position);
+              s.rotation = Math.atan2(vy, vx);
+              s.velocity.x = 0; s.velocity.y = 0;
+              seg++; target += SP;
+          }
+          acc += len;
+      }
+      // Path too short for the whole body — stack the rest at the tail end.
+      const tailP = path[path.length - 1];
+      for (; seg < body.length; seg++) {
+          const s = body[seg];
+          s.position.x = tailP.x; s.position.y = tailP.y;
+          s.velocity.x = 0; s.velocity.y = 0;
+      }
+  }
+
+  /** A body segment was destroyed: everything AFT of it falls off (→ free
+   *  drifting shards), and the segment itself shatters (handled by the caller). */
+  private severDragon(seg: GameEntity) {
+      const idx = this.dragonBody.indexOf(seg);
+      if (idx < 0) return;
+      for (let i = idx + 1; i < this.dragonBody.length; i++) this.detachDragonSegment(this.dragonBody[i]);
+      this.dragonBody.length = idx; // drop the broken segment + everything aft
+  }
+
+  /** A severed segment falls off the dragon: clear the flag, turn it into a free
+   *  mobile shard of its material, and kick it loose. */
+  private detachDragonSegment(seg: GameEntity) {
+      seg.dragonSegment = false;
+      seg.phasesTerrain = false; // a loose shard collides normally again
+      seg.shardVariant = this.tileToShardVariant(seg.shardVariant);
+      const a = Math.random() * Math.PI * 2;
+      seg.velocity.x = Math.cos(a) * 3.5;
+      seg.velocity.y = Math.sin(a) * 3.5;
+  }
+
+  /** A killed body segment: sever the tail, then dissolve it (shatter burst, no
+   *  regen/drops — it's a body part, not a map tile). */
+  private dragonSegmentDeath(seg: GameEntity) {
+      this.severDragon(seg);
+      this.spawnParticles(seg.position, 12, seg.color || '#94a3b8', {
+          speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 3.5, lifetimeMin: 0.2, lifetimeMax: 0.55,
+      });
+      seg.active = false;
+  }
+
+  /** Map a tile variant to its mobile-shard variant (for severed body parts). */
+  private tileToShardVariant(v: GameEntity['shardVariant']): GameEntity['shardVariant'] {
+      switch (v) {
+          case 'glass-tile':   return 'glass-shard';
+          case 'rock-tile':    return 'rock-shard';
+          case 'metal-tile':   return 'metal-shard';
+          case 'plastic-tile': return 'plastic-shard';
+          default:             return v;
+      }
+  }
+
   /** Dragon killed: big payoff + score + collapse the rift. */
   private dragonDeath(d: GameEntity) {
       this.awardScore(DRAGON_CONSTANTS.SCORE, d.position);
@@ -5056,12 +5159,17 @@ export class GameEngine {
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       d.active = false;
       this.dragon = null;
+      // The whole body scatters as free shards when the head dies.
+      for (let i = 0; i < this.dragonBody.length; i++) this.detachDragonSegment(this.dragonBody[i]);
+      this.dragonBody = [];
   }
 
-  /** Despawn the dragon (left via portal — no payoff). */
+  /** Despawn the dragon (left via portal — no payoff).  The body leaves with it. */
   private despawnDragon() {
       if (this.dragon) this.dragon.active = false;
       this.dragon = null;
+      for (let i = 0; i < this.dragonBody.length; i++) this.dragonBody[i].active = false;
+      this.dragonBody = [];
   }
 
   /** Portal VFX: an expanding violet rift ring + sparks. */

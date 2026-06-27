@@ -372,21 +372,27 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   hit-flash always reads.  Renders with NO health bar or off-screen chevron.
   Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
   engagement + ambient payload in `BUBBLE_CONSTANTS`).  Finally the Stage-6
-  DRAGON (an engine-managed segmented serpent MINI-BOSS — `'dragon'` AI strategy
-  is a NO-OP; `GameEngine.updateDragon`/`spawnDragon` own its lifecycle like the
+  DRAGON (an engine-managed serpent MINI-BOSS — `'dragon'` AI strategy is a
+  NO-OP; `GameEngine.updateDragon`/`spawnDragon` own its lifecycle like the
   snitch).  It ENTERS via a portal (`openDragonPortal` — a violet rift
-  shockwave), rides the asteroid flow field on a serpentine WEAVE devouring
-  static tiles in its path (`physics.forEachStaticNear` → `consumeTile`, since
-  static tiles aren't in the consume index) to grow longer + thicker, deals
-  contact damage with its head (the normal player↔enemy physics path), and
-  LEAVES via portal after `ROAM_DURATION` if not killed.  It `phasesTerrain`
-  (gnat-style collision skip — glides through everything except the player +
-  player projectiles, so it eats tiles instead of bouncing).  The head is a
-  normal damageable ENEMY (tanky `health` 220); a kill routes through a bespoke
-  `dragonDeath` (payoff + rift collapse) instead of the enemy explosion path.
-  The body is a chain of tapering segments RenderSystem draws along the head's
-  recorded `dragonPath` (`renderDragonBodies`, world-space, under the head).
-  DBG-summonable (Dragon ▸ "Summon").  Tuning in `DRAGON_CONSTANTS`.
+  shockwave), rides the asteroid flow field on a SLOW serpentine WEAVE
+  (`SPEED_FRAC` ≈ 0.13).  Its BODY is a real Snake of tiles: each static tile it
+  devours in its path (`physics.forEachStaticNear`) is APPENDED as a body segment
+  (`appendDragonSegment`) — a real finite-mass tile-variant STRUCTURE,
+  chain-followed behind the head (`positionDragonBody` snaps each along the head's
+  recorded `dragonPath`, `SEGMENT_SPACING` apart, up to `MAX_SEGMENTS`).  So the
+  dragon's body IS the material it ate (glass / rock / metal / plastic / mixes)
+  and each segment behaves like a tile (shootable / dents / breaks).  Segments are
+  kept OUT of the shard indices (EntityIndex `dragonSegment` gate → ShardSystem /
+  flow-drift / consume skip them) and `phasesTerrain` (glide through terrain +
+  each other; still SOLID to the player + shootable).  SEVER: shooting a body
+  segment dead (`dragonSegmentDeath`) drops it AND everything AFT of it
+  (`severDragon` → `detachDragonSegment` turns each into a free drifting shard of
+  its material).  The HEAD spits SWARM gnats + lobs HOMING missiles while roaming
+  (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`), deals contact damage,
+  is a tanky damageable ENEMY (`health` 220 → bespoke `dragonDeath`: payoff +
+  rift collapse + body scatters), and LEAVES via portal after `ROAM_DURATION` if
+  not killed.  DBG-summonable (Dragon ▸ "Summon").  Tuning in `DRAGON_CONSTANTS`.
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`

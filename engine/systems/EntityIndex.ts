@@ -125,8 +125,10 @@ export class EntityIndex {
           break;
         case EntityType.STRUCTURE:
           // Mobile shards only — static tiles (mass = Infinity) live
-          // in PhysicsSystem.staticGrid and aren't merge candidates.
-          if (e.mass !== Infinity) {
+          // in PhysicsSystem.staticGrid and aren't merge candidates.  Dragon
+          // body segments (Stage 6) are chain-controlled, so they're kept OUT of
+          // the shard indices (ShardSystem / flow-drift / consume ignore them).
+          if (e.mass !== Infinity && e.dragonSegment !== true) {
             this.asteroids.push(e);
             this.shardCandidates.push(e);
           }

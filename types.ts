@@ -576,6 +576,12 @@ export interface GameEntity {
   // and eats it via the consume pass instead of bouncing).  PhysicsSystem early
   // out.
   phasesTerrain?: boolean;
+  // Dragon body segment (Stage 6): a real tile-variant STRUCTURE that the dragon
+  // has eaten, chain-followed behind the head (position hard-set each frame by
+  // GameEngine.positionDragonBody).  Finite mass so it's shootable + collides;
+  // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
+  // consume leave it alone.  Cleared when it's severed off (→ free shard).
+  dragonSegment?: boolean;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

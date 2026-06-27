@@ -1292,7 +1292,9 @@ export class RenderSystem {
       // Collect first to avoid mutating set while iterating.
       let dead: GameEntity[] | null = null;
       for (const e of this._staticTileCacheSet) {
-          if (!e.active) {
+          // Evict on death OR when a tile stops being static (mass goes finite —
+          // e.g. the dragon eating it into a body segment) so no ghost is left.
+          if (!e.active || e.mass !== Infinity) {
               if (dead === null) dead = [];
               dead.push(e);
           }
@@ -1515,11 +1517,9 @@ export class RenderSystem {
     this.prepareStaticTileCacheForFrame(playerPos);
     this.blitStaticTileLayer(ctx);
 
-    // 4a₀. Dragon body — drawn UNDER the heads (which render in the entity
-    // pass) so segments stack head-on-top.  World space.
-    this.renderDragonBodies(ctx, entities, camera);
-
-    // 4a. Render Entities (Culling logic added)
+    // 4a. Render Entities (Culling logic added).  Stage 6: dragon body segments
+    // are real tile-variant STRUCTURE entities, so they render here like any
+    // tile (no dedicated pass).
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
 
     // 4b. Render Particles — single composite-op switch for the whole batch
