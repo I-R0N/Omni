@@ -212,7 +212,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
-    perf: true, timing: true,
+    perf: true, timing: true, dragon: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -274,29 +274,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
     </div>
   );
-  // Dragon mini-boss summon — one button per material (+ Mixed).  Each click
-  // spawns ANOTHER dragon, so several can be out at once.
-  const renderDragonGroup = () => (
-    <div className="flex flex-col items-center gap-2">
-      <span className="text-emerald-300 text-[11px] uppercase tracking-wider">Dragon — summon (stacks)</span>
-      <div className="flex flex-wrap justify-center gap-2 max-w-xl">
-        {['glass', 'rock', 'plastic', 'metal', 'mixed'].map(t => (
-          <button
-            key={t}
-            onClick={() => onSpawnDragon && onSpawnDragon(t)}
-            className="px-3 py-2 rounded-lg text-xs font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
   const renderTestPanel = () => (
     <>
       {renderMapGroup('Maps', REAL_MAPS)}
       {renderEnemyTestGroup()}
-      {renderDragonGroup()}
       <div className="text-center">
         <button
           onClick={() => toggleSection('fieldmaps')}
@@ -519,6 +500,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Relock', onResetUnlocks, 'Lean',
                   'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
               </>)}
+
+              {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
+              {renderSectionHeader('dragon', 'Dragon')}
+              {!collapsed.dragon && (
+                <div className="flex flex-wrap gap-2 px-1 py-1">
+                  {['glass', 'rock', 'plastic', 'metal', 'mixed'].map(t => (
+                    <button
+                      key={t}
+                      onClick={() => onSpawnDragon && onSpawnDragon(t)}
+                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
