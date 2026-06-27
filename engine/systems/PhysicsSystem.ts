@@ -1389,6 +1389,28 @@ export class PhysicsSystem {
 
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
+   *  Used by the dragon to devour tiles in its path (Stage 6). */
+  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
+      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
+      const rSq = r * r;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  const tdx = wrapDeltaX(t.position.x, x);
+                  const tdy = wrapDeltaY(t.position.y, y);
+                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
+              }
+          }
+      }
+  }
+
   public isPositionClear(x: number, y: number, r: number): boolean {
       const cx = Math.floor(x / SPATIAL_GRID_SIZE);
       const cy = Math.floor(y / SPATIAL_GRID_SIZE);
@@ -2095,6 +2117,15 @@ export class PhysicsSystem {
           const ok = other.type === EntityType.PLAYER
               || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
           if (!ok) return; // gnat vs non-player/non-shot (incl. gnat↔gnat) → skip
+      }
+      // Phase-through (Stage 6 dragon): glides through terrain/enemies and eats
+      // tiles via the consume pass; only collides with the player (contact) and
+      // player projectiles (to take damage).  Same gate as the gnat.
+      if (a.phasesTerrain === true || b.phasesTerrain === true) {
+          const other = a.phasesTerrain === true ? b : a;
+          const ok = other.type === EntityType.PLAYER
+              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
+          if (!ok) return;
       }
 
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs

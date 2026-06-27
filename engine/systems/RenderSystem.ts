@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1514,6 +1514,10 @@ export class RenderSystem {
     // double-paint a same-frame transition would otherwise produce.
     this.prepareStaticTileCacheForFrame(playerPos);
     this.blitStaticTileLayer(ctx);
+
+    // 4a₀. Dragon body — drawn UNDER the heads (which render in the entity
+    // pass) so segments stack head-on-top.  World space.
+    this.renderDragonBodies(ctx, entities, camera);
 
     // 4a. Render Entities (Culling logic added)
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
@@ -4069,6 +4073,40 @@ export class RenderSystem {
           return;
       }
 
+      // ── Dragon head (Stage 6): a forward-pointed scaled head with glowing
+      // eyes + swept horns — no engine flame.  Body segments render separately
+      // (renderDragonBodies).  Local +x faces travel.
+      if (shape === 'dragon') {
+          const flashD = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.3, flashD * 2));
+          const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);
+          const dark = `rgb(${Math.max(0, cr - 55)},${Math.max(0, cg - 55)},${Math.max(0, cb - 55)})`;
+          const fill = flashD > 0 ? '#ffffff' : `rgb(${cr},${cg},${cb})`;
+          // Swept horns (behind the skull).
+          ctx.fillStyle = dark;
+          for (const sgn of [-1, 1]) {
+              ctx.beginPath();
+              ctx.moveTo(-r * 0.15, sgn * r * 0.45);
+              ctx.lineTo(-r * 0.85, sgn * r * 0.95);
+              ctx.lineTo(-r * 0.05, sgn * r * 0.7);
+              ctx.closePath(); ctx.fill();
+          }
+          // Skull (oval, longer forward) + snout.
+          ctx.beginPath(); ctx.ellipse(r * 0.1, 0, r * 1.1, r * 0.82, 0, 0, Math.PI * 2);
+          ctx.fillStyle = fill; ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = dark; ctx.stroke();
+          ctx.beginPath(); ctx.arc(r * 0.85, 0, r * 0.46, 0, Math.PI * 2);
+          ctx.fillStyle = fill; ctx.fill();
+          // Eyes (glow + pupil).
+          for (const sgn of [-1, 1]) {
+              ctx.beginPath(); ctx.arc(r * 0.4, sgn * r * 0.42, r * 0.2, 0, Math.PI * 2);
+              ctx.fillStyle = DRAGON_CONSTANTS.EYE_COLOR; ctx.fill();
+              ctx.beginPath(); ctx.arc(r * 0.46, sgn * r * 0.42, r * 0.08, 0, Math.PI * 2);
+              ctx.fillStyle = '#000'; ctx.fill();
+          }
+          return;
+      }
+
       // The orb (Drone) renders a touch smaller so it reads as a compact,
       // buzzing craft next to the bigger winged ships.
       const shapeScale = shape === 'circle' ? 0.82 : 1;
@@ -4543,6 +4581,43 @@ export class RenderSystem {
               break;
       }
       ctx.closePath();
+  }
+
+  // Dragon body (Stage 6): a chain of tapering segments along the head's
+  // recorded path (`dragonPath`), drawn tail→head so the head end overlaps on
+  // top.  World space (camera-base transform active).  Segment count + radius
+  // scale with the head's grown size.  Toroidal via shiftX/shiftY.
+  private renderDragonBodies(ctx: CanvasRenderingContext2D, entities: GameEntity[], camera: CameraState) {
+      const camX = camera.position.x, camY = camera.position.y;
+      const D = DRAGON_CONSTANTS;
+      const TWO_PI = Math.PI * 2;
+      for (let e = 0; e < entities.length; e++) {
+          const d = entities[e];
+          if (!d.active || d.enemyShape !== 'dragon' || !d.dragonPath || d.dragonPath.length < 2) continue;
+          const path = d.dragonPath;
+          const headR = Math.max(d.size.x, d.size.y) * 0.5;
+          const segR0 = headR * D.BODY_RADIUS_FRAC;
+          const grown = Math.max(0, Math.floor((Math.max(d.size.x, d.size.y) - 64) / D.SEG_PER_SIZE));
+          const segCount = Math.max(0, Math.min(D.SEGMENTS + grown, Math.floor((path.length - 1) / D.SEGMENT_STRIDE)));
+          const [cr, cg, cb] = hexToRgb(d.color || D.COLOR);
+          const dark = `rgb(${Math.max(0, cr - 55)},${Math.max(0, cg - 55)},${Math.max(0, cb - 55)})`;
+          for (let i = segCount; i >= 1; i--) {
+              const p = path[Math.min(i * D.SEGMENT_STRIDE, path.length - 1)];
+              const r = segR0 * Math.pow(D.SEGMENT_TAPER, i);
+              ctx.save();
+              ctx.translate(shiftX(camX, p.x), shiftY(camY, p.y));
+              ctx.beginPath(); ctx.arc(0, 0, r, 0, TWO_PI);
+              ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+              ctx.fill();
+              ctx.lineWidth = 2; ctx.strokeStyle = dark; ctx.stroke();
+              // dorsal scale ridge — a small darker diamond on the spine
+              ctx.beginPath();
+              ctx.moveTo(0, -r * 0.55); ctx.lineTo(r * 0.28, 0);
+              ctx.lineTo(0, r * 0.55); ctx.lineTo(-r * 0.28, 0); ctx.closePath();
+              ctx.fillStyle = dark; ctx.fill();
+              ctx.restore();
+          }
+      }
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {

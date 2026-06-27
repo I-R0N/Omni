@@ -37,6 +37,7 @@ export class AISystem {
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
     swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
     bubble:     (dt, enemy, player, flowField, enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards, enemies),
+    dragon:     () => { /* engine-managed (GameEngine.updateDragon) — no AI here */ },
   };
 
   /**

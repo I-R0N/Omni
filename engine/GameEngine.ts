@@ -18,7 +18,7 @@ import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -254,6 +254,17 @@ export class GameEngine {
   // Bubbles keeps at least BUBBLE_CONSTANTS.AMBIENT_POPULATION alive, spawning
   // one offscreen each time this top-up timer elapses while the field is short.
   private ambientBubbleTimer: number = 0;
+
+  // ── Dragon mini-boss (Stage 6) ────────────────────────────────────────────
+  // One engine-managed segmented serpent at a time.  The head is a normal ENEMY
+  // (damageable / dealt with by handleEntityDeath); its lifecycle + movement +
+  // body-path live here (see spawnDragon / updateDragon).
+  private dragon: GameEntity | null = null;
+  private dragonState: 'enter' | 'roam' | 'leave' = 'enter';
+  private dragonStateTimer: number = 0;   // seconds left in the current state
+  private dragonTime: number = 0;          // weave clock
+  private dragonContactCd: number = 0;     // body-contact damage cooldown
+  private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1411,6 +1422,7 @@ export class GameEngine {
       this.snitch = null;
       this.snitchTime = 0;
       this.snitchCatchCount = 0;
+      this.dragon = null; // dies with the old map's entity list
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -2003,6 +2015,9 @@ export class GameEngine {
   }
 
   private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+      // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
+      // not the normal enemy explosion/shard/drop path.
+      if (entity === this.dragon && !entity.isExploding) { this.dragonDeath(entity); return; }
       // Score before startExplosion flips isExploding — the flag doubles
       // as the already-scored guard if a second death dispatch slips in.
       // Survivors retired at time-up never reach this path (WaveSystem
@@ -2489,6 +2504,7 @@ export class GameEngine {
     // Snitch tick — spawn for a fresh wave, steer along the flow field,
     // run the catch check (collide / shoot per the DBG toggle).
     this.updateSnitch(dt);
+    this.updateDragon(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -4880,6 +4896,153 @@ export class GameEngine {
       }
     }
     this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
+  }
+
+  // ─── Dragon mini-boss (Stage 6) ────────────────────────────────────────
+  //
+  // Engine-managed segmented serpent.  The head is a normal ENEMY (so
+  // projectiles damage it + handleEntityDeath routes a kill); this pass owns the
+  // lifecycle (enter→roam→leave), the flow-weave steering, the body-path
+  // history, and the tile-devour growth (via the shared consume pass).  One at a
+  // time; DBG-summonable.  Toroidal.
+  private updateDragon(dt: number) {
+      const d = this.dragon;
+      if (!d || !d.active || !this.currentMap) return;
+      this.dragonTime += dt;
+      const D = DRAGON_CONSTANTS;
+
+      // ── Flow-weave steering (slow + majestic) ──
+      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+      const cruise = Math.min(moveCfg.maxSpeed,
+          (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction));
+      const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+      const wob = Math.sin(this.dragonTime * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
+      const cosW = Math.cos(wob), sinW = Math.sin(wob);
+      const dirX = flow.x * cosW - flow.y * sinW;
+      const dirY = flow.x * sinW + flow.y * cosW;
+      const speedMul = this.dragonState === 'leave' ? 1.5 : 1; // dive out faster
+      const target = cruise * D.SPEED_FRAC * speedMul;
+      const alpha = Math.min(1, D.STEER_RATE * dt * 60);
+      d.velocity.x += (dirX * target - d.velocity.x) * alpha;
+      d.velocity.y += (dirY * target - d.velocity.y) * alpha;
+      d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
+
+      // ── Body path history (newest first); RenderSystem walks it ──
+      if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
+      const head0 = d.dragonPath[0];
+      const mdx = wrapDeltaX(head0.x, d.position.x), mdy = wrapDeltaY(head0.y, d.position.y);
+      if (mdx * mdx + mdy * mdy >= D.PATH_SPACING * D.PATH_SPACING) {
+          d.dragonPath.unshift({ x: d.position.x, y: d.position.y });
+          if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
+      }
+
+      // ── Devour tiles in the head's path (static tiles aren't in the consume
+      // index, so query the static grid directly).  Collect THEN eat so we
+      // don't mutate the grid mid-iteration.  Not while leaving. ──
+      if (this.dragonState !== 'leave' && d.consume) {
+          const headR = Math.max(d.size.x, d.size.y) * 0.6;
+          const buf = this._dragonEatBuf;
+          buf.length = 0;
+          this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 60, (t) => buf.push(t));
+          for (let i = 0; i < buf.length; i++) {
+              const t = buf[i];
+              if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
+              const tdx = wrapDeltaX(d.position.x, t.position.x);
+              const tdy = wrapDeltaY(d.position.y, t.position.y);
+              const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
+              if (tdx * tdx + tdy * tdy <= contact * contact) this.consumeTile(d, t, d.consume!, tdx, tdy);
+          }
+      }
+
+      // ── Lifecycle ──
+      this.dragonStateTimer -= dt;
+      if (this.dragonState === 'enter') {
+          if (this.dragonStateTimer <= 0) { this.dragonState = 'roam'; this.dragonStateTimer = D.ROAM_DURATION; }
+      } else if (this.dragonState === 'roam') {
+          if (this.dragonStateTimer <= 0) {
+              this.dragonState = 'leave';
+              this.dragonStateTimer = D.LEAVE_DURATION;
+              this.openDragonPortal(d.position); // exit rift opens ahead of it
+          }
+      } else { // leave
+          if (this.dragonStateTimer <= 0) this.despawnDragon();
+      }
+  }
+
+  /** Open an offscreen entry portal and birth the dragon head from it. */
+  private spawnDragon() {
+      if (this.dragon || !this.currentMap) return;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
+      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
+      wrapPosition(pos);
+      this.openDragonPortal(pos);
+
+      const v = ENEMY_VARIANTS[EnemySubtype.DRAGON];
+      const d: GameEntity = {
+          id: nextId('dragon'),
+          type: EntityType.ENEMY,
+          enemySubtype: EnemySubtype.DRAGON,
+          position: { x: pos.x, y: pos.y },
+          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // head inward
+          size: { x: v.size, y: v.size },
+          rotation: angle + Math.PI,
+          color: v.color,
+          active: true,
+          health: v.health,
+          maxHealth: v.health,
+          maxSpeed: v.maxSpeed,
+          mass: v.mass,
+          contactDamage: v.contactDamage,
+          enemyShape: 'dragon',
+          phasesTerrain: true,          // glides through terrain, eats it
+          consume: v.consume ? { ...v.consume } : undefined,
+          dragonPath: [{ x: pos.x, y: pos.y }],
+          aiState: 'chase',
+          glowPhase: Math.random() * Math.PI * 2,
+      };
+      this.currentMap.entities.push(d);
+      this.dragon = d;
+      this.dragonState = 'enter';
+      this.dragonStateTimer = DRAGON_CONSTANTS.ENTER_DURATION;
+      this.dragonTime = 0;
+  }
+
+  /** Dragon killed: big payoff + score + collapse the rift. */
+  private dragonDeath(d: GameEntity) {
+      this.awardScore(DRAGON_CONSTANTS.SCORE, d.position);
+      this.openDragonPortal(d.position);
+      this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
+          speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
+      d.active = false;
+      this.dragon = null;
+  }
+
+  /** Despawn the dragon (left via portal — no payoff). */
+  private despawnDragon() {
+      if (this.dragon) this.dragon.active = false;
+      this.dragon = null;
+  }
+
+  /** Portal VFX: an expanding violet rift ring + sparks. */
+  private openDragonPortal(pos: Vector2) {
+      this.spawnShockwave(pos, {
+          radius: DRAGON_CONSTANTS.PORTAL_RADIUS, damage: 0, knockback: 0,
+          color: DRAGON_CONSTANTS.PORTAL_COLOR, lifetime: DRAGON_CONSTANTS.PORTAL_DURATION,
+      });
+      this.spawnParticles(pos, 24, DRAGON_CONSTANTS.PORTAL_COLOR, {
+          speedMin: 2, speedMax: 9, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.3, lifetimeMax: 0.8,
+      });
+  }
+
+  /** DBG: summon the dragon (or force it to leave if one is already out). */
+  public debugSpawnDragon() {
+      if (this.dragon) { this.dragonState = 'leave'; this.dragonStateTimer = DRAGON_CONSTANTS.LEAVE_DURATION; this.openDragonPortal(this.dragon.position); }
+      else this.spawnDragon();
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

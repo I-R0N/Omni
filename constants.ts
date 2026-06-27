@@ -3086,6 +3086,19 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     multiply: { atSize: 50, maxPopulation: 14 },
     ambient: true, thirdParty: true,
   },
+  // ── Stage 6 ──
+  // Dragon: a big segmented serpent mini-boss.  Enters via a portal, rides the
+  // flow field weaving across the map and DEVOURS tiles (consume eats:'tile' →
+  // consumeTile) to grow longer + thicker, deals contact damage along its body,
+  // and leaves via portal if not killed.  Engine-managed (GameEngine.update-
+  // Dragon); the 'dragon' AI strategy is a no-op.  Tanky combat HP on the head.
+  [EnemySubtype.DRAGON]: {
+    color: '#34d399', size: 64, health: 220,
+    maxSpeed: 6, accel: 4, turnRate: 1.2,
+    sprite: ASSETS.ENEMY_TANK, mass: 120, shape: 'dragon',
+    shoots: false, contactDamage: 16,
+    consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3168,6 +3181,35 @@ export const BUBBLE_CONSTANTS = {
   SPAWN_MARGIN: 220,            // units past the viewport edge to spawn a fresh bubble
 };
 
+// Stage 6: the dragon mini-boss.  Engine-managed lifecycle (GameEngine.spawn-
+// Dragon / updateDragon): enter (portal) → roam (flow-weave + devour tiles) →
+// leave (portal), or die when its head HP runs out.  The body is a chain of
+// segments drawn by RenderSystem along the head's recorded path.
+export const DRAGON_CONSTANTS = {
+  SPEED_FRAC: 0.34,        // cruise speed as a fraction of the player's terminal cruise
+  WEAVE_FREQ: 1.3,         // serpentine weave frequency (rad/s)
+  WEAVE_AMP: 0.55,         // weave amplitude (radians, rotates the flow heading)
+  STEER_RATE: 0.05,        // velocity easing toward the target heading (×dt×60)
+  ENTER_DURATION: 1.1,     // seconds of portal emergence before it starts roaming
+  ROAM_DURATION: 28,       // seconds roaming before it heads out (if not killed)
+  LEAVE_DURATION: 1.6,     // seconds collapsing into the exit portal
+  PATH_SPACING: 13,        // world units between recorded head-path points
+  PATH_MAX: 80,            // cap on stored path points
+  SEGMENTS: 16,            // body segments at base size (grows with size)
+  SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
+  SEGMENT_STRIDE: 2,       // path points between consecutive rendered segments
+  SEGMENT_TAPER: 0.97,     // segment-radius multiplier toward the tail
+  BODY_RADIUS_FRAC: 0.46,  // first body segment radius as a fraction of head size
+  CONTACT_CD: 0.7,         // seconds between body-contact hits on the player
+  PORTAL_RADIUS: 160,      // portal ring max radius
+  PORTAL_DURATION: 0.9,    // portal ring VFX lifetime
+  PORTAL_COLOR: '#a78bfa', // violet rift
+  COLOR: '#34d399',        // emerald scales
+  EYE_COLOR: '#fde047',    // head eye glow
+  SCORE: 3000,             // kill payout
+  SPAWN_MARGIN: 300,       // units past the viewport edge to open the entry portal
+};
+
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
 // that apply the effect to the player on hit (and render in the effect colour).
 export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> = {
@@ -3207,6 +3249,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.SWARM]:     EnemyRole.RAMMING,
   [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
+  [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3220,7 +3263,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
 // ENEMY_ROLE did (RAMMING → 'dogfighter', SHOOTING → 'skirmisher'), so play is
 // byte-for-byte identical; the per-subtype quirks (Drone jitter, Orbiter true-
 // orbit, Sniper lock, Turret no-move) still live inside those routines.
-export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm' | 'bubble';
+export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm' | 'bubble' | 'dragon';
 export interface EnemyBehaviorDef {
   /** Which AISystem movement/targeting routine runs for this subtype. */
   move: EnemyMovement;
@@ -3241,6 +3284,7 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.SWARM]:     { move: 'swarm' },
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
   [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
+  [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────

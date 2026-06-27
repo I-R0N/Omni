@@ -317,6 +317,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugTriggerCardChoice();
   };
 
+  const handleSpawnDragon = () => {
+      if (engineRef.current) engineRef.current.debugSpawnDragon();
+  };
+
   const handlePurchaseUnlock = (id: string) => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
   };
@@ -442,6 +446,7 @@ const App: React.FC = () => {
         onSelectCard={handleSelectCard}
         onCycleCardInterval={handleCycleCardInterval}
         onTestCards={handleTestCards}
+        onSpawnDragon={handleSpawnDragon}
         onPurchaseUnlock={handlePurchaseUnlock}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}

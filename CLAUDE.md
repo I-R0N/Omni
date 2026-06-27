@@ -371,7 +371,22 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
   hit-flash always reads.  Renders with NO health bar or off-screen chevron.
   Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
-  engagement + ambient payload in `BUBBLE_CONSTANTS`).
+  engagement + ambient payload in `BUBBLE_CONSTANTS`).  Finally the Stage-6
+  DRAGON (an engine-managed segmented serpent MINI-BOSS — `'dragon'` AI strategy
+  is a NO-OP; `GameEngine.updateDragon`/`spawnDragon` own its lifecycle like the
+  snitch).  It ENTERS via a portal (`openDragonPortal` — a violet rift
+  shockwave), rides the asteroid flow field on a serpentine WEAVE devouring
+  static tiles in its path (`physics.forEachStaticNear` → `consumeTile`, since
+  static tiles aren't in the consume index) to grow longer + thicker, deals
+  contact damage with its head (the normal player↔enemy physics path), and
+  LEAVES via portal after `ROAM_DURATION` if not killed.  It `phasesTerrain`
+  (gnat-style collision skip — glides through everything except the player +
+  player projectiles, so it eats tiles instead of bouncing).  The head is a
+  normal damageable ENEMY (tanky `health` 220); a kill routes through a bespoke
+  `dragonDeath` (payoff + rift collapse) instead of the enemy explosion path.
+  The body is a chain of tapering segments RenderSystem draws along the head's
+  recorded `dragonPath` (`renderDragonBodies`, world-space, under the head).
+  DBG-summonable (Dragon ▸ "Summon").  Tuning in `DRAGON_CONSTANTS`.
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`

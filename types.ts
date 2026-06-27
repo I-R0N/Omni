@@ -136,12 +136,17 @@ export enum EnemySubtype {
   //           and splits — until SHOT, after which it homes in and latches onto
   //           the player, EMPing weapon + shield ('bubble' behavior).
   BUBBLE   = 'BUBBLE',
+  // Stage 6 — DRAGON: a big segmented serpent mini-boss that enters via a
+  //           portal, rides the flow field devouring tiles to grow, and leaves
+  //           via portal.  Engine-managed (GameEngine.updateDragon); the AI
+  //           'dragon' strategy is a no-op.
+  DRAGON   = 'DRAGON',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -560,6 +565,17 @@ export interface GameEntity {
   // Stamped on the PLAYER when it slams a tile/asteroid at ≥ KNOCK_SPEED
   // (PhysicsSystem); updateBubbles reads it to shake any latched bubble free.
   terrainSlamTimer?: number;
+
+  // ── Stage 6: dragon mini-boss ───────────────────────────────────────────
+  // Recent head-position history (newest first), recorded by
+  // GameEngine.updateDragon; RenderSystem walks it to draw the trailing body
+  // segments.  Only the dragon head carries this.
+  dragonPath?: Vector2[];
+  // Phase-through (gnat-style): the entity ignores collision with everything
+  // except the player + player projectiles (so the dragon glides through terrain
+  // and eats it via the consume pass instead of bouncing).  PhysicsSystem early
+  // out.
+  phasesTerrain?: boolean;
   // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
   // "is the field clear?" UNLESS this is explicitly false.  Set false for
   // entities spawned BY other entities or that replicate — nest brood, bubble

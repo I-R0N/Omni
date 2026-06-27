@@ -99,6 +99,7 @@ interface UIOverlayProps {
   onSelectCard?: (index: number) => void;
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
+  onSpawnDragon?: () => void;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -180,6 +181,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSelectCard,
   onCycleCardInterval,
   onTestCards,
+  onSpawnDragon,
   onPurchaseUnlock,
   onUnlockAll,
   onResetUnlocks,
@@ -487,6 +489,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Wave interval between free upgrade-card offers (1 / 2 / 3 / 5). 1 = a card pick after every wave.')}
                 {ctrlRow('Test cards', onTestCards, 'Show',
                   'Force an upgrade-card choice right now (uses the live wave number).')}
+                {ctrlRow('Dragon', onSpawnDragon, 'Summon',
+                  'Stage 6: summon the dragon mini-boss via portal (or send the current one out).')}
                 {ctrlRow('+1k Salv', onAddCredits, 'Grant',
                   'Grant 1000 Salvage for testing the (future) shop.')}
                 {ctrlRow('Max all', onMaxUpgrades, 'Max',
