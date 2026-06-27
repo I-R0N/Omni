@@ -3093,9 +3093,9 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // and leaves via portal if not killed.  Engine-managed (GameEngine.update-
   // Dragon); the 'dragon' AI strategy is a no-op.  Tanky combat HP on the head.
   [EnemySubtype.DRAGON]: {
-    color: '#34d399', size: 64, health: 220,
+    color: '#34d399', size: 64, health: 500, // big boss HP (> the bubble's max)
     maxSpeed: 6, accel: 4, turnRate: 1.2,
-    sprite: ASSETS.ENEMY_TANK, mass: 120, shape: 'dragon',
+    sprite: ASSETS.ENEMY_TANK, mass: 500, shape: 'dragon', // heavy: barely shoved
     shoots: false, contactDamage: 16,
     consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
   },
@@ -3206,6 +3206,7 @@ export const DRAGON_CONSTANTS = {
   SEGMENT_SPACING: 36,     // world units between body segments
   MAX_SEGMENTS: 28,        // body length cap (further tiles are just devoured)
   SEGMENT_MASS: 6,         // finite mass so a segment is dynamic + shootable
+  START_SEGMENTS: 10,      // body tiles it spawns with (a coherent random material)
   SEGMENTS: 16,            // body segments at base size (grows with size)
   SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
   SEGMENT_STRIDE: 2,       // path points between consecutive rendered segments

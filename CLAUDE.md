@@ -385,14 +385,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   and each segment behaves like a tile (shootable / dents / breaks).  Segments are
   kept OUT of the shard indices (EntityIndex `dragonSegment` gate → ShardSystem /
   flow-drift / consume skip them) and `phasesTerrain` (glide through terrain +
-  each other; still SOLID to the player + shootable).  SEVER: shooting a body
-  segment dead (`dragonSegmentDeath`) drops it AND everything AFT of it
-  (`severDragon` → `detachDragonSegment` turns each into a free drifting shard of
-  its material).  The HEAD spits SWARM gnats + lobs HOMING missiles while roaming
-  (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`), deals contact damage,
-  is a tanky damageable ENEMY (`health` 220 → bespoke `dragonDeath`: payoff +
-  rift collapse + body scatters), and LEAVES via portal after `ROAM_DURATION` if
-  not killed.  DBG-summonable (Dragon ▸ "Summon").  Tuning in `DRAGON_CONSTANTS`.
+  each other; still SOLID to the player + shootable).  It SPAWNS WITH a starting
+  body (`START_SEGMENTS` tiles of one random material, `makeDragonSegment` —
+  never a bare head; becomes mixed as it eats).  SEVER: shooting a body segment
+  dead (`dragonSegmentDeath`) drops it AND everything AFT of it (`severDragon` →
+  `detachDragonSegment` turns each into a free drifting shard of its material).
+  It's a NEUTRAL THIRD PARTY (`thirdParty:true`, like the bubble): passive —
+  just roams + eats — until ATTACKED by the player OR an enemy (head shot /
+  rammed → `provoked` via PhysicsSystem; a body-segment hit provokes too).  ONLY
+  once provoked does the HEAD deploy attacks: spit SWARM gnats + lob HOMING
+  missiles (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`).  Deals
+  contact damage; a tanky, heavy, damageable ENEMY (`health` 500, `mass` 500 →
+  bespoke `dragonDeath`: payoff + rift collapse + body scatters); LEAVES via
+  portal after `ROAM_DURATION` if not killed.  DBG-summonable (Dragon ▸ "Summon").
+  Tuning in `DRAGON_CONSTANTS`.
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`

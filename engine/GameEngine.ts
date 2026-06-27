@@ -17,8 +17,9 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
+import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -4964,8 +4965,18 @@ export class GameEngine {
       // ── Chain-follow: snap each body segment along the head's recorded path ──
       this.positionDragonBody(d);
 
-      // ── Head attacks (roam only): spit gnats + lob homing missiles ──
-      if (this.dragonState === 'roam') {
+      // ── Provoke-on-attack (third party): the head being shot stamps `provoked`
+      // (PhysicsSystem, like the bubble); shooting a BODY segment provokes it too
+      // (segment hitFlash) — default the aggressor to the player there. ──
+      if (!d.provoked) {
+          for (let i = 0; i < this.dragonBody.length; i++) {
+              if ((this.dragonBody[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
+          }
+      }
+
+      // ── Head attacks: ONLY once provoked (passive roamer until attacked) —
+      // spit gnats + lob homing missiles. ──
+      if (this.dragonState === 'roam' && d.provoked) {
           this.dragonGnatTimer -= dt;
           if (this.dragonGnatTimer <= 0) {
               this.dragonGnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
@@ -5028,14 +5039,30 @@ export class GameEngine {
           contactDamage: v.contactDamage,
           enemyShape: 'dragon',
           phasesTerrain: true,          // glides through terrain, eats it
+          thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
           consume: v.consume ? { ...v.consume } : undefined,
-          dragonPath: [{ x: pos.x, y: pos.y }],
           aiState: 'chase',
           glowPhase: Math.random() * Math.PI * 2,
       };
+      // Seed a trailing path (outward, away from the head's inward heading) so the
+      // starting body lays out behind it immediately instead of stacking.
+      const ox = Math.cos(angle), oy = Math.sin(angle); // outward = away from movement
+      const seed: Vector2[] = [];
+      for (let k = 0; k < 110; k++) seed.push({ x: pos.x + ox * k * DRAGON_CONSTANTS.PATH_SPACING, y: pos.y + oy * k * DRAGON_CONSTANTS.PATH_SPACING });
+      d.dragonPath = seed;
       this.currentMap.entities.push(d);
       this.dragon = d;
+      // Spawn a starting body of a single random material (it becomes mixed as it
+      // eats) so it never enters as a bare head.
       this.dragonBody = [];
+      const startVariants: StructureVariant[] = ['glass', 'rock', 'metal', 'plastic'];
+      const startVar = startVariants[(Math.random() * startVariants.length) | 0];
+      for (let i = 0; i < DRAGON_CONSTANTS.START_SEGMENTS; i++) {
+          const seg = this.makeDragonSegment(startVar, pos.x, pos.y);
+          this.currentMap.entities.push(seg);
+          this.dragonBody.push(seg);
+      }
+      this.positionDragonBody(d); // lay them out along the seeded path now
       this.dragonState = 'enter';
       this.dragonStateTimer = DRAGON_CONSTANTS.ENTER_DURATION;
       this.dragonTime = 0;
@@ -5073,6 +5100,22 @@ export class GameEngine {
       tile.phasesTerrain = true; // glides through terrain/each other; still solid to player + shots
       if (!tile.velocity) tile.velocity = { x: 0, y: 0 }; else { tile.velocity.x = 0; tile.velocity.y = 0; }
       this.dragonBody.push(tile);
+  }
+
+  /** Build a fresh hex-tile body segment of `variant` at (x,y) — used to spawn
+   *  the dragon's starting body.  A real tile (dent/shatter) flagged as a chain-
+   *  controlled, phasing dragon segment. */
+  private makeDragonSegment(variant: StructureVariant, x: number, y: number): GameEntity {
+      const w = HEX_WIDTH, h = HEX_HEIGHT;
+      const pts: Vector2[] = [
+          { x: 0, y: -h / 2 }, { x: w / 2, y: -h / 4 }, { x: w / 2, y: h / 4 },
+          { x: 0, y: h / 2 }, { x: -w / 2, y: h / 4 }, { x: -w / 2, y: -h / 4 },
+      ];
+      const seg = TileGenerator.buildStructureTile(0, 0, x, y, w, h, pts, variant);
+      seg.mass = DRAGON_CONSTANTS.SEGMENT_MASS;
+      seg.dragonSegment = true;
+      seg.phasesTerrain = true;
+      return seg;
   }
 
   /** Snap each body segment onto the head's recorded path, SEGMENT_SPACING apart
