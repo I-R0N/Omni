@@ -99,7 +99,7 @@ interface UIOverlayProps {
   onSelectCard?: (index: number) => void;
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
-  onSpawnDragon?: () => void;
+  onSpawnDragon?: (type: string) => void;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -274,10 +274,29 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
     </div>
   );
+  // Dragon mini-boss summon — one button per material (+ Mixed).  Each click
+  // spawns ANOTHER dragon, so several can be out at once.
+  const renderDragonGroup = () => (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-emerald-300 text-[11px] uppercase tracking-wider">Dragon — summon (stacks)</span>
+      <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+        {['glass', 'rock', 'plastic', 'metal', 'mixed'].map(t => (
+          <button
+            key={t}
+            onClick={() => onSpawnDragon && onSpawnDragon(t)}
+            className="px-3 py-2 rounded-lg text-xs font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
   const renderTestPanel = () => (
     <>
       {renderMapGroup('Maps', REAL_MAPS)}
       {renderEnemyTestGroup()}
+      {renderDragonGroup()}
       <div className="text-center">
         <button
           onClick={() => toggleSection('fieldmaps')}
@@ -489,8 +508,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Wave interval between free upgrade-card offers (1 / 2 / 3 / 5). 1 = a card pick after every wave.')}
                 {ctrlRow('Test cards', onTestCards, 'Show',
                   'Force an upgrade-card choice right now (uses the live wave number).')}
-                {ctrlRow('Dragon', onSpawnDragon, 'Summon',
-                  'Stage 6: summon the dragon mini-boss via portal (or send the current one out).')}
                 {ctrlRow('+1k Salv', onAddCredits, 'Grant',
                   'Grant 1000 Salvage for testing the (future) shop.')}
                 {ctrlRow('Max all', onMaxUpgrades, 'Max',

@@ -317,8 +317,8 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugTriggerCardChoice();
   };
 
-  const handleSpawnDragon = () => {
-      if (engineRef.current) engineRef.current.debugSpawnDragon();
+  const handleSpawnDragon = (type: string) => {
+      if (engineRef.current) engineRef.current.debugSpawnDragon(type);
   };
 
   const handlePurchaseUnlock = (id: string) => {

@@ -43,6 +43,18 @@ function blendHexColors(hexA: string, hexB: string): string {
 // dust" feel instead of a continuous cloud.
 const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
 
+/** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
+ *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
+interface DragonInstance {
+  head: GameEntity;
+  body: GameEntity[];                    // eaten/spawned tiles, head→tail
+  state: 'enter' | 'roam' | 'leave';
+  stateTimer: number;                    // seconds left in the current state
+  time: number;                          // weave clock
+  gnatTimer: number;                     // countdown to the next brood spit
+  missileTimer: number;                  // countdown to the next homing missile
+}
+
 export class GameEngine {
   private input: InputSystem;
   private physics: PhysicsSystem;
@@ -257,17 +269,11 @@ export class GameEngine {
   private ambientBubbleTimer: number = 0;
 
   // ── Dragon mini-boss (Stage 6) ────────────────────────────────────────────
-  // One engine-managed segmented serpent at a time.  The head is a normal ENEMY
-  // (damageable / dealt with by handleEntityDeath); its lifecycle + movement +
-  // body-path live here (see spawnDragon / updateDragon).
-  private dragon: GameEntity | null = null;
-  private dragonBody: GameEntity[] = [];   // eaten tiles, head→tail (Snake-style)
-  private dragonState: 'enter' | 'roam' | 'leave' = 'enter';
-  private dragonStateTimer: number = 0;   // seconds left in the current state
-  private dragonTime: number = 0;          // weave clock
-  private dragonContactCd: number = 0;     // body-contact damage cooldown
-  private dragonGnatTimer: number = 0;     // countdown to the next brood spit
-  private dragonMissileTimer: number = 0;  // countdown to the next homing missile
+  // Any number of engine-managed segmented serpents at once.  Each head is a
+  // normal ENEMY (damageable / routed through handleEntityDeath); per-dragon
+  // lifecycle + movement + Snake-body live on its DragonInstance (see
+  // spawnDragon / updateDragons).
+  private dragons: DragonInstance[] = [];
   private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
@@ -1426,8 +1432,7 @@ export class GameEngine {
       this.snitch = null;
       this.snitchTime = 0;
       this.snitchCatchCount = 0;
-      this.dragon = null; // dies with the old map's entity list
-      this.dragonBody = [];
+      this.dragons = []; // die with the old map's entity list
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -2022,7 +2027,10 @@ export class GameEngine {
   private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
       // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
       // not the normal enemy explosion/shard/drop path.
-      if (entity === this.dragon && !entity.isExploding) { this.dragonDeath(entity); return; }
+      if (entity.enemySubtype === EnemySubtype.DRAGON && !entity.isExploding) {
+          const inst = this.dragons.find(g => g.head === entity);
+          if (inst) { this.dragonDeath(inst); return; }
+      }
       // A body segment shot off: sever the tail + dissolve it (no regen/drops).
       if (entity.dragonSegment === true) { this.dragonSegmentDeath(entity); return; }
       // Score before startExplosion flips isExploding — the flag doubles
@@ -2511,7 +2519,7 @@ export class GameEngine {
     // Snitch tick — spawn for a fresh wave, steer along the flow field,
     // run the catch check (collide / shoot per the DBG toggle).
     this.updateSnitch(dt);
-    this.updateDragon(dt);
+    this.updateDragons(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -4912,107 +4920,108 @@ export class GameEngine {
   // lifecycle (enter→roam→leave), the flow-weave steering, the body-path
   // history, and the tile-devour growth (via the shared consume pass).  One at a
   // time; DBG-summonable.  Toroidal.
-  private updateDragon(dt: number) {
-      const d = this.dragon;
-      if (!d || !d.active || !this.currentMap) return;
-      this.dragonTime += dt;
+  private updateDragons(dt: number) {
+      if (this.dragons.length === 0 || !this.currentMap) return;
       const D = DRAGON_CONSTANTS;
-
-      // ── Flow-weave steering (slow + majestic) ──
       const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
       const cruise = Math.min(moveCfg.maxSpeed,
           (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction));
-      const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
-      const wob = Math.sin(this.dragonTime * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
-      const cosW = Math.cos(wob), sinW = Math.sin(wob);
-      const dirX = flow.x * cosW - flow.y * sinW;
-      const dirY = flow.x * sinW + flow.y * cosW;
-      const speedMul = this.dragonState === 'leave' ? 1.5 : 1; // dive out faster
-      const target = cruise * D.SPEED_FRAC * speedMul;
-      const alpha = Math.min(1, D.STEER_RATE * dt * 60);
-      d.velocity.x += (dirX * target - d.velocity.x) * alpha;
-      d.velocity.y += (dirY * target - d.velocity.y) * alpha;
-      d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
 
-      // ── Body path history (newest first); RenderSystem walks it ──
-      if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
-      const head0 = d.dragonPath[0];
-      const mdx = wrapDeltaX(head0.x, d.position.x), mdy = wrapDeltaY(head0.y, d.position.y);
-      if (mdx * mdx + mdy * mdy >= D.PATH_SPACING * D.PATH_SPACING) {
-          d.dragonPath.unshift({ x: d.position.x, y: d.position.y });
-          if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
-      }
+      for (let n = this.dragons.length - 1; n >= 0; n--) {
+          const inst = this.dragons[n];
+          const d = inst.head;
+          if (!d.active) { this.dragons.splice(n, 1); continue; }
+          inst.time += dt;
 
-      // ── Devour tiles in the head's path → APPEND each as a body segment
-      // (Snake growth, material-matched).  Static tiles aren't in the consume
-      // index, so query the static grid directly; collect THEN eat so we don't
-      // mutate the grid mid-iteration.  Not while leaving. ──
-      if (this.dragonState !== 'leave') {
-          const headR = Math.max(d.size.x, d.size.y) * 0.6;
-          const buf = this._dragonEatBuf;
-          buf.length = 0;
-          this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 40, (t) => buf.push(t));
-          for (let i = 0; i < buf.length; i++) {
-              const t = buf[i];
-              if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
-              const tdx = wrapDeltaX(d.position.x, t.position.x);
-              const tdy = wrapDeltaY(d.position.y, t.position.y);
-              const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
-              if (tdx * tdx + tdy * tdy <= contact * contact) this.appendDragonSegment(t, tdx, tdy);
+          // ── Flow-weave steering (slow + majestic) ──
+          const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+          const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
+          const cosW = Math.cos(wob), sinW = Math.sin(wob);
+          const dirX = flow.x * cosW - flow.y * sinW;
+          const dirY = flow.x * sinW + flow.y * cosW;
+          const speedMul = inst.state === 'leave' ? 1.5 : 1; // dive out faster
+          const target = cruise * D.SPEED_FRAC * speedMul;
+          const alpha = Math.min(1, D.STEER_RATE * dt * 60);
+          d.velocity.x += (dirX * target - d.velocity.x) * alpha;
+          d.velocity.y += (dirY * target - d.velocity.y) * alpha;
+          d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
+
+          // ── Body path history (newest first) ──
+          if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
+          const head0 = d.dragonPath[0];
+          const mdx = wrapDeltaX(head0.x, d.position.x), mdy = wrapDeltaY(head0.y, d.position.y);
+          if (mdx * mdx + mdy * mdy >= D.PATH_SPACING * D.PATH_SPACING) {
+              d.dragonPath.unshift({ x: d.position.x, y: d.position.y });
+              if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
           }
-      }
 
-      // ── Chain-follow: snap each body segment along the head's recorded path ──
-      this.positionDragonBody(d);
-
-      // ── Provoke-on-attack (third party): the head being shot stamps `provoked`
-      // (PhysicsSystem, like the bubble); shooting a BODY segment provokes it too
-      // (segment hitFlash) — default the aggressor to the player there. ──
-      if (!d.provoked) {
-          for (let i = 0; i < this.dragonBody.length; i++) {
-              if ((this.dragonBody[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
-          }
-      }
-
-      // ── Head attacks: ONLY once provoked (passive roamer until attacked) —
-      // spit gnats + lob homing missiles. ──
-      if (this.dragonState === 'roam' && d.provoked) {
-          this.dragonGnatTimer -= dt;
-          if (this.dragonGnatTimer <= 0) {
-              this.dragonGnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
-              const ctx = this.waveContext();
-              if (ctx) {
-                  this.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
-                  this.spawnParticles(d.position, 7, '#2dd4bf', {
-                      speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.2, lifetimeMax: 0.5,
-                  });
+          // ── Devour tiles in the head's path → APPEND each as a body segment ──
+          if (inst.state !== 'leave') {
+              const headR = Math.max(d.size.x, d.size.y) * 0.6;
+              const buf = this._dragonEatBuf;
+              buf.length = 0;
+              this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 40, (t) => buf.push(t));
+              for (let i = 0; i < buf.length; i++) {
+                  const t = buf[i];
+                  if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
+                  const tdx = wrapDeltaX(d.position.x, t.position.x);
+                  const tdy = wrapDeltaY(d.position.y, t.position.y);
+                  const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
+                  if (tdx * tdx + tdy * tdy <= contact * contact) this.appendDragonSegment(inst, t, tdx, tdy);
               }
           }
-          this.dragonMissileTimer -= dt;
-          if (this.dragonMissileTimer <= 0 && !this.player.isExploding) {
-              this.dragonMissileTimer = D.MISSILE_INTERVAL;
-              this.fireDragonMissile(d);
-          }
-      }
 
-      // ── Lifecycle ──
-      this.dragonStateTimer -= dt;
-      if (this.dragonState === 'enter') {
-          if (this.dragonStateTimer <= 0) { this.dragonState = 'roam'; this.dragonStateTimer = D.ROAM_DURATION; }
-      } else if (this.dragonState === 'roam') {
-          if (this.dragonStateTimer <= 0) {
-              this.dragonState = 'leave';
-              this.dragonStateTimer = D.LEAVE_DURATION;
-              this.openDragonPortal(d.position); // exit rift opens ahead of it
+          // ── Chain-follow: snap each body segment along the head's path ──
+          this.positionDragonBody(inst);
+
+          // ── Provoke-on-attack (third party): head shot stamps `provoked`
+          // (PhysicsSystem); a BODY-segment hit provokes too (default player). ──
+          if (!d.provoked) {
+              for (let i = 0; i < inst.body.length; i++) {
+                  if ((inst.body[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
+              }
           }
-      } else { // leave
-          if (this.dragonStateTimer <= 0) this.despawnDragon();
+
+          // ── Head attacks: ONLY once provoked — spit gnats + lob missiles ──
+          if (inst.state === 'roam' && d.provoked) {
+              inst.gnatTimer -= dt;
+              if (inst.gnatTimer <= 0) {
+                  inst.gnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
+                  const ctx = this.waveContext();
+                  if (ctx) {
+                      this.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
+                      this.spawnParticles(d.position, 7, '#2dd4bf', {
+                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.2, lifetimeMax: 0.5,
+                      });
+                  }
+              }
+              inst.missileTimer -= dt;
+              if (inst.missileTimer <= 0 && !this.player.isExploding) {
+                  inst.missileTimer = D.MISSILE_INTERVAL;
+                  this.fireDragonMissile(d);
+              }
+          }
+
+          // ── Lifecycle ──
+          inst.stateTimer -= dt;
+          if (inst.state === 'enter') {
+              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = D.ROAM_DURATION; }
+          } else if (inst.state === 'roam') {
+              if (inst.stateTimer <= 0) {
+                  inst.state = 'leave';
+                  inst.stateTimer = D.LEAVE_DURATION;
+                  this.openDragonPortal(d.position);
+              }
+          } else { // leave
+              if (inst.stateTimer <= 0) { this.despawnDragon(inst); this.dragons.splice(n, 1); }
+          }
       }
   }
 
-  /** Open an offscreen entry portal and birth the dragon head from it. */
-  private spawnDragon() {
-      if (this.dragon || !this.currentMap) return;
+  /** Open an offscreen entry portal and birth a dragon of `type` ('mixed' = a
+   *  multi-material starting body).  Multiple can be alive at once. */
+  private spawnDragon(type: StructureVariant | 'mixed' = 'mixed') {
+      if (!this.currentMap) return;
       const zoom = this.camera.zoom || 1;
       const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
       const angle = Math.random() * Math.PI * 2;
@@ -5051,23 +5060,23 @@ export class GameEngine {
       for (let k = 0; k < 110; k++) seed.push({ x: pos.x + ox * k * DRAGON_CONSTANTS.PATH_SPACING, y: pos.y + oy * k * DRAGON_CONSTANTS.PATH_SPACING });
       d.dragonPath = seed;
       this.currentMap.entities.push(d);
-      this.dragon = d;
-      // Spawn a starting body of a single random material (it becomes mixed as it
-      // eats) so it never enters as a bare head.
-      this.dragonBody = [];
-      const startVariants: StructureVariant[] = ['glass', 'rock', 'metal', 'plastic'];
-      const startVar = startVariants[(Math.random() * startVariants.length) | 0];
+      const inst: DragonInstance = {
+          head: d, body: [], state: 'enter',
+          stateTimer: DRAGON_CONSTANTS.ENTER_DURATION, time: 0,
+          gnatTimer: DRAGON_CONSTANTS.GNAT_INTERVAL, missileTimer: DRAGON_CONSTANTS.MISSILE_INTERVAL,
+      };
+      // Spawn a starting body so it never enters as a bare head.  A 'mixed'
+      // dragon cycles materials; a typed dragon is all one (it still becomes
+      // mixed as it eats other tiles).
+      const MIX: StructureVariant[] = ['glass', 'rock', 'metal', 'plastic'];
       for (let i = 0; i < DRAGON_CONSTANTS.START_SEGMENTS; i++) {
-          const seg = this.makeDragonSegment(startVar, pos.x, pos.y);
+          const segVar = type === 'mixed' ? MIX[i % MIX.length] : type;
+          const seg = this.makeDragonSegment(segVar, pos.x, pos.y);
           this.currentMap.entities.push(seg);
-          this.dragonBody.push(seg);
+          inst.body.push(seg);
       }
-      this.positionDragonBody(d); // lay them out along the seeded path now
-      this.dragonState = 'enter';
-      this.dragonStateTimer = DRAGON_CONSTANTS.ENTER_DURATION;
-      this.dragonTime = 0;
-      this.dragonGnatTimer = DRAGON_CONSTANTS.GNAT_INTERVAL;
-      this.dragonMissileTimer = DRAGON_CONSTANTS.MISSILE_INTERVAL;
+      this.dragons.push(inst);
+      this.positionDragonBody(inst); // lay the body out along the seeded path now
   }
 
   /** Fire one slow HOMING missile from the dragon head at the player. */
@@ -5084,10 +5093,10 @@ export class GameEngine {
 
   /** Devour a static tile → APPEND it as a body segment (Snake growth).  Beyond
    *  MAX_SEGMENTS the tile is just destroyed (the dragon still carves a path). */
-  private appendDragonSegment(tile: GameEntity, dx: number, dy: number) {
+  private appendDragonSegment(inst: DragonInstance, tile: GameEntity, dx: number, dy: number) {
       this.physics.removeStaticEntity(tile);
       this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
-      if (this.dragonBody.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
+      if (inst.body.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
           const inward = Math.atan2(-dy, -dx);
           this.spawnParticles(tile.position, 6, tile.color || '#94a3b8', {
               spreadAngle: inward, spreadCone: 0.9, speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.1, lifetimeMax: 0.3,
@@ -5099,7 +5108,7 @@ export class GameEngine {
       tile.dragonSegment = true;
       tile.phasesTerrain = true; // glides through terrain/each other; still solid to player + shots
       if (!tile.velocity) tile.velocity = { x: 0, y: 0 }; else { tile.velocity.x = 0; tile.velocity.y = 0; }
-      this.dragonBody.push(tile);
+      inst.body.push(tile);
   }
 
   /** Build a fresh hex-tile body segment of `variant` at (x,y) — used to spawn
@@ -5123,8 +5132,9 @@ export class GameEngine {
    *  the head's LIVE position (not the last recorded path point, which only
    *  updates every PATH_SPACING and made the whole body jump), so the chain
    *  tracks the smoothly-moving head jitter-free. */
-  private positionDragonBody(head: GameEntity) {
-      const body = this.dragonBody;
+  private positionDragonBody(inst: DragonInstance) {
+      const head = inst.head;
+      const body = inst.body;
       const path = head.dragonPath;
       if (body.length === 0 || !path || path.length < 1) return;
       const SP = DRAGON_CONSTANTS.SEGMENT_SPACING;
@@ -5161,11 +5171,17 @@ export class GameEngine {
 
   /** A body segment was destroyed: everything AFT of it falls off (→ free
    *  drifting shards), and the segment itself shatters (handled by the caller). */
-  private severDragon(seg: GameEntity) {
-      const idx = this.dragonBody.indexOf(seg);
+  private severDragon(inst: DragonInstance, seg: GameEntity) {
+      const idx = inst.body.indexOf(seg);
       if (idx < 0) return;
-      for (let i = idx + 1; i < this.dragonBody.length; i++) this.detachDragonSegment(this.dragonBody[i]);
-      this.dragonBody.length = idx; // drop the broken segment + everything aft
+      for (let i = idx + 1; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]);
+      inst.body.length = idx; // drop the broken segment + everything aft
+  }
+
+  /** Find the live dragon whose body contains `seg` (for sever routing). */
+  private dragonOwning(seg: GameEntity): DragonInstance | undefined {
+      for (let i = 0; i < this.dragons.length; i++) if (this.dragons[i].body.indexOf(seg) >= 0) return this.dragons[i];
+      return undefined;
   }
 
   /** A severed segment falls off the dragon: clear the flag, turn it into a free
@@ -5179,10 +5195,11 @@ export class GameEngine {
       seg.velocity.y = Math.sin(a) * 3.5;
   }
 
-  /** A killed body segment: sever the tail, then dissolve it (shatter burst, no
-   *  regen/drops — it's a body part, not a map tile). */
+  /** A killed body segment: sever the owning dragon's tail, then dissolve it
+   *  (shatter burst, no regen/drops — it's a body part, not a map tile). */
   private dragonSegmentDeath(seg: GameEntity) {
-      this.severDragon(seg);
+      const inst = this.dragonOwning(seg);
+      if (inst) this.severDragon(inst, seg);
       this.spawnParticles(seg.position, 12, seg.color || '#94a3b8', {
           speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 3.5, lifetimeMin: 0.2, lifetimeMax: 0.55,
       });
@@ -5200,8 +5217,9 @@ export class GameEngine {
       }
   }
 
-  /** Dragon killed: big payoff + score + collapse the rift. */
-  private dragonDeath(d: GameEntity) {
+  /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
+  private dragonDeath(inst: DragonInstance) {
+      const d = inst.head;
       this.awardScore(DRAGON_CONSTANTS.SCORE, d.position);
       this.openDragonPortal(d.position);
       this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
@@ -5209,18 +5227,16 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       d.active = false;
-      this.dragon = null;
-      // The whole body scatters as free shards when the head dies.
-      for (let i = 0; i < this.dragonBody.length; i++) this.detachDragonSegment(this.dragonBody[i]);
-      this.dragonBody = [];
+      for (let i = 0; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]); // body scatters
+      const k = this.dragons.indexOf(inst);
+      if (k >= 0) this.dragons.splice(k, 1);
   }
 
-  /** Despawn the dragon (left via portal — no payoff).  The body leaves with it. */
-  private despawnDragon() {
-      if (this.dragon) this.dragon.active = false;
-      this.dragon = null;
-      for (let i = 0; i < this.dragonBody.length; i++) this.dragonBody[i].active = false;
-      this.dragonBody = [];
+  /** Despawn a dragon (left via portal — no payoff).  The body leaves with it.
+   *  Caller removes it from `this.dragons`. */
+  private despawnDragon(inst: DragonInstance) {
+      inst.head.active = false;
+      for (let i = 0; i < inst.body.length; i++) inst.body[i].active = false;
   }
 
   /** Portal VFX: an expanding violet rift ring + sparks. */
@@ -5234,10 +5250,11 @@ export class GameEngine {
       });
   }
 
-  /** DBG: summon the dragon (or force it to leave if one is already out). */
-  public debugSpawnDragon() {
-      if (this.dragon) { this.dragonState = 'leave'; this.dragonStateTimer = DRAGON_CONSTANTS.LEAVE_DURATION; this.openDragonPortal(this.dragon.position); }
-      else this.spawnDragon();
+  /** DBG: summon a dragon of `type` ('glass'|'rock'|'metal'|'plastic'|'mixed').
+   *  Each call adds another — multiple dragons can be out at once. */
+  public debugSpawnDragon(type: string = 'mixed') {
+      const allowed = ['glass', 'rock', 'metal', 'plastic', 'mixed'];
+      this.spawnDragon((allowed.includes(type) ? type : 'mixed') as StructureVariant | 'mixed');
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

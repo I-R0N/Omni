@@ -3084,9 +3084,11 @@ export class PhysicsSystem {
               player.velocity.x *= retention;
               player.velocity.y *= retention;
               structure.hitFlash = 0.1;
-              if (isIndestructible) {
-                  // Permanent wall — signal the hit for SFX/shake but don't
-                  // touch health or queue destruction.
+              if (isIndestructible || structure.dragonSegment === true) {
+                  // Permanent wall — OR a dragon body segment, which only breaks
+                  // when SHOT, not by crashing into it.  Signal the hit (flash /
+                  // shake / the player already shed velocity above) but leave its
+                  // health alone and queue no destruction.
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }

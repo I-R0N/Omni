@@ -397,7 +397,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   missiles (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`).  Deals
   contact damage; a tanky, heavy, damageable ENEMY (`health` 500, `mass` 500 →
   bespoke `dragonDeath`: payoff + rift collapse + body scatters); LEAVES via
-  portal after `ROAM_DURATION` if not killed.  DBG-summonable (Dragon ▸ "Summon").
+  portal after `ROAM_DURATION` if not killed.  Body segments are IMMUNE to crash
+  damage (PhysicsSystem treats a `dragonSegment` like an indestructible wall on
+  player contact) — they only break when SHOT, so crashing into the body just
+  bounces.  ANY NUMBER of dragons can be alive at once — each is a
+  `DragonInstance` (head + body + per-dragon lifecycle/attack timers) in
+  `GameEngine.dragons`, ticked by `updateDragons`.  DBG: a dedicated Dragon menu
+  (glass / rock / plastic / metal / mixed buttons; each click stacks another).
   Tuning in `DRAGON_CONSTANTS`.
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
