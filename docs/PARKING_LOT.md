@@ -255,3 +255,63 @@ implicitly fine since they're 1-HP). This generalizes that idea to everyone.
 **Tuning knobs:** `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION` /
 `FADE_DURATION`; the existing width/height/offset entries; the optional
 `alwaysShowHealthBar` flag for bosses.
+
+---
+
+## Fine-tune pass: Stage-5 bubble + swarm (this session's enemy work)
+
+**Context:** A fast iteration session reshaped the SWARM gnat default and built
+out the BUBBLE into a full ambient third-party creature. The feel is broadly
+GOOD as shipped — this is a low-priority "come back and polish the numbers"
+item, not a redesign. Everything below is data-driven (constants), so tuning is
+edit-and-playtest with no structural work.
+
+**What changed this session (so the tuning has context):**
+- **Swarm gnat default** → `weave` (serpentine), still DBG-cyclable (Player ▸
+  "Gnat move").
+- **Bubble** went from a simple wave enemy to **ambient flow-riding fauna**
+  (`ambient` + `maintainAmbientBubbles`, never gates a wave) that is a **true
+  third party** (`thirdParty`: enemy fire hits it; it retaliates against whoever
+  last hit/rammed it). Eating became **pull-in → swallow-on-contact → digest
+  over time with the shard visible dissolving inside** the transparent membrane,
+  **mass/energy conserved** (`shardRichness`: denser shards = slower digest +
+  more growth/heal). Added **sickness** (plastic / green-nebula = toxic, and
+  post-latch) → green + sluggish + can't eat. Latch **no longer kills** — it
+  EMPs + size-scaled drains, then **knocks free → sick** (timer / any projectile
+  hit / player terrain-slam). Movement is **slow when passive, fast only when
+  hunting** (aggro-only bursts/lunges). HP **50 base, maxHealth linear with
+  size**. Starts **half size, grows slow**. Removed **health bars** (bubble) and
+  **off-screen chevrons** (bubble + snitch).
+
+**Tuning checklist (current values → things to feel out):**
+- **Aggro triggers:** `BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED` (3.5 — the
+  "more than a light touch" ram threshold; watch for gentle grazes provoking, or
+  hard rams not) · `AGGRO_LOSE_RANGE` (950 — leash).
+- **Hunt speed / catch-ability:** `AI_CONFIG.BUBBLE.PROVOKED_SPEED_MULT` (2.2) ·
+  `BURST_SPEED_MULT` (1.7) / `BURST_ACCEL_MULT` (2.2) / `BURST_INTERVAL` (1.6) /
+  `BURST_DURATION` (0.6) / `SEEK_ACCEL_MULT` (1.4). If a fully-grown bubble runs
+  the player down too easily, this is the knob.
+- **Latch threat:** `LATCH_DURATION` (2.6) · `LATCH_DPS` (6 base, ×size/baseSize)
+  · `KNOCK_SPEED` (6 — terrain-slam shake-off; verify it's reachable but not
+  trivial) · `EMP_REFRESH` (0.4). NOTE the open question: a max-size bubble's
+  size-linear maxHP (~190) + EMP-during-latch means you can't shoot it off, only
+  terrain-slam or wait — consider a latch-HP cap or shorter latch if punishing.
+- **Eating economy:** `consume.range` (150 sense) / `pull` (14) ·
+  `DIGEST_DURATION` (5.5 base, ×richness) · `RICH_MIN/MAX` (0.6/2.0) ·
+  `growthPerEat` (3) / `consume.maxSize` (58) · `HEAL_PER_RICH` (6) · base
+  `health` (50) + the size-linear maxHP curve (`syncBubbleMaxHealth`).
+- **Toxic detection:** `isToxicShard` flags plastic + **green-dominant nebula**
+  shards via a hex-channel check — if some green nebulae miss (or non-green trip
+  it), switch to a specific nebula-variant/palette test instead.
+- **Sickness:** `SICK_DURATION` (2.8) · `SICK_SPEED_MULT` (0.3) · `SICK_COLOR`.
+- **Population / passive feel:** `AMBIENT_POPULATION` (5) ·
+  `AMBIENT_RESPAWN_INTERVAL` (4) · `multiply.atSize` (50) / `maxPopulation` (14)
+  · `DRIFT_SPEED` (2.2) · `SHARD_VISION` (280) · `CALM_VISIBILITY` (0.45).
+- **Render polish (optional):** the squash-cling amount + EMP-arc look are
+  inline in `RenderSystem.drawEnemyShape`'s bubble branch; enemy latches get the
+  squash but no arcs (arcs are the player-only EMP tell) — could add a chew FX
+  for enemy latches.
+
+**All knobs live in:** `AI_CONFIG.BUBBLE` (movement), `BUBBLE_CONSTANTS`
+(engagement/sickness/ambient), and the `ENEMY_VARIANTS.BUBBLE` `consume` /
+`multiply` blocks — all in `constants.ts`.
