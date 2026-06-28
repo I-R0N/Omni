@@ -4079,7 +4079,10 @@ export class RenderSystem {
       if (shape === 'dragon') {
           if (entity.dragonHidden) return; // head has crossed the exit portal — gone
           const flashD = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
-          const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.3, flashD * 2));
+          // The head is the front of a fixed-scale snake body, so the big
+          // scale-punch the small ships use looks wrong here — keep it a subtle
+          // nudge and let the white flash carry the hit feedback.
+          const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.05, flashD * 0.3));
           const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);
           const plateLift = `rgb(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)})`;
           const plateSink = `rgb(${sinkCh(cr,0.55)},${sinkCh(cg,0.55)},${sinkCh(cb,0.55)})`;
