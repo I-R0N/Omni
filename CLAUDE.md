@@ -212,7 +212,10 @@ Key invariants:
 Notable existing field categories on `GameEntity`:
 
 - Visual: `sprite`, `color`, `polygonPoints`, `rotationSpeed`, `hitFlash`,
-  `trail`, `powerupGlowColor`
+  `hitReact` (0..1 damage-as-%-of-maxHealth, latched at damage time via
+  `hitReactStrength()`; RenderSystem scales the sprite scale-punch by it so a
+  chip on a big-HP beast barely flinches — unset → full punch), `trail`,
+  `powerupGlowColor`
 - AI: `enemySubtype`, `aiState`, `aiTimer`, `visionRange`, `maxSpeed`,
   `aggroTimer`, `orbitRadius`/`orbitSpin`/`preferredDistance`
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,

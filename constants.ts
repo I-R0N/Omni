@@ -2859,6 +2859,16 @@ export function enemyDamageMult(waveIndex: number): number {
     1 + ENEMY_SCALING.DMG_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
 }
 
+// Visual hit-reaction magnitude (0..1): a hit's damage as a fraction of the
+// target's max-health pool, used by RenderSystem to scale the sprite's
+// scale-punch.  Frail enemies take big-%% hits and snap hard; tanky beasts
+// (dragon ~500 HP, bubble 50+) chip-flinch.  One abstraction so every present
+// and future enemy reacts in proportion to how much it just lost.
+export function hitReactStrength(damage: number, maxHealth: number): number {
+  if (!(damage > 0) || !(maxHealth > 0)) return 0;
+  return Math.min(1, damage / maxHealth);
+}
+
 // ── Enemy variant configs ─────────────────────────────────────────────────────
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
 // Three tiers per role — each tier is strictly faster/tougher than the last.

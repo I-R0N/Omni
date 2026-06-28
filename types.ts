@@ -334,6 +334,12 @@ export interface GameEntity {
   polygonPoints?: Vector2[]; // For physics/collision shape
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
+  // Visual hit-reaction magnitude (0..1): the last hit's damage as a fraction
+  // of maxHealth, latched at damage time.  RenderSystem scales the sprite's
+  // scale-punch by it, so a chip on a big-HP beast (dragon / bubble) barely
+  // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
+  // (1), preserving the original feel for any un-wired damage path.
+  hitReact?: number;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
