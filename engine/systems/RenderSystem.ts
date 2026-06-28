@@ -4081,119 +4081,128 @@ export class RenderSystem {
           const flashD = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
           const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.3, flashD * 2));
           const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);
-          const clamp = (n: number) => Math.max(0, Math.min(255, n));
-          const shade = (d: number) => `rgb(${clamp(cr + d)},${clamp(cg + d)},${clamp(cb + d)})`;
-          const dark = shade(-60), mid = shade(-28), fill = flashD > 0 ? '#ffffff' : `rgb(${cr},${cg},${cb})`;
+          const plateLift = `rgb(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)})`;
+          const plateSink = `rgb(${sinkCh(cr,0.55)},${sinkCh(cg,0.55)},${sinkCh(cb,0.55)})`;
+          const edgeDk = `rgba(${sinkCh(cr,0.6)},${sinkCh(cg,0.6)},${sinkCh(cb,0.6)},0.9)`;
+          const edgeLt = `rgba(${liftCh(cr,0.6)},${liftCh(cg,0.6)},${liftCh(cb,0.6)},0.85)`;
           const provoked = entity.provoked === true;
-          // Local frame: forward = +x (the snout points along travel).
+          // Energy accent: portal-violet at rest, hot red when provoked.  The
+          // serpent is a void traveller, so its "life" reads as glowing plasma
+          // seams, not organic eyes/fangs.
+          const ax = provoked ? 255 : 168, ay = provoked ? 70 : 130, az = provoked ? 48 : 250;
+          // Deterministic reactor pulse (id-desynced so a pack doesn't throb in unison).
+          let h = 0; for (let i = 0; i < entity.id.length; i++) h = (h * 31 + entity.id.charCodeAt(i)) % 997;
+          const ph = (h / 997) * Math.PI * 2;
+          const pulse = 0.6 + 0.4 * Math.sin(nowSec * (provoked ? 7 : 3.5) + ph);
+          // Local frame: forward = +x (the dart points along travel).
 
-          // ── Back crest: a row of spinal spikes rising off the skull top ──
-          ctx.fillStyle = dark;
-          for (const [bx, h] of [[-0.55, 0.55], [-0.25, 0.7], [0.05, 0.6]] as const) {
-              ctx.beginPath();
-              ctx.moveTo(r * bx, -r * 0.45);
-              ctx.lineTo(r * (bx - 0.1), -r * (0.45 + h));
-              ctx.lineTo(r * (bx + 0.22), -r * 0.5);
-              ctx.closePath(); ctx.fill();
-          }
-
-          // ── Horns: a big backswept pair + a smaller forward pair ──
-          ctx.strokeStyle = dark; ctx.lineCap = 'round';
+          // ── Swept blade-fins (geometric "horns"): two hard angular plates
+          // raked off the back, a smaller inner pair — drawn behind the head. ──
           for (const sgn of [-1, 1]) {
-              ctx.lineWidth = r * 0.22;
               ctx.beginPath();
-              ctx.moveTo(-r * 0.45, sgn * r * 0.5);
-              ctx.quadraticCurveTo(-r * 1.15, sgn * r * 0.7, -r * 1.35, sgn * r * 0.15);
-              ctx.stroke();
-              ctx.lineWidth = r * 0.12;
+              ctx.moveTo(-r * 0.35, sgn * r * 0.42);
+              ctx.lineTo(-r * 1.45, sgn * r * 0.78);
+              ctx.lineTo(-r * 1.2, sgn * r * 0.34);
+              ctx.lineTo(-r * 0.5, sgn * r * 0.2);
+              ctx.closePath();
+              ctx.fillStyle = plateSink; ctx.fill();
+              ctx.lineWidth = Math.max(1, r * 0.04); ctx.strokeStyle = edgeLt; ctx.stroke();
               ctx.beginPath();
-              ctx.moveTo(-r * 0.2, sgn * r * 0.62);
-              ctx.quadraticCurveTo(-r * 0.55, sgn * r * 1.0, -r * 0.85, sgn * r * 0.95);
-              ctx.stroke();
-          }
-          ctx.lineCap = 'butt';
-
-          // ── Maw glow: a hot mouth-light when provoked (telegraphs aggro) ──
-          if (provoked) {
-              const mg = ctx.createRadialGradient(r * 0.95, r * 0.12, 0, r * 0.95, r * 0.12, r * 0.7);
-              mg.addColorStop(0, 'rgba(255,170,60,0.9)');
-              mg.addColorStop(1, 'rgba(255,90,30,0)');
-              ctx.fillStyle = mg;
-              ctx.beginPath(); ctx.arc(r * 0.95, r * 0.12, r * 0.7, 0, Math.PI * 2); ctx.fill();
+              ctx.moveTo(-r * 0.15, sgn * r * 0.5);
+              ctx.lineTo(-r * 0.85, sgn * r * 1.02);
+              ctx.lineTo(-r * 0.7, sgn * r * 0.55);
+              ctx.closePath();
+              ctx.fillStyle = edgeDk; ctx.fill();
           }
 
-          // ── Angular reptilian skull (upper) + hinged lower jaw ──
+          // ── Faceted dart skull: a sharp symmetric hex wedge, head-lit so the
+          // flat polygon reads with volume (bright at the nose, dark at the neck). ──
+          const skull = [
+              [1.55, 0], [0.52, -0.6], [-0.5, -0.5], [-0.88, -0.16],
+              [-0.88, 0.16], [-0.5, 0.5], [0.52, 0.6],
+          ] as const;
           ctx.beginPath();
-          ctx.moveTo(r * 1.5, -r * 0.02);    // snout tip
-          ctx.lineTo(r * 0.85, -r * 0.5);    // top of snout
-          ctx.lineTo(r * 0.18, -r * 0.72);   // brow front
-          ctx.lineTo(-r * 0.45, -r * 0.6);   // skull top
-          ctx.lineTo(-r * 0.78, -r * 0.18);  // back of skull (neck), upper
-          ctx.lineTo(-r * 0.6, r * 0.05);    // cheek
-          ctx.lineTo(r * 0.25, r * 0.18);    // upper-jaw line back
-          ctx.lineTo(r * 1.45, r * 0.12);    // upper-jaw line to snout
+          ctx.moveTo(r * skull[0][0], r * skull[0][1]);
+          for (let i = 1; i < skull.length; i++) ctx.lineTo(r * skull[i][0], r * skull[i][1]);
           ctx.closePath();
-          ctx.fillStyle = fill; ctx.fill();
-          ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = dark; ctx.stroke();
+          const sg = ctx.createRadialGradient(r * 0.7, -r * 0.12, r * 0.1, r * 0.1, 0, r * 1.5);
+          sg.addColorStop(0, flashD > 0 ? '#ffffff' : plateLift);
+          sg.addColorStop(0.55, flashD > 0 ? '#ffffff' : `rgb(${cr},${cg},${cb})`);
+          sg.addColorStop(1, plateSink);
+          ctx.fillStyle = sg; ctx.fill();
+          ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = edgeDk; ctx.stroke();
 
-          // Lower jaw (sits under the mouth line).
+          // ── Facet seams: a central ridge + two cheek creases split the plate
+          // into angular panels (lighter top crease, darker lower). ──
+          ctx.lineWidth = Math.max(1, r * 0.035);
+          ctx.strokeStyle = edgeLt;
           ctx.beginPath();
-          ctx.moveTo(-r * 0.55, r * 0.12);
-          ctx.lineTo(-r * 0.4, r * 0.6);     // jaw hinge
-          ctx.lineTo(r * 0.55, r * 0.66);    // chin
-          ctx.lineTo(r * 1.25, r * 0.3);     // lower snout
-          ctx.lineTo(r * 0.2, r * 0.2);
-          ctx.closePath();
-          ctx.fillStyle = mid; ctx.fill();
-          ctx.lineWidth = Math.max(1, r * 0.05); ctx.stroke();
+          ctx.moveTo(r * 1.55, 0); ctx.lineTo(r * 0.05, -r * 0.18); ctx.lineTo(-r * 0.88, -r * 0.16);
+          ctx.stroke();
+          ctx.strokeStyle = edgeDk;
+          ctx.beginPath();
+          ctx.moveTo(r * 1.55, 0); ctx.lineTo(r * 0.05, r * 0.18); ctx.lineTo(-r * 0.88, r * 0.16);
+          ctx.moveTo(r * 0.05, -r * 0.18); ctx.lineTo(r * 0.52, -r * 0.6);
+          ctx.moveTo(r * 0.05, r * 0.18); ctx.lineTo(r * 0.52, r * 0.6);
+          ctx.stroke();
 
-          // ── Fangs: white triangles clenched along the mouth line ──
-          ctx.fillStyle = '#f6f7f2';
-          for (const fx of [0.35, 0.6, 0.85, 1.1] as const) {
-              ctx.beginPath();                          // upper fangs point down
-              ctx.moveTo(r * fx, r * 0.15);
-              ctx.lineTo(r * (fx + 0.12), r * 0.15);
-              ctx.lineTo(r * (fx + 0.06), r * 0.36);
+          // ── Plasma maw: a glowing energy slit near the snout with hard chevron
+          // "teeth" cut from the plate — the mouth is light, not bone. ──
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const mawG = ctx.createRadialGradient(r * 0.95, 0, 0, r * 0.95, 0, r * 0.62);
+          mawG.addColorStop(0, `rgba(${ax},${ay},${az},${0.55 + 0.35 * pulse})`);
+          mawG.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
+          ctx.fillStyle = mawG;
+          ctx.beginPath(); ctx.ellipse(r * 0.95, 0, r * 0.55, r * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          // Chevron teeth (plate-coloured wedges biting into the glow).
+          ctx.fillStyle = plateSink;
+          for (const fx of [0.5, 0.78, 1.06, 1.34] as const) {
+              ctx.beginPath();                       // upper
+              ctx.moveTo(r * fx, -r * 0.16); ctx.lineTo(r * (fx + 0.16), -r * 0.16); ctx.lineTo(r * (fx + 0.08), r * 0.02);
+              ctx.closePath(); ctx.fill();
+              ctx.beginPath();                       // lower
+              ctx.moveTo(r * fx, r * 0.16); ctx.lineTo(r * (fx + 0.16), r * 0.16); ctx.lineTo(r * (fx + 0.08), -r * 0.02);
               ctx.closePath(); ctx.fill();
           }
-          for (const fx of [0.45, 0.72, 0.98] as const) {
-              ctx.beginPath();                          // lower fangs point up
-              ctx.moveTo(r * fx, r * 0.42);
-              ctx.lineTo(r * (fx + 0.12), r * 0.42);
-              ctx.lineTo(r * (fx + 0.06), r * 0.22);
-              ctx.closePath(); ctx.fill();
-          }
 
-          // ── Brow ridge (dark angular shadow over each eye) ──
-          ctx.fillStyle = dark;
+          // ── Sensor eyes: angled glowing energy diamonds flanking the core. ──
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
           for (const sgn of [-1, 1]) {
-              ctx.beginPath();
-              ctx.moveTo(-r * 0.1, sgn * r * 0.18);
-              ctx.lineTo(r * 0.52, sgn * r * 0.18);
-              ctx.lineTo(r * 0.4, sgn * r * 0.5);
-              ctx.lineTo(-r * 0.05, sgn * r * 0.42);
-              ctx.closePath(); ctx.fill();
-          }
-
-          // ── Slit eyes: angled almond glow + vertical reptilian pupil ──
-          for (const sgn of [-1, 1]) {
-              const ex = r * 0.28, ey = sgn * r * 0.35;
               ctx.save();
-              ctx.translate(ex, ey); ctx.rotate(sgn * 0.35);
-              ctx.beginPath(); ctx.ellipse(0, 0, r * 0.26, r * 0.13, 0, 0, Math.PI * 2);
-              ctx.fillStyle = provoked ? '#ff5a3c' : DRAGON_CONSTANTS.EYE_COLOR; ctx.fill();
-              ctx.beginPath(); ctx.ellipse(r * 0.04, 0, r * 0.05, r * 0.11, 0, 0, Math.PI * 2);
-              ctx.fillStyle = '#100b00'; ctx.fill();
+              ctx.translate(r * 0.34, sgn * r * 0.33); ctx.rotate(sgn * 0.5);
+              ctx.beginPath();
+              ctx.moveTo(r * 0.26, 0); ctx.lineTo(0, -r * 0.12); ctx.lineTo(-r * 0.18, 0); ctx.lineTo(0, r * 0.12);
+              ctx.closePath();
+              ctx.fillStyle = `rgba(${ax},${ay},${az},${0.7 + 0.3 * pulse})`; ctx.fill();
               ctx.restore();
           }
+          ctx.restore();
 
-          // ── Nostril flares near the snout tip ──
-          ctx.fillStyle = dark;
-          for (const sgn of [-1, 1]) {
-              ctx.beginPath();
-              ctx.ellipse(r * 1.18, sgn * r * 0.12, r * 0.07, r * 0.045, 0, 0, Math.PI * 2);
-              ctx.fill();
+          // ── Reactor core: a faceted energy hexagon set into the brow, with a
+          // soft outer bloom + white-hot centre.  The serpent's "heart-light". ──
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const coreR = r * (0.26 + 0.04 * pulse);
+          const bloom = ctx.createRadialGradient(-r * 0.02, 0, 0, -r * 0.02, 0, coreR * 2.4);
+          bloom.addColorStop(0, `rgba(${ax},${ay},${az},${0.6 * pulse})`);
+          bloom.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
+          ctx.fillStyle = bloom;
+          ctx.beginPath(); ctx.arc(-r * 0.02, 0, coreR * 2.4, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+              const a = ph + i * (Math.PI / 3);
+              const px = -r * 0.02 + Math.cos(a) * coreR, py = Math.sin(a) * coreR;
+              i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
           }
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${ax},${ay},${az},0.95)`; ctx.fill();
+          ctx.lineWidth = Math.max(1, r * 0.03); ctx.strokeStyle = edgeLt; ctx.stroke();
+          ctx.beginPath(); ctx.arc(-r * 0.02, 0, coreR * 0.4, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.7 + 0.3 * pulse})`; ctx.fill();
           return;
       }
 
