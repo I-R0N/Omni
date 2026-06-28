@@ -4087,32 +4087,26 @@ export class RenderSystem {
           const edgeLt = `rgba(${liftCh(cr,0.6)},${liftCh(cg,0.6)},${liftCh(cb,0.6)},0.85)`;
           const provoked = entity.provoked === true;
           // Energy accent: portal-violet at rest, hot red when provoked.  The
-          // serpent is a void traveller, so its "life" reads as glowing plasma
-          // seams, not organic eyes/fangs.
+          // serpent is a void traveller — its "life" reads as one glowing core,
+          // not organic eyes/fangs.  Kept deliberately spare so it doesn't
+          // out-detail the rest of the (flat, low-detail) game assets.
           const ax = provoked ? 255 : 168, ay = provoked ? 70 : 130, az = provoked ? 48 : 250;
-          // Deterministic reactor pulse (id-desynced so a pack doesn't throb in unison).
           let h = 0; for (let i = 0; i < entity.id.length; i++) h = (h * 31 + entity.id.charCodeAt(i)) % 997;
           const ph = (h / 997) * Math.PI * 2;
           const pulse = 0.6 + 0.4 * Math.sin(nowSec * (provoked ? 7 : 3.5) + ph);
           // Local frame: forward = +x (the dart points along travel).
 
-          // ── Swept blade-fins (geometric "horns"): two hard angular plates
-          // raked off the back, a smaller inner pair — drawn behind the head. ──
+          // ── Swept blade-fins (geometric "horns"): one clean angular plate per
+          // side, raked off the back. ──
+          ctx.fillStyle = plateSink;
+          ctx.lineWidth = Math.max(1, r * 0.04); ctx.strokeStyle = edgeDk;
           for (const sgn of [-1, 1]) {
               ctx.beginPath();
-              ctx.moveTo(-r * 0.35, sgn * r * 0.42);
-              ctx.lineTo(-r * 1.45, sgn * r * 0.78);
-              ctx.lineTo(-r * 1.2, sgn * r * 0.34);
-              ctx.lineTo(-r * 0.5, sgn * r * 0.2);
+              ctx.moveTo(-r * 0.3, sgn * r * 0.42);
+              ctx.lineTo(-r * 1.35, sgn * r * 0.72);
+              ctx.lineTo(-r * 0.55, sgn * r * 0.18);
               ctx.closePath();
-              ctx.fillStyle = plateSink; ctx.fill();
-              ctx.lineWidth = Math.max(1, r * 0.04); ctx.strokeStyle = edgeLt; ctx.stroke();
-              ctx.beginPath();
-              ctx.moveTo(-r * 0.15, sgn * r * 0.5);
-              ctx.lineTo(-r * 0.85, sgn * r * 1.02);
-              ctx.lineTo(-r * 0.7, sgn * r * 0.55);
-              ctx.closePath();
-              ctx.fillStyle = edgeDk; ctx.fill();
+              ctx.fill(); ctx.stroke();
           }
 
           // ── Faceted dart skull: a sharp symmetric hex wedge, head-lit so the
@@ -4132,76 +4126,43 @@ export class RenderSystem {
           ctx.fillStyle = sg; ctx.fill();
           ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = edgeDk; ctx.stroke();
 
-          // ── Facet seams: a central ridge + two cheek creases split the plate
-          // into angular panels (lighter top crease, darker lower). ──
-          ctx.lineWidth = Math.max(1, r * 0.035);
-          ctx.strokeStyle = edgeLt;
+          // ── One central ridge seam, just enough to read as a faceted plate. ──
+          ctx.lineWidth = Math.max(1, r * 0.035); ctx.strokeStyle = edgeLt;
           ctx.beginPath();
-          ctx.moveTo(r * 1.55, 0); ctx.lineTo(r * 0.05, -r * 0.18); ctx.lineTo(-r * 0.88, -r * 0.16);
-          ctx.stroke();
-          ctx.strokeStyle = edgeDk;
-          ctx.beginPath();
-          ctx.moveTo(r * 1.55, 0); ctx.lineTo(r * 0.05, r * 0.18); ctx.lineTo(-r * 0.88, r * 0.16);
-          ctx.moveTo(r * 0.05, -r * 0.18); ctx.lineTo(r * 0.52, -r * 0.6);
-          ctx.moveTo(r * 0.05, r * 0.18); ctx.lineTo(r * 0.52, r * 0.6);
+          ctx.moveTo(r * 1.55, 0); ctx.lineTo(-r * 0.88, 0);
           ctx.stroke();
 
-          // ── Plasma maw: a glowing energy slit near the snout with hard chevron
-          // "teeth" cut from the plate — the mouth is light, not bone. ──
+          // ── Plasma maw: a single soft energy slit at the snout (no teeth). ──
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          const mawG = ctx.createRadialGradient(r * 0.95, 0, 0, r * 0.95, 0, r * 0.62);
-          mawG.addColorStop(0, `rgba(${ax},${ay},${az},${0.55 + 0.35 * pulse})`);
+          const mawG = ctx.createRadialGradient(r * 1.0, 0, 0, r * 1.0, 0, r * 0.5);
+          mawG.addColorStop(0, `rgba(${ax},${ay},${az},${0.45 + 0.3 * pulse})`);
           mawG.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
           ctx.fillStyle = mawG;
-          ctx.beginPath(); ctx.ellipse(r * 0.95, 0, r * 0.55, r * 0.2, 0, 0, Math.PI * 2); ctx.fill();
-          ctx.restore();
-          // Chevron teeth (plate-coloured wedges biting into the glow).
-          ctx.fillStyle = plateSink;
-          for (const fx of [0.5, 0.78, 1.06, 1.34] as const) {
-              ctx.beginPath();                       // upper
-              ctx.moveTo(r * fx, -r * 0.16); ctx.lineTo(r * (fx + 0.16), -r * 0.16); ctx.lineTo(r * (fx + 0.08), r * 0.02);
-              ctx.closePath(); ctx.fill();
-              ctx.beginPath();                       // lower
-              ctx.moveTo(r * fx, r * 0.16); ctx.lineTo(r * (fx + 0.16), r * 0.16); ctx.lineTo(r * (fx + 0.08), -r * 0.02);
-              ctx.closePath(); ctx.fill();
-          }
-
-          // ── Sensor eyes: angled glowing energy diamonds flanking the core. ──
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          for (const sgn of [-1, 1]) {
-              ctx.save();
-              ctx.translate(r * 0.34, sgn * r * 0.33); ctx.rotate(sgn * 0.5);
-              ctx.beginPath();
-              ctx.moveTo(r * 0.26, 0); ctx.lineTo(0, -r * 0.12); ctx.lineTo(-r * 0.18, 0); ctx.lineTo(0, r * 0.12);
-              ctx.closePath();
-              ctx.fillStyle = `rgba(${ax},${ay},${az},${0.7 + 0.3 * pulse})`; ctx.fill();
-              ctx.restore();
-          }
+          ctx.beginPath(); ctx.ellipse(r * 1.0, 0, r * 0.42, r * 0.14, 0, 0, Math.PI * 2); ctx.fill();
           ctx.restore();
 
-          // ── Reactor core: a faceted energy hexagon set into the brow, with a
-          // soft outer bloom + white-hot centre.  The serpent's "heart-light". ──
+          // ── Reactor core: one faceted energy hexagon in the brow with a soft
+          // bloom + white-hot centre.  The serpent's single "eye". ──
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          const coreR = r * (0.26 + 0.04 * pulse);
-          const bloom = ctx.createRadialGradient(-r * 0.02, 0, 0, -r * 0.02, 0, coreR * 2.4);
+          const coreR = r * (0.28 + 0.04 * pulse);
+          const cx0 = r * 0.1;
+          const bloom = ctx.createRadialGradient(cx0, 0, 0, cx0, 0, coreR * 2.2);
           bloom.addColorStop(0, `rgba(${ax},${ay},${az},${0.6 * pulse})`);
           bloom.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
           ctx.fillStyle = bloom;
-          ctx.beginPath(); ctx.arc(-r * 0.02, 0, coreR * 2.4, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx0, 0, coreR * 2.2, 0, Math.PI * 2); ctx.fill();
           ctx.restore();
           ctx.beginPath();
           for (let i = 0; i < 6; i++) {
               const a = ph + i * (Math.PI / 3);
-              const px = -r * 0.02 + Math.cos(a) * coreR, py = Math.sin(a) * coreR;
+              const px = cx0 + Math.cos(a) * coreR, py = Math.sin(a) * coreR;
               i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
           }
           ctx.closePath();
           ctx.fillStyle = `rgba(${ax},${ay},${az},0.95)`; ctx.fill();
-          ctx.lineWidth = Math.max(1, r * 0.03); ctx.strokeStyle = edgeLt; ctx.stroke();
-          ctx.beginPath(); ctx.arc(-r * 0.02, 0, coreR * 0.4, 0, Math.PI * 2);
+          ctx.beginPath(); ctx.arc(cx0, 0, coreR * 0.42, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255,255,255,${0.7 + 0.3 * pulse})`; ctx.fill();
           return;
       }
