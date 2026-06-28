@@ -277,6 +277,7 @@ export class GameEngine {
   // spawnDragon / updateDragons).
   private dragons: DragonInstance[] = [];
   private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
+  private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1435,6 +1436,7 @@ export class GameEngine {
       this.snitchTime = 0;
       this.snitchCatchCount = 0;
       this.dragons = []; // die with the old map's entity list
+      this.dragonsKilled = 0; // reset the doubling payout per run
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -5272,7 +5274,9 @@ export class GameEngine {
   /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
   private dragonDeath(inst: DragonInstance) {
       const d = inst.head;
-      this.awardScore(DRAGON_CONSTANTS.SCORE, d.position);
+      // Payout doubles per kill this run: 3000, 6000, 12000, …
+      this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
+      this.dragonsKilled++;
       this.openDragonPortal(d.position);
       this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
           speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,

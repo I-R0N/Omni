@@ -396,8 +396,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   once provoked does the HEAD deploy attacks: spit SWARM gnats + lob HOMING
   missiles (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`).  Deals
   contact damage; a tanky, heavy, damageable ENEMY (`health` 500, `mass` 500 →
-  bespoke `dragonDeath`: payoff + rift collapse + body scatters); LEAVES via
-  portal after `ROAM_DURATION` if not killed.  Body segments are IMMUNE to crash
+  bespoke `dragonDeath`: payoff + rift collapse + body scatters).  Kill payout
+  DOUBLES per dragon killed this run (`DRAGON_CONSTANTS.SCORE` × 2^`dragonsKilled`
+  — 3000 / 6000 / 12000 …; `dragonsKilled` resets per run).  LEAVES via the exit
+  portal after `ROAM_DURATION` if not killed — it flies HEAD-FIRST into a rift
+  opened `PORTAL_AHEAD` of it and is swallowed tail-to-head (head hides on entry,
+  each body segment puffs as it crosses; `LEAVE_DURATION` is a safety cap).  Body segments are IMMUNE to crash
   damage (PhysicsSystem treats a `dragonSegment` like an indestructible wall on
   player contact) — they only break when SHOT, so crashing into the body just
   bounces.  ANY NUMBER of dragons can be alive at once — each is a
