@@ -2366,7 +2366,9 @@ export class RenderSystem {
       // a single matrix write — ~2-3× cheaper per slow-path entity.
       // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
       const rotation = entity.rotation + (
-        entity.type === EntityType.PLAYER
+        entity.isRival
+          ? SPRITE_CONSTANTS.RIVAL_ROTATION_OFFSET   // sprite art points up-left
+          : entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
           : entity.type === EntityType.ENEMY
             ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
@@ -2696,6 +2698,11 @@ export class RenderSystem {
                   if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
+                  // Rival ships render at 1:1 with their `size` so the visible
+                  // hull matches the collision footprint (getCollisionR = size/2)
+                  // — at the generic 1.5× the sprite overhangs its hitbox and
+                  // shots that look like hits sail past.
+                  if (entity.isRival) drawScale = 1.0;
                   // Hit-punch: enemies briefly swell on impact for a juicy
                   // reaction (driven by the hit-flash timer, scaled by the
                   // damage-as-%-of-maxHealth react magnitude).
@@ -2719,24 +2726,6 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
-
-                  // Rival ships (Stage 7): a disposition-coloured ring (red =
-                  // hostile, green = ally, amber = neutral) so the player can
-                  // read intent at a glance.  Rotation-invariant, drawn upright.
-                  if (entity.isRival) {
-                      const ring = Math.max(entity.size.x, entity.size.y) * 0.95;
-                      ctx.save();
-                      ctx.rotate(-entity.rotation);
-                      ctx.beginPath();
-                      ctx.arc(0, 0, ring, 0, Math.PI * 2);
-                      ctx.strokeStyle = entity.color || '#e2e8f0';
-                      ctx.lineWidth = 2.5;
-                      ctx.globalAlpha = 0.85;
-                      ctx.shadowColor = entity.color || '#e2e8f0';
-                      ctx.shadowBlur = 8;
-                      ctx.stroke();
-                      ctx.restore();
-                  }
 
                   // Draw Label for interactables
                   if (entity.type === EntityType.INTERACTABLE && entity.name) {

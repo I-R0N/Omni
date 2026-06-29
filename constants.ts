@@ -581,6 +581,10 @@ export const SPRITE_CONSTANTS = {
   // 3π/4 value was for the retired up-left sprite art and skewed every
   // polygon off its heading — most visibly on the triangle / arrow.)
   ENEMY_ROTATION_OFFSET: 0,
+  // Rival ships (Stage 7) render from the RETIRED enemy PNGs, which (like the
+  // player art) point up-left — so they need the same 3π/4 alignment offset as
+  // the player, NOT the procedural-enemy 0.
+  RIVAL_ROTATION_OFFSET: Math.PI*(3/4),
   PLAYER_BASE_SIZE: 20 // Default visual/physics size for player (x/y)
 };
 
@@ -3254,8 +3258,9 @@ export const RIVAL_CONSTANTS = {
   // Disposition spawn weights + team colours (the render ring + score popup).
   WEIGHTS: { hostile: 0.34, ally: 0.30, neutral: 0.36 },
   COLORS: { hostile: '#f87171', ally: '#34d399', neutral: '#fbbf24' } as Record<string, string>,
-  // Ship feel.
-  HEALTH: 120, MASS: 11, SIZE: 30, MAX_SPEED: 5.4, ACCEL: 4.2, STEER: 0.12,
+  // Ship feel.  SIZE is the on-screen sprite size AND the collision footprint
+  // (rivals draw 1:1, so hull == hitbox).
+  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4, ACCEL: 4.2, STEER: 0.12,
   VISION: 760,               // target-acquisition range
   FIRE_RANGE: 520,           // opens fire within this of its target
   PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target

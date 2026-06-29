@@ -420,7 +420,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   roamer (the dragon stays DBG-only).  A rival is a lean `EntityType.ENEMY` +
   `isRival`, RENDERED FROM AN OLD ENEMY PNG (`RIVAL_CONSTANTS.SPRITES` —
   drone/charger/tank/skirmisher/orbiter/sniper; the sprite-first RenderSystem
-  path handles it) with a disposition-coloured ring.  It HUNTS the nearest WAVE
+  path handles it, at `RIVAL_ROTATION_OFFSET` = the player's 3π/4 art angle and
+  a 1:1 `drawScale` so the hull matches the `size` hitbox).  It HUNTS the nearest WAVE
   enemy, strafes to hold `PREFERRED_DIST`, and fires a blaster bolt flagged
   `hitsEnemies` (a new projectile flag that lets an ENEMY-owned shot damage other
   ENEMY targets — bypassing the friendly-fire filter — but never another rival)
