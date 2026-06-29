@@ -2697,9 +2697,10 @@ export class RenderSystem {
                       drawScale = 1.02;
                   }
                   // Hit-punch: enemies briefly swell on impact for a juicy
-                  // reaction (driven by the hit-flash timer).
+                  // reaction (driven by the hit-flash timer, scaled by the
+                  // damage-as-%-of-maxHealth react magnitude).
                   if (entity.type === EntityType.ENEMY && entity.hitFlash && entity.hitFlash > 0) {
-                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2);
+                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2) * (entity.hitReact ?? 1);
                   }
 
                   const drawSize = maxDim * drawScale;
@@ -2718,6 +2719,24 @@ export class RenderSystem {
                       ctx.restore();
                   }
 
+
+                  // Rival ships (Stage 7): a disposition-coloured ring (red =
+                  // hostile, green = ally, amber = neutral) so the player can
+                  // read intent at a glance.  Rotation-invariant, drawn upright.
+                  if (entity.isRival) {
+                      const ring = Math.max(entity.size.x, entity.size.y) * 0.95;
+                      ctx.save();
+                      ctx.rotate(-entity.rotation);
+                      ctx.beginPath();
+                      ctx.arc(0, 0, ring, 0, Math.PI * 2);
+                      ctx.strokeStyle = entity.color || '#e2e8f0';
+                      ctx.lineWidth = 2.5;
+                      ctx.globalAlpha = 0.85;
+                      ctx.shadowColor = entity.color || '#e2e8f0';
+                      ctx.shadowBlur = 8;
+                      ctx.stroke();
+                      ctx.restore();
+                  }
 
                   // Draw Label for interactables
                   if (entity.type === EntityType.INTERACTABLE && entity.name) {

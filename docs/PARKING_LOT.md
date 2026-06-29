@@ -315,3 +315,41 @@ edit-and-playtest with no structural work.
 **All knobs live in:** `AI_CONFIG.BUBBLE` (movement), `BUBBLE_CONSTANTS`
 (engagement/sickness/ambient), and the `ENEMY_VARIANTS.BUBBLE` `consume` /
 `multiply` blocks — all in `constants.ts`.
+
+---
+
+## Rival ships (Stage 7) — polish + tuning follow-ups
+
+**Context:** Rivals shipped as bespoke engine-managed roamers
+(`GameEngine.updateRivals`, `RIVAL_CONSTANTS`) — player-like privateers that
+warp in on a cadence, hunt the wave enemies (stealing the player's points +
+drops), and per disposition (hostile / ally / neutral) fight, ignore, or
+retaliate against the player. First pass is intentionally lean; revisit:
+
+- **Terrain navigation.** Rivals steer straight at their target with no
+  pathfinding (unlike wave enemies, which ride the baked pursuit flow field
+  toward the player). On tile-dense maps they can bump/stall on walls. Options:
+  route rival steering through a flow field, add a cheap whisker-avoidance, or
+  let them `phasesTerrain` (cheapest, but less "ship-like").
+- **Theft legibility.** The point-steal is currently pure denial (the player
+  just gains nothing). Add a visible cue — a rival-coloured "+N stolen" popup at
+  the kill, a running per-rival `stolen` tally (already tracked on
+  `RivalInstance`) surfaced in the HUD, or a brief tether/flash.
+- **Enemy↔rival collateral.** Today enemies can't damage rivals (friendly-fire
+  filter), so rivals are only threatened by the player. Consider letting some
+  enemy fire hit rivals (make them `thirdParty`, or a `hitsRivals` flag) so the
+  battlefield is a real three-way.
+- **Ally value.** Allies help by thinning enemies but still deny loot/points —
+  net they may feel bad. Consider allies occasionally gifting a drop, reviving a
+  combo, or drawing aggro without stealing.
+- **Cadence / wave integration.** Spawn cadence is a flat timer while a wave is
+  active (`SPAWN_INTERVAL ± SPAWN_VAR`, capped `MAX_RIVALS`). Tie frequency /
+  disposition mix / count to wave index or difficulty; maybe a "rival wave".
+- **Combat depth.** All rivals use one blaster. Give dispositions/sprites
+  distinct weapons (the sprite already hints an archetype), evasion, or shields.
+- **Bounty / risk balance.** `TIER`-scaled bounty + full loot spray on a
+  player kill vs. the time cost of chasing one — needs playtest tuning.
+
+**All knobs live in:** `RIVAL_CONSTANTS` (cadence / stats / weapon / dispositions
+/ portal) in `constants.ts`; lifecycle in `GameEngine.updateRivals` /
+`spawnRival` / `fireRivalShot` / `rivalVacuumDrops`.

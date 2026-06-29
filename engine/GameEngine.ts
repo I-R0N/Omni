@@ -19,7 +19,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -55,6 +55,19 @@ interface DragonInstance {
   missileTimer: number;                  // countdown to the next homing missile
   portal?: { x: number; y: number };     // exit-portal centre (leave state only)
   headThrough?: boolean;                  // head has crossed the exit portal
+}
+
+// A rival ship (Stage 7) and its engine-managed lifecycle/AI state.  The ship
+// itself is a plain EntityType.ENEMY carrying isRival; everything else lives
+// here so the entity stays lean.
+interface RivalInstance {
+  ship: GameEntity;
+  disposition: RivalDisposition;
+  state: 'enter' | 'roam' | 'leave';
+  stateTimer: number;        // seconds left in the current state
+  fireTimer: number;         // weapon cooldown
+  stolen: number;            // points denied to the player so far (HUD/popup)
+  portal?: { x: number; y: number };  // exit-portal centre (leave only)
 }
 
 export class GameEngine {
@@ -278,6 +291,8 @@ export class GameEngine {
   private dragons: DragonInstance[] = [];
   private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
   private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
+  private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
+  private rivalSpawnTimer = RIVAL_CONSTANTS.FIRST_DELAY; // countdown to the next warp-in
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1437,6 +1452,8 @@ export class GameEngine {
       this.snitchCatchCount = 0;
       this.dragons = []; // die with the old map's entity list
       this.dragonsKilled = 0; // reset the doubling payout per run
+      this.rivals = []; // rival ships die with the old map
+      this.rivalSpawnTimer = RIVAL_CONSTANTS.FIRST_DELAY;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -2043,9 +2060,11 @@ export class GameEngine {
       // flips `active` directly), so they correctly award nothing.
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
-      if (entity.type === EntityType.ENEMY && !entity.isExploding) {
+      if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
           // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
+          // A rival-killed enemy (killedByRival) pays the player NOTHING — the
+          // rival stole it (Stage 7); the theft is shown by the rival's popup.
           const mult = this.registerComboKill();
           const scale = opts?.scoreScale ?? 1;
           this.awardScore(
@@ -2524,6 +2543,7 @@ export class GameEngine {
     // run the catch check (collide / shoot per the DBG toggle).
     this.updateSnitch(dt);
     this.updateDragons(dt);
+    this.updateRivals(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -5299,13 +5319,38 @@ export class GameEngine {
 
   /** Portal VFX: an expanding violet rift ring + sparks. */
   private openDragonPortal(pos: Vector2) {
-      this.spawnShockwave(pos, {
-          radius: DRAGON_CONSTANTS.PORTAL_RADIUS, damage: 0, knockback: 0,
-          color: DRAGON_CONSTANTS.PORTAL_COLOR, lifetime: DRAGON_CONSTANTS.PORTAL_DURATION,
+      this.openPortal(pos, {
+          color: DRAGON_CONSTANTS.PORTAL_COLOR,
+          radius: DRAGON_CONSTANTS.PORTAL_RADIUS,
+          duration: DRAGON_CONSTANTS.PORTAL_DURATION,
       });
-      this.spawnParticles(pos, 24, DRAGON_CONSTANTS.PORTAL_COLOR, {
-          speedMin: 2, speedMax: 9, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.3, lifetimeMax: 0.8,
+  }
+
+  /**
+   * Reusable rift-portal VFX (Stage 7 — abstracted from the dragon's single
+   * ring).  A layered warp: a bright white core flash, the main coloured rift
+   * ring, a wider trailing echo ring, a disc of inward-swirling embers, and a
+   * scatter of hot white sparks — plus a light screen punch.  Shared by the
+   * dragon and the rival ships; tune via the caller's PORTAL_* constants.
+   */
+  private openPortal(pos: Vector2, opts: { color: string; radius: number; duration: number }) {
+      const { color, radius, duration } = opts;
+      // White core flash (fast, small) → the rift "ignites".
+      this.spawnShockwave(pos, { radius: radius * 0.42, damage: 0, knockback: 0, color: '#ffffff', lifetime: duration * 0.55 });
+      // Main coloured rift ring.
+      this.spawnShockwave(pos, { radius, damage: 0, knockback: 0, color, lifetime: duration });
+      // Wider, slower echo ring — gives the rift depth.
+      this.spawnShockwave(pos, { radius: radius * 1.35, damage: 0, knockback: 0, color, lifetime: duration * 1.25 });
+      // Swirling embers filling the disc (tangential bias reads as a vortex).
+      this.spawnParticles(pos, 30, color, {
+          speedMin: 1, speedMax: 5, sizeMin: 1.5, sizeMax: 4,
+          lifetimeMin: 0.35, lifetimeMax: 0.9, positionJitter: radius * 0.55,
       });
+      // Hot white sparks bursting outward from the seam.
+      this.spawnParticles(pos, 16, '#ffffff', {
+          speedMin: 4, speedMax: 12, sizeMin: 1, sizeMax: 2.6, lifetimeMin: 0.2, lifetimeMax: 0.5,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO * 4); // a soft warp thud
   }
 
   /** DBG: summon a dragon of `type` ('glass'|'rock'|'metal'|'plastic'|'mixed').
@@ -5313,6 +5358,212 @@ export class GameEngine {
   public debugSpawnDragon(type: string = 'mixed') {
       const allowed = ['glass', 'rock', 'metal', 'plastic', 'mixed'];
       this.spawnDragon((allowed.includes(type) ? type : 'mixed') as StructureVariant | 'mixed');
+  }
+
+  // ─── Rival ships (Stage 7) ─────────────────────────────────────────────
+  //
+  // Player-like roamers that warp in via portal, hunt the WAVE enemies
+  // (stealing the player's kill points + loot), and—per disposition—fight,
+  // ignore, or retaliate against the player.  Engine-managed lifecycle
+  // (mirrors updateDragons); the ship is a lean EntityType.ENEMY + isRival.
+
+  private rollRivalDisposition(): RivalDisposition {
+      const w = RIVAL_CONSTANTS.WEIGHTS;
+      const r = Math.random() * (w.hostile + w.ally + w.neutral);
+      if (r < w.hostile) return 'hostile';
+      if (r < w.hostile + w.ally) return 'ally';
+      return 'neutral';
+  }
+
+  /** Per-frame rival lifecycle: cadence warp-ins, per-ship hunt/strafe/fire/
+   *  loot, and the warp-out fly-through.  Engine-driven (AISystem skips them). */
+  private updateRivals(dt: number) {
+      if (!this.currentMap) return;
+      const R = RIVAL_CONSTANTS;
+
+      // Cadence — warp a fresh rival in while a wave is live, capped.
+      if (this.waves.waveState === 'active' && this.rivals.length < R.MAX_RIVALS) {
+          this.rivalSpawnTimer -= dt;
+          if (this.rivalSpawnTimer <= 0) {
+              this.spawnRival();
+              this.rivalSpawnTimer = R.SPAWN_INTERVAL + Math.random() * R.SPAWN_VAR;
+          }
+      }
+      if (this.rivals.length === 0) return;
+
+      const enemies = this.entityIndex.enemies;
+      const steer = Math.min(1, R.STEER * dt * 60);
+      for (let n = this.rivals.length - 1; n >= 0; n--) {
+          const inst = this.rivals[n];
+          const s = inst.ship;
+          if (!s.active) { this.rivals.splice(n, 1); continue; }
+          inst.stateTimer -= dt;
+          inst.fireTimer -= dt;
+
+          // ── Target: nearest wave enemy; hostile (or a provoked neutral) also
+          // weighs the player. ──
+          const huntsPlayer = inst.disposition === 'hostile'
+              || (inst.disposition === 'neutral' && s.provoked === true);
+          let target: GameEntity | null = null;
+          let bestD2 = R.VISION * R.VISION;
+          for (let i = 0; i < enemies.length; i++) {
+              const e = enemies[i];
+              if (e.isRival || e.isExploding) continue;
+              const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 < bestD2) { bestD2 = d2; target = e; }
+          }
+          if (huntsPlayer && !this.player.isExploding) {
+              const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (target === null || d2 < bestD2) { target = this.player; bestD2 = d2; }
+          }
+
+          // ── Steering ──
+          let dirX: number, dirY: number, speedMul = 1;
+          if (inst.state === 'leave' && inst.portal) {
+              const px = wrapDeltaX(s.position.x, inst.portal.x), py = wrapDeltaY(s.position.y, inst.portal.y);
+              const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm; speedMul = R.LEAVE_SPEED_MULT;
+          } else if (target) {
+              const tx = wrapDeltaX(s.position.x, target.position.x), ty = wrapDeltaY(s.position.y, target.position.y);
+              const tm = Math.hypot(tx, ty) || 1;
+              // Hold a firing gap: close if far, back off if too near; always strafe.
+              const sign = tm > R.PREFERRED_DIST * 1.15 ? 1 : tm < R.PREFERRED_DIST * 0.7 ? -1 : 0;
+              dirX = (tx / tm) * sign + (-ty / tm) * 0.7;
+              dirY = (ty / tm) * sign + (tx / tm) * 0.7;
+              const dm = Math.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
+              s.rotation = Math.atan2(ty, tx); // face the target
+          } else {
+              const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+              const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
+              s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+          }
+          const tSpeed = R.MAX_SPEED * speedMul;
+          s.velocity.x += (dirX * tSpeed - s.velocity.x) * steer;
+          s.velocity.y += (dirY * tSpeed - s.velocity.y) * steer;
+          const sp = Math.hypot(s.velocity.x, s.velocity.y);
+          if (sp > tSpeed) { const k = tSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
+          if (inst.state === 'leave') s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+
+          // ── Fire (only while roaming, target in range) ──
+          if (inst.state === 'roam' && target && inst.fireTimer <= 0
+              && bestD2 <= R.FIRE_RANGE * R.FIRE_RANGE) {
+              inst.fireTimer = R.WEAPON.cooldown;
+              this.fireRivalShot(inst, target);
+          }
+
+          // ── Loot vacuum: steal nearby collectible drops from the player ──
+          this.rivalVacuumDrops(inst);
+
+          // ── Lifecycle ──
+          if (inst.state === 'enter') {
+              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = R.ROAM_DURATION; }
+          } else if (inst.state === 'roam') {
+              if (inst.stateTimer <= 0) {
+                  inst.state = 'leave'; inst.stateTimer = R.LEAVE_DURATION;
+                  const vm = Math.hypot(s.velocity.x, s.velocity.y) || 1;
+                  const portal = { x: s.position.x + (s.velocity.x / vm) * R.PORTAL_AHEAD, y: s.position.y + (s.velocity.y / vm) * R.PORTAL_AHEAD };
+                  wrapPosition(portal);
+                  inst.portal = portal;
+                  this.openPortal(portal, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+              }
+          } else if (inst.state === 'leave' && inst.portal) {
+              const cr = R.PORTAL_CONSUME_RADIUS;
+              const hx = wrapDeltaX(s.position.x, inst.portal.x), hy = wrapDeltaY(s.position.y, inst.portal.y);
+              if (hx * hx + hy * hy <= cr * cr || inst.stateTimer <= 0) {
+                  this.spawnParticles(s.position, 14, R.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
+                  s.active = false; this.rivals.splice(n, 1); continue;
+              }
+          }
+      }
+  }
+
+  /** Warp a rival ship in from an offscreen rift.  Disposition is rolled by
+   *  weight unless one is forced (DBG). */
+  private spawnRival(forced?: RivalDisposition) {
+      if (!this.currentMap) return;
+      const R = RIVAL_CONSTANTS;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + R.SPAWN_MARGIN;
+      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
+      wrapPosition(pos);
+      this.openPortal(pos, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+
+      const disposition = forced ?? this.rollRivalDisposition();
+      const sprite = R.SPRITES[Math.floor(Math.random() * R.SPRITES.length)];
+      const ship: GameEntity = {
+          id: nextId('rival'),
+          type: EntityType.ENEMY,
+          position: { x: pos.x, y: pos.y },
+          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // heading inward
+          size: { x: R.SIZE, y: R.SIZE },
+          rotation: angle + Math.PI,
+          color: R.COLORS[disposition],
+          active: true,
+          health: R.HEALTH,
+          maxHealth: R.HEALTH,
+          maxSpeed: R.MAX_SPEED,
+          mass: R.MASS,
+          enemyTier: R.TIER,            // kill bounty when the player downs it
+          isRival: true,
+          sprite,
+          trail: [],
+          glowPhase: Math.random() * Math.PI * 2,
+      };
+      this.currentMap.entities.push(ship);
+      this.rivals.push({
+          ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
+          fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
+      });
+  }
+
+  /** Rival weapon: a blaster bolt that may damage the wave enemies (hitsEnemies)
+   *  and—unless hostile or aimed AT the player—passes through the player. */
+  private fireRivalShot(inst: RivalInstance, target: GameEntity) {
+      if (!this.currentMap) return;
+      const W = RIVAL_CONSTANTS.WEAPON;
+      const cfg = {
+          type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
+          speed: W.speed, damage: W.damage, lifetime: W.lifetime,
+          color: inst.ship.color || W.color, size: W.size,
+          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+      } as WeaponConfig;
+      const ents = this.currentMap.entities;
+      const before = ents.length;
+      this.spawnProjectileFromConfig(inst.ship, { x: target.position.x, y: target.position.y }, cfg, EntityType.ENEMY);
+      const targetingPlayer = target === this.player;
+      const spares = !(inst.disposition === 'hostile' || targetingPlayer);
+      for (let i = before; i < ents.length; i++) {
+          const p = ents[i];
+          if (p.type === EntityType.PROJECTILE) { p.hitsEnemies = true; p.sparesPlayer = spares; }
+      }
+  }
+
+  /** Steal any collectible drop within LOOT_RANGE (denies the player + heals). */
+  private rivalVacuumDrops(inst: RivalInstance) {
+      const R = RIVAL_CONSTANTS;
+      const s = inst.ship;
+      const rng2 = R.LOOT_RANGE * R.LOOT_RANGE;
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const drop = this.activeDrops[i];
+          if (!drop.active || !isCollectibleDrop(drop)) continue;
+          const dx = wrapDeltaX(s.position.x, drop.position.x), dy = wrapDeltaY(s.position.y, drop.position.y);
+          if (dx * dx + dy * dy > rng2) continue;
+          drop.active = false;
+          s.health = Math.min(s.maxHealth ?? R.HEALTH, (s.health ?? 0) + R.HEAL_PER_LOOT);
+          this.spawnParticles(drop.position, 5, s.color || '#e2e8f0', {
+              speedMin: 1, speedMax: 5, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.15, lifetimeMax: 0.4,
+          });
+      }
+  }
+
+  /** DBG: warp in a rival of the given disposition (or a weighted roll). */
+  public debugSpawnRival(disposition: string = 'random') {
+      const forced = (disposition === 'hostile' || disposition === 'ally' || disposition === 'neutral')
+          ? disposition as RivalDisposition : undefined;
+      this.spawnRival(forced);
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

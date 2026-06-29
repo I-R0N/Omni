@@ -2614,7 +2614,15 @@ export class PhysicsSystem {
           // when the target is neutral.
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
-          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY && !target.thirdParty) return;
+          // Ally/neutral rival fire passes through the player (Stage 7) — its
+          // shots are meant for the wave enemies, not the pilot.
+          if (target.type === EntityType.PLAYER && proj.sparesPlayer) return;
+          // Enemy-vs-enemy friendly fire, EXCEPT: a neutral third party (bubble)
+          // is fair game for all, and a rival's `hitsEnemies` shot is allowed to
+          // damage the wave enemies (Stage 7) — but never another rival.
+          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
+              && !target.thirdParty && !proj.hitsEnemies) return;
+          if (proj.hitsEnemies && target.isRival) return;
 
           // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
           // (today's "tile shards"); they pass through every other shard
@@ -2875,6 +2883,8 @@ export class PhysicsSystem {
               // Player-attributed kill stamp — handleEntityDeath awards
               // shard/tile destruction points only when this is set.
               if (proj.ownerType === EntityType.PLAYER) target.killedByPlayer = true;
+              // Rival kill (Stage 7): deny the player this enemy's points + combo.
+              else if (proj.hitsEnemies && target.type === EntityType.ENEMY && !target.isRival) target.killedByRival = true;
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
               if (target.type === EntityType.STRUCTURE) {

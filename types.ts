@@ -514,6 +514,22 @@ export interface GameEntity {
   // third-party victim can blame the exact shooter.  'player' for player shots,
   // the enemy's id for enemy shots.
   ownerId?: string;
+  // Rival ship (Stage 7): a player-like EntityType.ENEMY roamer that fights the
+  // WAVE enemies (denying the player their points + drops) and—per disposition—
+  // may also fight the player.  Engine-managed (GameEngine.updateRivals), so
+  // AISystem skips it.  Renders from `sprite` (an old enemy PNG) with a
+  // disposition-coloured ring.
+  isRival?: boolean;
+  // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
+  // damage other ENEMY targets (so a rival can shoot the wave enemies), and
+  // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an
+  // ally/neutral rival's stray fire can't hurt the player).  Both unset on
+  // normal enemy fire — original behaviour preserved.
+  hitsEnemies?: boolean;
+  sparesPlayer?: boolean;
+  // Stamped on an enemy killed by a rival's projectile so handleEntityDeath
+  // withholds the kill points + combo from the player (the rival "steals" them).
+  killedByRival?: boolean;
   // Attach + disable (3c): when set, GameEngine.updateAttachments snaps this
   // entity's position onto the target every frame (a latch/grapple).  Cleared
   // when the target dies.  `attachOffset` is an optional fixed world offset.

@@ -411,7 +411,35 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `DragonInstance` (head + body + per-dragon lifecycle/attack timers) in
   `GameEngine.dragons`, ticked by `updateDragons`.  DBG: a dedicated Dragon menu
   (glass / rock / plastic / metal / mixed buttons; each click stacks another).
-  Tuning in `DRAGON_CONSTANTS`.
+  Tuning in `DRAGON_CONSTANTS`.  And the Stage-7 RIVAL (player-like privateer
+  ships — NOT an ENEMY_VARIANTS archetype but a bespoke engine-managed roamer
+  like the dragon/snitch: `GameEngine.rivals` = `RivalInstance[]`, ticked by
+  `updateRivals`, AISystem skips them via the `isRival` flag).  They WARP IN via
+  the abstracted portal on an auto-cadence (`RIVAL_CONSTANTS.SPAWN_INTERVAL`
+  while a wave is `active`, capped at `MAX_RIVALS`) — the only auto-spawned
+  roamer (the dragon stays DBG-only).  A rival is a lean `EntityType.ENEMY` +
+  `isRival`, RENDERED FROM AN OLD ENEMY PNG (`RIVAL_CONSTANTS.SPRITES` —
+  drone/charger/tank/skirmisher/orbiter/sniper; the sprite-first RenderSystem
+  path handles it) with a disposition-coloured ring.  It HUNTS the nearest WAVE
+  enemy, strafes to hold `PREFERRED_DIST`, and fires a blaster bolt flagged
+  `hitsEnemies` (a new projectile flag that lets an ENEMY-owned shot damage other
+  ENEMY targets — bypassing the friendly-fire filter — but never another rival)
+  + `sparesPlayer` (ally/neutral shots pass THROUGH the player).  Killing a wave
+  enemy with a rival shot stamps `killedByRival`, so `handleEntityDeath`
+  WITHHOLDS the kill points + combo from the player (the rival STEALS them); the
+  rival also VACUUMS collectible drops within `LOOT_RANGE` (denying + self-heal).
+  THREE dispositions (`RivalDisposition`, spawn-weighted, team colour →
+  `RIVAL_CONSTANTS.COLORS`): `hostile` (red — fights the player AND enemies),
+  `ally` (green — fights enemies only, never the player), `neutral` (amber —
+  fights enemies for loot, ignores the player UNTIL attacked → `provoked` flips
+  it to hunt the player).  A rival is a normal damageable ENEMY: the PLAYER can
+  down it for a `TIER`-scaled bounty + a loot spray (enemies/other rivals can't
+  damage it — friendly-fire filter), and it WARPS OUT via portal after
+  `ROAM_DURATION`.  DBG: a dedicated Rivals menu (hostile / ally / neutral /
+  random).  Tuning in `RIVAL_CONSTANTS`.  The rift-portal VFX itself is now the
+  reusable `GameEngine.openPortal(pos, {color,radius,duration})` (layered
+  core-flash + rift ring + echo ring + vortex embers + sparks + a soft shake);
+  `openDragonPortal` is a thin wrapper over it.
   Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`

@@ -321,6 +321,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugSpawnDragon(type);
   };
 
+  const handleSpawnRival = (disposition: string) => {
+      if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
+  };
+
   const handlePurchaseUnlock = (id: string) => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
   };
@@ -447,6 +451,7 @@ const App: React.FC = () => {
         onCycleCardInterval={handleCycleCardInterval}
         onTestCards={handleTestCards}
         onSpawnDragon={handleSpawnDragon}
+        onSpawnRival={handleSpawnRival}
         onPurchaseUnlock={handlePurchaseUnlock}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}

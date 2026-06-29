@@ -100,6 +100,7 @@ interface UIOverlayProps {
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
   onSpawnDragon?: (type: string) => void;
+  onSpawnRival?: (disposition: string) => void;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -182,6 +183,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleCardInterval,
   onTestCards,
   onSpawnDragon,
+  onSpawnRival,
   onPurchaseUnlock,
   onUnlockAll,
   onResetUnlocks,
@@ -212,7 +214,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
-    perf: true, timing: true, dragon: true,
+    perf: true, timing: true, dragon: true, rival: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -512,6 +514,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
                     >
                       {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Rival ships summon (DBG) ───────────────────────── */}
+              {renderSectionHeader('rival', 'Rivals')}
+              {!collapsed.rival && (
+                <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
+                  {[
+                    { k: 'hostile', c: 'hover:border-red-400' },
+                    { k: 'ally', c: 'hover:border-emerald-400' },
+                    { k: 'neutral', c: 'hover:border-amber-400' },
+                    { k: 'random', c: 'hover:border-sky-400' },
+                  ].map(({ k, c }) => (
+                    <button
+                      key={k}
+                      onClick={() => onSpawnRival && onSpawnRival(k)}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:text-white ${c}`}
+                    >
+                      {k}
                     </button>
                   ))}
                 </div>

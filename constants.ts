@@ -3236,6 +3236,44 @@ export const DRAGON_CONSTANTS = {
   SPAWN_MARGIN: 300,       // units past the viewport edge to open the entry portal
 };
 
+// ─── Rival ships (Stage 7) ───────────────────────────────────────────────
+// Player-like EntityType.ENEMY roamers that warp in via portal, hunt the WAVE
+// enemies (denying the player the kill points + drops they'd otherwise get),
+// and—per disposition—may also fight the player.  Engine-managed lifecycle
+// (GameEngine.updateRivals), rendered from an old enemy PNG with a disposition
+// ring.  Three dispositions: hostile (fights player + enemies), ally (fights
+// enemies only, never the player), neutral (fights enemies for loot, ignores
+// the player UNTIL attacked, then retaliates).
+export const RIVAL_CONSTANTS = {
+  // Cadence: a fresh rival warps in every SPAWN_INTERVAL (± VAR) seconds while a
+  // wave is active, up to MAX_RIVALS alive; the first waits FIRST_DELAY.
+  FIRST_DELAY: 14, SPAWN_INTERVAL: 26, SPAWN_VAR: 10, MAX_RIVALS: 3,
+  ROAM_DURATION: 34,         // seconds it hunts before warping back out (if alive)
+  ENTER_DURATION: 0.9,       // portal-emergence beat before it engages
+  SPAWN_MARGIN: 280,         // units past the viewport edge to open the entry portal
+  // Disposition spawn weights + team colours (the render ring + score popup).
+  WEIGHTS: { hostile: 0.34, ally: 0.30, neutral: 0.36 },
+  COLORS: { hostile: '#f87171', ally: '#34d399', neutral: '#fbbf24' } as Record<string, string>,
+  // Ship feel.
+  HEALTH: 120, MASS: 11, SIZE: 30, MAX_SPEED: 5.4, ACCEL: 4.2, STEER: 0.12,
+  VISION: 760,               // target-acquisition range
+  FIRE_RANGE: 520,           // opens fire within this of its target
+  PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target
+  TIER: 4,                   // kill-bounty tier (SCORE POINTS_PER_TIER × this) when downed
+  WEAPON: { speed: 8.5, damage: 9, cooldown: 0.5, lifetime: 1.4, size: 4.5, color: '#e2e8f0' },
+  LOOT_RANGE: 150,           // vacuums collectible drops within this (denies the player)
+  HEAL_PER_LOOT: 6,          // self-heal per drop eaten
+  // Warp-out portal (mirrors the dragon's fly-through, single ship).
+  PORTAL_RADIUS: 150, PORTAL_DURATION: 0.85, PORTAL_COLOR: '#a78bfa',
+  PORTAL_AHEAD: 300, PORTAL_CONSUME_RADIUS: 64, LEAVE_SPEED_MULT: 1.7, LEAVE_DURATION: 8,
+  // Sprite pool — the retired enemy art (one picked at random per rival).
+  SPRITES: [
+    ASSETS.ENEMY_DRONE, ASSETS.ENEMY_CHARGER, ASSETS.ENEMY_TANK,
+    ASSETS.ENEMY_SKIRMISHER, ASSETS.ENEMY_ORBITER, ASSETS.ENEMY_SNIPER,
+  ],
+};
+export type RivalDisposition = 'hostile' | 'ally' | 'neutral';
+
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
 // that apply the effect to the player on hit (and render in the effect colour).
 export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> = {

@@ -55,6 +55,10 @@ export class AISystem {
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
 
+      // Rival ships (Stage 7) are EntityType.ENEMY but engine-managed
+      // (GameEngine.updateRivals) — skip the enemy AI entirely.
+      if (enemy.isRival) continue;
+
       // Default initialization
       if (!enemy.aiState) {
           enemy.aiState = 'chase';
