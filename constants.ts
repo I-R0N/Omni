@@ -3249,10 +3249,11 @@ export const DRAGON_CONSTANTS = {
 // enemies only, never the player), neutral (fights enemies for loot, ignores
 // the player UNTIL attacked, then retaliates).
 export const RIVAL_CONSTANTS = {
-  // Cadence: a fresh rival warps in every SPAWN_INTERVAL (± VAR) seconds while a
-  // wave is active, up to MAX_RIVALS alive; the first waits FIRST_DELAY.
-  FIRST_DELAY: 14, SPAWN_INTERVAL: 26, SPAWN_VAR: 10, MAX_RIVALS: 3,
-  ROAM_DURATION: 34,         // seconds it hunts before warping back out (if alive)
+  // Cadence: a fresh random rival warps in every SCORE_INTERVAL points earned,
+  // up to MAX_RIVALS alive at once.
+  SCORE_INTERVAL: 1000, MAX_RIVALS: 6,
+  ROAM_DURATION: 280,        // seconds it hunts before warping back out (10× the
+                            // dragon's roam — rivals are long-term companions/rivals)
   ENTER_DURATION: 0.9,       // portal-emergence beat before it engages
   SPAWN_MARGIN: 280,         // units past the viewport edge to open the entry portal
   // Disposition spawn weights + team colours (the render ring + score popup).

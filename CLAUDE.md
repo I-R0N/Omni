@@ -415,9 +415,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ships — NOT an ENEMY_VARIANTS archetype but a bespoke engine-managed roamer
   like the dragon/snitch: `GameEngine.rivals` = `RivalInstance[]`, ticked by
   `updateRivals`, AISystem skips them via the `isRival` flag).  They WARP IN via
-  the abstracted portal on an auto-cadence (`RIVAL_CONSTANTS.SPAWN_INTERVAL`
-  while a wave is `active`, capped at `MAX_RIVALS`) — the only auto-spawned
-  roamer (the dragon stays DBG-only).  A rival is a lean `EntityType.ENEMY` +
+  the abstracted portal on a SCORE cadence (one random rival every
+  `RIVAL_CONSTANTS.SCORE_INTERVAL` = 1000 points earned, capped at `MAX_RIVALS`
+  alive) — the only auto-spawned roamer (the dragon stays DBG-only) — and roam
+  for `ROAM_DURATION` (280s, 10× the dragon) before warping out.  A rival is a lean `EntityType.ENEMY` +
   `isRival`, RENDERED FROM AN OLD ENEMY PNG (`RIVAL_CONSTANTS.SPRITES` —
   drone/charger/tank/skirmisher/orbiter/sniper; the sprite-first RenderSystem
   path handles it, at `RIVAL_ROTATION_OFFSET` = the player's 3π/4 art angle and

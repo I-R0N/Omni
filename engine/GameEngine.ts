@@ -292,7 +292,7 @@ export class GameEngine {
   private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
   private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
   private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
-  private rivalSpawnTimer = RIVAL_CONSTANTS.FIRST_DELAY; // countdown to the next warp-in
+  private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1453,7 +1453,7 @@ export class GameEngine {
       this.dragons = []; // die with the old map's entity list
       this.dragonsKilled = 0; // reset the doubling payout per run
       this.rivals = []; // rival ships die with the old map
-      this.rivalSpawnTimer = RIVAL_CONSTANTS.FIRST_DELAY;
+      this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -5381,13 +5381,13 @@ export class GameEngine {
       if (!this.currentMap) return;
       const R = RIVAL_CONSTANTS;
 
-      // Cadence — warp a fresh rival in while a wave is live, capped.
-      if (this.waves.waveState === 'active' && this.rivals.length < R.MAX_RIVALS) {
-          this.rivalSpawnTimer -= dt;
-          if (this.rivalSpawnTimer <= 0) {
-              this.spawnRival();
-              this.rivalSpawnTimer = R.SPAWN_INTERVAL + Math.random() * R.SPAWN_VAR;
-          }
+      // Cadence — a fresh random rival warps in every SCORE_INTERVAL points
+      // earned (capped at MAX_RIVALS alive).  The threshold advances with the
+      // score whether or not a rival actually spawns, so a score that vaults
+      // several intervals at once doesn't queue a backlog of warp-ins.
+      while (this.score >= this.nextRivalScore) {
+          if (this.rivals.length < R.MAX_RIVALS) this.spawnRival();
+          this.nextRivalScore += R.SCORE_INTERVAL;
       }
       if (this.rivals.length === 0) return;
 
