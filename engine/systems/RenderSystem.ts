@@ -2715,12 +2715,16 @@ export class RenderSystem {
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
 
-                  // Hit flash: re-draw brighter (whiter) on impact for a
-                  // stronger pop (prevents white-square by re-drawing the sprite)
+                  // Hit flash: re-draw the sprite blown out toward white on
+                  // impact for a punchy, unmistakable hit pop (the `filter`
+                  // affects only the drawn image, so no white-square artefact).
+                  // The brightness ramps with the flash timer so a fresh hit
+                  // reads as a near-white silhouette, fading back to the hull.
                   if (entity.hitFlash && entity.hitFlash > 0) {
+                      const f = Math.min(1, entity.hitFlash * 3);
                       ctx.save();
-                      ctx.globalAlpha = Math.min(1, 0.7 + (entity.hitFlash * 2.5));
-                      ctx.filter = 'brightness(1.8)';
+                      ctx.globalAlpha = Math.min(1, 0.55 + f);
+                      ctx.filter = `brightness(${(2 + f * 6).toFixed(2)})`;
                       ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
                       ctx.filter = 'none';
                       ctx.restore();
@@ -3919,12 +3923,10 @@ export class RenderSystem {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, width, height);
 
-      // Fill Color — player health bar is always red; enemy bars match enemy color
-      if (isPlayer) {
-          ctx.fillStyle = '#ef4444';
-      } else {
-          ctx.fillStyle = '#ef4444';
-      }
+      // Fill Color — player + normal enemy bars are red; rival bars take the
+      // disposition team colour (red hostile / green ally / amber neutral) so the
+      // bar doubles as the at-a-glance intent cue (replacing the removed ring).
+      ctx.fillStyle = entity.isRival ? (entity.color || '#ef4444') : '#ef4444';
 
       ctx.fillRect(x, y, width * healthPct, height);
 
