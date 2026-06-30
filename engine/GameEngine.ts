@@ -5392,7 +5392,15 @@ export class GameEngine {
       if (this.rivals.length === 0) return;
 
       const enemies = this.entityIndex.enemies;
-      const steer = Math.min(1, R.STEER * dt * 60);
+      // Rivals fly with the SAME mechanics as the player: thrust toward the
+      // desired heading + a self speed-cap, with the map's friction applied by
+      // PhysicsSystem (enemies already get it).  acc/maxSpeed come from the map
+      // movement config (player BASE values, no upgrade mults), so a rival is a
+      // baseline player ship — the upgraded player can still out-fly it.
+      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+      const acc = moveCfg ? moveCfg.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
+      const baseMaxSpeed = moveCfg ? moveCfg.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+      const timeScale = dt * 60;
       for (let n = this.rivals.length - 1; n >= 0; n--) {
           const inst = this.rivals[n];
           const s = inst.ship;
@@ -5438,11 +5446,14 @@ export class GameEngine {
               const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
               s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
           }
-          const tSpeed = R.MAX_SPEED * speedMul;
-          s.velocity.x += (dirX * tSpeed - s.velocity.x) * steer;
-          s.velocity.y += (dirY * tSpeed - s.velocity.y) * steer;
+          // Player-style movement: apply thrust along the desired heading, then
+          // self-cap speed (PhysicsSystem applies the map friction afterward, so
+          // the rival accelerates + coasts exactly like the player ship).
+          s.velocity.x += dirX * acc * timeScale;
+          s.velocity.y += dirY * acc * timeScale;
+          const maxSpeed = baseMaxSpeed * speedMul;
           const sp = Math.hypot(s.velocity.x, s.velocity.y);
-          if (sp > tSpeed) { const k = tSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
+          if (sp > maxSpeed) { const k = maxSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
           if (inst.state === 'leave') s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
 
           // ── Fire (only while roaming, target in range) ──

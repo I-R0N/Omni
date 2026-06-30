@@ -3259,8 +3259,10 @@ export const RIVAL_CONSTANTS = {
   WEIGHTS: { hostile: 0.34, ally: 0.30, neutral: 0.36 },
   COLORS: { hostile: '#f87171', ally: '#34d399', neutral: '#fbbf24' } as Record<string, string>,
   // Ship feel.  SIZE is the on-screen sprite size AND the collision footprint
-  // (rivals draw 1:1, so hull == hitbox).
-  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4, ACCEL: 4.2, STEER: 0.12,
+  // (rivals draw 1:1, so hull == hitbox).  Movement (thrust/friction/top speed)
+  // is NOT tuned here — rivals fly with the player's map movement config, so
+  // they handle like a baseline player ship.
+  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4,
   VISION: 760,               // target-acquisition range
   FIRE_RANGE: 520,           // opens fire within this of its target
   PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target

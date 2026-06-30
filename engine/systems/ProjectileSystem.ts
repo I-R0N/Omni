@@ -198,6 +198,12 @@ export class ProjectileSystem {
         pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
+        // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
+        // recycled rival projectile MUST clear them or a reused player/enemy shot
+        // inherits them — making player shots phase through rivals (hitsEnemies)
+        // and enemy shots phase through the player (sparesPlayer).
+        pooled.hitsEnemies = undefined;
+        pooled.sparesPlayer = undefined;
         entities.push(pooled);
       } else {
         entities.push({
