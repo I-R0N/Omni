@@ -15,11 +15,12 @@ import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
+import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -96,6 +97,10 @@ export class GameEngine {
   // hands every skippable pass an effective frame-skip interval.  See
   // engine/systems/PerfController.ts.
   private perfController: PerfController;
+  // In-game FPS / perf capture harness (DBG tool).  Zero cost while idle;
+  // records the per-frame timing + PerfSnapshot stream over a window and
+  // exports a copy-paste text block (see engine/systems/PerfRecorder.ts).
+  private perfRecorder: PerfRecorder = new PerfRecorder();
 
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
@@ -1549,6 +1554,23 @@ export class GameEngine {
     const wsMap: Record<string, 'active' | 'cleared'> = {
       inactive: 'active', active: 'active', cleared: 'cleared'
     };
+    // Build the perf snapshot once and reuse it for the HUD + the perf
+    // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
+    // pollute the FPS distribution).  `frameTime` is the true rAF delta.
+    const perf = this.buildPerfSnapshot();
+    if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
+      this.perfRecorder.sample(
+        frameTime * 1000,
+        perf.renderMs,
+        perf.updatePhysicsMs + perf.updateLogicMs,
+        perf.collisionsMs,
+        this.perfController.loadTier,
+        this.perfController.loadLevel,
+        perf.totalEntities,
+        perf.enemyCount,
+        perf.particleCount,
+      );
+    }
     this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
@@ -1651,7 +1673,10 @@ export class GameEngine {
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
-      perf: this.buildPerfSnapshot(),
+      perf,
+      perfRecording: this.perfRecorder.recording,
+      perfRecSamples: this.perfRecorder.sampleCount,
+      perfRecScene: this.perfRecorder.sceneTag,
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -5593,6 +5618,28 @@ export class GameEngine {
       const forced = (disposition === 'hostile' || disposition === 'ally' || disposition === 'neutral')
           ? disposition as RivalDisposition : undefined;
       this.spawnRival(forced);
+  }
+
+  // ─── Perf recorder (DBG FPS harness) ───────────────────────────────────
+  // Start/stop a capture, cycle the scene label, and export a copy-paste
+  // report.  Surfaced in the DBG panel's "Perf REC" section; see
+  // engine/systems/PerfRecorder.ts.
+  public perfRecToggle() { this.perfRecorder.toggle(); }
+  public perfRecCycleScene() { this.perfRecorder.cycleScene(); }
+
+  /** Build the copy-paste perf report from the current capture window.  The
+   *  viewport / dpr / zoom are captured live so the block records the FOV the
+   *  numbers were measured at (a wide desktop FOV draws more than a tablet). */
+  public perfRecExport(): string {
+    return this.perfRecorder.report({
+      viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
+      viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
+      dpr: typeof window !== 'undefined' ? Math.round((window.devicePixelRatio || 1) * 10) / 10 : 1,
+      zoom: this.camera.zoom || 1,
+      mapName: this.currentMap?.name || '—',
+      difficulty: this.difficultyLevel,
+      buildTag: 'exotic-opt',
+    }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

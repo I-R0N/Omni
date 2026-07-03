@@ -104,6 +104,10 @@ engine/
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
                           projectiles)
+    PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
+                          the per-frame timing + PerfSnapshot stream over a
+                          window and exports a copy-paste report (DBG panel
+                          "Perf REC" section; iPhone-friendly, no devtools)
 
 public/assets/            Sprites + Nebula*.png (auto-discovered, see §6)
 docs/                     Planning docs — out of date; see banner above

@@ -38,6 +38,30 @@ There is no automated FPS harness in this repo, and the last-mile gate is
 3. **Manual playtest checklist** (below) to capture live DBG perf-panel numbers
    on real hardware across the worst-case scenes.
 
+### In-game perf recorder (iPhone-friendly FPS harness)
+
+To capture real-hardware numbers without devtools, the DBG panel has a **Perf
+REC** section (`engine/systems/PerfRecorder.ts`, surfaced via
+`GameEngine.perfRec*`):
+
+1. Open the **DBG** panel → expand **Perf REC**.
+2. Tap the **scene** chip to label the capture (baseline / roamer-swarm /
+   dragon-stack / dense-wave / custom).
+3. Build the scene (DBG ▸ Dragon / Rivals / enemy-test), tap **● REC**, play
+   ~10–20 s, tap **● REC** again to stop.
+4. Tap **Copy** — the report is written to the clipboard (iOS Safari, inside the
+   tap) and also shown in a select-all textarea as a fallback. Paste it into
+   chat.
+
+While recording, the engine loop folds each **real PLAYING frame** (true rAF
+delta + the rolling PerfSnapshot) into a preallocated ring buffer — zero cost
+while idle, no per-frame allocation. The export aggregates FPS avg/median/5%-low/
+1%-low/min/max + ≥55 & ≥30 %, frame-time percentiles, avg render/sim/collision
+ms, the PerfController tier distribution + peak load, and peak entity/enemy/
+particle counts — at the live viewport/DPR/zoom so the FOV is recorded with the
+numbers. Run it once per scene below and paste all four blocks; that fills the
+table.
+
 ### Worst-case scenes (for the manual numbers table)
 
 | Scene | Contents | FOV |

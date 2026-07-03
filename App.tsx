@@ -325,6 +325,16 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
   };
 
+  const handlePerfRecToggle = () => {
+      if (engineRef.current) engineRef.current.perfRecToggle();
+  };
+  const handlePerfRecCycleScene = () => {
+      if (engineRef.current) engineRef.current.perfRecCycleScene();
+  };
+  const handlePerfRecExport = (): string => {
+      return engineRef.current ? engineRef.current.perfRecExport() : '';
+  };
+
   const handlePurchaseUnlock = (id: string) => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
   };
@@ -452,6 +462,9 @@ const App: React.FC = () => {
         onTestCards={handleTestCards}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
+        onPerfRecToggle={handlePerfRecToggle}
+        onPerfRecCycleScene={handlePerfRecCycleScene}
+        onPerfRecExport={handlePerfRecExport}
         onPurchaseUnlock={handlePurchaseUnlock}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}

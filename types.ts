@@ -1411,6 +1411,12 @@ export interface EngineStats {
   // Performance instrumentation — populated every frame, only displayed by
   // the dev-only F3 overlay so the normal HUD stays uncluttered.
   perf?: PerfSnapshot;
+  // ── Perf recorder (DBG FPS harness) ──────────────────────────────────
+  // Live capture state for the "Perf REC" DBG section: whether a capture is
+  // running, how many frames it holds, and the current scene label.
+  perfRecording?: boolean;
+  perfRecSamples?: number;
+  perfRecScene?: string;
 }
 
 export interface DamageText {
