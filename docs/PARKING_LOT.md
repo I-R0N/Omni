@@ -426,3 +426,34 @@ here for a future perf beat.
 
 Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
 `PARTICLE_CONSTANTS` / `MAX_PARTICLES` in `constants.ts`.
+
+---
+
+## Physics / shard broadphase at high entity counts (separate perf pass)
+
+**Out of scope for the exotic-enemies-optimization session** (that pass targeted
+the roamers + their render, not the collision/shard subsystem) — logged here as
+its own future target.
+
+**Observed (real-hardware Perf REC, iPhone 440×756 dpr3, Tile Heavy, diff 3):** a
+dense mobile-shard field (player shattered a lot of tiles) reached **~6,000
+entities**, pegging PerfController at **max tier the entire window** (load peak
+0.96). The cost profile flipped from render-bound to **sim-bound**: `sim 4.74 ms +
+collisions 2.56 ms` vs. `render 2.40 ms`. FPS held median 59 / avg 56 on the phone
+(≥55: 86 %, p99 44 ms), so it degrades gracefully — but the dynamic-grid collision
+pass + `ShardSystem` broadphase are the steady-state hot path at that scale, NOT
+the exotic roamers (16 enemies) or render (flat even at max load).
+
+This subsystem already has substantial machinery (shard-pair AUTO throttling,
+collision-sleep, viewport-cull cadence, render LOD, dedicated `PERF_TASKS`), which
+is why it stays graceful rather than falling over. A further pass would be its own
+deep investigation — candidate levers: cheaper dynamic-grid rebuild / query,
+broadphase pair reduction at high density, a `forEachDynamicNear` helper (also
+unblocks the parked `updateConsumers` query), and revisiting the shard-merge cull
+rate under max load. **Delicate** (merge / regen / neighbour-count all key off
+exact shard positions), so it warrants its own branch + verification, not a
+bolt-on to a roamer PR.
+
+Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
+`SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
+`PERF_TASKS` in `constants.ts`.
