@@ -247,8 +247,15 @@ implicitly fine since they're 1-HP). This generalizes that idea to everyone.
 - **Regen enemies** (planned trait): a bar refilling after the timer expired is
   invisible; that's fine (the player only needs the readout during/after a
   trade), but if it feels off, re-stamp the timer on regen ticks too.
-- **Player floating bar**: decide explicitly — remove it (rely on the HUD) or
-  keep it as a brief on-hit flash. The HUD already covers the persistent need.
+- **Player floating bar → screen HUD (user direction):** REMOVE the player's
+  floating health bar (drawn under the ship) and move it to the **screen HUD**,
+  and show a **numeric readout** alongside the bar (e.g. `87/100`). The engine
+  already feeds `EngineStats.playerStats` (health / maxHealth / shield) to
+  `UIOverlay`, so the persistent player readout lives there — add the bar + the
+  `health/maxHealth` number to the HUD and drop the world-space player bar in
+  `renderHealthBar`. Do the same for shield (`shield/maxShield`) if shown.
+  Enemies keep the transient world-space bar. (Consider still flashing a brief
+  on-hit bar/flash under the player for hit juice — optional.)
 - **Perf**: this is a net *reduction* in draw calls (most entities draw no bar
   most frames); the only new cost is a per-entity timer decrement.
 
@@ -258,7 +265,40 @@ implicitly fine since they're 1-HP). This generalizes that idea to everyone.
 
 ---
 
-## Fine-tune pass: Stage-5 bubble + swarm (this session's enemy work)
+## Weapon ammo model + menu clarity + purchase-UI parity
+
+**Context / request:** Three related weapon-UX asks.
+
+1. **Simplify the ammo model.** Weapons today carry per-weapon ammo costs
+   (`WEAPONS[w].ammoCost` / `chargedAmmoCost`) drawn from the shared ammo pool
+   (the d1 consolidation). Reconfigure to ONE of:
+   - **Unlimited ammo** — drop ammo entirely (or keep it purely cosmetic), so
+     weapon choice is about function, not resource management; OR
+   - **Uniform ammo cost** — every weapon costs the SAME per shot, so switching
+     weapons never changes how fast you burn the pool.
+   Pick per user direction (an `AskUserQuestion` when the task starts). Touches
+   `WEAPONS` cost fields, `WeaponSystem` fire/charge deduction, the ammo HUD, and
+   `DropSystem` ammo drops (if ammo is removed, the whole ammo-drop economy —
+   `AMMO_*`, drop merge, magnet — goes cosmetic or gets pulled; flag that scope).
+
+2. **Weapon menu: clearer locked vs. unlocked.** The weapon select/cycle should
+   visibly distinguish **unlocked** weapons from **locked** ones (the run starts
+   Blaster-only; the rest are Drydock unlocks — `unlockedWeapons` /
+   `ownedWeapons`). Show locked entries greyed/with a lock badge rather than
+   hidden, so the player sees what's available to buy. `UIOverlay` weapon menu +
+   `EngineStats.unlocks` / `.shop`.
+
+3. **Tie weapon-menu and pause-menu purchase graphics together.** The weapon
+   menu and the pause-menu **Drydock** (where weapons/shield/overcharge are
+   bought via `purchaseUnlock`) currently render differently. Unify them so a
+   weapon reads the SAME (icon, name, locked/owned state, cost) in both places —
+   ideally one shared weapon-card component/render used by both surfaces.
+
+**Touch points:** `constants.ts` `WEAPONS` / `WEAPON_LIST` / `UNLOCK_DEFS` /
+`AMMO_CONSTANTS`; `engine/systems/WeaponSystem.ts` + `DropSystem.ts`;
+`components/UIOverlay.tsx` (weapon menu + Drydock/Unlocks panels);
+`GameEngine.purchaseUnlock` + the `EngineStats.shop` / `.unlocks` payloads.
+Note: #1 is a gameplay-economy change (playtest it); #2/#3 are UI-only.
 
 **Context:** A fast iteration session reshaped the SWARM gnat default and built
 out the BUBBLE into a full ambient third-party creature. The feel is broadly
@@ -318,6 +358,32 @@ edit-and-playtest with no structural work.
 
 ---
 
+## Swarm gnats — collide with asteroids + tiles
+
+**Context / request:** SWARM gnats currently **phase through all terrain** — the
+Stage-4 perf simplification skips collision for every pair except the player +
+player projectiles (`PhysicsSystem.checkAndResolveCollision` `diesOnContact`
+early-out), so a big flock stays cheap. **Request: make gnats collide with
+asteroids and tiles** (mobile shards + static tiles) so they can't fly through
+the environment and read as physical.
+
+**Tradeoff to weigh (this is why it was skipped):** re-enabling gnat↔structure
+SAT is exactly the per-pair cost the early-out removed, and gnats spawn in dense
+flocks (Nest brood, Dragon spit). Naïvely turning it on scales badly. Options:
+- Collide with STRUCTURE only (keep gnat↔gnat and gnat↔enemy skipped) — the
+  cheapest way to get "bounces off terrain" without full participation.
+- Gate by flock size / on-screen only via `PerfController` so a huge off-screen
+  cloud doesn't pay for it.
+- A lightweight repel/steer-around instead of hard SAT impulse (cheaper, and
+  avoids gnats piling against a wall).
+
+**Touch points:** the `diesOnContact` early-out in
+`PhysicsSystem.checkAndResolveCollision`; the flat-fill gnat render path in
+`RenderSystem.drawEnemyShape`; `AISystem.updateSwarm` (may want terrain-aware
+steer). Measure a worst-case flock before/after.
+
+---
+
 ## Rival ships (Stage 7) — polish + tuning follow-ups
 
 **Context:** Rivals shipped as bespoke engine-managed roamers
@@ -349,6 +415,18 @@ retaliate against the player. First pass is intentionally lean; revisit:
   distinct weapons (the sprite already hints an archetype), evasion, or shields.
 - **Bounty / risk balance.** `TIER`-scaled bounty + full loot spray on a
   player kill vs. the time cost of chasing one — needs playtest tuning.
+- **Damage indication.** Strengthen the feedback when a rival takes damage —
+  the current sprite hit-flash + disposition health bar read, but rivals want
+  clearer damage numbers and a hit reaction that pops against the busy field
+  (e.g. a bigger spark burst, a brief outline, or the damage-triggered-bar
+  system once that lands). Verify world-space damage numbers actually fire for
+  rivals (`spawnDamageText` gate) and read at typical zoom.
+- **Contrast glow / standout.** Rivals can blend into the enemy field (they use
+  retired enemy PNGs). Add a subtle contrast glow / rim-light in the disposition
+  colour so they read as distinct player-like ships at a glance — NOT the old
+  shield-looking ring (removed per user); think a soft outer glow, engine-trail
+  emission (the `trail` field is already on the entity but unused), or a rim
+  highlight in `RenderSystem`'s rival sprite branch.
 
 **All knobs live in:** `RIVAL_CONSTANTS` (cadence / stats / weapon / dispositions
 / portal) in `constants.ts`; lifecycle in `GameEngine.updateRivals` /
