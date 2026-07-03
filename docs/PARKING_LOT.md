@@ -353,3 +353,39 @@ retaliate against the player. First pass is intentionally lean; revisit:
 **All knobs live in:** `RIVAL_CONSTANTS` (cadence / stats / weapon / dispositions
 / portal) in `constants.ts`; lifecycle in `GameEngine.updateRivals` /
 `spawnRival` / `fireRivalShot` / `rivalVacuumDrops`.
+
+---
+
+## Exotic-enemy roster (Stages 0–7) — balance / tuning pass
+
+**Context:** The exotic enemy roster shipped across Stages 0–7 (PR #67:
+Kamikaze, Bulwark, Turret, Swarm+Nest, Bubble, Dragon, Rivals) plus the older
+base roster. Each was tuned in isolation during its build; a holistic balance
+pass is owed once they all appear together in real timed waves. This is the
+BALANCE bucket (feel / numbers) — the separate perf/optimization work on the
+new engine-managed roamers is tracked in the plan (`exotic-enemies-optimization`).
+
+Known tuning wants (add freely):
+
+- **Bulwark** — the rotating arc shield tracks the player too fast; **slow the
+  shield rotation / slew** (`ENEMY_VARIANTS.BULWARK.shieldArc.slew`) so flanking
+  is a reliable counter, not a race. (Difficulty note already in this file.)
+- **Sniper** — the sniper's weapon feels underpowered for its telegraph/role;
+  **make the sniper shot more powerful** (damage and/or projectile speed on the
+  Sniper `ENEMY_VARIANTS` weapon).
+- **Rivals (Stage 7)** — balance the bounty vs. the time cost of chasing one,
+  the loot-steal rate, disposition mix, and ship stats (HP/weapon). See the
+  dedicated "Rival ships" entry above for the deeper feature follow-ups
+  (terrain nav, theft legibility, enemy↔rival collateral, ally value). Perf is
+  tracked separately in the plan.
+- **Dragon** — roam/leave timing, attack cadence once provoked, segment HP,
+  the doubling kill payout curve, and how/whether it enters normal play (DBG-only
+  today).
+- **Kamikaze / Turret / Swarm / Nest** — revisit blast radius, missile homing
+  strength, gnat bite, and brood cap against the timed-wave budgets.
+- **Cross-roster** — once (f) Timed waves lands, tune per-wave spawn budgets so
+  the exotic types are introduced legibly (the scripted teaching waves exist;
+  the mix beyond them needs balancing).
+
+All knobs live in `ENEMY_VARIANTS` / `ENEMY_TRAITS` / `AI_CONFIG` /
+`BUBBLE_CONSTANTS` / `DRAGON_CONSTANTS` / `RIVAL_CONSTANTS` in `constants.ts`.
