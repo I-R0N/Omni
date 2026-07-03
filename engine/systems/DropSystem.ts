@@ -12,6 +12,7 @@ import {
   METAL_ASSEMBLY,
   METAL_BREAK_SHARDS_PER_TIER,
   rockHitCeiling,
+  isCollectibleDrop,
 } from '../../constants';
 import { ParticleSystem } from './ParticleSystem';
 import { nextId } from './IdAllocator';
@@ -128,8 +129,11 @@ export class DropSystem {
       // via ShardSystem.shatter; nebula-tile skips drops via
       // variant.spawnsDropsOnDeath = false.
       this.spawnGlassShards(entities, entity);
-    } else if (entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'glass') {
-      // Drop was destroyed by a player projectile — apply its reward immediately.
+    } else if (isCollectibleDrop(entity)) {
+      // A collectible drop reached the death path (e.g. defensively, if one is
+      // ever destroyed) — apply its reward immediately.  (Pickups are normally
+      // collected by the GameEngine magnet scan; they're grid-excluded so
+      // projectiles pass through them.)
       this.applyDropEffect(player, entity, onMessage);
     } else if (isMobileShard) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
@@ -256,6 +260,18 @@ export class DropSystem {
         // collapse pass can condense it into a tile.
         collapseGraceTimer: getActiveShatterGraceDelay(),
       });
+    }
+
+    // Health drops (added because the expanded roster hits harder).  Two
+    // INDEPENDENT rolls at the SAME chances as the two ammo slots above, spawned
+    // as extra pickups with ammo-like physics — so enemy-kill drops roughly
+    // double and split ~50/50 ammo/health.  Scatter off the kill via the
+    // enemy's velocity (makeDropEntity adds the random spread).
+    if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_PRIMARY) {
+      this.spawnHealthDrop(entities, activeDrops, pos, DROP_CONFIG.HEALTH_PER_ENEMY, { x: pv.x, y: pv.y });
+    }
+    if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_SECONDARY) {
+      this.spawnHealthDrop(entities, activeDrops, pos, DROP_CONFIG.HEALTH_PER_ENEMY, { x: pv.x, y: pv.y });
     }
   }
 
@@ -1104,11 +1120,14 @@ export class DropSystem {
     const pullStrength = AMMO_DROP_PULL.STRENGTH;
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
-      if (!a.active || a.dropType !== 'ammo') continue;
+      // Generalized to any collectible drop (DROP_TYPES.collectible) — drops
+      // only fuse with their OWN type, so an ammo cluster and a health cluster
+      // each consolidate independently.
+      if (!a.active || !isCollectibleDrop(a)) continue;
       const aR = a.size.x * 0.5;
       for (let j = i + 1; j < activeDrops.length; j++) {
         const b = activeDrops[j];
-        if (!b.active || b.dropType !== 'ammo') continue;
+        if (!b.active || b.dropType !== a.dropType) continue;
         const bR = b.size.x * 0.5;
         const dx = wrapDeltaX(a.position.x, b.position.x);
         const dy = wrapDeltaY(a.position.y, b.position.y);
@@ -1135,7 +1154,8 @@ export class DropSystem {
           a.size.x = newR * 3;
           a.size.y = newR * 3;
           a.polygonPoints = this.generateShardPolygon(
-            'ammo', Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
+            a.dropType as 'ammo' | 'health',
+            Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
           );
           b.active = false;
         } else if (distSq < pullRangeSq && !a.magnetized && !b.magnetized) {
@@ -1162,31 +1182,30 @@ export class DropSystem {
     }
   }
 
-  /** Spawn a static (mass=Infinity) health drop at `pos`. */
+  /**
+   * Spawn a collectible health drop with the SAME physics as an ammo drop:
+   * finite mass (scatters off the kill, drifts with the asteroid flow field,
+   * magnetises to the player, and merges with nearby health drops).  Rendered
+   * as a red circle shard (`generateShardPolygon('health')`).  `value` is the
+   * heal amount (merges sum it).
+   */
   public spawnHealthDrop(
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
     value: number,
-    _parentVelocity?: Vector2,
+    parentVelocity?: Vector2,
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const drop: GameEntity = {
-      id:          nextId('drop_health'),
-      type:        EntityType.INTERACTABLE,
-      position:    { x: pos.x, y: pos.y },
-      velocity:    { x: 0, y: 0 },
-      size:        { x: 48, y: 48 },
-      rotation:    0,
-      rotationSpeed: 0,
-      color:       '#ef4444',
-      active:      true,
-      health:      1,
-      maxHealth:   1,
-      mass:        Infinity, // static — never moved by physics or flow field
-      dropType:    'health',
-      dropValue:   value,
-    };
+    const drop = this.makeDropEntity(
+      nextId('drop_health'),
+      pos,
+      parentVelocity,
+      '#ef4444',
+      value,
+      'health',
+    );
+    drop.polygonPoints = this.generateShardPolygon('health', Math.min(9, Math.max(4, 3.5 + value * 0.075)));
     entities.push(drop);
     activeDrops.push(drop);
   }
@@ -1245,8 +1264,8 @@ export class DropSystem {
       numPoints = 5 + Math.floor(Math.random() * 3);   // 5-7, jagged crystal
       radMin = 0.55; radMax = 1.25; angleJitterScale = 0.65;
     } else if (type === 'health') {
-      numPoints = 6 + Math.floor(Math.random() * 3);   // 6-8, organic blob
-      radMin = 0.45; radMax = 1.3; angleJitterScale = 0.5;
+      numPoints = 16;                                  // smooth red circle
+      radMin = 1.0; radMax = 1.0; angleJitterScale = 0;
     } else {
       numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
       radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;

@@ -9,6 +9,7 @@ import {
   WAVE_CONSTANTS,
   WAVE_ANNOUNCE_CONSTANTS,
   SCORE_CONSTANTS,
+  SHIELD_CONSTANTS,
   TIMED_WAVE_CONFIG,
   getWaveDurationSec,
   getWaveSpawnBudget,
@@ -186,13 +187,25 @@ export class WaveSystem {
     }
   }
 
-  /** Count tracked wave enemies still alive (exploding ones count as dead,
-   *  matching the old kill-all completion semantics). */
+  /** Count tracked wave enemies still alive that gate completion (exploding
+   *  ones count as dead, matching the old kill-all semantics).
+   *
+   *  Stage 2b: an enemy with `countsTowardWave === false` is skipped — these
+   *  are entities spawned BY other entities / that replicate (nest brood,
+   *  bubble offspring).  The wave ends when the COUNTED enemies (the ones
+   *  streamed from the spawn budget — nests, original bubbles, etc.) are all
+   *  dead; uncounted brood may still be alive and simply carry over as
+   *  survivors.  Non-enemy roamers (Snitch / dragon) are INTERACTABLEs and
+   *  never enter `waveEnemyIds`, so they never gate a wave at all.
+   *
+   *  This also gates the live concurrency cap in emitDueSpawns, so uncounted
+   *  brood don't throttle the wave's own spawn stream. */
   private countLiveTracked(entities: GameEntity[]): number {
     let live = 0;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding) live++;
+      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding
+          && e.countsTowardWave !== false) live++;
     }
     return live;
   }
@@ -206,8 +219,7 @@ export class WaveSystem {
    * world coords so seam spawns don't land at ±MAP_WIDTH off the map.
    */
   private spawnEnemy(subtype: EnemySubtype, ctx: WaveSpawnContext) {
-    const { entities, player, physics, difficultyLevel, viewportHalfDiagonal } = ctx;
-    const statScale = DIFFICULTY_STAT_SCALES[difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const { entities, player, physics, viewportHalfDiagonal } = ctx;
     const config = ENEMY_VARIANTS[subtype];
     const enemyHalfSize = config.size / 2;
     const safeRadius = enemyHalfSize + 30;
@@ -230,11 +242,31 @@ export class WaveSystem {
       if (physics.isPositionClear(x, y, safeRadius)) break;
     }
     const id = nextId(`wave_${this.waveIndex}_${this.nextSpawnIdx}`);
+    const enemy = this.buildEnemy(id, subtype, x, y, ctx, true);
+    entities.push(enemy);
+    this.waveEnemyIds.add(id);
+  }
+
+  /**
+   * Construct an enemy entity at (x, y) with the per-difficulty + per-wave
+   * stat scaling and the per-archetype field stamping (shield / arc / detonate)
+   * — shared by the offscreen-ring wave spawn and the nest brood spawn.  Does
+   * NOT push or track; the caller does.  `counts` → wave-completion accounting
+   * (Stage 2b): false marks brood that don't gate the wave.
+   */
+  private buildEnemy(
+    id: string, subtype: EnemySubtype, x: number, y: number,
+    ctx: WaveSpawnContext, counts: boolean,
+  ): GameEntity {
+    const statScale = DIFFICULTY_STAT_SCALES[ctx.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const config = ENEMY_VARIANTS[subtype];
 
     const tierMap: Partial<Record<string, number>> = {
       RAMMER_1: 1, SHOOTER_1: 1,
       RAMMER_2: 2, SHOOTER_2: 2,
       RAMMER_3: 3, SHOOTER_3: 3,
+      KAMIKAZE: 2, BULWARK: 2, TURRET: 3,
+      SWARM: 1, NEST: 3, BUBBLE: 2,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -243,7 +275,7 @@ export class WaveSystem {
     // damageMult read by the ram + projectile paths.
     const scaledHealth = Math.max(1, Math.round(config.health * statScale.health * enemyHpMult(this.waveIndex)));
     const dmgMult = (statScale.damage ?? 1) * enemyDamageMult(this.waveIndex);
-    entities.push({
+    const enemy: GameEntity = {
       id,
       type: EntityType.ENEMY,
       enemySubtype: subtype,
@@ -261,12 +293,77 @@ export class WaveSystem {
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
       contactDamage: config.contactDamage,
+      diesOnContact: config.diesOnContact,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
       enemyShape: config.shape,
       aimLaser: config.aimLaser,
-    });
+    };
+    // Stage 2b: brood (nest-spawned) don't gate wave completion.  Ambient
+    // fauna (Stage 5 bubble) NEVER gate, however they're built.
+    if (!counts || config.ambient) enemy.countsTowardWave = false;
 
+    // Bulwark shield (Stage 0): seed shield + maxShield + slow regen.  The
+    // generalized PhysicsSystem absorption path soaks hits for any shielded
+    // entity; recharge ticks already run for any entity in updatePhysics.
+    if (config.shield !== undefined) {
+      enemy.shield = config.shield;
+      enemy.maxShield = config.shield;
+      enemy.shieldRechargeRate = config.shieldRegen ?? SHIELD_CONSTANTS.RECHARGE_RATE;
+      enemy.shieldRechargeTimer = 0;
+      // Player-tracking directional arc (Bulwark): seed the sector half-width
+      // + max slew rate and a random start angle (AISystem then slews it
+      // toward the player each step).
+      if (config.shieldArc) {
+        enemy.shieldArcHalfWidth = (config.shieldArc.deg * Math.PI / 180) / 2;
+        enemy.shieldArcSpin = config.shieldArc.slew;
+        enemy.shieldArcAngle = Math.random() * Math.PI * 2;
+      }
+    }
+
+    // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
+    if (config.spawner) {
+      enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+    }
+
+    // Bubble consumer (Stage 5): copy the consume config onto the entity so
+    // GameEngine.updateConsumers feeds it nearby shards (clone so per-entity
+    // growth never mutates the shared variant table).
+    if (config.consume) {
+      enemy.consume = { ...config.consume };
+    }
+    // Third-party fauna (Stage 5): enemy fire can hit it + it retaliates against
+    // any attacker.
+    if (config.thirdParty) enemy.thirdParty = true;
+
+    // Kamikaze detonation payload (Stage 0): stamp the AoE config.  Blast
+    // damage rides the per-wave damageMult, matching how the ram + projectile
+    // paths scale.  Detonation itself is instant on contact (PhysicsSystem).
+    if (config.detonate) {
+      const d = config.detonate;
+      enemy.explosionRadius = d.radius;
+      enemy.explosionDamage = d.damage * dmgMult;
+      enemy.explosionKnockback = d.knockback;
+    }
+
+    return enemy;
+  }
+
+  /**
+   * Spawn an enemy at a given world position (nest brood) rather than the
+   * offscreen ring.  `counts` defaults false → the brood don't gate wave
+   * completion (Stage 2b).  Scatters slightly off `pos`.  Returns the entity.
+   */
+  public spawnAt(subtype: EnemySubtype, pos: Vector2, ctx: WaveSpawnContext, counts: boolean = false): GameEntity {
+    const id = nextId(`brood_${this.waveIndex}`);
+    const jitter = ENEMY_VARIANTS[subtype].size;
+    const x = pos.x + (Math.random() - 0.5) * jitter;
+    const y = pos.y + (Math.random() - 0.5) * jitter;
+    const enemy = this.buildEnemy(id, subtype, x, y, ctx, counts);
+    enemy.velocity.x = (Math.random() - 0.5) * 4;
+    enemy.velocity.y = (Math.random() - 0.5) * 4;
+    ctx.entities.push(enemy);
     this.waveEnemyIds.add(id);
+    return enemy;
   }
 
   /** Transition to 'cleared' once the field is empty: announce, hand the

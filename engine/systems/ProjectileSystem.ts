@@ -183,6 +183,7 @@ export class ProjectileSystem {
         pooled.homing = config.homing;
         pooled.homingStrength = config.homingStrength;
         pooled.ownerType = ownerType;
+        pooled.ownerId = shooter.id; // for third-party retaliation (Stage 5)
         pooled.pierceCount = config.pierce;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
@@ -197,6 +198,12 @@ export class ProjectileSystem {
         pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
+        // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
+        // recycled rival projectile MUST clear them or a reused player/enemy shot
+        // inherits them — making player shots phase through rivals (hitsEnemies)
+        // and enemy shots phase through the player (sparesPlayer).
+        pooled.hitsEnemies = undefined;
+        pooled.sparesPlayer = undefined;
         entities.push(pooled);
       } else {
         entities.push({
@@ -220,6 +227,7 @@ export class ProjectileSystem {
           homing: config.homing,
           homingStrength: config.homingStrength,
           ownerType,
+          ownerId: shooter.id, // for third-party retaliation (Stage 5)
           pierceCount: config.pierce,
           trail: [],
           isLightningProjectile: isLight,
@@ -260,36 +268,48 @@ export class ProjectileSystem {
    * projectiles still need an active + homing check because the index
    * does not split projectiles by `.homing`.
    */
-  public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], dt: number) {
+  public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], player: GameEntity, dt: number) {
     const t0 = performance.now();
-    if (enemies.length === 0) { this.lastHomingMs = performance.now() - t0; return; }
 
     const acquireRangeSq = HOMING_ACQUIRE_RANGE * HOMING_ACQUIRE_RANGE;
+    const playerHomeable = player.active && !player.isExploding;
 
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
       if (!p.homing) continue;
 
-      let target: GameEntity | null = null;
-      let minDist = acquireRangeSq;
-      // Capture the winning delta inside the inner loop so we don't pay
-      // a second wrapDelta pair to recompute it on the steer below.
+      let hasTarget = false;
+      // Capture the winning delta so we don't pay a second wrapDelta pair to
+      // recompute it on the steer below.
       let targetDx = 0, targetDy = 0;
 
-      for (let j = 0; j < enemies.length; j++) {
-        const e = enemies[j];
-        const dx = wrapDeltaX(p.position.x, e.position.x);
-        const dy = wrapDeltaY(p.position.y, e.position.y);
-        const d2 = dx * dx + dy * dy;
-        if (d2 < minDist) {
-          minDist = d2;
-          target = e;
-          targetDx = dx;
-          targetDy = dy;
+      if (p.ownerType === EntityType.ENEMY) {
+        // Enemy missiles (Turret) home on the PLAYER, regardless of range —
+        // the shot was already fired at them; dodging is via the gentle turn
+        // rate, not by leaving an acquire radius.
+        if (playerHomeable) {
+          targetDx = wrapDeltaX(p.position.x, player.position.x);
+          targetDy = wrapDeltaY(p.position.y, player.position.y);
+          hasTarget = true;
+        }
+      } else {
+        // Player homing weapon: steer toward the nearest enemy within range.
+        let minDist = acquireRangeSq;
+        for (let j = 0; j < enemies.length; j++) {
+          const e = enemies[j];
+          const dx = wrapDeltaX(p.position.x, e.position.x);
+          const dy = wrapDeltaY(p.position.y, e.position.y);
+          const d2 = dx * dx + dy * dy;
+          if (d2 < minDist) {
+            minDist = d2;
+            targetDx = dx;
+            targetDy = dy;
+            hasTarget = true;
+          }
         }
       }
 
-      if (target) {
+      if (hasTarget) {
         const desiredAngle = Math.atan2(targetDy, targetDx);
         let angleDiff = desiredAngle - p.rotation;
 

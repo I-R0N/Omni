@@ -120,12 +120,38 @@ export enum EnemySubtype {
   SHOOTER_1 = 'SHOOTER_1',
   SHOOTER_2 = 'SHOOTER_2',
   SHOOTER_3 = 'SHOOTER_3',
+  // Core-roster additions (Stage 0) — no new AI role:
+  //  - KAMIKAZE: a RAMMING suicide bomber that self-destructs on contact (AoE).
+  //  - BULWARK:  a SHOOTING fan-gunner behind a regenerating shield.
+  KAMIKAZE = 'KAMIKAZE',
+  BULWARK  = 'BULWARK',
+  // Stage 1 — TURRET: a stationary SHOOTING emplacement (maxSpeed 0, no-move
+  // AI branch) that rotates to aim and lobs slow homing missiles.
+  TURRET   = 'TURRET',
+  // Stage 4 — SWARM: a cheap, weak, fast flocker (boids 'swarm' behavior).
+  //           NEST:  a near-static spawner that periodically births SWARM brood.
+  SWARM    = 'SWARM',
+  NEST     = 'NEST',
+  // Stage 5 — BUBBLE: a passive soft-body blob that wanders, eats shards, grows
+  //           and splits — until SHOT, after which it homes in and latches onto
+  //           the player, EMPing weapon + shield ('bubble' behavior).
+  BUBBLE   = 'BUBBLE',
+  // Stage 6 — DRAGON: a big segmented serpent mini-boss that enters via a
+  //           portal, rides the flow field devouring tiles to grow, and leaves
+  //           via portal.  Engine-managed (GameEngine.updateDragon); the AI
+  //           'dragon' strategy is a no-op.
+  DRAGON   = 'DRAGON',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'circle';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon';
+
+// Drop item kinds.  Per-type properties (collectible vs environmental debris,
+// …) live in the DROP_TYPES registry in constants.ts — the single source of
+// truth so a new drop type is one table entry, not a hunt across systems.
+export type DropType = 'ammo' | 'health' | 'glass';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
@@ -143,10 +169,11 @@ export enum WeaponType {
 }
 
 // ── Status effects ────────────────────────────────────────────────────────────
-// Generic player debuff framework.  Today only 'corrosion' (a stacking
-// damage-over-time) is wired; the kind union + EffectPayload are shaped so new
-// effects (disables / scramble / slow) drop in without restructuring.
-export type StatusEffectKind = 'corrosion';
+// Generic player debuff framework.  Today: 'corrosion' (a stacking
+// damage-over-time) and 'disable' (weapon + shield offline for a duration —
+// an EMP, used by the reactive bubble).  The kind union + EffectPayload are
+// shaped so new effects (scramble / slow) drop in without restructuring.
+export type StatusEffectKind = 'corrosion' | 'disable';
 
 // Carried on an attack (WeaponConfig / projectile); applied to the player on hit.
 export interface EffectPayload {
@@ -154,6 +181,25 @@ export interface EffectPayload {
   duration: number;   // seconds (refreshed on re-hit)
   dmgPerSec: number;  // per stack (corrosion)
   maxStacks: number;
+}
+
+// Consume-and-grow config (Stage 3b).  A consumer absorbs nearby consumable
+// entities and grows.  `eats` selects the candidate family:
+//   'shard' — mobile shard-family STRUCTURE entities (finite mass) — the bubble
+//   'tile'  — static tiles (mass Infinity), routed through the tile-destroy
+//             patch — the dragon
+export interface ConsumeConfig {
+  eats: 'shard' | 'tile';
+  range: number;          // SENSE radius (world units, toroidal): within it a
+                          // mobile candidate is pulled (see `pull`); the actual
+                          // eat only fires on MEMBRANE CONTACT (radii overlap).
+  growthPerEat: number;   // size (diameter) added per consumed entity
+  maxSize: number;        // growth cap on size.x / size.y
+  hpPerEat?: number;      // optional max-health gained per eat
+  massPerEat?: number;    // optional mass gained per eat (Infinity-safe: skip)
+  pull?: number;          // optional inward tug (accel) on mobile candidates in
+                          // sense range — the suck-in before the swallow.  Tiles
+                          // (static) are never pulled.
 }
 
 // Live instance on the player (GameEntity.statusEffects).
@@ -288,6 +334,12 @@ export interface GameEntity {
   polygonPoints?: Vector2[]; // For physics/collision shape
   rotationSpeed?: number;    // Radians per second (asteroids, debris, etc.)
   hitFlash?: number; // Timer for white flash effect on damage
+  // Visual hit-reaction magnitude (0..1): the last hit's damage as a fraction
+  // of maxHealth, latched at damage time.  RenderSystem scales the sprite's
+  // scale-punch by it, so a chip on a big-HP beast (dragon / bubble) barely
+  // flinches while a heavy hit on a frail gnat snaps hard.  Unset → full punch
+  // (1), preserving the original feel for any un-wired damage path.
+  hitReact?: number;
   shield?: number;
   maxShield?: number;
   shieldRechargeTimer?: number; // Counts down from RECHARGE_DELAY; recharge starts at 0
@@ -366,6 +418,11 @@ export interface GameEntity {
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
   overchargeUnlocked?: boolean;
+  // Explosion-knockback overshoot allowance (player).  An AoE blast can drive
+  // the player above the normal maxSpeed cap; this holds the temporarily-raised
+  // cap, which decays back to maxSpeed each step (updatePlayerMovement) so the
+  // launch bleeds off instead of being snapped away by the hard cap.
+  overSpeedAllow?: number;
   // Status effects: `appliesEffect` is set on a projectile that should debuff
   // the player on hit; `statusEffects` is the player's live debuff list.
   appliesEffect?: EffectPayload;
@@ -376,12 +433,33 @@ export interface GameEntity {
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
+  // Kamikaze self-destruct (Stage 0).  A bomber stamps explosionRadius/
+  // explosionDamage/explosionKnockback at spawn; the moment it touches the
+  // player (PhysicsSystem contact path) it deals `contactDamage`, sets
+  // `detonateOnDeath`, and routes its death immediately — handleEntityDeath
+  // fires the AoE shockwave at the contact point (instant, no bounce-away).
+  // Bombers killed before they touch the player never set the flag, so they
+  // pop harmlessly — the kill-early counter.
+  detonateOnDeath?: boolean;
+  // Directional arc shield (Stage 0 Bulwark).  When `shieldArcHalfWidth` is
+  // set the shield only absorbs hits arriving within ±halfWidth of
+  // `shieldArcAngle` (a sector, not a full bubble).  AISystem slews
+  // `shieldArcAngle` toward the player bearing at up to `shieldArcSpin` rad/s
+  // (the max turn rate), so the shield tries to face the threat but a fast
+  // flank gets behind it.  Absent → a full bubble (player).
+  shieldArcAngle?: number;
+  shieldArcHalfWidth?: number;
+  shieldArcSpin?: number;
   // Native polygon silhouette for enemy rendering (set at spawn from the
   // archetype) — RenderSystem draws this instead of a sprite.
   enemyShape?: EnemyShape;
   // Damage dealt to the player on contact (rushers > 0; ranged enemies 0).
   // Scaled by the per-wave damageMult in the collision path.
   contactDamage?: number;
+  // Die-on-contact (Stage 4 Swarm): the enemy pops on its first touch of the
+  // player — deals `contactDamage` once (ignoring the impact-speed threshold)
+  // then dies.  A discrete hit + pop instead of a clinging friction-chip.
+  diesOnContact?: boolean;
   // Cosmetic render cache: a stable per-entity phase (radians) for the
   // pulsing enemy "core eye", lazily derived from the id on first draw so a
   // pack doesn't throb in unison.  Render-only; never read by the sim.
@@ -409,7 +487,7 @@ export interface GameEntity {
   gold?: number;
 
   // Drop item fields
-  dropType?: 'ammo' | 'health' | 'glass';
+  dropType?: DropType;
   dropValue?: number;
   // Magnet latch: set once a drop first enters the player's pull range.
   // Thereafter it homes to completion regardless of distance.
@@ -417,6 +495,128 @@ export interface GameEntity {
 
   // Enemy tier (1 | 2 | 3) — used for drop scaling
   enemyTier?: number;
+  // ── Stage 3 reusable mechanics (infrastructure; wired by Stage 4/5/6) ────
+  // Provoked-on-hit (3a): set true the first time the entity takes damage
+  // (PhysicsSystem projectile path + AoE).  A passive-until-provoked enemy
+  // (the bubble) wanders until this flips, then engages.  Harmless on every
+  // other enemy (unread).
+  provoked?: boolean;
+  // Third-party / neutral (Stage 5, bubble): a `thirdParty` entity can be
+  // damaged by projectiles of ANY owner (the friendly-fire filter is bypassed,
+  // so enemy fire hits it too) and RETALIATES against whoever last hit it.
+  // `aggroTargetId` is that current target — the id of the most recent attacker
+  // (the player as 'player', or an enemy by id).  The bubble seeks + latches
+  // this target instead of always the player, switching as new attackers hit
+  // it.  Cleared when the target dies (→ back to passive).
+  thirdParty?: boolean;
+  aggroTargetId?: string;
+  // Firing entity id stamped on a projectile (ProjectileSystem.spawn) so a
+  // third-party victim can blame the exact shooter.  'player' for player shots,
+  // the enemy's id for enemy shots.
+  ownerId?: string;
+  // Rival ship (Stage 7): a player-like EntityType.ENEMY roamer that fights the
+  // WAVE enemies (denying the player their points + drops) and—per disposition—
+  // may also fight the player.  Engine-managed (GameEngine.updateRivals), so
+  // AISystem skips it.  Renders from `sprite` (an old enemy PNG) with a
+  // disposition-coloured ring.
+  isRival?: boolean;
+  // Projectile flags for rival fire: `hitsEnemies` lets an ENEMY-owned shot
+  // damage other ENEMY targets (so a rival can shoot the wave enemies), and
+  // `sparesPlayer` makes an ENEMY-owned shot pass THROUGH the player (so an
+  // ally/neutral rival's stray fire can't hurt the player).  Both unset on
+  // normal enemy fire — original behaviour preserved.
+  hitsEnemies?: boolean;
+  sparesPlayer?: boolean;
+  // Stamped on an enemy killed by a rival's projectile so handleEntityDeath
+  // withholds the kill points + combo from the player (the rival "steals" them).
+  killedByRival?: boolean;
+  // Attach + disable (3c): when set, GameEngine.updateAttachments snaps this
+  // entity's position onto the target every frame (a latch/grapple).  Cleared
+  // when the target dies.  `attachOffset` is an optional fixed world offset.
+  attachedToId?: string;
+  attachOffset?: Vector2;
+  // Derived each tick from an active 'disable' status effect
+  // (GameEngine.tickStatusEffects): while true the entity's weapon can't fire
+  // and its shield neither absorbs nor recharges.  Read in hot paths so they
+  // don't rescan statusEffects.
+  systemsDisabled?: boolean;
+  // Consume-and-grow (3b): a consumer eats nearby consumable shards/tiles and
+  // grows.  Config drives GameEngine.updateConsumers (a PerfController-gated
+  // neighbour pass).  Absent → not a consumer.
+  consume?: ConsumeConfig;
+  // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
+  // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
+  spawnTimer?: number;
+  // Swarm movement scratch (Stage 4): per-gnat timer/phase reused by the
+  // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
+  // burst coast/dash cadence) — see AISystem.updateSwarm.
+  swarmTimer?: number;
+  // Reactive bubble (Stage 5).  `bubbleLatchTimer` counts down the seconds a
+  // provoked bubble stays latched onto the player (attachedToId='player')
+  // EMPing it, after which it releases and pops — ticked by
+  // GameEngine.updateBubbles.  (Passive movement rides the asteroid flow field
+  // / chases shards directly in AISystem.updateBubble — no stored heading.)
+  bubbleLatchTimer?: number;
+  // Burst/coast cadence for bubble locomotion (AISystem.updateBubble): counts
+  // down through a slow coast then a short fast dart, so a bubble normally
+  // creeps but periodically lunges.
+  bubbleBurstTimer?: number;
+  // Feed pulse: stamped when a bubble swallows a shard; the membrane briefly
+  // bulges (RenderSystem) while it ticks down in GameEngine.updateBubbles.
+  bubbleFeedTimer?: number;
+  // Digest (Stage 5): a bubble holding a shard inside it.  On membrane contact
+  // the shard is swallowed (deactivated) and its look snapshotted here; the
+  // bubble renders a shrinking ghost of it INSIDE the transparent membrane while
+  // the timer runs, then grows.  Mirrors the latch (a held target processed over
+  // a timer) — the bubble just can't engulf the too-big player/enemy, so that
+  // path clings + EMPs instead.  Ticked in GameEngine.updateBubbles.
+  // `bubbleDigestDuration` is the per-shard digest time (= DIGEST_DURATION ×
+  // richness) — stored for the render progress ratio AND to recover the richness
+  // at finish (heal/grow scale).
+  bubbleDigestTimer?: number;
+  bubbleDigestDuration?: number;
+  bubbleDigestColor?: string;
+  bubbleDigestSize0?: number;
+  // Sickness (Stage 5): set after breaking a latch or eating a toxic shard —
+  // the bubble turns green, moves sluggishly, and can't eat until it ticks out
+  // (GameEngine.updateBubbles).  Loses aggro on entry.
+  bubbleSickTimer?: number;
+  // Set on a LATCHED bubble when a projectile hits it (PhysicsSystem) so
+  // updateBubbles shakes it loose next tick.  Consumed there.
+  bubbleKnockFree?: boolean;
+  // Stamped on the PLAYER when it slams a tile/asteroid at ≥ KNOCK_SPEED
+  // (PhysicsSystem); updateBubbles reads it to shake any latched bubble free.
+  terrainSlamTimer?: number;
+
+  // ── Stage 6: dragon mini-boss ───────────────────────────────────────────
+  // Recent head-position history (newest first), recorded by
+  // GameEngine.updateDragon; RenderSystem walks it to draw the trailing body
+  // segments.  Only the dragon head carries this.
+  dragonPath?: Vector2[];
+  // Phase-through (gnat-style): the entity ignores collision with everything
+  // except the player + player projectiles (so the dragon glides through terrain
+  // and eats it via the consume pass instead of bouncing).  PhysicsSystem early
+  // out.
+  phasesTerrain?: boolean;
+  // Dragon body segment (Stage 6): a real tile-variant STRUCTURE that the dragon
+  // has eaten, chain-followed behind the head (position hard-set each frame by
+  // GameEngine.positionDragonBody).  Finite mass so it's shootable + collides;
+  // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
+  // consume leave it alone.  Cleared when it's severed off (→ free shard).
+  dragonSegment?: boolean;
+  // Dragon leave animation (Stage 6): the head has crossed its exit portal and
+  // is being swallowed tail-first — RenderSystem stops drawing it while the body
+  // segments collapse through the portal one by one.
+  dragonHidden?: boolean;
+  // Wave-completion accounting (Stage 2b).  A tracked wave enemy counts toward
+  // "is the field clear?" UNLESS this is explicitly false.  Set false for
+  // entities spawned BY other entities or that replicate — nest brood, bubble
+  // offspring — so they don't keep a wave open forever (the wave ends when the
+  // counted enemies, e.g. the nests / original bubbles, are dead; leftover
+  // brood carry over as survivors).  Absent → counts (every current enemy).
+  // Non-enemy roamers (Snitch, the future dragon) are EntityType.INTERACTABLE
+  // and never tracked, so they bypass this entirely.
+  countsTowardWave?: boolean;
 
   // ── Snitch (quidditch-style wave bonus target) ───────────────────────────
   // Marks the one-per-wave snitch entity (EntityType.INTERACTABLE, no
@@ -1124,6 +1324,7 @@ export interface EngineStats {
   // DBG enemy-scaling multiplier step name + the live per-wave HP/dmg mults.
   enemyScaleName?: string;
   enemyScaleInfo?: string;
+  swarmMoveName?: string;
   // DBG: enemy counterplay traits (armor, …) enabled.
   traitsEnabled?: boolean;
   // DBG enemy-test override: the forced spawn subtype (null = normal mix).

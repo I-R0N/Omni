@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1292,7 +1292,9 @@ export class RenderSystem {
       // Collect first to avoid mutating set while iterating.
       let dead: GameEntity[] | null = null;
       for (const e of this._staticTileCacheSet) {
-          if (!e.active) {
+          // Evict on death OR when a tile stops being static (mass goes finite —
+          // e.g. the dragon eating it into a body segment) so no ghost is left.
+          if (!e.active || e.mass !== Infinity) {
               if (dead === null) dead = [];
               dead.push(e);
           }
@@ -1391,7 +1393,13 @@ export class RenderSystem {
             this._attractors.push(entity);
         }
 
-        if (entity.type === EntityType.ENEMY || (entity.type === EntityType.INTERACTABLE && !entity.dropType)) {
+        // Off-screen indicator chevrons — for enemies and non-drop POIs.  Gnats
+        // (diesOnContact, Swarm) and bubbles (ambient fauna) are EXCLUDED: a
+        // cloud of them would crowd the screen with chevrons, and they aren't
+        // wave threats the player needs steering toward; the minimap still
+        // shows them for finding stragglers.
+        if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true && entity.enemyShape !== 'bubble')
+                || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
             // Enemies are range-UNLIMITED here (live count is capped by the
             // wave concurrency cap): the maps are big and the chevrons are
             // how the player finds the stragglers.  renderIndicators fades
@@ -1404,7 +1412,7 @@ export class RenderSystem {
         // here to avoid ~22k per-frame object allocations + fillRect calls.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
                 && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
-                && !(entity.type === EntityType.INTERACTABLE && entity.dropType && entity.dropType !== 'health')) {
+                && !(entity.type === EntityType.INTERACTABLE && entity.dropType)) {
             this._minimapBuffer.push({ entity, dx, dy });
         }
 
@@ -1509,7 +1517,9 @@ export class RenderSystem {
     this.prepareStaticTileCacheForFrame(playerPos);
     this.blitStaticTileLayer(ctx);
 
-    // 4a. Render Entities (Culling logic added)
+    // 4a. Render Entities (Culling logic added).  Stage 6: dragon body segments
+    // are real tile-variant STRUCTURE entities, so they render here like any
+    // tile (no dedicated pass).
     this.renderEntities(ctx, this._visibleEntities, camera, playerPos);
 
     // 4b. Render Particles — single composite-op switch for the whole batch
@@ -2356,7 +2366,9 @@ export class RenderSystem {
       // a single matrix write — ~2-3× cheaper per slow-path entity.
       // Mirrors BackgroundManager.ts:370-374 for nebula puffs.
       const rotation = entity.rotation + (
-        entity.type === EntityType.PLAYER
+        entity.isRival
+          ? SPRITE_CONSTANTS.RIVAL_ROTATION_OFFSET   // sprite art points up-left
+          : entity.type === EntityType.PLAYER
           ? SPRITE_CONSTANTS.PLAYER_ROTATION_OFFSET
           : entity.type === EntityType.ENEMY
             ? SPRITE_CONSTANTS.ENEMY_ROTATION_OFFSET
@@ -2686,10 +2698,16 @@ export class RenderSystem {
                   if (entity.type === EntityType.STRUCTURE && entity.mass === Infinity) {
                       drawScale = 1.02;
                   }
+                  // Rival ships render at 1:1 with their `size` so the visible
+                  // hull matches the collision footprint (getCollisionR = size/2)
+                  // — at the generic 1.5× the sprite overhangs its hitbox and
+                  // shots that look like hits sail past.
+                  if (entity.isRival) drawScale = 1.0;
                   // Hit-punch: enemies briefly swell on impact for a juicy
-                  // reaction (driven by the hit-flash timer).
+                  // reaction (driven by the hit-flash timer, scaled by the
+                  // damage-as-%-of-maxHealth react magnitude).
                   if (entity.type === EntityType.ENEMY && entity.hitFlash && entity.hitFlash > 0) {
-                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2);
+                      drawScale *= 1 + Math.min(0.4, entity.hitFlash * 2.2) * (entity.hitReact ?? 1);
                   }
 
                   const drawSize = maxDim * drawScale;
@@ -2697,12 +2715,16 @@ export class RenderSystem {
 
                   ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
 
-                  // Hit flash: re-draw brighter (whiter) on impact for a
-                  // stronger pop (prevents white-square by re-drawing the sprite)
+                  // Hit flash: re-draw the sprite blown out toward white on
+                  // impact for a punchy, unmistakable hit pop (the `filter`
+                  // affects only the drawn image, so no white-square artefact).
+                  // The brightness ramps with the flash timer so a fresh hit
+                  // reads as a near-white silhouette, fading back to the hull.
                   if (entity.hitFlash && entity.hitFlash > 0) {
+                      const f = Math.min(1, entity.hitFlash * 3);
                       ctx.save();
-                      ctx.globalAlpha = Math.min(1, 0.7 + (entity.hitFlash * 2.5));
-                      ctx.filter = 'brightness(1.8)';
+                      ctx.globalAlpha = Math.min(1, 0.55 + f);
+                      ctx.filter = `brightness(${(2 + f * 6).toFixed(2)})`;
                       ctx.drawImage(img, dOffset, dOffset, drawSize, drawSize);
                       ctx.filter = 'none';
                       ctx.restore();
@@ -3630,55 +3652,6 @@ export class RenderSystem {
                 buildShardPath();
                 ctx.stroke();
 
-            } else if (entity.type === EntityType.INTERACTABLE && entity.dropType === 'health') {
-                // ── Health heart — large static glowing heart ─────────────────
-                const r     = entity.size.x * 0.38;
-                const pulse = 0.88 + Math.sin(nowSec * 2.8) * 0.12;
-                const [hr, hg, hb] = [239, 68, 68]; // #ef4444
-
-                const drawHeart = () => {
-                    ctx.beginPath();
-                    ctx.moveTo(0, r * 0.38);
-                    ctx.bezierCurveTo( r,      -r * 0.38,  r * 1.05, -r * 1.05,  0, -r * 0.55);
-                    ctx.bezierCurveTo(-r * 1.05, -r * 1.05, -r,       -r * 0.38,  0,  r * 0.38);
-                    ctx.closePath();
-                };
-
-                // Outer bloom
-                const bloomR = r * 3.2 * pulse;
-                const bloom  = ctx.createRadialGradient(0, 0, 0, 0, 0, bloomR);
-                bloom.addColorStop(0,   `rgba(${hr},${hg},${hb},0.45)`);
-                bloom.addColorStop(0.5, `rgba(${hr},${hg},${hb},0.18)`);
-                bloom.addColorStop(1,   `rgba(${hr},${hg},${hb},0)`);
-                ctx.globalAlpha = 1.0;
-                ctx.beginPath();
-                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
-                ctx.fillStyle = bloom;
-                ctx.fill();
-
-                // Filled heart
-                ctx.globalAlpha = 0.92 * pulse;
-                ctx.fillStyle   = '#ef4444';
-                drawHeart();
-                ctx.fill();
-
-                // Bright core highlight
-                ctx.globalAlpha = 0.55 * pulse;
-                ctx.fillStyle   = '#fca5a5';
-                ctx.save();
-                ctx.scale(0.55, 0.55);
-                ctx.translate(0, -r * 0.1);
-                drawHeart();
-                ctx.restore();
-                ctx.fill();
-
-                // Crisp white outline
-                ctx.globalAlpha = 0.7 * pulse;
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth   = 2;
-                drawHeart();
-                ctx.stroke();
-
             } else if (entity.type === EntityType.INTERACTABLE && entity.dropType) {
                 // Drop shard — irregular polygon fragment tumbling in space
                 const lt = entity.lifetime ?? Infinity;
@@ -3690,8 +3663,9 @@ export class RenderSystem {
                 let rimColor: string;
                 let glowRgb: [number, number, number];
                 if (entity.dropType === 'health') {
-                    coreColor = '#6ef09a'; rimColor = '#22c55e';
-                    glowRgb = [74, 222, 128];
+                    // Red circle shard — bright red core, light-red rim + halo.
+                    coreColor = '#ef4444'; rimColor = '#fecaca';
+                    glowRgb = [239, 68, 68];
                 } else if (entity.dropType === 'ammo') {
                     // Black core with a white rim + halo so ammo drops read
                     // distinctly against the colourful weapon palette and
@@ -3925,6 +3899,9 @@ export class RenderSystem {
   private renderHealthBar(ctx: CanvasRenderingContext2D, entity: GameEntity, rx: number, ry: number) {
       // Only render for Player and Enemies
       if ((entity.type !== EntityType.PLAYER && entity.type !== EntityType.ENEMY) || entity.maxHealth <= 0) return;
+      // Bubbles (ambient fauna) carry no health bar — keep them reading as
+      // neutral blobs, not tracked combatants.
+      if (entity.enemyShape === 'bubble') return;
 
       const { PLAYER_WIDTH, PLAYER_HEIGHT, ENEMY_WIDTH, ENEMY_HEIGHT, OFFSET_MODIFIER, OFFSET_BASE } = UI_CONSTANTS.HEALTH_BAR;
 
@@ -3946,12 +3923,10 @@ export class RenderSystem {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, width, height);
 
-      // Fill Color — player health bar is always red; enemy bars match enemy color
-      if (isPlayer) {
-          ctx.fillStyle = '#ef4444';
-      } else {
-          ctx.fillStyle = '#ef4444';
-      }
+      // Fill Color — player + normal enemy bars are red; rival bars take the
+      // disposition team colour (red hostile / green ally / amber neutral) so the
+      // bar doubles as the at-a-glance intent cue (replacing the removed ring).
+      ctx.fillStyle = entity.isRival ? (entity.color || '#ef4444') : '#ef4444';
 
       ctx.fillRect(x, y, width * healthPct, height);
 
@@ -3977,12 +3952,242 @@ export class RenderSystem {
   // bakes rotation in), so the tail is at -x.
   private drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity, nowSec: number) {
       const shape = entity.enemyShape ?? 'triangle';
+      // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
+      // appears in large clouds, so it skips the full ship treatment (flame
+      // plume + cached body gradient + core eye + per-frame radial gradients) —
+      // just a flat colour-filled silhouette with a tiny bright nose, drawn with
+      // ZERO gradient allocations per frame.  Keeps a big flock cheap.
+      if (entity.diesOnContact === true) {
+          const flashG = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          const rg = Math.max(entity.size.x, entity.size.y) * 0.62 * (1 + Math.min(0.4, flashG * 2.2));
+          this.buildEnemyPath(ctx, shape, rg);
+          ctx.fillStyle = flashG > 0 ? '#ffffff' : (entity.color || '#2dd4bf');
+          ctx.fill();
+          // Tiny bright nose pip so facing reads.
+          ctx.beginPath();
+          ctx.arc(rg * 0.35, 0, rg * 0.22, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = 0.7;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          return;
+      }
+      // ── Reactive bubble (Stage 5): a translucent wobbling membrane — no
+      // engine flame.  A specular highlight + a pulsing nucleus sell the soft
+      // body; once provoked the membrane flushes angry-red and wobbles faster.
+      if (shape === 'bubble') {
+          const flashB = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          // Feed pulse: a brief outward membrane bulge right after a swallow
+          // (BUBBLE_CONSTANTS.FEED_PULSE), eased out as the timer decays.
+          const feed = (entity.bubbleFeedTimer ?? 0) > 0
+              ? (entity.bubbleFeedTimer! / BUBBLE_CONSTANTS.FEED_PULSE) * 0.18 : 0;
+          const rb = Math.max(entity.size.x, entity.size.y) * 0.6 * (1 + Math.min(0.4, flashB * 2.2) + feed);
+          if (entity.glowPhase === undefined) {
+              let h = 0; const id = entity.id;
+              for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
+              entity.glowPhase = (h / 997) * Math.PI * 2;
+          }
+          const ph = entity.glowPhase;
+          const provoked = entity.provoked === true;
+          const sick = (entity.bubbleSickTimer ?? 0) > 0;          // queasy → green
+          const latched = entity.attachedToId !== undefined;       // clinging to a hull
+          const digesting = (entity.bubbleDigestTimer ?? 0) > 0;   // holding a shard inside
+          const baseCol = sick ? BUBBLE_CONSTANTS.SICK_COLOR
+                        : provoked ? BUBBLE_CONSTANTS.COLOR_PROVOKED
+                        : (entity.color || '#67e8f9');
+          const [br, bg, bb] = hexToRgb(baseCol);
+          // Brightness / liveliness track AGGRO + sickness — feeding does NOT
+          // change the membrane brightness (the held meal reads it instead).
+          // Sick = a slow queasy throb; provoked = fast; calm = gentle.
+          const wob = sick ? 0.14 : provoked ? 0.16 : 0.10; // membrane wobble amplitude
+          const spd = sick ? 3.0 : provoked ? 5.5 : 2.4;    // wobble + pulse speed
+          // Calm bubbles render faint (easy to miss); provoked/sick full opacity.
+          // A hit-flash adds on top so a shot reads.
+          const vis = (provoked || sick) ? 1 : BUBBLE_CONSTANTS.CALM_VISIBILITY;
+          // Squash-cling: while latched the membrane flattens against the hull.
+          // updateBubbles points rotation at the target, so local +x is the
+          // contact normal — flatten x, spread y (the "splatted goo" read).
+          const squash = latched ? 0.34 : 0;
+          const sxx = 1 - squash, syy = 1 + squash * 0.7;
+
+          // Wobbling membrane outline (12 verts, two-frequency radius noise).
+          ctx.beginPath();
+          const N = 12;
+          for (let i = 0; i < N; i++) {
+              const a = (i / N) * Math.PI * 2;
+              const rr = rb * (1 + wob * (Math.sin(nowSec * spd + ph + i * 1.7) * 0.6 + Math.sin(nowSec * spd * 0.6 + i) * 0.4));
+              const x = Math.cos(a) * rr * sxx, y = Math.sin(a) * rr * syy;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          // Translucent fill: faint core → brighter rim (a soap-film look).
+          const grad = ctx.createRadialGradient(0, 0, rb * 0.2, 0, 0, rb);
+          grad.addColorStop(0, `rgba(${br},${bg},${bb},${0.10 * vis})`);
+          grad.addColorStop(0.7, `rgba(${br},${bg},${bb},${0.22 * vis})`);
+          grad.addColorStop(1, `rgba(${br},${bg},${bb},${0.5 * vis})`);
+          ctx.fillStyle = grad;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 * vis + flashB)})`;
+          ctx.stroke();
+
+          // Held meal (digesting): a shrinking ghost of the swallowed shard in
+          // its own colour, sitting INSIDE the transparent membrane — the eat
+          // read.  Replaces the idle nucleus while feeding.
+          if (digesting) {
+              const dp = entity.bubbleDigestTimer! / (entity.bubbleDigestDuration ?? BUBBLE_CONSTANTS.DIGEST_DURATION); // 1 → 0
+              const ir = Math.min((entity.bubbleDigestSize0 ?? rb) * 0.5, rb * 0.6) * (0.32 + 0.68 * dp);
+              const [dr, dg, dbb] = hexToRgb(entity.bubbleDigestColor || '#a8a29e');
+              ctx.beginPath();
+              const M = 9;
+              for (let i = 0; i < M; i++) {
+                  const a = (i / M) * Math.PI * 2;
+                  const rr = ir * (1 + 0.15 * Math.sin(nowSec * 6 + ph + i * 1.3));
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              ctx.closePath();
+              ctx.fillStyle = `rgba(${dr},${dg},${dbb},${0.25 + 0.6 * dp})`; // fades as it dissolves
+              ctx.fill();
+          } else {
+              // Inner nucleus — a small denser blob that pulses.
+              const nuc = rb * (0.30 + 0.05 * Math.sin(nowSec * spd + ph));
+              ctx.beginPath();
+              ctx.arc(0, 0, nuc, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(${br},${bg},${bb},${0.55 * vis})`;
+              ctx.fill();
+          }
+          // Specular highlight (upper-left), brighter on a hit.
+          ctx.beginPath();
+          ctx.arc(-rb * 0.32, -rb * 0.34, rb * 0.16, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.5 * vis + flashB)})`;
+          ctx.fill();
+
+          // EMP crackle (player latch only): amber zig-zags arcing off the
+          // contact face (+x) into the hull, selling the weapon/shield disable.
+          if (latched && entity.attachedToId === 'player') {
+              ctx.lineWidth = 1.4;
+              for (let k = 0; k < 3; k++) {
+                  ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * Math.random()})`;
+                  ctx.beginPath();
+                  let ax = rb * sxx * 0.7, ay = (Math.random() - 0.5) * rb * 0.8;
+                  ctx.moveTo(ax, ay);
+                  for (let s = 0; s < 3; s++) {
+                      ax += rb * 0.5 * (0.6 + Math.random() * 0.6);
+                      ay += (Math.random() - 0.5) * rb * 0.7;
+                      ctx.lineTo(ax, ay);
+                  }
+                  ctx.stroke();
+              }
+          }
+          return;
+      }
+
+      // ── Dragon head (Stage 6): a forward-pointed scaled head with glowing
+      // eyes + swept horns — no engine flame.  Body segments render separately
+      // (renderDragonBodies).  Local +x faces travel.
+      if (shape === 'dragon') {
+          if (entity.dragonHidden) return; // head has crossed the exit portal — gone
+          const flashD = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
+          // Same damage-proportional scale-punch as the ships: the dragon's huge
+          // HP pool makes each chip a tiny fraction, so the head only nudges (no
+          // special-case cap needed) while the white flash carries the feedback.
+          const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.4, flashD * 2.2) * (entity.hitReact ?? 1));
+          const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);
+          const plateLift = `rgb(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)})`;
+          const plateSink = `rgb(${sinkCh(cr,0.55)},${sinkCh(cg,0.55)},${sinkCh(cb,0.55)})`;
+          const edgeDk = `rgba(${sinkCh(cr,0.6)},${sinkCh(cg,0.6)},${sinkCh(cb,0.6)},0.9)`;
+          const edgeLt = `rgba(${liftCh(cr,0.6)},${liftCh(cg,0.6)},${liftCh(cb,0.6)},0.85)`;
+          const provoked = entity.provoked === true;
+          // Energy accent: portal-violet at rest, hot red when provoked.  The
+          // serpent is a void traveller — its "life" reads as one glowing core,
+          // not organic eyes/fangs.  Kept deliberately spare so it doesn't
+          // out-detail the rest of the (flat, low-detail) game assets.
+          const ax = provoked ? 255 : 168, ay = provoked ? 70 : 130, az = provoked ? 48 : 250;
+          let h = 0; for (let i = 0; i < entity.id.length; i++) h = (h * 31 + entity.id.charCodeAt(i)) % 997;
+          const ph = (h / 997) * Math.PI * 2;
+          const pulse = 0.6 + 0.4 * Math.sin(nowSec * (provoked ? 7 : 3.5) + ph);
+          // Local frame: forward = +x (the dart points along travel).
+
+          // ── Swept blade-fins (geometric "horns"): one clean angular plate per
+          // side, raked off the back. ──
+          ctx.fillStyle = plateSink;
+          ctx.lineWidth = Math.max(1, r * 0.04); ctx.strokeStyle = edgeDk;
+          for (const sgn of [-1, 1]) {
+              ctx.beginPath();
+              ctx.moveTo(-r * 0.3, sgn * r * 0.42);
+              ctx.lineTo(-r * 1.35, sgn * r * 0.72);
+              ctx.lineTo(-r * 0.55, sgn * r * 0.18);
+              ctx.closePath();
+              ctx.fill(); ctx.stroke();
+          }
+
+          // ── Faceted dart skull: a sharp symmetric hex wedge, head-lit so the
+          // flat polygon reads with volume (bright at the nose, dark at the neck). ──
+          const skull = [
+              [1.55, 0], [0.52, -0.6], [-0.5, -0.5], [-0.88, -0.16],
+              [-0.88, 0.16], [-0.5, 0.5], [0.52, 0.6],
+          ] as const;
+          ctx.beginPath();
+          ctx.moveTo(r * skull[0][0], r * skull[0][1]);
+          for (let i = 1; i < skull.length; i++) ctx.lineTo(r * skull[i][0], r * skull[i][1]);
+          ctx.closePath();
+          const sg = ctx.createRadialGradient(r * 0.7, -r * 0.12, r * 0.1, r * 0.1, 0, r * 1.5);
+          sg.addColorStop(0, flashD > 0 ? '#ffffff' : plateLift);
+          sg.addColorStop(0.55, flashD > 0 ? '#ffffff' : `rgb(${cr},${cg},${cb})`);
+          sg.addColorStop(1, plateSink);
+          ctx.fillStyle = sg; ctx.fill();
+          ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = edgeDk; ctx.stroke();
+
+          // ── One central ridge seam, just enough to read as a faceted plate. ──
+          ctx.lineWidth = Math.max(1, r * 0.035); ctx.strokeStyle = edgeLt;
+          ctx.beginPath();
+          ctx.moveTo(r * 1.55, 0); ctx.lineTo(-r * 0.88, 0);
+          ctx.stroke();
+
+          // ── Plasma maw: a single soft energy slit at the snout (no teeth). ──
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const mawG = ctx.createRadialGradient(r * 1.0, 0, 0, r * 1.0, 0, r * 0.5);
+          mawG.addColorStop(0, `rgba(${ax},${ay},${az},${0.45 + 0.3 * pulse})`);
+          mawG.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
+          ctx.fillStyle = mawG;
+          ctx.beginPath(); ctx.ellipse(r * 1.0, 0, r * 0.42, r * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+
+          // ── Reactor core: one faceted energy hexagon in the brow with a soft
+          // bloom + white-hot centre.  The serpent's single "eye". ──
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const coreR = r * (0.28 + 0.04 * pulse);
+          const cx0 = r * 0.1;
+          const bloom = ctx.createRadialGradient(cx0, 0, 0, cx0, 0, coreR * 2.2);
+          bloom.addColorStop(0, `rgba(${ax},${ay},${az},${0.6 * pulse})`);
+          bloom.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
+          ctx.fillStyle = bloom;
+          ctx.beginPath(); ctx.arc(cx0, 0, coreR * 2.2, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+              const a = ph + i * (Math.PI / 3);
+              const px = cx0 + Math.cos(a) * coreR, py = Math.sin(a) * coreR;
+              i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${ax},${ay},${az},0.95)`; ctx.fill();
+          ctx.beginPath(); ctx.arc(cx0, 0, coreR * 0.42, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.7 + 0.3 * pulse})`; ctx.fill();
+          return;
+      }
+
       // The orb (Drone) renders a touch smaller so it reads as a compact,
       // buzzing craft next to the bigger winged ships.
       const shapeScale = shape === 'circle' ? 0.82 : 1;
       const baseR = Math.max(entity.size.x, entity.size.y) * 0.62 * shapeScale;
       const flash = (entity.hitFlash && entity.hitFlash > 0) ? entity.hitFlash : 0;
-      const r = baseR * (1 + Math.min(0.4, flash * 2.2)); // scale-punch on hit
+      // Scale-punch on hit, scaled by the hit's damage-as-%-of-maxHealth so a
+      // chip on a tanky enemy barely flinches (hitReact unset → full punch).
+      const r = baseR * (1 + Math.min(0.4, flash * 2.2) * (entity.hitReact ?? 1));
       const col = entity.color || '#f87171';
       const [cr, cg, cb] = hexToRgb(col);
       const pal = enemyPalette(col);
@@ -4060,14 +4265,41 @@ export class RenderSystem {
           ctx.restore();
       }
 
-      // Shield bubble (translucent blue ring) when the enemy is shielded.
+      // Shield (translucent blue) when the enemy is shielded.  A directional
+      // arc shield (shieldArcHalfWidth set, Bulwark) draws a thick rotating
+      // sector — drawn in the entity's LOCAL frame, so undo the body rotation
+      // and use the world-space shieldArcAngle the sim sweeps — plus a faint
+      // full guide ring.  A full-bubble shield draws the original ring.
       if ((entity.maxShield ?? 0) > 0 && (entity.shield ?? 0) > 0) {
           const frac = (entity.shield ?? 0) / (entity.maxShield ?? 1);
-          ctx.beginPath();
-          ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac})`;
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
+          const flash = (entity.shieldHitFlash ?? 0) > 0 ? 0.35 : 0;
+          if (entity.shieldArcHalfWidth !== undefined) {
+              const half = entity.shieldArcHalfWidth;
+              const mid = (entity.shieldArcAngle ?? 0) - entity.rotation; // local frame
+              const rr = r * 1.6;
+              ctx.save();
+              // Faint full guide ring so the gap reads as "shield is elsewhere".
+              ctx.beginPath();
+              ctx.arc(0, 0, rr, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(96,165,250,${0.10 + 0.10 * frac})`;
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+              // The active sector — bright, with a soft outer glow.
+              ctx.beginPath();
+              ctx.arc(0, 0, rr, mid - half, mid + half);
+              ctx.strokeStyle = `rgba(${147 + Math.floor(60 * flash)},197,253,${0.55 + 0.4 * frac})`;
+              ctx.lineWidth = 4;
+              ctx.shadowColor = 'rgba(147,197,253,0.9)';
+              ctx.shadowBlur = 8;
+              ctx.stroke();
+              ctx.restore();
+          } else {
+              ctx.beginPath();
+              ctx.arc(0, 0, r * 1.4, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(96,165,250,${0.3 + 0.5 * frac + flash})`;
+              ctx.lineWidth = 2.5;
+              ctx.stroke();
+          }
       }
 
       // ── Body roll (Tank/hexagon only): a slow render-only rotational sway
@@ -4299,6 +4531,26 @@ export class RenderSystem {
           ctx.fill();
           ctx.restore();
       }
+
+      // ── Kamikaze danger aura.  A bomber (explosionRadius stamped) is a live
+      // warhead — it detonates the instant it touches you, so it gets a steady
+      // pulsing magenta warning glow to read as "kill me or dodge me" at a
+      // glance (the boom itself is its own big shockwave).  Render-only.
+      if (entity.type === EntityType.ENEMY && entity.explosionRadius !== undefined) {
+          const pulseA = 0.35 + 0.25 * Math.sin(nowSec * 7 + phase);
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const auraR = r * 1.25;
+          const ag = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, auraR);
+          ag.addColorStop(0, `rgba(232,121,249,0)`);
+          ag.addColorStop(0.7, `rgba(232,121,249,${0.18 * pulseA})`);
+          ag.addColorStop(1, `rgba(232,121,249,${0.45 * pulseA})`);
+          ctx.fillStyle = ag;
+          ctx.beginPath();
+          ctx.arc(0, 0, auraR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+      }
   }
 
   private buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
@@ -4335,6 +4587,16 @@ export class RenderSystem {
               }
               break;
           }
+          case 'octagon': {
+              // Bulwark fortress — a chunky 8-gon, rotated half a facet so a
+              // flat face points forward (reads as a shielded prow, not a spike).
+              for (let i = 0; i < 8; i++) {
+                  const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+                  const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              break;
+          }
           case 'pentagon': {
               for (let i = 0; i < 5; i++) {
                   const a = (i / 5) * Math.PI * 2;
@@ -4352,12 +4614,85 @@ export class RenderSystem {
               }
               break;
           }
+          case 'nest': {
+              // Fleshy hive — a lumpy 18-vertex blob (alternating radius) so it
+              // reads as an organic spawner, not a clean polygon.
+              const N = 18;
+              for (let i = 0; i < N; i++) {
+                  const a = (i / N) * Math.PI * 2;
+                  const rr = r * (i % 2 === 0 ? 1 : 0.82);
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              break;
+          }
+          case 'cross': {
+              // Turret emplacement — a chunky 12-vertex plus/cross with the
+              // forward arm (+x) reading as the gun barrel.  t = arm half-width.
+              const t = r * 0.34;
+              ctx.moveTo(r, -t);   ctx.lineTo(r, t);      // forward arm tip (barrel)
+              ctx.lineTo(t, t);    ctx.lineTo(t, r);      // down arm
+              ctx.lineTo(-t, r);   ctx.lineTo(-t, t);
+              ctx.lineTo(-r, t);   ctx.lineTo(-r, -t);    // rear arm
+              ctx.lineTo(-t, -t);  ctx.lineTo(-t, -r);    // up arm
+              ctx.lineTo(t, -r);   ctx.lineTo(t, -t);
+              break;
+          }
+          case 'bubble': {
+              // Soft round blob (gentle 12-vertex wobble) — fallback path for
+              // any consumer outside drawEnemyShape's bespoke membrane render.
+              const N = 12;
+              for (let i = 0; i < N; i++) {
+                  const a = (i / N) * Math.PI * 2;
+                  const rr = r * (i % 2 === 0 ? 1 : 0.92);
+                  const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              break;
+          }
           case 'triangle':
           default:
               ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);
               break;
       }
       ctx.closePath();
+  }
+
+  // Dragon body (Stage 6): a chain of tapering segments along the head's
+  // recorded path (`dragonPath`), drawn tail→head so the head end overlaps on
+  // top.  World space (camera-base transform active).  Segment count + radius
+  // scale with the head's grown size.  Toroidal via shiftX/shiftY.
+  private renderDragonBodies(ctx: CanvasRenderingContext2D, entities: GameEntity[], camera: CameraState) {
+      const camX = camera.position.x, camY = camera.position.y;
+      const D = DRAGON_CONSTANTS;
+      const TWO_PI = Math.PI * 2;
+      for (let e = 0; e < entities.length; e++) {
+          const d = entities[e];
+          if (!d.active || d.enemyShape !== 'dragon' || !d.dragonPath || d.dragonPath.length < 2) continue;
+          const path = d.dragonPath;
+          const headR = Math.max(d.size.x, d.size.y) * 0.5;
+          const segR0 = headR * D.BODY_RADIUS_FRAC;
+          const grown = Math.max(0, Math.floor((Math.max(d.size.x, d.size.y) - 64) / D.SEG_PER_SIZE));
+          const segCount = Math.max(0, Math.min(D.SEGMENTS + grown, Math.floor((path.length - 1) / D.SEGMENT_STRIDE)));
+          const [cr, cg, cb] = hexToRgb(d.color || D.COLOR);
+          const dark = `rgb(${Math.max(0, cr - 55)},${Math.max(0, cg - 55)},${Math.max(0, cb - 55)})`;
+          for (let i = segCount; i >= 1; i--) {
+              const p = path[Math.min(i * D.SEGMENT_STRIDE, path.length - 1)];
+              const r = segR0 * Math.pow(D.SEGMENT_TAPER, i);
+              ctx.save();
+              ctx.translate(shiftX(camX, p.x), shiftY(camY, p.y));
+              ctx.beginPath(); ctx.arc(0, 0, r, 0, TWO_PI);
+              ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+              ctx.fill();
+              ctx.lineWidth = 2; ctx.strokeStyle = dark; ctx.stroke();
+              // dorsal scale ridge — a small darker diamond on the spine
+              ctx.beginPath();
+              ctx.moveTo(0, -r * 0.55); ctx.lineTo(r * 0.28, 0);
+              ctx.lineTo(0, r * 0.55); ctx.lineTo(-r * 0.28, 0); ctx.closePath();
+              ctx.fillStyle = dark; ctx.fill();
+              ctx.restore();
+          }
+      }
   }
 
   private renderDamageTexts(ctx: CanvasRenderingContext2D, texts: DamageText[], camera: CameraState) {

@@ -71,9 +71,10 @@ engine/
                           collision resolution, gravity, per-entity damping
     RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
                           wave banner, minimap
-    AISystem.ts           Per-enemy state machine (states currently used:
-                          'idle', 'chase' — see §8); reaction-time lag
-                          targets, pack-sync, stuck detection
+    AISystem.ts           Per-enemy behavior-dispatch table (ENEMY_BEHAVIOR →
+                          moveStrategies); idle/chase state machine,
+                          reaction-time lag targets, pack-sync, stuck
+                          detection, arc-shield slew
     ParticleSystem.ts     Pooled particle FX
     TrailSystem.ts        Generic trail point management
     ProjectileSystem.ts   Projectile lifetime, homing, lightning gravity,
@@ -83,7 +84,8 @@ engine/
     WaveSystem.ts         Completion-wave spawn scheduler + grace
                           timer + spawn geometry.  A wave ends only when
                           its full budget has spawned AND every spawned
-                          enemy is dead (clear-the-field); the clock just
+                          COUNTED enemy is dead (clear-the-field;
+                          `countsTowardWave !== false`); the clock just
                           grades the speed bonus.  Survivors carry over.
     ShardSystem.ts        Tile / shard regen + shatter + merge orchestrator;
                           driven by SHARD_VARIANTS variant table
@@ -210,7 +212,10 @@ Key invariants:
 Notable existing field categories on `GameEntity`:
 
 - Visual: `sprite`, `color`, `polygonPoints`, `rotationSpeed`, `hitFlash`,
-  `trail`, `powerupGlowColor`
+  `hitReact` (0..1 damage-as-%-of-maxHealth, latched at damage time via
+  `hitReactStrength()`; RenderSystem scales the sprite scale-punch by it so a
+  chip on a big-HP beast barely flinches — unset → full punch), `trail`,
+  `powerupGlowColor`
 - AI: `enemySubtype`, `aiState`, `aiTimer`, `visionRange`, `maxSpeed`,
   `aggroTimer`, `orbitRadius`/`orbitSpin`/`preferredDistance`
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
@@ -306,12 +311,151 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
   `cooldown` is the real fire cadence; the old global burst config is gone),
-  `ENEMY_ROLE`, `ENEMY_WEAPON`
+  `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
+  (RAMMER_1-3 / SHOOTER_1-3) plus 3 additions — KAMIKAZE
+  (RAMMING star bomber that detonates an AoE shockwave INSTANTLY on player
+  contact; `shoots:false`), BULWARK (SHOOTING octagon fortress with a
+  rotating directional arc shield + a 3-shot fan), TURRET (Stage 1: a
+  STATIONARY SHOOTING cross emplacement — `maxSpeed:0` → AISystem no-move
+  branch — that rotates to aim and lobs slow HOMING missiles), and the Stage-4
+  pair SWARM (cheap fast 'swarm'-boids gnat that POPS on contact —
+  `diesOnContact`: deals its small bite once then dies, a discrete hit + light
+  pop instead of a clinging friction-chip; skips debris/drop spray.  For a big
+  flock to stay cheap, a `diesOnContact` gnat is simplified across systems:
+  collision is skipped for every pair except player + player-projectile
+  (`PhysicsSystem.checkAndResolveCollision` early-out — gnats phase through
+  terrain + each other), the render is a flat-fill silhouette with no flame/
+  gradients (`RenderSystem.drawEnemyShape` early path), and off-screen
+  indicator chevrons are suppressed (minimap still shows them)) + NEST
+  (near-static hive whose `spawner` config births SWARM brood via
+  `GameEngine.updateNests` → `WaveSystem.spawnAt(..., counts:false)`, capped at
+  `maxBrood`), and the Stage-5 BUBBLE (an AMBIENT PASSIVE soft-body blob,
+  'bubble' behavior — `ambient:true`, so it's ALWAYS-PRESENT fauna, NOT a wave
+  enemy: `countsTowardWave` is forced false however it spawns, and
+  `GameEngine.maintainAmbientBubbles` keeps `BUBBLE_CONSTANTS.AMBIENT_POPULATION`
+  alive — seeded in `startGame`, topped up offscreen on a timer, suppressed
+  while a DBG enemy-test forces another type).  Passive movement
+  (`AISystem.updateBubble`) rides the asteroid flow field
+  (`flowField.sampleAsteroidFlow`), peeling OFF the flow to chase + eat the
+  nearest mobile shard within `AI_CONFIG.BUBBLE.SHARD_VISION` (consume-and-grow
+  via `GameEngine.updateConsumers`).  Eating is MASS/ENERGY CONSERVED
+  (`shardRichness`): denser/bigger shards (metal > rock > glass/plastic/nebula,
+  scaled by size) take proportionally LONGER to digest
+  (`DIGEST_DURATION × richness`) and give more growth + maxHealth + heal
+  (`growConsumer(…, rich)`) — so a bubble heals from feeding and slowly tanks up.
+  PLASTIC and GREEN-nebula shards are TOXIC (`isToxicShard`): eating one makes
+  the bubble SICK (`bubbleSickTimer`) — it turns green, goes sluggish
+  (`SICK_SPEED_MULT`), and can't eat until it recovers.  It starts SMALL
+  (half-size) and grows slowly; once grown to `multiply.atSize` it SPLITS into
+  two base-size bubbles (`updateBubbles`, capped at `multiply.maxPopulation`).
+  It's a TRUE THIRD PARTY (`thirdParty:true`): passive until ATTACKED — by the
+  player OR another enemy.  Enemy fire can hit it (the PhysicsSystem
+  friendly-fire filter is bypassed for `thirdParty` targets), and any damaging
+  hit — OR a MODERATE body collision (relative impact ≥ `COLLIDE_AGGRO_SPEED`,
+  `PhysicsSystem.maybeBubbleCollisionAggro`) — stamps `aggroTargetId` to the
+  attacker/collider (`proj.ownerId`, the AoE ring's `ownerId`, or the rammer's
+  id) — so it retaliates against whoever last hit/rammed it, retargeting on each
+  new hit (`AISystem.resolveBubbleTarget`).  It LOSES aggro if the target flees
+  past `AGGRO_LOSE_RANGE` or when the attacker dies.  Once provoked it homes its
+  target and, on contact, LATCHES (`attachedToId` → `updateAttachments`) for
+  `LATCH_DURATION`, draining `LATCH_DPS × size/baseSize` (a bigger bubble bites
+  harder); on the PLAYER it also EMPs weapon + shield (`'disable'`, re-applied at
+  `EMP_REFRESH`).  The latch breaks — and the bubble falls off + goes SICK
+  (`detachLatch`, it NO LONGER dies) — on the timer, on ANY projectile hit
+  (`bubbleKnockFree`, PhysicsSystem), or when the player SLAMS a tile/asteroid at
+  ≥ `KNOCK_SPEED` (`terrainSlamTimer`).  Provoked bubbles stop breeding/eating.
+  Tanky: base `health` 50 with maxHealth scaling LINEARLY with size as it grows
+  (`syncBubbleMaxHealth`), so a big well-fed bubble takes real damage to kill.
+  Locomotion: SLOW while passive (drift / shard-chase); only when
+  HUNTING (provoked/aggro) does it move fast — a high sustained cap
+  (`PROVOKED_SPEED_MULT`) plus periodic LUNGES (`BURST_*`, aggro-only) so it can
+  run a fleeing enemy/player down.  Brightness tracks AGGRO only — feeding does
+  NOT brighten the membrane (the held meal reads instead); calm bubbles render
+  faint (`BUBBLE_CONSTANTS.CALM_VISIBILITY`), provoked ones full opacity, and a
+  hit-flash always reads.  Renders with NO health bar or off-screen chevron.
+  Feel tuning lives in `AI_CONFIG.BUBBLE` (drift / chase / seek / burst),
+  engagement + ambient payload in `BUBBLE_CONSTANTS`).  Finally the Stage-6
+  DRAGON (an engine-managed serpent MINI-BOSS — `'dragon'` AI strategy is a
+  NO-OP; `GameEngine.updateDragon`/`spawnDragon` own its lifecycle like the
+  snitch).  It ENTERS via a portal (`openDragonPortal` — a violet rift
+  shockwave), rides the asteroid flow field on a SLOW serpentine WEAVE
+  (`SPEED_FRAC` ≈ 0.13).  Its BODY is a real Snake of tiles: each static tile it
+  devours in its path (`physics.forEachStaticNear`) is APPENDED as a body segment
+  (`appendDragonSegment`) — a real finite-mass tile-variant STRUCTURE,
+  chain-followed behind the head (`positionDragonBody` snaps each along the head's
+  recorded `dragonPath`, `SEGMENT_SPACING` apart, up to `MAX_SEGMENTS`).  So the
+  dragon's body IS the material it ate (glass / rock / metal / plastic / mixes)
+  and each segment behaves like a tile (shootable / dents / breaks).  Segments are
+  kept OUT of the shard indices (EntityIndex `dragonSegment` gate → ShardSystem /
+  flow-drift / consume skip them) and `phasesTerrain` (glide through terrain +
+  each other; still SOLID to the player + shootable).  It SPAWNS WITH a starting
+  body (`START_SEGMENTS` tiles of one random material, `makeDragonSegment` —
+  never a bare head; becomes mixed as it eats).  SEVER: shooting a body segment
+  dead (`dragonSegmentDeath`) drops it AND everything AFT of it (`severDragon` →
+  `detachDragonSegment` turns each into a free drifting shard of its material).
+  It's a NEUTRAL THIRD PARTY (`thirdParty:true`, like the bubble): passive —
+  just roams + eats — until ATTACKED by the player OR an enemy (head shot /
+  rammed → `provoked` via PhysicsSystem; a body-segment hit provokes too).  ONLY
+  once provoked does the HEAD deploy attacks: spit SWARM gnats + lob HOMING
+  missiles (`GNAT_INTERVAL`/`MISSILE_INTERVAL`/`fireDragonMissile`).  Deals
+  contact damage; a tanky, heavy, damageable ENEMY (`health` 500, `mass` 500 →
+  bespoke `dragonDeath`: payoff + rift collapse + body scatters).  Kill payout
+  DOUBLES per dragon killed this run (`DRAGON_CONSTANTS.SCORE` × 2^`dragonsKilled`
+  — 3000 / 6000 / 12000 …; `dragonsKilled` resets per run).  LEAVES via the exit
+  portal after `ROAM_DURATION` if not killed — it flies HEAD-FIRST into a rift
+  opened `PORTAL_AHEAD` of it and is swallowed tail-to-head (head hides on entry,
+  each body segment puffs as it crosses; `LEAVE_DURATION` is a safety cap).  Body segments are IMMUNE to crash
+  damage (PhysicsSystem treats a `dragonSegment` like an indestructible wall on
+  player contact) — they only break when SHOT, so crashing into the body just
+  bounces.  ANY NUMBER of dragons can be alive at once — each is a
+  `DragonInstance` (head + body + per-dragon lifecycle/attack timers) in
+  `GameEngine.dragons`, ticked by `updateDragons`.  DBG: a dedicated Dragon menu
+  (glass / rock / plastic / metal / mixed buttons; each click stacks another).
+  Tuning in `DRAGON_CONSTANTS`.  And the Stage-7 RIVAL (player-like privateer
+  ships — NOT an ENEMY_VARIANTS archetype but a bespoke engine-managed roamer
+  like the dragon/snitch: `GameEngine.rivals` = `RivalInstance[]`, ticked by
+  `updateRivals`, AISystem skips them via the `isRival` flag).  They WARP IN via
+  the abstracted portal on a SCORE cadence (one random rival every
+  `RIVAL_CONSTANTS.SCORE_INTERVAL` = 1000 points earned, capped at `MAX_RIVALS`
+  alive) — the only auto-spawned roamer (the dragon stays DBG-only) — and roam
+  for `ROAM_DURATION` (280s, 10× the dragon) before warping out.  A rival is a lean `EntityType.ENEMY` +
+  `isRival`, RENDERED FROM AN OLD ENEMY PNG (`RIVAL_CONSTANTS.SPRITES` —
+  drone/charger/tank/skirmisher/orbiter/sniper; the sprite-first RenderSystem
+  path handles it, at `RIVAL_ROTATION_OFFSET` = the player's 3π/4 art angle and
+  a 1:1 `drawScale` so the hull matches the `size` hitbox).  It HUNTS the nearest WAVE
+  enemy, strafes to hold `PREFERRED_DIST`, and fires a blaster bolt flagged
+  `hitsEnemies` (a new projectile flag that lets an ENEMY-owned shot damage other
+  ENEMY targets — bypassing the friendly-fire filter — but never another rival)
+  + `sparesPlayer` (ally/neutral shots pass THROUGH the player).  Killing a wave
+  enemy with a rival shot stamps `killedByRival`, so `handleEntityDeath`
+  WITHHOLDS the kill points + combo from the player (the rival STEALS them); the
+  rival also VACUUMS collectible drops within `LOOT_RANGE` (denying + self-heal).
+  THREE dispositions (`RivalDisposition`, spawn-weighted, team colour →
+  `RIVAL_CONSTANTS.COLORS`): `hostile` (red — fights the player AND enemies),
+  `ally` (green — fights enemies only, never the player), `neutral` (amber —
+  fights enemies for loot, ignores the player UNTIL attacked → `provoked` flips
+  it to hunt the player).  A rival is a normal damageable ENEMY: the PLAYER can
+  down it for a `TIER`-scaled bounty + a loot spray (enemies/other rivals can't
+  damage it — friendly-fire filter), and it WARPS OUT via portal after
+  `ROAM_DURATION`.  DBG: a dedicated Rivals menu (hostile / ally / neutral /
+  random).  Tuning in `RIVAL_CONSTANTS`.  The rift-portal VFX itself is now the
+  reusable `GameEngine.openPortal(pos, {color,radius,duration})` (layered
+  core-flash + rift ring + echo ring + vortex embers + sparks + a soft shake);
+  `openDragonPortal` is a thin wrapper over it.
+  Optional ENEMY_VARIANTS
+  fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
+  onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
+  (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
+  `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
+  `shieldArcAngle` — a sweeping sector that only absorbs hits from the
+  covered side), and `consume`/`multiply`/`ambient` (the bubble's
+  eat-grow-split + always-present fauna flag).
 - `WEAPONS`, `WEAPON_LIST`
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
-- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (3 scripted
-  teaching waves), `getWaveDurationSec()`, `getWaveSpawnBudget()`,
-  `buildWaveSpawnList()`
+- `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (7 scripted
+  teaching waves, one per wave-enemy archetype; the BUBBLE is ambient fauna,
+  not a wave enemy, so it has no intro wave), `getWaveDurationSec()`,
+  `getWaveSpawnBudget()`, `buildWaveSpawnList()`
 - `SCORE_CONSTANTS` (tier-scaled kill points; player-attributed
   shard/tile destruction points — flat per shard, per-maxHealth for
   tiles, nebula variants excluded, attribution via the
@@ -415,14 +559,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   projectile-damage path (gated by `physics.traitsEnabled`, DBG
   "Traits"); armored enemies show the REDUCED hit number as feedback.
   evasive / front-shield / regen join with their enemies + the bosses.
-- `CORROSION` / `ENEMY_ATTACK_EFFECTS` — status-effect framework (v1 =
-  corrosion DoT only, but generic: `StatusEffectKind` / `EffectPayload`
-  / `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
+- `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
+  framework (generic: `StatusEffectKind` / `EffectPayload` /
+  `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
   (the Orbiter / Shooter-tier-2, green acid rounds) debuffs the player
   on hit (`GameEngine.handleProjectileHit` → `applyStatusEffect`);
-  `tickStatusEffects` bleeds health past the shield, stacks ×3, refresh
-  on re-hit.  HUD badge + acid drip; DBG "Corrode" self-apply
-  (`EngineStats.statusEffects`).  Duration-only — no mitigation yet.
+  `tickStatusEffects` applies per-kind effects, counts down, drops
+  expired.  Two kinds today: `'corrosion'` (stacking DoT, bleeds past
+  the shield, ×3) and `'disable'` (EMP — sets the derived
+  `systemsDisabled` flag so the weapon can't fire and the shield neither
+  absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
+  "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)
@@ -552,18 +699,74 @@ button in `UIOverlay.tsx`.
 - **AI states currently used in code are `'idle'` and `'chase'`.** The
   `aiState` type union in `types.ts` lists more, but the others have no
   active branches in `AISystem.ts`. Don't assume a missing state is wired.
+- **AI routing is a behavior-dispatch table.** `AISystem.update` routes each
+  enemy through `ENEMY_BEHAVIOR[subtype].move` (a movement-strategy id) via the
+  `moveStrategies` lookup map — NOT an `ENEMY_ROLE` if/else.  Adding a new
+  behavior is a row in `ENEMY_BEHAVIOR` (constants) + a strategy fn in the
+  `moveStrategies` table, not a growing switch.  The strategies today are
+  the original `updateBasicDogfighter` (`'dogfighter'`), `updateSkirmisher`
+  (`'skirmisher'`), `updateSwarm` (`'swarm'` — Stage 4; separation + jitter
+  flock with a DBG-selectable base steer via `getActiveSwarmMove`: weave
+  (serpentine — the default) / boids / vortex (orbit + dart) / burst (coast +
+  telegraphed dash), cycled by the Player ▸ "Gnat move" DBG row), and
+  `updateBubble` (`'bubble'` — Stage 5; passive flow-field drift / shard-chase
+  while UNprovoked, floaty player-seek once `provoked`, skipped entirely while
+  latched — receives the `shards` list so it can target food); the
+  per-subtype quirks (Drone jitter,
+  Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
+  routines.  Strategies receive the filtered `enemies` list (so a flock can scan
+  neighbours) AND the `shards` list (so the bubble can target food).  `ENEMY_ROLE`
+  is still the RAMMING/SHOOTING category used by pack-sync + wave-building.
+- **Stationary enemies use the no-move guard.** `AISystem.updateSkirmisher`
+  branches on `config.maxSpeed === 0` (Turret): it applies no thrust, bleeds
+  residual velocity, and skips the speed cap, but still runs the
+  rotate-to-aim + telegraph block.  (A sub-behavior of the skirmisher
+  strategy, not its own table entry.)
+- **Wave completion honors `countsTowardWave`.** `WaveSystem.countLiveTracked`
+  (which gates both completion AND the spawn-stream concurrency cap) skips
+  tracked enemies with `countsTowardWave === false` — entities spawned by other
+  entities / that replicate (nest brood) and the AMBIENT bubble fauna (every
+  bubble, via the `ambient` variant flag → `buildEnemy` forces the flag false
+  however it spawns).  A wave ends when the COUNTED enemies are dead; uncounted
+  brood / bubbles carry over.  Non-enemy roamers (Snitch, future dragon) are
+  `EntityType.INTERACTABLE` and never enter `waveEnemyIds`, so they never gate a
+  wave; the bubble stays `EntityType.ENEMY` (it takes damage / attacks / eats —
+  all the enemy machinery) but opts out of wave accounting via the flag.  Every
+  WAVE enemy leaves the flag unset (counts).
+- **Homing is owner-aware.** `ProjectileSystem.updateHoming` steers
+  PLAYER-owned homing shots toward the nearest enemy (acquire range) and
+  ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
+  so it takes the player entity as an argument.
 - **Drop types currently shipped: `'ammo'` and `'health'`** (collected by
-  the player). `'glass'` is a `dropType` value used internally for
+  the player). Both are collectible drops with the SAME physics — finite
+  mass, scatter off the kill, asteroid-flow drift, player magnetisation,
+  and same-type merge — and both are kept OUT of the dynamic collision grid,
+  so projectiles/ships pass through them and they can't be shot or destroyed;
+  collection is purely the GameEngine magnet/proximity scan. The
+  "collectible" rule is centralized: `DROP_TYPES` (constants) is the
+  per-drop-type registry and `isCollectibleDrop(e)` is the single predicate
+  the cross-cutting sites (grid skip, flow-drift, merge) call — so a new drop
+  type is one registry row + its effect/render, not a hunt across systems. `'glass'` is a `dropType` value used internally for
   shattered structure visuals; there is no fuel, gold-pickup, or
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
+- **Health drops mirror the ammo economy.** `spawnEnemyShards` rolls a
+  health drop INDEPENDENTLY at the same two chances as each ammo slot, so
+  enemy-kill pickups roughly double and split ~50/50 ammo/health (added
+  because the expanded roster hits harder). Each heals
+  `DROP_CONFIG.HEALTH_PER_ENEMY` (merges sum it); the wave-clear milestone
+  drop still heals `HEALTH_HEAL_AMOUNT`. Health drops render as a red
+  circle shard (`generateShardPolygon('health')` is a 16-gon; RenderSystem
+  drop-shard branch tints it red) — the old static glowing heart is gone.
+  Drops (ammo + health) are excluded from the minimap to avoid clutter.
 - **Ammo drops carry value 1 and merge.** `DropSystem.spawnAmmoDrop`
   hard-forces value = 1 (the per-source `amount` argument and
   `AMMO_PER_*` tunables are intentionally ignored). Nearby drops
-  mutually attract, damp, and fuse via `mergeAmmoDrops`
-  (`AMMO_DROP_PULL`), conserving total ammo — a wave-kill cluster
-  collapses into one fatter pickup. Non-magnetised ammo drops also
+  mutually attract, damp, and fuse via `mergeAmmoDrops` (now generalized
+  to fuse any same-type collectible, ammo↔ammo / health↔health;
+  `AMMO_DROP_PULL`), conserving total value — a wave-kill cluster
+  collapses into one fatter pickup. Non-magnetised drops also
   drift with the asteroid flow field.
 - **Periodic passes route through PerfController.** Any new skippable
   per-frame work (scans, cosmetic ticks, O(N²) passes) must register
@@ -599,6 +802,69 @@ button in `UIOverlay.tsx`.
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).
+- **Shield absorption is generalized.** The PhysicsSystem projectile-
+  damage path (and the GameEngine shockwave-AoE path) absorb into
+  `shield` for ANY entity with `shield`/`maxShield` > 0 — not just the
+  player.  This is what makes the Bulwark's shield soak hits; the
+  shield-recharge tick in `updatePhysics` was already entity-agnostic.
+  A DIRECTIONAL arc shield (`shieldArcHalfWidth` set) only absorbs hits
+  whose bearing falls in the covered sector — gated by the shot's TRAVEL
+  direction, not its position, so a fast bolt that overshoots can't tunnel
+  past (`PhysicsSystem.shieldCoversHit`, toroidal).  A covered hostile shot
+  is DEFLECTED off the ring (`tryArcShieldIntercept`, broadphase reach
+  extended via `arcShieldReach`): its velocity reflects about the radial
+  normal and the shield drains by the shot's damage, so the bolt ricochets
+  away (and can hit other enemies) while the shield still wears down.
+  Open-side shots — and shots bigger than the remaining shield — fall
+  through to the normal body hit.  AISystem slews `shieldArcAngle` toward the player at up to
+  `shieldArcSpin` rad/s, so the shield tries to face the threat but a fast
+  flank gets behind it — the Bulwark's soft counter.
+- **Stage-3 reusable mechanics (all three now wired by the Stage-5 BUBBLE).**
+  Three build-once primitives for the exotic enemies:
+  (3a) **Provoked-on-hit** — the PhysicsSystem projectile path + the AoE
+  ring stamp `entity.provoked = true` on any ENEMY they damage; the BUBBLE
+  reads this sticky flag to flip from passive to hostile.  A `thirdParty` entity
+  (the bubble) ALSO records WHO hit it (`aggroTargetId = proj.ownerId` / the AoE
+  ring's `ownerId`) and can be damaged by ANY owner — the PhysicsSystem
+  friendly-fire filter (`ENEMY + ownerType ENEMY`) is bypassed for `thirdParty`
+  targets, so enemy fire hits it and it retaliates against the attacker (player
+  or enemy), a genuine third party.  Projectiles carry `ownerId` (the firing
+  entity's id, `'player'` for the player) for exactly this.
+  (3b) **Consume-and-grow** — `GameEngine.updateConsumers` (PerfController
+  `consume` task) grows an entity carrying a `consume` ConsumeConfig by
+  eating nearby shards (`eats:'shard'` — the bubble) or tiles (`eats:'tile'`,
+  routed through the tile-destroy + flow-field patch — the future dragon),
+  capped at `maxSize`.  Two-phase feeding inside the SENSE radius (`cfg.range`):
+  mobile candidates are PULLED inward (`cfg.pull` tug) and only SWALLOWED on
+  MEMBRANE CONTACT (radii overlap) — `consumeEntity` then sprays an inward
+  shard-colour implosion + a membrane feed-bulge (`bubbleFeedTimer`), so shards
+  stream in and pop on contact instead of vanishing from afar.  Shards (bubble)
+  are then DIGESTED over `BUBBLE_CONSTANTS.DIGEST_DURATION` (`beginDigest` →
+  ticked in `updateBubbles` → `growConsumer`): the shard is swallowed
+  (deactivated, its look snapshotted onto `bubbleDigest*`) and RenderSystem draws
+  a shrinking ghost of it INSIDE the transparent membrane, one meal at a time.
+  This mirrors the LATCH (a held target processed over a timer); the bubble just
+  can't engulf the too-big player/enemy, so that path clings to the hull
+  (squash-cling render + EMP-arc crackle on the player) and drains instead.
+  Tiles (the future dragon) are eaten instantly (`consumeTile`).  The entity-COUNT
+  cap for self-replication is a live-subtype census at the child-spawn site
+  (`updateBubbles` for the bubble, `updateNests` for nest brood — both
+  pattern-match `enforceTypeCap`).
+  (3c) **Attach + disable** — `GameEntity.attachedToId` snaps an entity onto
+  its target each frame (`updateAttachments`, over the enemies index); the
+  `'disable'` status effect EMPs the target (see the status-framework note).
+  The bubble uses both (latch onto player + EMP).  All three are exercised by
+  Stage 4/5 (swarm/nest/bubble); the dragon (Stage 6) will reuse 3b for tiles.
+- **Kamikaze detonation.** A KAMIKAZE detonates the INSTANT it touches the
+  player: the PhysicsSystem contact path deals contact damage, sets
+  `detonateOnDeath`, and routes the death immediately, so
+  `GameEngine.handleEntityDeath` detonates.  The PLAYER is hit DIRECTLY
+  (`applyKamikazeBlastToPlayer`: shield-respecting damage + a launch via the
+  `overSpeedAllow` cap-overshoot) so the shove lands instantly at the contact
+  point; the ENEMY-owned AoE shockwave (player excluded) only sweeps
+  collateral onto nearby enemies/structures + the normal death-explosion.
+  Bombers killed before they touch the player never set the flag, so they pop
+  harmlessly — the kill-early counter.
 - **Nebula tile regen is off by default.** `NEBULA_CONSTANTS
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when

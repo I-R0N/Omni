@@ -273,8 +273,16 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.cycleEnemyScale();
   };
 
+  const handleCycleSwarmMove = () => {
+      if (engineRef.current) engineRef.current.cycleSwarmMove();
+  };
+
   const handleApplyCorrosion = () => {
       if (engineRef.current) engineRef.current.debugApplyCorrosion();
+  };
+
+  const handleApplyDisable = () => {
+      if (engineRef.current) engineRef.current.debugApplyDisable();
   };
 
   const handleToggleTraits = () => {
@@ -307,6 +315,14 @@ const App: React.FC = () => {
 
   const handleTestCards = () => {
       if (engineRef.current) engineRef.current.debugTriggerCardChoice();
+  };
+
+  const handleSpawnDragon = (type: string) => {
+      if (engineRef.current) engineRef.current.debugSpawnDragon(type);
+  };
+
+  const handleSpawnRival = (disposition: string) => {
+      if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
   };
 
   const handlePurchaseUnlock = (id: string) => {
@@ -423,7 +439,9 @@ const App: React.FC = () => {
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
         onCycleEnemyScale={handleCycleEnemyScale}
+        onCycleSwarmMove={handleCycleSwarmMove}
         onApplyCorrosion={handleApplyCorrosion}
+        onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}
         onCycleUpgrade={handleCycleUpgrade}
         onMaxUpgrades={handleMaxUpgrades}
@@ -432,6 +450,8 @@ const App: React.FC = () => {
         onSelectCard={handleSelectCard}
         onCycleCardInterval={handleCycleCardInterval}
         onTestCards={handleTestCards}
+        onSpawnDragon={handleSpawnDragon}
+        onSpawnRival={handleSpawnRival}
         onPurchaseUnlock={handlePurchaseUnlock}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}

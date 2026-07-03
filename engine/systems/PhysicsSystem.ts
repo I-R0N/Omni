@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -471,9 +471,13 @@ export class PhysicsSystem {
       }
       if (entity.shield !== undefined && entity.maxShield !== undefined
           && entity.shield < entity.maxShield
-          && (entity.shieldRechargeTimer ?? 0) <= 0) {
+          && (entity.shieldRechargeTimer ?? 0) <= 0
+          && !entity.systemsDisabled) { // EMP-disabled shield doesn't recharge (Stage 3c)
           entity.shield = Math.min(entity.maxShield, entity.shield + (entity.shieldRechargeRate ?? SHIELD_CONSTANTS.RECHARGE_RATE) * dt);
       }
+      // The directional arc-shield angle (Bulwark) is steered toward the
+      // player by AISystem (it has the player reference) — not auto-rotated
+      // here.
 
       // ORBITAL PHYSICS
       if (entity.orbitCenter && entity.orbitRadius && entity.orbitSpeed !== undefined && entity.orbitAngle !== undefined) {
@@ -810,12 +814,15 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
-        // Collectible ammo drops are non-physics bodies: magnet-pulled +
-        // proximity-collected only (see GameEngine drop scan).  Keeping
-        // them out of the dynamic grid removes their collision cost AND
-        // their contribution to lastMaxCellDensity / lastDynamicCount, so
-        // a lingering drop pile no longer pins the PerfController load.
-        if (e.type === EntityType.INTERACTABLE && e.dropType === 'ammo') continue;
+        // Collectible drops (ammo / health / any future pickup) are non-physics
+        // bodies: magnet-pulled + proximity-collected only (see GameEngine drop
+        // scan).  Keeping them out of the dynamic grid removes their collision
+        // cost AND their contribution to lastMaxCellDensity / lastDynamicCount,
+        // so a lingering drop pile no longer pins the PerfController load — and,
+        // crucially, means projectiles pass THROUGH them (they can't be shot).
+        // Routed through the DROP_TYPES registry so new pickup types are covered
+        // automatically.
+        if (isCollectibleDrop(e)) continue;
 
         // Particles never interact in resolveCollision — skip the grid.
         if (e.type === EntityType.PARTICLE) continue;
@@ -1064,6 +1071,108 @@ export class PhysicsSystem {
       if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
   }
 
+  /**
+   * Directional arc-shield gate.  Returns true if the shield should absorb a
+   * hit from projectile `proj` — always true for a full bubble (no
+   * shieldArcHalfWidth), and true for an arc shield only when the shot's
+   * INCOMING bearing falls within ±halfWidth of the sweeping shieldArcAngle.
+   *
+   * The incoming bearing is taken from the projectile's reversed velocity (the
+   * side it came FROM), not its current position: a fast shot can overshoot
+   * deep past the shield in one step, so its position at the collision frame
+   * may sit on the far side of the hull and give the wrong side — the travel
+   * direction does not.  Falls back to the position bearing only if the
+   * projectile has no usable velocity.  Toroidal.
+   */
+  public static shieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
+      const half = target.shieldArcHalfWidth;
+      if (half === undefined) return true; // full bubble
+      let bearing: number;
+      const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
+      if (vx * vx + vy * vy > 1e-6) {
+          bearing = Math.atan2(-vy, -vx); // direction the shot came from
+      } else {
+          bearing = Math.atan2(
+              wrapDeltaY(target.position.y, proj.position.y),
+              wrapDeltaX(target.position.x, proj.position.x),
+          );
+      }
+      let d = bearing - (target.shieldArcAngle ?? 0);
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return Math.abs(d) <= half;
+  }
+
+  /** World-unit radius of an arc shield's interception ring (matches the
+   *  rendered ring).  Used by the broadphase reach + tryArcShieldIntercept. */
+  public static arcShieldReach(e: GameEntity): number {
+      return Math.max(e.size.x, e.size.y) * SHIELD_CONSTANTS.ARC_REACH_FACTOR;
+  }
+
+  /**
+   * Directional arc-shield interception (Bulwark).  When an incoming hostile
+   * projectile crosses the shield ring within the covered sector, the shield
+   * DEFLECTS it off the ring surface (reflects its velocity about the radial
+   * normal) and drains by the shot's damage — so the bolt ricochets away
+   * (readable, and a hazard to other enemies) instead of vanishing, while the
+   * shield still wears down.  Returns true if the pair was handled (caller
+   * skips the body SAT).  Returns false — letting the shot proceed to the
+   * hull — when:
+   *   - the pair isn't projectile-vs-arc-shield,
+   *   - the shot is outside the ring or on an UNCOVERED bearing (flank the gap),
+   *   - the shot's damage exceeds the remaining shield (it punches through; the
+   *     body-SAT path drains the remaining shield and lands the remainder).
+   */
+  private tryArcShieldIntercept(
+      a: GameEntity,
+      b: GameEntity,
+      onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
+  ): boolean {
+      let proj: GameEntity, shielded: GameEntity;
+      if (a.type === EntityType.PROJECTILE && b.shieldArcHalfWidth !== undefined) { proj = a; shielded = b; }
+      else if (b.type === EntityType.PROJECTILE && a.shieldArcHalfWidth !== undefined) { proj = b; shielded = a; }
+      else return false;
+      if ((shielded.shield ?? 0) <= 0) return false;
+      // Don't let the shield deflect its owner's own fire (same-team projectile).
+      if (proj.ownerType === shielded.type) return false;
+
+      const reach = PhysicsSystem.arcShieldReach(shielded);
+      const dx = wrapDeltaX(shielded.position.x, proj.position.x);
+      const dy = wrapDeltaY(shielded.position.y, proj.position.y);
+      const distSq = dx * dx + dy * dy;
+      if (distSq > reach * reach) return false;                  // not at the ring yet
+      if (!PhysicsSystem.shieldCoversHit(shielded, proj)) return false; // open side → hull
+
+      // A shot bigger than the remaining shield punches through — let the body
+      // SAT path do the existing partial absorb so the shield isn't double-
+      // counted.
+      const projDmg = proj.damage || 1;
+      if (projDmg > shielded.shield!) return false;
+
+      // Radial normal at the impact (outward from the shield centre).  Only
+      // deflect shots actually travelling INTO the shield; an outward-moving
+      // bolt (already deflected) falls through harmlessly.
+      const dist = Math.sqrt(distSq) || 1;
+      const nx = dx / dist, ny = dy / dist;
+      const vdotn = proj.velocity.x * nx + proj.velocity.y * ny;
+      if (vdotn >= 0) return false;
+
+      // Reflect velocity about the normal: v' = v − 2(v·n)n, then snap the bolt
+      // to the ring surface so it rides outward and can't re-trigger / SAT the
+      // hull on the next step.
+      proj.velocity.x -= 2 * vdotn * nx;
+      proj.velocity.y -= 2 * vdotn * ny;
+      proj.rotation = Math.atan2(proj.velocity.y, proj.velocity.x);
+      proj.position.x = shielded.position.x + nx * (reach + 1);
+      proj.position.y = shielded.position.y + ny * (reach + 1);
+
+      shielded.shield! -= projDmg;
+      shielded.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+      shielded.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      if (onHit) onHit(proj.position, proj, shielded); // spark at the ring
+      return true;
+  }
+
   public static applyDentStep(tile: GameEntity, impactWorldPos: Vector2) {
       if (tile.shardVariant === undefined) return;
       const dent = SHARD_VARIANTS[tile.shardVariant].dent;
@@ -1280,6 +1389,28 @@ export class PhysicsSystem {
 
   // Returns true if world-space point (x, y) with radius r is clear of all
   // static tiles — used for safe spawn-point validation.
+  /** Visit every active static tile whose centre is within `r` (toroidal) of
+   *  (x,y).  The callback MUST NOT mutate the static grid (collect, then act).
+   *  Used by the dragon to devour tiles in its path (Stage 6). */
+  public forEachStaticNear(x: number, y: number, r: number, cb: (t: GameEntity) => void) {
+      const cx = Math.floor(x / SPATIAL_GRID_SIZE);
+      const cy = Math.floor(y / SPATIAL_GRID_SIZE);
+      const rSq = r * r;
+      for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+              const cell = this.staticGrid.get(cellKeyFromCell(cx + dx, cy + dy));
+              if (!cell) continue;
+              for (let i = 0; i < cell.length; i++) {
+                  const t = cell[i];
+                  if (!t.active) continue;
+                  const tdx = wrapDeltaX(t.position.x, x);
+                  const tdy = wrapDeltaY(t.position.y, y);
+                  if (tdx * tdx + tdy * tdy < rSq) cb(t);
+              }
+          }
+      }
+  }
+
   public isPositionClear(x: number, y: number, r: number): boolean {
       const cx = Math.floor(x / SPATIAL_GRID_SIZE);
       const cy = Math.floor(y / SPATIAL_GRID_SIZE);
@@ -1975,6 +2106,28 @@ export class PhysicsSystem {
       // Non-nebula shards (metal / rock / glass) never collide with nebula.
       if (this.nebulaPassThroughPair(a, b)) return;
 
+      // Lightweight gnat collision (Stage 4 perf): a die-on-contact gnat (Swarm)
+      // only needs to collide with the PLAYER (to pop) and with PLAYER
+      // PROJECTILES (to be shot).  Skipping every other pair — gnat↔gnat, ↔tile,
+      // ↔asteroid, ↔enemy — before the broadphase/SAT is a big win for a dense
+      // flock (the boids separation already handles spacing; gnats just phase
+      // through terrain).  Cheap boolean test up front.
+      if (a.diesOnContact === true || b.diesOnContact === true) {
+          const other = a.diesOnContact === true ? b : a;
+          const ok = other.type === EntityType.PLAYER
+              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
+          if (!ok) return; // gnat vs non-player/non-shot (incl. gnat↔gnat) → skip
+      }
+      // Phase-through (Stage 6 dragon): glides through terrain/enemies and eats
+      // tiles via the consume pass; only collides with the player (contact) and
+      // player projectiles (to take damage).  Same gate as the gnat.
+      if (a.phasesTerrain === true || b.phasesTerrain === true) {
+          const other = a.phasesTerrain === true ? b : a;
+          const ok = other.type === EntityType.PLAYER
+              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
+          if (!ok) return;
+      }
+
       // 0. BROADPHASE: Fast Circle Check — using toroidal delta so pairs
       // across the wrap seam are still considered.  If the shorter way
       // around the torus is < rA+rB, the two entities are genuinely close.
@@ -1985,11 +2138,26 @@ export class PhysicsSystem {
       // Expand player radius when shield is active
       if (a.id === 'player' && (a.shield ?? 0) > 0) rA *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
       if (b.id === 'player' && (b.shield ?? 0) > 0) rB *= SHIELD_CONSTANTS.COLLISION_MULTIPLIER;
+      // Extend reach to the arc-shield ring (Bulwark) so an incoming shot is
+      // considered out to the visible ring — tryArcShieldIntercept then absorbs
+      // a covered shot there instead of letting it tunnel to the hull.
+      if ((a.shield ?? 0) > 0 && a.shieldArcHalfWidth !== undefined) rA = Math.max(rA, PhysicsSystem.arcShieldReach(a));
+      if ((b.shield ?? 0) > 0 && b.shieldArcHalfWidth !== undefined) rB = Math.max(rB, PhysicsSystem.arcShieldReach(b));
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
 
       if (distSq > (rA + rB + 10)**2) return;
+
+      // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
+      // a short window GameEngine.updateBubbles reads to shake a latched bubble
+      // free.  STRUCTURE covers static tiles + mobile shards.
+      if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
+          const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
+          if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
+              ply.terrainSlamTimer = 0.12;
+          }
+      }
 
       // SAT works on absolute vertex positions.  If A and B sit on
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
@@ -2005,6 +2173,14 @@ export class PhysicsSystem {
           b.position.y += offsetY;
       }
 
+      // Arc-shield interception: a covered enemy shot is absorbed at the ring
+      // (before SAT), so it visibly stops at the shield instead of reaching the
+      // hull.  Open-side shots fall through to the normal SAT body hit.
+      if (this.tryArcShieldIntercept(a, b, onHit)) {
+          if (shifted) { wrapPosition(a.position); wrapPosition(b.position); }
+          return;
+      }
+
       // 1. SAT Collision Detection (Alloc-Free).  A metal composite collides
       // by its actual assembled shape (per-cell SAT) rather than its convex-
       // hull polygon, so contacts/hits match the connected triangles.
@@ -2012,6 +2188,9 @@ export class PhysicsSystem {
                      || (b.metalCells !== undefined && b.metalCells.length > 0);
       const hit = composite ? this.compositeSAT(a, b) : this.checkCollisionSAT(a, b);
       if (hit) {
+          // A moderate body collision aggros a passive bubble onto the collider
+          // (before resolve, so we read the true impact velocities).
+          PhysicsSystem.maybeBubbleCollisionAggro(a, b);
           this.resolveCollision(a, b, this.bufferMtv, onDamage, onDeath, onShake, onHit);
       }
 
@@ -2021,6 +2200,24 @@ export class PhysicsSystem {
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
+  }
+
+  /** Stage 5: a MODERATE body collision (relative impact speed ≥
+   *  COLLIDE_AGGRO_SPEED) between a passive third-party bubble and the player /
+   *  an enemy aggros the bubble onto the collider.  A light graze (slow drift
+   *  contact) is below threshold and ignored.  Skipped while the bubble is
+   *  latched or sick.  Bubble↔bubble is ignored. */
+  private static maybeBubbleCollisionAggro(a: GameEntity, b: GameEntity) {
+      const bubble = a.thirdParty ? a : (b.thirdParty ? b : null);
+      if (!bubble || bubble.attachedToId !== undefined || (bubble.bubbleSickTimer ?? 0) > 0) return;
+      const other = bubble === a ? b : a;
+      if (other.thirdParty) return; // bubble ↔ bubble
+      if (other.type !== EntityType.PLAYER && other.type !== EntityType.ENEMY) return;
+      const rvx = a.velocity.x - b.velocity.x;
+      const rvy = a.velocity.y - b.velocity.y;
+      if (rvx * rvx + rvy * rvy < BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED * BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED) return;
+      bubble.provoked = true;
+      bubble.aggroTargetId = other.id; // 'player' for the player, else the enemy id
   }
 
   /**
@@ -2381,10 +2578,12 @@ export class PhysicsSystem {
       // - Glass shards are full physics participants — they interact with everything
       //   (player, enemies, projectiles, asteroids, structures).  They are environmental
       //   debris and should deflect shots and bounce off ships.
-      // - Non-glass collectible drops: only physically collide with asteroids and
-      //   structures.  Player collection is handled by the magnetic logic in GameEngine,
-      //   not by physics contact, so we skip those pairs here to avoid accidental
-      //   collection via direct collision.
+      // - Collectible drops (ammo + health) are kept OUT of the dynamic grid
+      //   entirely (see the dropType skip in the grid build), so they never
+      //   reach this resolver — projectiles + ships pass through them and
+      //   collection is purely the GameEngine magnet/proximity scan.  The
+      //   non-glass branch below is a defensive guard in case one is ever
+      //   re-added to the grid.
       if (a.type === EntityType.INTERACTABLE || b.type === EntityType.INTERACTABLE) {
           const dropA = a.type === EntityType.INTERACTABLE && !!a.dropType;
           const dropB = b.type === EntityType.INTERACTABLE && !!b.dropType;
@@ -2409,10 +2608,21 @@ export class PhysicsSystem {
           const proj = a.type === EntityType.PROJECTILE ? a : b;
           const target = a.type === EntityType.PROJECTILE ? b : a;
 
-          // Ignore friendly fire and projectile-projectile
+          // Ignore friendly fire and projectile-projectile.  EXCEPTION: a
+          // third-party entity (the bubble) is fair game for everyone — enemy
+          // fire can hit it (Stage 5), so the enemy-vs-enemy filter is bypassed
+          // when the target is neutral.
           if (target.type === EntityType.PROJECTILE) return;
           if (target.type === EntityType.PLAYER && proj.ownerType === EntityType.PLAYER) return;
-          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY) return;
+          // Ally/neutral rival fire passes through the player (Stage 7) — its
+          // shots are meant for the wave enemies, not the pilot.
+          if (target.type === EntityType.PLAYER && proj.sparesPlayer) return;
+          // Enemy-vs-enemy friendly fire, EXCEPT: a neutral third party (bubble)
+          // is fair game for all, and a rival's `hitsEnemies` shot is allowed to
+          // damage the wave enemies (Stage 7) — but never another rival.
+          if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
+              && !target.thirdParty && !proj.hitsEnemies) return;
+          if (proj.hitsEnemies && target.isRival) return;
 
           // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
           // (today's "tile shards"); they pass through every other shard
@@ -2536,8 +2746,16 @@ export class PhysicsSystem {
 
           let projDmg = proj.damage || 1;
 
-          // Shield absorbs damage for the player
-          if (target.id === 'player' && (target.shield ?? 0) > 0) {
+          // Shield absorbs damage — generalized from player-only to ANY
+          // shielded entity (Stage 0 Bulwark): the enemy shield soaks the hit
+          // and re-arms its recharge delay exactly like the player's.  Entities
+          // without a shield (shield undefined) fall straight through.  A
+          // directional arc shield only absorbs hits from the covered sector
+          // (PhysicsSystem.shieldCoversHit) — flank it and the shot lands.  An
+          // EMP-disabled shield (Stage 3c) is offline and absorbs nothing.
+          if ((target.shield ?? 0) > 0 && (target.maxShield ?? 0) > 0
+              && !target.systemsDisabled
+              && PhysicsSystem.shieldCoversHit(target, proj)) {
               const absorbed = Math.min(target.shield!, projDmg);
               target.shield! -= absorbed;
               projDmg -= absorbed;
@@ -2620,6 +2838,17 @@ export class PhysicsSystem {
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
                   target.hitStun = HIT_FEEDBACK.STUN_SEC;
                   target.hitFlash = 0.18; // bigger flash + scale-punch on impact
+                  // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
+                  // tanky beast barely flinches and a heavy hit on a frail enemy snaps.
+                  target.hitReact = hitReactStrength(projDmg, target.maxHealth ?? target.health);
+                  target.provoked = true; // Stage 3a: a hit aggros a passive enemy
+                  // Third-party retaliation (Stage 5): the bubble targets its
+                  // attacker (player or the firing enemy), retargeting on each
+                  // new hit.
+                  if (target.thirdParty && proj.ownerId) target.aggroTargetId = proj.ownerId;
+                  // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
+                  // GameEngine.updateBubbles.
+                  if (target.attachedToId !== undefined) target.bubbleKnockFree = true;
               }
           }
 
@@ -2654,6 +2883,8 @@ export class PhysicsSystem {
               // Player-attributed kill stamp — handleEntityDeath awards
               // shard/tile destruction points only when this is set.
               if (proj.ownerType === EntityType.PLAYER) target.killedByPlayer = true;
+              // Rival kill (Stage 7): deny the player this enemy's points + combo.
+              else if (proj.hitsEnemies && target.type === EntityType.ENEMY && !target.isRival) target.killedByRival = true;
               // Stamp the impactor's velocity so shard spawning can scatter
               // pieces in the direction of impact rather than randomly.
               if (target.type === EntityType.STRUCTURE) {
@@ -2708,13 +2939,33 @@ export class PhysicsSystem {
               // Per-archetype contact damage (rushers hurt; ranged enemies
               // have 0).  No damage below the impact-speed threshold either.
               const contact = enemy.contactDamage ?? COLLISION_CONFIG.DAMAGE.PLAYER_RAM_ENEMY;
-              if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0) {
+              // Die-on-contact gnats (Swarm): pop on the FIRST touch, dealing
+              // their small bite once (regardless of impact speed, so a clinging
+              // gnat can't friction-chip), then die — a discrete hit + visible
+              // pop instead of an endless cling, and it self-clears the cloud.
+              if (enemy.diesOnContact && !enemy.isExploding) {
+                  if (contact > 0) {
+                      let bite = contact * (enemy.damageMult ?? 1);
+                      if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
+                          const absorbed = Math.min(target.shield!, bite);
+                          target.shield! -= absorbed;
+                          bite -= absorbed;
+                          target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                          target.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                      }
+                      if (bite > 0) { target.health -= bite; target.hitFlash = 0.2; }
+                      if (onShake) onShake(COLLISION_CONFIG.SHAKE.MICRO);
+                      if (target.health <= 0 && onDeath) onDeath(target);
+                  }
+                  enemy.health = 0;
+                  if (onDeath) onDeath(enemy); // pop (death FX + score)
+              } else if (ramImpact < SHIELD_CONSTANTS.DAMAGE_THRESHOLD || contact <= 0 || enemy.isExploding) {
                   // flash already handled by the general contact flash below
               } else {
                   // Per-wave enemy damage scaling rides enemy.damageMult.
                   const ramBase = contact * (enemy.damageMult ?? 1);
                   let ramDmg = ramBase;
-                  if ((target.shield ?? 0) > 0) {
+                  if ((target.shield ?? 0) > 0 && !target.systemsDisabled) {
                       const absorbed = Math.min(target.shield!, ramDmg);
                       target.shield! -= absorbed;
                       ramDmg -= absorbed;
@@ -2730,6 +2981,15 @@ export class PhysicsSystem {
                   if (target.health <= 0 && onDeath) {
                       onDeath(target);
                   }
+              }
+              // Kamikaze detonation (Stage 0): a bomber that reaches the player
+              // detonates INSTANTLY at the contact point — flag it and route the
+              // death now (handleEntityDeath fires the AoE shockwave), so it
+              // never bounces away to explode at a distance.  explosionRadius is
+              // the bomber marker; the !isExploding guard fires this exactly once.
+              if (enemy.explosionRadius !== undefined && !enemy.isExploding) {
+                  enemy.detonateOnDeath = true;
+                  if (onDeath) onDeath(enemy);
               }
           }
       }
@@ -2837,9 +3097,11 @@ export class PhysicsSystem {
               player.velocity.x *= retention;
               player.velocity.y *= retention;
               structure.hitFlash = 0.1;
-              if (isIndestructible) {
-                  // Permanent wall — signal the hit for SFX/shake but don't
-                  // touch health or queue destruction.
+              if (isIndestructible || structure.dragonSegment === true) {
+                  // Permanent wall — OR a dragon body segment, which only breaks
+                  // when SHOT, not by crashing into it.  Signal the hit (flash /
+                  // shake / the player already shed velocity above) but leave its
+                  // health alone and queue no destruction.
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
                   return;
               }

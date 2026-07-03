@@ -17,8 +17,9 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, CORROSION, ROCK_CHIP, ENEMY_NEBULA_BURST } from '../constants';
+import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -41,6 +42,33 @@ function blendHexColors(hexA: string, hexB: string): string {
 // hits rather than every shot, matching the user-requested "occasional
 // dust" feel instead of a continuous cloud.
 const ROCK_HIT_NEBULA_PUFF_CHANCE = 0.3;
+
+/** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
+ *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
+interface DragonInstance {
+  head: GameEntity;
+  body: GameEntity[];                    // eaten/spawned tiles, head→tail
+  state: 'enter' | 'roam' | 'leave';
+  stateTimer: number;                    // seconds left in the current state
+  time: number;                          // weave clock
+  gnatTimer: number;                     // countdown to the next brood spit
+  missileTimer: number;                  // countdown to the next homing missile
+  portal?: { x: number; y: number };     // exit-portal centre (leave state only)
+  headThrough?: boolean;                  // head has crossed the exit portal
+}
+
+// A rival ship (Stage 7) and its engine-managed lifecycle/AI state.  The ship
+// itself is a plain EntityType.ENEMY carrying isRival; everything else lives
+// here so the entity stays lean.
+interface RivalInstance {
+  ship: GameEntity;
+  disposition: RivalDisposition;
+  state: 'enter' | 'roam' | 'leave';
+  stateTimer: number;        // seconds left in the current state
+  fireTimer: number;         // weapon cooldown
+  stolen: number;            // points denied to the player so far (HUD/popup)
+  portal?: { x: number; y: number };  // exit-portal centre (leave only)
+}
 
 export class GameEngine {
   private input: InputSystem;
@@ -248,6 +276,23 @@ export class GameEngine {
   private snitchDartAway: boolean = false;  // current dart is a panic dart (away-bias active)
   private snitchDartAwayX: number = 0;
   private snitchDartAwayY: number = 0;
+
+  // ── Ambient bubble fauna (Stage 5) ────────────────────────────────────────
+  // Bubbles are always-present roamers, not wave enemies.  maintainAmbient-
+  // Bubbles keeps at least BUBBLE_CONSTANTS.AMBIENT_POPULATION alive, spawning
+  // one offscreen each time this top-up timer elapses while the field is short.
+  private ambientBubbleTimer: number = 0;
+
+  // ── Dragon mini-boss (Stage 6) ────────────────────────────────────────────
+  // Any number of engine-managed segmented serpents at once.  Each head is a
+  // normal ENEMY (damageable / routed through handleEntityDeath); per-dragon
+  // lifecycle + movement + Snake-body live on its DragonInstance (see
+  // spawnDragon / updateDragons).
+  private dragons: DragonInstance[] = [];
+  private _dragonEatBuf: GameEntity[] = []; // reused tile-devour scratch (no per-frame alloc)
+  private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
+  private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
+  private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -876,6 +921,11 @@ export class GameEngine {
     cycleEnemyScale();
   }
 
+  /** DBG: cycle the gnat (Swarm) movement mode to feel each side-by-side. */
+  public cycleSwarmMove() {
+    cycleSwarmMove();
+  }
+
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
   public toggleTraits() {
     this.physics.traitsEnabled = !this.physics.traitsEnabled;
@@ -1256,6 +1306,7 @@ export class GameEngine {
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
+    this.seedAmbientBubbles(); // always-present fauna, ready from frame one
   }
 
   public skipWave() {
@@ -1340,6 +1391,7 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
       forcedEnemy: this.forcedTestEnemy,
@@ -1398,6 +1450,10 @@ export class GameEngine {
       this.snitch = null;
       this.snitchTime = 0;
       this.snitchCatchCount = 0;
+      this.dragons = []; // die with the old map's entity list
+      this.dragonsKilled = 0; // reset the doubling payout per run
+      this.rivals = []; // rival ships die with the old map
+      this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -1565,6 +1621,7 @@ export class GameEngine {
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
       enemyScaleName: getActiveEnemyScaleName(),
+      swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
       traitsEnabled: this.physics.traitsEnabled,
       forcedEnemy: this.forcedTestEnemy,
@@ -1778,7 +1835,7 @@ export class GameEngine {
       // step, so enemies coast smoothly between AI updates (no snap).
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
-          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField);
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField, this.entityIndex.asteroids);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -1915,18 +1972,16 @@ export class GameEngine {
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
 
-      // Ammo drops follow the same asteroid flow field — the wind
-      // that catches loose shards also drags drops along, so a wave
-      // kill's drops drift with the local current toward the player
-      // instead of sitting where they spawned.  Magnetised drops
-      // skip the pass so the player-magnet trajectory isn't tugged
-      // sideways; health drops have mass=Infinity (static pickups)
-      // and aren't iterated here either.
+      // Collectible drops (ammo + health) follow the same asteroid flow
+      // field — the wind that catches loose shards also drags drops along,
+      // so a wave kill's drops drift with the local current toward the
+      // player instead of sitting where they spawned.  Magnetised drops
+      // skip the pass so the player-magnet trajectory isn't tugged sideways.
       if (flowEnabled) {
           for (let i = 0; i < this.activeDrops.length; i++) {
               const d = this.activeDrops[i];
               if (!d.active) continue;
-              if (d.dropType !== 'ammo') continue;
+              if (!isCollectibleDrop(d)) continue;
               if (d.magnetized) continue;
               const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
@@ -1991,15 +2046,25 @@ export class GameEngine {
   }
 
   private handleEntityDeath = (entity: GameEntity, opts?: { scoreScale?: number }) => {
+      // Dragon mini-boss (Stage 6): a bespoke death — payoff + rift collapse,
+      // not the normal enemy explosion/shard/drop path.
+      if (entity.enemySubtype === EnemySubtype.DRAGON && !entity.isExploding) {
+          const inst = this.dragons.find(g => g.head === entity);
+          if (inst) { this.dragonDeath(inst); return; }
+      }
+      // A body segment shot off: sever the tail + dissolve it (no regen/drops).
+      if (entity.dragonSegment === true) { this.dragonSegmentDeath(entity); return; }
       // Score before startExplosion flips isExploding — the flag doubles
       // as the already-scored guard if a second death dispatch slips in.
       // Survivors retired at time-up never reach this path (WaveSystem
       // flips `active` directly), so they correctly award nothing.
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
-      if (entity.type === EntityType.ENEMY && !entity.isExploding) {
+      if (entity.type === EntityType.ENEMY && !entity.isExploding && !entity.killedByRival) {
           // Ship kills build the combo and are paid at the resulting
           // multiplier; the scoreScale (snitch sweep = 0.5) stacks on top.
+          // A rival-killed enemy (killedByRival) pays the player NOTHING — the
+          // rival stole it (Stage 7); the theft is shown by the rival's popup.
           const mult = this.registerComboKill();
           const scale = opts?.scoreScale ?? 1;
           this.awardScore(
@@ -2009,6 +2074,31 @@ export class GameEngine {
       }
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
+      }
+
+      // Kamikaze detonation (Stage 0): a bomber flagged by the PhysicsSystem
+      // contact path fires its AoE shockwave at the contact point — instant,
+      // ENEMY-owned (threatens the player, shield-respecting in
+      // updateExplosionRings) + catches nearby enemies/structures as
+      // collateral.  Killed-early bombers never set the flag, so no boom.
+      if (entity.detonateOnDeath && entity.explosionRadius !== undefined) {
+          entity.detonateOnDeath = false;
+          // Ring handles collateral (nearby enemies/structures) + visuals; the
+          // PLAYER is hit DIRECTLY (below) so the launch + damage land instantly
+          // and reliably at the contact point, not gated on the ring sweep
+          // reaching them — hence the player is excluded from the ring.
+          this.spawnShockwave(entity.position, {
+              radius: entity.explosionRadius,
+              damage: entity.explosionDamage ?? 0,
+              knockback: entity.explosionKnockback ?? 0,
+              color: entity.color || '#e879f9',
+              ownerType: EntityType.ENEMY,
+              ownerId: entity.id, // a caught bubble blames the bomber (Stage 5)
+              excludeIds: ['player'],
+          });
+          this.applyKamikazeBlastToPlayer(entity);
+          // Heavy screen punch — the detonation should feel like a real blast.
+          this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
       }
 
       // Stage 5: shard-family death dispatches by variant id rather
@@ -2156,7 +2246,10 @@ export class GameEngine {
           this.shards.queueRegen(entity);
       }
 
-      if (entity.type === EntityType.ENEMY) {
+      // Tiny pop-on-contact gnats (Swarm) die in bulk — skip the heavy debris/
+      // drop spray + nebula dust so a popping cloud doesn't flood the field with
+      // shards, drops, and puffs.  They're a cheap threat, not a loot source.
+      if (entity.type === EntityType.ENEMY && !entity.diesOnContact) {
           this.spawnEnemyShards(entity);
 
           // Enemy death dust — a handful of nebula-shards tinted to the
@@ -2194,21 +2287,32 @@ export class GameEngine {
       if (entity.type === EntityType.ENEMY) {
           const ec = entity.color || '#f87171';
           const r = Math.max(entity.size.x, entity.size.y);
-          // Expanding shockwave ring (visual only) — a satisfying pop sized
-          // to the enemy; bigger enemies pop bigger.
-          this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
-          this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-          // Big colored debris burst + white core flash.
-          this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
-              speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
-              lifetimeMin: 0.3, lifetimeMax: 0.7,
-          });
-          this.spawnParticles(entity.position, 9, '#ffffff', {
-              speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
-              lifetimeMin: 0.15, lifetimeMax: 0.35,
-          });
-          // Small tier-scaled screen punch (respects the DBG shake toggle).
-          this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+          // Tiny pop-on-contact gnats (Swarm) die in bulk, so they get a
+          // deliberately LIGHT burst — one small ring + a few sparks, no screen
+          // shake — to avoid particle/shake spam when a cloud goes down at once.
+          if (entity.diesOnContact) {
+              this.spawnShockwave(entity.position, { radius: r * 1.6, damage: 0, knockback: 0, color: ec, lifetime: 0.2 });
+              this.spawnParticles(entity.position, 5, ec, {
+                  speedMin: 3, speedMax: 10, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.18, lifetimeMax: 0.4,
+              });
+          } else {
+              // Expanding shockwave ring (visual only) — a satisfying pop sized
+              // to the enemy; bigger enemies pop bigger.
+              this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
+              this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
+              // Big colored debris burst + white core flash.
+              this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+                  speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
+                  lifetimeMin: 0.3, lifetimeMax: 0.7,
+              });
+              this.spawnParticles(entity.position, 9, '#ffffff', {
+                  speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.15, lifetimeMax: 0.35,
+              });
+              // Small tier-scaled screen punch (respects the DBG shake toggle).
+              this.handleScreenShake(2.5 + (entity.enemyTier ?? 1));
+          }
       } else if (entity.type === EntityType.PLAYER) {
           // Cyan energy explosion
           this.spawnParticles(entity.position, 12, '#38bdf8', {
@@ -2384,6 +2488,26 @@ export class GameEngine {
     // entity the wavefront has just reached.  Runs after physics so
     // entity positions reflect this step's movement before being tested
     // against the ring radius.
+    // Kamikaze proximity fuse — detonate any bomber that has closed inside its
+    // trigger radius of the player, so the blast goes off slightly BEFORE
+    // contact (the on-contact path stays as a fallback).
+    this.updateKamikazeProximity();
+
+    // Stage 5: bubbles form/tick player latches and split when fat.  Runs
+    // BEFORE updateAttachments so a latch formed this step snaps the same frame.
+    this.updateBubbles(dt);
+    // Ambient fauna: keep the always-present bubble population topped up.
+    this.maintainAmbientBubbles(dt);
+
+    // Stage 3 reusable mechanics: snap grapples to their targets, and run the
+    // (gated) consume-and-grow neighbour scan.  Both no-op until an entity sets
+    // attachedToId / consume (Stage 4/5/6).
+    this.updateAttachments();
+    if (this.perfController.shouldRun('consume')) this.updateConsumers(dt);
+
+    // Stage 4: nests birth swarm brood on their timers.
+    this.updateNests(dt);
+
     const tRings = performance.now();
     this.updateExplosionRings();
     this.lastExplosionRingsMs = performance.now() - tRings;
@@ -2418,6 +2542,8 @@ export class GameEngine {
     // Snitch tick — spawn for a fresh wave, steer along the flow field,
     // run the catch check (collide / shoot per the DBG toggle).
     this.updateSnitch(dt);
+    this.updateDragons(dt);
+    this.updateRivals(dt);
 
     // Auto-collapse minimap
     if (this.minimapExpanded) {
@@ -2442,10 +2568,24 @@ export class GameEngine {
     this.player.velocity.y += moveDir.y * acc * timeScale;
     const throttle = Math.sqrt(moveDir.x * moveDir.x + moveDir.y * moveDir.y);
 
+    // Speed cap, with an external-impulse overshoot allowance: an explosion
+    // knockback (updateExplosionRings) raises `overSpeedAllow` above maxSpeed so
+    // the player is actually launched; the overshoot decays back to the cap each
+    // step (so the launch bleeds off) instead of the hard cap eating the hit.
+    let speedCap = maxSpeed;
+    if (this.player.overSpeedAllow !== undefined) {
+        const over = this.player.overSpeedAllow - maxSpeed;
+        if (over <= 0.5) {
+            this.player.overSpeedAllow = undefined;
+        } else {
+            this.player.overSpeedAllow = maxSpeed + over * Math.pow(HIT_FEEDBACK.PLAYER_KNOCKBACK_DECAY, timeScale);
+            speedCap = this.player.overSpeedAllow;
+        }
+    }
     const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
-    if (currentSpeed > maxSpeed) {
-        this.player.velocity.x = (this.player.velocity.x / currentSpeed) * maxSpeed;
-        this.player.velocity.y = (this.player.velocity.y / currentSpeed) * maxSpeed;
+    if (currentSpeed > speedCap) {
+        this.player.velocity.x = (this.player.velocity.x / currentSpeed) * speedCap;
+        this.player.velocity.y = (this.player.velocity.y / currentSpeed) * speedCap;
     }
 
     if (this.player.trail) {
@@ -2585,13 +2725,14 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0)
+    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
-    // Tick weapon cooldown + burst-fire queue via WeaponSystem.
+    // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
+    // EMP-disabled (Stage 3c) so an in-flight burst halts too.
     const tWeapons = performance.now();
-    if (this.currentMap) {
+    if (this.currentMap && !this.player.systemsDisabled) {
         this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt, this.handleScreenShake);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
@@ -2666,8 +2807,6 @@ export class GameEngine {
           drop.active = false;
           continue;
         }
-        // Health drops are static — skip the magnet pull.
-        if (drop.dropType === 'health') continue;
         // Latch on first entry into pull range; once latched the drop
         // keeps homing regardless of distance (guaranteed collection).
         if (!drop.magnetized) {
@@ -2928,6 +3067,10 @@ export class GameEngine {
   /** Tick the player's status effects: apply per-step damage, count down,
    *  drop expired.  Corrosion bleeds health directly (past the shield). */
   private tickStatusEffects(dt: number) {
+    // Derived disable flag is recomputed every tick (set below if an active
+    // 'disable' effect is present), so clear it up front even on the empty
+    // early-out so it can't stick after the effect lapses.
+    this.player.systemsDisabled = false;
     const list = this.player.statusEffects;
     if (!list || list.length === 0) return;
     let acidParticle = false;
@@ -2936,6 +3079,10 @@ export class GameEngine {
       if (e.kind === 'corrosion' && !this.player.isExploding) {
         this.player.health -= e.dmgPerStack * e.stacks * dt;
         acidParticle = true;
+      } else if (e.kind === 'disable') {
+        // EMP: weapon + shield offline while active (read in the fire + shield
+        // hot paths via systemsDisabled).
+        this.player.systemsDisabled = true;
       }
       e.remaining -= dt;
       if (e.remaining <= 0) list.splice(i, 1);
@@ -2955,6 +3102,13 @@ export class GameEngine {
     this.applyStatusEffect(this.player, {
       kind: 'corrosion', duration: CORROSION.DURATION,
       dmgPerSec: CORROSION.DMG_PER_SEC, maxStacks: CORROSION.MAX_STACKS,
+    });
+  }
+
+  /** DBG: EMP the player to test the weapon/shield disable + HUD badge. */
+  public debugApplyDisable() {
+    this.applyStatusEffect(this.player, {
+      kind: 'disable', duration: DISABLE.DURATION, dmgPerSec: 0, maxStacks: 1,
     });
   }
 
@@ -3444,6 +3598,8 @@ export class GameEngine {
 
   private handleShooting(target: Vector2, charged: boolean = false) {
       if (!this.currentMap) return;
+      // Weapon offline while EMP-disabled (Stage 3c).
+      if (this.player.systemsDisabled) return;
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
@@ -3476,7 +3632,7 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, dt);
+      this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, this.player, dt);
   }
 
   private updateLightningGravity(dt: number) {
@@ -3590,6 +3746,7 @@ export class GameEngine {
 
               target.health -= dmg;
               target.hitFlash = 0.15;
+              target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
               this.spawnDamageText(target.position, dmg, target);
 
               if (target.health <= 0 && !target.isExploding) {
@@ -3647,8 +3804,524 @@ export class GameEngine {
   // pre-populated into hitEntityIds so it isn't double-damaged (it
   // already took config.damage from the projectile collision upstream).
   // Player is also pre-populated to prevent self-damage.
-  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {
+  // ─── Nest brood spawning (Stage 4) ─────────────────────────────────────
+  //
+  // Tick each nest's brood timer; when it elapses, birth a batch of brood at
+  // the nest (via WaveSystem.spawnAt with counts=false — Stage 2b — so they
+  // don't gate wave completion) up to the spawner's maxBrood cap (a hard cap on
+  // the self-replicating population).  The O(enemies) brood census only runs on
+  // the spawn frame, so the common case is just an O(nests) timer tick.
+  private updateNests(dt: number) {
       if (!this.currentMap) return;
+      const enemies = this.entityIndex.enemies;
+      let ctx: WaveSpawnContext | null = null;
+      for (let i = 0; i < enemies.length; i++) {
+          const nest = enemies[i];
+          if (nest.spawnTimer === undefined || !nest.active || nest.isExploding) continue;
+          const spawner = nest.enemySubtype ? ENEMY_VARIANTS[nest.enemySubtype].spawner : undefined;
+          if (!spawner) continue;
+          nest.spawnTimer -= dt;
+          if (nest.spawnTimer > 0) continue;
+          nest.spawnTimer = spawner.interval;
+
+          // Hard cap: count live brood of the spawned subtype and stop at maxBrood.
+          let brood = 0;
+          for (let k = 0; k < enemies.length; k++) {
+              const e = enemies[k];
+              if (e.enemySubtype === spawner.subtype && e.active && !e.isExploding) brood++;
+          }
+          const room = spawner.maxBrood - brood;
+          if (room <= 0) continue;
+          ctx = ctx ?? this.waveContext();
+          if (!ctx) continue;
+          const n = Math.min(spawner.batch, room);
+          for (let b = 0; b < n; b++) this.waves.spawnAt(spawner.subtype, nest.position, ctx, false);
+          // Birth puff so the spawn reads.
+          this.spawnParticles(nest.position, 8, nest.color || '#0d9488', {
+              speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
+              lifetimeMin: 0.25, lifetimeMax: 0.55,
+          });
+      }
+  }
+
+  // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
+  //
+  // For each BUBBLE enemy: (1) a PASSIVE bubble grown to its multiply.atSize
+  // SPLITS — it resets to base size and births one offspring (counts=false),
+  // capped at multiply.maxPopulation live bubbles; (2) a PROVOKED bubble LATCHES
+  // onto its AGGRO TARGET (the last thing to attack it — the player OR an enemy)
+  // on contact — attach (Stage 3c) + drain, and an EMP (disable status) when the
+  // target is the player.  Against the player the latch ends in a pop (spent
+  // charge); against an enemy it releases and the bubble survives to re-engage.
+  // O(enemies) with a one-shot population census only on a split frame; ungated
+  // (bubbles are few), matching the kamikaze/nest passes.  Toroidal.
+  private updateBubbles(dt: number) {
+      if (!this.currentMap) return;
+      const p = this.player;
+      const enemies = this.entityIndex.enemies;
+      const B = BUBBLE_CONSTANTS;
+      const baseSize = ENEMY_VARIANTS[EnemySubtype.BUBBLE].size;
+      // Terrain-slam window (player smacked a tile/asteroid fast) ticks down here.
+      if (p.terrainSlamTimer) p.terrainSlamTimer = Math.max(0, p.terrainSlamTimer - dt);
+      let ctx: WaveSpawnContext | null = null;
+
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.enemySubtype !== EnemySubtype.BUBBLE || !e.active || e.isExploding) continue;
+          const cfg = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
+          if (e.bubbleFeedTimer) e.bubbleFeedTimer = Math.max(0, e.bubbleFeedTimer - dt); // membrane bulge decay
+          if (e.bubbleSickTimer) e.bubbleSickTimer = Math.max(0, e.bubbleSickTimer - dt);
+          const sick = (e.bubbleSickTimer ?? 0) > 0;
+
+          // ── Digesting a held shard: tick down, then grow + heal (the eat). The
+          // shrinking ghost is drawn inside the membrane by RenderSystem. ──
+          if ((e.bubbleDigestTimer ?? 0) > 0) {
+              e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
+              if (Math.random() < 0.25) {
+                  this.spawnParticles(e.position, 1, e.bubbleDigestColor || '#a8a29e', {
+                      speedMin: 0.5, speedMax: 2, sizeMin: 0.8, sizeMax: 1.8,
+                      lifetimeMin: 0.2, lifetimeMax: 0.45, positionJitter: Math.max(e.size.x, e.size.y) * 0.3,
+                  });
+              }
+              if (e.bubbleDigestTimer <= 0) {
+                  // Recover the richness from the stored per-shard duration.
+                  const rich = (e.bubbleDigestDuration ?? B.DIGEST_DURATION) / B.DIGEST_DURATION;
+                  this.growConsumer(e, cfg.consume!, rich);
+                  this.syncBubbleMaxHealth(e); // maxHP scales with the new size
+                  e.bubbleFeedTimer = B.FEED_PULSE; // final gulp bulge
+                  e.bubbleDigestTimer = 0;
+                  e.bubbleDigestDuration = undefined;
+                  e.bubbleDigestColor = undefined;
+                  e.bubbleDigestSize0 = undefined;
+              }
+          }
+
+          // ── Latched: EMP + size-scaled drain; falls off (→ sick) on the timer,
+          // a projectile hit, or a player terrain slam.  No longer dies. ──
+          if (e.attachedToId !== undefined) {
+              const victim = this.resolveAggroTarget(e.attachedToId);
+              const onPlayer = e.attachedToId === 'player';
+              // Face the target so the membrane squashes against its hull (render).
+              e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
+              if (victim && !victim.isExploding) {
+                  if (onPlayer) this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                  const drain = B.LATCH_DPS * (Math.max(e.size.x, e.size.y) / baseSize); // bigger bubble bites harder
+                  victim.health -= drain * dt;
+                  if (victim.health <= 0 && !victim.isExploding) this.handleEntityDeath(victim);
+              }
+              e.bubbleLatchTimer = (e.bubbleLatchTimer ?? 0) - dt;
+              const shaken = e.bubbleKnockFree === true || (onPlayer && (p.terrainSlamTimer ?? 0) > 0);
+              if (e.bubbleLatchTimer <= 0 || shaken || !victim || victim.isExploding) {
+                  e.bubbleKnockFree = undefined;
+                  this.detachLatch(e); // fall off + go sick + lose aggro (no death)
+              }
+              continue;
+          }
+
+          if (sick) continue; // sluggish + can't hunt/latch/breed (AISystem drifts it)
+
+          // ── Provoked + in contact with the aggro target → latch on ──
+          const target = e.aggroTargetId ? this.resolveAggroTarget(e.aggroTargetId) : (e.provoked ? p : null);
+          if (target) {
+              if (!target.active || target.isExploding) {
+                  // Attacker gone → calm down (back to ambient drift / breeding).
+                  e.aggroTargetId = undefined;
+                  e.provoked = false;
+              } else {
+                  const tr = Math.max(target.size.x, target.size.y) / 2;
+                  const dx = wrapDeltaX(e.position.x, target.position.x);
+                  const dy = wrapDeltaY(e.position.y, target.position.y);
+                  const reach = tr + Math.max(e.size.x, e.size.y) / 2 + B.CONTACT_PAD;
+                  if (dx * dx + dy * dy <= reach * reach) {
+                      e.attachedToId = target.id;
+                      e.attachOffset = { x: -dx, y: -dy }; // ride where it grabbed
+                      e.bubbleLatchTimer = B.LATCH_DURATION;
+                      if (target.id === 'player') this.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
+                      this.spawnParticles(target.position, 10, e.color || '#67e8f9', {
+                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3.5,
+                          lifetimeMin: 0.2, lifetimeMax: 0.5,
+                      });
+                  }
+                  continue; // a provoked bubble doesn't breed
+              }
+          }
+
+          // ── Passive + fat enough → split into two base-size bubbles ──
+          // (not while digesting a meal).
+          const mult = cfg.multiply;
+          if (mult && (e.bubbleDigestTimer ?? 0) <= 0 && Math.max(e.size.x, e.size.y) >= mult.atSize) {
+              let pop = 0;
+              for (let k = 0; k < enemies.length; k++) {
+                  const o = enemies[k];
+                  if (o.enemySubtype === EnemySubtype.BUBBLE && o.active && !o.isExploding) pop++;
+              }
+              if (pop >= mult.maxPopulation) continue;
+              ctx = ctx ?? this.waveContext();
+              if (!ctx) continue;
+              const base = cfg.size;
+              e.size.x = base; e.size.y = base;
+              this.syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
+              const a = Math.random() * Math.PI * 2;
+              e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
+              e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
+              const child = this.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
+              child.velocity.x = -Math.cos(a) * B.SPLIT_SPEED;
+              child.velocity.y = -Math.sin(a) * B.SPLIT_SPEED;
+              this.spawnParticles(e.position, 8, e.color || '#67e8f9', {
+                  speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3,
+                  lifetimeMin: 0.2, lifetimeMax: 0.5,
+              });
+          }
+      }
+  }
+
+  /** Resolve a bubble's aggro/latch target id to a live entity — the player
+   *  ('player') or an active enemy by id — or null if it's gone.  Cheap: the
+   *  player is special-cased and enemies come from the small filtered index. */
+  private resolveAggroTarget(id: string): GameEntity | null {
+      if (id === 'player') return this.player;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          if (enemies[i].id === id) return enemies[i].active ? enemies[i] : null;
+      }
+      return null;
+  }
+
+  /** Break a bubble's latch: it falls off, goes SICK (sluggish + can't eat),
+   *  and loses aggro — it does NOT die (shoot it while sick for the kill). */
+  private detachLatch(e: GameEntity) {
+      e.attachedToId = undefined;
+      e.attachOffset = undefined;
+      e.bubbleLatchTimer = 0;
+      e.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
+      e.aggroTargetId = undefined;
+      e.provoked = false; // calm down after the bite
+      this.spawnParticles(e.position, 12, BUBBLE_CONSTANTS.SICK_COLOR, {
+          speedMin: 2, speedMax: 7, sizeMin: 1.5, sizeMax: 3.2,
+          lifetimeMin: 0.2, lifetimeMax: 0.55,
+      });
+  }
+
+  /** Richness of a shard for mass/energy-conserved eating (shardRichness):
+   *  denser/bigger shards score higher → longer digest + more growth/health.
+   *  Clamped to BUBBLE_CONSTANTS.RICH_MIN..RICH_MAX. */
+  private shardRichness(shard: GameEntity): number {
+      const sizeR = Math.max(shard.size.x, shard.size.y) / 26; // ≈ a baseline shard
+      let dens = 1;
+      switch (shard.shardVariant) {
+          case 'metal-shard':   dens = 1.7;  break;
+          case 'rock-shard':    dens = 1.35; break;
+          case 'glass-shard':   dens = 0.9;  break;
+          case 'plastic-shard': dens = 0.9;  break;
+          case 'nebula-shard':  dens = 0.8;  break;
+      }
+      return Math.max(BUBBLE_CONSTANTS.RICH_MIN, Math.min(BUBBLE_CONSTANTS.RICH_MAX, sizeR * dens));
+    }
+
+  /** Toxic shards make the bubble sick on eating: plastic, or a GREEN nebula
+   *  shard (green-dominant blended colour). */
+  private isToxicShard(shard: GameEntity): boolean {
+      if (shard.shardVariant === 'plastic-shard') return true;
+      if (shard.shardVariant === 'nebula-shard') {
+          const hex = shard.nebulaBlendedHex || shard.color || '';
+          if (hex.length >= 7) {
+              const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+              return g > r * 1.1 && g > b * 1.1 && g > 90; // green-dominant
+          }
+      }
+      return false;
+  }
+
+  // ─── Ambient bubble population (Stage 5) ───────────────────────────────
+  //
+  // Bubbles are always-present fauna, not wave enemies — keep at least
+  // BUBBLE_CONSTANTS.AMBIENT_POPULATION alive at all times by topping up
+  // offscreen on a timer while the field is short (breeding can carry the count
+  // higher on its own).  Skipped while a DIFFERENT enemy is force-selected in
+  // the DBG enemy-test so that isolation stays clean.  O(enemies) census.
+  private maintainAmbientBubbles(dt: number) {
+      if (!this.currentMap || this.gameState !== GameState.PLAYING) return;
+      // A DBG enemy-test forcing a single type suppresses the ambient fauna so
+      // that type is seen in isolation.
+      if (this.forcedTestEnemy) return;
+
+      let count = 0;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.enemySubtype === EnemySubtype.BUBBLE && e.active && !e.isExploding) count++;
+      }
+      if (count >= BUBBLE_CONSTANTS.AMBIENT_POPULATION) {
+          this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+          return;
+      }
+      this.ambientBubbleTimer -= dt;
+      if (this.ambientBubbleTimer > 0) return;
+      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+      this.spawnAmbientBubble();
+  }
+
+  /** Seed the ambient bubble population in one shot (called on entering play so
+   *  the fauna is present from the first frame, not trickled in). */
+  private seedAmbientBubbles() {
+      if (!this.currentMap || this.forcedTestEnemy) return;
+      for (let i = 0; i < BUBBLE_CONSTANTS.AMBIENT_POPULATION; i++) this.spawnAmbientBubble();
+      this.ambientBubbleTimer = BUBBLE_CONSTANTS.AMBIENT_RESPAWN_INTERVAL;
+  }
+
+  /** Spawn one ambient bubble just outside the viewport (so it drifts in rather
+   *  than popping into view).  counts=false + the `ambient` variant flag keep it
+   *  out of wave accounting. */
+  private spawnAmbientBubble(): GameEntity | null {
+      const ctx = this.waveContext();
+      if (!ctx) return null;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + Math.random() * 240;
+      const pos = {
+          x: this.player.position.x + Math.cos(angle) * dist,
+          y: this.player.position.y + Math.sin(angle) * dist,
+      };
+      wrapPosition(pos);
+      return this.waves.spawnAt(EnemySubtype.BUBBLE, pos, ctx, false);
+  }
+
+  // ─── Kamikaze proximity fuse ───────────────────────────────────────────
+  //
+  // Each step, detonate any bomber (explosionRadius stamped) that has closed
+  // inside (player half-size + bomber half-size + KAMIKAZE_DETONATE_BUFFER) of
+  // the player, so the blast goes off a hair BEFORE the hulls touch rather than
+  // on overlap.  O(enemies); no PerfController gate (matches the AI pass).  The
+  // on-contact detonation in PhysicsSystem remains as a fallback.
+  private updateKamikazeProximity() {
+      const p = this.player;
+      if (p.isExploding) return;
+      const enemies = this.entityIndex.enemies;
+      const pr = Math.max(p.size.x, p.size.y) / 2;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          if (e.explosionRadius === undefined || e.isExploding) continue;
+          const dx = wrapDeltaX(e.position.x, p.position.x);
+          const dy = wrapDeltaY(e.position.y, p.position.y);
+          const trigger = pr + Math.max(e.size.x, e.size.y) / 2 + KAMIKAZE_DETONATE_BUFFER;
+          if (dx * dx + dy * dy <= trigger * trigger) {
+              e.detonateOnDeath = true;
+              this.handleEntityDeath(e);
+          }
+      }
+  }
+
+  // ─── Attach pass (Stage 3c) ────────────────────────────────────────────
+  //
+  // Snap every attached entity onto its target each frame (a latch / grapple).
+  // Runs in updateGameLogic AFTER physics so it tracks the target's post-move
+  // position.  If the target is gone (dead / inactive / missing) the attachment
+  // releases.  Iterates the (small) enemies index — the only attachers today
+  // are enemies (the bubble grappling the player); revisit if a non-enemy ever
+  // needs to attach.
+  private updateAttachments() {
+      const ents = this.entityIndex.enemies;
+      for (let i = 0; i < ents.length; i++) {
+          const e = ents[i];
+          if (!e.active || e.attachedToId === undefined) continue;
+          const target = this.entityById(e.attachedToId);
+          if (!target || !target.active || target.isExploding) {
+              e.attachedToId = undefined;
+              continue;
+          }
+          e.position.x = target.position.x + (e.attachOffset?.x ?? 0);
+          e.position.y = target.position.y + (e.attachOffset?.y ?? 0);
+          wrapPosition(e.position);
+          e.velocity.x = target.velocity.x;
+          e.velocity.y = target.velocity.y;
+      }
+  }
+
+  /** Linear lookup of an active entity by id (small N; attachments are rare). */
+  private entityById(id: string): GameEntity | undefined {
+      const ents = this.currentMap?.entities;
+      if (!ents) return undefined;
+      if (id === 'player') return this.player;
+      for (let i = 0; i < ents.length; i++) if (ents[i].id === id) return ents[i];
+      return undefined;
+  }
+
+  // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
+  //
+  // For each consumer (an entity carrying a `consume` config — the bubble; the
+  // dragon later), two-phase feeding within the SENSE radius (`cfg.range`):
+  // mobile candidates outside membrane contact are PULLED inward (a suck-in tug,
+  // `cfg.pull`), and a candidate that has reached MEMBRANE CONTACT (radii
+  // overlap) is SWALLOWED — grow + animate (consumeEntity).  This replaces the
+  // old eat-on-sight-at-range so shards visibly stream in and pop on contact
+  // instead of vanishing from afar.  PerfController-gated ('consume');
+  // torus-correct.  Growth is capped at `cfg.maxSize`; the self-replication
+  // entity cap lives at the child-spawn site (updateBubbles, Stage 5).
+  private updateConsumers(dt: number) {
+      if (!this.currentMap) return;
+      const enemies = this.entityIndex.enemies;
+      // Candidates: mobile shards (asteroids index) and/or static tiles.
+      const shards = this.entityIndex.asteroids;
+      for (let c = 0; c < enemies.length; c++) {
+          const consumer = enemies[c];
+          const cfg = consumer.consume;
+          if (!cfg || !consumer.active || consumer.isExploding) continue;
+          // Only a calm, idle bubble feeds: a hunting (provoked), latched,
+          // digesting, or SICK bubble doesn't pull or capture shards.
+          if ((consumer.bubbleDigestTimer ?? 0) > 0 || consumer.attachedToId !== undefined
+              || consumer.provoked || (consumer.bubbleSickTimer ?? 0) > 0) continue;
+          const rangeSq = cfg.range * cfg.range;
+          const consumerR = Math.max(consumer.size.x, consumer.size.y) * 0.6; // membrane radius
+          for (let k = 0; k < shards.length; k++) {
+              const cand = shards[k];
+              if (!cand.active || cand.isExploding) continue;
+              const wantTile = cfg.eats === 'tile';
+              const isTile = cand.mass === Infinity;
+              if (wantTile !== isTile) continue;
+              const dx = wrapDeltaX(consumer.position.x, cand.position.x); // consumer→cand
+              const dy = wrapDeltaY(consumer.position.y, cand.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 > rangeSq) continue;
+              const candR = Math.max(cand.size.x, cand.size.y) * 0.5;
+              const contact = consumerR + candR;
+              if (d2 <= contact * contact) {
+                  // SWALLOW on membrane contact.  Mobile shards are engulfed and
+                  // DIGESTED over time (held inside the bubble); static tiles
+                  // (the future dragon) are eaten instantly.
+                  if (isTile) this.consumeTile(consumer, cand, cfg, dx, dy);
+                  else { this.beginDigest(consumer, cand, dx, dy); break; }
+              } else if (!isTile && cfg.pull) {
+                  // Suck-in: tug the mobile shard toward the membrane, stronger
+                  // the closer it is (so a near shard accelerates into the mouth).
+                  const d = Math.sqrt(d2) || 1;
+                  const prox = 1 - d / cfg.range;          // 0 at the rim → 1 at contact
+                  const a = cfg.pull * (0.3 + 0.7 * prox) * dt;
+                  cand.velocity.x -= (dx / d) * a;
+                  cand.velocity.y -= (dy / d) * a;
+              }
+          }
+      }
+  }
+
+  /** Grow a consumer by one eat (size + heal + optional mass), scaled by `scale`
+   *  (the shard's richness — mass/energy conserved), capped at maxSize.  Shared
+   *  by the shard-digest finish + the instant tile eat.  (The bubble's maxHealth
+   *  is recomputed from its new size by syncBubbleMaxHealth, called after.) */
+  private growConsumer(consumer: GameEntity, cfg: ConsumeConfig, scale: number = 1) {
+      const cur = Math.max(consumer.size.x, consumer.size.y);
+      if (cur < cfg.maxSize) {
+          const grown = Math.min(cfg.maxSize, cur + cfg.growthPerEat * scale);
+          const s = grown / (cur || 1);
+          consumer.size.x *= s;
+          consumer.size.y *= s;
+      }
+      // Heal from eating (a denser meal heals more) — caps at the current maxHP;
+      // size-driven maxHP growth is applied by syncBubbleMaxHealth afterwards.
+      consumer.health = Math.min(consumer.maxHealth, consumer.health + BUBBLE_CONSTANTS.HEAL_PER_RICH * scale);
+      if (cfg.massPerEat && consumer.mass !== Infinity) consumer.mass += cfg.massPerEat * scale;
+  }
+
+  /** Keep a bubble's maxHealth LINEAR with its size (anchored at the variant's
+   *  base health @ base size).  Growing raises the ceiling AND fills the new HP
+   *  (mass conserved); shrinking on a split caps current HP to the new ceiling. */
+  private syncBubbleMaxHealth(e: GameEntity) {
+      const v = ENEMY_VARIANTS[EnemySubtype.BUBBLE];
+      const newMax = v.health * (Math.max(e.size.x, e.size.y) / v.size);
+      const delta = newMax - e.maxHealth;
+      e.maxHealth = newMax;
+      e.health = delta > 0 ? Math.min(newMax, e.health + delta) : Math.min(e.health, newMax);
+  }
+
+  /** Begin digesting a mobile shard: snapshot its look onto the bubble, swallow
+   *  it (deactivate), and spray a brief inward implosion.  Digest TIME scales
+   *  with the shard's richness (denser = slower), stored on the bubble so the
+   *  finish (updateBubbles) recovers the same richness for the heal/grow.  A
+   *  TOXIC shard (plastic / green-nebula) also makes the bubble sick.  The bubble
+   *  renders the shard as a shrinking ghost INSIDE its membrane until done.
+   *  `dx/dy` is consumer→shard. */
+  private beginDigest(consumer: GameEntity, shard: GameEntity, dx: number, dy: number) {
+      const rich = this.shardRichness(shard);
+      const dur = BUBBLE_CONSTANTS.DIGEST_DURATION * rich;
+      consumer.bubbleDigestTimer = dur;
+      consumer.bubbleDigestDuration = dur;
+      consumer.bubbleDigestColor = shard.color || '#a8a29e';
+      consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
+      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
+      if (this.isToxicShard(shard)) consumer.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
+      const inward = Math.atan2(-dy, -dx); // shard → bubble
+      this.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
+          spreadAngle: inward, spreadCone: 0.8,
+          speedMin: 2.5, speedMax: 6, sizeMin: 1, sizeMax: 2.4,
+          lifetimeMin: 0.1, lifetimeMax: 0.26,
+      });
+      shard.active = false; // swallowed (no score/regen — it's eaten, not destroyed)
+  }
+
+  /** Instant tile eat (the future dragon): grow + route the tile through the
+   *  death/flow-field patch + an inward implosion.  `dx/dy` is consumer→tile. */
+  private consumeTile(consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
+      this.growConsumer(consumer, cfg);
+      const inward = Math.atan2(-dy, -dx);
+      this.spawnParticles(tile.position, 9, tile.color || '#a8a29e', {
+          spreadAngle: inward, spreadCone: 0.9,
+          speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,
+          lifetimeMin: 0.12, lifetimeMax: 0.3,
+      });
+      consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
+      this.physics.removeStaticEntity(tile);
+      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
+      tile.active = false;
+  }
+
+  // ─── Kamikaze blast → player (direct, instant) ─────────────────────────
+  //
+  // Applied at detonation (handleEntityDeath) so the launch + damage land the
+  // same frame at the contact point, independent of the expanding ring (which
+  // only sweeps collateral onto other entities).  Damage is shield-respecting;
+  // the knockback drives the player past the speed cap via `overSpeedAllow` so
+  // it reads as a real shove (the hard cap would otherwise eat it).  Falloff
+  // floors at 0.3 so a point-blank bomber always throws you.
+  private applyKamikazeBlastToPlayer(bomb: GameEntity) {
+      const p = this.player;
+      if (p.isExploding) return;
+      const radius = bomb.explosionRadius ?? 0;
+      if (radius <= 0) return;
+      const dx = wrapDeltaX(bomb.position.x, p.position.x);
+      const dy = wrapDeltaY(bomb.position.y, p.position.y);
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius) return;
+      const falloff = Math.max(0.3, 1 - dist / radius);
+
+      // Damage (shield first, then hull) — mirrors the projectile/ram paths.
+      let dmg = (bomb.explosionDamage ?? 0) * falloff;
+      if ((p.shield ?? 0) > 0) {
+          const absorbed = Math.min(p.shield!, dmg);
+          p.shield! -= absorbed;
+          dmg -= absorbed;
+          p.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+          p.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+      }
+      if (dmg > 0) {
+          p.health -= dmg;
+          this.spawnDamageText(p.position, dmg, p);
+      }
+      p.hitFlash = 0.2;
+
+      // Launch: shove along the bomb→player vector (away from the blast) and
+      // raise the overshoot allowance so the cap doesn't clamp the impulse.
+      const k = (bomb.explosionKnockback ?? 0) * falloff;
+      let nx: number, ny: number;
+      if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
+      else { const a = Math.random() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
+      p.velocity.x += nx * k;
+      p.velocity.y += ny * k;
+      p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, Math.hypot(p.velocity.x, p.velocity.y));
+
+      if (p.health <= 0 && !p.isExploding) this.handleEntityDeath(p);
+  }
+
+  private applyExplosionAoE(impactPos: Vector2, proj: GameEntity, directTarget: GameEntity) {      if (!this.currentMap) return;
 
       // Impact-frame visuals (instant): bright spark burst + screen shake.
       // These don't wait for the wavefront — the player should feel the
@@ -3671,6 +4344,7 @@ export class GameEngine {
           knockback: proj.explosionKnockback ?? 0,
           color: WEAPONS[WeaponType.CANNON].color,
           ownerType: proj.ownerType,
+          ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
           excludeIds: [directTarget.id, 'player'],
       });
   }
@@ -3690,6 +4364,7 @@ export class GameEngine {
       color: string;
       lifetime?: number;
       ownerType?: GameEntity['ownerType'];
+      ownerId?: string;
       excludeIds?: string[];
   }) {
       if (!this.currentMap) return;
@@ -3730,6 +4405,7 @@ export class GameEngine {
           explosionDamage: opts.damage,
           explosionKnockback: opts.knockback,
           ownerType: opts.ownerType,
+          ownerId: opts.ownerId,
           hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
           validHitIds,
       });
@@ -3788,10 +4464,25 @@ export class GameEngine {
               const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
 
               if (dmg > 0) {
-                  const applied = dmg * falloff;
+                  let applied = dmg * falloff;
                   const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
+                  // Player shield soaks the blast first (kamikaze AoE and any
+                  // future enemy-owned explosion) so an AoE hit isn't a raw
+                  // shield-bypass — mirrors the projectile / ram absorption.
+                  if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
+                      const absorbed = Math.min(e.shield!, applied);
+                      e.shield! -= absorbed;
+                      applied -= absorbed;
+                      e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
+                      e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+                  }
                   if (!isIndestructible) e.health -= applied;
+                  if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
+                  // Third-party retaliation (Stage 5): an AoE that catches a
+                  // bubble makes it target the blast's owner.
+                  if (e.thirdParty && ring.ownerId) e.aggroTargetId = ring.ownerId;
                   e.hitFlash = 0.12;
+                  e.hitReact = hitReactStrength(applied, e.maxHealth ?? e.health);
                   this.spawnDamageText(e.position, applied, e);
                   if (e.health <= 0 && !e.isExploding) {
                       e.lastImpactDamage = applied;
@@ -3811,6 +4502,12 @@ export class GameEngine {
                   const k = knock * falloff;
                   e.velocity.x += (dx / dist) * k;
                   e.velocity.y += (dy / dist) * k;
+                  // Let the player overshoot the speed cap so the blast actually
+                  // launches them; the overshoot decays in updatePlayerMovement.
+                  if (e.id === 'player') {
+                      const sp = Math.hypot(e.velocity.x, e.velocity.y);
+                      e.overSpeedAllow = Math.max(e.overSpeedAllow ?? 0, sp);
+                  }
               }
           }
       }
@@ -4240,6 +4937,644 @@ export class GameEngine {
       }
     }
     this.waves.endWaveBySnitch(SCORE_CONSTANTS.SNITCH_POINTS, this.handleWaveCleared);
+  }
+
+  // ─── Dragon mini-boss (Stage 6) ────────────────────────────────────────
+  //
+  // Engine-managed segmented serpent.  The head is a normal ENEMY (so
+  // projectiles damage it + handleEntityDeath routes a kill); this pass owns the
+  // lifecycle (enter→roam→leave), the flow-weave steering, the body-path
+  // history, and the tile-devour growth (via the shared consume pass).  One at a
+  // time; DBG-summonable.  Toroidal.
+  private updateDragons(dt: number) {
+      if (this.dragons.length === 0 || !this.currentMap) return;
+      const D = DRAGON_CONSTANTS;
+      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+      const cruise = Math.min(moveCfg.maxSpeed,
+          (moveCfg.acceleration * getActivePlayerThrustMult()) / (1 - moveCfg.friction));
+
+      for (let n = this.dragons.length - 1; n >= 0; n--) {
+          const inst = this.dragons[n];
+          const d = inst.head;
+          if (!d.active) { this.dragons.splice(n, 1); continue; }
+          inst.time += dt;
+
+          // ── Steering ── while LEAVING, drive STRAIGHT toward the exit portal
+          // (then keep going straight once the head is through, so the whole
+          // body follows it through); otherwise the slow flow-weave roam.
+          let dirX: number, dirY: number, speedMul: number;
+          if (inst.state === 'leave' && inst.portal) {
+              if (!inst.headThrough) {
+                  const px = wrapDeltaX(d.position.x, inst.portal.x), py = wrapDeltaY(d.position.y, inst.portal.y);
+                  const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm;
+              } else {
+                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1; dirX = d.velocity.x / vm; dirY = d.velocity.y / vm; // continue straight
+              }
+              speedMul = D.LEAVE_SPEED_MULT;
+          } else {
+              const flow = this.flowField.sampleAsteroidFlow(d.position.x, d.position.y);
+              const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
+              const cosW = Math.cos(wob), sinW = Math.sin(wob);
+              dirX = flow.x * cosW - flow.y * sinW;
+              dirY = flow.x * sinW + flow.y * cosW;
+              speedMul = 1;
+          }
+          const target = cruise * D.SPEED_FRAC * speedMul;
+          const alpha = Math.min(1, D.STEER_RATE * dt * 60 * (inst.state === 'leave' ? 4 : 1));
+          d.velocity.x += (dirX * target - d.velocity.x) * alpha;
+          d.velocity.y += (dirY * target - d.velocity.y) * alpha;
+          d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
+
+          // ── Body path history (newest first) ──
+          if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
+          const head0 = d.dragonPath[0];
+          const mdx = wrapDeltaX(head0.x, d.position.x), mdy = wrapDeltaY(head0.y, d.position.y);
+          if (mdx * mdx + mdy * mdy >= D.PATH_SPACING * D.PATH_SPACING) {
+              d.dragonPath.unshift({ x: d.position.x, y: d.position.y });
+              if (d.dragonPath.length > D.PATH_MAX) d.dragonPath.length = D.PATH_MAX;
+          }
+
+          // ── Devour tiles in the head's path → APPEND each as a body segment ──
+          if (inst.state !== 'leave') {
+              const headR = Math.max(d.size.x, d.size.y) * 0.6;
+              const buf = this._dragonEatBuf;
+              buf.length = 0;
+              this.physics.forEachStaticNear(d.position.x, d.position.y, headR + 40, (t) => buf.push(t));
+              for (let i = 0; i < buf.length; i++) {
+                  const t = buf[i];
+                  if (!t.active || t.shardVariant === 'indestructible-tile') continue; // can't devour the unbreakable
+                  const tdx = wrapDeltaX(d.position.x, t.position.x);
+                  const tdy = wrapDeltaY(d.position.y, t.position.y);
+                  const contact = headR + Math.max(t.size.x, t.size.y) * 0.5;
+                  if (tdx * tdx + tdy * tdy <= contact * contact) this.appendDragonSegment(inst, t, tdx, tdy);
+              }
+          }
+
+          // ── Chain-follow: snap each body segment along the head's path ──
+          this.positionDragonBody(inst);
+
+          // ── Leaving: the dragon flies INTO the exit portal and is consumed
+          // HEAD→TAIL — each part vanishes (puff) as it crosses the portal, the
+          // body trailing through behind the (now-hidden) head. ──
+          if (inst.state === 'leave' && inst.portal) {
+              const cr = D.PORTAL_CONSUME_RADIUS, crSq = cr * cr;
+              if (!inst.headThrough) {
+                  const hx = wrapDeltaX(d.position.x, inst.portal.x), hy = wrapDeltaY(d.position.y, inst.portal.y);
+                  if (hx * hx + hy * hy <= crSq) {
+                      inst.headThrough = true;
+                      d.dragonHidden = true;        // head "entered" — stop drawing it
+                      d.contactDamage = 0;          // and stop hurting on contact
+                      this.spawnParticles(d.position, 14, D.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
+                  }
+              }
+              let remaining = 0;
+              for (let i = 0; i < inst.body.length; i++) {
+                  const s = inst.body[i];
+                  if (!s.active) continue;
+                  const sx = wrapDeltaX(s.position.x, inst.portal.x), sy = wrapDeltaY(s.position.y, inst.portal.y);
+                  if (sx * sx + sy * sy <= crSq) {
+                      s.active = false;
+                      this.spawnParticles(s.position, 9, s.color || D.PORTAL_COLOR, { speedMin: 2, speedMax: 7, sizeMin: 1.2, sizeMax: 3, lifetimeMin: 0.15, lifetimeMax: 0.5 });
+                  } else remaining++;
+              }
+              // Fully through (or the safety timer expired) → gone.
+              if ((inst.headThrough && remaining === 0) || inst.stateTimer <= 0) {
+                  this.despawnDragon(inst);
+                  this.dragons.splice(n, 1);
+                  continue;
+              }
+          }
+
+          // ── Provoke-on-attack (third party): head shot stamps `provoked`
+          // (PhysicsSystem); a BODY-segment hit provokes too (default player). ──
+          if (!d.provoked) {
+              for (let i = 0; i < inst.body.length; i++) {
+                  if ((inst.body[i].hitFlash ?? 0) > 0) { d.provoked = true; if (!d.aggroTargetId) d.aggroTargetId = 'player'; break; }
+              }
+          }
+
+          // ── Head attacks: ONLY once provoked — spit gnats + lob missiles ──
+          if (inst.state === 'roam' && d.provoked) {
+              inst.gnatTimer -= dt;
+              if (inst.gnatTimer <= 0) {
+                  inst.gnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
+                  const ctx = this.waveContext();
+                  if (ctx) {
+                      this.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
+                      this.spawnParticles(d.position, 7, '#2dd4bf', {
+                          speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.2, lifetimeMax: 0.5,
+                      });
+                  }
+              }
+              inst.missileTimer -= dt;
+              if (inst.missileTimer <= 0 && !this.player.isExploding) {
+                  inst.missileTimer = D.MISSILE_INTERVAL;
+                  this.fireDragonMissile(d);
+              }
+          }
+
+          // ── Lifecycle ── (leave COMPLETION is handled by the portal-consume
+          // pass above; here we only advance enter→roam→leave and open the exit
+          // rift AHEAD of the head so it flies into it.) ──
+          inst.stateTimer -= dt;
+          if (inst.state === 'enter') {
+              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = D.ROAM_DURATION; }
+          } else if (inst.state === 'roam') {
+              if (inst.stateTimer <= 0) {
+                  inst.state = 'leave';
+                  inst.stateTimer = D.LEAVE_DURATION; // safety cap only
+                  const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1;
+                  const portal = { x: d.position.x + (d.velocity.x / vm) * D.PORTAL_AHEAD, y: d.position.y + (d.velocity.y / vm) * D.PORTAL_AHEAD };
+                  wrapPosition(portal);
+                  inst.portal = portal;
+                  inst.headThrough = false;
+                  this.openDragonPortal(portal);
+              }
+          }
+      }
+  }
+
+  /** Open an offscreen entry portal and birth a dragon of `type` ('mixed' = a
+   *  multi-material starting body).  Multiple can be alive at once. */
+  private spawnDragon(type: StructureVariant | 'mixed' = 'mixed') {
+      if (!this.currentMap) return;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
+      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
+      wrapPosition(pos);
+      this.openDragonPortal(pos);
+
+      const v = ENEMY_VARIANTS[EnemySubtype.DRAGON];
+      const d: GameEntity = {
+          id: nextId('dragon'),
+          type: EntityType.ENEMY,
+          enemySubtype: EnemySubtype.DRAGON,
+          position: { x: pos.x, y: pos.y },
+          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // head inward
+          size: { x: v.size, y: v.size },
+          rotation: angle + Math.PI,
+          color: v.color,
+          active: true,
+          health: v.health,
+          maxHealth: v.health,
+          maxSpeed: v.maxSpeed,
+          mass: v.mass,
+          contactDamage: v.contactDamage,
+          enemyShape: 'dragon',
+          phasesTerrain: true,          // glides through terrain, eats it
+          thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
+          consume: v.consume ? { ...v.consume } : undefined,
+          aiState: 'chase',
+          glowPhase: Math.random() * Math.PI * 2,
+      };
+      // Seed a trailing path (outward, away from the head's inward heading) so the
+      // starting body lays out behind it immediately instead of stacking.
+      const ox = Math.cos(angle), oy = Math.sin(angle); // outward = away from movement
+      const seed: Vector2[] = [];
+      for (let k = 0; k < 110; k++) seed.push({ x: pos.x + ox * k * DRAGON_CONSTANTS.PATH_SPACING, y: pos.y + oy * k * DRAGON_CONSTANTS.PATH_SPACING });
+      d.dragonPath = seed;
+      this.currentMap.entities.push(d);
+      const inst: DragonInstance = {
+          head: d, body: [], state: 'enter',
+          stateTimer: DRAGON_CONSTANTS.ENTER_DURATION, time: 0,
+          gnatTimer: DRAGON_CONSTANTS.GNAT_INTERVAL, missileTimer: DRAGON_CONSTANTS.MISSILE_INTERVAL,
+      };
+      // Spawn a starting body so it never enters as a bare head.  A 'mixed'
+      // dragon cycles materials; a typed dragon is all one (it still becomes
+      // mixed as it eats other tiles).
+      const MIX: StructureVariant[] = ['glass', 'rock', 'metal', 'plastic'];
+      for (let i = 0; i < DRAGON_CONSTANTS.START_SEGMENTS; i++) {
+          const segVar = type === 'mixed' ? MIX[i % MIX.length] : type;
+          const seg = this.makeDragonSegment(segVar, pos.x, pos.y);
+          this.currentMap.entities.push(seg);
+          inst.body.push(seg);
+      }
+      this.dragons.push(inst);
+      this.positionDragonBody(inst); // lay the body out along the seeded path now
+  }
+
+  /** Fire one slow HOMING missile from the dragon head at the player. */
+  private fireDragonMissile(d: GameEntity) {
+      const M = DRAGON_CONSTANTS.MISSILE;
+      const cfg = {
+          type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
+          speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
+          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+          homing: true, homingStrength: M.homingStrength, glow: true,
+      } as WeaponConfig;
+      this.spawnProjectileFromConfig(d, this.player.position, cfg, EntityType.ENEMY);
+  }
+
+  /** Devour a static tile → APPEND it as a body segment (Snake growth).  Beyond
+   *  MAX_SEGMENTS the tile is just destroyed (the dragon still carves a path). */
+  private appendDragonSegment(inst: DragonInstance, tile: GameEntity, dx: number, dy: number) {
+      this.physics.removeStaticEntity(tile);
+      this.flowField.onTileDestroyed(tile.position.x, tile.position.y);
+      if (inst.body.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
+          const inward = Math.atan2(-dy, -dx);
+          this.spawnParticles(tile.position, 6, tile.color || '#94a3b8', {
+              spreadAngle: inward, spreadCone: 0.9, speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.1, lifetimeMax: 0.3,
+          });
+          tile.active = false;
+          return;
+      }
+      tile.mass = DRAGON_CONSTANTS.SEGMENT_MASS; // finite → dynamic + shootable
+      tile.dragonSegment = true;
+      tile.phasesTerrain = true; // glides through terrain/each other; still solid to player + shots
+      if (!tile.velocity) tile.velocity = { x: 0, y: 0 }; else { tile.velocity.x = 0; tile.velocity.y = 0; }
+      inst.body.push(tile);
+  }
+
+  /** Build a fresh hex-tile body segment of `variant` at (x,y) — used to spawn
+   *  the dragon's starting body.  A real tile (dent/shatter) flagged as a chain-
+   *  controlled, phasing dragon segment. */
+  private makeDragonSegment(variant: StructureVariant, x: number, y: number): GameEntity {
+      const w = HEX_WIDTH, h = HEX_HEIGHT;
+      const pts: Vector2[] = [
+          { x: 0, y: -h / 2 }, { x: w / 2, y: -h / 4 }, { x: w / 2, y: h / 4 },
+          { x: 0, y: h / 2 }, { x: -w / 2, y: h / 4 }, { x: -w / 2, y: -h / 4 },
+      ];
+      const seg = TileGenerator.buildStructureTile(0, 0, x, y, w, h, pts, variant);
+      seg.mass = DRAGON_CONSTANTS.SEGMENT_MASS;
+      seg.dragonSegment = true;
+      seg.phasesTerrain = true;
+      return seg;
+  }
+
+  /** Snap each body segment onto the head's path, SEGMENT_SPACING apart by arc
+   *  length, oriented along the body — the Snake chain.  The walk is ANCHORED to
+   *  the head's LIVE position (not the last recorded path point, which only
+   *  updates every PATH_SPACING and made the whole body jump), so the chain
+   *  tracks the smoothly-moving head jitter-free. */
+  private positionDragonBody(inst: DragonInstance) {
+      const head = inst.head;
+      const body = inst.body;
+      const path = head.dragonPath;
+      if (body.length === 0 || !path || path.length < 1) return;
+      const SP = DRAGON_CONSTANTS.SEGMENT_SPACING;
+      let prevX = head.position.x, prevY = head.position.y; // live anchor
+      let acc = 0, seg = 0, target = SP;
+      for (let i = 0; i < path.length && seg < body.length; i++) {
+          const cur = path[i];
+          const vx = wrapDeltaX(prevX, cur.x), vy = wrapDeltaY(prevY, cur.y); // prev → cur
+          const len = Math.hypot(vx, vy);
+          if (len > 1e-4) {
+              while (seg < body.length && acc + len >= target) {
+                  const t = (target - acc) / len;
+                  const s = body[seg];
+                  s.position.x = prevX + vx * t;
+                  s.position.y = prevY + vy * t;
+                  wrapPosition(s.position);
+                  s.rotation = Math.atan2(vy, vx);
+                  s.velocity.x = 0; s.velocity.y = 0;
+                  seg++; target += SP;
+              }
+              acc += len;
+          }
+          prevX = cur.x; prevY = cur.y;
+      }
+      // Path too short for the whole body — stack the rest at the tail end.
+      const tail = path[path.length - 1];
+      for (; seg < body.length; seg++) {
+          const s = body[seg];
+          s.position.x = tail.x; s.position.y = tail.y;
+          wrapPosition(s.position);
+          s.velocity.x = 0; s.velocity.y = 0;
+      }
+  }
+
+  /** A body segment was destroyed: everything AFT of it falls off (→ free
+   *  drifting shards), and the segment itself shatters (handled by the caller). */
+  private severDragon(inst: DragonInstance, seg: GameEntity) {
+      const idx = inst.body.indexOf(seg);
+      if (idx < 0) return;
+      for (let i = idx + 1; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]);
+      inst.body.length = idx; // drop the broken segment + everything aft
+  }
+
+  /** Find the live dragon whose body contains `seg` (for sever routing). */
+  private dragonOwning(seg: GameEntity): DragonInstance | undefined {
+      for (let i = 0; i < this.dragons.length; i++) if (this.dragons[i].body.indexOf(seg) >= 0) return this.dragons[i];
+      return undefined;
+  }
+
+  /** A severed segment falls off the dragon: clear the flag, turn it into a free
+   *  mobile shard of its material, and kick it loose. */
+  private detachDragonSegment(seg: GameEntity) {
+      seg.dragonSegment = false;
+      seg.phasesTerrain = false; // a loose shard collides normally again
+      seg.shardVariant = this.tileToShardVariant(seg.shardVariant);
+      const a = Math.random() * Math.PI * 2;
+      seg.velocity.x = Math.cos(a) * 3.5;
+      seg.velocity.y = Math.sin(a) * 3.5;
+  }
+
+  /** A killed body segment: sever the owning dragon's tail, then dissolve it
+   *  (shatter burst, no regen/drops — it's a body part, not a map tile). */
+  private dragonSegmentDeath(seg: GameEntity) {
+      const inst = this.dragonOwning(seg);
+      if (inst) this.severDragon(inst, seg);
+      this.spawnParticles(seg.position, 12, seg.color || '#94a3b8', {
+          speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 3.5, lifetimeMin: 0.2, lifetimeMax: 0.55,
+      });
+      seg.active = false;
+  }
+
+  /** Map a tile variant to its mobile-shard variant (for severed body parts). */
+  private tileToShardVariant(v: GameEntity['shardVariant']): GameEntity['shardVariant'] {
+      switch (v) {
+          case 'glass-tile':   return 'glass-shard';
+          case 'rock-tile':    return 'rock-shard';
+          case 'metal-tile':   return 'metal-shard';
+          case 'plastic-tile': return 'plastic-shard';
+          default:             return v;
+      }
+  }
+
+  /** Dragon killed: big payoff + score + collapse the rift + scatter the body. */
+  private dragonDeath(inst: DragonInstance) {
+      const d = inst.head;
+      // Payout doubles per kill this run: 3000, 6000, 12000, …
+      this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
+      this.dragonsKilled++;
+      this.openDragonPortal(d.position);
+      this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
+          speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
+      d.active = false;
+      for (let i = 0; i < inst.body.length; i++) this.detachDragonSegment(inst.body[i]); // body scatters
+      const k = this.dragons.indexOf(inst);
+      if (k >= 0) this.dragons.splice(k, 1);
+  }
+
+  /** Despawn a dragon (left via portal — no payoff).  The body leaves with it.
+   *  Caller removes it from `this.dragons`. */
+  private despawnDragon(inst: DragonInstance) {
+      inst.head.active = false;
+      for (let i = 0; i < inst.body.length; i++) inst.body[i].active = false;
+  }
+
+  /** Portal VFX: an expanding violet rift ring + sparks. */
+  private openDragonPortal(pos: Vector2) {
+      this.openPortal(pos, {
+          color: DRAGON_CONSTANTS.PORTAL_COLOR,
+          radius: DRAGON_CONSTANTS.PORTAL_RADIUS,
+          duration: DRAGON_CONSTANTS.PORTAL_DURATION,
+      });
+  }
+
+  /**
+   * Reusable rift-portal VFX (Stage 7 — abstracted from the dragon's single
+   * ring).  A layered warp: a bright white core flash, the main coloured rift
+   * ring, a wider trailing echo ring, a disc of inward-swirling embers, and a
+   * scatter of hot white sparks — plus a light screen punch.  Shared by the
+   * dragon and the rival ships; tune via the caller's PORTAL_* constants.
+   */
+  private openPortal(pos: Vector2, opts: { color: string; radius: number; duration: number }) {
+      const { color, radius, duration } = opts;
+      // White core flash (fast, small) → the rift "ignites".
+      this.spawnShockwave(pos, { radius: radius * 0.42, damage: 0, knockback: 0, color: '#ffffff', lifetime: duration * 0.55 });
+      // Main coloured rift ring.
+      this.spawnShockwave(pos, { radius, damage: 0, knockback: 0, color, lifetime: duration });
+      // Wider, slower echo ring — gives the rift depth.
+      this.spawnShockwave(pos, { radius: radius * 1.35, damage: 0, knockback: 0, color, lifetime: duration * 1.25 });
+      // Swirling embers filling the disc (tangential bias reads as a vortex).
+      this.spawnParticles(pos, 30, color, {
+          speedMin: 1, speedMax: 5, sizeMin: 1.5, sizeMax: 4,
+          lifetimeMin: 0.35, lifetimeMax: 0.9, positionJitter: radius * 0.55,
+      });
+      // Hot white sparks bursting outward from the seam.
+      this.spawnParticles(pos, 16, '#ffffff', {
+          speedMin: 4, speedMax: 12, sizeMin: 1, sizeMax: 2.6, lifetimeMin: 0.2, lifetimeMax: 0.5,
+      });
+      this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO * 4); // a soft warp thud
+  }
+
+  /** DBG: summon a dragon of `type` ('glass'|'rock'|'metal'|'plastic'|'mixed').
+   *  Each call adds another — multiple dragons can be out at once. */
+  public debugSpawnDragon(type: string = 'mixed') {
+      const allowed = ['glass', 'rock', 'metal', 'plastic', 'mixed'];
+      this.spawnDragon((allowed.includes(type) ? type : 'mixed') as StructureVariant | 'mixed');
+  }
+
+  // ─── Rival ships (Stage 7) ─────────────────────────────────────────────
+  //
+  // Player-like roamers that warp in via portal, hunt the WAVE enemies
+  // (stealing the player's kill points + loot), and—per disposition—fight,
+  // ignore, or retaliate against the player.  Engine-managed lifecycle
+  // (mirrors updateDragons); the ship is a lean EntityType.ENEMY + isRival.
+
+  private rollRivalDisposition(): RivalDisposition {
+      const w = RIVAL_CONSTANTS.WEIGHTS;
+      const r = Math.random() * (w.hostile + w.ally + w.neutral);
+      if (r < w.hostile) return 'hostile';
+      if (r < w.hostile + w.ally) return 'ally';
+      return 'neutral';
+  }
+
+  /** Per-frame rival lifecycle: cadence warp-ins, per-ship hunt/strafe/fire/
+   *  loot, and the warp-out fly-through.  Engine-driven (AISystem skips them). */
+  private updateRivals(dt: number) {
+      if (!this.currentMap) return;
+      const R = RIVAL_CONSTANTS;
+
+      // Cadence — a fresh random rival warps in every SCORE_INTERVAL points
+      // earned (capped at MAX_RIVALS alive).  The threshold advances with the
+      // score whether or not a rival actually spawns, so a score that vaults
+      // several intervals at once doesn't queue a backlog of warp-ins.
+      while (this.score >= this.nextRivalScore) {
+          if (this.rivals.length < R.MAX_RIVALS) this.spawnRival();
+          this.nextRivalScore += R.SCORE_INTERVAL;
+      }
+      if (this.rivals.length === 0) return;
+
+      const enemies = this.entityIndex.enemies;
+      // Rivals fly with the SAME mechanics as the player: thrust toward the
+      // desired heading + a self speed-cap, with the map's friction applied by
+      // PhysicsSystem (enemies already get it).  acc/maxSpeed come from the map
+      // movement config (player BASE values, no upgrade mults), so a rival is a
+      // baseline player ship — the upgraded player can still out-fly it.
+      const moveCfg = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
+      const acc = moveCfg ? moveCfg.acceleration : PHYSICS_CONSTANTS.ACCELERATION;
+      const baseMaxSpeed = moveCfg ? moveCfg.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED;
+      const timeScale = dt * 60;
+      for (let n = this.rivals.length - 1; n >= 0; n--) {
+          const inst = this.rivals[n];
+          const s = inst.ship;
+          if (!s.active) { this.rivals.splice(n, 1); continue; }
+          inst.stateTimer -= dt;
+          inst.fireTimer -= dt;
+
+          // ── Target: nearest wave enemy; hostile (or a provoked neutral) also
+          // weighs the player. ──
+          const huntsPlayer = inst.disposition === 'hostile'
+              || (inst.disposition === 'neutral' && s.provoked === true);
+          let target: GameEntity | null = null;
+          let bestD2 = R.VISION * R.VISION;
+          for (let i = 0; i < enemies.length; i++) {
+              const e = enemies[i];
+              if (e.isRival || e.isExploding) continue;
+              const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (d2 < bestD2) { bestD2 = d2; target = e; }
+          }
+          if (huntsPlayer && !this.player.isExploding) {
+              const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
+              const d2 = dx * dx + dy * dy;
+              if (target === null || d2 < bestD2) { target = this.player; bestD2 = d2; }
+          }
+
+          // ── Steering ──
+          let dirX: number, dirY: number, speedMul = 1;
+          if (inst.state === 'leave' && inst.portal) {
+              const px = wrapDeltaX(s.position.x, inst.portal.x), py = wrapDeltaY(s.position.y, inst.portal.y);
+              const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm; speedMul = R.LEAVE_SPEED_MULT;
+          } else if (target) {
+              const tx = wrapDeltaX(s.position.x, target.position.x), ty = wrapDeltaY(s.position.y, target.position.y);
+              const tm = Math.hypot(tx, ty) || 1;
+              // Hold a firing gap: close if far, back off if too near; always strafe.
+              const sign = tm > R.PREFERRED_DIST * 1.15 ? 1 : tm < R.PREFERRED_DIST * 0.7 ? -1 : 0;
+              dirX = (tx / tm) * sign + (-ty / tm) * 0.7;
+              dirY = (ty / tm) * sign + (tx / tm) * 0.7;
+              const dm = Math.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
+              s.rotation = Math.atan2(ty, tx); // face the target
+          } else {
+              const flow = this.flowField.sampleAsteroidFlow(s.position.x, s.position.y);
+              const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
+              s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+          }
+          // Player-style movement: apply thrust along the desired heading, then
+          // self-cap speed (PhysicsSystem applies the map friction afterward, so
+          // the rival accelerates + coasts exactly like the player ship).
+          s.velocity.x += dirX * acc * timeScale;
+          s.velocity.y += dirY * acc * timeScale;
+          const maxSpeed = baseMaxSpeed * speedMul;
+          const sp = Math.hypot(s.velocity.x, s.velocity.y);
+          if (sp > maxSpeed) { const k = maxSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
+          if (inst.state === 'leave') s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+
+          // ── Fire (only while roaming, target in range) ──
+          if (inst.state === 'roam' && target && inst.fireTimer <= 0
+              && bestD2 <= R.FIRE_RANGE * R.FIRE_RANGE) {
+              inst.fireTimer = R.WEAPON.cooldown;
+              this.fireRivalShot(inst, target);
+          }
+
+          // ── Loot vacuum: steal nearby collectible drops from the player ──
+          this.rivalVacuumDrops(inst);
+
+          // ── Lifecycle ──
+          if (inst.state === 'enter') {
+              if (inst.stateTimer <= 0) { inst.state = 'roam'; inst.stateTimer = R.ROAM_DURATION; }
+          } else if (inst.state === 'roam') {
+              if (inst.stateTimer <= 0) {
+                  inst.state = 'leave'; inst.stateTimer = R.LEAVE_DURATION;
+                  const vm = Math.hypot(s.velocity.x, s.velocity.y) || 1;
+                  const portal = { x: s.position.x + (s.velocity.x / vm) * R.PORTAL_AHEAD, y: s.position.y + (s.velocity.y / vm) * R.PORTAL_AHEAD };
+                  wrapPosition(portal);
+                  inst.portal = portal;
+                  this.openPortal(portal, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+              }
+          } else if (inst.state === 'leave' && inst.portal) {
+              const cr = R.PORTAL_CONSUME_RADIUS;
+              const hx = wrapDeltaX(s.position.x, inst.portal.x), hy = wrapDeltaY(s.position.y, inst.portal.y);
+              if (hx * hx + hy * hy <= cr * cr || inst.stateTimer <= 0) {
+                  this.spawnParticles(s.position, 14, R.PORTAL_COLOR, { speedMin: 2, speedMax: 8, sizeMin: 1.5, sizeMax: 4, lifetimeMin: 0.2, lifetimeMax: 0.6 });
+                  s.active = false; this.rivals.splice(n, 1); continue;
+              }
+          }
+      }
+  }
+
+  /** Warp a rival ship in from an offscreen rift.  Disposition is rolled by
+   *  weight unless one is forced (DBG). */
+  private spawnRival(forced?: RivalDisposition) {
+      if (!this.currentMap) return;
+      const R = RIVAL_CONSTANTS;
+      const zoom = this.camera.zoom || 1;
+      const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+      const angle = Math.random() * Math.PI * 2;
+      const dist = halfDiag + R.SPAWN_MARGIN;
+      const pos = { x: this.player.position.x + Math.cos(angle) * dist, y: this.player.position.y + Math.sin(angle) * dist };
+      wrapPosition(pos);
+      this.openPortal(pos, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
+
+      const disposition = forced ?? this.rollRivalDisposition();
+      const sprite = R.SPRITES[Math.floor(Math.random() * R.SPRITES.length)];
+      const ship: GameEntity = {
+          id: nextId('rival'),
+          type: EntityType.ENEMY,
+          position: { x: pos.x, y: pos.y },
+          velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // heading inward
+          size: { x: R.SIZE, y: R.SIZE },
+          rotation: angle + Math.PI,
+          color: R.COLORS[disposition],
+          active: true,
+          health: R.HEALTH,
+          maxHealth: R.HEALTH,
+          maxSpeed: R.MAX_SPEED,
+          mass: R.MASS,
+          enemyTier: R.TIER,            // kill bounty when the player downs it
+          isRival: true,
+          sprite,
+          trail: [],
+          glowPhase: Math.random() * Math.PI * 2,
+      };
+      this.currentMap.entities.push(ship);
+      this.rivals.push({
+          ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
+          fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
+      });
+  }
+
+  /** Rival weapon: a blaster bolt that may damage the wave enemies (hitsEnemies)
+   *  and—unless hostile or aimed AT the player—passes through the player. */
+  private fireRivalShot(inst: RivalInstance, target: GameEntity) {
+      if (!this.currentMap) return;
+      const W = RIVAL_CONSTANTS.WEAPON;
+      const cfg = {
+          type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
+          speed: W.speed, damage: W.damage, lifetime: W.lifetime,
+          color: inst.ship.color || W.color, size: W.size,
+          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+      } as WeaponConfig;
+      const ents = this.currentMap.entities;
+      const before = ents.length;
+      this.spawnProjectileFromConfig(inst.ship, { x: target.position.x, y: target.position.y }, cfg, EntityType.ENEMY);
+      const targetingPlayer = target === this.player;
+      const spares = !(inst.disposition === 'hostile' || targetingPlayer);
+      for (let i = before; i < ents.length; i++) {
+          const p = ents[i];
+          if (p.type === EntityType.PROJECTILE) { p.hitsEnemies = true; p.sparesPlayer = spares; }
+      }
+  }
+
+  /** Steal any collectible drop within LOOT_RANGE (denies the player + heals). */
+  private rivalVacuumDrops(inst: RivalInstance) {
+      const R = RIVAL_CONSTANTS;
+      const s = inst.ship;
+      const rng2 = R.LOOT_RANGE * R.LOOT_RANGE;
+      for (let i = 0; i < this.activeDrops.length; i++) {
+          const drop = this.activeDrops[i];
+          if (!drop.active || !isCollectibleDrop(drop)) continue;
+          const dx = wrapDeltaX(s.position.x, drop.position.x), dy = wrapDeltaY(s.position.y, drop.position.y);
+          if (dx * dx + dy * dy > rng2) continue;
+          drop.active = false;
+          s.health = Math.min(s.maxHealth ?? R.HEALTH, (s.health ?? 0) + R.HEAL_PER_LOOT);
+          this.spawnParticles(drop.position, 5, s.color || '#e2e8f0', {
+              speedMin: 1, speedMax: 5, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.15, lifetimeMax: 0.4,
+          });
+      }
+  }
+
+  /** DBG: warp in a rival of the given disposition (or a weighted roll). */
+  public debugSpawnRival(disposition: string = 'random') {
+      const forced = (disposition === 'hostile' || disposition === 'ally' || disposition === 'neutral')
+          ? disposition as RivalDisposition : undefined;
+      this.spawnRival(forced);
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

@@ -871,6 +871,62 @@ k. After N waves, spawn a portal to a new map.
     tight line is the playtest pass, then Phase 2 (f)
     Timed waves.
 
+32. **exotic-enemy roster (PR #67) — a full third-party ecosystem,
+    over-delivering the (h) precursor scope across many sessions.**
+    Built as the enemy-content run that precedes Phase 2 (h) bosses.
+    Base branch `claude/game-feedback-plan-UN3MV`; ~55 commits over
+    several sessions. What shipped is far broader than the original
+    (h) "shielded boss + Mega-Man-X weapon bosses" line — it's a
+    reusable enemy-behaviour toolkit plus a neutral/third-party fauna
+    ecosystem. Stages:
+    - **Structural (Stage 2/3)** — AI behavior-dispatch table
+      (`ENEMY_BEHAVIOR[subtype].move` → `moveStrategies`);
+      `countsTowardWave` wave accounting; three reusable primitives
+      (provoked-on-hit, consume-and-grow, attach+disable).
+    - **Stage 0** — Kamikaze (instant on-contact AoE) + Bulwark
+      (rotating directional arc shield that DEFLECTS covered shots).
+    - **Stage 1** — Turret (stationary, rotates to aim, homing missiles).
+    - **Stage 4** — Swarm + Nest (pop-on-contact gnats simplified across
+      systems; hive that births capped, non-wave-gating brood).
+    - **Stage 5** — Bubble: ambient third-party fauna — flow-riding,
+      eats/digests shards (mass-conserved, heals), splits, sickens on
+      toxic shards, latches+EMPs then knocks free; retaliates against
+      any attacker.
+    - **Stage 6** — Dragon: engine-managed serpent mini-boss whose body
+      is a real Snake of devoured tiles (shootable / severable), neutral
+      until attacked; enters/leaves via portal.
+    - **Stage 7 — Rivals** (this session's headline): player-like
+      privateer ships (bespoke `RivalInstance[]` roamers rendered from
+      the retired enemy PNGs) that hunt the WAVE enemies and STEAL the
+      player's kill points (`killedByRival` denial) + loot (vacuum),
+      with three dispositions (hostile / ally / neutral). Warp in on a
+      SCORE cadence (every 1000 pts, capped 6) and roam 280s (10× the
+      dragon). Fly with the player's own thrust/friction movement model.
+    This session also: redesigned the dragon HEAD (geometric space-
+    serpent, iterated from organic → detailed → pared-back per user);
+    doubling dragon kill payout (3000 × 2^kills); the dragon PORTAL
+    fly-through leave, then abstracted the rift VFX into a reusable
+    `GameEngine.openPortal(pos, opts)` (dragon + rivals share it);
+    GENERALIZED the hit-reaction scale-punch to `damage / maxHealth`
+    (`hitReactStrength`, new `hitReact` field) so chip hits on tanky
+    beasts barely flinch. Rival bugfixes worth noting for anyone
+    extending them: (a) pooled-projectile flag bleed — the rival-shot
+    flags (`hitsEnemies` / `sparesPlayer`) are stamped after spawn, so
+    `ProjectileSystem`'s pool-reuse path MUST clear them or recycled
+    player/enemy shots inherit them and phase through targets; (b)
+    sprite rotation needs the player's 3π/4 art offset
+    (`RIVAL_ROTATION_OFFSET`), and rivals draw 1:1 so hull == hitbox;
+    (c) hit/damage indication (punchy sprite flash + disposition-coloured
+    health bar). **Deviations vs plan:** the whole neutral/third-party
+    axis (bubble, dragon, rivals) is net-new mechanics NOT in the (h)
+    spec — (h) bosses (shielded open/close boss, weapon-type bosses,
+    per-run weapon unlocks) remain UNbuilt and still pending. **Two
+    follow-ups queued before continuing the plan:** an
+    `exotic-enemies-optimization` perf pass (see the task row) and an
+    exotic-enemy BALANCE pass (parking lot — Bulwark shield slew, Sniper
+    power, rival/dragon tuning). Validation: `npm run build` per commit;
+    manual playtest owed.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -989,7 +1045,9 @@ Run when convenient; can run in parallel with Phase 2.
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
 | f | Timed waves of mixed enemy types | pending | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. |
-| h | New enemies + bosses | pending | `claude/bosses-<suffix>` | Shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses. Weapons unlock per-run. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. |
+| exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
+| exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **pending — do BEFORE resuming the plan** | `claude/exotic-enemies-optimization-<suffix>` | User-directed optimization beat on what PR #67 just added, before moving to the next plan step. Targets: route `updateRivals` / `updateDragons` / `updateBubbles` / `maintainAmbientBubbles` periodic scans through `PerfController` tasks instead of running every step; the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot-vacuum walks; portal / death particle-burst counts; dragon body `positionDragonBody` chain cost with many segments; and general allocation discipline (mutate, don't allocate) in the new loops. Zero-behaviour posture like PR #58 where possible; flag any feel changes. |
+| h | New enemies + bosses (bosses proper) | pending | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. |
 | k | Portal to next map after N waves | pending | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring. **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. |
 
 ---

@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -581,6 +581,10 @@ export const SPRITE_CONSTANTS = {
   // 3π/4 value was for the retired up-left sprite art and skewed every
   // polygon off its heading — most visibly on the triangle / arrow.)
   ENEMY_ROTATION_OFFSET: 0,
+  // Rival ships (Stage 7) render from the RETIRED enemy PNGs, which (like the
+  // player art) point up-left — so they need the same 3π/4 alignment offset as
+  // the player, NOT the procedural-enemy 0.
+  RIVAL_ROTATION_OFFSET: Math.PI*(3/4),
   PLAYER_BASE_SIZE: 20 // Default visual/physics size for player (x/y)
 };
 
@@ -637,6 +641,74 @@ export const AI_CONFIG = {
     RADIAL_DEADZONE: 70,   // error band over which the radial pull saturates
     RADIAL_GAIN: 1.0,      // radial-correction accel as a fraction of accel
     TANGENTIAL: 1.0,       // tangential-drive accel as a fraction of accel
+  },
+
+  // Swarm (Stage 4) movement.  Base flock: seek the player + separation from
+  // nearby swarm units (so they spread into a darting cloud, not a stack) + a
+  // little jitter.  Separation + jitter apply in EVERY mode; the per-mode
+  // blocks below set the base seek/steer.  Mode is the DBG `cycleSwarmMove`.
+  SWARM: {
+    SEPARATION_RANGE: 46,
+    SEPARATION_STRENGTH: 1.4,
+    JITTER_ACCEL: 10,
+    // Orbiting vortex: hold a radius and swirl, periodically darting inward to
+    // bite then peeling back out.
+    VORTEX: {
+      RADIUS: 150,          // held swirl radius (units)
+      DEADZONE: 80,         // radial-error band over which the pull saturates
+      RADIAL_GAIN: 1.1,     // radial-correction accel (× accel)
+      TANGENTIAL: 1.25,     // swirl drive (× accel)
+      DART_RADIUS_FRAC: 0.0,  // dart drives all the way into the player (to bite)
+      DART_INTERVAL: 2.4,   // seconds between darts (+ up to VAR)
+      DART_VAR: 1.6,
+      DART_DURATION: 0.5,   // seconds the inward dart lasts
+    },
+    // Sine-weave: approach on a serpentine weave around the bee-line to the
+    // player so they juke and are hard to pin.
+    WEAVE: {
+      FREQ: 7,              // weave angular frequency (rad/s)
+      AMP: 1.1,             // perpendicular weave amplitude (fraction of seek)
+      CLOSE_DAMP: 220,      // weave amplitude fades to 0 within this distance
+    },
+    // Burst-dash: coast slowly, then fire a quick telegraphed lunge at the
+    // player, with dodge windows between darts.
+    BURST: {
+      COAST_INTERVAL: 1.6,  // seconds of coast between dashes (+ up to VAR)
+      COAST_VAR: 1.0,
+      DASH_DURATION: 0.45,  // seconds a dash lasts
+      DASH_ACCEL_MULT: 3.0, // accel toward player during a dash (× accel)
+      DASH_SPEED_MULT: 1.8, // speed cap during a dash (× maxSpeed)
+      COAST_SPEED_MULT: 0.35, // speed cap while coasting
+      COAST_DAMP: 0.92,     // per-step velocity damping while coasting
+      TELEGRAPH: 0.18,      // pre-dash wind-up flash (seconds)
+    },
+  },
+
+  // Bubble (Stage 5) movement.  Ambient fauna with three regimes:
+  //  - DRIFT (passive, no shard in sight): ride the asteroid flow field — steer
+  //    the velocity toward the local current at DRIFT_SPEED, so a field of them
+  //    streams along the same lanes as the asteroids.
+  //  - CHASE (passive, a shard within SHARD_VISION): peel OFF the flow and seek
+  //    the nearest eatable shard at CHASE_SPEED_MULT× maxSpeed, then eat it on
+  //    contact (the consume pass) and resume drifting.
+  //  - SEEK (provoked / shot): floaty pursuit of the player up to maxSpeed.
+  BUBBLE: {
+    DRIFT_SPEED: 2.2,         // cruise speed while riding the flow (units/step cap)
+    DRIFT_CORRECTION: 1.4,    // lerp rate of velocity toward the flow target (×dt)
+    SHARD_VISION: 280,        // range at which a passive bubble spots + chases a shard
+    CHASE_SPEED_MULT: 1.0,    // speed cap while chasing a shard (× maxSpeed)
+    SEEK_ACCEL_MULT: 1.4,     // accel toward target when provoked (× accel)
+    PROVOKED_SPEED_MULT: 2.2, // sustained speed cap when provoked (× maxSpeed) —
+                              // high enough to RUN DOWN a fleeing enemy/player
+    // Burst/coast — ONLY while provoked (aggro): a hunting bubble coasts fast
+    // and periodically LUNGES even faster to close the gap.  Passive bubbles
+    // (drift / shard-chase) never burst, so they stay slow and easy to ignore
+    // until shot.
+    BURST_INTERVAL: 1.6,      // seconds of fast coast between lunges (+ up to VAR)
+    BURST_VAR: 1.2,
+    BURST_DURATION: 0.6,      // seconds a lunge lasts
+    BURST_SPEED_MULT: 1.7,    // speed-cap multiplier during a lunge
+    BURST_ACCEL_MULT: 2.2,    // accel multiplier during a lunge
   },
 
   // Drone (RAMMER_1) idle locomotion: a constant low-amplitude random
@@ -1068,6 +1140,11 @@ export const PERF_TASKS = {
   // 4-step cadence at peak load drops cost ~75 % while staying
   // visually responsive.
   dropMerge:        { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
+  // Consume-and-grow neighbour scan (GameEngine.updateConsumers, Stage 3b).
+  // O(consumers × nearby candidates); only non-empty once a consumer (bubble /
+  // dragon) is on the field, so it early-outs cheaply most of the time and a
+  // few-step cadence is imperceptible (eating settles over frames).
+  consume:          { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
 } as const;
 
 export type PerfTaskId = keyof typeof PERF_TASKS;
@@ -2048,6 +2125,11 @@ export const HIT_FEEDBACK = {
   PLAYER_SHAKE_PER_DMG: 1.2,   // + this per point of shot damage
   PLAYER_SHAKE_MAX: 24,        // cap (between MEDIUM 10 and well past HEAVY)
   PLAYER_KICK_PER_DMG: 0.12,   // velocity shove along the shot direction
+  // Explosion knockback overshoot: a blast (e.g. kamikaze) drives the player
+  // PAST the normal maxSpeed cap and that overshoot decays back to cap by this
+  // per-60fps-step factor (≈0.95 → ~95% gone in 1s), so the player is launched
+  // and accelerates away instead of the hard speed-cap eating the impulse.
+  PLAYER_KNOCKBACK_DECAY: 0.95,
 };
 
 export const DAMAGE_TEXT_CONSTANTS = {
@@ -2250,6 +2332,11 @@ export const SHIELD_CONSTANTS = {
   COLOR: '#60a5fa',          // Blue-400
   COLLISION_MULTIPLIER: 1.8, // Player collision radius multiplier when shield > 0
   DAMAGE_THRESHOLD: 2.0,     // Min impact speed to actually drain shield (below = flash only)
+  // Directional arc shield (Bulwark): the interception ring radius as a
+  // fraction of the entity's max size.  Matches the rendered ring
+  // (baseR 0.62 × 1.6 ≈ 0.99·size) so a covered shot is absorbed AT the
+  // visible arc instead of tunneling to the hull.
+  ARC_REACH_FACTOR: 0.99,
 };
 
 export const WAVE_CONSTANTS = {
@@ -2532,6 +2619,23 @@ export function cycleSnitchSpeed(): number {
   return activeSnitchSpeedIndex;
 }
 
+// DBG: gnat (Swarm) movement mode — cycle to feel each behavior side-by-side.
+// 'weave' (serpentine dive) is the default; the others are the picked
+// alternatives kept for live DBG comparison.  See AISystem.updateSwarm.
+export const SWARM_MOVE_MODES = ['boids', 'vortex', 'weave', 'burst'] as const;
+export type SwarmMove = typeof SWARM_MOVE_MODES[number];
+let activeSwarmMoveIndex = SWARM_MOVE_MODES.indexOf('weave');
+export function getActiveSwarmMove(): SwarmMove {
+  return SWARM_MOVE_MODES[activeSwarmMoveIndex];
+}
+export function getActiveSwarmMoveName(): string {
+  return SWARM_MOVE_MODES[activeSwarmMoveIndex];
+}
+export function cycleSwarmMove(): number {
+  activeSwarmMoveIndex = (activeSwarmMoveIndex + 1) % SWARM_MOVE_MODES.length;
+  return activeSwarmMoveIndex;
+}
+
 // Shared-ammo pool config (post-d1).  Caps the player's single ammo number
 // and provides the canonical pickup colour used by every ammo drop entity
 // (enemy / asteroid / nebula sources all reuse this).
@@ -2544,6 +2648,34 @@ export const AMMO_CONSTANTS = {
   MAX_POOL:    200,
   DROP_COLOR: '#facc15', // canonical ammo-pickup yellow
 };
+
+// ── Drop-type registry ────────────────────────────────────────────────────────
+// Single source of truth for per-drop-type properties.  `collectible` marks a
+// magnet/proximity PICKUP (ammo / health): kept OUT of the dynamic collision
+// grid (projectiles + ships pass through; collection is the GameEngine drop
+// scan) and carried by the flow-drift / merge passes.  Non-collectible drops
+// (glass) are environmental debris and full physics participants.
+//
+// To add a future drop type: extend the DropType union (types.ts), add a row
+// here, and add its effect (DropSystem.applyDropEffect) + render style
+// (RenderSystem drop-shard branch).  The cross-cutting physics/flow/merge sites
+// route through `isCollectibleDrop` and need no edits.
+export interface DropTypeDef {
+  collectible: boolean;
+}
+export const DROP_TYPES: Record<DropType, DropTypeDef> = {
+  ammo:   { collectible: true },
+  health: { collectible: true },
+  glass:  { collectible: false },
+};
+/** True for a magnet/proximity pickup drop (the non-physics, non-shootable
+ *  kind).  The cross-cutting test used by the collision-grid skip, the
+ *  flow-drift pass, and the same-type merge. */
+export function isCollectibleDrop(e: GameEntity): boolean {
+  return e.type === EntityType.INTERACTABLE
+    && e.dropType !== undefined
+    && DROP_TYPES[e.dropType].collectible;
+}
 
 export const DROP_CONFIG = {
   // Per-pickup ammo amounts — chosen to keep today's per-encounter expected
@@ -2566,7 +2698,13 @@ export const DROP_CONFIG = {
   AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
   AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
   // Health
-  HEALTH_HEAL_AMOUNT:        100,   // HP restored per health drop
+  HEALTH_HEAL_AMOUNT:        100,   // HP restored per milestone (wave-clear) health drop
+  // Enemy-kill health drops (added because the expanded roster hits harder).
+  // Rolled INDEPENDENTLY at the same two chances as the ammo slots above, so
+  // enemy-kill pickups roughly double and split ~50/50 ammo/health.  Each heals
+  // this much (merges sum, like ammo) — modest so frequent drops sustain rather
+  // than trivialise.
+  HEALTH_PER_ENEMY:           15,
   // General
   COLLECT_RADIUS:             30,   // world units
   MAGNET_RANGE:              150,   // world units — a drop only starts pulling
@@ -2725,6 +2863,16 @@ export function enemyDamageMult(waveIndex: number): number {
     1 + ENEMY_SCALING.DMG_GROWTH_PER_WAVE * Math.max(0, waveIndex) * getActiveEnemyScaleMult());
 }
 
+// Visual hit-reaction magnitude (0..1): a hit's damage as a fraction of the
+// target's max-health pool, used by RenderSystem to scale the sprite's
+// scale-punch.  Frail enemies take big-%% hits and snap hard; tanky beasts
+// (dragon ~500 HP, bubble 50+) chip-flinch.  One abstraction so every present
+// and future enemy reacts in proportion to how much it just lost.
+export function hitReactStrength(damage: number, maxHealth: number): number {
+  if (!(damage > 0) || !(maxHealth > 0)) return 0;
+  return Math.min(1, damage / maxHealth);
+}
+
 // ── Enemy variant configs ─────────────────────────────────────────────────────
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
 // Three tiers per role — each tier is strictly faster/tougher than the last.
@@ -2740,7 +2888,7 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   color: string; size: number; health: number;
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number; shape: EnemyShape;
-  shoots: boolean; contactDamage: number; weapon?: Partial<WeaponConfig>;
+  shoots: boolean; contactDamage: number; diesOnContact?: boolean; weapon?: Partial<WeaponConfig>;
   // Optional burst pattern: fire `size` shots `gap` seconds apart, then
   // reload for the archetype weapon's full `cooldown`.  Absent → one shot
   // per `cooldown` (the common case).  The per-archetype `cooldown` is the
@@ -2759,6 +2907,48 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // (AISystem brakes to a stop) so it reads as a deliberate camping shooter
   // rather than a continuous strafing stream.
   aimLaser?: boolean;
+  // Kamikaze self-destruct payload (Stage 0).  When set, the enemy stamps
+  // explosionRadius/Damage/Knockback at spawn; on first contact with the
+  // player it deals `contactDamage` and detonates an AoE shockwave instantly
+  // at the contact point (GameEngine.handleEntityDeath via detonateOnDeath).
+  detonate?: { radius: number; damage: number; knockback: number };
+  // Defensive shield (Stage 0, Bulwark).  `shield` seeds both shield and
+  // maxShield at spawn; `shieldRegen` is the per-second recharge (slow, so the
+  // shield is a soft barrier the player burns through, not an invuln).  When
+  // `shieldArc` is set the shield is a directional sector (covering
+  // `shieldArc.deg` degrees) that ATTEMPTS to track the player — AISystem
+  // slews `shieldArcAngle` toward the player bearing at up to `shieldArc.slew`
+  // rad/s, so out-maneuvering the slew (flanking fast) exposes the hull.  Only
+  // hits from the covered side are absorbed.  Absent → a full bubble.  The
+  // generalized PhysicsSystem absorption path applies the arc gate; recharge
+  // is shared with the player tick.
+  shield?: number;
+  shieldRegen?: number;
+  shieldArc?: { deg: number; slew: number };
+  // Nest spawner (Stage 4): periodically births `batch` `subtype` brood every
+  // `interval` seconds, up to `maxBrood` live brood (a hard cap on the
+  // self-replicating population).  Brood are spawned at the nest and DON'T gate
+  // wave completion (Stage 2b countsTowardWave=false).
+  spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
+  // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
+  // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
+  // consumer.
+  consume?: ConsumeConfig;
+  // Self-replication (Stage 5, bubble): an UNprovoked consumer that has grown
+  // to `atSize` splits — it resets to base size and births one offspring (so
+  // eat→grow→split is a cycle), capped at `maxPopulation` live units of the
+  // subtype.  Offspring don't gate wave completion.  Absent → never multiplies.
+  multiply?: { atSize: number; maxPopulation: number };
+  // Ambient fauna (Stage 5, bubble): NOT a wave enemy.  An `ambient` archetype
+  // never gates wave completion (countsTowardWave forced false at spawn however
+  // it's built) and is kept present in the world by GameEngine.maintainAmbient-
+  // Bubbles instead of the wave spawner.  Absent → a normal wave enemy.
+  ambient?: boolean;
+  // Third party / neutral (Stage 5, bubble): stamped onto the entity so enemy
+  // fire can damage it (friendly-fire filter bypassed) and it retaliates
+  // against whoever attacks it — player OR enemy.  Absent → a normal enemy that
+  // only fights the player and ignores enemy fire.
+  thirdParty?: boolean;
 }> = {
   // ── Rushers — close in and fire (rose → orange → amber) ──
   // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
@@ -2825,7 +3015,111 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     weapon: { cooldown: 2.8, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
     telegraph: 0.75, aimLaser: true,
   },
+  // ── Core-roster additions (Stage 0) ──
+  // Kamikaze: a frail magenta star that screams in on a hard, fast dive and
+  // self-destructs on contact — a modest contact bite plus a detonation AoE.
+  // Low HP + a readable pre-detonation tell make it a kill-early-or-peel-away
+  // threat: pop it before it reaches you, or boost clear of the blast.  Does
+  // not shoot.
+  [EnemySubtype.KAMIKAZE]: {
+    color: '#e879f9', size: 26, health: 2,
+    maxSpeed: 9, accel: 7, turnRate: 4.0,
+    sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
+    shoots: false, contactDamage: 10,
+    detonate: { radius: 170, damage: 34, knockback: 1.5 },
+  },
+  // Bulwark: a slow violet octagon fortress behind a regenerating shield,
+  // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
+  // demands burst-through / flanking — a soft counter, not a hard wall.
+  [EnemySubtype.BULWARK]: {
+    color: '#a78bfa', size: 34, health: 4,
+    maxSpeed: 3.5, accel: 2.2, turnRate: 1.1,
+    sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 1.8, damage: 3.5, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
+    shield: 54, shieldRegen: 4, shieldArc: { deg: 150, slew: 2.8 },
+    telegraph: 0.5,
+  },
+  // ── Stage 1 ──
+  // Turret: a stationary steel emplacement (maxSpeed 0 → AISystem no-move
+  // branch) that rotates to track the player and lobs SLOW HOMING missiles on
+  // a long, telegraphed beat.  It can't chase, so it's a position-denial /
+  // priority-target threat: dodge the missiles by juking (their turn rate is
+  // gentle) or close in and destroy it.  Tanky + heavy so it reads as fixed.
+  [EnemySubtype.TURRET]: {
+    color: '#94a3b8', size: 36, health: 8,
+    maxSpeed: 0, accel: 0, turnRate: 1.8,
+    sprite: ASSETS.ENEMY_TANK, mass: 50, shape: 'cross',
+    shoots: true, contactDamage: 0,
+    weapon: { cooldown: 2.6, damage: 12, speed: 5, size: 7, color: '#fb7185',
+              homing: true, homingStrength: 0.5, glow: true },
+    telegraph: 0.7,
+  },
+  // ── Stage 4 ──
+  // Swarm: a cheap, weak, fast gnat (1 HP, tiny) that flocks toward the player
+  // with a light boids tick ('swarm' behavior — seek + separation + jitter), so
+  // a pack reads as a darting cloud rather than a clean line.  Low contact bite;
+  // the threat is numbers.  RAMMING role (rush in).
+  [EnemySubtype.SWARM]: {
+    color: '#2dd4bf', size: 16, health: 1,
+    maxSpeed: 7.5, accel: 7, turnRate: 4.5,
+    sprite: ASSETS.ENEMY_DRONE, mass: 4, shape: 'triangle',
+    shoots: false, contactDamage: 3, diesOnContact: true,
+  },
+  // Nest: a near-static fleshy hive (high HP, heavy, maxSpeed 0 → no-move
+  // branch; doesn't shoot) that periodically births SWARM brood until killed.
+  // A priority target — clear the nest to stop the bleeding.  Its brood don't
+  // gate wave completion (Stage 2b); killing the nest just stops new ones.
+  [EnemySubtype.NEST]: {
+    color: '#0d9488', size: 46, health: 14,
+    maxSpeed: 0, accel: 0, turnRate: 0.6,
+    sprite: ASSETS.ENEMY_TANK, mass: 60, shape: 'nest',
+    shoots: false, contactDamage: 0,
+    spawner: { subtype: EnemySubtype.SWARM, interval: 4.0, batch: 2, maxBrood: 10 },
+  },
+  // ── Stage 5 ──
+  // Bubble: a translucent soft-body blob.  PASSIVE by default — it drifts
+  // lazily, eats nearby mobile shards to grow (`consume`), and once fat enough
+  // SPLITS in two (`multiply`), so an ignored field of them quietly breeds.  It
+  // takes no notice of the player until SHOT: a hit sets `provoked` (Stage 3a),
+  // and from then on it homes in, latches onto the player on contact (Stage 3c
+  // attach), and EMPs weapon + shield ('disable' status) for a few seconds
+  // before releasing and popping.  Fragile (low HP) so you can shoot it off —
+  // but provoking the field stops the breeding and turns it on you.  RAMMING
+  // role (rush when provoked).  Cyan-violet membrane; no engine flame.
+  [EnemySubtype.BUBBLE]: {
+    color: '#67e8f9', size: 15, health: 50, // maxHealth then scales LINEARLY
+                                            // with size as it grows (updateBubbles.syncBubbleMaxHealth)
+    maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
+    sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
+    shoots: false, contactDamage: 0,
+    // growthPerEat / hpPerEat / the digest time are all SCALED per-eat by the
+    // shard's richness (mass/energy conserved — see shardRichness): denser/
+    // stronger shards take longer to digest and give more growth + health.
+    consume: { eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14 },
+    multiply: { atSize: 50, maxPopulation: 14 },
+    ambient: true, thirdParty: true,
+  },
+  // ── Stage 6 ──
+  // Dragon: a big segmented serpent mini-boss.  Enters via a portal, rides the
+  // flow field weaving across the map and DEVOURS tiles (consume eats:'tile' →
+  // consumeTile) to grow longer + thicker, deals contact damage along its body,
+  // and leaves via portal if not killed.  Engine-managed (GameEngine.update-
+  // Dragon); the 'dragon' AI strategy is a no-op.  Tanky combat HP on the head.
+  [EnemySubtype.DRAGON]: {
+    color: '#34d399', size: 64, health: 500, // big boss HP (> the bubble's max)
+    maxSpeed: 6, accel: 4, turnRate: 1.2,
+    sprite: ASSETS.ENEMY_TANK, mass: 500, shape: 'dragon', // heavy: barely shoved
+    shoots: false, contactDamage: 16,
+    consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
+  },
 };
+
+// Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
+// BEFORE its hull would actually touch the player (added on top of the two
+// half-sizes), so the blast goes off slightly ahead of contact rather than on
+// overlap.  Tuned per-frame in GameEngine.updateKamikazeProximity.
+export const KAMIKAZE_DETONATE_BUFFER = 36;
 
 // ── Status effects ────────────────────────────────────────────────────────────
 // Corrosion: a stacking damage-over-time the Orbiter (Shooter-tier-2) applies
@@ -2838,6 +3132,155 @@ export const CORROSION = {
   MAX_STACKS: 3,     // up to 9 dmg/s
   COLOR: '#a3e635',  // acid green — projectile + HUD badge + ship tint
 };
+
+// Disable / EMP (Stage 3c): a status effect that takes the player's weapon AND
+// shield offline for a duration (no firing, no absorb, no recharge).  Applied
+// by the reactive bubble on attach; DBG-self-appliable.  Single non-stacking
+// instance, refreshed on re-hit.
+export const DISABLE = {
+  DURATION: 2.5,     // seconds
+  COLOR: '#f59e0b',  // amber — HUD badge + ship tint
+};
+
+// Reactive bubble (Stage 5): the latch / contact / multiply behaviour run by
+// GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
+// AI_CONFIG.BUBBLE; this block is the engagement payload.
+export const BUBBLE_CONSTANTS = {
+  // Latch: when a provoked bubble touches the player it attaches and EMPs.
+  CONTACT_PAD: 6,         // extra units added to the two half-sizes for the grab
+  LATCH_DURATION: 2.6,    // seconds the bubble clings before it tires + falls off
+  LATCH_DPS: 6,           // BASE health/sec drained at base size, scaled UP
+                          // LINEARLY by the bubble's size (bigger/older bubble =
+                          // harder bite): drain = LATCH_DPS × size / baseSize
+  // A MODERATE collision (more than a light touch) with the player or an enemy
+  // aggros a passive bubble onto the collider — relative impact speed ≥ this.
+  COLLIDE_AGGRO_SPEED: 3.5,
+  // EMP refresh window applied each latched step.  Kept short so the disable
+  // ends ~immediately when the bubble detaches (the latch IS the lockout — no
+  // long tail past it).  Re-applied every step, so it never lapses mid-latch.
+  EMP_REFRESH: 0.4,       // seconds
+  // Knock-off: a latched bubble falls off (→ sick) on the LATCH_DURATION timer,
+  // OR early if it's shot (any projectile hit) OR if the player slams a tile /
+  // asteroid at ≥ KNOCK_SPEED (a deliberate shake-it-off counter).
+  KNOCK_SPEED: 6,         // player impact speed that shakes a latched bubble free
+  // Sickness: after breaking a latch, OR after eating a TOXIC shard (plastic /
+  // green-nebula), the bubble turns green + goes sluggish and can't eat for a
+  // while — and loses aggro.  This replaces the old latch-death.
+  SICK_DURATION: 2.8,     // seconds
+  SICK_SPEED_MULT: 0.3,   // movement-speed multiplier while sick (sluggish)
+  SICK_COLOR: '#84cc16',  // queasy lime — membrane tint while sick
+  // Aggro leash: a hunting bubble gives up if its target gets this far away.
+  AGGRO_LOSE_RANGE: 950,
+  // Mass/energy-conserved eating: each eat's digest time, growth and health are
+  // scaled by the shard's RICHNESS (shardRichness), clamped to this band.  A
+  // dense metal shard (high) takes longer + feeds more than a light glass one.
+  RICH_MIN: 0.6,
+  RICH_MAX: 2.0,
+  HEAL_PER_RICH: 6,       // current-HP healed per eat (× richness; capped at maxHP)
+  // Multiply: a passive bubble that has grown to its `multiply.atSize` splits.
+  SPLIT_SPEED: 3.5,       // outward speed imparted to parent + child on a split
+  COLOR_PROVOKED: '#fb7185', // angry membrane tint once provoked (render)
+  CALM_VISIBILITY: 0.45,  // membrane alpha multiplier while passive (faint, easy
+                          // to miss) — provoked bubbles render at full opacity
+                          // (a hit-flash still cuts through so shots read)
+  FEED_PULSE: 0.22,       // seconds the membrane bulges after swallowing a shard
+  DIGEST_DURATION: 5.5,   // BASE seconds to digest a shard (× richness) — slow,
+                          // one meal at a time
+  // Ambient population: bubbles are always-present fauna, not wave enemies.
+  // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
+  // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below
+  // it (breeding can carry the count higher, up to multiply.maxPopulation).
+  AMBIENT_POPULATION: 5,
+  AMBIENT_RESPAWN_INTERVAL: 4,  // seconds between top-up spawns while short
+  SPAWN_MARGIN: 220,            // units past the viewport edge to spawn a fresh bubble
+};
+
+// Stage 6: the dragon mini-boss.  Engine-managed lifecycle (GameEngine.spawn-
+// Dragon / updateDragon): enter (portal) → roam (flow-weave + devour tiles) →
+// leave (portal), or die when its head HP runs out.  The body is a chain of
+// segments drawn by RenderSystem along the head's recorded path.
+export const DRAGON_CONSTANTS = {
+  SPEED_FRAC: 0.13,        // cruise speed as a fraction of the player's terminal cruise
+                          // — deliberately slow + ponderous (a roaming siege beast)
+  WEAVE_FREQ: 1.1,         // serpentine weave frequency (rad/s)
+  WEAVE_AMP: 0.55,         // weave amplitude (radians, rotates the flow heading)
+  STEER_RATE: 0.04,        // velocity easing toward the target heading (×dt×60)
+  // Head attacks (Stage 6): periodically spits a SWARM gnat and lobs a slow
+  // HOMING missile at the player while roaming.
+  GNAT_INTERVAL: 3.2,      // seconds between brood spits (+ up to half, random)
+  MISSILE_INTERVAL: 2.6,   // seconds between homing missiles
+  MISSILE: { speed: 4.5, damage: 12, size: 7, lifetime: 6, color: '#fb7185', homingStrength: 0.55 },
+  ENTER_DURATION: 1.1,     // seconds of portal emergence before it starts roaming
+  ROAM_DURATION: 28,       // seconds roaming before it heads out (if not killed)
+  LEAVE_DURATION: 9,       // safety cap: seconds before the leave is force-finished
+                          // (the real exit is the head+tail crossing the portal)
+  PORTAL_AHEAD: 320,       // units ahead of the head to open the exit portal
+  PORTAL_CONSUME_RADIUS: 70, // head/segment within this of the portal centre → swallowed
+  LEAVE_SPEED_MULT: 1.8,   // speed boost while diving for the exit portal
+  PATH_SPACING: 11,        // world units between recorded head-path points
+  PATH_MAX: 200,           // cap on stored path points (enough for MAX_SEGMENTS)
+  // Snake body: each tile the dragon eats is appended as a real chain-followed
+  // segment, spaced SEGMENT_SPACING apart, up to MAX_SEGMENTS.
+  SEGMENT_SPACING: 36,     // world units between body segments
+  MAX_SEGMENTS: 28,        // body length cap (further tiles are just devoured)
+  SEGMENT_MASS: 6,         // finite mass so a segment is dynamic + shootable
+  START_SEGMENTS: 10,      // body tiles it spawns with (a coherent random material)
+  SEGMENTS: 16,            // body segments at base size (grows with size)
+  SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
+  SEGMENT_STRIDE: 2,       // path points between consecutive rendered segments
+  SEGMENT_TAPER: 0.97,     // segment-radius multiplier toward the tail
+  BODY_RADIUS_FRAC: 0.46,  // first body segment radius as a fraction of head size
+  CONTACT_CD: 0.7,         // seconds between body-contact hits on the player
+  PORTAL_RADIUS: 160,      // portal ring max radius
+  PORTAL_DURATION: 0.9,    // portal ring VFX lifetime
+  PORTAL_COLOR: '#a78bfa', // violet rift
+  COLOR: '#34d399',        // emerald scales
+  EYE_COLOR: '#fde047',    // head eye glow
+  SCORE: 3000,             // kill payout
+  SPAWN_MARGIN: 300,       // units past the viewport edge to open the entry portal
+};
+
+// ─── Rival ships (Stage 7) ───────────────────────────────────────────────
+// Player-like EntityType.ENEMY roamers that warp in via portal, hunt the WAVE
+// enemies (denying the player the kill points + drops they'd otherwise get),
+// and—per disposition—may also fight the player.  Engine-managed lifecycle
+// (GameEngine.updateRivals), rendered from an old enemy PNG with a disposition
+// ring.  Three dispositions: hostile (fights player + enemies), ally (fights
+// enemies only, never the player), neutral (fights enemies for loot, ignores
+// the player UNTIL attacked, then retaliates).
+export const RIVAL_CONSTANTS = {
+  // Cadence: a fresh random rival warps in every SCORE_INTERVAL points earned,
+  // up to MAX_RIVALS alive at once.
+  SCORE_INTERVAL: 1000, MAX_RIVALS: 6,
+  ROAM_DURATION: 280,        // seconds it hunts before warping back out (10× the
+                            // dragon's roam — rivals are long-term companions/rivals)
+  ENTER_DURATION: 0.9,       // portal-emergence beat before it engages
+  SPAWN_MARGIN: 280,         // units past the viewport edge to open the entry portal
+  // Disposition spawn weights + team colours (the render ring + score popup).
+  WEIGHTS: { hostile: 0.34, ally: 0.30, neutral: 0.36 },
+  COLORS: { hostile: '#f87171', ally: '#34d399', neutral: '#fbbf24' } as Record<string, string>,
+  // Ship feel.  SIZE is the on-screen sprite size AND the collision footprint
+  // (rivals draw 1:1, so hull == hitbox).  Movement (thrust/friction/top speed)
+  // is NOT tuned here — rivals fly with the player's map movement config, so
+  // they handle like a baseline player ship.
+  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4,
+  VISION: 760,               // target-acquisition range
+  FIRE_RANGE: 520,           // opens fire within this of its target
+  PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target
+  TIER: 4,                   // kill-bounty tier (SCORE POINTS_PER_TIER × this) when downed
+  WEAPON: { speed: 8.5, damage: 9, cooldown: 0.5, lifetime: 1.4, size: 4.5, color: '#e2e8f0' },
+  LOOT_RANGE: 150,           // vacuums collectible drops within this (denies the player)
+  HEAL_PER_LOOT: 6,          // self-heal per drop eaten
+  // Warp-out portal (mirrors the dragon's fly-through, single ship).
+  PORTAL_RADIUS: 150, PORTAL_DURATION: 0.85, PORTAL_COLOR: '#a78bfa',
+  PORTAL_AHEAD: 300, PORTAL_CONSUME_RADIUS: 64, LEAVE_SPEED_MULT: 1.7, LEAVE_DURATION: 8,
+  // Sprite pool — the retired enemy art (one picked at random per rival).
+  SPRITES: [
+    ASSETS.ENEMY_DRONE, ASSETS.ENEMY_CHARGER, ASSETS.ENEMY_TANK,
+    ASSETS.ENEMY_SKIRMISHER, ASSETS.ENEMY_ORBITER, ASSETS.ENEMY_SNIPER,
+  ],
+};
+export type RivalDisposition = 'hostile' | 'ally' | 'neutral';
 
 // Per-subtype attack effect: a shooter whose subtype appears here fires rounds
 // that apply the effect to the player on hit (and render in the effect colour).
@@ -2872,6 +3315,48 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.SHOOTER_1]: EnemyRole.SHOOTING,
   [EnemySubtype.SHOOTER_2]: EnemyRole.SHOOTING,
   [EnemySubtype.SHOOTER_3]: EnemyRole.SHOOTING,
+  [EnemySubtype.KAMIKAZE]:  EnemyRole.RAMMING,
+  [EnemySubtype.BULWARK]:   EnemyRole.SHOOTING,
+  [EnemySubtype.TURRET]:    EnemyRole.SHOOTING, // stationary (no-move guard in AISystem)
+  [EnemySubtype.SWARM]:     EnemyRole.RAMMING,
+  [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
+  [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
+  [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
+};
+
+// ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
+// Per-subtype movement strategy.  AISystem routes each enemy through the named
+// strategy via a lookup table instead of an `ENEMY_ROLE`-keyed if/else, so a
+// new behavior is a TABLE ENTRY (add a strategy fn in AISystem + a row here),
+// not a growing switch.  The value is an object so future per-subtype knobs
+// (targeting mode, an optional special-tick) drop in without restructuring.
+//
+// Today every subtype maps to one of the two original routines exactly as
+// ENEMY_ROLE did (RAMMING → 'dogfighter', SHOOTING → 'skirmisher'), so play is
+// byte-for-byte identical; the per-subtype quirks (Drone jitter, Orbiter true-
+// orbit, Sniper lock, Turret no-move) still live inside those routines.
+export type EnemyMovement = 'dogfighter' | 'skirmisher' | 'swarm' | 'bubble' | 'dragon';
+export interface EnemyBehaviorDef {
+  /** Which AISystem movement/targeting routine runs for this subtype. */
+  move: EnemyMovement;
+  // Extension points (add here + a matching strategy/handler in AISystem):
+  //   target?: 'player' | 'nearestEnemy' | …
+  //   special?: 'arcShieldSlew' | 'boids' | 'nestSpawn' | …
+}
+export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
+  [EnemySubtype.RAMMER_1]:  { move: 'dogfighter' },
+  [EnemySubtype.RAMMER_2]:  { move: 'dogfighter' },
+  [EnemySubtype.RAMMER_3]:  { move: 'dogfighter' },
+  [EnemySubtype.KAMIKAZE]:  { move: 'dogfighter' },
+  [EnemySubtype.SHOOTER_1]: { move: 'skirmisher' },
+  [EnemySubtype.SHOOTER_2]: { move: 'skirmisher' },
+  [EnemySubtype.SHOOTER_3]: { move: 'skirmisher' },
+  [EnemySubtype.BULWARK]:   { move: 'skirmisher' },
+  [EnemySubtype.TURRET]:    { move: 'skirmisher' },
+  [EnemySubtype.SWARM]:     { move: 'swarm' },
+  [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
+  [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
+  [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
 };
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
@@ -2887,6 +3372,12 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
   { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
   { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
+  { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
+  { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
+  { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
+  { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
+  // NOTE: BUBBLE is ambient fauna (always-present, never a wave enemy) — it's
+  // maintained by GameEngine.maintainAmbientBubbles, not spawned by waves.
 ];
 
 // Tier-weight progression for the weighted-random waves (index 3+).  Row =

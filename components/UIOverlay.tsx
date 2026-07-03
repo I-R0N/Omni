@@ -21,6 +21,14 @@ const ENEMY_TEST: { type: EnemySubtype | null; label: string }[] = [
   { type: EnemySubtype.SHOOTER_1, label: 'Skirmisher' },
   { type: EnemySubtype.SHOOTER_2, label: 'Orbiter' },
   { type: EnemySubtype.SHOOTER_3, label: 'Sniper' },
+  { type: EnemySubtype.KAMIKAZE,  label: 'Kamikaze' },
+  { type: EnemySubtype.BULWARK,   label: 'Bulwark' },
+  { type: EnemySubtype.TURRET,    label: 'Turret' },
+  { type: EnemySubtype.SWARM,     label: 'Swarm' },
+  { type: EnemySubtype.NEST,      label: 'Nest' },
+  // BUBBLE is ambient fauna (always present in normal play), not a forceable
+  // wave enemy — so it's intentionally absent here.  Any force-selection below
+  // suppresses the ambient bubbles for clean single-type isolation.
 ];
 const TEST_MAPS: { type: MapType; label: string }[] = [
   { type: MapType.ASTEROID_FIELD,       label: 'Asteroid Field' },
@@ -80,7 +88,9 @@ interface UIOverlayProps {
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
   onCycleEnemyScale?: () => void;
+  onCycleSwarmMove?: () => void;
   onApplyCorrosion?: () => void;
+  onApplyDisable?: () => void;
   onToggleTraits?: () => void;
   onCycleUpgrade?: (id: string) => void;
   onMaxUpgrades?: () => void;
@@ -89,6 +99,8 @@ interface UIOverlayProps {
   onSelectCard?: (index: number) => void;
   onCycleCardInterval?: () => void;
   onTestCards?: () => void;
+  onSpawnDragon?: (type: string) => void;
+  onSpawnRival?: (disposition: string) => void;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -159,7 +171,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
   onCycleEnemyScale,
+  onCycleSwarmMove,
   onApplyCorrosion,
+  onApplyDisable,
   onToggleTraits,
   onCycleUpgrade,
   onMaxUpgrades,
@@ -168,6 +182,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSelectCard,
   onCycleCardInterval,
   onTestCards,
+  onSpawnDragon,
+  onSpawnRival,
   onPurchaseUnlock,
   onUnlockAll,
   onResetUnlocks,
@@ -198,7 +214,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
-    perf: true, timing: true,
+    perf: true, timing: true, dragon: true, rival: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -453,8 +469,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
                 {statRow('  ↳ live', stats.enemyScaleInfo ?? '—', 'text-slate-400')}
+                {ctrlRow('Gnat move', onCycleSwarmMove, stats.swarmMoveName ?? 'boids',
+                  'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine) → burst (coast + telegraphed dash). Applies live to all gnats.')}
                 {ctrlRow('Corrode', onApplyCorrosion, 'Apply',
                   'Apply a corrosion stack to the player (DBG) to test the damage-over-time + HUD badge. Stacks up to 3; bleeds health past the shield.')}
+                {ctrlRow('Disable', onApplyDisable, 'EMP',
+                  'EMP the player (DBG) to test the weapon + shield disable (Stage 3c): firing is blocked and the shield goes offline (no absorb / no recharge) for the effect duration. Surfaces as a HUD badge.')}
                 {ctrlRow('Traits', onToggleTraits,
                   stats.traitsEnabled === false ? 'Off' : 'On',
                   'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
@@ -482,6 +502,43 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Relock', onResetUnlocks, 'Lean',
                   'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
               </>)}
+
+              {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
+              {renderSectionHeader('dragon', 'Dragon')}
+              {!collapsed.dragon && (
+                <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
+                  {['glass', 'rock', 'plastic', 'metal', 'mixed'].map(t => (
+                    <button
+                      key={t}
+                      onClick={() => onSpawnDragon && onSpawnDragon(t)}
+                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Rival ships summon (DBG) ───────────────────────── */}
+              {renderSectionHeader('rival', 'Rivals')}
+              {!collapsed.rival && (
+                <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
+                  {[
+                    { k: 'hostile', c: 'hover:border-red-400' },
+                    { k: 'ally', c: 'hover:border-emerald-400' },
+                    { k: 'neutral', c: 'hover:border-amber-400' },
+                    { k: 'random', c: 'hover:border-sky-400' },
+                  ].map(({ k, c }) => (
+                    <button
+                      key={k}
+                      onClick={() => onSpawnRival && onSpawnRival(k)}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:text-white ${c}`}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
@@ -759,18 +816,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   )}
                 </div>
               )}
-              {/* Active status effects — e.g. CORROSION ×N, fading as it lapses */}
-              {(stats.statusEffects ?? []).map(e => (
+              {/* Active status effects — e.g. CORROSION ×N / DISABLE, fading as it lapses */}
+              {(stats.statusEffects ?? []).map(e => {
+                const amber = e.kind === 'disable';
+                return (
                 <div
                   key={e.kind}
-                  className="pointer-events-none bg-slate-900/75 border border-lime-500/50 rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right"
+                  className={`pointer-events-none bg-slate-900/75 border rounded-lg px-3 py-1 shadow-lg backdrop-blur-sm text-right ${amber ? 'border-amber-500/50' : 'border-lime-500/50'}`}
                   style={{ opacity: Math.max(0.45, e.fraction) }}
                 >
-                  <span className="text-lime-300 text-[11px] font-extrabold uppercase tracking-widest tabular-nums">
-                    {e.kind} ×{e.stacks}
+                  <span className={`text-[11px] font-extrabold uppercase tracking-widest tabular-nums ${amber ? 'text-amber-300' : 'text-lime-300'}`}>
+                    {e.kind === 'disable' ? 'DISABLED' : `${e.kind} ×${e.stacks}`}
                   </span>
                 </div>
-              ))}
+              );})}
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
