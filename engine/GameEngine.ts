@@ -4395,17 +4395,28 @@ export class GameEngine {
       if (!radius || radius <= 0) return;
       const radiusSq = radius * radius;
 
+      // Cosmetic rings (the portal warp: damage 0 + knockback 0) never apply
+      // anything, so the in-range snapshot is pure waste — updateExplosionRings
+      // early-outs on an empty validHitIds set and the renderer draws the ring
+      // from its radius/lifetime alone.  Skip the O(all-entities) scan + Set
+      // work for them: a spawn burst (e.g. 10 dragon portals × 3 rings each)
+      // used to walk the whole map per ring on the single spawn frame, which
+      // is the bulk of the "spawn-burst hitch".  Damaging rings (cannon AoE,
+      // kamikaze, merge blow-back) still snapshot exactly as before.
       const validHitIds = new Set<string>();
       const ents = this.currentMap.entities;
-      for (let i = 0; i < ents.length; i++) {
-          const e = ents[i];
-          if (!e.active || e.isExploding) continue;
-          if (e.type === EntityType.PROJECTILE) continue;
-          if (e.type === EntityType.PARTICLE) continue;
-          if (e.type === EntityType.INTERACTABLE) continue;
-          const dx = wrapDeltaX(pos.x, e.position.x);
-          const dy = wrapDeltaY(pos.y, e.position.y);
-          if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
+      const cosmeticRing = opts.damage <= 0 && opts.knockback <= 0;
+      if (!cosmeticRing) {
+          for (let i = 0; i < ents.length; i++) {
+              const e = ents[i];
+              if (!e.active || e.isExploding) continue;
+              if (e.type === EntityType.PROJECTILE) continue;
+              if (e.type === EntityType.PARTICLE) continue;
+              if (e.type === EntityType.INTERACTABLE) continue;
+              const dx = wrapDeltaX(pos.x, e.position.x);
+              const dy = wrapDeltaY(pos.y, e.position.y);
+              if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
+          }
       }
 
       const lifetime = opts.lifetime ?? 0.35;

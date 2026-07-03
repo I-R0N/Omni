@@ -179,6 +179,29 @@ a state transition (calm ↔ provoked ↔ sick), not per frame. An idle drifting
 bubble reuses the same gradient object every frame. The key is compared by
 component (no per-frame key-string allocation — hot-path allocation discipline).
 
+### 5. Cosmetic shockwave rings — skip the O(N) hit-set snapshot
+
+Follow-up prompted by the real-hardware captures: the `dragon-stack` / warp-in
+`min`-FPS dips (a single spawn-frame hitch) traced largely to `spawnShockwave`
+(`GameEngine`). Every ring — **including the purely cosmetic portal rings**
+(`openPortal` fires three per warp with `damage: 0, knockback: 0`) — built a
+`validHitIds` Set by walking **all active entities** in range. On the ~4.6 k-tile
+"Tile Heavy" map a burst of 10 dragon portals × 3 rings = **~138 k distance
+checks + 30 Set allocations on the single spawn frame**, plus a per-frame no-op
+sweep of that set for each ring's lifetime — all to apply *nothing*.
+
+**Change:** skip the snapshot when `damage <= 0 && knockback <= 0`. The ring
+keeps an empty `validHitIds`; `updateExplosionRings` already early-outs on an
+empty set (`valid.size === 0`), and the renderer draws the ring from its
+radius/lifetime alone — so it's **visually identical**. Damaging rings (cannon
+AoE, kamikaze, merge blow-back) still snapshot exactly as before.
+
+- **Cost:** the portal-spawn / rival-warp burst frame drops from O(rings ×
+  all-entities) + N Set allocs to O(1). Removes the bulk of the spawn-burst
+  hitch (the residual is the particle spray — a separate, visual, still-parked
+  item). Verified: a 14-portal same-frame burst produced 21 live rings, **all
+  with empty hit-sets**, zero errors, rendering unchanged.
+
 ---
 
 ## Deferred (see `docs/PARKING_LOT.md`)
@@ -190,11 +213,14 @@ component (no per-frame key-string allocation — hot-path allocation discipline
   shard list. Replacing it with a dynamic-grid near-query would need a new
   `forEachDynamicNear` helper (PhysicsSystem only exposes a **static**-grid query
   today) — more invasive than this zero-behaviour pass warranted. Deferred.
-- **Portal / death particle-burst counts** (`openPortal` ≈ 46 particles + 3
-  shockwaves; dragon death 40; sever/segment puffs). These are one-shot on
-  spawn/death events, not per-frame, and cutting them is a **visual** change —
-  left intact per the zero-visual-change posture. Logged as a knob to revisit only
-  if a profile shows portal spam dominating.
+- **Portal / death particle-burst COUNTS** (`openPortal` ≈ 46 particles;
+  dragon death 40; sever/segment puffs). The *compute* half of the spawn-burst
+  hitch — the shockwave hit-set scan — is now fixed (optimization #5); what
+  remains is the particle spray itself, whose only lever is **cutting counts** (a
+  visual change) or staggering simultaneous spawns across frames. Left intact per
+  the zero-visual-change posture; only fires on many-at-once spawns/deaths, never
+  in steady play. Revisit with an explicit before/after if the residual dip
+  matters.
 - **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
   counts every step; cheap enough that gating them is low ROI and risks a spawn-
   timing wobble. Left as-is.
