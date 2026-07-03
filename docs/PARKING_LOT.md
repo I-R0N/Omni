@@ -408,17 +408,18 @@ here for a future perf beat.
   (`forEachStaticNear`) today — a `forEachDynamicNear` over the per-frame dynamic
   grid would be needed. More invasive than a zero-behaviour pass warranted.
 
-- **Portal / death particle-burst counts.** `openPortal` spawns ~46 particles;
-  dragon death 40; sever/segment puffs 6–12 each. UPDATE: the *compute* half of
-  the spawn-burst hitch — the cosmetic-ring `validHitIds` O(all-entities) scan in
-  `spawnShockwave` — was fixed in the exotic-enemies-optimization pass
-  (damage-0/knockback-0 rings now skip the snapshot; zero visual change). What
-  remains here is the particle SPRAY: one-shot on spawn/death **events** (not
-  per-frame), so it doesn't dominate a steady-state profile, but a screen full of
-  simultaneous warp-ins/deaths still spikes the particle pool. Cutting the counts
-  (or staggering simultaneous spawns across frames) is a **visual** change
-  (approval-gated), so left intact. Revisit with an explicit before/after only if
-  the residual dip matters; the cap already exists (`enforceCap` / `MAX_PARTICLES`).
+- **Portal / death particle-burst counts. — RESOLVED (exotic-enemies-opt).** The
+  spawn-burst hitch was fully addressed: (1) the cosmetic-ring `validHitIds`
+  O(all-entities) scan in `spawnShockwave` now skips for damage-0/knockback-0
+  rings; (2) `ParticleSystem`'s per-spawn `enforceTypeCap` O(N) rescans were
+  batched to once/frame in the engine loop (zero visual change — the cap and the
+  dropped-oldest set are identical); (3) burst counts trimmed ~40 % (enemy death
+  16–24/9 → 10–13/5, portal 30/16 → 18/10, dragon death 40 → 24; user-approved
+  visual reduction). Left here only as a pointer. NOTE: the same per-spawn
+  `enforceCap` pattern still exists for **projectiles** (`ProjectileSystem.spawn`
+  → `enforceCap`, MAX_PROJECTILES) — untouched because projectiles are gameplay
+  entities (cap timing can affect a frame), a candidate for the same once/frame
+  batching if a projectile-heavy weapon ever profiles hot.
 
 - **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
   counts run every step. Cheap enough that gating them (they only ACT on a timer)

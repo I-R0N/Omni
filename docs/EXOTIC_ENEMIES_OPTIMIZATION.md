@@ -198,9 +198,38 @@ AoE, kamikaze, merge blow-back) still snapshot exactly as before.
 
 - **Cost:** the portal-spawn / rival-warp burst frame drops from O(rings ×
   all-entities) + N Set allocs to O(1). Removes the bulk of the spawn-burst
-  hitch (the residual is the particle spray — a separate, visual, still-parked
-  item). Verified: a 14-portal same-frame burst produced 21 live rings, **all
+  hitch. Verified: a 14-portal same-frame burst produced 21 live rings, **all
   with empty hit-sets**, zero errors, rendering unchanged.
+
+### 6. Spawn-burst residual — batch the particle cap + trim burst counts (Tier 2)
+
+Follow-up after #5, once the cosmetic-ring scan was gone. Two parts:
+
+**6a — `enforceCap` batched to once per frame (zero visual change).**
+`ParticleSystem.spawn` called `enforceTypeCap` on **every** spawn — and that
+helper does **two O(all-entities) walks** (count, then evict). A mass death
+(snitch catch / AoE cluster / wave wipe) fires ~38 death-burst spawn calls on
+one frame, so at ~6 k entities that was **≈456 k iterations just for cap
+bookkeeping**, independent of particle count (`MAX_PARTICLES = 400` already
+bounds render). The cap is now enforced **once per frame** in the engine loop,
+after the sim drain and before the render pass — so the on-screen cap and
+*which* oldest particles get dropped are identical, but the per-spawn O(N)
+rescans are gone. Verified: a 20-dragon same-frame burst (560 particles wanted)
+clamps to exactly **400** active every frame then decays as they expire — zero
+errors, bound identical to the old per-spawn path.
+
+**6b — burst particle counts trimmed ~40 % (visual, user-approved).**
+| Site | before | after |
+|------|-------:|------:|
+| enemy death (colour / white) | 16–24 / 9 | 10–13 / 5 |
+| portal warp (embers / sparks) | 30 / 16 | 18 / 10 |
+| dragon death | 40 | 24 |
+| gnat death | 5 | 5 (unchanged — already light) |
+
+Fewer particles per burst so a simultaneous mass death / warp spawns less; the
+`MAX_PARTICLES` cap already bounded on-screen density, so the pop still reads.
+Approved by the user as an intentional, minor visual reduction (decision logged
+in `docs/GAME_FEEDBACK_PLAN.md`).
 
 ---
 
@@ -213,14 +242,11 @@ AoE, kamikaze, merge blow-back) still snapshot exactly as before.
   shard list. Replacing it with a dynamic-grid near-query would need a new
   `forEachDynamicNear` helper (PhysicsSystem only exposes a **static**-grid query
   today) — more invasive than this zero-behaviour pass warranted. Deferred.
-- **Portal / death particle-burst COUNTS** (`openPortal` ≈ 46 particles;
-  dragon death 40; sever/segment puffs). The *compute* half of the spawn-burst
-  hitch — the shockwave hit-set scan — is now fixed (optimization #5); what
-  remains is the particle spray itself, whose only lever is **cutting counts** (a
-  visual change) or staggering simultaneous spawns across frames. Left intact per
-  the zero-visual-change posture; only fires on many-at-once spawns/deaths, never
-  in steady play. Revisit with an explicit before/after if the residual dip
-  matters.
+- **Portal / death particle-burst — DONE (optimizations #5 + #6).** The
+  spawn-burst hitch is now addressed on all three fronts: the cosmetic-ring
+  O(N) hit-set scan is skipped (#5), the per-spawn `enforceCap` O(N) rescans are
+  batched to once/frame (#6a, zero-visual), and the burst particle counts are
+  trimmed ~40 % (#6b, user-approved). Nothing left parked here.
 - **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
   counts every step; cheap enough that gating them is low ROI and risks a spawn-
   timing wobble. Left as-is.

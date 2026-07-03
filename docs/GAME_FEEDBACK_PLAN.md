@@ -965,7 +965,26 @@ k. After N waves, spawn a portal to a new map.
     provoked+flash states, 3.5 s render at 1024×768 AND 2560×1440 → 0
     console/page errors, all render paths correct). Report +
     per-scenario table + parity checklist:
-    `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. Next per the tight line: the
+    `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`.
+    **Post-merge follow-ups (same PR #69, driven by real-hardware Perf REC
+    captures the user pasted back):** (5) cosmetic shockwave rings
+    (damage-0/knockback-0 portals) now skip the O(all-entities) `validHitIds`
+    snapshot in `spawnShockwave` — kills most of the spawn-burst hitch,
+    zero-visual. (6a) `ParticleSystem`'s per-spawn `enforceTypeCap` (two
+    O(all-entities) walks per spawn call — ~456k iterations on a mass-death
+    frame) batched to ONCE per frame in the engine loop; zero-visual (cap +
+    dropped-oldest identical, verified a 20-dragon burst clamps to exactly 400).
+    (6b) **APPROVED VISUAL CHANGE** — burst particle counts trimmed ~40 %
+    (enemy death 16–24/9 → 10–13/5, portal 30/16 → 18/10, dragon death 40 → 24;
+    gnat 5 unchanged). This is the one intentional visual deviation in the PR;
+    the user was asked via AskUserQuestion ("Both 2a and 2b") and approved it.
+    Finding that reframed it: `MAX_PARTICLES=400` already bounds render, so the
+    mass-death hitch was the `enforceCap` rescans (6a), not particle count — the
+    count cut (6b) is a minor extra. A separate physics/shard-broadphase perf
+    target (a 6k-shard field pegged max tier: sim 4.74ms + collisions 2.56ms)
+    was logged to the parking lot as OUT OF SCOPE for this session. Also shipped:
+    an in-game Perf REC harness (`engine/systems/PerfRecorder.ts`) for
+    iPhone-friendly copy-paste FPS captures. Next per the tight line: the
     exotic-enemy BALANCE pass (parking lot), then Phase 2 (h) bosses.
 
 20. **living-entity (new content task).** New non-threatening

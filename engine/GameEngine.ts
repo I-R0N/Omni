@@ -1754,6 +1754,14 @@ export class GameEngine {
         this.simAccumulator %= FIXED_DT;
     }
 
+    // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
+    // path — see ParticleSystem.spawn).  Runs after the whole sim drain so
+    // every death-burst / FX particle spawned this frame is counted, and before
+    // the render pass so the on-screen cap (and which oldest particles are
+    // dropped) is identical to the old per-spawn behaviour — just one O(N) pass
+    // instead of one per spawn call.
+    if (this.currentMap) this.particles.enforceCap(this.currentMap.entities);
+
     // Refresh the frame entity list one more time so anything spawned during
     // the final sim step is included in the render pass.
     this.prepareFrameEntities();
@@ -2330,12 +2338,14 @@ export class GameEngine {
               // to the enemy; bigger enemies pop bigger.
               this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
               this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-              // Big colored debris burst + white core flash.
-              this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+              // Big colored debris burst + white core flash.  (Counts trimmed
+              // ~40 % — Tier 2b — so a mass death spawns fewer particles; the
+              // pop still reads at MAX_PARTICLES-bounded density.)
+              this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), ec, {
                   speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
                   lifetimeMin: 0.3, lifetimeMax: 0.7,
               });
-              this.spawnParticles(entity.position, 9, '#ffffff', {
+              this.spawnParticles(entity.position, 5, '#ffffff', {
                   speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
                   lifetimeMin: 0.15, lifetimeMax: 0.35,
               });
@@ -5334,7 +5344,7 @@ export class GameEngine {
       this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
       this.dragonsKilled++;
       this.openDragonPortal(d.position);
-      this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
+      this.spawnParticles(d.position, 24, DRAGON_CONSTANTS.COLOR, { // Tier 2b: 40 → 24
           speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
@@ -5376,12 +5386,14 @@ export class GameEngine {
       // Wider, slower echo ring — gives the rift depth.
       this.spawnShockwave(pos, { radius: radius * 1.35, damage: 0, knockback: 0, color, lifetime: duration * 1.25 });
       // Swirling embers filling the disc (tangential bias reads as a vortex).
-      this.spawnParticles(pos, 30, color, {
+      // Counts trimmed ~40 % (Tier 2b) so a burst of simultaneous warps spawns
+      // fewer particles; the layered rings still carry the rift's body.
+      this.spawnParticles(pos, 18, color, {
           speedMin: 1, speedMax: 5, sizeMin: 1.5, sizeMax: 4,
           lifetimeMin: 0.35, lifetimeMax: 0.9, positionJitter: radius * 0.55,
       });
       // Hot white sparks bursting outward from the seam.
-      this.spawnParticles(pos, 16, '#ffffff', {
+      this.spawnParticles(pos, 10, '#ffffff', {
           speedMin: 4, speedMax: 12, sizeMin: 1, sizeMax: 2.6, lifetimeMin: 0.2, lifetimeMax: 0.5,
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO * 4); // a soft warp thud
