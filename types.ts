@@ -471,6 +471,25 @@ export interface GameEntity {
   enemyBodyGrad?: CanvasGradient;
   enemyBodyGradR?: number;
   enemyBodyGradCol?: string;
+  // Cosmetic render cache for the geometric Dragon head (Stage 6): the big
+  // faceted-skull body gradient + the plasma-maw unit gradient, both reused
+  // across frames.  Rebuilt only when the size/colour/flash key changes; the
+  // per-frame energy pulse is applied via globalAlpha (the maw / bloom fade to
+  // a=0 at the rim, so a scalar alpha is exactly equivalent to baking the pulse
+  // into the stops).  Render-only; never read by the sim.
+  dragonSkullGrad?: CanvasGradient;
+  dragonMawGrad?: CanvasGradient;
+  dragonGradR?: number;
+  dragonGradCol?: string;
+  dragonGradFlash?: boolean;
+  dragonGradProvoked?: boolean;
+  // Cosmetic render cache for the Bubble membrane (Stage 5) fill gradient,
+  // keyed on the membrane radius + colour + visibility (all change only on a
+  // state transition, not per frame).  Render-only.
+  bubbleFillGrad?: CanvasGradient;
+  bubbleFillGradR?: number;
+  bubbleFillGradCol?: string;
+  bubbleFillGradVis?: number;
   // Attack-telegraph charge, 0→1, set by WeaponSystem over the archetype's
   // `telegraph` window as a shot winds up (and cleared when not charging /
   // out of range).  RenderSystem draws a muzzle charge glow scaled by it on

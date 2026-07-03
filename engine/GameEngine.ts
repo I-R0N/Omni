@@ -68,6 +68,10 @@ interface RivalInstance {
   fireTimer: number;         // weapon cooldown
   stolen: number;            // points denied to the player so far (HUD/popup)
   portal?: { x: number; y: number };  // exit-portal centre (leave only)
+  // Cached hunt target (Stage 7 perf).  Re-acquired on the PerfController
+  // `rivalScan` cadence; steering/firing recompute only the O(1) distance to it
+  // every step, and it's dropped the moment it goes inactive/exploding.
+  target?: GameEntity | null;
 }
 
 export class GameEngine {
@@ -4125,7 +4129,10 @@ export class GameEngine {
       for (let i = 0; i < ents.length; i++) {
           const e = ents[i];
           if (!e.active || e.attachedToId === undefined) continue;
-          const target = this.entityById(e.attachedToId);
+          // Attachment targets are the player or an enemy (the bubble latch), so
+          // resolve through the player special-case + the small enemies index
+          // rather than a full O(all-entities) master-list scan.
+          const target = this.resolveAggroTarget(e.attachedToId);
           if (!target || !target.active || target.isExploding) {
               e.attachedToId = undefined;
               continue;
@@ -4136,15 +4143,6 @@ export class GameEngine {
           e.velocity.x = target.velocity.x;
           e.velocity.y = target.velocity.y;
       }
-  }
-
-  /** Linear lookup of an active entity by id (small N; attachments are rare). */
-  private entityById(id: string): GameEntity | undefined {
-      const ents = this.currentMap?.entities;
-      if (!ents) return undefined;
-      if (id === 'player') return this.player;
-      for (let i = 0; i < ents.length; i++) if (ents[i].id === id) return ents[i];
-      return undefined;
   }
 
   // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
@@ -5391,6 +5389,9 @@ export class GameEngine {
       }
       if (this.rivals.length === 0) return;
 
+      // Re-acquire targets + run the loot vacuum on the PerfController cadence;
+      // everything else (steering, firing, lifecycle) still ticks every step.
+      const doScan = this.perfController.shouldRun('rivalScan');
       const enemies = this.entityIndex.enemies;
       // Rivals fly with the SAME mechanics as the player: thrust toward the
       // desired heading + a self speed-cap, with the map's friction applied by
@@ -5408,23 +5409,38 @@ export class GameEngine {
           inst.stateTimer -= dt;
           inst.fireTimer -= dt;
 
-          // ── Target: nearest wave enemy; hostile (or a provoked neutral) also
-          // weighs the player. ──
-          const huntsPlayer = inst.disposition === 'hostile'
-              || (inst.disposition === 'neutral' && s.provoked === true);
-          let target: GameEntity | null = null;
-          let bestD2 = R.VISION * R.VISION;
-          for (let i = 0; i < enemies.length; i++) {
-              const e = enemies[i];
-              if (e.isRival || e.isExploding) continue;
-              const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < bestD2) { bestD2 = d2; target = e; }
+          // ── Target: re-acquired on the rivalScan cadence (nearest wave enemy
+          // within VISION; a hostile / provoked-neutral rival also weighs the
+          // player), then CACHED on the instance.  Between scans steering/firing
+          // reuse the cached target and only recompute the O(1) distance to it —
+          // dropping it the moment it goes inactive/exploding. ──
+          let target: GameEntity | null = inst.target ?? null;
+          if (target && (!target.active || target.isExploding)) target = null;
+          if (doScan) {
+              const huntsPlayer = inst.disposition === 'hostile'
+                  || (inst.disposition === 'neutral' && s.provoked === true);
+              target = null;
+              let acqD2 = R.VISION * R.VISION;
+              for (let i = 0; i < enemies.length; i++) {
+                  const e = enemies[i];
+                  if (e.isRival || e.isExploding) continue;
+                  const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
+                  const d2 = dx * dx + dy * dy;
+                  if (d2 < acqD2) { acqD2 = d2; target = e; }
+              }
+              if (huntsPlayer && !this.player.isExploding) {
+                  const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
+                  const d2 = dx * dx + dy * dy;
+                  if (target === null || d2 < acqD2) { target = this.player; acqD2 = d2; }
+              }
+              inst.target = target;
           }
-          if (huntsPlayer && !this.player.isExploding) {
-              const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (target === null || d2 < bestD2) { target = this.player; bestD2 = d2; }
+          // Live squared distance to the (cached) target — drives the strafe
+          // sign + the fire-range gate below.
+          let bestD2 = Infinity;
+          if (target) {
+              const tdx = wrapDeltaX(s.position.x, target.position.x), tdy = wrapDeltaY(s.position.y, target.position.y);
+              bestD2 = tdx * tdx + tdy * tdy;
           }
 
           // ── Steering ──
@@ -5463,8 +5479,10 @@ export class GameEngine {
               this.fireRivalShot(inst, target);
           }
 
-          // ── Loot vacuum: steal nearby collectible drops from the player ──
-          this.rivalVacuumDrops(inst);
+          // ── Loot vacuum: steal nearby collectible drops from the player
+          // (cadenced with the target re-acquire; drops settle over many frames
+          // so a few-step defer is invisible). ──
+          if (doScan) this.rivalVacuumDrops(inst);
 
           // ── Lifecycle ──
           if (inst.state === 'enter') {

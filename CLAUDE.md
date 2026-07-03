@@ -574,9 +574,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
   (mutual drop attraction + merge band)
 - `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS` (per-task min/max
-  interval, cost weight, auto curve), `LOCAL_MERGE_CONSTANTS`
-  (local-density merge-rate boost; replaced the global
-  entity-count merge-rate ladder)
+  interval, cost weight, auto curve; includes `rivalScan` — the
+  cadenced rival target re-acquire + loot-vacuum, see §8),
+  `LOCAL_MERGE_CONSTANTS` (local-density merge-rate boost; replaced
+  the global entity-count merge-rate ladder)
 - `TILE_SNAP` (unified shard→tile snap for plastic / glass /
   metal), `FLOW_VARIABILITY` (inverse-mass flow-correction +
   terminal-speed scaling)
@@ -773,7 +774,22 @@ button in `UIOverlay.tsx`.
   a task in `PERF_TASKS` and gate on `perfController.shouldRun(id)` —
   do NOT roll a private frame-counter or AUTO interval table. The
   controller samples load per sim step, applies tier hysteresis, and
-  staggers task phases so skipped work doesn't bunch up.
+  staggers task phases so skipped work doesn't bunch up.  The exotic
+  roamers follow this: `updateRivals` gates its `O(rivals×enemies)`
+  target re-acquire + `O(rivals×drops)` loot vacuum on the `rivalScan`
+  task (min interval 1 → identical at low load), CACHING the chosen
+  target on `RivalInstance.target` and recomputing only the O(1)
+  distance to it every step for steering/firing.  `updateConsumers`
+  (bubble/dragon eating) uses the `consume` task.  Cosmetic gradient
+  builds for the heavy render paths are cached ON THE ENTITY, keyed
+  like `enemyBodyGrad`: the geometric Dragon head caches its skull +
+  plasma-maw gradients (`dragonSkullGrad`/`dragonMawGrad`, invalidated
+  on size/colour/flash/provoked; the per-frame energy pulse rides
+  `globalAlpha` instead of the colour stops), and the Bubble membrane
+  caches its fill gradient (`bubbleFillGrad`, keyed on radius/colour/
+  visibility).  `updateAttachments` resolves latch targets through the
+  player special-case + the small enemies index, never a full
+  master-list scan.
 - **Shard→tile snap is unified.** Merged plastic / glass / metal
   shards snap onto the hex grid through the shared `TILE_SNAP` policy
   (≥ 2× tile diameter + rest-speed gate) and release debris on snap.

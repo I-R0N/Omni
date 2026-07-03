@@ -927,6 +927,47 @@ k. After N waves, spawn a portal to a new map.
     power, rival/dragon tuning). Validation: `npm run build` per commit;
     manual playtest owed.
 
+33. **exotic-enemies-optimization — zero-behaviour perf pass over the
+    heavy roamers (Rivals / Dragons / Bubbles).** Follow-up to PR #67,
+    same posture as PR #58/#63: identical gameplay + visuals, only
+    cheaper. Four changes, each build-clean:
+    - **`rivalScan` PerfController task.** `updateRivals` ran two
+      full-list walks per rival every step — the `O(rivals×enemies)`
+      target scan and the `O(rivals×drops)` loot vacuum. Both now gate
+      on `rivalScan` (`minInterval 1, maxInterval 4`), with the chosen
+      target CACHED on `RivalInstance.target`; steering/firing/lifecycle
+      still tick every step against the cache, recomputing only the O(1)
+      distance. `min 1` → byte-identical at low load; stretches to 4 only
+      under real pressure. The deferral of which enemy is re-picked / when
+      a drop is snatched is ≤3 steps — imperceptible.
+    - **`updateAttachments` full-scan removed.** The bubble latch resolved
+      its target through `entityById` — an `O(all-entities)` master-list
+      walk (≤~2 700). Swapped for `resolveAggroTarget` (player special-case
+      + small enemies index). `entityById` deleted.
+    - **Dragon-head + bubble render caches.** The geometric dragon head
+      rebuilt 3 `createRadialGradient`s (7 stop-parses) per dragon per
+      frame; the bubble membrane rebuilt 1. Skull + maw + membrane
+      gradients now cache on the entity (keyed like `enemyBodyGrad`), the
+      dragon's per-frame energy pulse riding `globalAlpha` (provably
+      equal — the maw/bloom fade to a=0 at the rim). On-screen dragon
+      render cost stops scaling with per-frame gradient churn, so the win
+      GROWS with FOV (a desktop viewport draws more dragons than a tablet).
+    - **Allocation discipline** in the new/touched loops (cached target,
+      component-compared bubble cache key — no per-frame string alloc).
+    Deviations: **none removed / capped / down-cadenced perceptibly**, so
+    no AskUserQuestion approval gate was needed. Deferred to the parking
+    lot (zero-behaviour posture): a dynamic-grid query for the
+    `updateConsumers` `O(consumers×shards)` scan (needs a new
+    `forEachDynamicNear`; already `consume`-gated), and cutting
+    portal/death particle-burst counts (a visual change). Verified: `npm
+    run build`; headless Chromium smoke (10 DBG dragons + 6 rivals +
+    ambient bubbles, ~2.7–2.8k entities, teleported on-screen in
+    provoked+flash states, 3.5 s render at 1024×768 AND 2560×1440 → 0
+    console/page errors, all render paths correct). Report +
+    per-scenario table + parity checklist:
+    `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. Next per the tight line: the
+    exotic-enemy BALANCE pass (parking lot), then Phase 2 (h) bosses.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1046,7 +1087,7 @@ Run when convenient; can run in parallel with Phase 2.
 |----|------|--------|--------|-------|
 | f | Timed waves of mixed enemy types | pending | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. |
 | exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
-| exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **pending — do BEFORE resuming the plan** | `claude/exotic-enemies-optimization-<suffix>` | User-directed optimization beat on what PR #67 just added, before moving to the next plan step. Targets: route `updateRivals` / `updateDragons` / `updateBubbles` / `maintainAmbientBubbles` periodic scans through `PerfController` tasks instead of running every step; the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot-vacuum walks; portal / death particle-burst counts; dragon body `positionDragonBody` chain cost with many segments; and general allocation discipline (mutate, don't allocate) in the new loops. Zero-behaviour posture like PR #58 where possible; flag any feel changes. |
+| exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **shipped (into plan branch)** | `claude/exotic-enemies-optimization-nty6i8` | Zero-behaviour/zero-visual pass (decision #33). Cadenced the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot vacuum through a new `rivalScan` PerfController task with a cached `RivalInstance.target` (min interval 1 → identical at low load); killed the O(all-entities) `entityById` latch-resolve in `updateAttachments`; cached the geometric dragon-head skull + maw gradients and the bubble-membrane fill gradient on the entity (per-frame pulse → `globalAlpha`), so on-screen dragon/bubble render cost stops scaling with the per-frame `createRadialGradient` churn (the win grows with FOV). Verified via headless Chromium (10 dragons + 6 rivals + ambient bubbles, 0 errors, tablet + desktop FOV). `updateConsumers` spatial-query + particle-burst counts deferred to the parking lot (zero-behaviour posture). Report: `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. |
 | h | New enemies + bosses (bosses proper) | pending | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. |
 | k | Portal to next map after N waves | pending | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring. **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. |
 

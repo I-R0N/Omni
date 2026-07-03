@@ -389,3 +389,36 @@ Known tuning wants (add freely):
 
 All knobs live in `ENEMY_VARIANTS` / `ENEMY_TRAITS` / `AI_CONFIG` /
 `BUBBLE_CONSTANTS` / `DRAGON_CONSTANTS` / `RIVAL_CONSTANTS` in `constants.ts`.
+
+---
+
+## Exotic-enemies-optimization — deferred perf ideas
+
+**Context:** The `exotic-enemies-optimization` pass (decision #33, shipped) took a
+strict zero-behaviour / zero-visual posture. Two perf ideas were intentionally
+left out of that pass because they would need new infra or a visible change; log
+here for a future perf beat.
+
+- **`updateConsumers` dynamic-grid query.** The consume-and-grow scan
+  (bubble/dragon eating) is `O(calm consumers × all mobile shards)` over the full
+  `entityIndex.asteroids` list. It is already `PerfController`-gated (`consume`)
+  and early-outs for every non-idle consumer, but on a shard-dense field a single
+  calm bubble still walks the whole shard list each scan step. A real fix is a
+  spatial near-query, but PhysicsSystem only exposes a **static**-grid helper
+  (`forEachStaticNear`) today — a `forEachDynamicNear` over the per-frame dynamic
+  grid would be needed. More invasive than a zero-behaviour pass warranted.
+
+- **Portal / death particle-burst counts.** `openPortal` spawns ~46 particles +
+  3 shockwave rings; dragon death 40; sever/segment puffs 6–12 each. These are
+  one-shot on spawn/death **events** (not per-frame), so they don't dominate a
+  steady-state profile — but a screen full of simultaneous warp-ins/deaths spikes
+  the particle pool. Cutting the counts is a **visual** change (approval-gated),
+  so left intact. Revisit only if a profile shows portal/death spam dominating a
+  worst-case scene; the cap already exists (`enforceCap` / `MAX_PARTICLES`).
+
+- **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
+  counts run every step. Cheap enough that gating them (they only ACT on a timer)
+  is low ROI and risks a spawn-timing wobble; left every-step.
+
+Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
+`PARTICLE_CONSTANTS` / `MAX_PARTICLES` in `constants.ts`.
