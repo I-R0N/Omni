@@ -62,24 +62,51 @@ particle counts — at the live viewport/DPR/zoom so the FOV is recorded with th
 numbers. Run it once per scene below and paste all four blocks; that fills the
 table.
 
-### Worst-case scenes (for the manual numbers table)
+### Real-hardware captures (after)
 
-| Scene | Contents | FOV |
-|-------|----------|-----|
-| A — roamer swarm (desktop) | 6 rivals + ~8 DBG dragons + full ambient bubbles + a dense wave | 2560×1440 |
-| B — roamer swarm (tablet) | same as A | ~1024×768 |
-| C — dragon stack | 10 DBG dragons (mixed materials), bodies on-screen | 2560×1440 |
-| D — baseline | a normal wave, no DBG roamers | both |
+Captured with the in-game Perf REC harness on an iPhone (440×756 dpr3) and a
+desktop-width browser via the PR preview (1229×790 dpr2), zoom 0.65, difficulty
+3, on the "Tile Heavy" map (≈4.4–4.8k entities). Each is a 30–90 s window.
 
-Record from the DBG panel: render-time ms, collision ms, PerfController tier +
-load, and per-section timers. Fill the table on real hardware:
+| Scene | FOV | frames | FPS avg / med / 1%-low / min | frame p95 / p99 | render / sim / coll ms | tier avg · load peak | peak ents / enemies / parts |
+|-------|-----|-------:|------------------------------|-----------------|------------------------|----------------------|------------------------------|
+| baseline    | 440×756 dpr3  | 3426 | 59 / 59 / 38 / 19 | 20 / 26 ms | 1.77 / 1.01 / 0.29 | 1.00 · 0.26 | 4650 / 9 / 321 |
+| roamer-swarm| 1229×790 dpr2 | 5445 | 59 / 59 / 50 / 48 | 18 / 20 ms | 2.29 / 0.73 / 0.15 | 0.57 · 0.24 | 4427 / 3 / 173 |
+| dragon-stack| 1229×790 dpr2 | 1933 | 58 / 59 / 43 / 10 | 19 / 23 ms | 2.18 / 1.18 / 0.39 | 1.00 · 0.29 | 4620 / 15 / 268 |
+| dense-wave  | 1229×790 dpr2 | 2797 | 57 / 59 / 43 / 5  | 21 / 23 ms | 2.09 / 1.32 / 0.50 | 1.04 · 0.70 | 4835 / 19 / 415 |
 
-| Scene | render ms (before → after) | sim ms (before → after) | tier |
-|-------|---------|---------|------|
-| A | _ → _ | _ → _ | _ |
-| B | _ → _ | _ → _ | _ |
-| C | _ → _ | _ → _ | _ |
-| D | _ → _ | _ → _ | _ |
+**Interpretation.**
+
+- **Locked ~60, vsync-bound, with 4–5× headroom in every scene.** The measured
+  work is tiny — render ≤2.3 ms, sim ≤1.3 ms, collisions ≤0.5 ms — against a
+  16.7 ms (60 Hz) budget. The phone is idle-waiting on vsync, not compute-bound.
+- **Render is FOV/pixel-bound, not entity-bound — which is the whole point of
+  the pass.** render ms tracks viewport pixels (1.77 ms on the iPhone → ~2.1–2.3
+  ms at the wider desktop FOV) and barely moves between the light `roamer-swarm`
+  (3 enemies) and the `dragon-stack` (15 enemies, ~10 geometric dragon heads on
+  screen). With the old per-frame dragon-gradient churn, a stack of ~10 heads
+  would rebuild ~30 gradients + 70 colour-stop parses every frame and render
+  would climb visibly; here it stayed flat (2.18 ms, *below* the roamer scene).
+  That flatness is the gradient-cache win showing up on device.
+- **PerfController only left `light` in `dense-wave`** (2% med / 1% heavy, load
+  peak 0.70). The rival/`consume` cadences and tier stretching are built for that
+  regime; at these loads they run at `minInterval` (identical to pre-pass), which
+  is why FPS is unchanged — the pass buys per-frame *headroom* and future safety
+  margin, not a visible FPS jump at loads the game already ran fine.
+- **The low `min` FPS values (19 / 10 / 5) are single spawn/death hitches, not
+  steady state** — `dragon-stack`'s min 10 is the 10-portals-at-once mass-spawn
+  burst, `dense-wave`'s min 5 is a wave spawn/mass-death particle spike. Median
+  and p95/p99 stay tight (≤23 ms) in every scene. These map to the parked
+  particle-burst item (visual change, approval-gated) and only fire on
+  simultaneous spawns/deaths, never in steady play.
+
+**Net:** the optimized build holds a locked 60 across iPhone and desktop-width
+FOV, baseline through dense-wave, and render cost no longer scales with on-screen
+dragon count. A before/after FPS delta isn't observable at these loads because
+both builds are vsync-bound at 60; the measurable difference is per-frame render
+cost under a dragon stack (structurally 3 gradient builds/dragon → 1) and the
+reduced `O(rivals×N)` / `O(all-entities)` walks, which matter as headroom on
+weaker devices and under heavier future content.
 
 ---
 
