@@ -160,6 +160,12 @@ export class PhysicsSystem {
   // always resolve.  Off restores resolving every pair regardless of
   // visibility.
   public shardViewportCullEnabled: boolean = true;
+  // Debug toggle — the tile repel PUSH (glass-tile + metal-tile, the only
+  // variants with a `repel` config).  When false, the repel scan still runs and
+  // still lights the tile/scanner glow (repelImpulse), but the outward VELOCITY
+  // impulse is not applied — so tiles react/light up to a nearby player/enemy
+  // yet no longer physically shove them.  Default ON.
+  public repelPushEnabled: boolean = true;
   // Camera-aligned viewport rect (world coords, CULL_MARGIN-padded),
   // set per sim frame by GameEngine.  Null until the first set — then
   // resolveShardPairs treats all shards as on-screen (conservative).
@@ -926,8 +932,14 @@ export class PhysicsSystem {
                             const t = 1 - dist / repel.range;
                             const accel = repel.strength * t * t * timeScale;
                             const inv = 1 / dist;
-                            a.velocity.x += dx * inv * accel;
-                            a.velocity.y += dy * inv * accel;
+                            // The PUSH (outward velocity impulse) is DBG-gated;
+                            // the glow feedback below (repelImpulse) still runs
+                            // so tiles light up to a nearby body even with the
+                            // push off.
+                            if (this.repelPushEnabled) {
+                                a.velocity.x += dx * inv * accel;
+                                a.velocity.y += dy * inv * accel;
+                            }
                             // Scanner reads its own accumulator for fade fx.
                             a.repelImpulse = (a.repelImpulse ?? 0) + accel;
                             // The tile's glow tracks ONLY the player / enemies,

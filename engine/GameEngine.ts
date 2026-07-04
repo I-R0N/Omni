@@ -732,6 +732,13 @@ export class GameEngine {
     this.renderer.chevronsOffscreenOnly = !this.renderer.chevronsOffscreenOnly;
   }
 
+  /** DBG (Shards & Physics): toggle the tile repel PUSH (glass + metal tiles).
+   *  OFF disables only the outward velocity shove — the tile/scanner glow still
+   *  reacts to a nearby body. */
+  public toggleRepelPush() {
+    this.physics.repelPushEnabled = !this.physics.repelPushEnabled;
+  }
+
   /**
    * Toggle the plastic-shard neighbour-brightness automata (PAuto).
    * On: shards render in the active palette's constant base shade,
@@ -1389,6 +1396,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1637,6 +1645,7 @@ export class GameEngine {
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,

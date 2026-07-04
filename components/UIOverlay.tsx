@@ -65,6 +65,7 @@ interface UIOverlayProps {
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
   onToggleChevronMode?: () => void;
+  onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -155,6 +156,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleScreenShake,
   onToggleTileOutlines,
   onToggleChevronMode,
+  onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -694,6 +696,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Collisions', onToggleCollisions,
                   stats.collisionsEnabled === false ? 'Off' : 'On',
                   'Toggle the SAT collision broadphase. OFF is game-breaking — measurement aid only.')}
+                {ctrlRow('Tile push', onToggleRepelPush,
+                  stats.repelPushEnabled === false ? 'Off' : 'On',
+                  'Toggle the tile repel PUSH (glass + metal tiles — the only variants with a repel field). OFF disables only the outward velocity shove; the tile glow still reacts to a nearby player/enemy.')}
                 {ctrlRow('Shard grav', onToggleShardGravity,
                   stats.shardGravityEnabled === false ? 'Off' : 'On',
                   'Toggle shard↔shard gravity pull (attractedTo pass in ShardSystem.runMergeBroadphase). Today only nebula-shard has a non-none attractedTo.')}

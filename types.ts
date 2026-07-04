@@ -1287,6 +1287,9 @@ export interface EngineStats {
   // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
   // original "chevron everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
+  // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
+  // nearby bodies; false = push off (glow feedback still reacts).
+  repelPushEnabled?: boolean;
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
