@@ -344,6 +344,12 @@ export class RenderSystem {
   // Default OFF.  Wired through GameEngine.toggleTileOutlines and
   // surfaced in the DBG panel's Visual section.
   public tileOutlinesEnabled: boolean = false;
+  // When true, off-screen indicator chevrons are suppressed for entities that
+  // are currently ON screen — the player can already see them, so the chevron
+  // is redundant clutter; chevrons then only point at nearby-but-offscreen
+  // entities.  Wired through GameEngine.toggleChevronMode, surfaced in the DBG
+  // Visual section ("Chevrons": Offscreen / All).  Default = offscreen-only.
+  public chevronsOffscreenOnly: boolean = true;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -468,7 +474,7 @@ export class RenderSystem {
 
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
-  private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
+  private _indicatorBuffer: { entity: GameEntity, distSq: number, onScreen: boolean }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
   // Pre-rendered nebula twinkle star (created once, reused for every nebula
@@ -1405,7 +1411,15 @@ export class RenderSystem {
             // how the player finds the stragglers.  renderIndicators fades
             // far chevrons instead of culling them.
             const distSq = dx*dx + dy*dy;
-            this._indicatorBuffer.push({ entity, distSq });
+            // Whether the entity is currently within the true (unpadded)
+            // viewport — its half-size lets an entity peeking in at the edge
+            // count as visible.  renderIndicators uses this to suppress the
+            // (redundant) chevron for on-screen entities when the DBG
+            // "Chevrons: Offscreen" mode is on.
+            const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
+            const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
+                          && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
+            this._indicatorBuffer.push({ entity, distSq, onScreen });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -4895,7 +4909,7 @@ export class RenderSystem {
 
   private renderIndicators(
     ctx: CanvasRenderingContext2D, 
-    targets: { entity: GameEntity, distSq: number }[], 
+    targets: { entity: GameEntity, distSq: number, onScreen: boolean }[], 
     camera: CameraState, 
     width: number, 
     height: number
@@ -4920,6 +4934,10 @@ export class RenderSystem {
       for (let i = 0; i < targets.length; i++) {
           const item = targets[i];
           const t = item.entity;
+
+          // Offscreen-only mode: the player can already see an on-screen
+          // entity, so its chevron is redundant clutter — skip it.
+          if (this.chevronsOffscreenOnly && item.onScreen) continue;
 
           if (t.type === EntityType.ENEMY) {
               if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;

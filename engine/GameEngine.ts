@@ -725,6 +725,13 @@ export class GameEngine {
     this.renderer.tileOutlinesEnabled = !this.renderer.tileOutlinesEnabled;
   }
 
+  /** DBG (Visual): flip the off-screen-indicator chevron mode between
+   *  "Offscreen" (only nearby-but-offscreen entities get a chevron) and "All"
+   *  (also chevron on-screen entities — the original behaviour). */
+  public toggleChevronMode() {
+    this.renderer.chevronsOffscreenOnly = !this.renderer.chevronsOffscreenOnly;
+  }
+
   /**
    * Toggle the plastic-shard neighbour-brightness automata (PAuto).
    * On: shards render in the active palette's constant base shade,
@@ -1381,6 +1388,7 @@ export class GameEngine {
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1628,6 +1636,7 @@ export class GameEngine {
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,

@@ -64,6 +64,7 @@ interface UIOverlayProps {
   onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
+  onToggleChevronMode?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -153,6 +154,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleMergeRate,
   onToggleScreenShake,
   onToggleTileOutlines,
+  onToggleChevronMode,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -642,6 +644,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Outlines', onToggleTileOutlines,
                   stats.tileOutlinesEnabled === true ? 'On' : 'Off',
                   'Collision-shape outlines on plastic + nebula tiles/shards (soft-gradient variants). Shows the SAT polygon against the gradient fill.')}
+                {ctrlRow('Chevrons', onToggleChevronMode,
+                  stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
+                  'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}

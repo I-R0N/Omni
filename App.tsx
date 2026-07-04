@@ -185,6 +185,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleTileOutlines();
   };
 
+  const handleToggleChevronMode = () => {
+      if (engineRef.current) engineRef.current.toggleChevronMode();
+  };
+
   const handleTogglePlasticAutomata = () => {
       if (engineRef.current) engineRef.current.togglePlasticAutomata();
   };
@@ -427,6 +431,7 @@ const App: React.FC = () => {
         onToggleMergeRate={handleToggleMergeRate}
         onToggleScreenShake={handleToggleScreenShake}
         onToggleTileOutlines={handleToggleTileOutlines}
+        onToggleChevronMode={handleToggleChevronMode}
         onTogglePlasticAutomata={handleTogglePlasticAutomata}
         onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
         onToggleMaterialAutomata={handleToggleMaterialAutomata}

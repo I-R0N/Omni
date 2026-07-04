@@ -1283,6 +1283,10 @@ export interface EngineStats {
   // nebula-shard cloud sprite).  Default false; DBG-toggleable via
   // the Visual section's Outline button.
   tileOutlinesEnabled?: boolean;
+  // DBG (Visual): off-screen-indicator chevron mode. true = chevrons only for
+  // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
+  // original "chevron everything past the centre ring" behaviour.
+  chevronsOffscreenOnly?: boolean;
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
