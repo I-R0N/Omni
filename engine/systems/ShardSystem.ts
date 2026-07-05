@@ -362,6 +362,24 @@ export class ShardSystem {
   private _mergeBondedScratch: Set<GameEntity> = new Set();
   private _mergeGridScratch: Map<number, number[]> = new Map();
 
+  // ── Per-shatter scratch buffers (allocation discipline) ─────────────────
+  // shatterAsteroidStyle used to allocate the size / raw-area / density-tier
+  // temp arrays (via Array.from / map / filter) every shatter, and
+  // generateShardPolygon allocated an intermediate {angle,r}[] + sort/map
+  // closures per polygon.  A mass-shatter frame (a cluster crushed at once)
+  // fired hundreds of these, driving the GC stalls + sim spikes the Perf REC
+  // captures flagged.  These are reused in place — values are copied into the
+  // spawned children (never held by reference), so sharing one buffer across
+  // the synchronous, non-reentrant shatter loop is safe.  The final held
+  // allocations (child GameEntity + its polygon {x,y}[]) are untouched here
+  // (they need pooling — a separate, more invasive step).
+  private _shSizes: number[] = [];
+  private _shRaw: number[] = [];
+  private _shDensity: number[] = [];
+  private _polyAngle: number[] = [];
+  private _polyRadius: number[] = [];
+  private _polyIdx: number[] = [];
+
   constructor(private particles: ParticleSystem) {}
 
   public setPerfController(pc: PerfController): void {
@@ -725,14 +743,30 @@ export class ShardSystem {
     const numPoints = polyVerticesOptions !== undefined && polyVerticesOptions.length > 0
       ? polyVerticesOptions[Math.floor(Math.random() * polyVerticesOptions.length)]
       : polyVerticesMin + Math.floor(Math.random() * (polyVerticesMax - polyVerticesMin + 1));
-    const rawPts: { angle: number; r: number }[] = [];
+    // Fill reused numeric scratch (no intermediate {angle,r} objects) then
+    // sort indices by angle in place — an insertion sort (numPoints is ~6-8)
+    // that reproduces the old `.sort((a,b)=>a.angle-b.angle)` order exactly.
+    // Only the returned {x,y}[] (held by the entity) is freshly allocated.
+    const ang = this._polyAngle, rad = this._polyRadius, idx = this._polyIdx;
     for (let j = 0; j < numPoints; j++) {
-      const baseAngle  = (j / numPoints) * Math.PI * 2;
-      const jitterAmt  = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitter;
-      rawPts.push({ angle: baseAngle + jitterAmt, r: baseR * (radiusMin + Math.random() * radiusRange) });
+      const baseAngle = (j / numPoints) * Math.PI * 2;
+      const jitterAmt = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitter;
+      ang[j] = baseAngle + jitterAmt;
+      rad[j] = baseR * (radiusMin + Math.random() * radiusRange);
+      idx[j] = j;
     }
-    rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+    for (let a = 1; a < numPoints; a++) {
+      const key = idx[a]; const ka = ang[key];
+      let b = a - 1;
+      while (b >= 0 && ang[idx[b]] > ka) { idx[b + 1] = idx[b]; b--; }
+      idx[b + 1] = key;
+    }
+    const out: Vector2[] = new Array(numPoints);
+    for (let k = 0; k < numPoints; k++) {
+      const i = idx[k];
+      out[k] = { x: Math.cos(ang[i]) * rad[i], y: Math.sin(ang[i]) * rad[i] };
+    }
+    return out;
   }
 
   /**
@@ -819,7 +853,10 @@ export class ShardSystem {
     }
     if (count < 2) return;
 
-    let sizes: number[];
+    // Reused scratch (see field decl) — cleared per shatter, values copied
+    // into the spawned children below, never held by reference.
+    const sizes = this._shSizes;
+    sizes.length = 0;
     if (merges > 1 || isRockShatter) {
       // Merged shard OR rock-shatter — even area-per-fragment so
       // every child lands at roughly base-shard size, regardless of
@@ -834,9 +871,8 @@ export class ShardSystem {
       // sit at roughly base size.
       const parentArea = parent.size.x * parent.size.x;
       const childSize = Math.sqrt(parentArea / count);
-      sizes = Array.from({ length: count }, () => childSize);
+      for (let i = 0; i < count; i++) sizes.push(childSize);
     } else if (useFraction) {
-      sizes = [];
       const span = fMax! - fMin!;
       for (let i = 0; i < count; i++) {
         sizes.push(parent.size.x * (fMin! + Math.random() * span));
@@ -844,11 +880,18 @@ export class ShardSystem {
     } else {
       const parentArea = parent.size.x * parent.size.x;
       const alpha = alphaMin + damageNorm * (alphaMax - alphaMin);
-      const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
-      const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
-      sizes = rawAreas
-        .map(a => Math.sqrt((a / rawSum) * parentArea))
-        .filter(s => s >= MIN_SIZE);
+      const rawAreas = this._shRaw;
+      rawAreas.length = 0;
+      let rawSum = 0;
+      for (let i = 0; i < count; i++) {
+        const a = Math.pow(Math.random(), alpha);
+        rawAreas.push(a);
+        rawSum += a;
+      }
+      for (let i = 0; i < count; i++) {
+        const s = Math.sqrt((rawAreas[i] / rawSum) * parentArea);
+        if (s >= MIN_SIZE) sizes.push(s);
+      }
       if (sizes.length < 2) return;
     }
 
@@ -874,10 +917,11 @@ export class ShardSystem {
     if (isRockShatter) {
       const parentTier = parent.densityTier ?? 0;
       const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
-      childDensityTiers = new Array(sizes.length);
+      childDensityTiers = this._shDensity; // reused scratch (values copied below)
+      childDensityTiers.length = 0;
       for (let i = 0; i < sizes.length; i++) {
         const offset = Math.floor(Math.random() * 5) - 2; // -2..+2
-        childDensityTiers[i] = Math.max(0, Math.min(maxTier, parentTier + offset));
+        childDensityTiers.push(Math.max(0, Math.min(maxTier, parentTier + offset)));
       }
     }
 
