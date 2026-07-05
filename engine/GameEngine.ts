@@ -1577,14 +1577,9 @@ export class GameEngine {
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       this.perfRecorder.sample(
         frameTime * 1000,
-        perf.renderMs,
-        perf.updatePhysicsMs + perf.updateLogicMs,
-        perf.collisionsMs,
+        perf,
         this.perfController.loadTier,
         this.perfController.loadLevel,
-        perf.totalEntities,
-        perf.enemyCount,
-        perf.particleCount,
       );
     }
     this.onStatsUpdate({

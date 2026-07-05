@@ -18,6 +18,8 @@
  *     the Copy button), so the hot path stays clean.
  */
 
+import { PerfSnapshot } from '../../types';
+
 export interface PerfReportContext {
   viewportW: number;
   viewportH: number;
@@ -51,9 +53,20 @@ export class PerfRecorder {
 
   // Running aggregates for the section costs + counts (mean = sum / count).
   private sumRender = 0;
-  private sumSim = 0;
+  private sumSim = 0;          // updatePhysicsMs + updateLogicMs
   private sumCollisions = 0;
   private sumLoadTier = 0;
+  // Sim sub-timer breakdown (means) — so a heavy capture pinpoints WHERE the
+  // sim time goes (physics broadphase vs shard merge vs gravity vs flow vs AI)
+  // instead of only the aggregate.  All are PerfSnapshot rolling-averages.
+  private sumUpdPhysics = 0;   // whole updatePhysics wall time
+  private sumUpdLogic = 0;     // whole updateGameLogic wall time
+  private sumPhysics = 0;      // PhysicsSystem.update (incl. collisions + gravity)
+  private sumShardSys = 0;     // ShardSystem.update (merge broadphase + bonds)
+  private sumGravity = 0;      // attractor gravity
+  private sumLocalGravity = 0; // player↔asteroid local gravity
+  private sumFlowField = 0;    // FlowFieldGrid rebuild/flush
+  private sumAi = 0;           // AISystem.update
   private maxEntities = 0;
   private maxEnemies = 0;
   private maxParticles = 0;
@@ -97,6 +110,14 @@ export class PerfRecorder {
     this.sumSim = 0;
     this.sumCollisions = 0;
     this.sumLoadTier = 0;
+    this.sumUpdPhysics = 0;
+    this.sumUpdLogic = 0;
+    this.sumPhysics = 0;
+    this.sumShardSys = 0;
+    this.sumGravity = 0;
+    this.sumLocalGravity = 0;
+    this.sumFlowField = 0;
+    this.sumAi = 0;
     this.maxEntities = 0;
     this.maxEnemies = 0;
     this.maxParticles = 0;
@@ -113,29 +134,32 @@ export class PerfRecorder {
    */
   public sample(
     frameMs: number,
-    renderMs: number,
-    simMs: number,
-    collisionsMs: number,
+    perf: PerfSnapshot,
     loadTier: number,
     loadLevel: number,
-    totalEntities: number,
-    enemyCount: number,
-    particleCount: number,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
     this.frameMs[this.count++] = frameMs;
-    this.sumRender += renderMs;
-    this.sumSim += simMs;
-    this.sumCollisions += collisionsMs;
+    this.sumRender += perf.renderMs;
+    this.sumSim += perf.updatePhysicsMs + perf.updateLogicMs;
+    this.sumCollisions += perf.collisionsMs;
     this.sumLoadTier += loadTier;
+    this.sumUpdPhysics += perf.updatePhysicsMs;
+    this.sumUpdLogic += perf.updateLogicMs;
+    this.sumPhysics += perf.physicsMs;
+    this.sumShardSys += perf.shardSysMs;
+    this.sumGravity += perf.gravityMs;
+    this.sumLocalGravity += perf.localGravityMs;
+    this.sumFlowField += perf.flowFieldMs;
+    this.sumAi += perf.aiMs;
     const ti = loadTier < 0 ? 0 : loadTier >= this.tierHist.length ? this.tierHist.length - 1 : loadTier | 0;
     this.tierHist[ti]++;
     if (loadTier > this.maxTier) this.maxTier = loadTier;
     if (loadLevel > this.peakLoad) this.peakLoad = loadLevel;
-    if (totalEntities > this.maxEntities) this.maxEntities = totalEntities;
-    if (enemyCount > this.maxEnemies) this.maxEnemies = enemyCount;
-    if (particleCount > this.maxParticles) this.maxParticles = particleCount;
+    if (perf.totalEntities > this.maxEntities) this.maxEntities = perf.totalEntities;
+    if (perf.enemyCount > this.maxEnemies) this.maxEnemies = perf.enemyCount;
+    if (perf.particleCount > this.maxParticles) this.maxParticles = perf.particleCount;
   }
 
   /**
@@ -186,6 +210,11 @@ export class PerfRecorder {
       `FPS   avg ${fpsR(avgFps)} · median ${fpsR(toFps(medianFrame))} · 5%-low ${fpsR(toFps(p95Frame))} · 1%-low ${fpsR(toFps(p99Frame))} · min ${fpsR(toFps(maxFrame))} · max ${fpsR(toFps(minFrame))} · ≥55: ${Math.round((ge55 / n) * 100)}% · ≥30: ${Math.round((ge30 / n) * 100)}%`,
       `frame avg ${r1(sumFrame / n)}ms · median ${r1(medianFrame)}ms · p95 ${r1(p95Frame)}ms · p99 ${r1(p99Frame)}ms`,
       `cost  render avg ${r2(this.sumRender / n)}ms · sim avg ${r2(this.sumSim / n)}ms · collisions avg ${r2(this.sumCollisions / n)}ms`,
+      // Sim breakdown so a heavy capture shows WHERE the sim ms goes.  updPhys +
+      // updLogic = sim; physics (incl. collisions/gravity) + AI + flow live in
+      // updPhys, shardSys in updLogic.  gravity/localGrav are sub-slices of
+      // physics, printed for detail.
+      `sim   updPhys ${r2(this.sumUpdPhysics / n)} · updLogic ${r2(this.sumUpdLogic / n)} · physics ${r2(this.sumPhysics / n)} · shardSys ${r2(this.sumShardSys / n)} · ai ${r2(this.sumAi / n)} · flow ${r2(this.sumFlowField / n)} · grav ${r2(this.sumGravity / n)} · locGrav ${r2(this.sumLocalGravity / n)}`,
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];
