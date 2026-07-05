@@ -204,7 +204,7 @@ export class GameEngine {
   // space).  THRUST extends the trail opposite to the input/thrust
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
