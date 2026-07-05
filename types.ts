@@ -1276,6 +1276,9 @@ export interface EngineStats {
   // Hard collisions between nebula-shard pairs (ignores their
   // passThrough flag).  DBG-toggleable; default OFF.
   nebulaShardCollisionsEnabled?: boolean;
+  // DBG (Shards & Physics): PLAYER ↔ nebula-shard hard collision. true = the
+  // ship physically parts/scatters the cloud; false = glide-through (pull only).
+  playerNebulaCollisionEnabled?: boolean;
   // Collision-sleep for mobile shards — skips asleep↔asleep pair math
   // in resolveShardPairs.  DBG-toggleable; default ON.
   shardSleepEnabled?: boolean;

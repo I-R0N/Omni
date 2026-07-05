@@ -161,6 +161,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleNebulaShardCollisions();
   };
 
+  const handleTogglePlayerNebulaCollision = () => {
+      if (engineRef.current) engineRef.current.togglePlayerNebulaCollision();
+  };
+
   const handleToggleShardSleep = () => {
       if (engineRef.current) engineRef.current.toggleShardSleep();
   };
@@ -429,6 +433,7 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
+        onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}
         onToggleShardSleep={handleToggleShardSleep}
         onToggleShardViewportCull={handleToggleShardViewportCull}
         onToggleShardLod={handleToggleShardLod}

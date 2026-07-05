@@ -143,6 +143,14 @@ export class PhysicsSystem {
   // narrow: nebula-vs-striker and nebula-vs-tile still honour
   // passThrough — only the same-variant pair is affected.
   public nebulaShardCollisionsEnabled: boolean = true;
+  // Debug toggle — PLAYER ↔ nebula-shard hard collision.  When true, the
+  // player↔nebula-shard pair bypasses the nebula passThrough gate in
+  // resolveCollision and takes the standard SAT impulse, so the ship physically
+  // shoves / parts the nebula cloud (the light 0.01-mass shards scatter) instead
+  // of gliding through with only the applyNebulaPlayerPull swirl.  This re-adds
+  // an interaction that was gated off when nebula-shards gained passThrough.
+  // Default ON (the requested behaviour).
+  public playerNebulaCollisionEnabled: boolean = true;
   // Debug toggle — collision-sleep for mobile shards.  When true,
   // resolveShardPairs skips the SAT+impulse math for asleep↔asleep
   // pairs (the bulk of a settled field).  Flip OFF to A/B-test the
@@ -2547,7 +2555,13 @@ export class PhysicsSystem {
       const bIsNebTile  = b.shardVariant === 'nebula-tile';
       const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
       const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
-      const nebPairCollides = nebShardPair || nebShardTilePair;
+      // Player ↔ nebula-shard hard collision (DBG, default on) — the ship
+      // physically parts the cloud instead of gliding through.  Bypasses the
+      // passThrough gate so the pair below takes the normal SAT impulse.
+      const playerNebShardPair = this.playerNebulaCollisionEnabled
+          && ((aIsNebShard && b.type === EntityType.PLAYER)
+              || (bIsNebShard && a.type === EntityType.PLAYER));
+      const nebPairCollides = nebShardPair || nebShardTilePair || playerNebShardPair;
       const aPassThrough = !nebPairCollides && a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true;
       const bPassThrough = !nebPairCollides && b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true;
       if (aPassThrough || bPassThrough) {

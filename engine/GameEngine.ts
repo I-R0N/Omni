@@ -657,6 +657,13 @@ export class GameEngine {
     this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
   }
 
+  /** DBG (Shards & Physics): toggle the PLAYER ↔ nebula-shard hard collision —
+   *  the ship physically parts the cloud vs. gliding through with only the pull.
+   *  Default on. */
+  public togglePlayerNebulaCollision() {
+    this.physics.playerNebulaCollisionEnabled = !this.physics.playerNebulaCollisionEnabled;
+  }
+
   /**
    * Toggle collision-sleep for mobile shards.  When on, resolveShardPairs
    * skips the SAT+impulse math for asleep↔asleep pairs (the bulk of a
@@ -1394,6 +1401,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      playerNebulaCollisionEnabled: this.physics.playerNebulaCollisionEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
@@ -1644,6 +1652,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      playerNebulaCollisionEnabled: this.physics.playerNebulaCollisionEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
