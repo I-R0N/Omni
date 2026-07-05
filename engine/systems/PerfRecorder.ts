@@ -70,6 +70,15 @@ export class PerfRecorder {
   private maxEntities = 0;
   private maxEnemies = 0;
   private maxParticles = 0;
+  // Spike attribution: the RAW (unsmoothed) per-frame render + sim peaks, and
+  // the render/sim of the single WORST frame (max frame time) — so a capture
+  // says whether the tail hitches are render, sim, or an external gap (both
+  // small but frame time large → GC / browser stall, not our compute).
+  private maxRawRender = 0;
+  private maxRawSim = 0;
+  private worstFrameMs = 0;
+  private worstFrameRender = 0;
+  private worstFrameSim = 0;
   // Tier histogram (index = PerfController tier; small fixed span covers all).
   private readonly tierHist = new Int32Array(8);
   private maxTier = 0;
@@ -121,6 +130,11 @@ export class PerfRecorder {
     this.maxEntities = 0;
     this.maxEnemies = 0;
     this.maxParticles = 0;
+    this.maxRawRender = 0;
+    this.maxRawSim = 0;
+    this.worstFrameMs = 0;
+    this.worstFrameRender = 0;
+    this.worstFrameSim = 0;
     this.tierHist.fill(0);
     this.maxTier = 0;
     this.peakLoad = 0;
@@ -137,10 +151,19 @@ export class PerfRecorder {
     perf: PerfSnapshot,
     loadTier: number,
     loadLevel: number,
+    rawRenderMs: number,
+    rawSimMs: number,
   ): void {
     if (!this.recording) return;
     if (this.count >= this.cap) { this.full = true; this.recording = false; return; }
     this.frameMs[this.count++] = frameMs;
+    if (rawRenderMs > this.maxRawRender) this.maxRawRender = rawRenderMs;
+    if (rawSimMs > this.maxRawSim) this.maxRawSim = rawSimMs;
+    if (frameMs > this.worstFrameMs) {
+      this.worstFrameMs = frameMs;
+      this.worstFrameRender = rawRenderMs;
+      this.worstFrameSim = rawSimMs;
+    }
     this.sumRender += perf.renderMs;
     this.sumSim += perf.updatePhysicsMs + perf.updateLogicMs;
     this.sumCollisions += perf.collisionsMs;
@@ -215,6 +238,10 @@ export class PerfRecorder {
       // updPhys, shardSys in updLogic.  gravity/localGrav are sub-slices of
       // physics, printed for detail.
       `sim   updPhys ${r2(this.sumUpdPhysics / n)} · updLogic ${r2(this.sumUpdLogic / n)} · physics ${r2(this.sumPhysics / n)} · shardSys ${r2(this.sumShardSys / n)} · ai ${r2(this.sumAi / n)} · flow ${r2(this.sumFlowField / n)} · grav ${r2(this.sumGravity / n)} · locGrav ${r2(this.sumLocalGravity / n)}`,
+      // Spike attribution (raw per-frame): the worst frame's render/sim split
+      // + the independent raw peaks.  worst frame ≈ render+sim → our compute;
+      // worst frame ≫ render+sim → an external gap (GC / browser stall).
+      `spike worst frame ${r1(this.worstFrameMs)}ms → render ${r2(this.worstFrameRender)} · sim ${r2(this.worstFrameSim)} · peak render ${r2(this.maxRawRender)} · peak sim ${r2(this.maxRawSim)}`,
       `perf  tier avg ${r2(avgTier)} (${tierParts.join(' / ')}) · load peak ${r2(this.peakLoad)}`,
       `peak  entities ${this.maxEntities} · enemies ${this.maxEnemies} · particles ${this.maxParticles}`,
     ];
