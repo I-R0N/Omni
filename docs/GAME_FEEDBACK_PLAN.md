@@ -987,6 +987,52 @@ k. After N waves, spawn a portal to a new map.
     iPhone-friendly copy-paste FPS captures. Next per the tight line: the
     exotic-enemy BALANCE pass (parking lot), then Phase 2 (h) bosses.
 
+34. **Game-structure + item-economy strategy workstream
+    (design gate for the rest of Phase 2).** Opened by user
+    direction 2026-06-14. Context: the (f) stage
+    over-committed (the exotic-enemy roster of decision #32 +
+    the optimization pass of decision #33), and before
+    continuing the main plan the user wants the actual game
+    structure decided:
+    a. **Structure axis** — survival waves of enemies vs
+       discrete levels + bosses vs open-world exploration
+       (or a staged/hybrid combination; user flagged "there
+       may also be two stages to this").
+    b. **Item-economy axis** — ammo/health pickups only
+       (today's model) vs mineral/material drops + item
+       creation at map hubs vs health/gold drops only, or
+       combinations. Note the dormant hooks already in
+       code: `gold` on the player entity (unused),
+       `enemyTier` (set on spawn, unused by drop scaling),
+       `dropComposition` (can in principle hold more
+       variants), and the whole material/shard taxonomy
+       (rock / glass / metal / plastic) which maps
+       naturally onto a material-drop economy.
+    c. **Long-term constraint** — user has a post-plan
+       roadmap: multiplayer mobile app connecting in-game
+       map locations to real-world lat/lon coordinates.
+       Implemented AFTER this feedback plan completes, but
+       the structure + economy designed now must not
+       foreclose it. Implications to weigh during design:
+       map identity as a first-class network (portals ↔
+       physical locations), durable player progression
+       (inventory / upgrades / unlocks that outlive a run —
+       today the game has NO persistence beyond in-memory
+       run state per CLAUDE.md §1), serializable economy
+       (server-authoritative later), mobile input+perf
+       (c2 and the ongoing optimization passes align).
+       Details of this roadmap to be captured when the
+       user provides them.
+    d. **Process** — this is an orchestration-owned DESIGN
+       workstream, not a code session. Deliverable: a
+       strategy doc (`docs/GAME_STRUCTURE_STRATEGY.md`)
+       developed with the user, which then re-scopes (h)
+       and (k) briefs. Phase 2 rows for (h) and (k) are
+       gated on it. Phase 3 pairs are NOT gated (UI /
+       SFX / input polish is structure-agnostic), except
+       (i) death/completion screen copy may shift with the
+       structure choice.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1102,13 +1148,19 @@ Run when convenient; can run in parallel with Phase 2.
 
 ## Phase 2 — Structure (sequential, after Phase 1)
 
+> **GATED by the game-structure strategy workstream (decision #34).**
+> The (f) wave model, (h) boss model, and (k) portal model all depend
+> on the structural direction (survival waves vs discrete levels vs
+> open world) and the item-economy direction. Do not finalize (f),
+> (h), or (k) briefs until the strategy doc lands.
+
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| f | Timed waves of mixed enemy types | pending | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. |
+| f | Timed waves of mixed enemy types | pending — gated on decision #34 | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. The (f) brief drafted 2026-06-14 is **on hold** — its six design knobs (duration model, mix, pacing, survivors, early-complete, difficulty) presuppose the survival-wave structure, which is exactly what decision #34 opens for debate. |
 | exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
 | exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **shipped (into plan branch)** | `claude/exotic-enemies-optimization-nty6i8` | Zero-behaviour/zero-visual pass (decision #33). Cadenced the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot vacuum through a new `rivalScan` PerfController task with a cached `RivalInstance.target` (min interval 1 → identical at low load); killed the O(all-entities) `entityById` latch-resolve in `updateAttachments`; cached the geometric dragon-head skull + maw gradients and the bubble-membrane fill gradient on the entity (per-frame pulse → `globalAlpha`), so on-screen dragon/bubble render cost stops scaling with the per-frame `createRadialGradient` churn (the win grows with FOV). Verified via headless Chromium (10 dragons + 6 rivals + ambient bubbles, 0 errors, tablet + desktop FOV). `updateConsumers` spatial-query + particle-burst counts deferred to the parking lot (zero-behaviour posture). Report: `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. |
-| h | New enemies + bosses (bosses proper) | pending | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. |
-| k | Portal to next map after N waves | pending | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring. **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. |
+| h | New enemies + bosses (bosses proper) | pending — gated on decision #34 | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Boss/level framing depends on decision #34 outcome.** |
+| k | Portal to next map after N waves | pending — gated on decision #34 | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (note PR #67 already shipped a reusable `GameEngine.openPortal(pos, opts)` rift VFX — dragon + rivals use it; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. **Portal semantics (level-select vs overworld-travel vs hub-network) depend on decision #34 outcome.** |
 
 ---
 
