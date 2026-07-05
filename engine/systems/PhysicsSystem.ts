@@ -1634,6 +1634,7 @@ export class PhysicsSystem {
         } else {
             e.offscreen = false;
         }
+        e._pairSeq = i; // pass-local numeric dedup index (see pair loop below)
         const key = cellKey(e.position.x, e.position.y);
         let cell = this.shardGrid.get(key);
         if (!cell) { cell = []; this.shardGrid.set(key, cell); }
@@ -1662,7 +1663,13 @@ export class PhysicsSystem {
                 for (let j = 0; j < cell.length; j++) {
                     const b = cell[j];
                     if (a === b) continue;
-                    if (a.id > b.id) continue; // process each pair once
+                    // Process each unordered pair once.  Numeric dedup on the
+                    // pass-local _pairSeq (set in the grid build above) — cheaper
+                    // than the old `a.id > b.id` string compare, run per candidate
+                    // over dense piles.  resolveAsteroidPair + its delegates are
+                    // fully order-independent, so which side is the representative
+                    // doesn't change the outcome.
+                    if (a._pairSeq! > b._pairSeq!) continue;
                     // Sleep skip: two resting shards in contact are
                     // stable — no separation or bounce to apply, so
                     // skip the SAT+impulse math entirely.  A pair with
@@ -2033,8 +2040,27 @@ export class PhysicsSystem {
 
       const overlap = sumR - dist;
       const { CORRECTION_PERCENT, SLOP, ELASTICITY } = COLLISION_CONFIG;
-      const invMassA = 1 / a.mass;
-      const invMassB = 1 / b.mass;
+      // Memoised 1/mass + pow(1/mass, MASS_BIAS_EXPONENT), keyed on the mass
+      // value.  Mass is constant per shard between merges, so this is computed
+      // ~once per shard per mass-epoch and reused across ALL its pairs —
+      // removing 2 divisions + 2 Math.pow from every resolved pair in a dense
+      // pile.  Self-invalidating: any mass change (merge / density retier)
+      // makes `_massCacheKey !== mass` and recomputes.  Bit-identical to the
+      // old inline math.
+      if (a._massCacheKey !== a.mass) {
+          const im = 1 / a.mass;
+          a._invMassCache = im;
+          a._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          a._massCacheKey = a.mass;
+      }
+      if (b._massCacheKey !== b.mass) {
+          const im = 1 / b.mass;
+          b._invMassCache = im;
+          b._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          b._massCacheKey = b.mass;
+      }
+      const invMassA = a._invMassCache!;
+      const invMassB = b._invMassCache!;
       const totalInvMass = invMassA + invMassB;
       if (totalInvMass <= 0) return;
 
@@ -2072,8 +2098,8 @@ export class PhysicsSystem {
       const velAlongNormal = rvx * nx + rvy * ny;
       if (velAlongNormal > 0) return; // already moving apart
 
-      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
-      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassA = a._effInvMassCache!; // memoised above (mass-keyed)
+      const effInvMassB = b._effInvMassCache!;
       const j = -(1 + ELASTICITY) * velAlongNormal;
       const impulse = j / (effInvMassA + effInvMassB);
       const ix = nx * impulse;

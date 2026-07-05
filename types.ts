@@ -471,6 +471,17 @@ export interface GameEntity {
   enemyBodyGrad?: CanvasGradient;
   enemyBodyGradR?: number;
   enemyBodyGradCol?: string;
+  // PhysicsSystem shard-pair hot-path caches (transient, sim-internal — never
+  // read outside the broadphase).  `_pairSeq` is a pass-local dedup index set
+  // during the shard-grid build (numeric, cheaper than the old id-string
+  // compare).  `_invMassCache` / `_effInvMassCache` memoise 1/mass and
+  // pow(1/mass, MASS_BIAS_EXPONENT) — recomputed only when `mass` differs from
+  // `_massCacheKey`, so a dense awake-shard pile skips 2 divisions + 2 Math.pow
+  // per resolved pair.
+  _pairSeq?: number;
+  _invMassCache?: number;
+  _effInvMassCache?: number;
+  _massCacheKey?: number;
   // Cosmetic render cache for the geometric Dragon head (Stage 6): the big
   // faceted-skull body gradient + the plasma-maw unit gradient, both reused
   // across frames.  Rebuilt only when the size/colour/flash key changes; the
