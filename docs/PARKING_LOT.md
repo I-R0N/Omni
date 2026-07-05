@@ -358,9 +358,23 @@ edit-and-playtest with no structural work.
 
 ---
 
-## Swarm gnats — collide with asteroids + tiles
+## Swarm gnats — collide with asteroids + tiles — DONE
 
-**Context / request:** SWARM gnats currently **phase through all terrain** — the
+**RESOLVED (physics-shard-broadphase branch):** the `diesOnContact` collision
+early-out in `PhysicsSystem.checkAndResolveCollision` was removed, so gnats now
+take STANDARD enemy collisions — they bounce off tiles / asteroids and each other
+instead of phasing through. The gnat still POPS only on player contact (the
+resolveCollision ENEMY-vs-PLAYER branch is gated on the target being the player),
+so hitting a tile bounces rather than kills it; enemy fire still can't hit them
+(friendly-fire filter). Measured cost of the feared dense-flock case was small
+(0.68 ms collisions with 60 gnats in a tile field) — the boids separation keeps a
+flock spaced, so few pairs actually overlap past the circle broadphase, and the
+predicted O(k²) blow-up didn't materialise. Verified: a gnat spawned on a tile is
+pushed off + survives; a gnat on the player pops + deals damage; 0 errors. The
+mitigations below (structure-only / PerfController gate / repel-steer) are left as
+notes in case a future denser brood needs them.
+
+**Original context / request:** SWARM gnats used to **phase through all terrain** — the
 Stage-4 perf simplification skips collision for every pair except the player +
 player projectiles (`PhysicsSystem.checkAndResolveCollision` `diesOnContact`
 early-out), so a big flock stays cheap. **Request: make gnats collide with

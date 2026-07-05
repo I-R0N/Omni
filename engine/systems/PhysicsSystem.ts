@@ -2152,18 +2152,15 @@ export class PhysicsSystem {
       // Non-nebula shards (metal / rock / glass) never collide with nebula.
       if (this.nebulaPassThroughPair(a, b)) return;
 
-      // Lightweight gnat collision (Stage 4 perf): a die-on-contact gnat (Swarm)
-      // only needs to collide with the PLAYER (to pop) and with PLAYER
-      // PROJECTILES (to be shot).  Skipping every other pair — gnat↔gnat, ↔tile,
-      // ↔asteroid, ↔enemy — before the broadphase/SAT is a big win for a dense
-      // flock (the boids separation already handles spacing; gnats just phase
-      // through terrain).  Cheap boolean test up front.
-      if (a.diesOnContact === true || b.diesOnContact === true) {
-          const other = a.diesOnContact === true ? b : a;
-          const ok = other.type === EntityType.PLAYER
-              || (other.type === EntityType.PROJECTILE && other.ownerType === EntityType.PLAYER);
-          if (!ok) return; // gnat vs non-player/non-shot (incl. gnat↔gnat) → skip
-      }
+      // Swarm gnats (diesOnContact) now take STANDARD enemy collisions — they
+      // bounce off terrain (tiles / asteroids) and each other instead of
+      // phasing through, so a flock reads as physical.  The Stage-4 perf
+      // early-out that skipped every non-player pair is removed; the gnat still
+      // POPS only on player contact (the resolveCollision ENEMY-vs-PLAYER
+      // branch is gated on the target being the player), so hitting a tile
+      // bounces rather than kills it.  (The boids separation already keeps a
+      // flock spaced, so actual overlaps — the only pairs that reach SAT past
+      // the circle broadphase — stay bounded.)
       // Phase-through (Stage 6 dragon): glides through terrain/enemies and eats
       // tiles via the consume pass; only collides with the player (contact) and
       // player projectiles (to take damage).  Same gate as the gnat.
