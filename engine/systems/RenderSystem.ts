@@ -344,6 +344,12 @@ export class RenderSystem {
   // Default OFF.  Wired through GameEngine.toggleTileOutlines and
   // surfaced in the DBG panel's Visual section.
   public tileOutlinesEnabled: boolean = false;
+  // When true, off-screen indicator chevrons are suppressed for entities that
+  // are currently ON screen — the player can already see them, so the chevron
+  // is redundant clutter; chevrons then only point at nearby-but-offscreen
+  // entities.  Wired through GameEngine.toggleChevronMode, surfaced in the DBG
+  // Visual section ("Chevrons": Offscreen / All).  Default = offscreen-only.
+  public chevronsOffscreenOnly: boolean = true;
   // DBG toggle (PAuto) — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
@@ -468,7 +474,7 @@ export class RenderSystem {
 
   private images: Map<string, HTMLImageElement> = new Map();
   // Optimization: Reusable buffer for sorting indicators to prevent array allocation
-  private _indicatorBuffer: { entity: GameEntity, distSq: number }[] = [];
+  private _indicatorBuffer: { entity: GameEntity, distSq: number, onScreen: boolean }[] = [];
   // Pre-rendered specular dot bitmap (created once, reused for every glass tile)
   private _specularBitmap: HTMLCanvasElement | null = null;
   // Pre-rendered nebula twinkle star (created once, reused for every nebula
@@ -1405,7 +1411,15 @@ export class RenderSystem {
             // how the player finds the stragglers.  renderIndicators fades
             // far chevrons instead of culling them.
             const distSq = dx*dx + dy*dy;
-            this._indicatorBuffer.push({ entity, distSq });
+            // Whether the entity is currently within the true (unpadded)
+            // viewport — its half-size lets an entity peeking in at the edge
+            // count as visible.  renderIndicators uses this to suppress the
+            // (redundant) chevron for on-screen entities when the DBG
+            // "Chevrons: Offscreen" mode is on.
+            const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
+            const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
+                          && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
+            this._indicatorBuffer.push({ entity, distSq, onScreen });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -4021,11 +4035,21 @@ export class RenderSystem {
           }
           ctx.closePath();
           // Translucent fill: faint core → brighter rim (a soap-film look).
-          const grad = ctx.createRadialGradient(0, 0, rb * 0.2, 0, 0, rb);
-          grad.addColorStop(0, `rgba(${br},${bg},${bb},${0.10 * vis})`);
-          grad.addColorStop(0.7, `rgba(${br},${bg},${bb},${0.22 * vis})`);
-          grad.addColorStop(1, `rgba(${br},${bg},${bb},${0.5 * vis})`);
-          ctx.fillStyle = grad;
+          // Cached across frames — the radius (rb) and the colour/visibility key
+          // only change on a hit-flash/feed pulse or a state transition, so an
+          // idle drifting bubble reuses the same gradient object every frame.
+          if (entity.bubbleFillGradR !== rb || entity.bubbleFillGradCol !== baseCol
+              || entity.bubbleFillGradVis !== vis) {
+              const grad = ctx.createRadialGradient(0, 0, rb * 0.2, 0, 0, rb);
+              grad.addColorStop(0, `rgba(${br},${bg},${bb},${0.10 * vis})`);
+              grad.addColorStop(0.7, `rgba(${br},${bg},${bb},${0.22 * vis})`);
+              grad.addColorStop(1, `rgba(${br},${bg},${bb},${0.5 * vis})`);
+              entity.bubbleFillGrad = grad;
+              entity.bubbleFillGradR = rb;
+              entity.bubbleFillGradCol = baseCol;
+              entity.bubbleFillGradVis = vis;
+          }
+          ctx.fillStyle = entity.bubbleFillGrad!;
           ctx.fill();
           ctx.lineWidth = 1.5;
           ctx.strokeStyle = `rgba(${br},${bg},${bb},${Math.min(1, 0.6 * vis + flashB)})`;
@@ -4093,7 +4117,8 @@ export class RenderSystem {
           // HP pool makes each chip a tiny fraction, so the head only nudges (no
           // special-case cap needed) while the white flash carries the feedback.
           const r = Math.max(entity.size.x, entity.size.y) * 0.5 * (1 + Math.min(0.4, flashD * 2.2) * (entity.hitReact ?? 1));
-          const [cr, cg, cb] = hexToRgb(entity.color || DRAGON_CONSTANTS.COLOR);
+          const dragonCol = entity.color || DRAGON_CONSTANTS.COLOR;
+          const [cr, cg, cb] = hexToRgb(dragonCol);
           const plateLift = `rgb(${liftCh(cr,0.5)},${liftCh(cg,0.5)},${liftCh(cb,0.5)})`;
           const plateSink = `rgb(${sinkCh(cr,0.55)},${sinkCh(cg,0.55)},${sinkCh(cb,0.55)})`;
           const edgeDk = `rgba(${sinkCh(cr,0.6)},${sinkCh(cg,0.6)},${sinkCh(cb,0.6)},0.9)`;
@@ -4108,6 +4133,32 @@ export class RenderSystem {
           const ph = (h / 997) * Math.PI * 2;
           const pulse = 0.6 + 0.4 * Math.sin(nowSec * (provoked ? 7 : 3.5) + ph);
           // Local frame: forward = +x (the dart points along travel).
+
+          // ── Cosmetic gradient cache: the faceted-skull body gradient and the
+          // plasma-maw gradient are rebuilt ONLY when the size / colour / flash /
+          // provoked key changes; the per-frame energy `pulse` rides globalAlpha
+          // at paint time (both maw + core-bloom fade to a=0 at the rim, so a
+          // scalar alpha reproduces the old pulse-in-the-stops exactly).  With
+          // several dragons on screen this drops the per-frame createRadialGradient
+          // + addColorStop parse cost from 3 builds/dragon to at most the pulsing
+          // core bloom. ──
+          const flashActive = flashD > 0;
+          if (entity.dragonGradR !== r || entity.dragonGradCol !== dragonCol
+              || entity.dragonGradFlash !== flashActive || entity.dragonGradProvoked !== provoked) {
+              const sg = ctx.createRadialGradient(r * 0.7, -r * 0.12, r * 0.1, r * 0.1, 0, r * 1.5);
+              sg.addColorStop(0, flashActive ? '#ffffff' : plateLift);
+              sg.addColorStop(0.55, flashActive ? '#ffffff' : `rgb(${cr},${cg},${cb})`);
+              sg.addColorStop(1, plateSink);
+              entity.dragonSkullGrad = sg;
+              const mg = ctx.createRadialGradient(r * 1.0, 0, 0, r * 1.0, 0, r * 0.5);
+              mg.addColorStop(0, `rgba(${ax},${ay},${az},1)`);
+              mg.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
+              entity.dragonMawGrad = mg;
+              entity.dragonGradR = r;
+              entity.dragonGradCol = dragonCol;
+              entity.dragonGradFlash = flashActive;
+              entity.dragonGradProvoked = provoked;
+          }
 
           // ── Swept blade-fins (geometric "horns"): one clean angular plate per
           // side, raked off the back. ──
@@ -4132,11 +4183,7 @@ export class RenderSystem {
           ctx.moveTo(r * skull[0][0], r * skull[0][1]);
           for (let i = 1; i < skull.length; i++) ctx.lineTo(r * skull[i][0], r * skull[i][1]);
           ctx.closePath();
-          const sg = ctx.createRadialGradient(r * 0.7, -r * 0.12, r * 0.1, r * 0.1, 0, r * 1.5);
-          sg.addColorStop(0, flashD > 0 ? '#ffffff' : plateLift);
-          sg.addColorStop(0.55, flashD > 0 ? '#ffffff' : `rgb(${cr},${cg},${cb})`);
-          sg.addColorStop(1, plateSink);
-          ctx.fillStyle = sg; ctx.fill();
+          ctx.fillStyle = entity.dragonSkullGrad!; ctx.fill();
           ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = edgeDk; ctx.stroke();
 
           // ── One central ridge seam, just enough to read as a faceted plate. ──
@@ -4148,10 +4195,8 @@ export class RenderSystem {
           // ── Plasma maw: a single soft energy slit at the snout (no teeth). ──
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
-          const mawG = ctx.createRadialGradient(r * 1.0, 0, 0, r * 1.0, 0, r * 0.5);
-          mawG.addColorStop(0, `rgba(${ax},${ay},${az},${0.45 + 0.3 * pulse})`);
-          mawG.addColorStop(1, `rgba(${ax},${ay},${az},0)`);
-          ctx.fillStyle = mawG;
+          ctx.globalAlpha = 0.45 + 0.3 * pulse; // energy pulse (cached unit gradient)
+          ctx.fillStyle = entity.dragonMawGrad!;
           ctx.beginPath(); ctx.ellipse(r * 1.0, 0, r * 0.42, r * 0.14, 0, 0, Math.PI * 2); ctx.fill();
           ctx.restore();
 
@@ -4864,7 +4909,7 @@ export class RenderSystem {
 
   private renderIndicators(
     ctx: CanvasRenderingContext2D, 
-    targets: { entity: GameEntity, distSq: number }[], 
+    targets: { entity: GameEntity, distSq: number, onScreen: boolean }[], 
     camera: CameraState, 
     width: number, 
     height: number
@@ -4889,6 +4934,10 @@ export class RenderSystem {
       for (let i = 0; i < targets.length; i++) {
           const item = targets[i];
           const t = item.entity;
+
+          // Offscreen-only mode: the player can already see an on-screen
+          // entity, so its chevron is redundant clutter — skip it.
+          if (this.chevronsOffscreenOnly && item.onScreen) continue;
 
           if (t.type === EntityType.ENEMY) {
               if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;

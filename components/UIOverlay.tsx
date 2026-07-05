@@ -64,6 +64,8 @@ interface UIOverlayProps {
   onToggleMergeRate?: () => void;
   onToggleScreenShake?: () => void;
   onToggleTileOutlines?: () => void;
+  onToggleChevronMode?: () => void;
+  onToggleRepelPush?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -101,6 +103,12 @@ interface UIOverlayProps {
   onTestCards?: () => void;
   onSpawnDragon?: (type: string) => void;
   onSpawnRival?: (disposition: string) => void;
+  // Perf recorder (DBG FPS harness): toggle capture, cycle the scene label,
+  // and export the copy-paste report string (returned so the overlay can
+  // write it to the clipboard + show a manual-copy fallback).
+  onPerfRecToggle?: () => void;
+  onPerfRecCycleScene?: () => void;
+  onPerfRecExport?: () => string;
   onPurchaseUnlock?: (id: string) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
@@ -147,6 +155,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleMergeRate,
   onToggleScreenShake,
   onToggleTileOutlines,
+  onToggleChevronMode,
+  onToggleRepelPush,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -184,6 +194,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onTestCards,
   onSpawnDragon,
   onSpawnRival,
+  onPerfRecToggle,
+  onPerfRecCycleScene,
+  onPerfRecExport,
   onPurchaseUnlock,
   onUnlockAll,
   onResetUnlocks,
@@ -214,7 +227,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
-    perf: true, timing: true, dragon: true, rival: true,
+    perf: true, timing: true, dragon: true, rival: true, perfrec: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -223,6 +236,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
+  // Perf recorder: the last exported report text, shown in a manual-copy
+  // textarea (a fallback so the block is always grabbable even if the async
+  // Clipboard API is blocked — important on iOS Safari).  Cleared on dismiss.
+  const [perfCopyText, setPerfCopyText] = useState<string>('');
+  const [perfCopied, setPerfCopied] = useState<boolean>(false);
+  const handlePerfCopy = () => {
+    if (!onPerfRecExport) return;
+    const text = onPerfRecExport();
+    setPerfCopyText(text);
+    setPerfCopied(false);
+    // Best-effort async clipboard write (works on iOS Safari inside the tap);
+    // the textarea below is the always-available fallback.
+    try {
+      navigator.clipboard?.writeText(text).then(() => setPerfCopied(true)).catch(() => {});
+    } catch { /* fall through to the textarea */ }
+  };
   // Read-only filter for the top 'Entities' readout: total / active
   // (awake) / asleep (dynamic-sleeping).  Display only — does not change
   // sleeping behaviour (that's the Shards & Physics ▸ Sleep toggle).
@@ -540,6 +569,62 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </div>
               )}
 
+              {/* ── Perf recorder (FPS harness, DBG) ───────────────── */}
+              {renderSectionHeader('perfrec', 'Perf REC')}
+              {!collapsed.perfrec && (
+                <div className="pointer-events-auto flex flex-col gap-1.5 px-1 py-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => onPerfRecToggle && onPerfRecToggle()}
+                      className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all ${
+                        stats.perfRecording
+                          ? 'bg-red-600/80 border-red-400 text-white animate-pulse'
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-red-400 hover:text-white'
+                      }`}
+                      title="Start / stop an FPS + perf capture"
+                    >
+                      {stats.perfRecording ? '● REC' : '○ REC'}
+                    </button>
+                    <button
+                      onClick={() => onPerfRecCycleScene && onPerfRecCycleScene()}
+                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all capitalize bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white"
+                      title="Cycle the scene label recorded with the capture"
+                    >
+                      {stats.perfRecScene ?? 'baseline'}
+                    </button>
+                    <button
+                      onClick={handlePerfCopy}
+                      disabled={(stats.perfRecSamples ?? 0) === 0}
+                      className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-all bg-slate-800 border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white disabled:opacity-40"
+                      title="Export the capture as a copy-paste report"
+                    >
+                      {perfCopied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                    <span className="text-[10px] text-slate-400 tabular-nums">
+                      {stats.perfRecording ? 'rec ' : ''}{stats.perfRecSamples ?? 0}f
+                    </span>
+                  </div>
+                  {perfCopyText && (
+                    <div className="flex flex-col gap-1">
+                      <textarea
+                        readOnly
+                        value={perfCopyText}
+                        onFocus={(e) => e.currentTarget.select()}
+                        rows={7}
+                        className="w-full bg-slate-950/80 border border-slate-700 rounded text-[9px] leading-tight text-slate-200 font-mono p-1.5 resize-y select-all"
+                        title="Tap to select all, then copy"
+                      />
+                      <button
+                        onClick={() => { setPerfCopyText(''); setPerfCopied(false); }}
+                        className="self-end px-2 py-0.5 rounded text-[9px] text-slate-400 hover:text-white"
+                      >
+                        dismiss
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── Visual ─────────────────────────────────────────── */}
               {renderSectionHeader('visual', 'Visual')}
               {!collapsed.visual && (<>
@@ -561,6 +646,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Outlines', onToggleTileOutlines,
                   stats.tileOutlinesEnabled === true ? 'On' : 'Off',
                   'Collision-shape outlines on plastic + nebula tiles/shards (soft-gradient variants). Shows the SAT polygon against the gradient fill.')}
+                {ctrlRow('Chevrons', onToggleChevronMode,
+                  stats.chevronsOffscreenOnly === false ? 'All' : 'Offscreen',
+                  'Off-screen indicator chevrons. Offscreen: only nearby-but-offscreen entities get a chevron (on-screen ones are suppressed as redundant). All: also chevron on-screen entities (original behaviour).')}
                 {ctrlRow('Pl shade', onTogglePlasticAutomata,
                   stats.plasticAutomataEnabled === true ? 'On' : 'Off',
                   'Plastic-shard neighbour-brightness automata. On: palette base shade darkened by contact count (like nebula interior-darkening); Off: per-instance random shades.')}
@@ -608,6 +696,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Collisions', onToggleCollisions,
                   stats.collisionsEnabled === false ? 'Off' : 'On',
                   'Toggle the SAT collision broadphase. OFF is game-breaking — measurement aid only.')}
+                {ctrlRow('Tile push', onToggleRepelPush,
+                  stats.repelPushEnabled === false ? 'Off' : 'On',
+                  'Toggle the tile repel PUSH (glass + metal tiles — the only variants with a repel field). OFF disables only the outward velocity shove; the tile glow still reacts to a nearby player/enemy.')}
                 {ctrlRow('Shard grav', onToggleShardGravity,
                   stats.shardGravityEnabled === false ? 'Off' : 'On',
                   'Toggle shard↔shard gravity pull (attractedTo pass in ShardSystem.runMergeBroadphase). Today only nebula-shard has a non-none attractedTo.')}

@@ -147,8 +147,13 @@ export class ParticleSystem {
         });
       }
     }
-
-    this.enforceCap(entities);
+    // NOTE: the particle hard-cap is enforced ONCE per sim step by the engine
+    // loop (GameEngine.updateGameLogic → particles.enforceCap), not here.
+    // enforceTypeCap is O(all entities), so calling it inside every spawn()
+    // made a mass-death frame (≈38 death-burst spawn calls × ~6k entities × 2
+    // passes ≈ 456k iterations) the dominant spawn-frame cost.  Batching to
+    // once/step is visually identical (the cap is applied before the frame
+    // draws) and drops that to a single O(N) pass.
   }
 
   /**

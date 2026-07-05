@@ -471,6 +471,25 @@ export interface GameEntity {
   enemyBodyGrad?: CanvasGradient;
   enemyBodyGradR?: number;
   enemyBodyGradCol?: string;
+  // Cosmetic render cache for the geometric Dragon head (Stage 6): the big
+  // faceted-skull body gradient + the plasma-maw unit gradient, both reused
+  // across frames.  Rebuilt only when the size/colour/flash key changes; the
+  // per-frame energy pulse is applied via globalAlpha (the maw / bloom fade to
+  // a=0 at the rim, so a scalar alpha is exactly equivalent to baking the pulse
+  // into the stops).  Render-only; never read by the sim.
+  dragonSkullGrad?: CanvasGradient;
+  dragonMawGrad?: CanvasGradient;
+  dragonGradR?: number;
+  dragonGradCol?: string;
+  dragonGradFlash?: boolean;
+  dragonGradProvoked?: boolean;
+  // Cosmetic render cache for the Bubble membrane (Stage 5) fill gradient,
+  // keyed on the membrane radius + colour + visibility (all change only on a
+  // state transition, not per frame).  Render-only.
+  bubbleFillGrad?: CanvasGradient;
+  bubbleFillGradR?: number;
+  bubbleFillGradCol?: string;
+  bubbleFillGradVis?: number;
   // Attack-telegraph charge, 0→1, set by WeaponSystem over the archetype's
   // `telegraph` window as a shot winds up (and cleared when not charging /
   // out of range).  RenderSystem draws a muzzle charge glow scaled by it on
@@ -1264,6 +1283,13 @@ export interface EngineStats {
   // nebula-shard cloud sprite).  Default false; DBG-toggleable via
   // the Visual section's Outline button.
   tileOutlinesEnabled?: boolean;
+  // DBG (Visual): off-screen-indicator chevron mode. true = chevrons only for
+  // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
+  // original "chevron everything past the centre ring" behaviour.
+  chevronsOffscreenOnly?: boolean;
+  // DBG (Shards & Physics): tile repel PUSH (glass + metal). true = tiles shove
+  // nearby bodies; false = push off (glow feedback still reacts).
+  repelPushEnabled?: boolean;
   // When true, plastic-shards render in the active palette's constant
   // base shade, brightness-scaled by their plastic-shard contact
   // count (PAuto automata).  Default true.
@@ -1392,6 +1418,12 @@ export interface EngineStats {
   // Performance instrumentation — populated every frame, only displayed by
   // the dev-only F3 overlay so the normal HUD stays uncluttered.
   perf?: PerfSnapshot;
+  // ── Perf recorder (DBG FPS harness) ──────────────────────────────────
+  // Live capture state for the "Perf REC" DBG section: whether a capture is
+  // running, how many frames it holds, and the current scene label.
+  perfRecording?: boolean;
+  perfRecSamples?: number;
+  perfRecScene?: string;
 }
 
 export interface DamageText {

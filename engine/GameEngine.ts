@@ -15,11 +15,12 @@ import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
+import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -68,6 +69,10 @@ interface RivalInstance {
   fireTimer: number;         // weapon cooldown
   stolen: number;            // points denied to the player so far (HUD/popup)
   portal?: { x: number; y: number };  // exit-portal centre (leave only)
+  // Cached hunt target (Stage 7 perf).  Re-acquired on the PerfController
+  // `rivalScan` cadence; steering/firing recompute only the O(1) distance to it
+  // every step, and it's dropped the moment it goes inactive/exploding.
+  target?: GameEntity | null;
 }
 
 export class GameEngine {
@@ -92,6 +97,10 @@ export class GameEngine {
   // hands every skippable pass an effective frame-skip interval.  See
   // engine/systems/PerfController.ts.
   private perfController: PerfController;
+  // In-game FPS / perf capture harness (DBG tool).  Zero cost while idle;
+  // records the per-frame timing + PerfSnapshot stream over a window and
+  // exports a copy-paste text block (see engine/systems/PerfRecorder.ts).
+  private perfRecorder: PerfRecorder = new PerfRecorder();
 
   private isRunning: boolean = false;
   private gameState: GameState = GameState.MENU;
@@ -714,6 +723,20 @@ export class GameEngine {
    */
   public toggleTileOutlines() {
     this.renderer.tileOutlinesEnabled = !this.renderer.tileOutlinesEnabled;
+  }
+
+  /** DBG (Visual): flip the off-screen-indicator chevron mode between
+   *  "Offscreen" (only nearby-but-offscreen entities get a chevron) and "All"
+   *  (also chevron on-screen entities — the original behaviour). */
+  public toggleChevronMode() {
+    this.renderer.chevronsOffscreenOnly = !this.renderer.chevronsOffscreenOnly;
+  }
+
+  /** DBG (Shards & Physics): toggle the tile repel PUSH (glass + metal tiles).
+   *  OFF disables only the outward velocity shove — the tile/scanner glow still
+   *  reacts to a nearby body. */
+  public toggleRepelPush() {
+    this.physics.repelPushEnabled = !this.physics.repelPushEnabled;
   }
 
   /**
@@ -1372,6 +1395,8 @@ export class GameEngine {
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1545,6 +1570,23 @@ export class GameEngine {
     const wsMap: Record<string, 'active' | 'cleared'> = {
       inactive: 'active', active: 'active', cleared: 'cleared'
     };
+    // Build the perf snapshot once and reuse it for the HUD + the perf
+    // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
+    // pollute the FPS distribution).  `frameTime` is the true rAF delta.
+    const perf = this.buildPerfSnapshot();
+    if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
+      this.perfRecorder.sample(
+        frameTime * 1000,
+        perf.renderMs,
+        perf.updatePhysicsMs + perf.updateLogicMs,
+        perf.collisionsMs,
+        this.perfController.loadTier,
+        this.perfController.loadLevel,
+        perf.totalEntities,
+        perf.enemyCount,
+        perf.particleCount,
+      );
+    }
     this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
@@ -1602,6 +1644,8 @@ export class GameEngine {
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
+      chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
+      repelPushEnabled: this.physics.repelPushEnabled,
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -1647,7 +1691,10 @@ export class GameEngine {
       weaponCount: this.currentWeaponIndex + 1,
       shield: this.player.shield,
       maxShield: this.player.maxShield,
-      perf: this.buildPerfSnapshot(),
+      perf,
+      perfRecording: this.perfRecorder.recording,
+      perfRecSamples: this.perfRecorder.sampleCount,
+      perfRecScene: this.perfRecorder.sceneTag,
     });
 
     if (this.gameState !== GameState.PLAYING) {
@@ -1724,6 +1771,14 @@ export class GameEngine {
     if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
         this.simAccumulator %= FIXED_DT;
     }
+
+    // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
+    // path — see ParticleSystem.spawn).  Runs after the whole sim drain so
+    // every death-burst / FX particle spawned this frame is counted, and before
+    // the render pass so the on-screen cap (and which oldest particles are
+    // dropped) is identical to the old per-spawn behaviour — just one O(N) pass
+    // instead of one per spawn call.
+    if (this.currentMap) this.particles.enforceCap(this.currentMap.entities);
 
     // Refresh the frame entity list one more time so anything spawned during
     // the final sim step is included in the render pass.
@@ -2301,12 +2356,14 @@ export class GameEngine {
               // to the enemy; bigger enemies pop bigger.
               this.spawnShockwave(entity.position, { radius: r * 2.4, damage: 0, knockback: 0, color: ec, lifetime: 0.34 });
               this.spawnShockwave(entity.position, { radius: r * 1.3, damage: 0, knockback: 0, color: '#ffffff', lifetime: 0.22 });
-              // Big colored debris burst + white core flash.
-              this.spawnParticles(entity.position, 16 + Math.floor(Math.random() * 8), ec, {
+              // Big colored debris burst + white core flash.  (Counts trimmed
+              // ~40 % — Tier 2b — so a mass death spawns fewer particles; the
+              // pop still reads at MAX_PARTICLES-bounded density.)
+              this.spawnParticles(entity.position, 10 + Math.floor(Math.random() * 4), ec, {
                   speedMin: 4, speedMax: 16, sizeMin: 2, sizeMax: 4.5,
                   lifetimeMin: 0.3, lifetimeMax: 0.7,
               });
-              this.spawnParticles(entity.position, 9, '#ffffff', {
+              this.spawnParticles(entity.position, 5, '#ffffff', {
                   speedMin: 7, speedMax: 20, sizeMin: 1.5, sizeMax: 3,
                   lifetimeMin: 0.15, lifetimeMax: 0.35,
               });
@@ -4125,7 +4182,10 @@ export class GameEngine {
       for (let i = 0; i < ents.length; i++) {
           const e = ents[i];
           if (!e.active || e.attachedToId === undefined) continue;
-          const target = this.entityById(e.attachedToId);
+          // Attachment targets are the player or an enemy (the bubble latch), so
+          // resolve through the player special-case + the small enemies index
+          // rather than a full O(all-entities) master-list scan.
+          const target = this.resolveAggroTarget(e.attachedToId);
           if (!target || !target.active || target.isExploding) {
               e.attachedToId = undefined;
               continue;
@@ -4136,15 +4196,6 @@ export class GameEngine {
           e.velocity.x = target.velocity.x;
           e.velocity.y = target.velocity.y;
       }
-  }
-
-  /** Linear lookup of an active entity by id (small N; attachments are rare). */
-  private entityById(id: string): GameEntity | undefined {
-      const ents = this.currentMap?.entities;
-      if (!ents) return undefined;
-      if (id === 'player') return this.player;
-      for (let i = 0; i < ents.length; i++) if (ents[i].id === id) return ents[i];
-      return undefined;
   }
 
   // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
@@ -4372,17 +4423,28 @@ export class GameEngine {
       if (!radius || radius <= 0) return;
       const radiusSq = radius * radius;
 
+      // Cosmetic rings (the portal warp: damage 0 + knockback 0) never apply
+      // anything, so the in-range snapshot is pure waste — updateExplosionRings
+      // early-outs on an empty validHitIds set and the renderer draws the ring
+      // from its radius/lifetime alone.  Skip the O(all-entities) scan + Set
+      // work for them: a spawn burst (e.g. 10 dragon portals × 3 rings each)
+      // used to walk the whole map per ring on the single spawn frame, which
+      // is the bulk of the "spawn-burst hitch".  Damaging rings (cannon AoE,
+      // kamikaze, merge blow-back) still snapshot exactly as before.
       const validHitIds = new Set<string>();
       const ents = this.currentMap.entities;
-      for (let i = 0; i < ents.length; i++) {
-          const e = ents[i];
-          if (!e.active || e.isExploding) continue;
-          if (e.type === EntityType.PROJECTILE) continue;
-          if (e.type === EntityType.PARTICLE) continue;
-          if (e.type === EntityType.INTERACTABLE) continue;
-          const dx = wrapDeltaX(pos.x, e.position.x);
-          const dy = wrapDeltaY(pos.y, e.position.y);
-          if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
+      const cosmeticRing = opts.damage <= 0 && opts.knockback <= 0;
+      if (!cosmeticRing) {
+          for (let i = 0; i < ents.length; i++) {
+              const e = ents[i];
+              if (!e.active || e.isExploding) continue;
+              if (e.type === EntityType.PROJECTILE) continue;
+              if (e.type === EntityType.PARTICLE) continue;
+              if (e.type === EntityType.INTERACTABLE) continue;
+              const dx = wrapDeltaX(pos.x, e.position.x);
+              const dy = wrapDeltaY(pos.y, e.position.y);
+              if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
+          }
       }
 
       const lifetime = opts.lifetime ?? 0.35;
@@ -5300,7 +5362,7 @@ export class GameEngine {
       this.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, this.dragonsKilled), d.position);
       this.dragonsKilled++;
       this.openDragonPortal(d.position);
-      this.spawnParticles(d.position, 40, DRAGON_CONSTANTS.COLOR, {
+      this.spawnParticles(d.position, 24, DRAGON_CONSTANTS.COLOR, { // Tier 2b: 40 → 24
           speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
@@ -5342,12 +5404,14 @@ export class GameEngine {
       // Wider, slower echo ring — gives the rift depth.
       this.spawnShockwave(pos, { radius: radius * 1.35, damage: 0, knockback: 0, color, lifetime: duration * 1.25 });
       // Swirling embers filling the disc (tangential bias reads as a vortex).
-      this.spawnParticles(pos, 30, color, {
+      // Counts trimmed ~40 % (Tier 2b) so a burst of simultaneous warps spawns
+      // fewer particles; the layered rings still carry the rift's body.
+      this.spawnParticles(pos, 18, color, {
           speedMin: 1, speedMax: 5, sizeMin: 1.5, sizeMax: 4,
           lifetimeMin: 0.35, lifetimeMax: 0.9, positionJitter: radius * 0.55,
       });
       // Hot white sparks bursting outward from the seam.
-      this.spawnParticles(pos, 16, '#ffffff', {
+      this.spawnParticles(pos, 10, '#ffffff', {
           speedMin: 4, speedMax: 12, sizeMin: 1, sizeMax: 2.6, lifetimeMin: 0.2, lifetimeMax: 0.5,
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MICRO * 4); // a soft warp thud
@@ -5391,6 +5455,9 @@ export class GameEngine {
       }
       if (this.rivals.length === 0) return;
 
+      // Re-acquire targets + run the loot vacuum on the PerfController cadence;
+      // everything else (steering, firing, lifecycle) still ticks every step.
+      const doScan = this.perfController.shouldRun('rivalScan');
       const enemies = this.entityIndex.enemies;
       // Rivals fly with the SAME mechanics as the player: thrust toward the
       // desired heading + a self speed-cap, with the map's friction applied by
@@ -5408,23 +5475,38 @@ export class GameEngine {
           inst.stateTimer -= dt;
           inst.fireTimer -= dt;
 
-          // ── Target: nearest wave enemy; hostile (or a provoked neutral) also
-          // weighs the player. ──
-          const huntsPlayer = inst.disposition === 'hostile'
-              || (inst.disposition === 'neutral' && s.provoked === true);
-          let target: GameEntity | null = null;
-          let bestD2 = R.VISION * R.VISION;
-          for (let i = 0; i < enemies.length; i++) {
-              const e = enemies[i];
-              if (e.isRival || e.isExploding) continue;
-              const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < bestD2) { bestD2 = d2; target = e; }
+          // ── Target: re-acquired on the rivalScan cadence (nearest wave enemy
+          // within VISION; a hostile / provoked-neutral rival also weighs the
+          // player), then CACHED on the instance.  Between scans steering/firing
+          // reuse the cached target and only recompute the O(1) distance to it —
+          // dropping it the moment it goes inactive/exploding. ──
+          let target: GameEntity | null = inst.target ?? null;
+          if (target && (!target.active || target.isExploding)) target = null;
+          if (doScan) {
+              const huntsPlayer = inst.disposition === 'hostile'
+                  || (inst.disposition === 'neutral' && s.provoked === true);
+              target = null;
+              let acqD2 = R.VISION * R.VISION;
+              for (let i = 0; i < enemies.length; i++) {
+                  const e = enemies[i];
+                  if (e.isRival || e.isExploding) continue;
+                  const dx = wrapDeltaX(s.position.x, e.position.x), dy = wrapDeltaY(s.position.y, e.position.y);
+                  const d2 = dx * dx + dy * dy;
+                  if (d2 < acqD2) { acqD2 = d2; target = e; }
+              }
+              if (huntsPlayer && !this.player.isExploding) {
+                  const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
+                  const d2 = dx * dx + dy * dy;
+                  if (target === null || d2 < acqD2) { target = this.player; acqD2 = d2; }
+              }
+              inst.target = target;
           }
-          if (huntsPlayer && !this.player.isExploding) {
-              const dx = wrapDeltaX(s.position.x, this.player.position.x), dy = wrapDeltaY(s.position.y, this.player.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (target === null || d2 < bestD2) { target = this.player; bestD2 = d2; }
+          // Live squared distance to the (cached) target — drives the strafe
+          // sign + the fire-range gate below.
+          let bestD2 = Infinity;
+          if (target) {
+              const tdx = wrapDeltaX(s.position.x, target.position.x), tdy = wrapDeltaY(s.position.y, target.position.y);
+              bestD2 = tdx * tdx + tdy * tdy;
           }
 
           // ── Steering ──
@@ -5463,8 +5545,10 @@ export class GameEngine {
               this.fireRivalShot(inst, target);
           }
 
-          // ── Loot vacuum: steal nearby collectible drops from the player ──
-          this.rivalVacuumDrops(inst);
+          // ── Loot vacuum: steal nearby collectible drops from the player
+          // (cadenced with the target re-acquire; drops settle over many frames
+          // so a few-step defer is invisible). ──
+          if (doScan) this.rivalVacuumDrops(inst);
 
           // ── Lifecycle ──
           if (inst.state === 'enter') {
@@ -5575,6 +5659,28 @@ export class GameEngine {
       const forced = (disposition === 'hostile' || disposition === 'ally' || disposition === 'neutral')
           ? disposition as RivalDisposition : undefined;
       this.spawnRival(forced);
+  }
+
+  // ─── Perf recorder (DBG FPS harness) ───────────────────────────────────
+  // Start/stop a capture, cycle the scene label, and export a copy-paste
+  // report.  Surfaced in the DBG panel's "Perf REC" section; see
+  // engine/systems/PerfRecorder.ts.
+  public perfRecToggle() { this.perfRecorder.toggle(); }
+  public perfRecCycleScene() { this.perfRecorder.cycleScene(); }
+
+  /** Build the copy-paste perf report from the current capture window.  The
+   *  viewport / dpr / zoom are captured live so the block records the FOV the
+   *  numbers were measured at (a wide desktop FOV draws more than a tablet). */
+  public perfRecExport(): string {
+    return this.perfRecorder.report({
+      viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
+      viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
+      dpr: typeof window !== 'undefined' ? Math.round((window.devicePixelRatio || 1) * 10) / 10 : 1,
+      zoom: this.camera.zoom || 1,
+      mapName: this.currentMap?.name || '—',
+      difficulty: this.difficultyLevel,
+      buildTag: 'exotic-opt',
+    }, PERF_CONTROLLER_CONSTANTS.TIER_NAMES as unknown as string[]);
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.

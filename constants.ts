@@ -1145,6 +1145,15 @@ export const PERF_TASKS = {
   // dragon) is on the field, so it early-outs cheaply most of the time and a
   // few-step cadence is imperceptible (eating settles over frames).
   consume:          { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
+  // Rival re-acquire + loot-vacuum scan (GameEngine.updateRivals, Stage 7).
+  // Two per-rival full-list walks — targeting is O(rivals × live enemies) and
+  // the loot vacuum is O(rivals × active drops).  Steering, firing, and the
+  // lifecycle still run EVERY step against the cached target (recomputing only
+  // the O(1) distance to it), so this cadence only defers WHICH enemy a rival
+  // re-picks and WHEN a nearby drop is snatched — both imperceptible.  min 1 →
+  // identical to the old every-step behaviour at low load; stretches to 4 only
+  // under real pressure (many rivals + a dense wave), exactly when it matters.
+  rivalScan:        { minInterval: 1, maxInterval: 4,   costWeight: 0.6, autoCurve: 1.0 },
 } as const;
 
 export type PerfTaskId = keyof typeof PERF_TASKS;

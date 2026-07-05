@@ -467,3 +467,72 @@ Known tuning wants (add freely):
 
 All knobs live in `ENEMY_VARIANTS` / `ENEMY_TRAITS` / `AI_CONFIG` /
 `BUBBLE_CONSTANTS` / `DRAGON_CONSTANTS` / `RIVAL_CONSTANTS` in `constants.ts`.
+
+---
+
+## Exotic-enemies-optimization — deferred perf ideas
+
+**Context:** The `exotic-enemies-optimization` pass (decision #33, shipped) took a
+strict zero-behaviour / zero-visual posture. Two perf ideas were intentionally
+left out of that pass because they would need new infra or a visible change; log
+here for a future perf beat.
+
+- **`updateConsumers` dynamic-grid query.** The consume-and-grow scan
+  (bubble/dragon eating) is `O(calm consumers × all mobile shards)` over the full
+  `entityIndex.asteroids` list. It is already `PerfController`-gated (`consume`)
+  and early-outs for every non-idle consumer, but on a shard-dense field a single
+  calm bubble still walks the whole shard list each scan step. A real fix is a
+  spatial near-query, but PhysicsSystem only exposes a **static**-grid helper
+  (`forEachStaticNear`) today — a `forEachDynamicNear` over the per-frame dynamic
+  grid would be needed. More invasive than a zero-behaviour pass warranted.
+
+- **Portal / death particle-burst counts. — RESOLVED (exotic-enemies-opt).** The
+  spawn-burst hitch was fully addressed: (1) the cosmetic-ring `validHitIds`
+  O(all-entities) scan in `spawnShockwave` now skips for damage-0/knockback-0
+  rings; (2) `ParticleSystem`'s per-spawn `enforceTypeCap` O(N) rescans were
+  batched to once/frame in the engine loop (zero visual change — the cap and the
+  dropped-oldest set are identical); (3) burst counts trimmed ~40 % (enemy death
+  16–24/9 → 10–13/5, portal 30/16 → 18/10, dragon death 40 → 24; user-approved
+  visual reduction). Left here only as a pointer. NOTE: the same per-spawn
+  `enforceCap` pattern still exists for **projectiles** (`ProjectileSystem.spawn`
+  → `enforceCap`, MAX_PROJECTILES) — untouched because projectiles are gameplay
+  entities (cap timing can affect a frame), a candidate for the same once/frame
+  batching if a projectile-heavy weapon ever profiles hot.
+
+- **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
+  counts run every step. Cheap enough that gating them (they only ACT on a timer)
+  is low ROI and risks a spawn-timing wobble; left every-step.
+
+Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
+`PARTICLE_CONSTANTS` / `MAX_PARTICLES` in `constants.ts`.
+
+---
+
+## Physics / shard broadphase at high entity counts (separate perf pass)
+
+**Out of scope for the exotic-enemies-optimization session** (that pass targeted
+the roamers + their render, not the collision/shard subsystem) — logged here as
+its own future target.
+
+**Observed (real-hardware Perf REC, iPhone 440×756 dpr3, Tile Heavy, diff 3):** a
+dense mobile-shard field (player shattered a lot of tiles) reached **~6,000
+entities**, pegging PerfController at **max tier the entire window** (load peak
+0.96). The cost profile flipped from render-bound to **sim-bound**: `sim 4.74 ms +
+collisions 2.56 ms` vs. `render 2.40 ms`. FPS held median 59 / avg 56 on the phone
+(≥55: 86 %, p99 44 ms), so it degrades gracefully — but the dynamic-grid collision
+pass + `ShardSystem` broadphase are the steady-state hot path at that scale, NOT
+the exotic roamers (16 enemies) or render (flat even at max load).
+
+This subsystem already has substantial machinery (shard-pair AUTO throttling,
+collision-sleep, viewport-cull cadence, render LOD, dedicated `PERF_TASKS`), which
+is why it stays graceful rather than falling over. A further pass would be its own
+deep investigation — candidate levers: cheaper dynamic-grid rebuild / query,
+broadphase pair reduction at high density, a `forEachDynamicNear` helper (also
+unblocks the parked `updateConsumers` query), and revisiting the shard-merge cull
+rate under max load. **Delicate** (merge / regen / neighbour-count all key off
+exact shard positions), so it warrants its own branch + verification, not a
+bolt-on to a roamer PR.
+
+Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
+`SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
+`PERF_TASKS` in `constants.ts`.

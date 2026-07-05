@@ -1,0 +1,293 @@
+# Exotic-enemies optimization pass
+
+A performance pass over the heavy interactive entity types (the engine-managed /
+third-party roamers — Rivals, Dragons, Bubbles — and the exotic roster) and the
+per-step / per-frame systems that drive them. Goal: hold frame rate when many are
+alive and on screen at once, scaling from a tablet field-of-view up to a large
+desktop FOV (a wider viewport reveals more of the torus, so more heavy entities
+are drawn per frame).
+
+**Posture: zero functionality / behaviour / visual change** — same gameplay
+results, identical visuals, only cheaper (the PR #58 / #63 posture). Every change
+below is either load-gated with a `minInterval: 1` (so it is byte-identical to the
+old every-step behaviour at low load and only stretches under real pressure) or a
+render cache that is provably equivalent to the per-frame rebuild it replaces. No
+approval-gated items were required — nothing was removed, capped, or down-cadenced
+in a player-perceptible way.
+
+---
+
+## Method & measurement
+
+There is no automated FPS harness in this repo, and the last-mile gate is
+`npm run build` (vite type-checks via esbuild). Verification was done three ways:
+
+1. **Static complexity / allocation analysis** of every per-step and per-frame
+   cost the heavy entities incur (the roamer `update*` loops and their render
+   paths). Each optimization below lists the before/after cost.
+2. **A headless Chromium smoke run** (Playwright over the built `dist/`) that
+   starts a Universe game, spawns **10 DBG dragons (every material) + 6 rivals**
+   alongside the auto-seeded ambient bubble population (~2 700–2 850 live
+   entities), teleports the roamers on-screen in provoked + hit-flash states, and
+   renders ~3.5 s of simulation at **both a tablet (1024×768) and a desktop
+   (2560×1440) viewport**. Result: **0 console/page errors at both FOVs**, all
+   dragon heads (faceted skull + plasma maw + reactor core), rival sprites, dragon
+   bodies, and bubble membranes rendering correctly through the new cached paths.
+   (The scaffolding — a temporary `window.__engine` handle and the test script —
+   was reverted before commit.)
+3. **Manual playtest checklist** (below) to capture live DBG perf-panel numbers
+   on real hardware across the worst-case scenes.
+
+### In-game perf recorder (iPhone-friendly FPS harness)
+
+To capture real-hardware numbers without devtools, the DBG panel has a **Perf
+REC** section (`engine/systems/PerfRecorder.ts`, surfaced via
+`GameEngine.perfRec*`):
+
+1. Open the **DBG** panel → expand **Perf REC**.
+2. Tap the **scene** chip to label the capture (baseline / roamer-swarm /
+   dragon-stack / dense-wave / custom).
+3. Build the scene (DBG ▸ Dragon / Rivals / enemy-test), tap **● REC**, play
+   ~10–20 s, tap **● REC** again to stop.
+4. Tap **Copy** — the report is written to the clipboard (iOS Safari, inside the
+   tap) and also shown in a select-all textarea as a fallback. Paste it into
+   chat.
+
+While recording, the engine loop folds each **real PLAYING frame** (true rAF
+delta + the rolling PerfSnapshot) into a preallocated ring buffer — zero cost
+while idle, no per-frame allocation. The export aggregates FPS avg/median/5%-low/
+1%-low/min/max + ≥55 & ≥30 %, frame-time percentiles, avg render/sim/collision
+ms, the PerfController tier distribution + peak load, and peak entity/enemy/
+particle counts — at the live viewport/DPR/zoom so the FOV is recorded with the
+numbers. Run it once per scene below and paste all four blocks; that fills the
+table.
+
+### Real-hardware captures (after)
+
+Captured with the in-game Perf REC harness on an iPhone (440×756 dpr3) and a
+desktop-width browser via the PR preview (1229×790 dpr2), zoom 0.65, difficulty
+3, on the "Tile Heavy" map (≈4.4–4.8k entities). Each is a 30–90 s window.
+
+| Scene | FOV | frames | FPS avg / med / 1%-low / min | frame p95 / p99 | render / sim / coll ms | tier avg · load peak | peak ents / enemies / parts |
+|-------|-----|-------:|------------------------------|-----------------|------------------------|----------------------|------------------------------|
+| baseline    | 440×756 dpr3  | 3426 | 59 / 59 / 38 / 19 | 20 / 26 ms | 1.77 / 1.01 / 0.29 | 1.00 · 0.26 | 4650 / 9 / 321 |
+| roamer-swarm| 1229×790 dpr2 | 5445 | 59 / 59 / 50 / 48 | 18 / 20 ms | 2.29 / 0.73 / 0.15 | 0.57 · 0.24 | 4427 / 3 / 173 |
+| dragon-stack| 1229×790 dpr2 | 1933 | 58 / 59 / 43 / 10 | 19 / 23 ms | 2.18 / 1.18 / 0.39 | 1.00 · 0.29 | 4620 / 15 / 268 |
+| dense-wave  | 1229×790 dpr2 | 2797 | 57 / 59 / 43 / 5  | 21 / 23 ms | 2.09 / 1.32 / 0.50 | 1.04 · 0.70 | 4835 / 19 / 415 |
+
+**Interpretation.**
+
+- **Locked ~60, vsync-bound, with 4–5× headroom in every scene.** The measured
+  work is tiny — render ≤2.3 ms, sim ≤1.3 ms, collisions ≤0.5 ms — against a
+  16.7 ms (60 Hz) budget. The phone is idle-waiting on vsync, not compute-bound.
+- **Render is FOV/pixel-bound, not entity-bound — which is the whole point of
+  the pass.** render ms tracks viewport pixels (1.77 ms on the iPhone → ~2.1–2.3
+  ms at the wider desktop FOV) and barely moves between the light `roamer-swarm`
+  (3 enemies) and the `dragon-stack` (15 enemies, ~10 geometric dragon heads on
+  screen). With the old per-frame dragon-gradient churn, a stack of ~10 heads
+  would rebuild ~30 gradients + 70 colour-stop parses every frame and render
+  would climb visibly; here it stayed flat (2.18 ms, *below* the roamer scene).
+  That flatness is the gradient-cache win showing up on device.
+- **PerfController only left `light` in `dense-wave`** (2% med / 1% heavy, load
+  peak 0.70). The rival/`consume` cadences and tier stretching are built for that
+  regime; at these loads they run at `minInterval` (identical to pre-pass), which
+  is why FPS is unchanged — the pass buys per-frame *headroom* and future safety
+  margin, not a visible FPS jump at loads the game already ran fine.
+- **The low `min` FPS values (19 / 10 / 5) are single spawn/death hitches, not
+  steady state** — `dragon-stack`'s min 10 is the 10-portals-at-once mass-spawn
+  burst, `dense-wave`'s min 5 is a wave spawn/mass-death particle spike. Median
+  and p95/p99 stay tight (≤23 ms) in every scene. These map to the parked
+  particle-burst item (visual change, approval-gated) and only fire on
+  simultaneous spawns/deaths, never in steady play.
+
+**Net:** the optimized build holds a locked 60 across iPhone and desktop-width
+FOV, baseline through dense-wave, and render cost no longer scales with on-screen
+dragon count. A before/after FPS delta isn't observable at these loads because
+both builds are vsync-bound at 60; the measurable difference is per-frame render
+cost under a dragon stack (structurally 3 gradient builds/dragon → 1) and the
+reduced `O(rivals×N)` / `O(all-entities)` walks, which matter as headroom on
+weaker devices and under heavier future content.
+
+---
+
+## Optimizations shipped
+
+### 1. Rival targeting + loot-vacuum → PerfController cadence (`rivalScan`)
+
+`GameEngine.updateRivals` ran two full-list walks **per rival, every sim step**:
+
+- **Targeting** — a nearest-wave-enemy scan over the whole `entityIndex.enemies`
+  list: `O(rivals × live enemies)`. In a dense wave (wave enemies + swarm brood +
+  dragon-spat gnats push `enemies` to ~100–150), 6 rivals = up to ~900 toroidal
+  distance ops **per step**, ×2–3 substeps/frame.
+- **Loot vacuum** (`rivalVacuumDrops`) — a scan over every active drop:
+  `O(rivals × active drops)`, up to `6 × MAX_ACTIVE_DROPS` per step.
+
+**Change:** a new `PERF_TASKS.rivalScan` (`minInterval: 1, maxInterval: 4`) gates
+both the target **re-acquire** and the loot vacuum. The chosen target is **cached
+on the `RivalInstance`** (`inst.target`); steering, firing, the strafe-distance
+gate, and the whole lifecycle still run **every step** against the cached target,
+recomputing only the **O(1)** distance to it. The cache is dropped the instant the
+target goes inactive/exploding, and re-acquired on the next scan step.
+
+- **Cost:** at low load `minInterval: 1` → **identical to the old every-step
+  behaviour**. Under real pressure the interval stretches to 4, cutting the two
+  `O(rivals × N)` walks by ~75% while movement/aim stay smooth.
+- **Behaviour:** only *which* enemy a rival re-picks, and *when* a nearby drop is
+  snatched, defer by ≤3 steps (~50 ms) under load — imperceptible, and exactly the
+  "targeting re-acquire / loot-vacuum scan" cadence the task blesses. Rivals still
+  hunt, strafe, fire `hitsEnemies`/`sparesPlayer` bolts, steal kills + loot, and
+  warp out identically.
+
+### 2. `updateAttachments` — kill the full-master-list `entityById` scan
+
+The bubble latch (attach primitive 3c) resolved its target each frame via
+`entityById(id)`, a linear walk over **the entire `currentMap.entities` array**
+(up to ~2 700 entities on a full map) per latched entity. Replaced with
+`resolveAggroTarget` — the player special-case + a walk of the small
+`entityIndex.enemies` slice (the only attach targets today). Same result, O(all
+entities) → O(active enemies). The now-dead `entityById` was removed.
+
+### 3. Dragon-head render — cache the per-frame gradients
+
+`RenderSystem.drawEnemyShape`'s geometric dragon head (Stage 6) rebuilt **three**
+`createRadialGradient`s with **seven** `addColorStop` CSS-string parses **per
+dragon, every frame** — the biggest being the full faceted-skull body gradient.
+With a stack of dragons on a wide desktop FOV this is pure per-frame churn.
+
+**Change:** the skull body gradient and the plasma-maw gradient are now **cached on
+the entity** (`dragonSkullGrad` / `dragonMawGrad`), rebuilt only when the
+size / colour / hit-flash / provoked **key** changes (mirroring the existing
+`enemyBodyGrad` cache). The per-frame energy `pulse` is applied via **`globalAlpha`
+at paint time** instead of being baked into the maw's colour stops — provably
+equivalent, because the maw fades to `alpha = 0` at the rim, so scaling a unit
+`1→0` gradient by `k` reproduces the old `(0.45 + 0.3·pulse) → 0` stops exactly.
+
+- **Cost:** 3 gradient builds + 7 stop-parses per dragon/frame → **1** (only the
+  reactor-core bloom, whose radius genuinely pulses, is still per-frame). ~67%
+  fewer gradient allocations for every on-screen dragon; the win scales with
+  visible-dragon count, i.e. **grows with FOV**.
+- **Visual:** unchanged (confirmed in the smoke render — skull, maw, and
+  provoked-red core all correct).
+
+### 4. Bubble-membrane render — cache the fill gradient
+
+The reactive-bubble membrane (Stage 5) rebuilt its soap-film radial fill gradient
+every frame. Now cached on the entity (`bubbleFillGrad`), keyed on membrane radius
++ base colour + visibility — all of which change only on a hit-flash/feed pulse or
+a state transition (calm ↔ provoked ↔ sick), not per frame. An idle drifting
+bubble reuses the same gradient object every frame. The key is compared by
+component (no per-frame key-string allocation — hot-path allocation discipline).
+
+### 5. Cosmetic shockwave rings — skip the O(N) hit-set snapshot
+
+Follow-up prompted by the real-hardware captures: the `dragon-stack` / warp-in
+`min`-FPS dips (a single spawn-frame hitch) traced largely to `spawnShockwave`
+(`GameEngine`). Every ring — **including the purely cosmetic portal rings**
+(`openPortal` fires three per warp with `damage: 0, knockback: 0`) — built a
+`validHitIds` Set by walking **all active entities** in range. On the ~4.6 k-tile
+"Tile Heavy" map a burst of 10 dragon portals × 3 rings = **~138 k distance
+checks + 30 Set allocations on the single spawn frame**, plus a per-frame no-op
+sweep of that set for each ring's lifetime — all to apply *nothing*.
+
+**Change:** skip the snapshot when `damage <= 0 && knockback <= 0`. The ring
+keeps an empty `validHitIds`; `updateExplosionRings` already early-outs on an
+empty set (`valid.size === 0`), and the renderer draws the ring from its
+radius/lifetime alone — so it's **visually identical**. Damaging rings (cannon
+AoE, kamikaze, merge blow-back) still snapshot exactly as before.
+
+- **Cost:** the portal-spawn / rival-warp burst frame drops from O(rings ×
+  all-entities) + N Set allocs to O(1). Removes the bulk of the spawn-burst
+  hitch. Verified: a 14-portal same-frame burst produced 21 live rings, **all
+  with empty hit-sets**, zero errors, rendering unchanged.
+
+### 6. Spawn-burst residual — batch the particle cap + trim burst counts (Tier 2)
+
+Follow-up after #5, once the cosmetic-ring scan was gone. Two parts:
+
+**6a — `enforceCap` batched to once per frame (zero visual change).**
+`ParticleSystem.spawn` called `enforceTypeCap` on **every** spawn — and that
+helper does **two O(all-entities) walks** (count, then evict). A mass death
+(snitch catch / AoE cluster / wave wipe) fires ~38 death-burst spawn calls on
+one frame, so at ~6 k entities that was **≈456 k iterations just for cap
+bookkeeping**, independent of particle count (`MAX_PARTICLES = 400` already
+bounds render). The cap is now enforced **once per frame** in the engine loop,
+after the sim drain and before the render pass — so the on-screen cap and
+*which* oldest particles get dropped are identical, but the per-spawn O(N)
+rescans are gone. Verified: a 20-dragon same-frame burst (560 particles wanted)
+clamps to exactly **400** active every frame then decays as they expire — zero
+errors, bound identical to the old per-spawn path.
+
+**6b — burst particle counts trimmed ~40 % (visual, user-approved).**
+| Site | before | after |
+|------|-------:|------:|
+| enemy death (colour / white) | 16–24 / 9 | 10–13 / 5 |
+| portal warp (embers / sparks) | 30 / 16 | 18 / 10 |
+| dragon death | 40 | 24 |
+| gnat death | 5 | 5 (unchanged — already light) |
+
+Fewer particles per burst so a simultaneous mass death / warp spawns less; the
+`MAX_PARTICLES` cap already bounded on-screen density, so the pop still reads.
+Approved by the user as an intentional, minor visual reduction (decision logged
+in `docs/GAME_FEEDBACK_PLAN.md`).
+
+---
+
+## Deferred (see `docs/PARKING_LOT.md`)
+
+- **`updateConsumers` spatial query.** The consume-and-grow scan is
+  `O(calm consumers × all mobile shards)` over the full `entityIndex.asteroids`
+  list. It is already `PerfController`-gated (`consume`) and early-outs for every
+  non-idle bubble, but on a shard-dense field a calm bubble still walks the whole
+  shard list. Replacing it with a dynamic-grid near-query would need a new
+  `forEachDynamicNear` helper (PhysicsSystem only exposes a **static**-grid query
+  today) — more invasive than this zero-behaviour pass warranted. Deferred.
+- **Portal / death particle-burst — DONE (optimizations #5 + #6).** The
+  spawn-burst hitch is now addressed on all three fronts: the cosmetic-ring
+  O(N) hit-set scan is skipped (#5), the per-spawn `enforceCap` O(N) rescans are
+  batched to once/frame (#6a, zero-visual), and the burst particle counts are
+  trimmed ~40 % (#6b, user-approved). Nothing left parked here.
+- **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
+  counts every step; cheap enough that gating them is low ROI and risks a spawn-
+  timing wobble. Left as-is.
+
+---
+
+## Parity checklist (manual playtest)
+
+Run each on real hardware; all must behave exactly as before this pass.
+
+**Rivals** (DBG ▸ Rivals: hostile / ally / neutral / random)
+- [ ] Hostile hunts player + enemies; ally hunts enemies only; neutral ignores
+      the player until attacked, then flips to hunt it.
+- [ ] Rival bolts damage wave enemies (`hitsEnemies`) and pass through the player
+      unless hostile/aimed (`sparesPlayer`); never hit another rival.
+- [ ] Killing a wave enemy with a rival shot denies the player the points/combo
+      (`killedByRival`); rival vacuums nearby drops (heals + denies).
+- [ ] Rival warps in on the score cadence + via DBG; warps out via portal after
+      the roam window; player can down it for the tier bounty + loot spray.
+- [ ] Spawn 6 rivals into a dense wave — target re-acquire + strafe still look
+      instant; no visible "sticky target" lag.
+
+**Dragons** (DBG ▸ Dragon: glass / rock / plastic / metal / mixed; stack several)
+- [ ] Head renders faceted skull + plasma maw + reactor core; portal-violet at
+      rest, hot-red when provoked; pulse animates; hit-flash whitens.
+- [ ] Body is a Snake of eaten tiles; eats tiles in its path; severing a segment
+      drops it + everything aft as drifting shards; body immune to crash, breaks
+      only when shot.
+- [ ] Neutral until attacked; once provoked spits gnats + lobs homing missiles.
+- [ ] Leaves head-first through the exit portal after the roam window; kill payout
+      doubles per dragon (3000 · 2^n).
+- [ ] Stack 8–10 dragons on-screen at desktop FOV — render-time stays flat vs. the
+      same count pre-pass (gradient cache win).
+
+**Bubbles** (ambient; DBG ▸ enemy-test BUBBLE, Corrode/Disable)
+- [ ] Calm bubbles drift faint on the flow field, chase + digest shards (heal +
+      grow), split at size; plastic/green-nebula shards sicken them.
+- [ ] Provoked (shoot/ram one) → homes, latches, drains + EMPs the player, knocks
+      free on a projectile hit / terrain slam → goes sick.
+- [ ] Membrane wobble, feed bulge, digest ghost, squash-cling all render as before.
+
+**General**
+- [ ] `npm run build` clean; `node scripts/inline-build.mjs` regenerates the
+      standalone; DBG perf panel numbers at/below baseline across scenes A–D.
