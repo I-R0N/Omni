@@ -1845,8 +1845,8 @@ export const NEBULA_CONSTANTS = {
   // for a "part the cloud" look; when that toggle is on this swirl is
   // skipped so the two don't compound.
   PLAYER_PULL_RANGE: 150,
-  PLAYER_PULL_STRENGTH: 2.5,
-  PLAYER_PULL_SPIN: 3.0,
+  PLAYER_PULL_STRENGTH: 0.25,
+  PLAYER_PULL_SPIN: 0.3,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
   // shards must substantially OVERLAP, not merely touch, before a merge
