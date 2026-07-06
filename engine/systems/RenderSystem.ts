@@ -526,6 +526,41 @@ export class RenderSystem {
   private _minimapBuffer: { entity: GameEntity, dx: number, dy: number }[] = [];
   private _attractors: GameEntity[] = [];
 
+  // Object pools backing the {entity,rx,ry} render buckets above.  The
+  // live arrays are rebuilt every frame; without pooling, each visible
+  // entity pushed a fresh `{entity,rx,ry}` literal — thousands per frame
+  // in a tile-dense scene (~60-90k small objects/sec), the dominant
+  // driver of the periodic GC pauses that show up as tail-frame hitches.
+  // Each pool retains every slot it has ever handed out (grows to the
+  // high-water visible count, ~1-2k, then never allocates again); the
+  // matching live array holds REFERENCES into the pool and is reset via
+  // `.length = 0`, which drops the refs but leaves the pooled objects
+  // intact for reuse.  `pushSlot` mutates a pooled slot in place instead
+  // of allocating.  Consumers read the live arrays unchanged.
+  private _visiblePool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _nebulaTilePool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _nebulaShardPool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _trailPool: { entity: GameEntity, rx: number, ry: number }[] = [];
+  private _particlePool: { entity: GameEntity, rx: number, ry: number }[] = [];
+
+  /**
+   * Append `entity` to a live render bucket by reusing a pooled slot.
+   * `live` and `pool` stay index-aligned: the next slot is `pool[live.length]`
+   * (created lazily on first use, mutated in place thereafter).  `live` must
+   * only be appended via this helper and cleared via `.length = 0`.
+   */
+  private pushSlot(
+    live: { entity: GameEntity, rx: number, ry: number }[],
+    pool: { entity: GameEntity, rx: number, ry: number }[],
+    entity: GameEntity, rx: number, ry: number,
+  ): void {
+    const n = live.length;
+    let s = pool[n];
+    if (s === undefined) { s = { entity, rx, ry }; pool[n] = s; }
+    else { s.entity = entity; s.rx = rx; s.ry = ry; }
+    live.push(s);
+  }
+
   // ── Pre-rendered static minimap layer ─────────────────────────────────
   // Structures (~22k) don't move, so we render them to an offscreen canvas
   // once on map load and blit the relevant viewport each frame instead of
@@ -1382,9 +1417,9 @@ export class RenderSystem {
             // Nebula tiles are static (mass = Infinity) but must render in
             // the dedicated bottom layer, not the main entity layer.
             if (entity.shardVariant === 'nebula-tile') {
-                this._nebulaTileEntities.push({ entity, rx, ry });
+                this.pushSlot(this._nebulaTileEntities, this._nebulaTilePool, entity, rx, ry);
             } else {
-                this._visibleEntities.push({ entity, rx, ry });
+                this.pushSlot(this._visibleEntities, this._visiblePool, entity, rx, ry);
             }
             continue;
         }
@@ -1436,19 +1471,19 @@ export class RenderSystem {
 
         // Particles go to a separate buffer for single-pass 'lighter' composite rendering
         if (entity.type === EntityType.PARTICLE) {
-            this._particleBuffer.push({ entity, rx, ry });
+            this.pushSlot(this._particleBuffer, this._particlePool, entity, rx, ry);
         } else if (entity.shardVariant === 'nebula-shard') {
             // Mobile nebula shards render in the dedicated bottom layer,
             // above nebula tiles but below all other entities.  (Static
             // nebula tiles are routed to their own bucket in the
             // STRUCTURE fast-path above.)
-            this._nebulaShardEntities.push({ entity, rx, ry });
+            this.pushSlot(this._nebulaShardEntities, this._nebulaShardPool, entity, rx, ry);
         } else if (entity.shardVariant === 'nebula-tile') {
             // Defensive: a nebula tile that ever has finite mass still
             // belongs in the tile layer, never the main entity layer.
-            this._nebulaTileEntities.push({ entity, rx, ry });
+            this.pushSlot(this._nebulaTileEntities, this._nebulaTilePool, entity, rx, ry);
         } else {
-            this._visibleEntities.push({ entity, rx, ry });
+            this.pushSlot(this._visibleEntities, this._visiblePool, entity, rx, ry);
         }
 
         // Player trail = independent expanding rings (one is enough to draw);
@@ -1456,7 +1491,7 @@ export class RenderSystem {
         // The snitch's comet tail rides the projectile-strip path in gold.
         if (entity.trail && entity.trail.length > 0
                 && (entity.type === EntityType.PLAYER || entity.type === EntityType.PROJECTILE || entity.isSnitch)) {
-            this._trailEntities.push({ entity, rx, ry });
+            this.pushSlot(this._trailEntities, this._trailPool, entity, rx, ry);
         }
     }
 

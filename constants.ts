@@ -1825,25 +1825,28 @@ export const NEBULA_CONSTANTS = {
   GRAVITY_RANGE: 380,
   GRAVITY_STRENGTH: 380,
   GRAVITY_MIN_DIST: 15,
-  // Player→nebula-shard pull (PhysicsSystem.applyNebulaPlayerPull).
-  // Active when a player ship passes within PLAYER_PULL_RANGE of a
+  // Player→nebula-shard swirl (PhysicsSystem.applyNebulaPlayerPull).
+  // The player↔nebula-shard interaction mirrors the player↔nebula-TILE
+  // feel: a pure PASS-THROUGH (no SAT bounce) plus a soft ROTATION push,
+  // so the ship swirls the cloud in its wake instead of shoving it.
+  // Active every substep the ship is within PLAYER_PULL_RANGE of a
   // nebula-shard; falloff is linear (full at the centre, zero at the
-  // range edge).  STRENGTH is the velocity nudge (units/s) added each
-  // step at the centre.  SPIN_KICK is the rad/s nudge added per shard
-  // per second of being in range — stable per-shard sign drawn from
-  // the entity id so the cloud reads as varied swirls.  The shatter
-  // path is independent — shards in range still shatter on direct
-  // contact via the standard nebula pass-through trigger.
-  //
-  // Both the pull AND the shatter check skip shards whose
-  // `nebulaMergeCooldown` is active — the same field already gates
-  // shard↔shard merging, so freshly-spawned shatter children (which
-  // carry the post-shatter cooldown) sit out the player interaction
-  // until the cooldown elapses.  Single field gates all three nebula-
-  // shard interactions: pull, shatter, merge.
-  PLAYER_PULL_RANGE: 60,
-  PLAYER_PULL_STRENGTH: 1,
-  PLAYER_PULL_SPIN: 1.5,
+  // range edge).  STRENGTH is the TANGENTIAL swirl velocity (units/s)
+  // added at the centre — perpendicular to the ship→shard line, signed
+  // per-shard so the cloud reads as varied vortices rather than a single
+  // pinwheel; damping (LINEAR_DAMPING) bounds it into a gentle orbit.
+  // SPIN is the rotation-rate ramp (rad/s per step at the centre), capped
+  // at MAX_SPIN.  Applied CONTINUOUSLY (no cooldown gate) so the swirl is
+  // smooth, not a once-a-second jerk — the range/strength are tuned for a
+  // visible-but-cheap wake.  The shatter path is independent: nebula
+  // TILES still shatter on player contact; nebula SHARDS never do (pure
+  // pass-through).  A DBG toggle (PhysicsSystem.playerNebulaCollisionEnabled,
+  // default OFF) can instead route the pair through the hard SAT impulse
+  // for a "part the cloud" look; when that toggle is on this swirl is
+  // skipped so the two don't compound.
+  PLAYER_PULL_RANGE: 150,
+  PLAYER_PULL_STRENGTH: 0.025,
+  PLAYER_PULL_SPIN: 0.03,
   // Merge proximity: when (dist < (r_large + r_small) × MERGE_PROXIMITY_K)
   // the larger nebula absorbs the smaller one.  K = 0.55 means the
   // shards must substantially OVERLAP, not merely touch, before a merge

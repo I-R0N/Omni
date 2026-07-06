@@ -79,10 +79,10 @@ export enum TrailShape {
   NONE     = 'NONE',
 }
 
-// Player trail emission gate — debug-only toggle.  THRUST (default) ties
-// emission to input/acceleration so coasting at full speed produces no
-// trail; VELOCITY ties it to translation so the trail reads off the
-// ship's motion regardless of whether thrust is applied.
+// Player trail emission gate — debug-only toggle.  VELOCITY (default) ties
+// emission to translation so the trail reads off the ship's motion regardless
+// of whether thrust is applied; THRUST ties it to input/acceleration so
+// coasting at full speed produces no trail.
 export enum TrailEmitMode {
   THRUST   = 'THRUST',
   VELOCITY = 'VELOCITY',
@@ -471,6 +471,17 @@ export interface GameEntity {
   enemyBodyGrad?: CanvasGradient;
   enemyBodyGradR?: number;
   enemyBodyGradCol?: string;
+  // PhysicsSystem shard-pair hot-path caches (transient, sim-internal — never
+  // read outside the broadphase).  `_pairSeq` is a pass-local dedup index set
+  // during the shard-grid build (numeric, cheaper than the old id-string
+  // compare).  `_invMassCache` / `_effInvMassCache` memoise 1/mass and
+  // pow(1/mass, MASS_BIAS_EXPONENT) — recomputed only when `mass` differs from
+  // `_massCacheKey`, so a dense awake-shard pile skips 2 divisions + 2 Math.pow
+  // per resolved pair.
+  _pairSeq?: number;
+  _invMassCache?: number;
+  _effInvMassCache?: number;
+  _massCacheKey?: number;
   // Cosmetic render cache for the geometric Dragon head (Stage 6): the big
   // faceted-skull body gradient + the plasma-maw unit gradient, both reused
   // across frames.  Rebuilt only when the size/colour/flash key changes; the
@@ -1265,6 +1276,9 @@ export interface EngineStats {
   // Hard collisions between nebula-shard pairs (ignores their
   // passThrough flag).  DBG-toggleable; default OFF.
   nebulaShardCollisionsEnabled?: boolean;
+  // DBG (Shards & Physics): PLAYER ↔ nebula-shard hard collision. true = the
+  // ship physically parts/scatters the cloud; false = glide-through (pull only).
+  playerNebulaCollisionEnabled?: boolean;
   // Collision-sleep for mobile shards — skips asleep↔asleep pair math
   // in resolveShardPairs.  DBG-toggleable; default ON.
   shardSleepEnabled?: boolean;

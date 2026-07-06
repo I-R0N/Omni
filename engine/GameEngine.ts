@@ -204,7 +204,7 @@ export class GameEngine {
   // space).  THRUST extends the trail opposite to the input/thrust
   // direction by accumulating a per-emit offset in -input.  Toggled
   // from the DBG panel.
-  private trailEmitMode: TrailEmitMode = TrailEmitMode.THRUST;
+  private trailEmitMode: TrailEmitMode = TrailEmitMode.VELOCITY;
 
   // ── Performance toggle: player↔asteroid local gravity ───────────
   // PhysicsSystem.applyLocalGravity is the bidirectional pull
@@ -467,6 +467,11 @@ export class GameEngine {
   private perfWeapons        = new Float64Array(GameEngine.PERF_WINDOW);
   private lastUpdatePhysicsMs: number = 0;
   private lastUpdateGameLogicMs: number = 0;
+  // Raw per-FRAME sim time (sum of updatePhysics + updateGameLogic across every
+  // substep this frame) — the unsmoothed spike signal the Perf REC recorder
+  // reads for tail attribution (distinct from the 60-frame-averaged
+  // PerfSnapshot sim timers, which can't localise a single 50ms frame).
+  private lastFrameSimMs: number = 0;
   private lastPhysMiscMs: number = 0;
   private lastLogicMiscMs: number = 0;
   private lastDropsMs: number = 0;
@@ -650,6 +655,13 @@ export class GameEngine {
    */
   public toggleNebulaShardCollisions() {
     this.physics.nebulaShardCollisionsEnabled = !this.physics.nebulaShardCollisionsEnabled;
+  }
+
+  /** DBG (Shards & Physics): toggle the PLAYER ↔ nebula-shard hard collision —
+   *  the ship physically parts the cloud vs. gliding through with only the pull.
+   *  Default on. */
+  public togglePlayerNebulaCollision() {
+    this.physics.playerNebulaCollisionEnabled = !this.physics.playerNebulaCollisionEnabled;
   }
 
   /**
@@ -1389,6 +1401,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      playerNebulaCollisionEnabled: this.physics.playerNebulaCollisionEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
@@ -1575,16 +1588,17 @@ export class GameEngine {
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
     const perf = this.buildPerfSnapshot();
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
+      // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
+      // the SAME just-finished frame — sample() runs at the top of the next
+      // frame), and the smoothed snapshot.  The raw pair drives spike
+      // attribution (which sub-system owns the worst frames).
       this.perfRecorder.sample(
         frameTime * 1000,
-        perf.renderMs,
-        perf.updatePhysicsMs + perf.updateLogicMs,
-        perf.collisionsMs,
+        perf,
         this.perfController.loadTier,
         this.perfController.loadLevel,
-        perf.totalEntities,
-        perf.enemyCount,
-        perf.particleCount,
+        this.renderer.lastRenderMs,
+        this.lastFrameSimMs,
       );
     }
     this.onStatsUpdate({
@@ -1638,6 +1652,7 @@ export class GameEngine {
       shardGravityEnabled: this.shards.shardGravityEnabled,
       shardBondingEnabled: this.shards.shardBondingEnabled,
       nebulaShardCollisionsEnabled: this.physics.nebulaShardCollisionsEnabled,
+      playerNebulaCollisionEnabled: this.physics.playerNebulaCollisionEnabled,
       shardSleepEnabled: this.physics.shardSleepEnabled,
       shardViewportCullEnabled: this.physics.shardViewportCullEnabled,
       shardLodEnabled: this.renderer.shardLodEnabled,
@@ -1727,6 +1742,7 @@ export class GameEngine {
     this.simAccumulator += Math.min(frameTime, MAX_FRAME_TIME);
 
     let steps = 0;
+    let frameSimMs = 0; // raw per-frame sim total (summed across substeps)
     while (this.simAccumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
         // Refresh working set for physics/AI before each sim step so
         // entities spawned during the previous step are visible to this one.
@@ -1756,6 +1772,7 @@ export class GameEngine {
         const tLogic0 = performance.now();
         try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
         this.lastUpdateGameLogicMs = performance.now() - tLogic0;
+        frameSimMs += this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs;
         // Push per-substep perf samples.  Every timed sub-phase was written
         // to instance fields on its owning system during the two calls above;
         // the recorder just reads and ring-buffers them in one shot.
@@ -1771,6 +1788,7 @@ export class GameEngine {
     if (steps >= MAX_SUBSTEPS && this.simAccumulator >= FIXED_DT) {
         this.simAccumulator %= FIXED_DT;
     }
+    this.lastFrameSimMs = frameSimMs; // raw per-frame sim total (spike attribution)
 
     // Enforce the particle hard-cap ONCE per frame (moved out of the per-spawn
     // path — see ParticleSystem.spawn).  Runs after the whole sim drain so

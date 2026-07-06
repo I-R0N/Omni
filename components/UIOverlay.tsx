@@ -58,6 +58,7 @@ interface UIOverlayProps {
   onToggleShardGravity?: () => void;
   onToggleShardBonding?: () => void;
   onToggleNebulaShardCollisions?: () => void;
+  onTogglePlayerNebulaCollision?: () => void;
   onToggleShardSleep?: () => void;
   onToggleShardViewportCull?: () => void;
   onToggleShardLod?: () => void;
@@ -149,6 +150,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleShardGravity,
   onToggleShardBonding,
   onToggleNebulaShardCollisions,
+  onTogglePlayerNebulaCollision,
   onToggleShardSleep,
   onToggleShardViewportCull,
   onToggleShardLod,
@@ -432,8 +434,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
 
-        {/* Top-left: debug panel (visible only when debug is on) */}
-        <div className="flex flex-col gap-1">
+        {/* Top-left: debug panel (visible only when debug is on).  Lifted to
+            z-[60] so it sits ABOVE the paused Player Menu overlay (z-50) —
+            lets debug features be toggled while the game is paused. */}
+        <div className="flex flex-col gap-1 relative z-[60]">
           {/* Debug toggle button — always visible */}
           <button
             onClick={onToggleDebug}
@@ -708,6 +712,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb collide', onToggleNebulaShardCollisions,
                   stats.nebulaShardCollisionsEnabled === true ? 'On' : 'Off',
                   'Toggle hard SAT collisions between nebula-shard pairs (ignores their passThrough flag). Default OFF. A/B-test whether forcing nebula pairs to bounce breaks up large gather-piles.')}
+                {ctrlRow('Plr↔neb', onTogglePlayerNebulaCollision,
+                  stats.playerNebulaCollisionEnabled === false ? 'Off' : 'On',
+                  'Player ↔ nebula-shard hard collision. On (default): the ship physically parts/scatters the cloud (bypasses nebula passThrough → SAT impulse). Off: glide-through with only the applyNebulaPlayerPull swirl.')}
                 {ctrlRow('Sleep', onToggleShardSleep,
                   stats.shardSleepEnabled === false ? 'Off' : 'On',
                   'Toggle collision-sleep for mobile shards. ON: resting shards stop resolving against each other (the bulk of a settled field) until disturbed by an awake body. OFF resolves every pair every pass.')}
