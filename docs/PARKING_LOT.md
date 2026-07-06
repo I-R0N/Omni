@@ -524,28 +524,68 @@ Knobs: `PERF_TASKS` (`consume`), `PhysicsSystem` grids, `EXPLOSION_CONSTANTS` /
 
 ## Physics / shard broadphase at high entity counts (separate perf pass)
 
-**Out of scope for the exotic-enemies-optimization session** (that pass targeted
-the roamers + their render, not the collision/shard subsystem) — logged here as
-its own future target.
+**Partly addressed on the `physics-shard-broadphase` branch (PR #70).** What
+landed there, zero-behaviour:
+- **Broadphase per-pair math** — `resolveAsteroidPair` now caches
+  `invMass`/`effInvMass` on a mass-keyed self-invalidating field (removes 2 div +
+  2 pow per pair) and dedups pairs on a numeric `_pairSeq` instead of an `a.id >
+  b.id` string compare.
+- **Render-bucket pooling** — the per-frame `{entity,rx,ry}` render candidate
+  buckets (`_visibleEntities` / nebula tile+shard / trail / particle) were the
+  dominant per-frame allocator (~60–90k small objects/sec in a tile-dense scene,
+  the driver of periodic GC-pause tail hitches). Now backed by persistent object
+  pools; steady-state bucket allocation is zero. Measured: `peak render 17 → 9 ms`
+  on the same heavy scene.
 
-**Observed (real-hardware Perf REC, iPhone 440×756 dpr3, Tile Heavy, diff 3):** a
-dense mobile-shard field (player shattered a lot of tiles) reached **~6,000
-entities**, pegging PerfController at **max tier the entire window** (load peak
-0.96). The cost profile flipped from render-bound to **sim-bound**: `sim 4.74 ms +
-collisions 2.56 ms` vs. `render 2.40 ms`. FPS held median 59 / avg 56 on the phone
-(≥55: 86 %, p99 44 ms), so it degrades gracefully — but the dynamic-grid collision
-pass + `ShardSystem` broadphase are the steady-state hot path at that scale, NOT
-the exotic roamers (16 enemies) or render (flat even at max load).
+**Measurement conclusion (four real-hardware captures, iPhone 440×756 dpr3, diff
+3):** steady state is vsync-bound and smooth (median 59, p95 21 ms on the
+shard-dense Asteroid Field). The residual ~80 ms worst-frame hitches at moderate
+density are **external browser/system stalls** (`3 ms sim + 3 ms render` on the
+worst frame — not our compute), uncorrelated with sim load, and not addressable in
+our JS. The exotic roamers and render are NOT the hot path; the collision/shard
+broadphase is.
 
-This subsystem already has substantial machinery (shard-pair AUTO throttling,
-collision-sleep, viewport-cull cadence, render LOD, dedicated `PERF_TASKS`), which
-is why it stays graceful rather than falling over. A further pass would be its own
-deep investigation — candidate levers: cheaper dynamic-grid rebuild / query,
-broadphase pair reduction at high density, a `forEachDynamicNear` helper (also
-unblocks the parked `updateConsumers` query), and revisiting the shard-merge cull
-rate under max load. **Delicate** (merge / regen / neighbour-count all key off
-exact shard positions), so it warrants its own branch + verification, not a
-bolt-on to a roamer PR.
+**The one remaining IN-OUR-CODE spike — the as-needed lever below.** A 200 s /
+**8,081-entity** Tile Heavy capture produced a genuine compute spike: worst frame
+133 ms with **`sim 100 ms`** (`peak sim 106`). That is the fundamental **O(k²)
+shard-pair cost** of resolving a grid cell packed with fresh shatter debris — a
+cannon into a tight tile cluster spawns hundreds of shards into a few cells in one
+substep. The per-pair cost, the exclusions (particles / drops / static / shard
+outer-loop), the sleep skip, the viewport-cull cadence, and the density-scaled
+AUTO throttle are ALL already in — so the only lever left trades a little
+shard-field behaviour and is deliberately parked until shards actually get too
+heavy in real play.
+
+### As-needed: per-cell shard-pair budget (do this if shards profile hot)
+
+**Trigger:** a real-play scene (not a stress test) where `resolveShardPairs`
+dominates a sim spike — i.e. `collisions`/`physics` climb and `peak sim` spikes
+right after big shatters, at very high shard density (the 8,081-entity capture is
+the reference case).
+
+**Idea:** bound the pairs resolved per grid cell per substep. When a single cell
+holds a pathological pile (> K shards), resolve only a rotating subset of its
+pairs each substep so every pair is still covered within a few frames — caps the
+dense-cell cost from O(k²) to ≈O(k·K). Set K high so it engages ONLY on the
+spike-causing clusters and leaves normal density byte-identical.
+
+**Where:** `PhysicsSystem.resolveShardPairs` (the `for i / 3×3 cell / for j` inner
+loop, ~L1672). Add the cell-pile threshold + a per-substep rotating offset
+(`shardPairCallCount % stride`) so the covered subset advances each call. Keep the
+existing `_pairSeq` dedup, sleep skip, and viewport gate.
+
+**Tradeoff / risk:** in the very densest MOMENTARY piles, shards separate a touch
+softer for a frame or two before fully covered. Piles are transient (shards
+scatter apart), so this should read as imperceptible — but VERIFY against a dense
+headless scene (confirm no visible sustained interpenetration) before shipping,
+since the shard-field feel is user-protected. Tune K / stride in
+`SHARD_PAIR_CONSTANTS`.
+
+**Other candidate levers (heavier, lower priority):** cheaper dynamic-grid rebuild
+/ query, a `forEachDynamicNear` helper (also unblocks the parked
+`updateConsumers` query), revisiting the shard-merge cull rate under max load.
+**Delicate** (merge / regen / neighbour-count all key off exact shard positions),
+so any of these warrants its own branch + verification.
 
 Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
 `SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
