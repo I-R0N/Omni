@@ -1033,6 +1033,58 @@ k. After N waves, spawn a portal to a new map.
        (i) death/completion screen copy may shift with the
        structure choice.
 
+35. **Reconciliation audit 2026-07-06 — four merged PRs were
+    never logged in this doc.** Full PR sweep against the plan
+    branch surfaced #64 / #65 / #66 / #70 as shipped-but-
+    unrecorded (plus #59 closed UNmerged — the nebula-puff
+    sprite attempt off the PR-45 feedback merge — and #68, a
+    docs-only parking-lot PR sharing #67's head branch).
+    a. **PR #64 — (f) shipped, model superseded.** "Timed
+       waves" became **completion-based waves** mid-branch:
+       wave ends when budget fully spawned AND field cleared;
+       the clock only grades an early-clear speed bonus;
+       survivors carry over. So original feedback (f)'s
+       literal ask ("timed waves … until time is up") was
+       consciously replaced — record this as the wave-model
+       decision of record. Also shipped, far beyond (f):
+       the scoring spine (kill points, combo, ticker,
+       killedByPlayer attribution), the golden snitch, the
+       run-progression spine (Augments / Modules / Drydock /
+       Salvage — the run starts lean, score mirrors 1:1 into
+       spendable Salvage), the counterplay layer
+       (ENEMY_TRAITS armor + status-effect framework), and a
+       ground-up enemy visual redesign. **The progression
+       spine is directly load-bearing for decision #34's
+       item-economy axis — a v1 economy already exists.**
+    b. **PR #65 — material damage system.** Crack overlay,
+       probabilistic rock break (hit ceiling model),
+       conservation-of-mass chipping (chips shed on every
+       non-killing hit; asteroids shrink by chip footprint;
+       rock dust re-condenses to rock).
+    c. **PR #66 — enemy perf + nebula material condensation.**
+       Enemies release colour-matched nebula on death; nebula
+       hue selects which material a cloud crystallises into
+       (mass-conserved, per-material unit costs).
+       **Economy-relevant: enemy deaths already seed the
+       material loop.** Combined with #64's Salvage economy,
+       the item-economy axis of decision #34 is not a blank
+       page — the strategy should decide what to EXTEND, not
+       what to invent.
+    d. **PR #70 — physics/shard broadphase + render-GC
+       pooling** (merged 2026-07-06). Measure-first. Render-
+       bucket pooling halved peak render on heavy scenes.
+       Four user-approved behaviour changes (player↔nebula-
+       shard pass-through + swirl, gnat terrain collisions,
+       trail default VELOCITY, tile repel push off by
+       default). Remaining O(k²) shard-pair spike at extreme
+       density parked with sketch in `docs/PARKING_LOT.md`.
+    Process note: these landed while the orchestration
+    session was between check-ins — the "enemy pass" and
+    "optimization pass" the user referenced on 06-14 turned
+    out to be this batch plus #67/#69. Going forward the
+    reconciliation default is a full PR-list sweep (not just
+    merge-commit reading) whenever the user says work landed.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1148,17 +1200,21 @@ Run when convenient; can run in parallel with Phase 2.
 
 ## Phase 2 — Structure (sequential, after Phase 1)
 
-> **GATED by the game-structure strategy workstream (decision #34).**
-> The (f) wave model, (h) boss model, and (k) portal model all depend
-> on the structural direction (survival waves vs discrete levels vs
-> open world) and the item-economy direction. Do not finalize (f),
-> (h), or (k) briefs until the strategy doc lands.
+> **(h) and (k) are GATED by the game-structure strategy workstream
+> (decision #34).** The boss model and portal model both depend on the
+> structural direction (survival waves vs discrete levels vs open
+> world) and the item-economy direction. Do not finalize (h) or (k)
+> briefs until the strategy doc lands. (f) shipped before the gate
+> was recorded — see decision #35a.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| f | Timed waves of mixed enemy types | pending — gated on decision #34 | `claude/timed-waves-<suffix>` | Restructure WAVE_DEFINITIONS / WaveSystem. Depends on (e) clean spawn + (j) clean despawn. The (f) brief drafted 2026-06-14 is **on hold** — its six design knobs (duration model, mix, pacing, survivors, early-complete, difficulty) presuppose the survival-wave structure, which is exactly what decision #34 opens for debate. |
+| f | Timed waves of mixed enemy types | **shipped — model superseded mid-branch (PR #64, merged into plan branch)** | `claude/timed-waves-mixed-enemies-irpfug` | 44 commits, +3440/-438. The original *timed* model was **superseded by completion-based waves**: a wave ends when its full budget has spawned AND the field is cleared; the clock only grades an early-clear speed bonus (`onCleared`); survivors carry over. Scripted teach-waves 1–3, weighted-random 4+ with variety guarantee. MASSIVE over-delivery beyond (f): scoring spine (tier-scaled kill points, rapid-kill combo, integer ticker chip, `killedByPlayer` attribution for shard/tile points), golden snitch (persists across waves, per-catch speed ramp, catch = wave end + half-value enemy wipe), run progression (**Augments** = per-wave stat cards, **Modules** = Drydock unlocks bought with Salvage mirroring score 1:1, lean run start), counterplay layer (`ENEMY_TRAITS` armor v1 + status-effect framework with corrosion DoT), full enemy visual redesign across 3 styling waves, hit/death FX, render-path GC cuts. See decision #35a. |
+| material-damage | Crack overlay + probabilistic rock break + conservation-of-mass chipping | **shipped (PR #65, merged into plan branch)** | `claude/material-damage-cracks-tdwyrn` | Deferred follow-up from #64, standalone task. Seeded stable fracture overlay (`drawDamageCracks`) on rocky/metal destructibles; rock `maxHealth` reinterpreted as a size/density hit ceiling with probabilistic early break (always cracks on hit 1, guaranteed break at ceiling); every non-killing hit sheds a chip (dust nebula-shard or solid rock chunk) with mass conserved — asteroids shrink by the chip footprint; rock-derived dust re-condenses into rock-shards via `fromRock` flag. Field-map dropdown fix. See decision #35b. |
+| enemy-perf + nebula-condense | Enemy-behavior perf pass + nebula material condensation | **shipped (PR #66, merged into plan branch)** | `claude/enemy-perf-triage-90ka6s` | Perf: projectile glow-gradient cache (was rebuilding per shot per frame — the term that actually scales with combat intensity) + flow-field scratch vectors. **Condensation system (economy-relevant):** enemies release colour-matched nebula shards on death (`ENEMY_NEBULA_BURST`); when a cloud crystallises, blended hue selects the material via `NEBULA_MATERIAL_BANDS` (rock=red/orange, plastic=yellow/green, glass=cyan/blue, metal=indigo/violet); mass-conserved — a cloud must accumulate `NEBULA_CONDENSE[material].units` (glass/rock 2, plastic 4, metal 6), lock-in + excess-split releases remainder colours. **Enemy deaths now literally seed the material economy.** See decision #35c. |
 | exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
 | exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **shipped (into plan branch)** | `claude/exotic-enemies-optimization-nty6i8` | Zero-behaviour/zero-visual pass (decision #33). Cadenced the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot vacuum through a new `rivalScan` PerfController task with a cached `RivalInstance.target` (min interval 1 → identical at low load); killed the O(all-entities) `entityById` latch-resolve in `updateAttachments`; cached the geometric dragon-head skull + maw gradients and the bubble-membrane fill gradient on the entity (per-frame pulse → `globalAlpha`), so on-screen dragon/bubble render cost stops scaling with the per-frame `createRadialGradient` churn (the win grows with FOV). Verified via headless Chromium (10 dragons + 6 rivals + ambient bubbles, 0 errors, tablet + desktop FOV). `updateConsumers` spatial-query + particle-burst counts deferred to the parking lot (zero-behaviour posture). Report: `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. |
+| physics-broadphase-opt | Physics/shard broadphase optimization + render-GC pooling | **shipped (PR #70, merged into plan branch 2026-07-06)** | `claude/physics-shard-broadphase-k7m2p` | Measure-first follow-on to #69, driven by iPhone Perf REC captures. Zero-behaviour: per-pair invMass/effInvMass cache + numeric `_pairSeq` dedup in `resolveAsteroidPair`; shatter-path scratch reuse; Perf REC sim sub-timer breakdown + spike attribution. **Big win:** render-bucket pooling (steady-state bucket allocation zero; peak render 17→9 ms). **User-approved behaviour changes:** player↔nebula-shard now pass-through + soft swirl (hard collision = DBG toggle, default off); swarm gnats take standard terrain collisions; player trail default → VELOCITY; tile repel push off by default (glow retained); DBG accessible while paused. Conclusion: steady state vsync-bound; residual hitches are external browser/GC stalls; the one genuine in-code spike (O(k²) shard-pair at 8k+ entities) parked in `docs/PARKING_LOT.md` with an implementation sketch. See decision #35d. |
 | h | New enemies + bosses (bosses proper) | pending — gated on decision #34 | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Boss/level framing depends on decision #34 outcome.** |
 | k | Portal to next map after N waves | pending — gated on decision #34 | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (note PR #67 already shipped a reusable `GameEngine.openPortal(pos, opts)` rift VFX — dragon + rivals use it; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. **Portal semantics (level-select vs overworld-travel vs hub-network) depend on decision #34 outcome.** |
 
