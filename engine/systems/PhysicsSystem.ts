@@ -143,14 +143,17 @@ export class PhysicsSystem {
   // narrow: nebula-vs-striker and nebula-vs-tile still honour
   // passThrough — only the same-variant pair is affected.
   public nebulaShardCollisionsEnabled: boolean = true;
-  // Debug toggle — PLAYER ↔ nebula-shard hard collision.  When true, the
+  // Debug toggle — PLAYER ↔ nebula-shard HARD collision.  When true, the
   // player↔nebula-shard pair bypasses the nebula passThrough gate in
   // resolveCollision and takes the standard SAT impulse, so the ship physically
-  // shoves / parts the nebula cloud (the light 0.01-mass shards scatter) instead
-  // of gliding through with only the applyNebulaPlayerPull swirl.  This re-adds
-  // an interaction that was gated off when nebula-shards gained passThrough.
-  // Default ON (the requested behaviour).
-  public playerNebulaCollisionEnabled: boolean = true;
+  // shoves / parts the nebula cloud (the light 0.01-mass shards scatter).
+  // Default OFF: the near-massless (0.01) shards take huge velocity kicks off
+  // the impulse and cascade energy through the field, dropping frames at high
+  // shard density.  The default interaction is instead the cheap pass-through +
+  // rotation swirl in applyNebulaPlayerPull (mirrors player↔nebula-TILE), which
+  // this flag suppresses when on so the two don't compound.  Flip on for the
+  // "part the cloud" look.
+  public playerNebulaCollisionEnabled: boolean = false;
   // Debug toggle — collision-sleep for mobile shards.  When true,
   // resolveShardPairs skips the SAT+impulse math for asleep↔asleep
   // pairs (the bulk of a settled field).  Flip OFF to A/B-test the
@@ -638,24 +641,41 @@ export class PhysicsSystem {
    * filtered by `active` alone and can hold mid-explosion entries.
    */
   /**
-   * Player → nebula-shard gravity pull.  Nebula shards keep their
-   * passThrough flag so the player ship glides through them without
-   * an SAT impulse; this pass replaces the bounce with a soft pull
-   * (velocity nudge toward the player + a stable rotational kick) so
-   * the cloud appears to swirl in the ship's wake instead of just
-   * sliding past.  Shatter still triggers on direct contact via the
-   * standard nebula pass-through path in resolveCollision.
+   * Player → nebula-shard swirl.  Nebula shards keep their passThrough
+   * flag so the player ship glides THROUGH them with no SAT impulse —
+   * the same pass-through the player gets against nebula TILES.  In
+   * place of a bounce this pass applies a soft ROTATION push: a
+   * tangential velocity swirl (perpendicular to the ship→shard line)
+   * plus a rotation-rate ramp, so the cloud swirls in the ship's wake
+   * instead of sliding past inertly.  Cheap by construction — no SAT,
+   * no near-massless energy cascade, just a per-shard velocity/spin
+   * nudge — which is why it stays smooth at high shard density where
+   * the hard-collision path drops frames.
    *
-   * - Linear falloff: full strength at the centre, zero at the range
-   *   edge, no pull past the edge.
+   * - Applied CONTINUOUSLY every substep (no cooldown gate) so the
+   *   swirl reads as a smooth wake, not a once-a-second jerk.  Terminal
+   *   swirl speed is bounded by NEBULA_CONSTANTS.LINEAR_DAMPING; the
+   *   ship passes through fast enough that shards get a transient kick,
+   *   then settle.
+   * - Tangential (not radial): the swirl is perpendicular to the
+   *   ship→shard vector, so shards orbit the ship rather than collapsing
+   *   into the hull or blowing outward.
    * - Spin sign is deterministic per shard (id last-char parity) so a
-   *   given shard always swirls the same way; the field as a whole
-   *   reads as varied vortices rather than a uniform pinwheel.
-   * - rotationSpeed is capped at NEBULA_CONSTANTS.MAX_SPIN so a long-
-   *   lingering shard doesn't spin up to absurd rates.
+   *   given shard always swirls the same way; the field as a whole reads
+   *   as varied vortices rather than a uniform pinwheel.
+   * - rotationSpeed is capped at NEBULA_CONSTANTS.MAX_SPIN.
+   *
+   * Skipped entirely when the DBG hard-collision toggle is on
+   * (playerNebulaCollisionEnabled) — that path routes the pair through
+   * the SAT impulse instead, and the two shouldn't compound.  The
+   * nebula-shard shatter path is unchanged: shards never shatter on
+   * player contact (pure pass-through); only nebula TILES do.
    */
   private applyNebulaPlayerPull(entities: GameEntity[], player: GameEntity, timeScale: number) {
       if (!player.active || player.isExploding) return;
+      // Hard-collision toggle owns the interaction when on — don't
+      // double up the swirl on top of the SAT bounce.
+      if (this.playerNebulaCollisionEnabled) return;
       const range = NEBULA_CONSTANTS.PLAYER_PULL_RANGE;
       const rangeSq = range * range;
       const strength = NEBULA_CONSTANTS.PLAYER_PULL_STRENGTH;
@@ -667,11 +687,6 @@ export class PhysicsSystem {
       for (let i = 0; i < entities.length; i++) {
           const e = entities[i];
           if (!e.active || e.shardVariant !== 'nebula-shard') continue;
-          // Skip shards on a cooldown — same field that gates shard↔shard
-          // merging.  Freshly-spawned shatter children carry the cooldown
-          // from postShatterMergeCooldown, so they "rest" for a beat
-          // before the pull picks them up again.
-          if ((e.nebulaMergeCooldown ?? 0) > 0) continue;
           const dx = wrapDeltaX(e.position.x, px);
           const dy = wrapDeltaY(e.position.y, py);
           const distSq = dx * dx + dy * dy;
@@ -679,22 +694,20 @@ export class PhysicsSystem {
           const dist = Math.sqrt(distSq);
           const fall = 1 - dist / range; // 1 at centre → 0 at edge
           const invDist = 1 / dist;
-          const deltaV = strength * fall * timeScale;
-          e.velocity.x += dx * invDist * deltaV;
-          e.velocity.y += dy * invDist * deltaV;
-          // Stable per-shard spin direction.
+          // Normalised radial (shard → player).
+          const rx = dx * invDist;
+          const ry = dy * invDist;
+          // Stable per-shard spin direction → varied vortices.
           const lastChar = e.id ? e.id.charCodeAt(e.id.length - 1) : 0;
           const spinSign = (lastChar & 1) ? 1 : -1;
+          // Tangential swirl: perpendicular to the radial, signed per
+          // shard.  perp(rx,ry) = (-ry, rx); flip by spinSign.
+          const swirl = strength * fall * timeScale;
+          e.velocity.x += -ry * spinSign * swirl;
+          e.velocity.y += rx * spinSign * swirl;
+          // Rotation push, capped.
           const nextSpin = (e.rotationSpeed ?? 0) + spinSign * spinKick * fall * timeScale;
           e.rotationSpeed = Math.max(-maxSpin, Math.min(maxSpin, nextSpin));
-          // Stamp the same cooldown a freshly-spawned shard carries
-          // (postShatterMergeCooldown = MERGE_COOLDOWN) so the pull
-          // fires once per cycle rather than every step the player is
-          // in range — turns continuous proximity into a pulse so the
-          // shard doesn't accumulate velocity / spin without bound.
-          // The same field gates shard↔shard merging while it's hot,
-          // which keeps the rest-beat consistent across interactions.
-          e.nebulaMergeCooldown = NEBULA_CONSTANTS.MERGE_COOLDOWN;
       }
   }
 
@@ -2552,9 +2565,11 @@ export class PhysicsSystem {
       const bIsNebTile  = b.shardVariant === 'nebula-tile';
       const nebShardPair = this.nebulaShardCollisionsEnabled && aIsNebShard && bIsNebShard;
       const nebShardTilePair = (aIsNebShard && bIsNebTile) || (bIsNebShard && aIsNebTile);
-      // Player ↔ nebula-shard hard collision (DBG, default on) — the ship
+      // Player ↔ nebula-shard hard collision (DBG, default OFF) — the ship
       // physically parts the cloud instead of gliding through.  Bypasses the
-      // passThrough gate so the pair below takes the normal SAT impulse.
+      // passThrough gate so the pair below takes the normal SAT impulse.  Off
+      // by default; the pass-through swirl (applyNebulaPlayerPull) is the
+      // standard interaction.
       const playerNebShardPair = this.playerNebulaCollisionEnabled
           && ((aIsNebShard && b.type === EntityType.PLAYER)
               || (bIsNebShard && a.type === EntityType.PLAYER));
