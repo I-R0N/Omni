@@ -172,8 +172,8 @@ export class PhysicsSystem {
   // variants with a `repel` config).  When false, the repel scan still runs and
   // still lights the tile/scanner glow (repelImpulse), but the outward VELOCITY
   // impulse is not applied — so tiles react/light up to a nearby player/enemy
-  // yet no longer physically shove them.  Default ON.
-  public repelPushEnabled: boolean = true;
+  // yet no longer physically shove them.  Default OFF (glow only).
+  public repelPushEnabled: boolean = false;
   // Camera-aligned viewport rect (world coords, CULL_MARGIN-padded),
   // set per sim frame by GameEngine.  Null until the first set — then
   // resolveShardPairs treats all shards as on-screen (conservative).
