@@ -1287,8 +1287,14 @@ of the items in Phase 1 follow-ups.
 The path to closing this plan WITHOUT growing scope. Every session below
 observes the three strategy guardrails (decision #36e).
 
+0. **weapons-ammo design session** (user-added gate, 2026-07-08) —
+   flesh out the weapons + ammo system plan BEFORE bosses: weapon
+   roster identity, ammo economy pressure, Drydock acquisition/pricing,
+   trait-counterplay mapping, and the boss-weapon reconciliation.
+   Design-only session; deliverable `docs/WEAPONS_AMMO_PLAN.md` via
+   docs-only PR. (h)'s design phase consumes its output.
 1. **(h) Bosses** — submap special encounters as wave capstones.
-   Design-phase AskUserQuestion: boss-unlock vs Drydock reconciliation.
+   Boss-weapon model comes from the weapons-ammo plan (step 0).
 2. **(k) Portals + map descriptors** — the traversable portal entity on
    the thin descriptor layer. The plan's one architectural extension
    point for the overworld.
