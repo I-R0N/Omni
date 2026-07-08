@@ -1085,6 +1085,55 @@ k. After N waves, spawn a portal to a new map.
     reconciliation default is a full PR-list sweep (not just
     merge-commit reading) whenever the user says work landed.
 
+36. **Strategy adopted — decision #34 RESOLVED
+    (2026-07-08).** The user synthesized the structure +
+    economy strategy across external design discussions;
+    captured verbatim-ish as `docs/GAME_STRUCTURE_STRATEGY.md`
+    (the deliverable decision #34d called for). Headlines:
+    a. **Vision** — Omni evolves toward a living universe
+       simulator in four layers: Physics (shipped), Structure
+       (mostly shipped), Meaning (landmark recognition — next
+       major goal, NOT this plan), Ecosystem (long-term).
+       Guiding principle: the simulation creates
+       opportunities; the player discovers, influences, and
+       exploits them.
+    b. **Structure resolution** — the CURRENT plan stays a
+       high-fidelity submap/arena game. The continuous
+       overworld (travel, stations, NPC traffic, map
+       identity, exploration) is the NEXT overhaul. The
+       lat/lon multiplayer phase follows that.
+    c. **Economy resolution** — purchase-based, extending the
+       shipped Salvage/Drydock spine (hulls, weapons,
+       hardware, modules). NO crafting trees, NO
+       inventory-heavy material collection. Materials stay
+       physical; players interact with emergent structures,
+       not shard vacuuming. Mining (formations/deposits, NPC
+       operations) is an overworld-phase concern.
+    d. **Persistence resolution** — three scales: Temporary
+       (combat, wave progress), Ship (purchased hardware,
+       owned ships, modules), World (landmarks, stations,
+       discoveries). "The world remembers geography more than
+       individual battles." Implementation of durable
+       persistence is post-plan; nothing in this plan should
+       foreclose it.
+    e. **Plan impact** — (h) un-gated (bosses = submap
+       special encounters; reconcile weapon-unlock with
+       Drydock in design phase); (k) un-gated + re-scoped
+       (portals ride a new thin map-descriptor layer — the
+       plan's one deliberate overworld extension point);
+       living-entity closed as superseded by the Bubble;
+       orbital-fields-moons moved to the Overworld plan.
+       Three strategic guardrails for all remaining sessions:
+       (1) every new mechanic should be an expression of the
+       material simulation; (2) design for pattern
+       recognition, not recipe memorization; (3) preserve
+       clean architectural boundaries — expose extension
+       points, don't build the overworld early.
+    f. **Completion roadmap** — see the "Completion roadmap"
+       section before Phase 3. After the final ship-it PR,
+       a NEW plan doc + branch opens for the Overworld
+       overhaul; this file then goes read-only as history.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1194,18 +1243,17 @@ Run when convenient; can run in parallel with Phase 2.
 | material-palette-residual | Metal de-white + rock red/blue palette | pending | `claude/material-palette-residual-<suffix>` | Carved out of `material-palette-pass` (decision #21) after PR #61 shipped the automata piece. Small palette-only task: remove white from metal palette and add a shiny-ready blue range; add red+blue to rock palette so the existing rock-aggregation darkening reads warmer/cooler depending on cluster context. No automata changes (already done), and the original hue-lerp / warm-cool sub-arc extension is **dropped per user direction** — this palette work closes decision #21 entirely. See decision #30. |
 | map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
 | minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
-| living-entity | New non-threatening grazer entity | **paused** | `claude/living-entity-<suffix>` | Brief drafted, implementation paused per user direction. Decision #20 captures the design surface for whenever this resumes. |
+| living-entity | New non-threatening grazer entity | **closed — superseded by the Bubble (PR #67)** | — | Decision #20's design surface (wanders, eats glass/rock/metal shards, grows, splits, non-threatening) shipped in spirit as the Stage-5 Bubble: ambient fauna, consume-and-grow (mass-conserved), split at size, passive-until-provoked. Differences (bubble also eats plastic/nebula variants, and retaliates) accepted. Reopen only if a distinctly different creature is wanted. |
 
 ---
 
 ## Phase 2 — Structure (sequential, after Phase 1)
 
-> **(h) and (k) are GATED by the game-structure strategy workstream
-> (decision #34).** The boss model and portal model both depend on the
-> structural direction (survival waves vs discrete levels vs open
-> world) and the item-economy direction. Do not finalize (h) or (k)
-> briefs until the strategy doc lands. (f) shipped before the gate
-> was recorded — see decision #35a.
+> **GATE RESOLVED (decision #36).** The strategy landed as
+> `docs/GAME_STRUCTURE_STRATEGY.md`: this plan stays a high-fidelity
+> submap/arena game; the continuous overworld is the NEXT overhaul.
+> Economy stays purchase-based (Salvage → Drydock), no crafting.
+> (h) and (k) are un-gated with the re-scopes noted in their rows.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
@@ -1215,8 +1263,8 @@ Run when convenient; can run in parallel with Phase 2.
 | exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
 | exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **shipped (into plan branch)** | `claude/exotic-enemies-optimization-nty6i8` | Zero-behaviour/zero-visual pass (decision #33). Cadenced the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot vacuum through a new `rivalScan` PerfController task with a cached `RivalInstance.target` (min interval 1 → identical at low load); killed the O(all-entities) `entityById` latch-resolve in `updateAttachments`; cached the geometric dragon-head skull + maw gradients and the bubble-membrane fill gradient on the entity (per-frame pulse → `globalAlpha`), so on-screen dragon/bubble render cost stops scaling with the per-frame `createRadialGradient` churn (the win grows with FOV). Verified via headless Chromium (10 dragons + 6 rivals + ambient bubbles, 0 errors, tablet + desktop FOV). `updateConsumers` spatial-query + particle-burst counts deferred to the parking lot (zero-behaviour posture). Report: `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. |
 | physics-broadphase-opt | Physics/shard broadphase optimization + render-GC pooling | **shipped (PR #70, merged into plan branch 2026-07-06)** | `claude/physics-shard-broadphase-k7m2p` | Measure-first follow-on to #69, driven by iPhone Perf REC captures. Zero-behaviour: per-pair invMass/effInvMass cache + numeric `_pairSeq` dedup in `resolveAsteroidPair`; shatter-path scratch reuse; Perf REC sim sub-timer breakdown + spike attribution. **Big win:** render-bucket pooling (steady-state bucket allocation zero; peak render 17→9 ms). **User-approved behaviour changes:** player↔nebula-shard now pass-through + soft swirl (hard collision = DBG toggle, default off); swarm gnats take standard terrain collisions; player trail default → VELOCITY; tile repel push off by default (glow retained); DBG accessible while paused. Conclusion: steady state vsync-bound; residual hitches are external browser/GC stalls; the one genuine in-code spike (O(k²) shard-pair at 8k+ entities) parked in `docs/PARKING_LOT.md` with an implementation sketch. See decision #35d. |
-| h | New enemies + bosses (bosses proper) | pending — gated on decision #34 | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), Mega-Man-X-style weapon-type bosses, per-run weapon unlocks. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Boss/level framing depends on decision #34 outcome.** |
-| k | Portal to next map after N waves | pending — gated on decision #34 | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (note PR #67 already shipped a reusable `GameEngine.openPortal(pos, opts)` rift VFX — dragon + rivals use it; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map (original scope) AND intra-map (teleport to another location on the same map). Per-portal config picks destination. **Portal semantics (level-select vs overworld-travel vs hub-network) depend on decision #34 outcome.** |
+| h | New enemies + bosses (bosses proper) | pending — un-gated, next up | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), weapon-type bosses. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Re-scope per strategy (decision #36):** bosses are submap "special encounters" as wave capstones. Design-phase knob: reconcile the Mega-Man-X defeat-unlocks-weapon idea with the Drydock purchase model (grant Module free vs unlock purchasability vs unique boss weapon). No new progression system — everything routes through the shipped Augments/Modules/Salvage spine. |
+| k | Portal to next map after N waves | pending — un-gated, re-scoped | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (PR #67 already shipped the reusable `GameEngine.openPortal(pos, opts)` rift VFX; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map AND intra-map. **Re-scope per strategy (decision #36):** destinations reference a new lightweight **map-descriptor layer** (stable map IDs + metadata), NOT bare MapType enum switching — this is the plan's one deliberate extension point for the future overworld (which will reference the same descriptors). Keep the descriptor layer thin: id, display name, MapType, spawn-point, optional traits. No overworld features in this plan. |
 
 ---
 
@@ -1229,8 +1277,37 @@ of the items in Phase 1 follow-ups.
 
 | ID | Task | Notes |
 |----|------|-------|
-| orbital-fields-moons | Orbital flow fields + moving moons with gravity | New mechanic. Flow fields that create circular orbits around a central planet entity; moving moons rendered in the background that contribute gravitational pull like the central planet. Touches FlowField + FlowFieldGrid + BackgroundManager + LOCAL_GRAVITY_CONSTANTS. Likely 2+ sessions. Fits between Phase 2 (k) and Phase 3, or alongside Pair B/C polish. See decision #25. |
+| orbital-fields-moons | Orbital flow fields + moving moons with gravity | **MOVED to the Overworld plan** (decision #36) — planets and moving celestial landmarks are overworld features per `docs/GAME_STRUCTURE_STRATEGY.md`. Original sketch preserved in decision #25; it becomes an early task of the next plan, not this one. |
 | voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
+
+---
+
+## Completion roadmap (adopted 2026-07-08, decision #36)
+
+The path to closing this plan WITHOUT growing scope. Every session below
+observes the three strategy guardrails (decision #36e).
+
+1. **(h) Bosses** — submap special encounters as wave capstones.
+   Design-phase AskUserQuestion: boss-unlock vs Drydock reconciliation.
+2. **(k) Portals + map descriptors** — the traversable portal entity on
+   the thin descriptor layer. The plan's one architectural extension
+   point for the overworld.
+3. **Phase 3 pairs in parallel** (below): A = (i) death screen;
+   B = (a) SFX → (b) explosion variety; C = (c2) controller/joystick →
+   (c1) menu help.
+4. **Polish batch** — material-palette-residual + map-composition +
+   minimap-faithfulness bundled into 1–2 small sessions (map-composition
+   doubles as regional-identity groundwork per the strategy's
+   "maps become known for characteristics").
+5. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
+   → `main`, one deploy.
+
+Explicitly OUT of this plan (moved to the Overworld plan): continuous
+overworld, stations, NPC traffic/civilizations, landmark detection
+(Meaning Layer), mining operations, orbital-fields-moons, durable
+persistence. Still parked (decision #27 + parking lot): unchanged.
+voronoi-rock-fracture stays deferred-optional — pull in only if a
+material session has spare room; PR #65 already delivers the feel.
 
 ---
 
