@@ -20,7 +20,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -136,7 +136,7 @@ export class GameEngine {
   private credits: number = 0;
   private upgradeLevels: Record<UpgradeId, number> = {
       hull: 0, plating: 0, capacitor: 0, engine: 0,
-      thrusters: 0, gunnery: 0, autoloader: 0, magazine: 0,
+      thrusters: 0, gunnery: 0, autoloader: 0,
   };
   // Between-wave upgrade-card choice.  When `cardChoicePending` is set the
   // sim pauses and the UI shows `pendingCards`; picking one applies it and
@@ -153,6 +153,11 @@ export class GameEngine {
   // in the Drydock (Salvage) or, rarely, granted free via a card.  Synced to
   // the player entity (ownedWeapons / overchargeUnlocked) for WeaponSystem.
   private unlockedWeapons: Set<WeaponType> = new Set([WeaponType.BLASTER]);
+  // 2-slot equip loadout (pivot 1b).  Exactly 2 entries; null = empty slot.
+  // New run = [Blaster, empty].  Owned governs what CAN be equipped;
+  // equipped governs what cycle/select/fire may use.  Swaps happen in the
+  // pause-menu Drydock (interim home until the station POI lands in 1e).
+  private equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
   private shieldUnlocked: boolean = false;
   private overchargeUnlocked: boolean = false;
   // The one live "+N" points popup, if any.  New awards accumulate into it
@@ -255,7 +260,7 @@ export class GameEngine {
   private screenShakeEnabled: boolean = false;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
-  // When `asteroidFlowEnabled` is false, the per-asteroid / per-ammo-drop
+  // When `asteroidFlowEnabled` is false, the per-asteroid / per-drop
   // velocity nudge in updatePhysics is skipped entirely.  Asteroids that
   // were moving keep their current velocity but receive no further
   // streamline correction; combined with `linearDamping` they decay
@@ -502,11 +507,6 @@ export class GameEngine {
   public toggleDebug() {
     this.debugMode = !this.debugMode;
     this.renderer.setDebugMode(this.debugMode);
-
-    // Fill the shared ammo pool when entering debug mode
-    if (this.debugMode) {
-      this.player.ammo = AMMO_CONSTANTS.MAX_POOL;
-    }
   }
 
   /**
@@ -925,7 +925,7 @@ export class GameEngine {
   }
 
   /**
-   * Toggle the per-asteroid / per-ammo-drop flow-field velocity nudge
+   * Toggle the per-asteroid / per-drop flow-field velocity nudge
    * in updatePhysics.  When OFF, the `applyFlow` step early-exits after
    * the rotation update — asteroids retain whatever velocity they had
    * but receive no streamline correction.  Combined with linearDamping
@@ -1258,7 +1258,6 @@ export class GameEngine {
       burstTimer: 0,
       trail: [],
       sprite: ASSETS.PLAYER_SHIP,
-      ammo: 0,   // shared-ammo pool (post-d1) — BLASTER bypasses, every other weapon draws by ammoCost
       gold: 0,
       shield: SHIELD_CONSTANTS.MAX_CHARGE,
       maxShield: SHIELD_CONSTANTS.MAX_CHARGE,
@@ -1384,13 +1383,13 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.upgradeSpeedMult(),
-        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
       } : undefined,
       unlocks: this.gameState === GameState.PAUSED ? {
         weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
         shield: this.shieldUnlocked,
         overcharge: this.overchargeUnlocked,
       } : undefined,
+      loadout: this.gameState === GameState.PAUSED ? this.loadoutSnapshot() : undefined,
       shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
@@ -1517,7 +1516,6 @@ export class GameEngine {
       this.player.shieldRechargeTimer = 0;
       this.player.shieldHitFlash = 0;
       this.player.statusEffects = [];
-      this.player.ammo = 0;
       this.player.gold = 0;
       this.score = 0;
       this.displayScore = 0;
@@ -1639,13 +1637,13 @@ export class GameEngine {
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.upgradeSpeedMult(),
-        maxAmmo: this.player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL,
       } : undefined,
       unlocks: this.gameState === GameState.PAUSED ? {
         weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
         shield: this.shieldUnlocked,
         overcharge: this.overchargeUnlocked,
       } : undefined,
+      loadout: this.gameState === GameState.PAUSED ? this.loadoutSnapshot() : undefined,
       shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
@@ -2054,7 +2052,7 @@ export class GameEngine {
       };
       for (let i = 0; i < asteroids.length; i++) applyFlow(asteroids[i]);
 
-      // Collectible drops (ammo + health) follow the same asteroid flow
+      // Collectible drops (salvage + health) follow the same asteroid flow
       // field — the wind that catches loose shards also drags drops along,
       // so a wave kill's drops drift with the local current toward the
       // player instead of sitting where they spawned.  Magnetised drops
@@ -2078,7 +2076,7 @@ export class GameEngine {
                   fyDir = ny / nmag;
               }
               // Same inverse-mass scaling as the shard loop.  Drops
-              // have fixed mass = 5 (makeDropEntity), so all ammo
+              // have fixed mass = 5 (makeDropEntity), so all
               // drops share a single massScale ≈ sqrt(7/5) = 1.18 —
               // slightly faster than baseline-mass shards.  Plastic
               // boost doesn't apply (drops aren't shards).
@@ -2313,7 +2311,7 @@ export class GameEngine {
       }
 
       if (isNebula && this.currentMap) {
-          // Nebula-specific ammo-drop roll + neighbour-counts-dirty.
+          // Nebula-specific salvage-drop roll + neighbour-counts-dirty.
           this.nebulas.handleDeath(
               this.currentMap.entities,
               this.activeDrops,
@@ -2755,7 +2753,7 @@ export class GameEngine {
         const { SIZE, EXPANDED_SIZE, MARGIN } = MINIMAP_CONSTANTS;
         const currentSize = this.minimapExpanded ? EXPANDED_SIZE : SIZE;
         const mapX = MARGIN;
-        const mapY = window.innerHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
+        const mapY = window.innerHeight - currentSize - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN;
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
@@ -2768,26 +2766,17 @@ export class GameEngine {
             return;
         }
 
-        // Ammo HUD slot selection — intercept taps on the weapon slots.
-        // Layout: [BLASTER] gap [AMMO READOUT] gap [BURST][SHOTGUN]…
-        // The ammo readout box (between the blaster and the other weapons)
-        // is informational only and not selectable.
-        const { SLOT_H, SLOT_GAP } = AMMO_HUD_CONSTANTS;
-        const { startY: slotStartY, slotW, blasterX, weaponsStartX } =
-            computeAmmoHUDLayout(window.innerWidth, window.innerHeight);
+        // Loadout HUD slot selection — intercept taps on the 2 equip slots.
+        const { SLOT_H } = LOADOUT_HUD_CONSTANTS;
+        const { startY: slotStartY, slotW, slotXs } =
+            computeLoadoutHUDLayout(window.innerWidth, window.innerHeight);
 
         if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
-            // Blaster slot (index 0)
-            if (evt.x >= blasterX && evt.x <= blasterX + slotW) {
-                this.selectWeapon(WEAPON_LIST[0]);
-                return;
-            }
-            // Non-blaster weapon slots (indices 1..N-1)
-            for (let i = 1; i < WEAPON_LIST.length; i++) {
-                const sx = weaponsStartX + (i - 1) * (slotW + SLOT_GAP);
-                if (evt.x >= sx && evt.x <= sx + slotW) {
-                    this.selectWeapon(WEAPON_LIST[i]);
-                    return;
+            for (let i = 0; i < slotXs.length; i++) {
+                if (evt.x >= slotXs[i] && evt.x <= slotXs[i] + slotW) {
+                    const w = this.equippedWeapons[i];
+                    if (w !== null) this.selectWeapon(w);
+                    return; // empty-slot tap is a no-op but still swallowed
                 }
             }
         }
@@ -2856,16 +2845,8 @@ export class GameEngine {
     }
     this.playerMessages.length = msgIdx;
 
-    // Tick down the shared ammo-pickup flash timer
-    if (this.player.ammoPickupFlash && this.player.ammoPickupFlash.timer > 0) {
-      this.player.ammoPickupFlash.timer -= dt;
-      if (this.player.ammoPickupFlash.timer <= 0) {
-        this.player.ammoPickupFlash = undefined;
-      }
-    }
-
-    // Tick down the salvage-pickup flash timer (same pattern; drives the
-    // "+N" flash on the HUD Salvage chip via EngineStats.salvageFlash)
+    // Tick down the salvage-pickup flash timer (drives the "+N" flash on
+    // the HUD Salvage chip via EngineStats.salvageFlash)
     if (this.player.salvagePickupFlash && this.player.salvagePickupFlash.timer > 0) {
       this.player.salvagePickupFlash.timer -= dt;
       if (this.player.salvagePickupFlash.timer <= 0) {
@@ -2874,7 +2855,7 @@ export class GameEngine {
     }
 
     // Proximity collection + magnetic pull — single pass over activeDrops.
-    // An ammo shard starts pulling only once the player comes within
+    // A drop starts pulling only once the player comes within
     // MAGNET_RANGE; from then on it's latched (`magnetized`) and homes to
     // completion even if the player leaves.  Health hearts collect on
     // contact only (static pickup).  Skippable (PerfController `dropScan`
@@ -2917,16 +2898,16 @@ export class GameEngine {
       }
     }
 
-    // Consolidate ammo-drop clusters — pairs within touching range
+    // Consolidate same-type drop clusters — pairs within touching range
     // fuse, the survivor absorbs the value, the other retires for
-    // the compaction sweep below.  Total ammo across the cluster is
+    // the compaction sweep below.  Total value across the cluster is
     // preserved (sum-of-values onto the survivor), so this is purely
-    // an entity-count reduction, not an ammo nerf.  Cadenced via
+    // an entity-count reduction, not a reward nerf.  Cadenced via
     // PerfController 'dropMerge' (autoCurve 1-4 steps) — the O(N²)
     // pair scan + pull damping isn't time-critical, drops converge
     // over many frames either way.
     if (this.perfController.shouldRun('dropMerge')) {
-      this.drops.mergeAmmoDrops(this.activeDrops);
+      this.drops.mergeDrops(this.activeDrops);
     }
 
     // Remove drops that were deactivated (collected, shot, or expired).
@@ -3107,7 +3088,6 @@ export class GameEngine {
           UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FLOOR,
           1 - UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL * lv.autoloader,
       );
-      this.player.maxAmmo = AMMO_CONSTANTS.MAX_POOL + UPGRADE_EFFECTS.MAGAZINE_AMMO_PER_LEVEL * lv.magazine;
   }
 
   /** Per-upgrade snapshot for the DBG panel + (future) shop. */
@@ -3207,11 +3187,60 @@ export class GameEngine {
 
   // ── Unlocks + Drydock shop ──────────────────────────────────────────────
 
-  /** Push the unlock state onto the player entity so WeaponSystem can gate
-   *  weapon cycle/select + charged shots without reaching into the engine. */
+  /** Push the unlock + loadout state onto the player entity so WeaponSystem
+   *  can gate weapon cycle/select + charged shots without reaching into the
+   *  engine. */
   private syncUnlocksToPlayer() {
       this.player.ownedWeapons = WEAPON_LIST.filter(w => this.unlockedWeapons.has(w));
+      this.player.equippedWeapons = [...this.equippedWeapons];
       this.player.overchargeUnlocked = this.overchargeUnlocked;
+      // The active weapon must always be equipped — if a swap removed it,
+      // fall to the first filled slot.
+      const cur = this.player.currentWeapon;
+      if (cur === undefined || !this.equippedWeapons.includes(cur)) {
+          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null) ?? WeaponType.BLASTER;
+          this.player.currentWeapon = first;
+          this.player.burstQueue = 0;
+          this.currentWeaponIndex = WEAPON_LIST.indexOf(first);
+      }
+  }
+
+  /**
+   * Equip an owned weapon into loadout slot 0/1 (or null to empty slot 2's
+   * position).  Free while at the (interim) pause-menu Drydock — station-only
+   * commitment arrives with 1e.  If the weapon already sits in the OTHER
+   * slot, the two slots swap.  Rejects: unowned weapons, and emptying the
+   * last filled slot.  Returns true when the loadout changed.
+   */
+  public equipWeapon(slot: number, weaponId: string | null): boolean {
+      if (slot !== 0 && slot !== 1) return false;
+      const other = 1 - slot;
+      if (weaponId === null) {
+          if (this.equippedWeapons[other] === null) return false; // can't empty both
+          if (this.equippedWeapons[slot] === null) return false;  // already empty
+          this.equippedWeapons[slot] = null;
+          this.syncUnlocksToPlayer();
+          return true;
+      }
+      const w = WEAPON_LIST.find(t => t === weaponId);
+      if (w === undefined || !this.unlockedWeapons.has(w)) return false;
+      if (this.equippedWeapons[slot] === w) return false; // no-op
+      if (this.equippedWeapons[other] === w) {
+          // Already in the other slot — swap the two slots.
+          this.equippedWeapons[other] = this.equippedWeapons[slot];
+      }
+      this.equippedWeapons[slot] = w;
+      this.syncUnlocksToPlayer();
+      return true;
+  }
+
+  /** Pause-menu loadout snapshot (slots + what can be equipped). */
+  private loadoutSnapshot() {
+      const entry = (w: WeaponType | null) => w === null ? null : { id: w as string, name: WEAPONS[w].name };
+      return {
+          slots: this.equippedWeapons.map(entry),
+          owned: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => entry(w)!),
+      };
   }
 
   private isUnlockOwned(def: UnlockDef): boolean {
@@ -3231,9 +3260,15 @@ export class GameEngine {
           this.syncUnlocksToPlayer();
       } else if (def.weapon !== undefined) {
           this.unlockedWeapons.add(def.weapon);
+          // Auto-equip into the first EMPTY loadout slot for immediate payoff
+          // (the doc §4 "first purchase fills slot 2" beat).  With both slots
+          // full the weapon is owned only — swap at the Drydock.
+          const empty = this.equippedWeapons.indexOf(null);
           this.syncUnlocksToPlayer();
-          // Auto-equip the freshly unlocked weapon for immediate payoff.
-          this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
+          if (empty !== -1) {
+              this.equipWeapon(empty, def.weapon);
+              this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
+          }
       }
   }
 
@@ -3262,6 +3297,7 @@ export class GameEngine {
       this.unlockedWeapons = new Set([WeaponType.BLASTER]);
       this.shieldUnlocked = false;
       this.overchargeUnlocked = false;
+      this.equippedWeapons = [WeaponType.BLASTER, null]; // slot 1 Blaster, slot 2 empty
       this.player.currentWeapon = WeaponType.BLASTER;
       this.currentWeaponIndex = 0;
       this.syncUnlocksToPlayer();
@@ -4722,7 +4758,7 @@ export class GameEngine {
     // Offer only AUGMENTS whose dependency MODULE is installed — never a
     // card for a system the player can't use yet (e.g. shield Plating /
     // Capacitor before the Shield module, or Magazine with only the
-    // ammo-free Blaster).  Levels are uncapped, so all eligible stay offerable.
+    // Blaster).  Levels are uncapped, so all eligible stay offerable.
     const pool = UPGRADE_DEFS.filter(d => this.augmentEligible(d));
     for (let i = pool.length - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
@@ -5267,7 +5303,7 @@ export class GameEngine {
       const cfg = {
           type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
           speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
-          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+          count: 1, spread: 0, recoil: 0, pierce: 0,
           homing: true, homingStrength: M.homingStrength, glow: true,
       } as WeaponConfig;
       this.spawnProjectileFromConfig(d, this.player.position, cfg, EntityType.ENEMY);
@@ -5667,7 +5703,7 @@ export class GameEngine {
           type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
           speed: W.speed, damage: W.damage, lifetime: W.lifetime,
           color: inst.ship.color || W.color, size: W.size,
-          count: 1, spread: 0, recoil: 0, pierce: 0, ammoCost: 0, chargedAmmoCost: 0,
+          count: 1, spread: 0, recoil: 0, pierce: 0,
       } as WeaponConfig;
       const ents = this.currentMap.entities;
       const before = ents.length;

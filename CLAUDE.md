@@ -166,7 +166,7 @@ Per-frame `loop()`:
         catch check (collide/shoot per DBG toggle), wave-end on catch
         (the snitch entity persists across waves)
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
-        same-type drop merge pass (`DropSystem.mergeAmmoDrops`;
+        same-type drop merge pass (`DropSystem.mergeDrops`;
         `dropMerge` task)
      7. Player weapon tick + input
      8. Projectile lifetime tick
@@ -225,11 +225,11 @@ Notable existing field categories on `GameEntity`:
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
   `targetEntityId`, `pierceCount`, `hitEntityIds`, `isBouncer`,
   `isLightningProjectile`, `isLightningArc`, `arcPoints`
-- Drop / reward: `dropType` (`'ammo' | 'health' | 'glass' | 'salvage'`),
-  `dropValue`, `dropWeapon`, `powerupWeapon`, `ammoPickupFlash`,
-  `salvagePickupFlash`, `ammo`,
+- Drop / reward: `dropType` (`'health' | 'glass' | 'salvage'`),
+  `dropValue`, `dropWeapon`, `powerupWeapon`, `salvagePickupFlash`,
   `dropComposition`. Note: `gold` exists on the player entity but is
-  **not currently consumed** anywhere.
+  **not currently consumed** anywhere.  (The ammo pool, `ammoPickupFlash`,
+  and the `'ammo'` drop type were deleted with the ammo system, pivot 1b.)
 - Shard family (tiles + shards): `shardVariant`
   (`'glass-tile' | 'plastic-tile' | 'metal-tile' |
   'indestructible-tile' | 'rock-tile' | 'nebula-tile' | 'rock-shard' |
@@ -260,7 +260,9 @@ Notable existing field categories on `GameEntity`:
   draw and invalidated at every site that mutates the inputs
   (composition, neighbour count, tile area).
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
-  `shieldRechargeTimer`/`shieldHitFlash`, `ammo`, `enemyTier` (set on
+  `shieldRechargeTimer`/`shieldHitFlash`, `ownedWeapons`/
+  `equippedWeapons` (the 2-slot loadout — see §5 WEAPONS note),
+  `enemyTier` (set on
   spawn but currently unused by drop scaling), `suppressDrops`
 
 Variant differentiation for shard-family entities goes through
@@ -276,7 +278,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `CHUNK_SIZE`, `SPATIAL_GRID_SIZE`
 - `COLORS`, `CAMERA_CONSTANTS`, `SPRITE_CONSTANTS`
 - `AI_CONFIG`, `COLLISION_CONFIG`
-- `UI_CONSTANTS`, `AMMO_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`,
+- `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`,
   `INPUT_CONSTANTS`
 - `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
@@ -455,7 +457,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `shieldArcAngle` — a sweeping sector that only absorbs hits from the
   covered side), and `consume`/`multiply`/`ambient` (the bubble's
   eat-grow-split + always-present fauna flag).
-- `WEAPONS`, `WEAPON_LIST`
+- `WEAPONS`, `WEAPON_LIST`.  Ammo is DELETED as a system (pivot 1b): no
+  drops, pool, per-shot costs, HUD strip, select gating, or dry-fallback —
+  weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
+  `GameEngine.equippedWeapons` holds exactly 2 slots (null = empty; new
+  run = Blaster + empty); any 2 OWNED weapons may be equipped (the Blaster
+  is fully swappable out), cycle/select run over the slots only
+  (`WeaponSystem.cycleWeapon`/`selectWeapon`), and swaps are free in the
+  pause-menu Drydock ("Loadout" panel → `GameEngine.equipWeapon`; the
+  station POI takes over in 1e).  Buying a weapon auto-equips it into the
+  first EMPTY slot.  The HUD is a 2-slot readout
+  (`RenderSystem.renderLoadoutHUD` + `computeLoadoutHUDLayout`; active
+  slot highlighted, charge ring unchanged on the ship).  Charged shots
+  cost only the 1.0s hold.  Bouncer/Lightning cooldowns were raised
+  (0.40→0.55, 0.50→0.65) in the same change to replace the ammo tax they
+  leaned on.
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (7 scripted
   teaching waves, one per wave-enemy archetype; the BUBBLE is ambient fauna,
@@ -480,8 +496,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   one-shot majority and the kill-frame overlap are gone; damage chips
   render small + muted-red, distinct from gold points.)
 - `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
-  spine.  8 leveled stat upgrades (hull / plating / capacitor / engine /
-  thrusters / gunnery / autoloader / magazine) earned ONLY from
+  spine.  7 leveled stat upgrades (hull / plating / capacitor / engine /
+  thrusters / gunnery / autoloader — Magazine died with the ammo system,
+  1b) earned ONLY from
   wave-completion cards (every wave); a normal card grants 1 level, and
   every 4th wave (`POWERFUL_WAVE_INTERVAL`) the cards roll "powerful"
   variants worth +2/+3/+4 levels (`UpgradeCard.levels`).  Levels are
@@ -491,8 +508,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
   folds the run's `upgradeLevels` into the player's effective stats —
   maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
-  WeaponSystem), `cooldownMult` (WeaponSystem), `maxAmmo` (DropSystem
-  clamp), plus speed/accel via `upgradeSpeedMult()`/`upgradeThrustMult()`
+  WeaponSystem), `cooldownMult` (WeaponSystem), plus speed/accel via
+  `upgradeSpeedMult()`/`upgradeThrustMult()`
   multiplied into the movement line.  At all-zero the game is identical
   to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
   testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
@@ -501,8 +518,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   unlocks are **Modules**.  An augment with a `requires` (shield /
   anyWeapon) is withheld from the card pool (`GameEngine.augmentEligible`)
   until its module is installed — never offer a card for a system the
-  player can't use (Plating/Capacitor need Shield; Magazine needs a
-  non-Blaster weapon).
+  player can't use (Plating/Capacitor need Shield).
 - `UNLOCK_DEFS` / `upgradeCost()` — one-time run unlocks + the stat-
   upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
   shield, no charged shots); unlocks (Shield, Overcharge, the 6
@@ -580,10 +596,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch spray size — includes the income arithmetic
   behind the pricing), `DROP_CONFIG` (per-source salvage/health drop
-  chances + magnet/lifetime), `HEALTH_DROP_INTERVAL`, `AMMO_CONSTANTS`
-  (ammo POOL only — ammo drops no longer exist; pool dies in increment
-  1b), `AMMO_DROP_PULL` (mutual drop attraction + merge band, any
-  same-type collectible)
+  chances + magnet/lifetime), `HEALTH_DROP_INTERVAL`, `DROP_PULL`
+  (mutual drop attraction + merge band, any same-type collectible)
 - `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS` (per-task min/max
   interval, cost weight, auto curve; includes `rivalScan` — the
   cadenced rival target re-acquire + loot-vacuum, see §8),
@@ -750,8 +764,8 @@ button in `UIOverlay.tsx`.
   ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
   so it takes the player entity as an argument.
 - **Drop types currently shipped: `'salvage'` and `'health'`** (collected
-  by the player; weapons-ammo pivot increment 1a — salvage replaced ammo
-  in EVERY drop source, and ammo drops no longer spawn anywhere).  Both
+  by the player; weapons-ammo pivot — salvage replaced ammo in EVERY
+  drop source in 1a, and 1b deleted the ammo system entirely).  Both
   are collectible drops with the SAME physics — finite
   mass, scatter off the kill, asteroid-flow drift, player magnetisation,
   and same-type merge — and both are kept OUT of the dynamic collision grid,
@@ -762,9 +776,7 @@ button in `UIOverlay.tsx`.
   the cross-cutting sites (grid skip, flow-drift, merge) call — so a new drop
   type is one registry row + its effect/render, not a hunt across systems.
   `'glass'` is a `dropType` value used internally for
-  shattered structure visuals; `'ammo'` remains in the union/registry for
-  the ammo-pool machinery until increment 1b deletes the ammo system, but
-  nothing spawns it.  There is no fuel, gold-pickup, or
+  shattered structure visuals.  There is no fuel, gold-pickup, or
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
@@ -774,7 +786,7 @@ button in `UIOverlay.tsx`.
   collected unit pays `SALVAGE_CONSTANTS.CREDITS_PER_DROP` (conversion
   happens once at collection; `dropValue` counts units so merges stay
   value-conserving).  Pickup feedback: `player.salvagePickupFlash`
-  (accumulating "+N credits" window, same pattern as `ammoPickupFlash`)
+  (accumulating "+N credits" window)
   → `EngineStats.salvageFlash` → the in-game HUD Salvage chip (silver,
   under the score chip in `UIOverlay`; credits are on `EngineStats` every
   frame, not just while paused).  Salvage renders as a silver scrap-glint
@@ -795,9 +807,9 @@ button in `UIOverlay.tsx`.
   Drops (salvage + health) are excluded from the minimap to avoid clutter.
 - **Salvage drops carry value 1 and merge.** `DropSystem.spawnSalvageDrop`
   always spawns value = 1 (no per-source amount). Nearby drops
-  mutually attract, damp, and fuse via `mergeAmmoDrops` (generalized
-  to fuse any same-type collectible, salvage↔salvage / health↔health;
-  `AMMO_DROP_PULL`), conserving total value — a wave-kill cluster
+  mutually attract, damp, and fuse via `mergeDrops` (any same-type
+  collectible, salvage↔salvage / health↔health;
+  `DROP_PULL`), conserving total value — a wave-kill cluster
   collapses into one fatter pickup. Non-magnetised drops also
   drift with the asteroid flow field.
 - **Periodic passes route through PerfController.** Any new skippable

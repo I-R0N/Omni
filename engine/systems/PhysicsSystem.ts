@@ -822,7 +822,7 @@ export class PhysicsSystem {
     // Awake-only count drives the PerfController throttle: an asleep shard
     // skips pair-resolution math (resolveShardPairs bails on asleep↔asleep),
     // so a field of settled bodies costs almost nothing and must NOT pin the
-    // load — same principle as the ammo-drop exclusion below.  Without this,
+    // load — same principle as the collectible-drop exclusion below.  Without this,
     // never-sleeping metal composites accumulate on mixed maps and throttle
     // shared passes (shardPair/colorBlend/…), starving nebula collisions.
     let awakeCount = 0;
@@ -841,7 +841,7 @@ export class PhysicsSystem {
         // Static structures are already in staticGrid. Do NOT add them here.
         if (e.mass === Infinity && e.type !== EntityType.INTERACTABLE) continue;
 
-        // Collectible drops (ammo / health / any future pickup) are non-physics
+        // Collectible drops (salvage / health / any future pickup) are non-physics
         // bodies: magnet-pulled + proximity-collected only (see GameEngine drop
         // scan).  Keeping them out of the dynamic grid removes their collision
         // cost AND their contribution to lastMaxCellDensity / lastDynamicCount,
@@ -2642,7 +2642,7 @@ export class PhysicsSystem {
       // - Glass shards are full physics participants — they interact with everything
       //   (player, enemies, projectiles, asteroids, structures).  They are environmental
       //   debris and should deflect shots and bounce off ships.
-      // - Collectible drops (ammo + health) are kept OUT of the dynamic grid
+      // - Collectible drops (salvage + health) are kept OUT of the dynamic grid
       //   entirely (see the dropType skip in the grid build), so they never
       //   reach this resolver — projectiles + ships pass through them and
       //   collection is purely the GameEngine magnet/proximity scan.  The

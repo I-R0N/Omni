@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, WEAPON_SLOT_LABELS, AMMO_HUD_CONSTANTS, AMMO_CONSTANTS, computeAmmoHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -1606,9 +1606,9 @@ export class RenderSystem {
         this.renderPlayerMessages(ctx, playerMessages, width, height);
     }
 
-    // 9. Render Ammo HUD (Screen Space)
+    // 9. Render 2-slot loadout HUD (Screen Space)
     if (player) {
-        this.renderAmmoHUD(ctx, player, width, height);
+        this.renderLoadoutHUD(ctx, player, width, height);
     }
 
     this.lastRenderMs = performance.now() - t0;
@@ -3722,12 +3722,6 @@ export class RenderSystem {
                     // money; salvage is the money drop.
                     coreColor = '#94a3b8'; rimColor = '#f8fafc';
                     glowRgb = [203, 213, 225];
-                } else if (entity.dropType === 'ammo') {
-                    // Legacy — ammo drops no longer spawn (salvage replaced
-                    // them); branch kept until increment 1b deletes the ammo
-                    // system.
-                    coreColor = '#000000'; rimColor = '#ffffff';
-                    glowRgb = [255, 255, 255];
                 } else {
                     // 'powerup' or any other — use entity.color
                     coreColor = entity.color; rimColor = entity.color;
@@ -5093,142 +5087,84 @@ export class RenderSystem {
       ctx.restore();
   }
 
-  private renderAmmoHUD(
+  /**
+   * 2-slot loadout HUD (pivot 1b — replaced the 8-cell ammo strip).  One
+   * wide slot per equipped weapon showing its colour pip + full name; the
+   * ACTIVE slot fills with the weapon colour.  An empty slot renders as a
+   * dim dashed outline.  The charge ring stays on the player ship
+   * (chargeProgress) — not drawn here.
+   */
+  private renderLoadoutHUD(
       ctx: CanvasRenderingContext2D,
       player: GameEntity,
       width: number,
       height: number
   ) {
-      const { SLOT_H, SLOT_GAP, SLOT_RADIUS: RADIUS } = AMMO_HUD_CONSTANTS;
-      const { startY, slotW, blasterX, ammoX, weaponsStartX } = computeAmmoHUDLayout(width, height);
+      const { SLOT_H, SLOT_RADIUS: RADIUS } = LOADOUT_HUD_CONSTANTS;
+      const { startY, slotW, slotXs } = computeLoadoutHUDLayout(width, height);
       const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
+      const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
 
       ctx.save();
       ctx.textAlign  = 'center';
       ctx.textBaseline = 'middle';
 
-      const FLASH_DURATION = 0.75;
-      const pool       = player.ammo ?? 0;
-      const flash      = player.ammoPickupFlash;
-      const flashT     = flash ? Math.max(0, flash.timer / FLASH_DURATION) : 0; // 1→0
-      const isFlashing = flashT > 0;
+      for (let i = 0; i < slotXs.length; i++) {
+          const x = slotXs[i];
+          const y = startY;
+          const wType = equipped[i] ?? null;
 
-      // Render a single weapon-picker slot (used for the blaster + every
-      // other weapon).  The shared-pool readout is rendered separately
-      // below in its own dedicated box.
-      const drawWeaponSlot = (wType: WeaponType, x: number) => {
-          const wCfg    = WEAPONS[wType];
-          const y       = startY;
-          const canFire = wCfg.ammoCost === 0 || pool >= wCfg.ammoCost;
-          const active  = wType === activeWeapon;
+          if (wType === null) {
+              // Empty slot — dim dashed placeholder ("fill me at the Drydock").
+              ctx.globalAlpha = 0.35;
+              ctx.strokeStyle = '#475569';
+              ctx.lineWidth   = 1;
+              ctx.setLineDash([5, 4]);
+              ctx.beginPath();
+              roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.font        = `bold 9px monospace`;
+              ctx.fillStyle   = '#64748b';
+              ctx.fillText('EMPTY', x + slotW / 2, y + SLOT_H / 2);
+              continue;
+          }
 
-          ctx.globalAlpha = canFire ? (active ? 0.92 : 0.65) : 0.28;
-          ctx.fillStyle   = canFire ? (active ? wCfg.color : '#1e293b') : '#0f172a';
+          const wCfg   = WEAPONS[wType];
+          const active = wType === activeWeapon;
+
+          ctx.globalAlpha = active ? 0.92 : 0.6;
+          ctx.fillStyle   = active ? wCfg.color : '#1e293b';
           ctx.beginPath();
           roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
           ctx.fill();
 
-          ctx.globalAlpha = canFire ? (active ? 1.0 : 0.5) : 0.2;
-          ctx.strokeStyle = active ? wCfg.color : (canFire ? '#475569' : '#1e293b');
+          ctx.globalAlpha = active ? 1.0 : 0.5;
+          ctx.strokeStyle = active ? wCfg.color : '#475569';
           ctx.lineWidth   = active ? 2 : 1;
           ctx.beginPath();
           roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
           ctx.stroke();
 
-          // Color pip
-          ctx.globalAlpha = canFire ? 1.0 : 0.3;
+          // Colour pip + slot number
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle   = wCfg.color;
           ctx.beginPath();
-          ctx.arc(x + slotW / 2, y + 10, Math.max(3, slotW * 0.11), 0, Math.PI * 2);
+          ctx.arc(x + slotW / 2, y + 11, 4, 0, Math.PI * 2);
           ctx.fill();
+          ctx.font        = `bold 8px monospace`;
+          ctx.globalAlpha = 0.55;
+          ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';
+          ctx.fillText(String(i + 1), x + 8, y + 11);
 
-          if (slotW >= 28) {
-              // Pre-computed at module init in constants.ts — saves per-frame
-              // split/map/join string allocation for every visible weapon slot.
-              const label = WEAPON_SLOT_LABELS[wCfg.type] ?? '';
-              ctx.font        = `bold ${Math.max(7, Math.min(8, slotW * 0.19))}px monospace`;
-              ctx.globalAlpha = canFire ? 0.7 : 0.2;
-              ctx.fillStyle   = active ? '#ffffff' : '#94a3b8';
-              ctx.fillText(label, x + slotW / 2, y + SLOT_H / 2 + 4);
-          }
-      };
-
-      // Blaster (always-firable, infinite ammo)
-      drawWeaponSlot(WEAPON_LIST[0], blasterX);
-
-      // Non-blaster weapons (ammo-gated)
-      for (let i = 1; i < WEAPON_LIST.length; i++) {
-          drawWeaponSlot(WEAPON_LIST[i], weaponsStartX + (i - 1) * (slotW + SLOT_GAP));
-      }
-
-      // ── Shared-pool readout ────────────────────────────────────────────
-      // Dedicated slot-sized box between blaster and the rest.  Always
-      // shows the current shared-ammo number; flashes yellow on pickup.
-      {
-          const x = ammoX;
-          const y = startY;
-          const ammoLabel = String(pool);
-          const fontSize  = Math.max(13, Math.min(18, slotW * 0.42));
-
-          // Slot background — neutral slate so it reads as a readout, not a button
-          ctx.globalAlpha = 0.7;
-          ctx.fillStyle   = '#0f172a';
-          ctx.beginPath();
-          roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
-          ctx.fill();
-
-          // Yellow flash overlay on pickup
-          if (isFlashing) {
-              const [fr, fg, fb] = hexToRgb(AMMO_CONSTANTS.DROP_COLOR);
-              ctx.globalAlpha = flashT * 0.55;
-              ctx.fillStyle   = `rgb(${fr},${fg},${fb})`;
-              ctx.beginPath();
-              roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
-              ctx.fill();
-          }
-
-          // Border — yellow when flashing, otherwise neutral
-          ctx.globalAlpha = isFlashing ? (0.5 + flashT * 0.5) : 0.6;
-          ctx.strokeStyle = isFlashing ? AMMO_CONSTANTS.DROP_COLOR : '#475569';
-          ctx.lineWidth   = isFlashing ? 2 : 1;
-          ctx.beginPath();
-          roundRectPath(ctx, x, y, slotW, SLOT_H, RADIUS);
-          ctx.stroke();
-
-          // "AMMO" label across the top
-          if (slotW >= 28) {
-              ctx.font        = `bold ${Math.max(7, Math.min(8, slotW * 0.19))}px monospace`;
-              ctx.globalAlpha = 0.7;
-              ctx.fillStyle   = AMMO_CONSTANTS.DROP_COLOR;
-              ctx.fillText('AMMO', x + slotW / 2, y + 10);
-          }
-
-          // Big shared-pool number
-          ctx.font        = `bold ${fontSize}px monospace`;
-          ctx.globalAlpha = pool > 0 ? 1.0 : 0.45;
-          ctx.fillStyle   = '#ffffff';
-          ctx.shadowColor = 'rgba(0,0,0,0.8)';
-          ctx.shadowBlur  = 3;
-          ctx.fillText(ammoLabel, x + slotW / 2, y + SLOT_H - 14);
-          ctx.shadowBlur  = 0;
-
-          // Floating +N pickup text
-          if (isFlashing && flash) {
-              const rise    = (1 - flashT) * 22;
-              const alpha   = flashT > 0.5 ? 1.0 : flashT * 2;
-              const textY   = y - 6 - rise;
-              ctx.font        = `bold ${Math.max(10, slotW * 0.3)}px monospace`;
-              ctx.globalAlpha = alpha;
-              ctx.fillStyle   = AMMO_CONSTANTS.DROP_COLOR;
-              ctx.shadowColor = 'rgba(0,0,0,0.9)';
-              ctx.shadowBlur  = 4;
-              ctx.fillText(`+${flash.amount}`, x + slotW / 2, textY);
-              ctx.shadowBlur  = 0;
-          }
+          // Full weapon name (slots are wide enough post-1b)
+          ctx.font        = `bold ${Math.max(9, Math.min(12, slotW * 0.115))}px monospace`;
+          ctx.globalAlpha = active ? 1.0 : 0.65;
+          ctx.fillStyle   = active ? '#ffffff' : '#cbd5e1';
+          ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 16);
       }
 
       ctx.globalAlpha = 1;
-      ctx.shadowBlur  = 0;
       ctx.restore();
   }
 
@@ -5255,7 +5191,7 @@ export class RenderSystem {
       const currentSize = expanded ? EXPANDED_SIZE : SIZE;
 
       const mapX = MARGIN;
-      const mapY = screenHeight - currentSize - AMMO_HUD_CONSTANTS.BOTTOM_MARGIN;
+      const mapY = screenHeight - currentSize - LOADOUT_HUD_CONSTANTS.BOTTOM_MARGIN;
 
       ctx.save();
 

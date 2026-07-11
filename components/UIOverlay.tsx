@@ -111,6 +111,9 @@ interface UIOverlayProps {
   onPerfRecCycleScene?: () => void;
   onPerfRecExport?: () => string;
   onPurchaseUnlock?: (id: string) => void;
+  // 2-slot loadout swap (interim pause-menu home until the station lands):
+  // equip owned weapon `weaponId` into slot 0/1, or null to empty the slot.
+  onEquipWeapon?: (slot: number, weaponId: string | null) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
   onToggleFFOverlayVectors?: () => void;
@@ -200,6 +203,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPerfRecCycleScene,
   onPerfRecExport,
   onPurchaseUnlock,
+  onEquipWeapon,
   onUnlockAll,
   onResetUnlocks,
   onToggleFFOverlayVectors,
@@ -1076,7 +1080,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statLine('Damage', fmtMult(ps?.damageMult))}
                   {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
                   {statLine('Speed', fmtMult(ps?.speedMult))}
-                  {statLine('Max ammo', ps?.maxAmmo ?? 200)}
                 </div>
               </div>
 
@@ -1107,6 +1110,42 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Overcharge</span>
               </div>
             </div>
+
+            {/* Loadout — 2 equip slots.  Interim home: swaps are free here in
+                the pause menu until the station POI (1e) takes over. */}
+            {stats.loadout && (
+              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
+                <div className="flex flex-col gap-1.5">
+                  {stats.loadout.slots.map((slot, i) => (
+                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
+                      {(stats.loadout?.owned ?? []).map(w => (
+                        <button
+                          key={w.id}
+                          onClick={() => onEquipWeapon?.(i, w.id)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
+                            slot?.id === w.id
+                              ? 'bg-sky-600/70 text-white'
+                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
+                          }`}
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
+                        <button
+                          onClick={() => onEquipWeapon?.(i, null)}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
+                        >
+                          ✕ empty
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Drydock — spend Salvage on major unlocks (stat upgrades are card-only) */}
             {stats.shop && (

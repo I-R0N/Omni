@@ -351,6 +351,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
   };
 
+  const handleEquipWeapon = (slot: number, weaponId: string | null) => {
+      if (engineRef.current) engineRef.current.equipWeapon(slot, weaponId);
+  };
+
   const handleUnlockAll = () => {
       if (engineRef.current) engineRef.current.debugUnlockAll();
   };
@@ -481,6 +485,7 @@ const App: React.FC = () => {
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
         onPurchaseUnlock={handlePurchaseUnlock}
+        onEquipWeapon={handleEquipWeapon}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}

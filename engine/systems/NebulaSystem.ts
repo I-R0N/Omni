@@ -30,7 +30,7 @@ import { getCollisionR } from '../entityCache';
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
  * gravity/merge dynamics, tile regeneration with rule-based colour,
- * shard→tile transmutation, and the low-frequency ammo drop roll.
+ * shard→tile transmutation, and the low-frequency salvage drop roll.
  *
  * Extracted from GameEngine as part of the Phase-2/3 style system split
  * introduced by the engine-upgrade PR.  Stage 2 of the shard-system
@@ -51,7 +51,7 @@ import { getCollisionR } from '../entityCache';
  *
  * Dependencies injected via constructor:
  *   - ParticleSystem for merge-event glimmer bursts.
- *   - DropSystem for ammo drops + wave-scaled ammo type lookup.
+ *   - DropSystem for salvage drops.
  */
 export class NebulaSystem {
     /**
