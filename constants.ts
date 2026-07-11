@@ -2254,7 +2254,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     name: 'Seeker Missiles',
     cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
     speed: 12,
-    damage: 6,
+    damage: 8,         // 6 → 8 (pivot 1d): "can't miss" shouldn't be "can't kill" —
+                       // the designated anti-evasive answer once traits expand
     lifetime: 3.0,
     color: '#3b82f6', // Blue
     size: 8,
@@ -2460,7 +2461,10 @@ export const UNLOCK_DEFS: readonly UnlockDef[] = [
   { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
   { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
   { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
-  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 40000 },
+  // Player-facing name unified to "Pierce Beam" (pivot 1d) — the HUD and the
+  // Drydock used to disagree ("Pierce Beam" vs "Bouncer / Ricochet beams").
+  // Code identifiers (WeaponType.BOUNCER, isBouncer, …) are unchanged.
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Pierce Beam', desc: 'Piercing ricochet beams', cost: 40000 },
   { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
   { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
   { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
