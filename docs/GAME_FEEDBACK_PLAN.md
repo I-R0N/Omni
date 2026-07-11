@@ -1134,6 +1134,63 @@ k. After N waves, spawn a portal to a new map.
        a NEW plan doc + branch opens for the Overworld
        overhaul; this file then goes read-only as history.
 
+37. **Weapons-ammo plan adopted (PR #71) — economy pivot;
+    scope flags ruled (2026-07-11).** Roadmap step 0 complete.
+    The design session returned a PIVOT, not a tuning pass;
+    `docs/WEAPONS_AMMO_PLAN.md` is the design doc of record
+    (audit, settled design, per-weapon job statements,
+    pricing, trait-counterplay map, sequenced increments).
+    Headlines:
+    a. **Ammo deleted as a system** — no drops/pool/per-shot
+       costs/HUD/dry-fallback. Weapon pressure = cooldown +
+       loadout commitment. Magazine augment dies; Autoloader
+       becomes the premium (steepest-priced) weapon stat.
+    b. **Salvage becomes a physical collectible drop**,
+       replacing ammo at every source; the `awardScore` 1:1
+       score→Salvage mirror is REMOVED (score = performance,
+       Salvage = collected wealth; rival loot-vacuum steals
+       money). Health drops unchanged.
+    c. **Purchase-only progression** — wave-completion
+       upgrade cards + the 18% free-unlock lottery are
+       removed; stat upgrades join the shop on a real
+       per-level escalating `upgradeCost()` curve.
+    d. **Weapons = 2-slot equip loadout** — new run: Blaster
+       + empty; any 2 owned weapons equip; Blaster fully
+       swappable; swaps are station-only once the station
+       lands (interim: pause-menu Drydock — note the
+       commitment mechanic has no teeth until 1e ships).
+    e. **Boss gate ANSWERED — model (d):** bosses grant
+       salvage and/or shop discounts; weapons stay purely
+       purchased; NO unlock plumbing. Weapon-bosses wield
+       themed variants of the literal player archetypes via
+       the existing `Partial<WeaponConfig>` override pattern.
+       (h) consumes doc §6 + the §7 trait-counterplay table.
+    f. **Scope-flag ruling (user, 2026-07-11): station-poi
+       ACCEPTED; waves-to-nodes DEFERRED to the Overworld
+       plan.** Rationale: the station is what gives the
+       purchase economy + loadout commitment teeth, one
+       bounded medium session, and a legitimate guardrail-#3
+       extension point; waves-to-nodes restructures where the
+       core loop lives (the overworld's layered-map thesis
+       arriving early) and would double (k)'s scope — (k)
+       stays thin as scoped in #36e. Consequences: (h) bosses
+       stay BASE-MAP wave capstones; waves keep running on
+       the base map for the rest of this plan (resolves doc
+       §9 open question 3); the station-poi brief MUST define
+       a mid-wave docking rule (the doc's station design
+       assumed a combat-light map).
+    g. **Sequencing** — increments land per doc §8 as
+       re-scoped: salvage-drops → ammo-removal + loadout-2
+       (with the §3 Bouncer/Lightning cooldown compensation
+       in the SAME PR) → purchase-only-progression →
+       weapon-identity-tuning (incl. Pierce Beam/Bouncer
+       naming unification) → station-poi → (h). Remaining
+       doc-§9 open questions (salvage death penalty, absolute
+       pricing, Overcharge+Cannon ceiling, snitch salvage
+       payout) are owned by the implementing sessions at
+       tuning time. CLAUDE.md discrepancies found in the
+       audit (doc §1.4) go to the punch list.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1277,6 +1334,7 @@ of the items in Phase 1 follow-ups.
 
 | ID | Task | Notes |
 |----|------|-------|
+| waves-to-nodes | Wave gameplay relocates into portal-node sub-maps; base map goes combat-light | **DEFERRED to the Overworld plan** (decision #37f) — the design lives in `docs/WEAPONS_AMMO_PLAN.md` §2.4/§8.6. Rejected for this plan because it restructures where the core loop happens and would double (k)'s scope; in this plan a combat-light base map is mostly empty space. The overworld plan (whose thesis IS layered maps) is the right home; WaveSystem activation re-plumbing happens there. |
 | orbital-fields-moons | Orbital flow fields + moving moons with gravity | **MOVED to the Overworld plan** (decision #36) — planets and moving celestial landmarks are overworld features per `docs/GAME_STRUCTURE_STRATEGY.md`. Original sketch preserved in decision #25; it becomes an early task of the next plan, not this one. |
 | voronoi-rock-fracture | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
 
@@ -1287,33 +1345,58 @@ of the items in Phase 1 follow-ups.
 The path to closing this plan WITHOUT growing scope. Every session below
 observes the three strategy guardrails (decision #36e).
 
-0. **weapons-ammo design session** (user-added gate, 2026-07-08) —
-   flesh out the weapons + ammo system plan BEFORE bosses: weapon
-   roster identity, ammo economy pressure, Drydock acquisition/pricing,
-   trait-counterplay mapping, and the boss-weapon reconciliation.
-   Design-only session; deliverable `docs/WEAPONS_AMMO_PLAN.md` via
-   docs-only PR. (h)'s design phase consumes its output.
-1. **(h) Bosses** — submap special encounters as wave capstones.
-   Boss-weapon model comes from the weapons-ammo plan (step 0).
-2. **(k) Portals + map descriptors** — the traversable portal entity on
+0. ~~**weapons-ammo design session**~~ — **DONE** (PR #71,
+   2026-07-11; decision #37). Deliverable `docs/WEAPONS_AMMO_PLAN.md`;
+   economy pivot adopted; scope flags ruled (station-poi accepted,
+   waves-to-nodes deferred to the Overworld plan).
+1. **Economy-pivot increments** (from WEAPONS_AMMO_PLAN §8; sequential,
+   each a single session):
+   - 1a. **salvage-drops** — `'salvage'` DropType + effect + render,
+     replacing the ammo roll at every source; remove the `awardScore`
+     1:1 Salvage mirror. Health drops untouched. Small.
+   - 1b. **ammo-removal + loadout-2** — delete the ammo system (pool,
+     costs, HUD strip, gating, dry-fallback, Magazine augment); add the
+     2-slot equip loadout; HUD → 2 slots + charge ring; the doc-§3
+     Bouncer/Lightning cooldown compensation lands in the SAME PR.
+     Interim: loadout swap in the pause-menu Drydock. Medium.
+   - 1c. **purchase-only-progression** — remove upgrade cards + the
+     free-unlock lottery; real per-level `upgradeCost()` curve
+     (Autoloader steepest); keep a wave-clear salvage bonus as the
+     reward beat. Small-medium.
+   - 1d. **weapon-identity-tuning** — doc-§3 increments + Pierce
+     Beam/Bouncer naming unification. Small.
+   - 1e. **station-poi** — station entity at map center; dock
+     interaction; shop UI relocates out of the pause menu; hull repair
+     + station-only loadout swap. MUST define the mid-wave docking rule
+     (waves stay on the base map this plan). Medium. Accepted scope
+     flag, decision #37f.
+2. **(h) Bosses** — BASE-MAP wave capstones (waves-to-nodes deferred).
+   Consumes doc §6 (model (d): salvage/discount payouts, NO unlock
+   plumbing; weapon-bosses wield themed player archetypes) + §7
+   (wire evasive / front-shield / regen traits against the
+   counterplay table).
+3. **(k) Portals + map descriptors** — the traversable portal entity on
    the thin descriptor layer. The plan's one architectural extension
-   point for the overworld.
-3. **Phase 3 pairs in parallel** (below): A = (i) death screen;
+   point for the overworld. Unchanged by the pivot (waves-to-nodes
+   was the extension that would have grown it; deferred).
+4. **Phase 3 pairs in parallel** (below): A = (i) death screen;
    B = (a) SFX → (b) explosion variety; C = (c2) controller/joystick →
    (c1) menu help.
-4. **Polish batch** — material-palette-residual + map-composition +
+5. **Polish batch** — material-palette-residual + map-composition +
    minimap-faithfulness bundled into 1–2 small sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
    "maps become known for characteristics").
-5. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
+6. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
    → `main`, one deploy.
 
 Explicitly OUT of this plan (moved to the Overworld plan): continuous
-overworld, stations, NPC traffic/civilizations, landmark detection
-(Meaning Layer), mining operations, orbital-fields-moons, durable
-persistence. Still parked (decision #27 + parking lot): unchanged.
-voronoi-rock-fracture stays deferred-optional — pull in only if a
-material session has spare room; PR #65 already delivers the feel.
+overworld, multi-station networks / NPC traffic / civilizations
+(the single station POI of 1e is the in-plan stand-in), landmark
+detection (Meaning Layer), mining operations, orbital-fields-moons,
+**waves-to-nodes** (portal nodes hosting wave gameplay; decision #37f),
+durable persistence. Still parked (decision #27 + parking lot):
+unchanged. voronoi-rock-fracture stays deferred-optional — pull in only
+if a material session has spare room; PR #65 already delivers the feel.
 
 ---
 
@@ -1394,6 +1477,17 @@ These are not full tasks — fold into a relevant PR when convenient.
       variant ids in §4). **Done in the branch-review punch-list
       pass** — §4 field categories, §5 constant blocks, §8
       conventions all refreshed.
+- [ ] CLAUDE.md discrepancies found by the weapons-ammo audit
+      (`docs/WEAPONS_AMMO_PLAN.md` §1.4): `upgradeCost()` named but
+      nonexistent (becomes real in increment 1c); `ENEMY_AMMO_DROP` /
+      `ASTEROID_AMMO_PROGRESSION` no longer exist in `constants.ts`;
+      Pierce Beam vs Bouncer naming split (unified in increment 1d);
+      "enemies fire weapon archetypes" overstated (bespoke
+      `ENEMY_WEAPON` overrides, not `WEAPONS` entries);
+      `mergeAmmoDrops` doc-comment cap 64 vs actual 100. Most of §5's
+      ammo-economy prose dies wholesale with increments 1a/1b — fold
+      the CLAUDE.md refresh into those PRs rather than fixing
+      piecemeal now.
 - [ ] FF audit follow-ups #FF-1 (asteroid obstacle-aware fallback +
       diagonal wall-repulsion), #FF-2 (re-examine obstacle filter
       once any finite-mass wall-like variants ship), #FF-3 (perf
