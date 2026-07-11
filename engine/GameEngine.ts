@@ -20,7 +20,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, AMMO_CONSTANTS, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, AMMO_HUD_CONSTANTS, computeAmmoHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -129,7 +129,8 @@ export class GameEngine {
   private comboCount: number = 0;
   private comboTimer: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
-  // Spendable Salvage currency (earns 1:1 with score) and per-upgrade levels.
+  // Spendable Salvage currency — earned ONLY by collecting salvage drops in
+  // the field (the score 1:1 mirror is gone) — and per-upgrade levels.
   // applyUpgrades() folds the levels into the player's effective stats; all
   // reset per run.  Behaviour-changing unlocks + shop UI build on top.
   private credits: number = 0;
@@ -1368,6 +1369,10 @@ export class GameEngine {
       comboCount: this.comboCount,
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       credits: this.credits,
+      salvageFlash: this.player.salvagePickupFlash ? {
+        amount: this.player.salvagePickupFlash.amount,
+        fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
+      } : undefined,
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
@@ -1619,6 +1624,10 @@ export class GameEngine {
       comboCount: this.comboCount,
       comboFraction: this.comboTimer > 0 ? this.comboTimer / SCORE_CONSTANTS.COMBO_WINDOW_SEC : 0,
       credits: this.credits,
+      salvageFlash: this.player.salvagePickupFlash ? {
+        amount: this.player.salvagePickupFlash.amount,
+        fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
+      } : undefined,
       upgrades: this.upgradeSnapshot(),
       cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
       cardInterval: this.cardWaveInterval,
@@ -2855,6 +2864,15 @@ export class GameEngine {
       }
     }
 
+    // Tick down the salvage-pickup flash timer (same pattern; drives the
+    // "+N" flash on the HUD Salvage chip via EngineStats.salvageFlash)
+    if (this.player.salvagePickupFlash && this.player.salvagePickupFlash.timer > 0) {
+      this.player.salvagePickupFlash.timer -= dt;
+      if (this.player.salvagePickupFlash.timer <= 0) {
+        this.player.salvagePickupFlash = undefined;
+      }
+    }
+
     // Proximity collection + magnetic pull — single pass over activeDrops.
     // An ammo shard starts pulling only once the player comes within
     // MAGNET_RANGE; from then on it's latched (`magnetized`) and homes to
@@ -3296,7 +3314,9 @@ export class GameEngine {
    *  live popup — O(1), no array scan — so it reads as a growing total. */
   private awardScore(points: number, popupPos?: Vector2) {
       this.score += points;
-      this.credits += points; // Salvage earns 1:1 with score (score stays the high-score)
+      // NOTE: score no longer mints Salvage (the 1:1 credits mirror is gone —
+      // weapons-ammo pivot increment 1a).  Credits come only from COLLECTING
+      // salvage drops in the field (applyDropEffect → onSalvage).
       if (!popupPos || points === 0) return;
 
       // Fold into the current popup if it's still floating.
@@ -4997,6 +5017,12 @@ export class GameEngine {
     this.snitch = null;
     this.snitchCatchCount++; // the NEXT snitch spawns faster — catching ramps speed, not waves
     this.awardScore(SCORE_CONSTANTS.SNITCH_POINTS, s.position);
+    // Salvage spray — score no longer mints credits, so the catch pays money
+    // as physical drops (they scatter, merge, and magnetise like any salvage;
+    // sized against the per-wave income arithmetic in SALVAGE_CONSTANTS).
+    for (let i = 0; i < SALVAGE_CONSTANTS.SNITCH_CATCH_DROPS; i++) {
+      this.spawnSalvageDrop(s.position, s.velocity);
+    }
     this.spawnParticles(s.position, SNITCH_CONSTANTS.CATCH_BURST_COUNT, SNITCH_CONSTANTS.CORE_COLOR, {
       speedMin: 1, speedMax: 6,
       sizeMin: 1, sizeMax: 3,
@@ -5715,7 +5741,12 @@ export class GameEngine {
   // sites in updateGameLogic / handleEntityDeath / collection paths.
 
   private applyDropEffect(entity: GameEntity) {
-    this.drops.applyDropEffect(this.player, entity, (t, c) => this.pushPlayerMessage(t, c));
+    this.drops.applyDropEffect(
+      this.player,
+      entity,
+      (t, c) => this.pushPlayerMessage(t, c),
+      (credits) => { this.credits += credits; },
+    );
   }
 
   private spawnDrops(entity: GameEntity) {
@@ -5726,6 +5757,7 @@ export class GameEngine {
       this.player,
       entity,
       (t, c) => this.pushPlayerMessage(t, c),
+      (credits) => { this.credits += credits; },
     );
   }
 
@@ -5756,9 +5788,9 @@ export class GameEngine {
     this.drops.spawnGlassShards(this.currentMap.entities, tile);
   }
 
-  private spawnAmmoDrop(pos: Vector2, amount: number, parentVelocity?: Vector2) {
+  private spawnSalvageDrop(pos: Vector2, parentVelocity?: Vector2) {
     if (!this.currentMap) return;
-    this.drops.spawnAmmoDrop(this.currentMap.entities, this.activeDrops, pos, amount, parentVelocity);
+    this.drops.spawnSalvageDrop(this.currentMap.entities, this.activeDrops, pos, parentVelocity);
   }
 
   private spawnHealthDrop(pos: Vector2, value: number, parentVelocity?: Vector2) {

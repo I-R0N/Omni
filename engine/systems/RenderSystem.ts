@@ -3715,10 +3715,17 @@ export class RenderSystem {
                     // Red circle shard — bright red core, light-red rim + halo.
                     coreColor = '#ef4444'; rimColor = '#fecaca';
                     glowRgb = [239, 68, 68];
+                } else if (entity.dropType === 'salvage') {
+                    // Silver scrap-glint — steel-grey chunk with a bright
+                    // white glint rim + cool halo.  Deliberately NOT gold:
+                    // gold "+N" popups mean score, which no longer pays
+                    // money; salvage is the money drop.
+                    coreColor = '#94a3b8'; rimColor = '#f8fafc';
+                    glowRgb = [203, 213, 225];
                 } else if (entity.dropType === 'ammo') {
-                    // Black core with a white rim + halo so ammo drops read
-                    // distinctly against the colourful weapon palette and
-                    // the yellow HUD readout.
+                    // Legacy — ammo drops no longer spawn (salvage replaced
+                    // them); branch kept until increment 1b deletes the ammo
+                    // system.
                     coreColor = '#000000'; rimColor = '#ffffff';
                     glowRgb = [255, 255, 255];
                 } else {

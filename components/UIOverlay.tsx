@@ -898,6 +898,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {(stats.score ?? 0).toLocaleString()} PTS
                 </span>
               </div>
+              {/* Salvage (money) — silver to match the field drop, distinct
+                  from the gold score chip.  Flashes +N on pickup. */}
+              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-slate-200 text-xs font-bold tracking-widest tabular-nums">
+                  ◈ {(stats.credits ?? 0).toLocaleString()}
+                </span>
+                {stats.salvageFlash && (
+                  <span
+                    className="text-slate-50 text-xs font-extrabold tabular-nums ml-1.5"
+                    style={{ opacity: Math.max(0.25, stats.salvageFlash.fraction) }}
+                  >
+                    +{stats.salvageFlash.amount.toLocaleString()}
+                  </span>
+                )}
+              </div>
               {/* Kill-combo multiplier — fades out as the window lapses */}
               {(stats.comboMultiplier ?? 1) > 1 && (
                 <div

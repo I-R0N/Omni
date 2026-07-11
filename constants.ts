@@ -1917,16 +1917,14 @@ export const NEBULA_CONSTANTS = {
   TWINKLE_INTERVAL_MAX: 9.0,
   TWINKLE_STAR_SIZE: 10,
   TWINKLE_PLACEMENT_RANGE: 0.35,
-  // ── Standard drops (ammo) ────────────────────────────────────────
-  // Nebula tiles and shards occasionally release a standard ammo
-  // drop on shatter — low frequency so breaking a cluster yields the
+  // ── Standard drops (salvage) ─────────────────────────────────────
+  // Nebula tiles and shards occasionally release a salvage drop on
+  // shatter — low frequency so breaking a cluster yields the
   // occasional reward without flooding the map.  The roll is
   // independent of shard creation: shard count/size math is
-  // untouched, the ammo drop (if any) is a bonus that spawns
-  // alongside the usual shards.  Post-d1 every ammo drop awards the
-  // shared currency, so there is no per-weapon variant here.
-  AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
-  AMMO_PER_NEBULA: 3,     // shared-pool ammo units per nebula drop
+  // untouched, the salvage drop (if any) is a bonus that spawns
+  // alongside the usual shards.
+  SALVAGE_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
 
   // ── Color equilibration ───────────────────────────────────────
   // Per-frame circular-hue lerp alphas for NebulaSystem's
@@ -2648,9 +2646,10 @@ export function cycleSwarmMove(): number {
   return activeSwarmMoveIndex;
 }
 
-// Shared-ammo pool config (post-d1).  Caps the player's single ammo number
-// and provides the canonical pickup colour used by every ammo drop entity
-// (enemy / asteroid / nebula sources all reuse this).
+// Shared-ammo pool config (post-d1).  Caps the player's single ammo number;
+// DROP_COLOR now only colours the ammo HUD flash (ammo DROPS no longer spawn
+// — salvage replaced them in every source; the whole pool goes away in
+// increment 1b).
 //
 // MAX_POOL rationale: pre-refactor there was no explicit per-weapon cap;
 // debug fills filled to 999 and a typical playthrough stockpiled ~30-60 per
@@ -2663,7 +2662,7 @@ export const AMMO_CONSTANTS = {
 
 // ── Drop-type registry ────────────────────────────────────────────────────────
 // Single source of truth for per-drop-type properties.  `collectible` marks a
-// magnet/proximity PICKUP (ammo / health): kept OUT of the dynamic collision
+// magnet/proximity PICKUP (salvage / health): kept OUT of the dynamic collision
 // grid (projectiles + ships pass through; collection is the GameEngine drop
 // scan) and carried by the flow-drift / merge passes.  Non-collectible drops
 // (glass) are environmental debris and full physics participants.
@@ -2676,9 +2675,10 @@ export interface DropTypeDef {
   collectible: boolean;
 }
 export const DROP_TYPES: Record<DropType, DropTypeDef> = {
-  ammo:   { collectible: true },
-  health: { collectible: true },
-  glass:  { collectible: false },
+  ammo:    { collectible: true },  // legacy — nothing spawns ammo DROPS anymore (increment 1b deletes)
+  health:  { collectible: true },
+  salvage: { collectible: true },  // money drop — pays credits on collection
+  glass:   { collectible: false },
 };
 /** True for a magnet/proximity pickup drop (the non-physics, non-shootable
  *  kind).  The cross-cutting test used by the collision-grid skip, the
@@ -2689,32 +2689,53 @@ export function isCollectibleDrop(e: GameEntity): boolean {
     && DROP_TYPES[e.dropType].collectible;
 }
 
+// ── Salvage economy ──────────────────────────────────────────────────────────
+// Salvage is the money drop (weapons-ammo pivot increment 1a): it replaced
+// ammo in every drop source, and collecting it is now the ONLY way to earn
+// credits (the awardScore 1:1 score→Salvage mirror is gone).  Drops carry
+// value 1 and merge value-conservingly like ammo did; the credit conversion
+// happens once at collection.
+//
+// CREDITS_PER_DROP arithmetic (provisional — pending playtest): expected
+// salvage per enemy kill = 0.55 + 0.25 = 0.8 units.  Wave spawn budgets at
+// default difficulty run 6/7/8/9 for waves 1-4, so combat income ≈ 4.8 →
+// 7.2 units/wave (cumulative ≈ 17 by end of wave 3).  Terrain mining
+// (asteroid 45 %, dent shard 85 %, plastic 20 %, nebula 6 %) plus the
+// 6-9 destructible shards each kill sprays adds very roughly another
+// 50-100 % for a player who mines casually — call it ~25 units collected by
+// wave 3.  At 1 000 credits/unit the first weapon (Burst, 25 000) lands
+// around wave 2-4, matching the plan target (WEAPONS_AMMO_PLAN §5) without
+// touching the UNLOCK_DEFS price ladder.
+export const SALVAGE_CONSTANTS = {
+  CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
+  DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
+                              // (deliberately NOT gold: gold "+N" popups mean
+                              // score, which no longer pays money)
+  // Snitch-catch payout: the snitch pays score but score no longer mints
+  // credits, so the catch also sprays this many salvage units (≈ a wave-and-
+  // a-half of combat income — it's the biggest chase reward in the game).
+  SNITCH_CATCH_DROPS: 8,
+};
+
 export const DROP_CONFIG = {
-  // Per-pickup ammo amounts — chosen to keep today's per-encounter expected
-  // ammo close to the per-weapon-pool model (asteroid 1.80, enemy 2.15,
-  // nebula 0.18 — see also NEBULA_CONSTANTS.AMMO_PER_NEBULA).
-  AMMO_PER_ENEMY_PRIMARY:   3,    // primary enemy ammo drop (paired with AMMO_DROP_CHANCE_ENEMY_PRIMARY)
-  AMMO_PER_ENEMY_SECONDARY: 2,    // secondary enemy ammo drop (independent roll)
-  AMMO_PER_ASTEROID:        4,    // ammo units per asteroid drop
-  // Dent-policy mobile shards (plastic-shard, metal-shard) take
-  // multiple hits to destroy, so their drop rate + payload run
-  // higher than a single-hit asteroid to reward the effort.
-  AMMO_PER_DENT_SHARD:      6,
-  // Drop-spawn probabilities
-  AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
-  AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
+  // Salvage-spawn probabilities — carried over 1:1 from the old ammo-roll
+  // chances (WEAPONS_AMMO_PLAN §4: reuse today's rates as the starting
+  // point).  Every salvage drop carries value 1; there is no per-source
+  // amount anymore.
+  SALVAGE_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops salvage
+  SALVAGE_DROP_CHANCE_DENT_SHARD:      0.85, // dent shards take several hits — higher reward
   // Plastic-shards may break into a small number of sub-shards (each
   // a drop opportunity), so their per-shard drop chance is cut well
   // below the generic dent-shard rate.
-  AMMO_DROP_CHANCE_PLASTIC_SHARD:   0.20, // 20 % chance a plastic shard drops ammo
-  AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
-  AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
+  SALVAGE_DROP_CHANCE_PLASTIC_SHARD:   0.20,
+  SALVAGE_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // primary enemy salvage roll
+  SALVAGE_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // secondary roll (independent)
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per milestone (wave-clear) health drop
   // Enemy-kill health drops (added because the expanded roster hits harder).
-  // Rolled INDEPENDENTLY at the same two chances as the ammo slots above, so
-  // enemy-kill pickups roughly double and split ~50/50 ammo/health.  Each heals
-  // this much (merges sum, like ammo) — modest so frequent drops sustain rather
+  // Rolled INDEPENDENTLY at the same two chances as the salvage slots above, so
+  // enemy-kill pickups roughly double and split ~50/50 salvage/health.  Each heals
+  // this much (merges sum, like salvage) — modest so frequent drops sustain rather
   // than trivialise.
   HEALTH_PER_ENEMY:           15,
   // General

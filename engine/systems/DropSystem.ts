@@ -4,6 +4,7 @@ import {
   COLORS,
   AMMO_CONSTANTS,
   DROP_CONFIG,
+  SALVAGE_CONSTANTS,
   AMMO_DROP_PULL,
   SHARD_VARIANTS,
   NEBULA_CONSTANTS,
@@ -35,9 +36,9 @@ import {
  * drops) also registered in a caller-supplied `activeDrops` cache for fast
  * lookup during the collection pass.
  *
- * Reward application (player ammo / health adjustment) lives on this system
- * too — it's the natural home for "what happens when a drop is collected"
- * and keeps the surface area of Phase 3 small.
+ * Reward application (player salvage / health adjustment) lives on this
+ * system too — it's the natural home for "what happens when a drop is
+ * collected" and keeps the surface area of Phase 3 small.
  */
 export class DropSystem {
   constructor(private particles: ParticleSystem) {}
@@ -49,15 +50,34 @@ export class DropSystem {
    * Called both from spawnDrops (when a drop is destroyed by a player
    * projectile) and from the contact-collection loop in GameEngine.
    * `onMessage` is invoked for health drops so the engine can surface a HUD
-   * message without this system needing to know about the HUD pipeline.
+   * message without this system needing to know about the HUD pipeline;
+   * `onSalvage` is invoked with the credits gained from a salvage drop so
+   * the engine can bank them (credits live on GameEngine, not the player
+   * entity).
    */
   public applyDropEffect(
     player: GameEntity,
     entity: GameEntity,
     onMessage?: (text: string, color: string) => void,
+    onSalvage?: (credits: number) => void,
   ) {
-    if (entity.dropType === 'ammo') {
-      const amount = entity.dropValue ?? DROP_CONFIG.AMMO_PER_ASTEROID;
+    if (entity.dropType === 'salvage') {
+      // dropValue counts salvage UNITS (merges sum them); the credit
+      // conversion happens once here at collection.
+      const units   = entity.dropValue ?? 1;
+      const credits = units * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
+      // Pickup flash — same accumulate-within-window pattern as the ammo
+      // flash so rapid pickups read as one growing "+N" on the HUD chip.
+      const prev = player.salvagePickupFlash;
+      player.salvagePickupFlash = {
+        timer:  0.75,
+        amount: (prev && prev.timer > 0 ? prev.amount : 0) + credits,
+      };
+      onSalvage?.(credits);
+    } else if (entity.dropType === 'ammo') {
+      // Legacy — no site spawns ammo drops anymore; branch kept until
+      // increment 1b deletes the ammo system.
+      const amount = entity.dropValue ?? 1;
       const before = player.ammo ?? 0;
       player.ammo = Math.min(player.maxAmmo ?? AMMO_CONSTANTS.MAX_POOL, before + amount);
       const gained = player.ammo - before;
@@ -81,9 +101,9 @@ export class DropSystem {
 
   /**
    * Top-level drop/shard dispatcher invoked when an entity is destroyed.
-   * Structures → glass shards, interactables → reward, asteroids → ammo /
+   * Structures → glass shards, interactables → reward, asteroids → salvage /
    * health drops driven by the (optionally) stored dropComposition or a
-   * random ammo roll.
+   * random salvage roll.
    */
   public spawnDrops(
     entities: GameEntity[],
@@ -91,6 +111,7 @@ export class DropSystem {
     player: GameEntity,
     entity: GameEntity,
     onMessage?: (text: string, color: string) => void,
+    onSalvage?: (credits: number) => void,
   ) {
     const pos = entity.position;
     const pv = entity.velocity;
@@ -134,12 +155,14 @@ export class DropSystem {
       // ever destroyed) — apply its reward immediately.  (Pickups are normally
       // collected by the GameEngine magnet scan; they're grid-excluded so
       // projectiles pass through them.)
-      this.applyDropEffect(player, entity, onMessage);
+      this.applyDropEffect(player, entity, onMessage, onSalvage);
     } else if (isMobileShard) {
       if (entity.dropComposition && entity.dropComposition.length > 0) {
         for (const comp of entity.dropComposition) {
           if (comp.type === 'ammo') {
-            this.spawnAmmoDrop(entities, activeDrops, pos, comp.value, pv);
+            // Legacy composition entries — ammo drops no longer exist, so
+            // stored ammo value releases as salvage instead.
+            this.spawnSalvageDrop(entities, activeDrops, pos, pv);
           } else if (comp.type === 'health') {
             this.spawnHealthDrop(entities, activeDrops, pos, comp.value, pv);
           }
@@ -147,24 +170,21 @@ export class DropSystem {
         }
       } else {
         // Dent-policy shards take several hits to destroy, so their
-        // drop chance + payload runs higher than single-hit asteroids.
+        // drop chance runs higher than single-hit asteroids.
         // Non-dent shards (rock-shard, glass-shard) keep the legacy
         // asteroid drop rate.
         const isDentShard = entity.shardVariant !== undefined
           && SHARD_VARIANTS[entity.shardVariant].dent !== undefined;
         // Plastic-shards burst into many children, so they roll a much
         // lower drop chance than other dent shards (metal) to avoid a
-        // flood of ammo from one cluster break.
+        // flood of salvage from one cluster break.
         const dropChance = entity.shardVariant === 'plastic-shard'
-          ? DROP_CONFIG.AMMO_DROP_CHANCE_PLASTIC_SHARD
+          ? DROP_CONFIG.SALVAGE_DROP_CHANCE_PLASTIC_SHARD
           : isDentShard
-            ? DROP_CONFIG.AMMO_DROP_CHANCE_DENT_SHARD
-            : DROP_CONFIG.AMMO_DROP_CHANCE_ASTEROID;
-        const dropAmount = isDentShard
-          ? DROP_CONFIG.AMMO_PER_DENT_SHARD
-          : DROP_CONFIG.AMMO_PER_ASTEROID;
+            ? DROP_CONFIG.SALVAGE_DROP_CHANCE_DENT_SHARD
+            : DROP_CONFIG.SALVAGE_DROP_CHANCE_ASTEROID;
         if (Math.random() < dropChance) {
-          this.spawnAmmoDrop(entities, activeDrops, pos, dropAmount, pv);
+          this.spawnSalvageDrop(entities, activeDrops, pos, pv);
         }
       }
     }
@@ -174,11 +194,11 @@ export class DropSystem {
 
   /**
    * Break a dead enemy into debris.  Uses a fixed slot plan (6 tile shards +
-   * 1 primary-ammo + 1 secondary-ammo + maybe an empty asteroid) which is
-   * then shuffled before spawning so drops aren't always positioned last.
-   * Both ammo slots roll the shared-ammo currency at independent rates;
-   * combined expected ammo per enemy ≈ 0.55*3 + 0.25*2 = 2.15 (matches the
-   * pre-d1 own+next economy).
+   * 1 primary-salvage + 1 secondary-salvage + maybe an empty asteroid) which
+   * is then shuffled before spawning so drops aren't always positioned last.
+   * Both salvage slots roll independently at the old ammo-slot rates;
+   * combined expected salvage per enemy = 0.55 + 0.25 = 0.8 units (drops
+   * carry value 1 and merge).
    */
   public spawnEnemyShards(
     entities: GameEntity[],
@@ -188,14 +208,14 @@ export class DropSystem {
     const pos     = enemy.position;
     const pv      = enemy.velocity;
 
-    // Plan: 6 tile shards + 1 primary ammo + 1 secondary ammo + 1 empty asteroid (50 % chance)
+    // Plan: 6 tile shards + 1 primary salvage + 1 secondary salvage + 1 empty asteroid (50 % chance)
     const TOTAL_PHYSICAL = 6 + 1 + 1 + (Math.random() < 0.5 ? 1 : 0);
 
-    type SlotKind = 'tile' | 'asteroid' | 'ammoPrimary' | 'ammoSecondary';
+    type SlotKind = 'tile' | 'asteroid' | 'salvagePrimary' | 'salvageSecondary';
     const slots: SlotKind[] = [];
     for (let i = 0; i < 6; i++) slots.push('tile');
-    slots.push('ammoPrimary');
-    slots.push('ammoSecondary');
+    slots.push('salvagePrimary');
+    slots.push('salvageSecondary');
     if (TOTAL_PHYSICAL > 8) slots.push('asteroid');
     // Shuffle so drops aren't always last
     for (let i = slots.length - 1; i > 0; i--) {
@@ -213,12 +233,12 @@ export class DropSystem {
 
       const kind = slots[i];
 
-      if (kind === 'ammoPrimary' && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_PRIMARY) {
-        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ENEMY_PRIMARY, { x: vx * 5, y: vy * 5 });
+      if (kind === 'salvagePrimary' && Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_PRIMARY) {
+        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 });
         continue;
       }
-      if (kind === 'ammoSecondary' && Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_SECONDARY) {
-        this.spawnAmmoDrop(entities, activeDrops, pos, DROP_CONFIG.AMMO_PER_ENEMY_SECONDARY, { x: vx * 5, y: vy * 5 });
+      if (kind === 'salvageSecondary' && Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_SECONDARY) {
+        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 });
         continue;
       }
 
@@ -263,14 +283,14 @@ export class DropSystem {
     }
 
     // Health drops (added because the expanded roster hits harder).  Two
-    // INDEPENDENT rolls at the SAME chances as the two ammo slots above, spawned
-    // as extra pickups with ammo-like physics — so enemy-kill drops roughly
-    // double and split ~50/50 ammo/health.  Scatter off the kill via the
-    // enemy's velocity (makeDropEntity adds the random spread).
-    if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_PRIMARY) {
+    // INDEPENDENT rolls at the SAME chances as the two salvage slots above,
+    // spawned as extra pickups with the same drop physics — so enemy-kill
+    // drops roughly double and split ~50/50 salvage/health.  Scatter off the
+    // kill via the enemy's velocity (makeDropEntity adds the random spread).
+    if (Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_PRIMARY) {
       this.spawnHealthDrop(entities, activeDrops, pos, DROP_CONFIG.HEALTH_PER_ENEMY, { x: pv.x, y: pv.y });
     }
-    if (Math.random() < DROP_CONFIG.AMMO_DROP_CHANCE_ENEMY_SECONDARY) {
+    if (Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_SECONDARY) {
       this.spawnHealthDrop(entities, activeDrops, pos, DROP_CONFIG.HEALTH_PER_ENEMY, { x: pv.x, y: pv.y });
     }
   }
@@ -1066,51 +1086,47 @@ export class DropSystem {
   // --- Collectible drop spawning ------------------------------------------
 
   /**
-   * Spawn a single collectible shared-ammo drop and register it in
-   * `activeDrops`.  All ammo drops use the same canonical pickup colour;
-   * post-d1 there is no per-weapon variant.
+   * Spawn a single collectible salvage (money) drop and register it in
+   * `activeDrops`.  Every salvage drop carries value 1 — one salvage UNIT
+   * (converted to credits at collection via SALVAGE_CONSTANTS
+   * .CREDITS_PER_DROP).  Field clutter is held in check by mergeAmmoDrops,
+   * which consolidates adjacent same-type drops by summing their values
+   * onto a single survivor — total salvage conservation across the
+   * wave-cluster, single entity instead of many.
    */
-  public spawnAmmoDrop(
+  public spawnSalvageDrop(
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
-    _amount: number,
     parentVelocity?: Vector2,
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    // Base ammo drops always carry value 1 — the per-source amount
-    // parameter is intentionally ignored so an enemy/asteroid kill
-    // grants exactly one ammo regardless of historical AMMO_PER_*
-    // tunables.  Field clutter is held in check by mergeAmmoDrops,
-    // which consolidates adjacent ammo drops by summing their values
-    // onto a single survivor — total ammo conservation across the
-    // wave-cluster, single entity instead of many.
     const amount = 1;
     const drop = this.makeDropEntity(
-      nextId('drop_ammo'),
+      nextId('drop_salvage'),
       pos,
       parentVelocity,
-      AMMO_CONSTANTS.DROP_COLOR,
+      SALVAGE_CONSTANTS.DROP_COLOR,
       amount,
-      'ammo',
+      'salvage',
     );
-    drop.polygonPoints = this.generateShardPolygon('ammo', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
+    drop.polygonPoints = this.generateShardPolygon('salvage', Math.min(9, Math.max(4, 3.5 + amount * 0.2)));
     entities.push(drop);
     activeDrops.push(drop);
   }
 
   /**
-   * Consolidate adjacent ammo drops: any two ammo drops whose
-   * centres are within (rA + rB) world units fuse — the larger
+   * Consolidate adjacent same-type drops: any two drops of one type
+   * whose centres are within (rA + rB) world units fuse — the larger
    * absorbs the smaller's value and the smaller retires.  Cluster
-   * cases (5+ ammo drops from a wave of enemy deaths near each
+   * cases (5+ salvage drops from a wave of enemy deaths near each
    * other) collapse to a single entity carrying the summed value,
-   * holding total ammo constant while sharply cutting drop-entity
+   * holding total value constant while sharply cutting drop-entity
    * count.  Survivor's polygon + entity size regenerate from the
    * new value so the visual reads as "fatter pickup".
    *
    * O(N²) pairwise scan; activeDrops is bounded by DROP_CONFIG.MAX_
-   * ACTIVE_DROPS (64 today) so the worst case is a few thousand
+   * ACTIVE_DROPS (100 today) so the worst case is a few thousand
    * ops — negligible vs the broadphase passes.  Toroidal-correct
    * via wrapDeltaX/Y.  Inactive drops left for the next-step
    * compaction sweep to drop from the activeDrops cache.
@@ -1121,8 +1137,8 @@ export class DropSystem {
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
       // Generalized to any collectible drop (DROP_TYPES.collectible) — drops
-      // only fuse with their OWN type, so an ammo cluster and a health cluster
-      // each consolidate independently.
+      // only fuse with their OWN type, so a salvage cluster and a health
+      // cluster each consolidate independently.
       if (!a.active || !isCollectibleDrop(a)) continue;
       const aR = a.size.x * 0.5;
       for (let j = i + 1; j < activeDrops.length; j++) {
@@ -1154,7 +1170,7 @@ export class DropSystem {
           a.size.x = newR * 3;
           a.size.y = newR * 3;
           a.polygonPoints = this.generateShardPolygon(
-            a.dropType as 'ammo' | 'health',
+            a.dropType as 'ammo' | 'health' | 'salvage',
             Math.min(9, Math.max(4, 3.5 + a.dropValue * 0.2)),
           );
           b.active = false;
@@ -1255,7 +1271,7 @@ export class DropSystem {
     return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
   }
 
-  public generateShardPolygon(type: 'ammo' | 'health', baseR: number): Vector2[] {
+  public generateShardPolygon(type: 'ammo' | 'health' | 'salvage', baseR: number): Vector2[] {
     let numPoints: number;
     let radMin: number;
     let radMax: number;
@@ -1266,6 +1282,9 @@ export class DropSystem {
     } else if (type === 'health') {
       numPoints = 16;                                  // smooth red circle
       radMin = 1.0; radMax = 1.0; angleJitterScale = 0;
+    } else if (type === 'salvage') {
+      numPoints = 4 + Math.floor(Math.random() * 3);   // 4-6, chunky scrap nugget
+      radMin = 0.60; radMax = 1.20; angleJitterScale = 0.55;
     } else {
       numPoints = 5 + Math.floor(Math.random() * 2);   // 5-6, crystal
       radMin = 0.65; radMax = 1.15; angleJitterScale = 0.4;
@@ -1283,7 +1302,7 @@ export class DropSystem {
   /** Create a generic collectible-drop entity skeleton. */
   private makeDropEntity(
     id: string, pos: Vector2, pv: Vector2 | undefined,
-    color: string, value: number, dropType: 'ammo' | 'health',
+    color: string, value: number, dropType: 'ammo' | 'health' | 'salvage',
   ): GameEntity {
     const scatter = 20;
     const angle   = Math.random() * Math.PI * 2;

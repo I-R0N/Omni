@@ -80,7 +80,7 @@ engine/
     ProjectileSystem.ts   Projectile lifetime, homing, lightning gravity,
                           bouncer, pierce
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
-    DropSystem.ts         Ammo + health drop spawn / collection
+    DropSystem.ts         Salvage + health drop spawn / collection
     WaveSystem.ts         Completion-wave spawn scheduler + grace
                           timer + spawn geometry.  A wave ends only when
                           its full budget has spawned AND every spawned
@@ -92,7 +92,7 @@ engine/
     ShardSystem.types.ts  ShardVariantId / ShardVariantDef / merge schema
     NebulaSystem.ts       Slim nebula adapter: neighbour-count refresh,
                           shard→tile transmutation, regen-completion hook,
-                          ammo-drop roll
+                          salvage-drop roll
     FlowField.ts          Analytical flow vector (used at map-load asteroid
                           seeding only)
     FlowFieldGrid.ts      Baked enemy-pursuit grid + asteroid-flow field;
@@ -166,8 +166,8 @@ Per-frame `loop()`:
         catch check (collide/shoot per DBG toggle), wave-end on catch
         (the snitch entity persists across waves)
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
-        ammo-drop merge pass (`DropSystem.mergeAmmoDrops`; `dropMerge`
-        task)
+        same-type drop merge pass (`DropSystem.mergeAmmoDrops`;
+        `dropMerge` task)
      7. Player weapon tick + input
      8. Projectile lifetime tick
 3. Final `prepareFrameEntities()` after sim steps.
@@ -225,8 +225,9 @@ Notable existing field categories on `GameEntity`:
 - Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
   `targetEntityId`, `pierceCount`, `hitEntityIds`, `isBouncer`,
   `isLightningProjectile`, `isLightningArc`, `arcPoints`
-- Drop / reward: `dropType` (`'ammo' | 'health' | 'glass'`), `dropValue`,
-  `dropWeapon`, `powerupWeapon`, `ammoPickupFlash`, `ammo`,
+- Drop / reward: `dropType` (`'ammo' | 'health' | 'glass' | 'salvage'`),
+  `dropValue`, `dropWeapon`, `powerupWeapon`, `ammoPickupFlash`,
+  `salvagePickupFlash`, `ammo`,
   `dropComposition`. Note: `gold` exists on the player entity but is
   **not currently consumed** anywhere.
 - Shard family (tiles + shards): `shardVariant`
@@ -485,8 +486,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   every 4th wave (`POWERFUL_WAVE_INTERVAL`) the cards roll "powerful"
   variants worth +2/+3/+4 levels (`UpgradeCard.levels`).  Levels are
   UNCAPPED (`max` on `UpgradeDef` is a DBG-cycle bound only).  Salvage
-  (`GameEngine.credits`,
-  a spendable mirror of score earned 1:1 in `awardScore`) funds the
+  (`GameEngine.credits`, earned ONLY by collecting salvage drops — the
+  old 1:1 score mirror in `awardScore` is removed) funds the
   Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
   folds the run's `upgradeLevels` into the player's effective stats —
   maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
@@ -540,7 +541,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   inside PANIC_RADIUS (panic darts bias away from the player; a
   cooldown guarantees coast windows between them).  The whole ramp is
   scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Player ▸
-  "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`,
+  "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`
+  plus a spray of `SALVAGE_CONSTANTS.SNITCH_CATCH_DROPS` salvage drops
+  (score no longer mints credits, so the catch pays money physically),
   wipes every live enemy for `SNITCH_SWEEP_KILL_FRACTION` (half) of its
   normal kill value via the full death path, and ends the current wave
   via `WaveSystem.endWaveBySnitch` (no early-clear bonus on top); the
@@ -574,9 +577,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `systemsDisabled` flag so the weapon can't fire and the shield neither
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
-- `DROP_CONFIG`, `HEALTH_DROP_INTERVAL`, `ENEMY_AMMO_DROP`,
-  `ASTEROID_AMMO_PROGRESSION`, `AMMO_CONSTANTS`, `AMMO_DROP_PULL`
-  (mutual drop attraction + merge band)
+- `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
+  drop colour, snitch-catch spray size — includes the income arithmetic
+  behind the pricing), `DROP_CONFIG` (per-source salvage/health drop
+  chances + magnet/lifetime), `HEALTH_DROP_INTERVAL`, `AMMO_CONSTANTS`
+  (ammo POOL only — ammo drops no longer exist; pool dies in increment
+  1b), `AMMO_DROP_PULL` (mutual drop attraction + merge band, any
+  same-type collectible)
 - `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS` (per-task min/max
   interval, cost weight, auto curve; includes `rivalScan` — the
   cadenced rival target re-acquire + loot-vacuum, see §8),
@@ -742,8 +749,10 @@ button in `UIOverlay.tsx`.
   PLAYER-owned homing shots toward the nearest enemy (acquire range) and
   ENEMY-owned homing missiles (Turret) toward the player (no range gate) —
   so it takes the player entity as an argument.
-- **Drop types currently shipped: `'ammo'` and `'health'`** (collected by
-  the player). Both are collectible drops with the SAME physics — finite
+- **Drop types currently shipped: `'salvage'` and `'health'`** (collected
+  by the player; weapons-ammo pivot increment 1a — salvage replaced ammo
+  in EVERY drop source, and ammo drops no longer spawn anywhere).  Both
+  are collectible drops with the SAME physics — finite
   mass, scatter off the kill, asteroid-flow drift, player magnetisation,
   and same-type merge — and both are kept OUT of the dynamic collision grid,
   so projectiles/ships pass through them and they can't be shot or destroyed;
@@ -751,25 +760,43 @@ button in `UIOverlay.tsx`.
   "collectible" rule is centralized: `DROP_TYPES` (constants) is the
   per-drop-type registry and `isCollectibleDrop(e)` is the single predicate
   the cross-cutting sites (grid skip, flow-drift, merge) call — so a new drop
-  type is one registry row + its effect/render, not a hunt across systems. `'glass'` is a `dropType` value used internally for
-  shattered structure visuals; there is no fuel, gold-pickup, or
+  type is one registry row + its effect/render, not a hunt across systems.
+  `'glass'` is a `dropType` value used internally for
+  shattered structure visuals; `'ammo'` remains in the union/registry for
+  the ammo-pool machinery until increment 1b deletes the ammo system, but
+  nothing spawns it.  There is no fuel, gold-pickup, or
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
-- **Health drops mirror the ammo economy.** `spawnEnemyShards` rolls a
-  health drop INDEPENDENTLY at the same two chances as each ammo slot, so
-  enemy-kill pickups roughly double and split ~50/50 ammo/health (added
+- **Salvage is the money.** Collecting a salvage drop is the ONLY way to
+  earn `GameEngine.credits` — the old `awardScore` 1:1 score→Salvage
+  mirror is REMOVED (score stays the pure performance metric).  Each
+  collected unit pays `SALVAGE_CONSTANTS.CREDITS_PER_DROP` (conversion
+  happens once at collection; `dropValue` counts units so merges stay
+  value-conserving).  Pickup feedback: `player.salvagePickupFlash`
+  (accumulating "+N credits" window, same pattern as `ammoPickupFlash`)
+  → `EngineStats.salvageFlash` → the in-game HUD Salvage chip (silver,
+  under the score chip in `UIOverlay`; credits are on `EngineStats` every
+  frame, not just while paused).  Salvage renders as a silver scrap-glint
+  chunk (steel core, white glint rim) — deliberately NOT gold, because
+  gold "+N" popups mean score, which no longer pays money.  The rival
+  loot-vacuum steals salvage via the generic `isCollectibleDrop` path —
+  rivals literally steal money.  The snitch catch sprays
+  `SALVAGE_CONSTANTS.SNITCH_CATCH_DROPS` salvage on top of its score
+  payout.
+- **Health drops mirror the salvage economy.** `spawnEnemyShards` rolls a
+  health drop INDEPENDENTLY at the same two chances as each salvage slot, so
+  enemy-kill pickups roughly double and split ~50/50 salvage/health (added
   because the expanded roster hits harder). Each heals
   `DROP_CONFIG.HEALTH_PER_ENEMY` (merges sum it); the wave-clear milestone
   drop still heals `HEALTH_HEAL_AMOUNT`. Health drops render as a red
   circle shard (`generateShardPolygon('health')` is a 16-gon; RenderSystem
   drop-shard branch tints it red) — the old static glowing heart is gone.
-  Drops (ammo + health) are excluded from the minimap to avoid clutter.
-- **Ammo drops carry value 1 and merge.** `DropSystem.spawnAmmoDrop`
-  hard-forces value = 1 (the per-source `amount` argument and
-  `AMMO_PER_*` tunables are intentionally ignored). Nearby drops
-  mutually attract, damp, and fuse via `mergeAmmoDrops` (now generalized
-  to fuse any same-type collectible, ammo↔ammo / health↔health;
+  Drops (salvage + health) are excluded from the minimap to avoid clutter.
+- **Salvage drops carry value 1 and merge.** `DropSystem.spawnSalvageDrop`
+  always spawns value = 1 (no per-source amount). Nearby drops
+  mutually attract, damp, and fuse via `mergeAmmoDrops` (generalized
+  to fuse any same-type collectible, salvage↔salvage / health↔health;
   `AMMO_DROP_PULL`), conserving total value — a wave-kill cluster
   collapses into one fatter pickup. Non-magnetised drops also
   drift with the asteroid flow field.
@@ -818,7 +845,7 @@ button in `UIOverlay.tsx`.
   player/enemy, variant-driven shatter + regen-queue via
   `ShardSystem` for shard-family entities (gated by
   `SHARD_VARIANTS[v].shatter` / `.regen`), enemy-shard spawn for
-  enemies, ammo-drop roll via `NebulaSystem.handleDeath()` for nebula
+  enemies, salvage-drop roll via `NebulaSystem.handleDeath()` for nebula
   variants.  Drops are spawned by `spawnDrops(entity)` for shard-
   family STRUCTURE entities (and only when `suppressDrops` is unset
   and the variant isn't a nebula).

@@ -151,7 +151,10 @@ export type EnemyShape =
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
 // truth so a new drop type is one table entry, not a hunt across systems.
-export type DropType = 'ammo' | 'health' | 'glass';
+// 'salvage' is the money drop (credits on collection).  'ammo' remains in the
+// union for the ammo POOL machinery until increment 1b deletes the ammo
+// system — no site spawns an ammo DROP anymore.
+export type DropType = 'ammo' | 'health' | 'glass' | 'salvage';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
@@ -399,6 +402,12 @@ export interface GameEntity {
   // Shared-pool ammo-pickup flash: timer counts down from FLASH_DURATION → 0;
   // `amount` accumulates +N pickups inside the same flash window.
   ammoPickupFlash?: { timer: number; amount: number };
+
+  // Salvage-pickup flash — same accumulate-within-window pattern as
+  // ammoPickupFlash; `amount` is the CREDITS gained (units ×
+  // SALVAGE_CONSTANTS.CREDITS_PER_DROP).  Piped to the HUD Salvage chip
+  // via EngineStats.salvageFlash.
+  salvagePickupFlash?: { timer: number; amount: number };
 
   // Shared ammo pool — single currency consumed by every non-blaster weapon
   // at its per-weapon `ammoCost`.  Blaster is infinite and bypasses this pool.
@@ -1217,9 +1226,12 @@ export interface EngineStats {
   comboMultiplier?: number;
   comboCount?: number;
   comboFraction?: number;
-  /** Spendable Salvage currency (earns 1:1 with score; score stays the
-   *  permanent high-score).  Spent on upgrades / unlocks. */
+  /** Spendable Salvage currency — earned by COLLECTING salvage drops in the
+   *  field (score no longer mirrors into it).  Spent on upgrades / unlocks. */
   credits?: number;
+  /** Salvage-pickup flash for the HUD chip: credits gained in the current
+   *  flash window + remaining-window fraction for fade. */
+  salvageFlash?: { amount: number; fraction: number };
   /** Per-upgrade level snapshot for the DBG Upgrades panel. */
   upgrades?: { id: string; label: string; level: number; max: number }[];
   /** Pending between-wave upgrade-card choice (undefined when not
