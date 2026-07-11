@@ -2218,7 +2218,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
-    name: 'Pierce Beam',
+    name: 'Laser',
     cooldown: 0.40,    // 2.5 shots/s
     speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
@@ -2461,10 +2461,12 @@ export const UNLOCK_DEFS: readonly UnlockDef[] = [
   { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
   { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
   { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
-  // Player-facing name unified to "Pierce Beam" (pivot 1d) — the HUD and the
-  // Drydock used to disagree ("Pierce Beam" vs "Bouncer / Ricochet beams").
-  // Code identifiers (WeaponType.BOUNCER, isBouncer, …) are unchanged.
-  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Pierce Beam', desc: 'Piercing ricochet beams', cost: 40000 },
+  // Player-facing name unified to "Laser" (pivot 1d, user decision) — the HUD
+  // and the Drydock used to disagree ("Pierce Beam" vs "Bouncer / Ricochet
+  // beams"), and ricochet is planned to become a GENERAL projectile-vs-shield
+  // feature, so the name deliberately doesn't claim bouncing as this weapon's
+  // identity.  Code identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000 },
   { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
   { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
   { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
