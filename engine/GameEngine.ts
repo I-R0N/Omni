@@ -19,8 +19,8 @@ import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, UpgradeCard, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, UPGRADE_CARD_CONSTANTS, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, upgradeCost, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -138,19 +138,9 @@ export class GameEngine {
       hull: 0, plating: 0, capacitor: 0, engine: 0,
       thrusters: 0, gunnery: 0, autoloader: 0,
   };
-  // Between-wave upgrade-card choice.  When `cardChoicePending` is set the
-  // sim pauses and the UI shows `pendingCards`; picking one applies it and
-  // resumes.  Offered every `cardWaveInterval` waves (DBG-cyclable).
-  private cardChoicePending: boolean = false;
-  private pendingCards: UpgradeCard[] = [];
-  private cardWaveInterval: number = UPGRADE_CARD_CONSTANTS.DEFAULT_WAVE_INTERVAL;
-  // Short delay after a wave clears before the card modal opens, so the
-  // celebration animation plays first.  0 = nothing pending.
-  private cardOpenDelaySec: number = 0;
-  private pendingCardWaveNum: number = 0;
   // ── Unlocks ─────────────────────────────────────────────────────────────
   // The run starts LEAN: Blaster only, no shield, no charged shots.  Bought
-  // in the Drydock (Salvage) or, rarely, granted free via a card.  Synced to
+  // in the Drydock (Salvage).  Synced to
   // the player entity (ownedWeapons / overchargeUnlocked) for WeaponSystem.
   private unlockedWeapons: Set<WeaponType> = new Set([WeaponType.BLASTER]);
   // 2-slot equip loadout (pivot 1b).  Exactly 2 entries; null = empty slot.
@@ -1373,8 +1363,6 @@ export class GameEngine {
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
       upgrades: this.upgradeSnapshot(),
-      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
-      cardInterval: this.cardWaveInterval,
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1503,10 +1491,6 @@ export class GameEngine {
       this.credits = 0;
       this.resetUnlocks(); // back to lean (Blaster only, no shield/overcharge)
       this.resetUpgrades();
-      this.cardChoicePending = false;
-      this.pendingCards = [];
-      this.cardOpenDelaySec = 0;
-      this.pendingCardWaveNum = 0;
 
       // Reset Player
       this.player.position = { x: 0, y: 0 };
@@ -1627,8 +1611,6 @@ export class GameEngine {
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
       upgrades: this.upgradeSnapshot(),
-      cardChoice: this.cardChoicePending ? this.pendingCards : undefined,
-      cardInterval: this.cardWaveInterval,
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1721,15 +1703,6 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
-        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
-        this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
-        return;
-    }
-
-    // Between-wave card choice freezes the sim (the field stays drawn
-    // behind the React card overlay) until the player picks.
-    if (this.cardChoicePending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2487,16 +2460,6 @@ export class GameEngine {
     // Player status effects (corrosion DoT, …) tick before the death check.
     this.tickStatusEffects(dt);
 
-    // Deferred card-modal open — fires once the wave-clear celebration
-    // beat has elapsed (the modal then pauses the sim).
-    if (this.cardOpenDelaySec > 0) {
-        this.cardOpenDelaySec -= dt;
-        if (this.cardOpenDelaySec <= 0 && !this.cardChoicePending) {
-            this.openCardChoice(this.pendingCardWaveNum);
-            this.pendingCardWaveNum = 0;
-        }
-    }
-
     // Update Shake.  Mutate shakeOffset in place rather than replacing the
     // object — the field is read by reference downstream and a fresh object
     // every active-shake frame is wasted GC pressure.
@@ -3249,7 +3212,7 @@ export class GameEngine {
       return def.weapon !== undefined && this.unlockedWeapons.has(def.weapon);
   }
 
-  /** Grant an unlock (free path: cards / DBG; the shop deducts first). */
+  /** Grant an unlock (free path: DBG; the shop deducts first). */
   private applyUnlock(def: UnlockDef) {
       if (def.kind === 'shield') {
           this.shieldUnlocked = true;
@@ -3272,8 +3235,7 @@ export class GameEngine {
       }
   }
 
-  /** Buy a one-time unlock with Salvage.  (Stat upgrades are NOT sold here
-   *  — they come exclusively from wave-completion cards.) */
+  /** Buy a one-time unlock (Module) with Salvage. */
   public purchaseUnlock(id: string): boolean {
       const def = UNLOCK_DEFS.find(d => d.id === id);
       if (!def || this.isUnlockOwned(def) || this.credits < def.cost) return false;
@@ -3306,14 +3268,43 @@ export class GameEngine {
   public debugResetUnlocks() { this.resetUnlocks(); this.applyUpgrades(); }
 
   /** Drydock catalog snapshot for the player menu (built only while paused).
-   *  Unlocks only — stat upgrades are card-only. */
+   *  Modules (one-time unlocks) + Augments (per-level stat upgrades priced
+   *  by the escalating upgradeCost() curve — purchase-only progression,
+   *  pivot 1c).  A shield-dependent augment (Plating / Capacitor) is shown
+   *  LOCKED until the Shield module is owned — visible so the dependency
+   *  reads as shop ordering, not filtered away (the old card-eligibility
+   *  machinery died with the cards). */
   private shopSnapshot() {
       return {
           unlocks: UNLOCK_DEFS.map(d => {
               const owned = this.isUnlockOwned(d);
               return { id: d.id, label: d.label, desc: d.desc, owned, cost: d.cost, affordable: !owned && this.credits >= d.cost };
           }),
+          augments: UPGRADE_DEFS.map(d => {
+              const level = this.upgradeLevels[d.id];
+              const cost = upgradeCost(d.id, level);
+              const locked = d.requires === 'shield' && !this.shieldUnlocked;
+              return {
+                  id: d.id as string, label: d.label, desc: d.desc, level, cost,
+                  locked,
+                  affordable: !locked && this.credits >= cost,
+              };
+          }),
       };
+  }
+
+  /** Buy one level of a stat upgrade (Augment) with Salvage.  Locked
+   *  augments (shield-dependent, Shield not owned) can't be bought. */
+  public purchaseUpgrade(id: string): boolean {
+      const def = UPGRADE_DEFS.find(d => d.id === id);
+      if (!def) return false;
+      if (def.requires === 'shield' && !this.shieldUnlocked) return false;
+      const cost = upgradeCost(def.id, this.upgradeLevels[def.id]);
+      if (this.credits < cost) return false;
+      this.credits -= cost;
+      this.upgradeLevels[def.id] += 1; // uncapped, like the cards were
+      this.applyUpgrades();
+      return true;
   }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
@@ -4699,7 +4690,7 @@ export class GameEngine {
     this.awardScore(bonus, this.player.position);
 
     // Wave-clear celebration — gold for a snitch catch, green for a
-    // clear-the-field win.  Plays before the card modal (see the delay).
+    // clear-the-field win.
     this.playWaveClearCelebration(bySnitch);
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
@@ -4715,12 +4706,19 @@ export class GameEngine {
       this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
     }
 
-    // Between-wave upgrade card offer — every `cardWaveInterval` waves.
-    // Deferred by CARD_OPEN_DELAY_SEC so the celebration plays first; the
-    // tick in updateGameLogic opens the (sim-pausing) modal when it fires.
-    if ((clearedIndex + 1) % this.cardWaveInterval === 0) {
-      this.pendingCardWaveNum = clearedIndex + 1;
-      this.cardOpenDelaySec = UPGRADE_CARD_CONSTANTS.CARD_OPEN_DELAY_SEC;
+    // Wave-clear reward beat (pivot 1c): the upgrade cards are gone, so the
+    // clear pays a salvage burst instead — physical drops beside the player
+    // (they converge/merge like any salvage).  Sized in SALVAGE_CONSTANTS
+    // against the per-wave income arithmetic; the early-clear SPEED bonus
+    // above stays score-only.  This spray + the grace timer is the
+    // between-wave breather now that the card modal no longer pauses the sim.
+    for (let i = 0; i < SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 40 + Math.random() * 80;
+      this.spawnSalvageDrop({
+        x: this.player.position.x + Math.cos(a) * d,
+        y: this.player.position.y + Math.sin(a) * d,
+      });
     }
   };
 
@@ -4742,107 +4740,6 @@ export class GameEngine {
       lifetimeMin: 0.4, lifetimeMax: 0.8,
     });
     this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
-  }
-
-  // ── Between-wave upgrade cards ──────────────────────────────────────────
-
-  /** Build the card set for the wave that just cleared and pause for the
-   *  player's pick.  Pool = stat-upgrade cards (a free level of a not-maxed
-   *  upgrade) + occasional Salvage cards; all-maxed falls back to Salvage. */
-  private openCardChoice(waveNumber: number) {
-    const { CARD_COUNT, SALVAGE_CARD_CHANCE, SALVAGE_CARD_BASE, SALVAGE_CARD_PER_WAVE } = UPGRADE_CARD_CONSTANTS;
-    const salvageCard = (): UpgradeCard => {
-      const amount = SALVAGE_CARD_BASE + SALVAGE_CARD_PER_WAVE * waveNumber;
-      return { kind: 'salvage', label: 'Salvage Cache', desc: `+${amount} Salvage`, amount, rarity: 'common' };
-    };
-    // Offer only AUGMENTS whose dependency MODULE is installed — never a
-    // card for a system the player can't use yet (e.g. shield Plating /
-    // Capacitor before the Shield module, or Magazine with only the
-    // Blaster).  Levels are uncapped, so all eligible stay offerable.
-    const pool = UPGRADE_DEFS.filter(d => this.augmentEligible(d));
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    // Every Nth wave the stat cards are "powerful" — each grants a random
-    // 2–4 levels at once (and renders with the rare accent).
-    const { POWERFUL_WAVE_INTERVAL, POWERFUL_MIN_LEVELS, POWERFUL_MAX_LEVELS } = UPGRADE_CARD_CONSTANTS;
-    const powerful = waveNumber % POWERFUL_WAVE_INTERVAL === 0;
-    const cards: UpgradeCard[] = [];
-    for (let i = 0; i < CARD_COUNT; i++) {
-      const def = pool[i];
-      if (def) {
-        const levels = powerful
-          ? POWERFUL_MIN_LEVELS + ((Math.random() * (POWERFUL_MAX_LEVELS - POWERFUL_MIN_LEVELS + 1)) | 0)
-          : 1;
-        const next = this.upgradeLevels[def.id] + levels;
-        const tag = levels > 1 ? ` ×${levels}` : '';
-        cards.push({
-          kind: 'stat', label: def.label, desc: `${def.desc}${tag}  (→ Lv ${next})`,
-          id: def.id, levels, rarity: powerful ? 'rare' : 'common',
-        });
-      } else {
-        cards.push(salvageCard());
-      }
-    }
-    // Chance to swap one stat card for a Salvage card for variety.
-    if (cards.length === CARD_COUNT && cards.some(c => c.kind === 'stat') && Math.random() < SALVAGE_CARD_CHANCE) {
-      const statIdxs = cards.map((c, i) => c.kind === 'stat' ? i : -1).filter(i => i >= 0);
-      cards[statIdxs[(Math.random() * statIdxs.length) | 0]] = salvageCard();
-    }
-    // Rarely, offer a FREE unlock card (if anything's still unowned).
-    const notOwned = UNLOCK_DEFS.filter(d => !this.isUnlockOwned(d));
-    if (notOwned.length > 0 && Math.random() < UPGRADE_CARD_CONSTANTS.UNLOCK_CARD_CHANCE) {
-      const u = notOwned[(Math.random() * notOwned.length) | 0];
-      cards[(Math.random() * cards.length) | 0] = {
-        kind: 'unlock', label: u.label, desc: `Module — ${u.desc}`, id: u.id, rarity: 'rare',
-      };
-    }
-    this.pendingCards = cards;
-    this.cardChoicePending = true;
-  }
-
-  /** Whether an augment card may be offered — gated on its dependency
-   *  module so the player is never shown a card for a system they lack. */
-  private augmentEligible(d: { requires?: 'shield' | 'anyWeapon' }): boolean {
-    if (d.requires === 'shield') return this.shieldUnlocked;
-    if (d.requires === 'anyWeapon') return this.unlockedWeapons.size > 1; // > Blaster
-    return true;
-  }
-
-  /** Apply the chosen card and resume play.  Called from the UI. */
-  public selectUpgradeCard(index: number) {
-    if (!this.cardChoicePending) return;
-    const card = this.pendingCards[index];
-    if (card) {
-      if (card.kind === 'stat' && card.id) {
-        const id = card.id as UpgradeId;
-        if (this.upgradeLevels[id] !== undefined) {
-          this.upgradeLevels[id] += card.levels ?? 1; // uncapped; powerful cards grant 2–4
-          this.applyUpgrades();
-        }
-      } else if (card.kind === 'salvage') {
-        this.credits += card.amount ?? 0;
-      } else if (card.kind === 'unlock' && card.id) {
-        const def = UNLOCK_DEFS.find(d => d.id === card.id);
-        if (def && !this.isUnlockOwned(def)) this.applyUnlock(def); // free (no cost)
-      }
-    }
-    this.cardChoicePending = false;
-    this.pendingCards = [];
-  }
-
-  /** DBG: cycle the card-offer wave interval (1 → 2 → 3 → 5 → 1). */
-  public cycleCardInterval() {
-    const cyc = UPGRADE_CARD_CONSTANTS.WAVE_INTERVAL_CYCLE;
-    const i = cyc.indexOf(this.cardWaveInterval as 1 | 2 | 4 | 8);
-    this.cardWaveInterval = cyc[(i + 1) % cyc.length];
-  }
-
-  /** DBG: force a card choice right now (uses the live wave number). */
-  public debugTriggerCardChoice() {
-    if (this.cardChoicePending) return;
-    this.openCardChoice(this.waveIndex + 1);
   }
 
   // ── Snitch — quidditch-style bonus target ───────────────────────────────

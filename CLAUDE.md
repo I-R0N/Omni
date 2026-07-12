@@ -498,53 +498,49 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `UPGRADE_DEFS` / `UPGRADE_EFFECTS` (`UpgradeId`) — in-run progression
   spine.  7 leveled stat upgrades (hull / plating / capacitor / engine /
   thrusters / gunnery / autoloader — Magazine died with the ammo system,
-  1b) earned ONLY from
-  wave-completion cards (every wave); a normal card grants 1 level, and
-  every 4th wave (`POWERFUL_WAVE_INTERVAL`) the cards roll "powerful"
-  variants worth +2/+3/+4 levels (`UpgradeCard.levels`).  Levels are
-  UNCAPPED (`max` on `UpgradeDef` is a DBG-cycle bound only).  Salvage
-  (`GameEngine.credits`, earned ONLY by collecting salvage drops — the
-  old 1:1 score mirror in `awardScore` is removed) funds the
-  Drydock UNLOCKS, not these.  `GameEngine.applyUpgrades`
-  folds the run's `upgradeLevels` into the player's effective stats —
-  maxHealth, maxShield, `shieldRechargeRate`, `damageMult` (read in
-  WeaponSystem), `cooldownMult` (WeaponSystem), plus speed/accel via
-  `upgradeSpeedMult()`/`upgradeThrustMult()`
+  1b).  PURCHASE-ONLY progression (pivot 1c): levels are BOUGHT in the
+  Drydock (`GameEngine.purchaseUpgrade`) at the escalating
+  `upgradeCost()` curve — the free wave-completion cards, the "powerful"
+  card variants, and the free-unlock lottery are all REMOVED (there is
+  no card modal, no sim-pause between waves, no `UpgradeCard` type).
+  Levels are UNCAPPED (`max` on `UpgradeDef` is a DBG-cycle bound only).
+  Salvage (`GameEngine.credits`, earned ONLY by collecting salvage
+  drops — the old 1:1 score mirror in `awardScore` is removed) funds
+  BOTH the stat levels and the Drydock unlocks now.
+  `GameEngine.applyUpgrades` folds the run's `upgradeLevels` into the
+  player's effective stats — maxHealth, maxShield, `shieldRechargeRate`,
+  `damageMult` (read in WeaponSystem), `cooldownMult` (WeaponSystem),
+  plus speed/accel via `upgradeSpeedMult()`/`upgradeThrustMult()`
   multiplied into the movement line.  At all-zero the game is identical
   to before; all reset per run in `resetAndLoadSelectedMap`.  Surfaced +
   testable via the DBG **Upgrades** panel (per-stat level cycle, +1k
   Salvage, Max-all, Reset; `EngineStats.upgrades` / `.credits`).
-  PLAYER-FACING TERMS: stat-upgrade cards are **Augments**, the one-time
-  unlocks are **Modules**.  An augment with a `requires` (shield /
-  anyWeapon) is withheld from the card pool (`GameEngine.augmentEligible`)
-  until its module is installed — never offer a card for a system the
-  player can't use (Plating/Capacitor need Shield).
-- `UNLOCK_DEFS` / `upgradeCost()` — one-time run unlocks + the stat-
-  upgrade Salvage cost curve.  The run starts LEAN (Blaster only, no
-  shield, no charged shots); unlocks (Shield, Overcharge, the 6
-  non-Blaster weapons) are bought in the **Drydock** (a shop section in
-  the player menu, `GameEngine.purchaseUnlock` spending `credits`) or,
-  rarely, granted free via an `'unlock'` card.  The Drydock sells
-  ONLY these unlocks — the 8 stat upgrades come exclusively from
-  wave-completion cards.
+  PLAYER-FACING TERMS: stat upgrades are **Augments**, the one-time
+  unlocks are **Modules**.  A `requires: 'shield'` augment (Plating /
+  Capacitor) is shown LOCKED in the shop until the Shield module is
+  owned — visible so the dependency reads as shop ordering (the old
+  card-eligibility filter, `augmentEligible`, died with the cards).
+- `UNLOCK_DEFS` / `UPGRADE_COST` / `upgradeCost(id, level)` — one-time
+  run unlocks + the REAL stat-upgrade Salvage cost curve (geometric,
+  ~1.45×/level; Gunnery 1.5×, Autoloader steepest at 1.6× — it's the
+  premium weapon stat post-ammo; Hull/Plating cheapest at 4k base).
+  The run starts LEAN (Blaster only, no shield, no charged shots);
+  unlocks (Shield, Overcharge, the 6 non-Blaster weapons) are bought in
+  the **Drydock** (a shop section in the player menu,
+  `GameEngine.purchaseUnlock` spending `credits`).
   Unlock state lives on `GameEngine` (`unlockedWeapons` / `shieldUnlocked`
   / `overchargeUnlocked`), synced to the player entity
   (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon
   cycle/select + charged shots; `applyUpgrades` gates `maxShield` to 0
-  until Shield is owned.  `EngineStats.shop` / `.unlocks` (built only
-  while paused) drive the player-menu Drydock + Unlocks panels; DBG
-  "Unlock all" / "Relock" cover testing.  NOTE: per-wave enemy stat
-  scaling is still a planned increment.
-- `UPGRADE_CARD_CONSTANTS` — free between-wave upgrade-card pick.  Every
-  `cardWaveInterval` waves (DBG "Card int", default 1) `handleWaveCleared`
-  calls `GameEngine.openCardChoice`, which pauses the sim
-  (`cardChoicePending` short-circuits the loop's accumulator) and offers
-  `CARD_COUNT` cards (`UpgradeCard[]` on `EngineStats.cardChoice`).  Pool
-  today: stat-upgrade cards (a free level of a not-maxed `UPGRADE_DEFS`
-  entry) + occasional Salvage cards; the `'unlock'` card kind is reserved
-  for the weapons/shield/overcharge unlocks (next).  `selectUpgradeCard`
-  applies the pick and resumes.  Modal lives in `UIOverlay`
-  (`stats.cardChoice`); DBG "Test cards" force-triggers a choice.
+  until Shield is owned.  `EngineStats.shop` (`.unlocks` Modules +
+  `.augments` per-level stat prices, built only while paused) drives the
+  player-menu Drydock panels; DBG "Unlock all" / "Relock" cover testing.
+  NOTE: per-wave enemy stat scaling is still a planned increment.
+- Wave-clear reward beat (pivot 1c): with the cards gone,
+  `handleWaveCleared` sprays `SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS`
+  salvage drops beside the player on every clear (alongside the
+  milestone health drop); the early-clear SPEED bonus stays score-only.
+  The grace timer + this spray is the between-wave breather now.
 - `SNITCH_CONSTANTS` — golden-comet snitch that PERSISTS across waves
   (one keeps flying until caught): a non-drop INTERACTABLE (`isSnitch`)
   riding the asteroid flow field with a sinusoidal weave and a
@@ -594,7 +590,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
-  drop colour, snitch-catch spray size — includes the income arithmetic
+  drop colour, snitch-catch + wave-clear spray sizes — includes the
+  income arithmetic
   behind the pricing), `DROP_CONFIG` (per-source salvage/health drop
   chances + magnet/lifetime), `HEALTH_DROP_INTERVAL`, `DROP_PULL`
   (mutual drop attraction + merge band, any same-type collectible)

@@ -2392,11 +2392,12 @@ export const SCORE_CONSTANTS = {
 // ── Progression: leveled stat upgrades ───────────────────────────────────────
 // In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
 // (every wave); a normal card grants 1 level, and every 4th wave the cards roll
-// "powerful" variants that grant +2/+3/+4 levels at once.  Levels are UNCAPPED
-// (a focused build can stack a stat as high as picks allow).  GameEngine
-// .applyUpgrades folds the run's `upgradeLevels` into the player's effective
-// stats.  Unlocks (weapons / shield / overcharge) are the separate Salvage→
-// Drydock module economy.
+// Levels are UNCAPPED (a focused build can stack a stat as high as Salvage
+// allows).  GameEngine.applyUpgrades folds the run's `upgradeLevels` into the
+// player's effective stats.  Purchase-only progression (pivot 1c): levels are
+// BOUGHT in the Drydock at the escalating upgradeCost() curve — the free
+// wave-completion cards are gone.  Unlocks (weapons / shield / overcharge)
+// are the same shop's one-time Modules.
 // (Magazine died with the ammo system, pivot 1b — 7 stat upgrades remain.
 // Autoloader is now the premium weapon stat; its purchase-price curve should
 // be the steepest when purchase-only progression lands in 1c.)
@@ -2409,8 +2410,8 @@ export interface UpgradeDef {
   label: string;   // DBG / card / menu label
   desc: string;    // one-line effect of one card (= one level)
   max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
-  // Dependency on a major MODULE — the card is withheld from the pool until
-  // the module is installed (otherwise the augment would do nothing):
+  // Dependency on a major MODULE — shown LOCKED in the shop until the
+  // module is installed (otherwise the augment would do nothing):
   //   'shield' → needs the Shield module (Plating / Capacitor)
   requires?: 'shield';
 }
@@ -2427,8 +2428,8 @@ export const UPGRADE_DEFS: readonly UpgradeDef[] = [
 
 // ── One-time unlocks ──────────────────────────────────────────────────────────
 // The run starts LEAN — Blaster only, no shield, no charged shots.  These
-// unlocks are bought in the Drydock (Salvage) or, rarely, offered as a free
-// card.  Weapon unlocks map to a WeaponType; shield + overcharge are flags.
+// unlocks are bought in the Drydock (Salvage).  Weapon unlocks map to a
+// WeaponType; shield + overcharge are flags.
 export interface UnlockDef {
   id: string;
   kind: 'shield' | 'overcharge' | 'weapon';
@@ -2469,30 +2470,39 @@ export const UPGRADE_EFFECTS = {
   AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
 };
 
-// ── Between-wave upgrade cards ────────────────────────────────────────────────
-// After every Nth wave (WAVE_INTERVAL, DBG-cyclable) the game pauses and offers
-// a free choice of CARD_COUNT cards.  Pool today: stat-upgrade cards (a free
-// level of one of the UPGRADE_DEFS) + occasional Salvage cards.  Unlock cards
-// (weapons / shield / overcharge) plug into the same pool once unlocks ship.
-export const UPGRADE_CARD_CONSTANTS = {
-  CARD_COUNT: 3,
-  DEFAULT_WAVE_INTERVAL: 1,             // a card every wave
-  WAVE_INTERVAL_CYCLE: [1, 2, 4, 8] as const,
-  // Every Nth wave the offered cards are "powerful" — each grants a random
-  // POWERFUL_MIN..POWERFUL_MAX levels instead of 1.
-  POWERFUL_WAVE_INTERVAL: 4,
-  POWERFUL_MIN_LEVELS: 2,
-  POWERFUL_MAX_LEVELS: 4,
-  SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
-  SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
-  SALVAGE_CARD_PER_WAVE: 75,
-  // Beat between a wave clearing and the card modal opening, so the
-  // wave-clear celebration animation plays before the sim pauses.
-  CARD_OPEN_DELAY_SEC: 1.1,
-  // Chance one of the offered cards is a free (rare) unlock, when any
-  // unlock is still unowned.
-  UNLOCK_CARD_CHANCE: 0.18,
+// ── Stat-upgrade (Augment) pricing — purchase-only progression (pivot 1c) ────
+// upgradeCost(id, level) = next-level price when the stat sits at `level`.
+// Per-level escalating geometric curve; tuned against the 1a salvage income
+// (≈ 8-13 units ≈ 8k-13k credits per early wave with the clear spray):
+//   - Hull / Plating cheapest (defensive comfort, ~half a wave for L1)
+//   - Autoloader steepest — it's the premium weapon stat post-ammo (fire
+//     cadence is the only in-combat brake left)
+// L1 prices sit below the first weapon (Burst 25k) so "a stat level or two"
+// slots naturally between weapon purchases (WEAPONS_AMMO_PLAN §5 order:
+// first weapon → Shield → stat levels → second weapon → Overcharge → depth).
+// Numbers provisional pending playtest.
+export const UPGRADE_COST: {
+  BASE: Record<UpgradeId, number>;
+  RATIO: Record<UpgradeId, number>;
+} = {
+  BASE: {
+    hull: 4000, plating: 4000, capacitor: 5000,
+    engine: 6000, thrusters: 6000, gunnery: 8000,
+    autoloader: 10000,
+  },
+  RATIO: {
+    hull: 1.45, plating: 1.45, capacitor: 1.45,
+    engine: 1.45, thrusters: 1.45, gunnery: 1.5,
+    autoloader: 1.6,
+  },
 };
+
+/** Salvage price of the NEXT level of `id` when the stat currently sits at
+ *  `level` (geometric; rounded to a clean 100). */
+export function upgradeCost(id: UpgradeId, level: number): number {
+  const raw = UPGRADE_COST.BASE[id] * Math.pow(UPGRADE_COST.RATIO[id], level);
+  return Math.round(raw / 100) * 100;
+}
 
 // ── Timed-wave config ────────────────────────────────────────────────────────
 // Waves are timed windows: enemies stream in continuously until the clock
@@ -2686,6 +2696,12 @@ export const SALVAGE_CONSTANTS = {
   // credits, so the catch also sprays this many salvage units (≈ a wave-and-
   // a-half of combat income — it's the biggest chase reward in the game).
   SNITCH_CATCH_DROPS: 8,
+  // Wave-clear reward beat (pivot 1c — replaced the free upgrade cards):
+  // every wave clear sprays this many salvage units beside the player.
+  // Sizing: combat income runs ≈ 4.8-7.2 units/wave (0.8 × budget), so +3
+  // is a noticeable ~50% early-wave topper without dwarfing the fighting
+  // itself.  The early-clear SPEED bonus stays score-only.
+  WAVE_CLEAR_DROPS: 3,
 };
 
 export const DROP_CONFIG = {

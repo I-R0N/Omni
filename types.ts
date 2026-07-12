@@ -1223,12 +1223,6 @@ export interface EngineStats {
   salvageFlash?: { amount: number; fraction: number };
   /** Per-upgrade level snapshot for the DBG Upgrades panel. */
   upgrades?: { id: string; label: string; level: number; max: number }[];
-  /** Pending between-wave upgrade-card choice (undefined when not
-   *  choosing).  The sim is paused while this is set; the player picks
-   *  one card to apply. */
-  cardChoice?: UpgradeCard[];
-  /** Wave interval between card offers (DBG-cyclable; 1 = every wave). */
-  cardInterval?: number;
   /** Effective player stats for the player menu (pause screen). */
   playerStats?: {
     health: number; maxHealth: number;
@@ -1244,10 +1238,14 @@ export interface EngineStats {
     slots: ({ id: string; name: string } | null)[];
     owned: { id: string; name: string }[];
   };
-  /** Drydock shop catalog (populated only while paused).  Unlocks only —
-   *  stat upgrades come exclusively from wave-completion cards. */
+  /** Drydock shop catalog (populated only while paused).  `unlocks` are the
+   *  one-time Modules; `augments` are per-level stat upgrades priced by the
+   *  escalating upgradeCost() curve (purchase-only progression, pivot 1c).
+   *  A `locked` augment (shield-dependent, Shield not owned) renders
+   *  visible-but-locked so the dependency reads as shop ordering. */
   shop?: {
     unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
+    augments: { id: string; label: string; desc: string; level: number; cost: number; affordable: boolean; locked: boolean }[];
   };
   debugMode?: boolean;
   trailShape?: TrailShape;
@@ -1466,19 +1464,8 @@ export interface DamageText {
   fontScale?: number;
 }
 
-// One option in a between-wave upgrade-card choice.  `kind` discriminates
-// the payload: 'stat' bumps an upgrade level (`id`), 'salvage' grants
-// currency (`amount`).  'unlock' is reserved for the weapons/shield/
-// overcharge unlocks (built next) — the card pool is already shaped for it.
-export interface UpgradeCard {
-  kind: 'stat' | 'salvage' | 'unlock';
-  label: string;
-  desc: string;
-  id?: string;       // upgrade id (stat) or unlock id
-  amount?: number;   // salvage granted
-  levels?: number;   // stat-card level grant (1 normal; 2–4 on powerful waves)
-  rarity?: 'common' | 'rare';
-}
+// (The between-wave UpgradeCard choice was removed in pivot 1c — all
+// progression is purchased in the Drydock now.)
 
 // Full-screen wave announcement banner rendered on the canvas.
 export interface WaveAnnouncement {
