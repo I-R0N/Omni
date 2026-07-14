@@ -1191,6 +1191,49 @@ k. After N waves, spawn a portal to a new map.
        tuning time. CLAUDE.md discrepancies found in the
        audit (doc §1.4) go to the punch list.
 
+38. **Economy-pivot increments 1a–1d SHIPPED (PR #72,
+    2026-07-12).** All four on one PR (one commit each),
+    reviewed against the briefs pre-merge — clean: every
+    fence held (Burst/Cannon/Blaster/Shotgun untouched, no
+    station code, no enemy scaling), ammo survives only as
+    comments, build + headless smokes green. Implementation
+    decisions made in-session (recorded in the PR body):
+    a. **"Laser"** is the unified player-facing name for
+       WeaponType.BOUNCER (user pick — ricochet may later
+       generalize to a projectile-vs-shield feature, so the
+       weapon shouldn't claim "Bouncer" as identity). Code
+       identifiers unchanged. Supersedes WEAPONS_AMMO_PLAN
+       §3's "pick Pierce Beam or Bouncer".
+    b. Salvage renders **silver scrap-glint**, deliberately
+       NOT gold — gold "+N" popups mean score, which no
+       longer pays money.
+    c. Laser rebalance took the **cooldown lever**
+       (0.40→0.55), not per-beam damage — same axis as
+       Lightning (0.50→0.65), prices the spam free ammo
+       used to tax.
+    d. First-pass economy numbers (all provisional pending
+       playtest): CREDITS_PER_SALVAGE=1000; wave-clear spray
+       3 salvage; snitch catch sprays 8; upgradeCost() =
+       base × ratio^level (Hull/Plating 4k@1.45× …
+       Autoloader 10k@1.6× steepest). Arithmetic puts the
+       first weapon at wave 2–3 (§5 target met) and the §5
+       purchase order holds.
+    e. Small additions beyond brief, accepted: buying a
+       weapon auto-equips into the first empty slot;
+       Plating/Capacitor render visible-but-locked
+       ("🔒 SHIELD") until Shield is owned; renames
+       AMMO_DROP_PULL→DROP_PULL, mergeAmmoDrops→mergeDrops.
+    f. **Playtest watches** (flagged, unchanged): pacing
+       without the card breather (grace timer + clear spray
+       is the beat now); Overcharge+Cannon free-AoE ceiling
+       (lever = charged cooldown, never a resource);
+       absolute prices/income scale.
+    g. Nit for the punch list: stale ShardSystem.ts comment
+       still says "Ammo drops" where it means collectible
+       drops generally.
+    Next: 1e station-poi in a breakout session (separate
+    PR), then (h) bosses.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1349,22 +1392,16 @@ observes the three strategy guardrails (decision #36e).
    2026-07-11; decision #37). Deliverable `docs/WEAPONS_AMMO_PLAN.md`;
    economy pivot adopted; scope flags ruled (station-poi accepted,
    waves-to-nodes deferred to the Overworld plan).
-1. **Economy-pivot increments** (from WEAPONS_AMMO_PLAN §8; sequential,
-   each a single session):
-   - 1a. **salvage-drops** — `'salvage'` DropType + effect + render,
-     replacing the ammo roll at every source; remove the `awardScore`
-     1:1 Salvage mirror. Health drops untouched. Small.
-   - 1b. **ammo-removal + loadout-2** — delete the ammo system (pool,
-     costs, HUD strip, gating, dry-fallback, Magazine augment); add the
-     2-slot equip loadout; HUD → 2 slots + charge ring; the doc-§3
-     Bouncer/Lightning cooldown compensation lands in the SAME PR.
-     Interim: loadout swap in the pause-menu Drydock. Medium.
-   - 1c. **purchase-only-progression** — remove upgrade cards + the
-     free-unlock lottery; real per-level `upgradeCost()` curve
-     (Autoloader steepest); keep a wave-clear salvage bonus as the
-     reward beat. Small-medium.
-   - 1d. **weapon-identity-tuning** — doc-§3 increments + Pierce
-     Beam/Bouncer naming unification. Small.
+1. **Economy-pivot increments** (from WEAPONS_AMMO_PLAN §8):
+   - ~~1a. **salvage-drops**~~ — **DONE** (PR #72, decision #38).
+   - ~~1b. **ammo-removal + loadout-2**~~ — **DONE** (PR #72). Ammo
+     deleted; 2-slot loadout; Laser/Lightning cooldown compensation
+     landed same-PR per the §8 rule.
+   - ~~1c. **purchase-only-progression**~~ — **DONE** (PR #72). Cards
+     + lottery removed; real `upgradeCost()` curve; wave-clear salvage
+     spray is the reward beat.
+   - ~~1d. **weapon-identity-tuning**~~ — **DONE** (PR #72). Seeker
+     6→8; player-facing name unified to **"Laser"** (decision #38a).
    - 1e. **station-poi** — station entity at map center; dock
      interaction; shop UI relocates out of the pause menu; hull repair
      + station-only loadout swap. MUST define the mid-wave docking rule
@@ -1477,17 +1514,18 @@ These are not full tasks — fold into a relevant PR when convenient.
       variant ids in §4). **Done in the branch-review punch-list
       pass** — §4 field categories, §5 constant blocks, §8
       conventions all refreshed.
-- [ ] CLAUDE.md discrepancies found by the weapons-ammo audit
-      (`docs/WEAPONS_AMMO_PLAN.md` §1.4): `upgradeCost()` named but
-      nonexistent (becomes real in increment 1c); `ENEMY_AMMO_DROP` /
-      `ASTEROID_AMMO_PROGRESSION` no longer exist in `constants.ts`;
-      Pierce Beam vs Bouncer naming split (unified in increment 1d);
-      "enemies fire weapon archetypes" overstated (bespoke
-      `ENEMY_WEAPON` overrides, not `WEAPONS` entries);
-      `mergeAmmoDrops` doc-comment cap 64 vs actual 100. Most of §5's
-      ammo-economy prose dies wholesale with increments 1a/1b — fold
-      the CLAUDE.md refresh into those PRs rather than fixing
-      piecemeal now.
+- [x] CLAUDE.md discrepancies found by the weapons-ammo audit
+      (`docs/WEAPONS_AMMO_PLAN.md` §1.4). **Resolved by PR #72's
+      in-PR CLAUDE.md refresh**: `upgradeCost()` is now real (1c);
+      the dead ammo-economy prose (incl. `ENEMY_AMMO_DROP` /
+      `ASTEROID_AMMO_PROGRESSION` references) died with the ammo
+      system (1b); naming unified to "Laser" (1d); the stale
+      `mergeAmmoDrops` cap comment vanished in the `mergeDrops`
+      rename.
+- [ ] Stale comment in `ShardSystem.ts` (~line 1446) says "Ammo
+      drops are no longer merge candidates" — should say collectible
+      drops generally (salvage/health); ammo drops no longer exist.
+      One-line cosmetic fix; ride any future PR (decision #38g).
 - [ ] FF audit follow-ups #FF-1 (asteroid obstacle-aware fallback +
       diagonal wall-repulsion), #FF-2 (re-examine obstacle filter
       once any finite-mass wall-like variants ship), #FF-3 (perf
