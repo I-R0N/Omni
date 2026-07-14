@@ -420,7 +420,7 @@ export const PLASTIC_SHARD_FLOW_MULT = 5;
 // Plastic's 5× boost is applied BEFORE the mass scale (so heavy
 // plastic blobs are diluted just like heavy rock — the plastic
 // character shows mainly when the blob is light).  Drops use the
-// same math at their fixed mass = 5, so all ammo drops cruise
+// same math at their fixed mass = 5, so all drops cruise
 // slightly faster than baseline shards but consistently within
 // their own family.
 export const FLOW_VARIABILITY = {
@@ -799,16 +799,14 @@ export const UI_CONSTANTS = {
   }
 };
 
-export const AMMO_HUD_CONSTANTS = {
-  SLOT_W_MAX:    36,   // shrunk post-d1 — per-slot ammo number moved to a dedicated box
-  SLOT_W_MIN:    22,
+// 2-slot loadout HUD (pivot 1b — replaced the 8-cell ammo strip).  Two wide
+// slots showing the equipped weapons; the active slot is highlighted.  The
+// charge ring stays on the player ship (chargeProgress), not here.
+export const LOADOUT_HUD_CONSTANTS = {
+  SLOT_W_MAX:    120,
+  SLOT_W_MIN:    64,
   SLOT_H:        48,
-  SLOT_GAP:      4,
-  // Wider gap separating the always-firable blaster from the rest of the
-  // bar.  The ammo readout + ammo-gated weapons sit on the right, glued
-  // together by the regular SLOT_GAP, so the ammo box reads as belonging
-  // to the weapon group rather than floating between two halves.
-  SLOT_SEP:      14,
+  SLOT_GAP:      8,
   SLOT_RADIUS:   5,
   BOTTOM_MARGIN: 14,
 };
@@ -1134,7 +1132,7 @@ export const PERF_TASKS = {
   flowField:        { minInterval: 1, maxInterval: 2,   costWeight: 1.0, autoCurve: 1.0 },
   nebulaNeighbors:  { minInterval: 1, maxInterval: 4,   costWeight: 0.9, autoCurve: 1.0 },
   dropScan:         { minInterval: 1, maxInterval: 2,   costWeight: 0.6, autoCurve: 1.0 },
-  // O(N²) ammo-drop merge pass (DropSystem.mergeAmmoDrops).  Up to
+  // O(N²) drop merge pass (DropSystem.mergeDrops).  Up to
   // DROP_CONFIG.MAX_ACTIVE_DROPS² pair-ops + damping + nudges per
   // step; not time-critical (drops settle over many frames), so a
   // 4-step cadence at peak load drops cost ~75 % while staying
@@ -1917,16 +1915,14 @@ export const NEBULA_CONSTANTS = {
   TWINKLE_INTERVAL_MAX: 9.0,
   TWINKLE_STAR_SIZE: 10,
   TWINKLE_PLACEMENT_RANGE: 0.35,
-  // ── Standard drops (ammo) ────────────────────────────────────────
-  // Nebula tiles and shards occasionally release a standard ammo
-  // drop on shatter — low frequency so breaking a cluster yields the
+  // ── Standard drops (salvage) ─────────────────────────────────────
+  // Nebula tiles and shards occasionally release a salvage drop on
+  // shatter — low frequency so breaking a cluster yields the
   // occasional reward without flooding the map.  The roll is
   // independent of shard creation: shard count/size math is
-  // untouched, the ammo drop (if any) is a bonus that spawns
-  // alongside the usual shards.  Post-d1 every ammo drop awards the
-  // shared currency, so there is no per-weapon variant here.
-  AMMO_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
-  AMMO_PER_NEBULA: 3,     // shared-pool ammo units per nebula drop
+  // untouched, the salvage drop (if any) is a bonus that spawns
+  // alongside the usual shards.
+  SALVAGE_DROP_CHANCE: 0.06, // 6 % per shatter (tile OR shard)
 
   // ── Color equilibration ───────────────────────────────────────
   // Per-frame circular-hue lerp alphas for NebulaSystem's
@@ -2165,8 +2161,10 @@ export const DAMAGE_TEXT_CONSTANTS = {
 //   composes existing primitives (homing / pierce / bounce / lightning /
 //   spread / burst) plus the new `explosionRadius` AoE primitive on the
 //   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
-//   .CHARGE_FULL window then released) consume `chargedAmmoCost` instead
-//   and are dispatched per-weapon in WeaponSystem.firePlayerWeaponCharged().
+//   .CHARGE_FULL window then released) cost only the charge time — ammo was
+//   deleted as a system (pivot 1b); weapon pressure = cooldown + the 2-slot
+//   loadout commitment.  Bouncer/Lightning cooldowns were raised in the same
+//   change to replace the ammo tax they leaned on.
 export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BLASTER]: {
     type: WeaponType.BLASTER,
@@ -2175,14 +2173,12 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     speed: 16,
     damage: 4,
     lifetime: 1.5,
-    color: '#ef4444', // Red — infinite ammo starter
+    color: '#ef4444', // Red — the starter all-rounder
     size: 6,
     count: 1,
     spread: 2,
     recoil: 0.5,
     pierce: 0,
-    ammoCost: 0,
-    chargedAmmoCost: 0,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
@@ -2199,8 +2195,6 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     pierce: 2,
     burstCount: 3,
     burstDelay: 0.04,
-    ammoCost: 2,
-    chargedAmmoCost: 3,
   },
   [WeaponType.SHOTGUN]: {
     type: WeaponType.SHOTGUN,
@@ -2215,13 +2209,14 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
     pierce: 1,
-    ammoCost: 4,
-    chargedAmmoCost: 6,
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
-    name: 'Pierce Beam',
-    cooldown: 0.40,    // 2.5 shots/s
+    name: 'Laser',
+    cooldown: 0.55,    // 0.40 → 0.55 (pivot 1b): the 15-ammo/s tax was its real
+                       // downside; with ammo gone the crowd-rake needs a brake.
+                       // Cooldown (not per-beam damage) so each volley keeps its
+                       // line-deleting punch — same lever as Lightning.
     speed: 30,         // fast straight beam — stays the quickest projectile
     damage: 5,
     lifetime: 4,       // bounded; the bounceCount cap usually ends it sooner
@@ -2232,13 +2227,12 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 99,        // effectively infinite enemy penetration; tile bounces still cap via bounceCount
     bounceCount: 3,    // reflects up to 3 times off tiles before dissipating
-    ammoCost: 6,
-    chargedAmmoCost: 9,
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
     name: 'Lightning',
-    cooldown: 0.50,    // 2 shots/s
+    cooldown: 0.65,    // 0.50 → 0.65 (pivot 1b): compensates for free ammo —
+                       // chain falloff already limits single-target value
     speed: 26,         // gravity pull curves the projectile toward targets
     damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
     lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
@@ -2248,15 +2242,14 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     spread: 3,
     recoil: 0.3,
     pierce: 0,         // stops on first hit, then chains
-    ammoCost: 8,
-    chargedAmmoCost: 12,
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
     name: 'Seeker Missiles',
     cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
     speed: 12,
-    damage: 6,
+    damage: 8,         // 6 → 8 (pivot 1d): "can't miss" shouldn't be "can't kill" —
+                       // the designated anti-evasive answer once traits expand
     lifetime: 3.0,
     color: '#3b82f6', // Blue
     size: 8,
@@ -2265,8 +2258,6 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     recoil: 0.5,
     pierce: 0,
     homing: true,
-    ammoCost: 10,
-    chargedAmmoCost: 15,
   },
   [WeaponType.CANNON]: {
     type: WeaponType.CANNON,
@@ -2284,12 +2275,11 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     explosionRadius: 110,   // world units of radial AoE on impact
     explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
-    ammoCost: 12,
-    chargedAmmoCost: 18,
   },
 };
 
-// Full rainbow order — used for ammo HUD slot layout and weapon cycling
+// Full rainbow order — canonical weapon ordering (Drydock catalog, DBG).
+// In-game cycling/selection runs over the player's 2-slot loadout, not this.
 export const WEAPON_LIST = [
   WeaponType.BLASTER,
   WeaponType.BURST,
@@ -2300,17 +2290,8 @@ export const WEAPON_LIST = [
   WeaponType.CANNON,
 ];
 
-// Pre-computed slot abbreviations for the ammo HUD (initials of each word in
-// the weapon's display name, capped at 3 chars).  Built once on module init
-// so the HUD render path avoids per-frame split/map/join string churn for
-// every visible weapon slot.
-export const WEAPON_SLOT_LABELS: Record<WeaponType, string> = (() => {
-  const out = {} as Record<WeaponType, string>;
-  for (const wt of WEAPON_LIST) {
-    out[wt] = WEAPONS[wt].name.split(' ').map(w => w[0]).join('').substring(0, 3);
-  }
-  return out;
-})();
+// (WEAPON_SLOT_LABELS deleted with the 8-cell ammo strip — the 2-slot
+// loadout HUD is wide enough to render full weapon names.)
 
 // Burst-fire parameters for shooting enemies.
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
@@ -2328,8 +2309,6 @@ export const ENEMY_WEAPON: WeaponConfig = {
   spread: 4,
   recoil: 0,
   pierce: 0,
-  ammoCost: 0,        // unused — enemies don't draw from a shared pool
-  chargedAmmoCost: 0, // unused — enemies don't charge
 };
 
 // --- ASSETS ---
@@ -2394,7 +2373,7 @@ export const SCORE_CONSTANTS = {
   // Catching the snitch also wipes every live enemy on the field, each
   // worth this fraction of its normal kill value (a board-clear bonus).
   SNITCH_SWEEP_KILL_FRACTION: 0.5,
-  POPUP_COLOR: '#facc15',         // floating "+N" kill popup (ammo-yellow family)
+  POPUP_COLOR: '#facc15',         // floating "+N" kill popup (gold family)
   POPUP_LIFETIME: 1.6,            // a touch longer than damage text so it registers
   // HUD score ticker: the displayed total catches up to the true score by
   // at least 1 and at most this fraction of the gap per frame, so big
@@ -2413,25 +2392,28 @@ export const SCORE_CONSTANTS = {
 // ── Progression: leveled stat upgrades ───────────────────────────────────────
 // In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
 // (every wave); a normal card grants 1 level, and every 4th wave the cards roll
-// "powerful" variants that grant +2/+3/+4 levels at once.  Levels are UNCAPPED
-// (a focused build can stack a stat as high as picks allow).  GameEngine
-// .applyUpgrades folds the run's `upgradeLevels` into the player's effective
-// stats.  Unlocks (weapons / shield / overcharge) are the separate Salvage→
-// Drydock module economy.
+// Levels are UNCAPPED (a focused build can stack a stat as high as Salvage
+// allows).  GameEngine.applyUpgrades folds the run's `upgradeLevels` into the
+// player's effective stats.  Purchase-only progression (pivot 1c): levels are
+// BOUGHT in the Drydock at the escalating upgradeCost() curve — the free
+// wave-completion cards are gone.  Unlocks (weapons / shield / overcharge)
+// are the same shop's one-time Modules.
+// (Magazine died with the ammo system, pivot 1b — 7 stat upgrades remain.
+// Autoloader is now the premium weapon stat; its purchase-price curve should
+// be the steepest when purchase-only progression lands in 1c.)
 export type UpgradeId =
   | 'hull' | 'plating' | 'capacitor' | 'engine'
-  | 'thrusters' | 'gunnery' | 'autoloader' | 'magazine';
+  | 'thrusters' | 'gunnery' | 'autoloader';
 
 export interface UpgradeDef {
   id: UpgradeId;
   label: string;   // DBG / card / menu label
   desc: string;    // one-line effect of one card (= one level)
   max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
-  // Dependency on a major MODULE — the card is withheld from the pool until
-  // the module is installed (otherwise the augment would do nothing):
-  //   'shield'    → needs the Shield module (Plating / Capacitor)
-  //   'anyWeapon' → needs any non-Blaster weapon (Magazine; Blaster is free)
-  requires?: 'shield' | 'anyWeapon';
+  // Dependency on a major MODULE — shown LOCKED in the shop until the
+  // module is installed (otherwise the augment would do nothing):
+  //   'shield' → needs the Shield module (Plating / Capacitor)
+  requires?: 'shield';
 }
 
 export const UPGRADE_DEFS: readonly UpgradeDef[] = [
@@ -2442,13 +2424,12 @@ export const UPGRADE_DEFS: readonly UpgradeDef[] = [
   { id: 'thrusters',  label: 'Thrusters',  desc: '+12% acceleration' , max: 10 },
   { id: 'gunnery',    label: 'Gunnery',    desc: '+12% weapon damage', max: 10 },
   { id: 'autoloader', label: 'Autoloader', desc: '-8% fire cooldown' , max: 10 },
-  { id: 'magazine',   label: 'Magazine',   desc: '+40 ammo capacity' , max: 10, requires: 'anyWeapon' },
 ] as const;
 
 // ── One-time unlocks ──────────────────────────────────────────────────────────
 // The run starts LEAN — Blaster only, no shield, no charged shots.  These
-// unlocks are bought in the Drydock (Salvage) or, rarely, offered as a free
-// card.  Weapon unlocks map to a WeaponType; shield + overcharge are flags.
+// unlocks are bought in the Drydock (Salvage).  Weapon unlocks map to a
+// WeaponType; shield + overcharge are flags.
 export interface UnlockDef {
   id: string;
   kind: 'shield' | 'overcharge' | 'weapon';
@@ -2462,19 +2443,22 @@ export const UNLOCK_DEFS: readonly UnlockDef[] = [
   { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
   { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
   { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
-  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Bouncer',   desc: 'Ricochet beams',    cost: 40000 },
+  // Player-facing name unified to "Laser" (pivot 1d, user decision) — the HUD
+  // and the Drydock used to disagree ("Pierce Beam" vs "Bouncer / Ricochet
+  // beams"), and ricochet is planned to become a GENERAL projectile-vs-shield
+  // feature, so the name deliberately doesn't claim bouncing as this weapon's
+  // identity.  Code identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
+  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000 },
   { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
   { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
   { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
 ] as const;
 
-// Per-level effect magnitudes (read by GameEngine.applyUpgrades + the
-// movement hook).  Base values they modify: HP 100, shield SHIELD_CONSTANTS
-// .MAX_CHARGE, recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
-// Per-LEVEL effect magnitudes.  A normal card grants 1 level; powerful
-// (every-4th-wave) cards grant +2/+3/+4 levels, so they're worth that many of
-// these.  Base values they modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
-// recharge SHIELD_CONSTANTS.RECHARGE_RATE, ammo AMMO MAX_POOL.
+// Per-LEVEL effect magnitudes (read by GameEngine.applyUpgrades + the
+// movement hook).  A normal card grants 1 level; powerful (every-4th-wave)
+// cards grant +2/+3/+4 levels, so they're worth that many of these.  Base
+// values they modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE, recharge
+// SHIELD_CONSTANTS.RECHARGE_RATE.
 export const UPGRADE_EFFECTS = {
   HULL_HP_PER_LEVEL: 25,
   PLATING_SHIELD_PER_LEVEL: 15,
@@ -2484,33 +2468,41 @@ export const UPGRADE_EFFECTS = {
   GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.12,
   AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.08,
   AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
-  MAGAZINE_AMMO_PER_LEVEL: 40,
 };
 
-// ── Between-wave upgrade cards ────────────────────────────────────────────────
-// After every Nth wave (WAVE_INTERVAL, DBG-cyclable) the game pauses and offers
-// a free choice of CARD_COUNT cards.  Pool today: stat-upgrade cards (a free
-// level of one of the UPGRADE_DEFS) + occasional Salvage cards.  Unlock cards
-// (weapons / shield / overcharge) plug into the same pool once unlocks ship.
-export const UPGRADE_CARD_CONSTANTS = {
-  CARD_COUNT: 3,
-  DEFAULT_WAVE_INTERVAL: 1,             // a card every wave
-  WAVE_INTERVAL_CYCLE: [1, 2, 4, 8] as const,
-  // Every Nth wave the offered cards are "powerful" — each grants a random
-  // POWERFUL_MIN..POWERFUL_MAX levels instead of 1.
-  POWERFUL_WAVE_INTERVAL: 4,
-  POWERFUL_MIN_LEVELS: 2,
-  POWERFUL_MAX_LEVELS: 4,
-  SALVAGE_CARD_CHANCE: 0.30,            // chance one of the 3 slots is a Salvage card
-  SALVAGE_CARD_BASE: 300,              // Salvage granted = BASE + PER_WAVE × waveNumber
-  SALVAGE_CARD_PER_WAVE: 75,
-  // Beat between a wave clearing and the card modal opening, so the
-  // wave-clear celebration animation plays before the sim pauses.
-  CARD_OPEN_DELAY_SEC: 1.1,
-  // Chance one of the offered cards is a free (rare) unlock, when any
-  // unlock is still unowned.
-  UNLOCK_CARD_CHANCE: 0.18,
+// ── Stat-upgrade (Augment) pricing — purchase-only progression (pivot 1c) ────
+// upgradeCost(id, level) = next-level price when the stat sits at `level`.
+// Per-level escalating geometric curve; tuned against the 1a salvage income
+// (≈ 8-13 units ≈ 8k-13k credits per early wave with the clear spray):
+//   - Hull / Plating cheapest (defensive comfort, ~half a wave for L1)
+//   - Autoloader steepest — it's the premium weapon stat post-ammo (fire
+//     cadence is the only in-combat brake left)
+// L1 prices sit below the first weapon (Burst 25k) so "a stat level or two"
+// slots naturally between weapon purchases (WEAPONS_AMMO_PLAN §5 order:
+// first weapon → Shield → stat levels → second weapon → Overcharge → depth).
+// Numbers provisional pending playtest.
+export const UPGRADE_COST: {
+  BASE: Record<UpgradeId, number>;
+  RATIO: Record<UpgradeId, number>;
+} = {
+  BASE: {
+    hull: 4000, plating: 4000, capacitor: 5000,
+    engine: 6000, thrusters: 6000, gunnery: 8000,
+    autoloader: 10000,
+  },
+  RATIO: {
+    hull: 1.45, plating: 1.45, capacitor: 1.45,
+    engine: 1.45, thrusters: 1.45, gunnery: 1.5,
+    autoloader: 1.6,
+  },
 };
+
+/** Salvage price of the NEXT level of `id` when the stat currently sits at
+ *  `level` (geometric; rounded to a clean 100). */
+export function upgradeCost(id: UpgradeId, level: number): number {
+  const raw = UPGRADE_COST.BASE[id] * Math.pow(UPGRADE_COST.RATIO[id], level);
+  return Math.round(raw / 100) * 100;
+}
 
 // ── Timed-wave config ────────────────────────────────────────────────────────
 // Waves are timed windows: enemies stream in continuously until the clock
@@ -2648,22 +2640,11 @@ export function cycleSwarmMove(): number {
   return activeSwarmMoveIndex;
 }
 
-// Shared-ammo pool config (post-d1).  Caps the player's single ammo number
-// and provides the canonical pickup colour used by every ammo drop entity
-// (enemy / asteroid / nebula sources all reuse this).
-//
-// MAX_POOL rationale: pre-refactor there was no explicit per-weapon cap;
-// debug fills filled to 999 and a typical playthrough stockpiled ~30-60 per
-// weapon across ~6 weapons (~200-360 total).  200 in shared form keeps the
-// "well-stocked" feel without drifting into infinite-ammo territory.
-export const AMMO_CONSTANTS = {
-  MAX_POOL:    200,
-  DROP_COLOR: '#facc15', // canonical ammo-pickup yellow
-};
+// (AMMO_CONSTANTS deleted — the ammo system was removed in pivot 1b.)
 
 // ── Drop-type registry ────────────────────────────────────────────────────────
 // Single source of truth for per-drop-type properties.  `collectible` marks a
-// magnet/proximity PICKUP (ammo / health): kept OUT of the dynamic collision
+// magnet/proximity PICKUP (salvage / health): kept OUT of the dynamic collision
 // grid (projectiles + ships pass through; collection is the GameEngine drop
 // scan) and carried by the flow-drift / merge passes.  Non-collectible drops
 // (glass) are environmental debris and full physics participants.
@@ -2676,9 +2657,9 @@ export interface DropTypeDef {
   collectible: boolean;
 }
 export const DROP_TYPES: Record<DropType, DropTypeDef> = {
-  ammo:   { collectible: true },
-  health: { collectible: true },
-  glass:  { collectible: false },
+  health:  { collectible: true },
+  salvage: { collectible: true },  // money drop — pays credits on collection
+  glass:   { collectible: false },
 };
 /** True for a magnet/proximity pickup drop (the non-physics, non-shootable
  *  kind).  The cross-cutting test used by the collision-grid skip, the
@@ -2689,32 +2670,59 @@ export function isCollectibleDrop(e: GameEntity): boolean {
     && DROP_TYPES[e.dropType].collectible;
 }
 
+// ── Salvage economy ──────────────────────────────────────────────────────────
+// Salvage is the money drop (weapons-ammo pivot increment 1a): it replaced
+// ammo in every drop source, and collecting it is now the ONLY way to earn
+// credits (the awardScore 1:1 score→Salvage mirror is gone).  Drops carry
+// value 1 and merge value-conservingly like ammo did; the credit conversion
+// happens once at collection.
+//
+// CREDITS_PER_DROP arithmetic (provisional — pending playtest): expected
+// salvage per enemy kill = 0.55 + 0.25 = 0.8 units.  Wave spawn budgets at
+// default difficulty run 6/7/8/9 for waves 1-4, so combat income ≈ 4.8 →
+// 7.2 units/wave (cumulative ≈ 17 by end of wave 3).  Terrain mining
+// (asteroid 45 %, dent shard 85 %, plastic 20 %, nebula 6 %) plus the
+// 6-9 destructible shards each kill sprays adds very roughly another
+// 50-100 % for a player who mines casually — call it ~25 units collected by
+// wave 3.  At 1 000 credits/unit the first weapon (Burst, 25 000) lands
+// around wave 2-4, matching the plan target (WEAPONS_AMMO_PLAN §5) without
+// touching the UNLOCK_DEFS price ladder.
+export const SALVAGE_CONSTANTS = {
+  CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
+  DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
+                              // (deliberately NOT gold: gold "+N" popups mean
+                              // score, which no longer pays money)
+  // Snitch-catch payout: the snitch pays score but score no longer mints
+  // credits, so the catch also sprays this many salvage units (≈ a wave-and-
+  // a-half of combat income — it's the biggest chase reward in the game).
+  SNITCH_CATCH_DROPS: 8,
+  // Wave-clear reward beat (pivot 1c — replaced the free upgrade cards):
+  // every wave clear sprays this many salvage units beside the player.
+  // Sizing: combat income runs ≈ 4.8-7.2 units/wave (0.8 × budget), so +3
+  // is a noticeable ~50% early-wave topper without dwarfing the fighting
+  // itself.  The early-clear SPEED bonus stays score-only.
+  WAVE_CLEAR_DROPS: 3,
+};
+
 export const DROP_CONFIG = {
-  // Per-pickup ammo amounts — chosen to keep today's per-encounter expected
-  // ammo close to the per-weapon-pool model (asteroid 1.80, enemy 2.15,
-  // nebula 0.18 — see also NEBULA_CONSTANTS.AMMO_PER_NEBULA).
-  AMMO_PER_ENEMY_PRIMARY:   3,    // primary enemy ammo drop (paired with AMMO_DROP_CHANCE_ENEMY_PRIMARY)
-  AMMO_PER_ENEMY_SECONDARY: 2,    // secondary enemy ammo drop (independent roll)
-  AMMO_PER_ASTEROID:        4,    // ammo units per asteroid drop
-  // Dent-policy mobile shards (plastic-shard, metal-shard) take
-  // multiple hits to destroy, so their drop rate + payload run
-  // higher than a single-hit asteroid to reward the effort.
-  AMMO_PER_DENT_SHARD:      6,
-  // Drop-spawn probabilities
-  AMMO_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops ammo
-  AMMO_DROP_CHANCE_DENT_SHARD:      0.85, // 85 % chance a dent shard drops ammo
+  // Salvage-spawn probabilities — carried over 1:1 from the old ammo-roll
+  // chances (WEAPONS_AMMO_PLAN §4: reuse today's rates as the starting
+  // point).  Every salvage drop carries value 1; there is no per-source
+  // amount anymore.
+  SALVAGE_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops salvage
+  SALVAGE_DROP_CHANCE_DENT_SHARD:      0.85, // dent shards take several hits — higher reward
   // Plastic-shards may break into a small number of sub-shards (each
   // a drop opportunity), so their per-shard drop chance is cut well
   // below the generic dent-shard rate.
-  AMMO_DROP_CHANCE_PLASTIC_SHARD:   0.20, // 20 % chance a plastic shard drops ammo
-  AMMO_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // 55 % chance an enemy drops its primary ammo
-  AMMO_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // 25 % chance an enemy drops its secondary ammo
+  SALVAGE_DROP_CHANCE_PLASTIC_SHARD:   0.20,
+  SALVAGE_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // primary enemy salvage roll
+  SALVAGE_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // secondary roll (independent)
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per milestone (wave-clear) health drop
   // Enemy-kill health drops (added because the expanded roster hits harder).
-  // Rolled INDEPENDENTLY at the same two chances as the ammo slots above, so
-  // enemy-kill pickups roughly double and split ~50/50 ammo/health.  Each heals
-  // this much (merges sum, like ammo) — modest so frequent drops sustain rather
+  // Rolled INDEPENDENTLY at the same two chances as the salvage slots above, so
+  // enemy-kill pickups roughly double and split ~50/50 salvage/health.  Each heals
+  // this much (merges sum, like salvage) — modest so frequent drops sustain rather
   // than trivialise.
   HEALTH_PER_ENEMY:           15,
   // General
@@ -2731,16 +2739,17 @@ export const DROP_CONFIG = {
   MAX_ACTIVE_DROPS:       100,   // hard cap
 };
 
-// ── Ammo-drop ↔ ammo-drop pull ─────────────────────────────────────
-// Mutual gravity between non-magnetised ammo drops, applied inside
-// DropSystem.mergeAmmoDrops on the same O(N²) pair walk that
-// consolidates touching drops.  Pairs already in contact merge as
-// before; pairs in (sumR, RANGE] receive a small 1/dist velocity
-// nudge toward each other so a cluster from a wave kill converges
-// and merges over a fraction of a second instead of sitting put
-// waiting for the player.  Magnetised drops (already homing on the
-// player) skip the pull so the magnet path keeps a clean trajectory.
-export const AMMO_DROP_PULL = {
+// ── Drop ↔ drop pull ───────────────────────────────────────────────
+// Mutual gravity between non-magnetised same-type collectible drops
+// (salvage / health), applied inside DropSystem.mergeDrops on the same
+// O(N²) pair walk that consolidates touching drops.  Pairs already in
+// contact merge as before; pairs in (sumR, RANGE] receive a small
+// 1/dist velocity nudge toward each other so a cluster from a wave
+// kill converges and merges over a fraction of a second instead of
+// sitting put waiting for the player.  Magnetised drops (already
+// homing on the player) skip the pull so the magnet path keeps a
+// clean trajectory.
+export const DROP_PULL = {
   /** Centre-to-centre distance above which the pull turns off.
    *  Inside the player magnet range (DROP_CONFIG.MAGNET_RANGE) so
    *  the player still has the final say on collection cadence. */
@@ -2764,29 +2773,20 @@ export const AMMO_DROP_PULL = {
 } as const;
 
 /**
- * Compute the ammo-HUD slot layout for a given screen size.
+ * Compute the 2-slot loadout-HUD layout for a given screen size.
  *
- * Slot order (post-d1): [BLASTER]  ⎢SLOT_SEP⎥  [AMMO]⎢SLOT_GAP⎥[BURST][SHOTGUN]…
+ * Two wide slots, centered in the space right of the minimap:
+ *   [SLOT 1] ⎢SLOT_GAP⎥ [SLOT 2]
  *
- * The blaster sits alone on the left (infinite ammo, never gated).  The
- * shared-pool readout joins the ammo-gated weapons on the right, glued
- * together by the regular SLOT_GAP so the readout reads as part of that
- * group rather than floating in between.  Only one wider SLOT_SEP gap
- * separates blaster from the ammo+weapons cluster.
- *
- * Total cells = 1 (blaster) + 1 (ammo) + (WEAPON_LIST.length - 1) (other
- * weapons).  One SLOT_SEP gap (after blaster) + (WEAPON_LIST.length - 1)
- * SLOT_GAP gaps (ammo→burst + the inter-weapon gaps).
+ * Returns the per-slot x positions so the renderer and the tap hit-test
+ * (GameEngine fire-event routing) share one geometry source.
  */
-export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number): {
+export function computeLoadoutHUDLayout(screenWidth: number, screenHeight: number): {
   startY: number;
   slotW: number;
-  blasterX: number;
-  ammoX: number;
-  weaponsStartX: number;
-  totalW: number;
+  slotXs: [number, number];
 } {
-  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, SLOT_SEP, BOTTOM_MARGIN } = AMMO_HUD_CONSTANTS;
+  const { SLOT_W_MAX, SLOT_W_MIN, SLOT_H, SLOT_GAP, BOTTOM_MARGIN } = LOADOUT_HUD_CONSTANTS;
   const { MARGIN: MM, SIZE: MS } = MINIMAP_CONSTANTS;
 
   // Horizontal: start just right of the minimap, leave symmetric margin on the right
@@ -2794,28 +2794,12 @@ export function computeAmmoHUDLayout(screenWidth: number, screenHeight: number):
   const rightEdge   = screenWidth - MM;
   const availableW  = rightEdge - leftClear;
 
-  // Cells: blaster (1) + ammo (1) + non-blaster weapons (WEAPON_LIST.length - 1)
-  const cells           = WEAPON_LIST.length + 1;
-  // Gaps: 1 SLOT_SEP after the blaster + (cells - 2) regular gaps between
-  // every other adjacent pair (ammo→burst + the inter-weapon gaps).
-  const standardGaps    = cells - 2;
-  const fixedGapsW      = SLOT_SEP + standardGaps * SLOT_GAP;
+  const slotW  = Math.max(SLOT_W_MIN, Math.min(SLOT_W_MAX, Math.floor((availableW - SLOT_GAP) / 2)));
+  const totalW = slotW * 2 + SLOT_GAP;
+  const startX = leftClear + Math.max(0, (availableW - totalW) / 2);
+  const startY = screenHeight - SLOT_H - BOTTOM_MARGIN;
 
-  // Scale slot width to fit
-  const slotW = Math.max(
-    SLOT_W_MIN,
-    Math.min(SLOT_W_MAX, Math.floor((availableW - fixedGapsW) / cells))
-  );
-  const totalW = cells * slotW + fixedGapsW;
-
-  // Center the scaled group within the available width
-  const groupStartX = leftClear + Math.max(0, (availableW - totalW) / 2);
-  const blasterX       = groupStartX;
-  const ammoX          = blasterX + slotW + SLOT_SEP;
-  const weaponsStartX  = ammoX + slotW + SLOT_GAP;
-  const startY         = screenHeight - SLOT_H - BOTTOM_MARGIN;
-
-  return { startY, slotW, blasterX, ammoX, weaponsStartX, totalW };
+  return { startY, slotW, slotXs: [startX, startX + slotW + SLOT_GAP] };
 }
 
 // Difficulty (enemy count multiplier) 0 = none, 3 = full
@@ -4035,7 +4019,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     passThrough: true,
     // Slow-path tint compute is expensive enough to merit caching.
     renderCache: 'composition',
-    spawnsDropsOnDeath: false,                  // NebulaSystem handles its own ammo roll
+    spawnsDropsOnDeath: false,                  // NebulaSystem handles its own salvage roll
   },
   'rock-shard': {
     id: 'rock-shard',

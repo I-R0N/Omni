@@ -99,9 +99,6 @@ interface UIOverlayProps {
   onMaxUpgrades?: () => void;
   onResetUpgrades?: () => void;
   onAddCredits?: () => void;
-  onSelectCard?: (index: number) => void;
-  onCycleCardInterval?: () => void;
-  onTestCards?: () => void;
   onSpawnDragon?: (type: string) => void;
   onSpawnRival?: (disposition: string) => void;
   // Perf recorder (DBG FPS harness): toggle capture, cycle the scene label,
@@ -111,6 +108,10 @@ interface UIOverlayProps {
   onPerfRecCycleScene?: () => void;
   onPerfRecExport?: () => string;
   onPurchaseUnlock?: (id: string) => void;
+  onPurchaseUpgrade?: (id: string) => void;
+  // 2-slot loadout swap (interim pause-menu home until the station lands):
+  // equip owned weapon `weaponId` into slot 0/1, or null to empty the slot.
+  onEquipWeapon?: (slot: number, weaponId: string | null) => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
   onToggleFFOverlayVectors?: () => void;
@@ -191,15 +192,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onMaxUpgrades,
   onResetUpgrades,
   onAddCredits,
-  onSelectCard,
-  onCycleCardInterval,
-  onTestCards,
   onSpawnDragon,
   onSpawnRival,
   onPerfRecToggle,
   onPerfRecCycleScene,
   onPerfRecExport,
   onPurchaseUnlock,
+  onPurchaseUpgrade,
+  onEquipWeapon,
   onUnlockAll,
   onResetUnlocks,
   onToggleFFOverlayVectors,
@@ -393,44 +393,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
 
-      {/* ── Between-wave upgrade card choice (modal; sim is paused) ── */}
-      {stats.cardChoice && stats.cardChoice.length > 0 && (
-        <div className="absolute inset-0 z-50 pointer-events-auto flex flex-col items-center justify-center gap-6 bg-slate-950/70 backdrop-blur-sm">
-          <div className="text-center">
-            <h2 className="text-amber-300 text-2xl font-extrabold tracking-[0.2em]">CHOOSE AN AUGMENT</h2>
-            <p className="text-slate-400 text-[11px] uppercase tracking-widest mt-1">
-              Wave {stats.waveNumber ?? 1} cleared · free pick
-            </p>
-          </div>
-          <div className="flex gap-4 flex-wrap justify-center max-w-3xl px-4">
-            {stats.cardChoice.map((c, i) => {
-              const powerful = c.kind === 'stat' && (c.levels ?? 1) > 1;
-              const accent = c.kind === 'salvage'
-                ? 'border-amber-400/70 hover:border-amber-300 hover:shadow-amber-500/30'
-                : c.kind === 'unlock'
-                  ? 'border-violet-400/70 hover:border-violet-300 hover:shadow-violet-500/30'
-                  : powerful
-                    ? 'border-fuchsia-400/80 hover:border-fuchsia-300 hover:shadow-fuchsia-500/40 ring-1 ring-fuchsia-400/30'
-                    : 'border-sky-400/70 hover:border-sky-300 hover:shadow-sky-500/30';
-              const badge = c.kind === 'salvage' ? 'text-amber-300' : c.kind === 'unlock' ? 'text-violet-300' : powerful ? 'text-fuchsia-300' : 'text-sky-300';
-              return (
-                <button
-                  key={i}
-                  onClick={() => onSelectCard?.(i)}
-                  className={`w-44 h-56 rounded-xl border-2 bg-slate-900/85 shadow-xl flex flex-col items-center justify-center gap-3 p-4 transition-all hover:scale-105 active:scale-95 ${accent}`}
-                >
-                  <span className={`text-[10px] font-bold uppercase tracking-widest ${badge}`}>
-                    {c.kind === 'salvage' ? 'Salvage' : c.kind === 'unlock' ? 'Module' : powerful ? `Augment ×${c.levels}` : 'Augment'}
-                  </span>
-                  <span className="text-white text-lg font-extrabold text-center leading-tight">{c.label}</span>
-                  <span className="text-slate-300 text-xs text-center leading-snug">{c.desc}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* ── Top Bar ── */}
       <div className="flex justify-between items-start">
 
@@ -520,10 +482,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {(stats.upgrades ?? []).map(u =>
                   ctrlRow(u.label, () => onCycleUpgrade?.(u.id), `Lv ${u.level}/${u.max}`,
                     `Cycle ${u.label} upgrade level (DBG). Click bumps the level and wraps back to 0 at max; applies live to the player's effective stats.`))}
-                {ctrlRow('Card int', onCycleCardInterval, `every ${stats.cardInterval ?? 1}`,
-                  'Wave interval between free upgrade-card offers (1 / 2 / 3 / 5). 1 = a card pick after every wave.')}
-                {ctrlRow('Test cards', onTestCards, 'Show',
-                  'Force an upgrade-card choice right now (uses the live wave number).')}
                 {ctrlRow('+1k Salv', onAddCredits, 'Grant',
                   'Grant 1000 Salvage for testing the (future) shop.')}
                 {ctrlRow('Max all', onMaxUpgrades, 'Max',
@@ -898,6 +856,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {(stats.score ?? 0).toLocaleString()} PTS
                 </span>
               </div>
+              {/* Salvage (money) — silver to match the field drop, distinct
+                  from the gold score chip.  Flashes +N on pickup. */}
+              <div className="pointer-events-none bg-slate-900/75 border border-slate-600/50 rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right">
+                <span className="text-slate-200 text-xs font-bold tracking-widest tabular-nums">
+                  ◈ {(stats.credits ?? 0).toLocaleString()}
+                </span>
+                {stats.salvageFlash && (
+                  <span
+                    className="text-slate-50 text-xs font-extrabold tabular-nums ml-1.5"
+                    style={{ opacity: Math.max(0.25, stats.salvageFlash.fraction) }}
+                  >
+                    +{stats.salvageFlash.amount.toLocaleString()}
+                  </span>
+                )}
+              </div>
               {/* Kill-combo multiplier — fades out as the window lapses */}
               {(stats.comboMultiplier ?? 1) > 1 && (
                 <div
@@ -1061,7 +1034,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statLine('Damage', fmtMult(ps?.damageMult))}
                   {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
                   {statLine('Speed', fmtMult(ps?.speedMult))}
-                  {statLine('Max ammo', ps?.maxAmmo ?? 200)}
                 </div>
               </div>
 
@@ -1093,26 +1065,86 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
-            {/* Drydock — spend Salvage on major unlocks (stat upgrades are card-only) */}
-            {stats.shop && (
-              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3">
-                <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {stats.shop.unlocks.map(u => (
-                    <button
-                      key={u.id}
-                      disabled={u.owned || !u.affordable}
-                      onClick={() => onPurchaseUnlock?.(u.id)}
-                      className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                        u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                          : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
-                            : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      <span className="font-bold">{u.label}</span>
-                      <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
-                    </button>
+            {/* Loadout — 2 equip slots.  Interim home: swaps are free here in
+                the pause menu until the station POI (1e) takes over. */}
+            {stats.loadout && (
+              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
+                <div className="flex flex-col gap-1.5">
+                  {stats.loadout.slots.map((slot, i) => (
+                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
+                      {(stats.loadout?.owned ?? []).map(w => (
+                        <button
+                          key={w.id}
+                          onClick={() => onEquipWeapon?.(i, w.id)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
+                            slot?.id === w.id
+                              ? 'bg-sky-600/70 text-white'
+                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
+                          }`}
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
+                        <button
+                          onClick={() => onEquipWeapon?.(i, null)}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
+                        >
+                          ✕ empty
+                        </button>
+                      )}
+                    </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Drydock — purchase-only progression (pivot 1c): one-time
+                Modules + per-level stat Augments, both bought with Salvage. */}
+            {stats.shop && (
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
+                <div>
+                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {stats.shop.unlocks.map(u => (
+                      <button
+                        key={u.id}
+                        disabled={u.owned || !u.affordable}
+                        onClick={() => onPurchaseUnlock?.(u.id)}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="font-bold">{u.label}</span>
+                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Augments</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {stats.shop.augments.map(a => (
+                      <button
+                        key={a.id}
+                        disabled={a.locked || !a.affordable}
+                        onClick={() => onPurchaseUpgrade?.(a.id)}
+                        title={a.locked ? 'Requires the Shield module' : a.desc}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          a.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
+                            : a.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="font-bold">{a.label} <span className="text-[9px] opacity-70">Lv{a.level}</span></span>
+                        <span className="tabular-nums">{a.locked ? '🔒 SHIELD' : `◈${a.cost.toLocaleString()}`}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

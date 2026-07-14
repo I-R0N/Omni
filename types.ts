@@ -151,7 +151,10 @@ export type EnemyShape =
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
 // truth so a new drop type is one table entry, not a hunt across systems.
-export type DropType = 'ammo' | 'health' | 'glass';
+// 'salvage' is the money drop (credits on collection); 'glass' is internal
+// shattered-structure debris.  ('ammo' was deleted with the ammo system,
+// pivot increment 1b.)
+export type DropType = 'health' | 'glass' | 'salvage';
 
 export enum EnemyRole {
   RAMMING  = 'RAMMING',
@@ -224,14 +227,9 @@ export interface WeaponConfig {
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
   pierce: number; // How many entities the projectile passes through after the first hit
-  // Shared-ammo deduction per normal (tap) trigger pull.  Blaster = 0
-  // (infinite); every other weapon = 1.  Charged shots use chargedAmmoCost.
-  ammoCost: number;
-  // Shared-ammo deduction for a charged (hold-to-fire) trigger pull.
-  // Blaster = 0; every other weapon = 2.  When the shared pool is short of
-  // chargedAmmoCost on charge release, WeaponSystem falls back to a normal
-  // shot at ammoCost.
-  chargedAmmoCost: number;
+  // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
+  // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
+  // commitment; charged shots cost only the charge-time hold.
   // Maximum tile-bounces for a bouncer projectile.  Bouncer is the only
   // weapon that uses this today; absent on other configs.
   bounceCount?: number;
@@ -285,12 +283,9 @@ export interface NebulaColorStop {
 }
 
 // ── Drop composition entry ────────────────────────────────────────────────────
-// Tracks drops stored inside a composite asteroid, including absorbed power-ups.
-// Post-d1: ammo is a single shared currency, so ammo entries no longer carry
-// a per-weapon tag — `value` is the shared-pool amount the drop will award on
-// release.
+// Tracks drops stored inside a composite asteroid; released as individual
+// drops on destruction.  ('ammo' entries died with the ammo system, 1b.)
 export type DropCompositionEntry =
-  | { type: 'ammo'; value: number }
   | { type: 'health'; value: number };
 
 export interface GameEntity {
@@ -396,27 +391,30 @@ export interface GameEntity {
   // Powerup pickup
   powerupWeapon?: WeaponType;
 
-  // Shared-pool ammo-pickup flash: timer counts down from FLASH_DURATION → 0;
-  // `amount` accumulates +N pickups inside the same flash window.
-  ammoPickupFlash?: { timer: number; amount: number };
+  // Salvage-pickup flash — accumulate-within-window: timer counts down from
+  // FLASH_DURATION → 0; `amount` is the CREDITS gained (units ×
+  // SALVAGE_CONSTANTS.CREDITS_PER_DROP), summing pickups inside the same
+  // window.  Piped to the HUD Salvage chip via EngineStats.salvageFlash.
+  salvagePickupFlash?: { timer: number; amount: number };
 
-  // Shared ammo pool — single currency consumed by every non-blaster weapon
-  // at its per-weapon `ammoCost`.  Blaster is infinite and bypasses this pool.
-  ammo?: number;
   // Upgrade-derived stat modifiers (player only; set by GameEngine
   // .applyUpgrades from the run's upgrade levels).  Read at the existing
   // stat-hook sites with a sensible fallback so a fresh entity is unchanged:
-  //  - maxAmmo: ammo-pool cap (DropSystem clamp; default AMMO MAX_POOL)
   //  - damageMult / cooldownMult: weapon scaling (WeaponSystem; default 1)
   //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
-  maxAmmo?: number;
   damageMult?: number;
   cooldownMult?: number;
   shieldRechargeRate?: number;
-  // Unlock gating (player only; set by GameEngine.syncUnlocksToPlayer):
-  //  - ownedWeapons: which weapons cycle/select may pick (always ≥ Blaster)
+  // Unlock + loadout gating (player only; set by GameEngine
+  // .syncUnlocksToPlayer):
+  //  - ownedWeapons: what CAN be equipped (always ≥ Blaster)
+  //  - equippedWeapons: the 2-slot loadout — what cycle/select may pick and
+  //    fire.  Exactly 2 entries; null = empty slot.  New run =
+  //    [BLASTER, null].  Loadout swaps happen in the pause-menu Drydock
+  //    (interim home until the station POI lands).
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
+  equippedWeapons?: (WeaponType | null)[];
   overchargeUnlocked?: boolean;
   // Explosion-knockback overshoot allowance (player).  An AoE blast can drive
   // the player above the normal maxSpeed cap; this holds the temporarily-raised
@@ -835,7 +833,7 @@ export interface GameEntity {
   // shards/drops that were spawned **as a result of** the wave's own
   // kills (e.g. glass-shards from a tile the wave shattered earlier in
   // its sweep).  Without this, every cannon hit cascaded into a pile of
-  // ammo drops because each newborn shard rolled the asteroid drop
+  // salvage drops because each newborn shard rolled the asteroid drop
   // table when the wave killed it.
   validHitIds?: Set<string>;
 
@@ -1217,29 +1215,37 @@ export interface EngineStats {
   comboMultiplier?: number;
   comboCount?: number;
   comboFraction?: number;
-  /** Spendable Salvage currency (earns 1:1 with score; score stays the
-   *  permanent high-score).  Spent on upgrades / unlocks. */
+  /** Spendable Salvage currency — earned by COLLECTING salvage drops in the
+   *  field (score no longer mirrors into it).  Spent on upgrades / unlocks. */
   credits?: number;
+  /** Salvage-pickup flash for the HUD chip: credits gained in the current
+   *  flash window + remaining-window fraction for fade. */
+  salvageFlash?: { amount: number; fraction: number };
   /** Per-upgrade level snapshot for the DBG Upgrades panel. */
   upgrades?: { id: string; label: string; level: number; max: number }[];
-  /** Pending between-wave upgrade-card choice (undefined when not
-   *  choosing).  The sim is paused while this is set; the player picks
-   *  one card to apply. */
-  cardChoice?: UpgradeCard[];
-  /** Wave interval between card offers (DBG-cyclable; 1 = every wave). */
-  cardInterval?: number;
   /** Effective player stats for the player menu (pause screen). */
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
-    damageMult: number; cooldownMult: number; speedMult: number; maxAmmo: number;
+    damageMult: number; cooldownMult: number; speedMult: number;
   };
   /** Current run unlocks for the player menu (real ownership). */
   unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
-  /** Drydock shop catalog (populated only while paused).  Unlocks only —
-   *  stat upgrades come exclusively from wave-completion cards. */
+  /** 2-slot equip loadout for the pause-menu swap UI (populated only while
+   *  paused).  `slots` holds the equipped weapon (or null = empty slot);
+   *  `owned` is everything that CAN be equipped.  ids are WeaponType values. */
+  loadout?: {
+    slots: ({ id: string; name: string } | null)[];
+    owned: { id: string; name: string }[];
+  };
+  /** Drydock shop catalog (populated only while paused).  `unlocks` are the
+   *  one-time Modules; `augments` are per-level stat upgrades priced by the
+   *  escalating upgradeCost() curve (purchase-only progression, pivot 1c).
+   *  A `locked` augment (shield-dependent, Shield not owned) renders
+   *  visible-but-locked so the dependency reads as shop ordering. */
   shop?: {
     unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
+    augments: { id: string; label: string; desc: string; level: number; cost: number; affordable: boolean; locked: boolean }[];
   };
   debugMode?: boolean;
   trailShape?: TrailShape;
@@ -1349,7 +1355,7 @@ export interface EngineStats {
   playerThrustName?: string;
   playerSpeedName?: string;
   // ── Asteroid/shard flow-field DBG state ───────────────────────
-  // Enables the per-asteroid / per-ammo-drop velocity nudge toward
+  // Enables the per-asteroid / per-drop velocity nudge toward
   // the baked asteroid-flow vector.  Default true (production);
   // DBG-toggleable to OFF for A/B-testing zero-flow behaviour
   // (asteroids decay toward zero velocity over a few seconds; only
@@ -1458,19 +1464,8 @@ export interface DamageText {
   fontScale?: number;
 }
 
-// One option in a between-wave upgrade-card choice.  `kind` discriminates
-// the payload: 'stat' bumps an upgrade level (`id`), 'salvage' grants
-// currency (`amount`).  'unlock' is reserved for the weapons/shield/
-// overcharge unlocks (built next) — the card pool is already shaped for it.
-export interface UpgradeCard {
-  kind: 'stat' | 'salvage' | 'unlock';
-  label: string;
-  desc: string;
-  id?: string;       // upgrade id (stat) or unlock id
-  amount?: number;   // salvage granted
-  levels?: number;   // stat-card level grant (1 normal; 2–4 on powerful waves)
-  rarity?: 'common' | 'rare';
-}
+// (The between-wave UpgradeCard choice was removed in pivot 1c — all
+// progression is purchased in the Drydock now.)
 
 // Full-screen wave announcement banner rendered on the canvas.
 export interface WaveAnnouncement {

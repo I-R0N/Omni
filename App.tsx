@@ -317,18 +317,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.addDebugCredits(1000);
   };
 
-  const handleSelectCard = (index: number) => {
-      if (engineRef.current) engineRef.current.selectUpgradeCard(index);
-  };
-
-  const handleCycleCardInterval = () => {
-      if (engineRef.current) engineRef.current.cycleCardInterval();
-  };
-
-  const handleTestCards = () => {
-      if (engineRef.current) engineRef.current.debugTriggerCardChoice();
-  };
-
   const handleSpawnDragon = (type: string) => {
       if (engineRef.current) engineRef.current.debugSpawnDragon(type);
   };
@@ -349,6 +337,14 @@ const App: React.FC = () => {
 
   const handlePurchaseUnlock = (id: string) => {
       if (engineRef.current) engineRef.current.purchaseUnlock(id);
+  };
+
+  const handleEquipWeapon = (slot: number, weaponId: string | null) => {
+      if (engineRef.current) engineRef.current.equipWeapon(slot, weaponId);
+  };
+
+  const handlePurchaseUpgrade = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseUpgrade(id);
   };
 
   const handleUnlockAll = () => {
@@ -472,15 +468,14 @@ const App: React.FC = () => {
         onMaxUpgrades={handleMaxUpgrades}
         onResetUpgrades={handleResetUpgrades}
         onAddCredits={handleAddCredits}
-        onSelectCard={handleSelectCard}
-        onCycleCardInterval={handleCycleCardInterval}
-        onTestCards={handleTestCards}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
         onPurchaseUnlock={handlePurchaseUnlock}
+        onEquipWeapon={handleEquipWeapon}
+        onPurchaseUpgrade={handlePurchaseUpgrade}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}

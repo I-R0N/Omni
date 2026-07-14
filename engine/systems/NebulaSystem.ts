@@ -30,7 +30,7 @@ import { getCollisionR } from '../entityCache';
 /**
  * NebulaSystem — owns everything nebula-specific: shatter bursts, shard
  * gravity/merge dynamics, tile regeneration with rule-based colour,
- * shard→tile transmutation, and the low-frequency ammo drop roll.
+ * shard→tile transmutation, and the low-frequency salvage drop roll.
  *
  * Extracted from GameEngine as part of the Phase-2/3 style system split
  * introduced by the engine-upgrade PR.  Stage 2 of the shard-system
@@ -51,7 +51,7 @@ import { getCollisionR } from '../entityCache';
  *
  * Dependencies injected via constructor:
  *   - ParticleSystem for merge-event glimmer bursts.
- *   - DropSystem for ammo drops + wave-scaled ammo type lookup.
+ *   - DropSystem for salvage drops.
  */
 export class NebulaSystem {
     /**
@@ -133,10 +133,10 @@ export class NebulaSystem {
      * NEBULA and NEBULA_SHARD entities here instead of the generic
      * drops / particle-burst path.  Nebulae are the only entity type
      * that doesn't spawn glass or asteroid shards on death — they
-     * produce polygonal nebula shards + an occasional ammo drop.
+     * produce polygonal nebula shards + an occasional salvage drop.
      *
      * @param entities     Current map's entities list (shards are appended).
-     * @param activeDrops  Drop-lookup cache (ammo drop registers here too).
+     * @param activeDrops  Drop-lookup cache (salvage drop registers here too).
      * @param entity       The NEBULA tile or NEBULA_SHARD that just died.
      */
     public handleDeath(
@@ -148,21 +148,20 @@ export class NebulaSystem {
         // directly from GameEngine.handleEntityDeath via
         // `this.shards.shatter(entity, entities)`.  This system
         // only handles the nebula-specific bookkeeping +
-        // ammo-drop roll.
+        // salvage-drop roll.
 
         // A destroyed tile removes itself from its neighbours' counts;
         // flag for recompute on the next frame.
         if (entity.shardVariant === 'nebula-tile') this.neighborCountsDirty = true;
 
-        // Low-frequency ammo drop — the ONLY standard drop nebulae produce.
+        // Low-frequency salvage drop — the ONLY standard drop nebulae produce.
         // Roll is independent of the shard math so shard count/size is
         // unaffected; the drop (if any) is a bonus alongside the shards.
-        if (Math.random() < NEBULA_CONSTANTS.AMMO_DROP_CHANCE) {
-            this.drops.spawnAmmoDrop(
+        if (Math.random() < NEBULA_CONSTANTS.SALVAGE_DROP_CHANCE) {
+            this.drops.spawnSalvageDrop(
                 entities,
                 activeDrops,
                 entity.position,
-                NEBULA_CONSTANTS.AMMO_PER_NEBULA,
                 entity.lastImpactVelocity,
             );
         }
