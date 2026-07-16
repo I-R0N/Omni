@@ -46,7 +46,9 @@ netlify.toml              Netlify deploy config (publish = dist/)
 scripts/inline-build.mjs  Bundles dist/ into omniverse-standalone.html
 
 components/
-  UIOverlay.tsx           Entire HUD (menu, pause, wave banner, debug panel)
+  UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
+                          UI, dock affordance; debug panel lives inside
+                          the pause menu)
 
 engine/
   GameEngine.ts           God-class orchestrator (~2200 lines). Owns the
@@ -56,8 +58,9 @@ engine/
                           listener registry
   NebulaColor.ts          Palette-aware hex blending for nebula compositions
   maps/
-    MapClasses.ts         BaseMapLayer + full-game maps (UniverseMap,
-                          RingMap, SevenRingsMap, PocketMap) and the
+    MapClasses.ts         BaseMapLayer + full-game maps (OverworldMap,
+                          UniverseMap, RingMap, SevenRingsMap,
+                          PocketMap) and the
                           single-element 6k showcase maps
                           (AsteroidFieldMap, GlassFieldMap,
                           PlasticFieldMap, MetalFieldMap,
@@ -131,7 +134,12 @@ only honored from the main menu; mid-game requires `restartGame()`.
 
 Per-frame `loop()`:
 
-1. Measure delta, accumulate into `simAccumulator`.
+1. Measure delta, accumulate into `simAccumulator`.  BUT FIRST: if
+   `dockedAtStation` is set (station POI, increment 1e) the loop pushes
+   stats, draws a static frame, and returns — the sim FREEZES while the
+   React station UI is up (same short-circuit the removed
+   `cardChoicePending` card modal used).  The E key undocks from inside
+   this branch.
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal
@@ -165,6 +173,12 @@ Per-frame `loop()`:
         burst/coast AI + flow-field steering, comet-tail emission,
         catch check (collide/shoot per DBG toggle), wave-end on catch
         (the snitch entity persists across waves)
+     5b. `updateStationDocking()` — one O(1) torus-wrapped distance to
+        the station POI + the E-key edge check; stamps
+        `stationDockReady` (the world-space dock-halo affordance) and
+        flips `dockedAtStation` on dock.  Followed by the Overworld
+        roaming-dragon keeper (auto-respawn on `OVERWORLD_CONSTANTS`
+        timers; OVERWORLD map only).
      6. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         same-type drop merge pass (`DropSystem.mergeDrops`;
         `dropMerge` task)
@@ -259,6 +273,10 @@ Notable existing field categories on `GameEntity`:
   `nebulaCachedSize` — populated by RenderSystem after a slow-path
   draw and invalidated at every site that mutates the inputs
   (composition, neighbour count, tile area).
+- Station POI: `isStation` (the one-per-Overworld station entity —
+  INTERACTABLE + mass ∞ + no dropType, so broadphase / static grid /
+  flow-field obstacles all skip it), `stationDockReady` (stamped per
+  step by the dock proximity check; drives the render-side dock halo)
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ownedWeapons`/
   `equippedWeapons` (the 2-slot loadout — see §5 WEAPONS note),
@@ -463,9 +481,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.equippedWeapons` holds exactly 2 slots (null = empty; new
   run = Blaster + empty); any 2 OWNED weapons may be equipped (the Blaster
   is fully swappable out), cycle/select run over the slots only
-  (`WeaponSystem.cycleWeapon`/`selectWeapon`), and swaps are free in the
-  pause-menu Drydock ("Loadout" panel → `GameEngine.equipWeapon`; the
-  station POI takes over in 1e).  Buying a weapon auto-equips it into the
+  (`WeaponSystem.cycleWeapon`/`selectWeapon`), and swaps are STATION-ONLY
+  (1e): free while `dockedAtStation` (station UI Loadout panel →
+  `GameEngine.equipWeapon`, which REJECTS while undocked — undocked =
+  committed loadout; the DBG weapon grant bypasses via
+  `equipWeaponInternal`).  Buying a weapon auto-equips it into the
   first EMPTY slot.  The HUD is a 2-slot readout
   (`RenderSystem.renderLoadoutHUD` + `computeLoadoutHUDLayout`; active
   slot highlighted, charge ring unchanged on the ship).  Charged shots
@@ -499,7 +519,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   spine.  7 leveled stat upgrades (hull / plating / capacitor / engine /
   thrusters / gunnery / autoloader — Magazine died with the ammo system,
   1b).  PURCHASE-ONLY progression (pivot 1c): levels are BOUGHT in the
-  Drydock (`GameEngine.purchaseUpgrade`) at the escalating
+  Drydock (`GameEngine.purchaseUpgrade` — STATION-ONLY since 1e: rejects
+  unless `dockedAtStation`) at the escalating
   `upgradeCost()` curve — the free wave-completion cards, the "powerful"
   card variants, and the free-unlock lottery are all REMOVED (there is
   no card modal, no sim-pause between waves, no `UpgradeCard` type).
@@ -526,15 +547,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   premium weapon stat post-ammo; Hull/Plating cheapest at 4k base).
   The run starts LEAN (Blaster only, no shield, no charged shots);
   unlocks (Shield, Overcharge, the 6 non-Blaster weapons) are bought in
-  the **Drydock** (a shop section in the player menu,
-  `GameEngine.purchaseUnlock` spending `credits`).
+  the **Drydock** — since 1e a panel of the DOCKED STATION UI, not the
+  pause menu (`GameEngine.purchaseUnlock` spending `credits`, rejects
+  unless `dockedAtStation`).
   Unlock state lives on `GameEngine` (`unlockedWeapons` / `shieldUnlocked`
   / `overchargeUnlocked`), synced to the player entity
   (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon
   cycle/select + charged shots; `applyUpgrades` gates `maxShield` to 0
   until Shield is owned.  `EngineStats.shop` (`.unlocks` Modules +
-  `.augments` per-level stat prices, built only while paused) drives the
-  player-menu Drydock panels; DBG "Unlock all" / "Relock" cover testing.
+  `.augments` per-level stat prices, built while paused OR docked)
+  drives the station Drydock panels; DBG "Unlock all" / "Relock" +
+  the per-weapon grant rows cover wave-map testing.
   NOTE: per-wave enemy stat scaling is still a planned increment.
 - Wave-clear reward beat (pivot 1c): with the cards gone,
   `handleWaveCleared` sprays `SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS`
@@ -589,6 +612,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `systemsDisabled` flag so the weapon can't fire and the shield neither
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
+- `STATION_CONSTANTS` / `OVERWORLD_CONSTANTS` (increment 1e) — the
+  space-station POI (size / colour / `DOCK_RANGE` / placement
+  `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is pay-per-HP,
+  PRO-RATED: heals what the player can afford at 30 salvage/HP) and the
+  wave-free Overworld map's roaming-dragon respawn timers.  The station
+  is the home of ALL commerce: Drydock shop + loadout swaps + hull
+  repair live in the DOCKED station UI; the pause menu has no commerce
+  sections.  Docking = proximity + E key / HUD DOCK button; docked =
+  sim frozen (loop short-circuit); undocked = locked loadout.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic
@@ -637,10 +669,17 @@ and `DIFFICULTY_STAT_SCALES`.
 Two families of maps live in `engine/maps/MapClasses.ts`, all subclasses
 of `BaseMapLayer`:
 
-- **Full-game maps** — `UniverseMap` (`UNIVERSE`), `RingMap` (`RING`),
-  `SevenRingsMap` (`SEVEN_RINGS`), `PocketMap` (`POCKET`). These mix
+- **Full-game maps** — `OverworldMap` (`OVERWORLD`), `UniverseMap`
+  (`UNIVERSE`), `RingMap` (`RING`), `SevenRingsMap` (`SEVEN_RINGS`),
+  `PocketMap` (`POCKET`). These mix
   asteroids, structures (multiple variants), and nebulae and are the
-  ones a normal play session uses.
+  ones a normal play session uses.  The **Overworld** is the WAVE-FREE
+  home map (increment 1e): `WaveSystem.init(ctx, enabled=false)` — no
+  waves, no snitch; population is the ambient systems (bubbles, score-
+  cadence rivals, an engine-respawned roaming dragon) plus the STATION
+  POI at map center (its `MAP_POPULATION` cluster counts are read from
+  the table — the authoritative pattern).  Player spawns beside the
+  station, inside dock range.
 - **Single-element 6 000 × 6 000 showcase maps** — `AsteroidFieldMap`
   (`ASTEROID_FIELD`), `GlassFieldMap` (`GLASS_FIELD`),
   `PlasticFieldMap` (`PLASTIC_FIELD`), `MetalFieldMap` (`METAL_FIELD`),
@@ -925,6 +964,25 @@ button in `UIOverlay.tsx`.
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
   shards merge past the area threshold.
+- **The station POI is a non-drop INTERACTABLE.** Like the snitch:
+  `EntityType.INTERACTABLE` + no `dropType` means the physics broadphase
+  skips every pair it's in; `mass: Infinity` + INTERACTABLE keeps it out
+  of the static grid too, and the flow-field obstacle bake only reads
+  STRUCTUREs — so the station is pure scenery + a dock zone with zero
+  collision/flow side effects.  The existing POI paths give it a minimap
+  dot, an off-screen chevron, and `handleAsteroidRespawn` avoidance for
+  free.  Docking state lives on `GameEngine` (`station` /
+  `dockedAtStation` / `dockInRange`); commerce methods (`equipWeapon` /
+  `purchaseUnlock` / `purchaseUpgrade` / `repairHull`) all REJECT while
+  undocked, and `pauseGame()` is a no-op while docked (one full-screen
+  overlay at a time).
+- **The debug menu lives in the pause Player Menu** ("Debug Menu"
+  collapsible section) — the old floating top-left DBG button/panel is
+  gone.  The 'Overlays' row inside is the old master toggle (renderer
+  debug overlays only).  DBG **Weapons** rows (grant + equip per weapon,
+  `debugGrantWeapon`) are the wave-map test path for weapons now that
+  commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
+  feeds them.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through
