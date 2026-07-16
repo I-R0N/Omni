@@ -347,6 +347,26 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.purchaseUpgrade(id);
   };
 
+  const handleDock = () => {
+      if (engineRef.current) engineRef.current.dockAtStation();
+  };
+
+  const handleUndock = () => {
+      if (engineRef.current) engineRef.current.undock();
+  };
+
+  const handleRepairHull = () => {
+      if (engineRef.current) engineRef.current.repairHull();
+  };
+
+  const handleGrantWeapon = (id: string) => {
+      if (engineRef.current) engineRef.current.debugGrantWeapon(id);
+  };
+
+  const handleTeleportStation = () => {
+      if (engineRef.current) engineRef.current.debugTeleportToStation();
+  };
+
   const handleUnlockAll = () => {
       if (engineRef.current) engineRef.current.debugUnlockAll();
   };
@@ -476,6 +496,11 @@ const App: React.FC = () => {
         onPurchaseUnlock={handlePurchaseUnlock}
         onEquipWeapon={handleEquipWeapon}
         onPurchaseUpgrade={handlePurchaseUpgrade}
+        onDock={handleDock}
+        onUndock={handleUndock}
+        onRepairHull={handleRepairHull}
+        onGrantWeapon={handleGrantWeapon}
+        onTeleportStation={handleTeleportStation}
         onUnlockAll={handleUnlockAll}
         onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}

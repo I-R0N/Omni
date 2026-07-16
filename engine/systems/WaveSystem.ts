@@ -72,9 +72,10 @@ export class WaveSystem {
   }
 
   /** Reset all wave state and start wave 0.  Skipped entirely when
-   *  enemyScale is 0 (difficulty "None") — the map loads with waves
-   *  disabled: no wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext) {
+   *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
+   *  maps, e.g. the Overworld) — the map loads with waves disabled: no
+   *  wave 1 banner, no grace-period cycling, no enemies. */
+  public init(ctx: WaveSpawnContext, enabled: boolean = true) {
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
@@ -86,7 +87,7 @@ export class WaveSystem {
     this.spawnTimesSec = [];
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
-    if (ctx.enemyScale <= 0) return;
+    if (!enabled || ctx.enemyScale <= 0) return;
     this.startWave(0, ctx);
   }
 

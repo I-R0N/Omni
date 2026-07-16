@@ -1392,6 +1392,11 @@ export const SHOOTING_STAR_CONSTANTS = {
 };
 
 export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceleration: number, friction: number }> = {
+  [MapType.OVERWORLD]: {
+    maxSpeed: 120,
+    acceleration: 0.085,
+    friction: 0.998
+  },
   [MapType.UNIVERSE]: {
     maxSpeed: 120,
     acceleration: 0.085,
@@ -2702,6 +2707,47 @@ export const SALVAGE_CONSTANTS = {
   // is a noticeable ~50% early-wave topper without dwarfing the fighting
   // itself.  The early-clear SPEED bonus stays score-only.
   WAVE_CLEAR_DROPS: 3,
+};
+
+// ── Space station POI (economy-pivot increment 1e) ──────────────────────────
+// One station sits at the center of the OVERWORLD map — the home of the
+// Drydock shop, the loadout swaps (station-only commitment: undocked =
+// locked loadout), and hull repair.  It's an EntityType.INTERACTABLE with
+// mass ∞ and no dropType: the physics broadphase skips non-drop
+// INTERACTABLE pairs entirely, the static grid and the flow-field obstacle
+// bake both exclude INTERACTABLEs, and handleAsteroidRespawn already
+// avoids POIs — so the station is pure scenery + a dock zone with zero
+// collision/flow surprises.  Docking freezes the sim (cardChoicePending-
+// style loop short-circuit) and opens the station UI.
+export const STATION_CONSTANTS = {
+  SIZE: 180,             // world-unit diameter of the station body
+  COLOR: '#38bdf8',      // sky — matches the Drydock UI headers; minimap dot + chevron colour
+  NAME: 'STATION',
+  // Dock proximity — a single O(1) torus-wrapped distance check per sim
+  // step (player → fixed point; no scan, no PerfController task needed).
+  // The player spawn sits inside this radius so a fresh Overworld run
+  // opens with the DOCK affordance visible (discoverability).
+  DOCK_RANGE: 260,
+  // Placement clearance: map generation drops every entity seeded within
+  // this radius of the station so it never spawns buried in a cluster.
+  CLEARANCE: 520,
+  // Hull repair — pay-per-HP, PRO-RATED (decision: station-poi 1e).
+  // 30 salvage/HP ⇒ a full base-hull (100 HP) repair ≈ 3 000 credits,
+  // ~half a wave of combat income (CREDITS_PER_DROP arithmetic above) and
+  // well under the cheapest weapon (25 000).  If the player can't afford
+  // the full repair the button heals what they CAN pay for.
+  REPAIR_COST_PER_HP: 30,
+};
+
+// ── Overworld map (wave-free home map, increment 1e) ────────────────────────
+// Population is standard mixed terrain (MAP_POPULATION[OVERWORLD]) plus the
+// ambient systems that need no waves: bubbles (automatic fauna), rivals
+// (score-cadence warp-ins), and a roaming dragon kept alive by GameEngine:
+// the first spawns shortly after the run starts, and a fresh one rifts in
+// a while after the previous one dies or leaves.
+export const OVERWORLD_CONSTANTS = {
+  DRAGON_FIRST_SPAWN_SEC: 25,
+  DRAGON_RESPAWN_SEC: 90,
 };
 
 export const DROP_CONFIG = {
@@ -4363,6 +4409,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
 // fields, both deleted in Stage 7.
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
+  // Overworld (wave-free home map, 12k) — standard mixed terrain, read
+  // directly from this table by OverworldMap.init() (the authoritative
+  // pattern; the older natural maps still hardcode their ratios).
+  [MapType.OVERWORLD]: {
+    'rock-shard': { freeSpawn: { count: 120, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
+    'glass-tile':   { tileCluster: { clusterCount: 10, minClusterSize: 10, maxClusterSize: 30 } },
+    'plastic-tile': { tileCluster: { clusterCount:  4, minClusterSize:  8, maxClusterSize: 20 } },
+    'metal-tile':   { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
+    'nebula-tile':  { tileCluster: { clusterCount: 42, minClusterSize: 12, maxClusterSize: 36 } },
+  },
   [MapType.UNIVERSE]: {
     'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
     'glass-tile':          { tileCluster: { clusterCount: 14, minClusterSize: 10, maxClusterSize: 34 } },

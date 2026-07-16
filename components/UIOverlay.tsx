@@ -7,6 +7,9 @@ import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtyp
 // stress map).  Both the main menu and the pause screen render the same
 // groups via renderMapGroup().
 const REAL_MAPS: { type: MapType; label: string }[] = [
+  // Wave-free home map: station POI (shop / loadout / repair) + ambient
+  // roamers (bubbles, rivals, dragon).  No waves.
+  { type: MapType.OVERWORLD,   label: 'Overworld' },
   { type: MapType.UNIVERSE,    label: 'Deep Space' },
   { type: MapType.RING,        label: 'Ring World' },
   { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
@@ -109,9 +112,18 @@ interface UIOverlayProps {
   onPerfRecExport?: () => string;
   onPurchaseUnlock?: (id: string) => void;
   onPurchaseUpgrade?: (id: string) => void;
-  // 2-slot loadout swap (interim pause-menu home until the station lands):
-  // equip owned weapon `weaponId` into slot 0/1, or null to empty the slot.
+  // 2-slot loadout swap — STATION-ONLY (1e): the station UI is the sole
+  // caller; the engine rejects swaps while undocked.
   onEquipWeapon?: (slot: number, weaponId: string | null) => void;
+  // Station docking (Overworld): dock from the in-range affordance, undock
+  // from the station UI, repair hull (pay-per-HP, pro-rated).
+  onDock?: () => void;
+  onUndock?: () => void;
+  onRepairHull?: () => void;
+  // DBG: grant + equip a weapon (pause-menu debug Weapons rows) and
+  // teleport the player to the station's doorstep (Overworld only).
+  onGrantWeapon?: (id: string) => void;
+  onTeleportStation?: () => void;
   onUnlockAll?: () => void;
   onResetUnlocks?: () => void;
   onToggleFFOverlayVectors?: () => void;
@@ -200,6 +212,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPurchaseUnlock,
   onPurchaseUpgrade,
   onEquipWeapon,
+  onDock,
+  onUndock,
+  onRepairHull,
+  onGrantWeapon,
+  onTeleportStation,
   onUnlockAll,
   onResetUnlocks,
   onToggleFFOverlayVectors,
@@ -228,13 +245,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, upgrades: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, perfrec: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
-    // outer pause-only Switch Map / Test wrapper.
-    fieldmaps: true, switchmap: true,
+    // outer pause-only Switch Map / Test wrapper.  'debug' is the pause-menu
+    // Debug Menu wrapper (the DBG panel's home since the station increment).
+    fieldmaps: true, switchmap: true, debug: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -390,35 +408,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     entityCountMode === 'asleep' ? asleepEntities
     : entityCountMode === 'active' ? Math.max(0, totalEntities - asleepEntities)
     : totalEntities;
-  return (
-    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
-
-      {/* ── Top Bar ── */}
-      <div className="flex justify-between items-start">
-
-        {/* Top-left: debug panel (visible only when debug is on).  Lifted to
-            z-[60] so it sits ABOVE the paused Player Menu overlay (z-50) —
-            lets debug features be toggled while the game is paused. */}
-        <div className="flex flex-col gap-1 relative z-[60]">
-          {/* Debug toggle button — always visible */}
-          <button
-            onClick={onToggleDebug}
-            className={`pointer-events-auto self-start px-2 py-1 rounded text-[10px] font-mono font-bold tracking-widest border transition-all ${
-              stats.debugMode
-                ? 'bg-amber-500/30 border-amber-400/70 text-amber-300'
-                : 'bg-slate-800/70 border-slate-600/50 text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            DBG
-          </button>
-
-          {/* Debug info + perf instrumentation panel.  Shown only while
-              debug mode is active (DBG button).  Deliberately small and
-              semi-transparent (~35% bg opacity, 8-9 px font, tight leading)
-              so it never hides the player ship while dev stats stream. */}
-          {stats.debugMode && (
-            <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
-              <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
+  // ── Debug menu content ────────────────────────────────────────────────
+  // Relocated INTO the pause Player Menu as a proper section (station
+  // increment decision) — the old floating top-left DBG button + dropdown
+  // panel is gone.  Kept as a plain JSX const so the pause overlay slots
+  // it under its collapsible "Debug Menu" header.  The 'Overlays' row is
+  // the old DBG master toggle: it still gates the renderer's debug
+  // overlays (collision polygons, input vector, tile outlines).
+  const debugSections = (
+    <div className="font-mono text-[9px] leading-tight text-slate-300/90">
+              {ctrlRow('Overlays', onToggleDebug,
+                stats.debugMode ? 'On' : 'Off',
+                'Renderer debug overlays (collision polygons, player input vector). The old DBG master toggle — menu sections below work regardless.')}
 
               {/* ── Stats (top of menu — default open) ─────────────── */}
               {renderSectionHeader('stats', 'Stats')}
@@ -473,6 +474,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Traits', onToggleTraits,
                   stats.traitsEnabled === false ? 'Off' : 'On',
                   'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
+                {ctrlRow('Station', onTeleportStation, 'Go',
+                  'Teleport the player to the station\'s doorstep (docking-test harness). Overworld only — no-op on maps without a station.')}
               </>)}
 
               {/* ── Upgrades (progression spine — DBG) ─────────────── */}
@@ -493,6 +496,16 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Relock', onResetUnlocks, 'Lean',
                   'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
               </>)}
+
+              {/* ── Weapons (DBG grant + equip) ────────────────────── */}
+              {/* With commerce station-only, this is the wave-map test
+                  path for getting a weapon in hand: click = unlock (if
+                  needed) + equip.  S1/S2 = current loadout slot. */}
+              {renderSectionHeader('weapons', 'Weapons')}
+              {!collapsed.weapons && (stats.weaponCatalog ?? []).map(w =>
+                ctrlRow(w.name, () => onGrantWeapon?.(w.id),
+                  w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
+                  `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then equips it into the first empty loadout slot (or swaps out the inactive slot). S1/S2 = equipped slot.`))}
 
               {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
               {renderSectionHeader('dragon', 'Dragon')}
@@ -840,9 +853,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statRow(' ·tLit-N', perf.tileLightingCount)}
                 </>)}
               </>)}
-            </div>
-          )}
-        </div>
+    </div>
+  );
+
+  return (
+    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+
+      {/* ── Top Bar ── */}
+      <div className="flex justify-between items-start">
+        {/* Top-left intentionally empty — the debug menu now lives in the
+            pause Player Menu (Debug Menu section). */}
+        <div />
 
         {/* Top-right: wave HUD + pause button */}
         <div className="flex items-start gap-3">
@@ -901,6 +922,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </span>
                 </div>
               );})}
+              {stats.wavesEnabled !== false && (
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
@@ -924,11 +946,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </p>
                 )}
               </div>
+              )}
             </div>
           )}
 
-          {/* Pause button */}
-          {stats.gameState === GameState.PLAYING && (
+          {/* Pause button — hidden while docked (the station UI already
+              freezes the sim and owns the screen) */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && (
             <button
               onClick={onPause}
               className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 shadow-lg border border-slate-600/60 transition-all active:scale-95"
@@ -942,6 +966,150 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           )}
         </div>
       </div>
+
+      {/* ── Dock affordance (Overworld station) ── */}
+      {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && (
+        <button
+          onClick={onDock}
+          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
+        >
+          ⚓ Dock <span className="text-sky-200 text-[10px] font-mono normal-case">[E]</span>
+        </button>
+      )}
+
+      {/* ── Station UI (docked) ── */}
+      {/* The sim is frozen while docked (loop short-circuit); this overlay is
+          the Drydock's home: shop (Modules + Augments), loadout swaps (free
+          here, locked everywhere else), and pay-per-HP hull repair. */}
+      {stats.gameState === GameState.PLAYING && stats.dock?.docked && (() => {
+        const ps = stats.playerStats;
+        return (
+        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-sky-300 tracking-[0.2em]">⬡ STATION</h2>
+              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            </div>
+
+            <button
+              onClick={onUndock}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              UNDOCK <span className="text-emerald-200 text-[10px] font-mono">[E]</span>
+            </button>
+
+            {/* Hull repair — pay-per-HP, pro-rated (heals what you can afford) */}
+            <div className="bg-slate-800/60 border border-rose-600/30 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-xs">
+                <h3 className="text-rose-300 text-[11px] font-bold uppercase tracking-widest mb-1">Hull Repair</h3>
+                <span className="text-slate-400">Hull </span>
+                <span className="text-white font-bold tabular-nums">{ps?.health ?? 0} / {ps?.maxHealth ?? 100}</span>
+                <span className="text-slate-500 ml-2 text-[10px]">◈{stats.station?.repairCostPerHp ?? 0}/HP · partial repair if short</span>
+              </div>
+              <button
+                disabled={!stats.station?.canRepair}
+                onClick={onRepairHull}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                  stats.station?.canRepair
+                    ? 'bg-rose-700/60 hover:bg-rose-600/70 text-rose-100 active:scale-95'
+                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {(stats.station?.missingHull ?? 0) <= 0
+                  ? 'HULL FULL'
+                  : `REPAIR ◈${(stats.station?.fullRepairCost ?? 0).toLocaleString()}`}
+              </button>
+            </div>
+
+            {/* Loadout — 2 equip slots.  Swaps are free while docked; the
+                engine rejects them everywhere else (undocked = committed). */}
+            {stats.loadout && (
+              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
+                <div className="flex flex-col gap-1.5">
+                  {stats.loadout.slots.map((slot, i) => (
+                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
+                      {(stats.loadout?.owned ?? []).map(w => (
+                        <button
+                          key={w.id}
+                          onClick={() => onEquipWeapon?.(i, w.id)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
+                            slot?.id === w.id
+                              ? 'bg-sky-600/70 text-white'
+                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
+                          }`}
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
+                        <button
+                          onClick={() => onEquipWeapon?.(i, null)}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
+                        >
+                          ✕ empty
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Drydock — purchase-only progression: one-time Modules +
+                per-level stat Augments, both bought with Salvage. */}
+            {stats.shop && (
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
+                <div>
+                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {stats.shop.unlocks.map(u => (
+                      <button
+                        key={u.id}
+                        disabled={u.owned || !u.affordable}
+                        onClick={() => onPurchaseUnlock?.(u.id)}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="font-bold">{u.label}</span>
+                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Augments</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {stats.shop.augments.map(a => (
+                      <button
+                        key={a.id}
+                        disabled={a.locked || !a.affordable}
+                        onClick={() => onPurchaseUpgrade?.(a.id)}
+                        title={a.locked ? 'Requires the Shield module' : a.desc}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                          a.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
+                            : a.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="font-bold">{a.label} <span className="text-[9px] opacity-70">Lv{a.level}</span></span>
+                        <span className="tabular-nums">{a.locked ? '🔒 SHIELD' : `◈${a.cost.toLocaleString()}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        );
+      })()}
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
@@ -1065,89 +1233,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
-            {/* Loadout — 2 equip slots.  Interim home: swaps are free here in
-                the pause menu until the station POI (1e) takes over. */}
-            {stats.loadout && (
-              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
-                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
-                <div className="flex flex-col gap-1.5">
-                  {stats.loadout.slots.map((slot, i) => (
-                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
-                      {(stats.loadout?.owned ?? []).map(w => (
-                        <button
-                          key={w.id}
-                          onClick={() => onEquipWeapon?.(i, w.id)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
-                            slot?.id === w.id
-                              ? 'bg-sky-600/70 text-white'
-                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
-                          }`}
-                        >
-                          {w.name}
-                        </button>
-                      ))}
-                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
-                        <button
-                          onClick={() => onEquipWeapon?.(i, null)}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
-                        >
-                          ✕ empty
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Drydock — purchase-only progression (pivot 1c): one-time
-                Modules + per-level stat Augments, both bought with Salvage. */}
-            {stats.shop && (
-              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
-                <div>
-                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.unlocks.map(u => (
-                      <button
-                        key={u.id}
-                        disabled={u.owned || !u.affordable}
-                        onClick={() => onPurchaseUnlock?.(u.id)}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{u.label}</span>
-                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Augments</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.augments.map(a => (
-                      <button
-                        key={a.id}
-                        disabled={a.locked || !a.affordable}
-                        onClick={() => onPurchaseUpgrade?.(a.id)}
-                        title={a.locked ? 'Requires the Shield module' : a.desc}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          a.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
-                            : a.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{a.label} <span className="text-[9px] opacity-70">Lv{a.level}</span></span>
-                        <span className="tabular-nums">{a.locked ? '🔒 SHIELD' : `◈${a.cost.toLocaleString()}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Commerce (Drydock shop + Loadout swaps) moved OUT of the pause
+                menu to the Overworld station UI (economy-pivot 1e) — pausing
+                is no longer a shopping trip, and the loadout is committed
+                while undocked. */}
+            <p className="text-slate-500 text-[11px] text-center">
+              Shop, loadout swaps &amp; hull repair are at the <span className="text-sky-400 font-bold">Overworld station</span>.
+            </p>
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}
@@ -1161,6 +1253,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {!collapsed.switchmap && (
                 <div className="mt-4 flex flex-col items-center gap-4">
                   {renderTestPanel()}
+                </div>
+              )}
+            </div>
+
+            {/* Debug menu — the DBG panel's proper pause-menu home (the old
+                floating top-left dropdown button is gone). */}
+            <div className="text-center">
+              <button
+                onClick={() => toggleSection('debug')}
+                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+              >
+                Debug Menu {collapsed.debug ? '▸' : '▾'}
+              </button>
+              {!collapsed.debug && (
+                <div className="mt-3 mx-auto w-full max-w-xs bg-slate-900/70 border border-amber-500/30 rounded-lg px-3 py-2 text-left">
+                  {debugSections}
                 </div>
               )}
             </div>

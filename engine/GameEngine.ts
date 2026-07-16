@@ -17,10 +17,10 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
+import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, upgradeCost, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, upgradeCost, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -298,6 +298,23 @@ export class GameEngine {
   private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
   private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
   private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
+
+  // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
+  // The station lives on the OVERWORLD map (found by isStation at map load).
+  // Docking = proximity (one O(1) torus distance per sim step) + an explicit
+  // action (E key / HUD DOCK button).  While `dockedAtStation` the loop
+  // short-circuits the sim exactly like the removed cardChoicePending card
+  // modal did (field stays drawn behind the React station UI) and the
+  // station UI hosts the Drydock shop, the loadout swaps, and hull repair.
+  // Undocked = locked loadout: equipWeapon / purchaseUnlock / purchase-
+  // Upgrade are guarded on this flag.
+  private station: GameEntity | null = null;
+  private dockedAtStation: boolean = false;
+  private dockInRange: boolean = false;
+  private dockKeyHeld: boolean = false; // E-key edge detector (dock + undock)
+  // Overworld roaming dragon — first spawn shortly after run start, then a
+  // fresh rift a while after the previous dragon dies or leaves.
+  private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1271,6 +1288,7 @@ export class GameEngine {
    *  restartGame() share a single construction path. */
   private buildMap(type: MapType): BaseMapLayer {
     switch (type) {
+      case MapType.OVERWORLD:            return new OverworldMap();
       case MapType.RING:                 return new RingMap();
       case MapType.SEVEN_RINGS:          return new SevenRingsMap();
       case MapType.POCKET:               return new PocketMap();
@@ -1350,6 +1368,7 @@ export class GameEngine {
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
       waveStatus: 'active',
+      wavesEnabled: true, // skip only exists during wave gameplay
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
@@ -1450,7 +1469,9 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    if (this.gameState === GameState.PLAYING) {
+    // The docked station UI already freezes the sim; stacking the pause
+    // menu on top of it would double up two full-screen overlays.
+    if (this.gameState === GameState.PLAYING && !this.dockedAtStation) {
         this.gameState = GameState.PAUSED;
     }
   }
@@ -1484,6 +1505,12 @@ export class GameEngine {
       this.dragonsKilled = 0; // reset the doubling payout per run
       this.rivals = []; // rival ships die with the old map
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
+      // Station / docking state — the station entity itself is rebuilt with
+      // the map (loadMap re-finds it); the overworld dragon timer restarts
+      // its first-spawn countdown.
+      this.dockedAtStation = false;
+      this.dockInRange = false;
+      this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
@@ -1492,8 +1519,10 @@ export class GameEngine {
       this.resetUnlocks(); // back to lean (Blaster only, no shield/overcharge)
       this.resetUpgrades();
 
-      // Reset Player
-      this.player.position = { x: 0, y: 0 };
+      // Reset Player — at the map's declared spawn point (the Overworld
+      // spawns the player beside the station rather than at the origin).
+      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
+      this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
@@ -1514,7 +1543,7 @@ export class GameEngine {
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
 
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
-      this.camera.position = { x: 0, y: 0 };
+      this.camera.position = { ...spawn };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
   }
@@ -1574,6 +1603,10 @@ export class GameEngine {
     // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
     const perf = this.buildPerfSnapshot();
+    // Menu-grade snapshots (loadout / shop / stats) are built while the
+    // pause menu OR the docked station UI is up — both are sim-frozen
+    // full-screen overlays that need them.
+    const menuOpen = this.gameState === GameState.PAUSED || this.dockedAtStation;
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
       // the SAME just-finished frame — sample() runs at the top of the next
@@ -1598,6 +1631,7 @@ export class GameEngine {
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
+      wavesEnabled: this.wavesEnabled,
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
@@ -1611,7 +1645,7 @@ export class GameEngine {
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
       upgrades: this.upgradeSnapshot(),
-      playerStats: this.gameState === GameState.PAUSED ? {
+      playerStats: menuOpen ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
@@ -1620,13 +1654,16 @@ export class GameEngine {
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.upgradeSpeedMult(),
       } : undefined,
-      unlocks: this.gameState === GameState.PAUSED ? {
+      unlocks: menuOpen ? {
         weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
         shield: this.shieldUnlocked,
         overcharge: this.overchargeUnlocked,
       } : undefined,
-      loadout: this.gameState === GameState.PAUSED ? this.loadoutSnapshot() : undefined,
-      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
+      loadout: menuOpen ? this.loadoutSnapshot() : undefined,
+      shop: menuOpen ? this.shopSnapshot() : undefined,
+      dock: this.station ? { inRange: this.dockInRange, docked: this.dockedAtStation } : undefined,
+      station: this.dockedAtStation ? this.stationSnapshot() : undefined,
+      weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1703,6 +1740,21 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Docked at the station: freeze the sim (the field stays drawn behind
+    // the React station UI) until the player undocks — the same short-
+    // circuit the removed between-wave card modal used.  The E key undocks
+    // (edge-triggered on the shared latch); the station UI's UNDOCK button
+    // routes through undock() as well.
+    if (this.dockedAtStation) {
+        const eDown = this.input.isKeyDown('KeyE');
+        if (eDown && !this.dockKeyHeld) this.undock();
+        this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2590,6 +2642,26 @@ export class GameEngine {
     this.updateDragons(dt);
     this.updateRivals(dt);
 
+    // Station docking (Overworld) — one O(1) torus-wrapped distance to the
+    // fixed station point + the E-key edge check.  No scan, no
+    // PerfController task needed.
+    this.updateStationDocking();
+    // Overworld roaming dragon — keep one alive: first spawn shortly after
+    // run start, then a fresh rift a while after the previous one dies or
+    // leaves (the timer re-arms while a dragon is up).
+    if (this.currentMap.type === MapType.OVERWORLD) {
+        if (this.dragons.length > 0) {
+            this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
+        } else {
+            this.overworldDragonTimer -= dt;
+            if (this.overworldDragonTimer <= 0) {
+                const types: (StructureVariant | 'mixed')[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
+                this.spawnDragon(types[Math.floor(Math.random() * types.length)]);
+                this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
+            }
+        }
+    }
+
     // Auto-collapse minimap
     if (this.minimapExpanded) {
         this.minimapTimer -= dt;
@@ -3148,6 +3220,94 @@ export class GameEngine {
     });
   }
 
+  // ── Space station docking (economy-pivot 1e) ─────────────────────────────
+
+  /** Per-sim-step dock check: refresh the in-range flag (single torus-
+   *  wrapped distance to the fixed station point), stamp the world-space
+   *  affordance onto the station entity, and dock on the E-key edge.
+   *  Runs only while PLAYING and undocked (the docked branch lives in the
+   *  loop's freeze short-circuit). */
+  private updateStationDocking() {
+    const s = this.station;
+    if (!s || !s.active || this.player.isExploding) {
+        this.dockInRange = false;
+        if (s) s.stationDockReady = false;
+        this.dockKeyHeld = this.input.isKeyDown('KeyE');
+        return;
+    }
+    const dx = wrapDeltaX(s.position.x, this.player.position.x);
+    const dy = wrapDeltaY(s.position.y, this.player.position.y);
+    const r = STATION_CONSTANTS.DOCK_RANGE;
+    this.dockInRange = dx * dx + dy * dy <= r * r;
+    s.stationDockReady = this.dockInRange;
+
+    const eDown = this.input.isKeyDown('KeyE');
+    if (this.dockInRange && eDown && !this.dockKeyHeld) this.dockAtStation();
+    this.dockKeyHeld = eDown;
+  }
+
+  /** Dock: freeze the sim and open the station UI (Drydock + loadout +
+   *  hull repair).  Requires being in dock range; the ship parks (velocity
+   *  zeroed) so undocking resumes stationary beside the station. */
+  public dockAtStation(): boolean {
+    if (this.gameState !== GameState.PLAYING) return false;
+    if (this.dockedAtStation || !this.dockInRange || this.player.isExploding) return false;
+    this.dockedAtStation = true;
+    this.player.velocity.x = 0;
+    this.player.velocity.y = 0;
+    return true;
+  }
+
+  /** Undock: release the sim freeze.  Mirrors resumeGame's accumulator
+   *  hygiene so the first post-dock frame doesn't integrate stale time. */
+  public undock() {
+    if (!this.dockedAtStation) return;
+    this.dockedAtStation = false;
+    this.lastTime = performance.now();
+    this.simAccumulator = 0;
+  }
+
+  /** Hull repair — pay-per-HP, PRO-RATED (station service; docked only).
+   *  Heals min(missing hull, what the player can afford) at
+   *  STATION_CONSTANTS.REPAIR_COST_PER_HP.  Shield is untouched — it
+   *  recharges itself in the field. */
+  public repairHull(): boolean {
+    if (!this.dockedAtStation) return false;
+    const missing = Math.ceil(this.player.maxHealth - this.player.health);
+    if (missing <= 0) return false;
+    const per = STATION_CONSTANTS.REPAIR_COST_PER_HP;
+    const heal = Math.min(missing, Math.floor(this.credits / per));
+    if (heal <= 0) return false;
+    this.credits -= heal * per;
+    this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+    this.pushPlayerMessage(`+${heal} hull`, '#4ade80');
+    return true;
+  }
+
+  /** Station services snapshot for the docked UI. */
+  private stationSnapshot() {
+    const per = STATION_CONSTANTS.REPAIR_COST_PER_HP;
+    const missing = Math.max(0, Math.ceil(this.player.maxHealth - this.player.health));
+    return {
+        repairCostPerHp: per,
+        missingHull: missing,
+        fullRepairCost: missing * per,
+        canRepair: missing > 0 && this.credits >= per,
+    };
+  }
+
+  /** DBG: teleport the player to the station's doorstep (Overworld only —
+   *  no-op on maps without a station). */
+  public debugTeleportToStation() {
+    const s = this.station;
+    if (!s || !s.active) return;
+    this.player.position.x = s.position.x;
+    this.player.position.y = s.position.y + STATION_CONSTANTS.DOCK_RANGE * 0.8;
+    wrapPosition(this.player.position);
+    this.player.velocity.x = 0;
+    this.player.velocity.y = 0;
+  }
+
   // ── Unlocks + Drydock shop ──────────────────────────────────────────────
 
   /** Push the unlock + loadout state onto the player entity so WeaponSystem
@@ -3169,13 +3329,22 @@ export class GameEngine {
   }
 
   /**
-   * Equip an owned weapon into loadout slot 0/1 (or null to empty slot 2's
-   * position).  Free while at the (interim) pause-menu Drydock — station-only
-   * commitment arrives with 1e.  If the weapon already sits in the OTHER
-   * slot, the two slots swap.  Rejects: unowned weapons, and emptying the
-   * last filled slot.  Returns true when the loadout changed.
+   * Equip an owned weapon into loadout slot 0/1 (or null to empty the
+   * slot).  STATION-ONLY (economy-pivot 1e): swaps are free while docked
+   * and rejected everywhere else — undocked = committed loadout.  The DBG
+   * weapon grant bypasses via equipWeaponInternal.
    */
   public equipWeapon(slot: number, weaponId: string | null): boolean {
+      if (!this.dockedAtStation) return false;
+      return this.equipWeaponInternal(slot, weaponId);
+  }
+
+  /**
+   * The actual slot swap.  If the weapon already sits in the OTHER slot,
+   * the two slots swap.  Rejects: unowned weapons, and emptying the last
+   * filled slot.  Returns true when the loadout changed.
+   */
+  private equipWeaponInternal(slot: number, weaponId: string | null): boolean {
       if (slot !== 0 && slot !== 1) return false;
       const other = 1 - slot;
       if (weaponId === null) {
@@ -3229,19 +3398,47 @@ export class GameEngine {
           const empty = this.equippedWeapons.indexOf(null);
           this.syncUnlocksToPlayer();
           if (empty !== -1) {
-              this.equipWeapon(empty, def.weapon);
+              this.equipWeaponInternal(empty, def.weapon);
               this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
           }
       }
   }
 
-  /** Buy a one-time unlock (Module) with Salvage. */
+  /** Buy a one-time unlock (Module) with Salvage.  STATION-ONLY: commerce
+   *  lives at the docked station UI (economy-pivot 1e). */
   public purchaseUnlock(id: string): boolean {
+      if (!this.dockedAtStation) return false;
       const def = UNLOCK_DEFS.find(d => d.id === id);
       if (!def || this.isUnlockOwned(def) || this.credits < def.cost) return false;
       this.credits -= def.cost;
       this.applyUnlock(def);
       return true;
+  }
+
+  /** DBG: grant + equip one weapon (the pause-menu debug Weapons rows).
+   *  With commerce station-only, this is the wave-map test path for
+   *  getting a weapon in hand: unlock it if needed, then equip it — into
+   *  the first empty slot, else replacing the slot the ACTIVE weapon is
+   *  not in (so the weapon under test doesn't yank the one being fired). */
+  public debugGrantWeapon(id: string) {
+      const w = WEAPON_LIST.find(t => t === id);
+      if (w === undefined) return;
+      if (!this.unlockedWeapons.has(w)) this.unlockedWeapons.add(w);
+      if (this.equippedWeapons.includes(w)) { this.syncUnlocksToPlayer(); return; }
+      let slot = this.equippedWeapons.indexOf(null);
+      if (slot === -1) slot = this.equippedWeapons[0] === this.player.currentWeapon ? 1 : 0;
+      this.equipWeaponInternal(slot, w);
+  }
+
+  /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
+   *  while paused): every weapon with its ownership + equipped slot. */
+  private weaponCatalogSnapshot() {
+      return WEAPON_LIST.map(w => ({
+          id: w as string,
+          name: WEAPONS[w].name,
+          owned: this.unlockedWeapons.has(w),
+          slot: (() => { const i = this.equippedWeapons.indexOf(w); return i === -1 ? null : i; })(),
+      }));
   }
 
   /** DBG: unlock everything (weapons, shield, overcharge). */
@@ -3294,8 +3491,10 @@ export class GameEngine {
   }
 
   /** Buy one level of a stat upgrade (Augment) with Salvage.  Locked
-   *  augments (shield-dependent, Shield not owned) can't be bought. */
+   *  augments (shield-dependent, Shield not owned) can't be bought.
+   *  STATION-ONLY, like every purchase (economy-pivot 1e). */
   public purchaseUpgrade(id: string): boolean {
+      if (!this.dockedAtStation) return false;
       const def = UPGRADE_DEFS.find(d => d.id === id);
       if (!def) return false;
       if (def.requires === 'shield' && !this.shieldUnlocked) return false;
@@ -5661,10 +5860,17 @@ export class GameEngine {
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
+  /** True when the active map runs wave gameplay.  The OVERWORLD is the
+   *  wave-free home map (station + ambient fauna only) — WaveSystem is
+   *  initialised disabled there, exactly like difficulty "None". */
+  private get wavesEnabled(): boolean {
+    return this.currentMap?.type !== MapType.OVERWORLD;
+  }
+
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
-    this.waves.init(ctx);
+    this.waves.init(ctx, this.wavesEnabled);
   }
 
 
@@ -5781,6 +5987,11 @@ export class GameEngine {
       this.renderer.buildStaticTileLayer(map.entities, map.width, map.height);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
+      // Cache the station POI (Overworld only; null elsewhere) so the
+      // per-step dock proximity check is a direct reference, not a scan.
+      this.station = map.entities.find(e => e.isStation) ?? null;
+      this.dockedAtStation = false;
+      this.dockInRange = false;
   }
 
   private draw() {

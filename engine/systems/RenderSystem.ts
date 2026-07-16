@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -3774,6 +3774,83 @@ export class RenderSystem {
                 ctx.lineWidth = 1;
                 buildShardPath();
                 ctx.stroke();
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.isStation) {
+                // ── Space station POI (economy-pivot 1e) ──────────────────
+                // Flat-shape language: slow-spinning outer docking ring with
+                // pylon nubs, counter-rotating hex core, blinking beacon.
+                // All animation is render-side (nowSec) — the entity itself
+                // is static, mass-∞ scenery.
+                const r = entity.size.x / 2;
+                const coreR = r * 0.42;
+                const spin = nowSec * 0.15;
+
+                // Dock-available halo: soft pulsing ring at the dock radius
+                // while the player is in range (stationDockReady stamped by
+                // the engine's proximity check) — the world-space half of
+                // the "dock available" affordance.
+                if (entity.stationDockReady) {
+                    const pulse = 0.5 + 0.5 * Math.sin(nowSec * 3.2);
+                    ctx.globalAlpha = 0.10 + pulse * 0.12;
+                    ctx.strokeStyle = '#7dd3fc';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, STATION_CONSTANTS.DOCK_RANGE, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Outer docking ring
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = entity.color;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.stroke();
+                // Pylon nubs riding the ring
+                ctx.fillStyle = entity.color;
+                for (let i = 0; i < 6; i++) {
+                    const a = spin + (i / 6) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // Spokes core → ring (counter-rotating with the hex core)
+                ctx.globalAlpha = 0.5;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = -spin * 0.6 + (i / 6) * Math.PI * 2;
+                    ctx.moveTo(Math.cos(a) * coreR, Math.sin(a) * coreR);
+                    ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+                }
+                ctx.stroke();
+                // Hex core hull
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = -spin * 0.6 + (i / 6) * Math.PI * 2;
+                    const px = Math.cos(a) * coreR, py = Math.sin(a) * coreR;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fillStyle = '#0c4a6e';
+                ctx.fill();
+                ctx.strokeStyle = entity.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Blinking beacon heart
+                ctx.globalAlpha = 0.55 + 0.45 * Math.sin(nowSec * 2.4);
+                ctx.fillStyle = '#e0f2fe';
+                ctx.beginPath();
+                ctx.arc(0, 0, coreR * 0.34, 0, Math.PI * 2);
+                ctx.fill();
+                // Name label under the ring
+                ctx.globalAlpha = 0.85;
+                ctx.fillStyle = '#bae6fd';
+                ctx.font = 'bold 12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(entity.name ?? 'STATION', 0, r + 24);
+                ctx.globalAlpha = 1.0;
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
                 // ── Snitch — golden comet core ────────────────────────────

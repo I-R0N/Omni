@@ -9,6 +9,11 @@
 import type { ShardVariantId } from './engine/systems/ShardSystem.types';
 
 export enum MapType {
+  // Wave-free home map (economy-pivot increment 1e): standard mixed
+  // terrain + ambient fauna (bubbles), rivals, a roaming dragon, and the
+  // space-station POI at map center.  WaveSystem never starts a wave here
+  // — the station (shop / loadout / repair) is dockable at any time.
+  OVERWORLD   = 'OVERWORLD',
   UNIVERSE    = 'UNIVERSE',
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
@@ -656,6 +661,18 @@ export interface GameEntity {
   // two consecutive snitches don't weave identically.
   snitchWanderPhase?: number;
 
+  // ── Space-station POI (economy-pivot 1e) ─────────────────────────────────
+  // Marks the one-per-Overworld-map station entity (EntityType.INTERACTABLE,
+  // no dropType, mass ∞): the physics broadphase skips it entirely, the
+  // static grid and flow-field obstacle bake exclude INTERACTABLEs, so it's
+  // pure scenery + a dock zone.  Docking logic lives in GameEngine; the
+  // bespoke draw keys off this flag.
+  isStation?: boolean;
+  // Stamped each sim step by the dock proximity check: true while the player
+  // is inside STATION_CONSTANTS.DOCK_RANGE.  RenderSystem pulses the dock
+  // ring when set — the "dock available" affordance in world space.
+  stationDockReady?: boolean;
+
   // Stamped by the damage paths when the killing blow came from the player
   // (projectile, crash, lightning chain, cannon AoE).  handleEntityDeath
   // awards shard/tile destruction points only when set, then clears it so
@@ -1201,6 +1218,9 @@ export interface EngineStats {
   waveNumber?: number;
   waveTotal?: number;
   waveStatus?: 'active' | 'cleared';
+  /** False on wave-free maps (the Overworld): the HUD hides the wave chip
+   *  and no wave ever starts.  Absent/true = normal wave gameplay. */
+  wavesEnabled?: boolean;
   waveGraceTimer?: number;
   /** Seconds elapsed in the active wave (count-up scoring timer); undefined
    *  outside the 'active' phase. */
@@ -1247,6 +1267,22 @@ export interface EngineStats {
     unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
     augments: { id: string; label: string; desc: string; level: number; cost: number; affordable: boolean; locked: boolean }[];
   };
+  /** Station docking state (Overworld only).  `inRange` drives the DOCK
+   *  affordance; `docked` opens the station UI (the sim is frozen while
+   *  set — cardChoicePending-style short-circuit). */
+  dock?: { inRange: boolean; docked: boolean };
+  /** Station services snapshot (built only while docked).  Hull repair is
+   *  pay-per-HP, pro-rated: a partial repair heals what the player can
+   *  afford.  `fullRepairCost` = missingHull × repairCostPerHp. */
+  station?: {
+    repairCostPerHp: number;
+    missingHull: number;
+    fullRepairCost: number;
+    canRepair: boolean;
+  };
+  /** Full weapon catalog for the pause-menu DEBUG weapons rows (built only
+   *  while paused).  `slot` = equipped loadout slot (0/1) or null. */
+  weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
