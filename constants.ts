@@ -2394,132 +2394,129 @@ export const SCORE_CONSTANTS = {
   COMBO_MAX_MULTIPLIER: 5,
 };
 
-// ── Progression: leveled stat upgrades ───────────────────────────────────────
-// In-run progression spine.  Stat upgrades come ONLY from wave-completion cards
-// (every wave); a normal card grants 1 level, and every 4th wave the cards roll
-// Levels are UNCAPPED (a focused build can stack a stat as high as Salvage
-// allows).  GameEngine.applyUpgrades folds the run's `upgradeLevels` into the
-// player's effective stats.  Purchase-only progression (pivot 1c): levels are
-// BOUGHT in the Drydock at the escalating upgradeCost() curve — the free
-// wave-completion cards are gone.  Unlocks (weapons / shield / overcharge)
-// are the same shop's one-time Modules.
-// (Magazine died with the ammo system, pivot 1b — 7 stat upgrades remain.
-// Autoloader is now the premium weapon stat; its purchase-price curve should
-// be the steepest when purchase-only progression lands in 1c.)
-export type UpgradeId =
-  | 'hull' | 'plating' | 'capacitor' | 'engine'
-  | 'thrusters' | 'gunnery' | 'autoloader';
-
-export interface UpgradeDef {
-  id: UpgradeId;
-  label: string;   // DBG / card / menu label
-  desc: string;    // one-line effect of one card (= one level)
-  max: number;     // DBG-cycle soft cap ONLY — gameplay levels are uncapped
-  // Dependency on a major MODULE — shown LOCKED in the shop until the
-  // module is installed (otherwise the augment would do nothing):
-  //   'shield' → needs the Shield module (Plating / Capacitor)
-  requires?: 'shield';
-}
-
-export const UPGRADE_DEFS: readonly UpgradeDef[] = [
-  { id: 'hull',       label: 'Hull',       desc: '+25 max HP'        , max: 10 },
-  { id: 'plating',    label: 'Plating',    desc: '+15 max shield'    , max: 10, requires: 'shield' },
-  { id: 'capacitor',  label: 'Capacitor',  desc: '+25% shield regen' , max: 10, requires: 'shield' },
-  { id: 'engine',     label: 'Engine',     desc: '+8% top speed'     , max: 10 },
-  { id: 'thrusters',  label: 'Thrusters',  desc: '+12% acceleration' , max: 10 },
-  { id: 'gunnery',    label: 'Gunnery',    desc: '+12% weapon damage', max: 10 },
-  { id: 'autoloader', label: 'Autoloader', desc: '-8% fire cooldown' , max: 10 },
-] as const;
-
-// ── One-time unlocks ──────────────────────────────────────────────────────────
-// The run starts LEAN — Blaster only, no shield, no charged shots.  These
-// unlocks are bought in the Drydock (Salvage).  Weapon unlocks map to a
-// WeaponType; shield + overcharge are flags.
-export interface UnlockDef {
-  id: string;
-  kind: 'shield' | 'overcharge' | 'weapon';
-  weapon?: WeaponType;
-  label: string;
-  desc: string;
-  cost: number;
-}
-export const UNLOCK_DEFS: readonly UnlockDef[] = [
-  { id: 'shield',        kind: 'shield',     label: 'Shield',     desc: 'Deflector shield',  cost: 30000 },
-  { id: 'overcharge',    kind: 'overcharge', label: 'Overcharge', desc: 'Hold-to-charge',    cost: 45000 },
-  { id: 'wpn_burst',     kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
-  { id: 'wpn_shotgun',   kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
-  // Player-facing name unified to "Laser" (pivot 1d, user decision) — the HUD
-  // and the Drydock used to disagree ("Pierce Beam" vs "Bouncer / Ricochet
-  // beams"), and ricochet is planned to become a GENERAL projectile-vs-shield
-  // feature, so the name deliberately doesn't claim bouncing as this weapon's
-  // identity.  Code identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
-  { id: 'wpn_bouncer',   kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000 },
-  { id: 'wpn_lightning', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
-  { id: 'wpn_homing',    kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
-  { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
-] as const;
-
-// ── Modules: hex-slot outfitting (station increment follow-up) ───────────────
-// EVERY unlock and stat upgrade is an installable MODULE.  The ship carries
-// two 7-hex groups (a center tile + one at each of its 6 sides): the SHIP
-// group and the WEAPON group.  Slots start mostly empty; a module's effect
-// applies ONLY while it is installed in a slot.  Within the WEAPON group,
-// slots 0..WEAPON_GUN_SLOTS-1 are the GUN slots — the only ones that accept
-// kind 'weapon' (the 2-slot loadout lives on, and "more gun slots" is the
-// designed future major upgrade).  The remaining weapon slots take
-// kind 'weapon-mod' (fire-rate / damage / overcharge).  Kind 'ship-part'
-// is RESERVED for the future hull/engine/wings/nosecone design modules
-// (performance profiles + ship sprites) — schema only today.
+// ── Modules: hex-slot outfitting with inventory (module-config increment) ────
+// EVERY piece of progression is a discrete, NON-UPGRADEABLE module ITEM.
+// Stat families come in fixed Mk I/II/III varieties (own price, own fixed
+// effect — no per-level curve, no in-place upgrades; a better mark is a new
+// purchase you swap in).  Purchases land in the INVENTORY (a tile grid);
+// outfitting is moving items between inventory tiles and the two 7-hex
+// installation groups (SHIP / WEAPON — a center tile + one at each side).
+// Weapon-group slots 0..WEAPON_GUN_SLOTS-1 are the GUN slots (the 2-slot
+// loadout lives on as those hexes; more gun slots is a future ship
+// purchase — see the ship-catalog entry in docs/PARKING_LOT.md).
 //
-// Ownership stays on the existing substrate (unlockedWeapons / shieldUnlocked
-// / overchargeUnlocked / upgradeLevels ≥ 1), and leveled modules keep the
-// escalating upgradeCost() curve — buying level 1 grants the module, further
-// levels are bought while it's installed.  Installation state lives on
-// GameEngine (shipSlots / weaponSlots); rearrangement is free while DOCKED
-// and rejected everywhere else, like all commerce.
+// ADJACENCY REQUIREMENTS (MODULE_REQUIREMENTS): an installed module only
+// FUNCTIONS while it touches an ACTIVE module of its required family —
+// engine⇢hull, thrusters⇢engine, shield/plating⇢hull, capacitor⇢shield,
+// weapon-mods⇢gun.  Hull and guns are the roots of their groups (no
+// requirement), so a hull module is the prerequisite for the whole ship
+// tree ("a hull module should always be required").  Activity is computed
+// as a fixpoint over HEX_ADJACENCY; inactive modules contribute nothing
+// and render dimmed with the unmet requirement shown.
+//
+// Kind 'ship-part' remains RESERVED schema (see docs/PARKING_LOT.md —
+// superseded Option B).  Duplicates are allowed (two Hull Mk I stack).
 export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
+export type ModuleFamily =
+  | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge';
+
+/** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
+ *  Base values modified: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE,
+ *  recharge SHIELD_CONSTANTS.RECHARGE_RATE. */
+export interface ModuleEffect {
+  maxHp?: number;           // hull
+  maxShield?: number;       // plating (only counts while a shield core is active)
+  shieldRegenFrac?: number; // capacitor
+  speedFrac?: number;       // engine
+  accelFrac?: number;       // thrusters
+  damageFrac?: number;      // gunnery
+  cooldownFrac?: number;    // autoloader
+  shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
+  overcharge?: boolean;     // enables hold-to-charge shots
+}
+
 export interface ModuleDef {
-  id: string;              // unlock ids ('shield', 'wpn_burst', …) and UpgradeIds ('hull', …) reused
+  id: string;              // variety id: 'hull_mk2', 'wpn_shotgun', …
+  family: ModuleFamily;
+  mark: number;            // 1..3 (1 for single-variety families)
   group: ModuleGroup;
   kind: ModuleKind;
   label: string;
   desc: string;
-  weapon?: WeaponType;     // kind 'weapon' only
-  upgradeId?: UpgradeId;   // leveled modules — price via upgradeCost(), effect via UPGRADE_EFFECTS
-  cost?: number;           // one-time modules — price (leveled modules price via the curve)
-  requires?: 'shield';     // shown locked in the shop until Shield is OWNED (existing rule)
+  cost: number;
+  weapon?: WeaponType;     // family 'gun' only
+  effect?: ModuleEffect;
 }
-export const MODULE_SLOT_COUNT = 7;  // hex flower: 1 center + 6 sides
-export const WEAPON_GUN_SLOTS = 2;   // weapon-group slots 0..1 hold guns
 
-const unlockCost = (id: string): number => UNLOCK_DEFS.find(d => d.id === id)!.cost;
+export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
+export const WEAPON_GUN_SLOTS = 2;    // weapon-group slots 0..1 hold guns
+export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)
+// Autoloader stack floor — cadence never drops below 40% of base.
+export const COOLDOWN_FLOOR = 0.4;
+
+/** Which family an installed module must TOUCH (an ACTIVE module of any
+ *  listed family, adjacent per HEX_ADJACENCY) to function.  Absent =
+ *  root (hull, gun) — always active while installed. */
+export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> = {
+  engine:     ['hull'],
+  thrusters:  ['engine'],
+  shield:     ['hull'],
+  plating:    ['hull'],
+  capacitor:  ['shield'],
+  gunnery:    ['gun'],
+  autoloader: ['gun'],
+  overcharge: ['gun'],
+};
+
+/** Neighbour indices per hex slot in the 7-flower: 0 = center (touches
+ *  all six); ring tiles touch the center + their two ring neighbours. */
+export const HEX_ADJACENCY: readonly (readonly number[])[] = [
+  [1, 2, 3, 4, 5, 6],
+  [0, 2, 6], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 6], [0, 5, 1],
+];
+
+// Mk pricing ≈ the CUMULATIVE cost of the old per-level curve at that
+// level (rounded) so the salvage economy is unchanged in total: reaching
+// "Mk III power" costs about what L3 used to.
+const MK = ['', ' Mk I', ' Mk II', ' Mk III'];
+const statMks = (
+  family: ModuleFamily, group: ModuleGroup, kind: ModuleKind, label: string,
+  descOf: (mk: number) => string, costs: number[], effOf: (mk: number) => ModuleEffect,
+): ModuleDef[] => costs.map((cost, i) => ({
+  id: `${family}_mk${i + 1}`, family, mark: i + 1, group, kind,
+  label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost, effect: effOf(i + 1),
+}));
+
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
-  { id: 'shield',     group: 'ship', kind: 'ship', label: 'Shield',     desc: 'Deflector shield',  cost: unlockCost('shield') },
-  { id: 'hull',       group: 'ship', kind: 'ship', label: 'Hull',       desc: '+25 max HP / level',        upgradeId: 'hull' },
-  { id: 'plating',    group: 'ship', kind: 'ship', label: 'Plating',    desc: '+15 max shield / level',    upgradeId: 'plating',   requires: 'shield' },
-  { id: 'capacitor',  group: 'ship', kind: 'ship', label: 'Capacitor',  desc: '+25% shield regen / level', upgradeId: 'capacitor', requires: 'shield' },
-  { id: 'engine',     group: 'ship', kind: 'ship', label: 'Engine',     desc: '+8% top speed / level',     upgradeId: 'engine' },
-  { id: 'thrusters',  group: 'ship', kind: 'ship', label: 'Thrusters',  desc: '+12% acceleration / level', upgradeId: 'thrusters' },
-  // ── Weapon group: guns (gun slots only) ──
-  { id: 'wpn_blaster',   group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm', cost: 0 },
-  { id: 'wpn_burst',     group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: unlockCost('wpn_burst') },
-  { id: 'wpn_shotgun',   group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: unlockCost('wpn_shotgun') },
-  { id: 'wpn_bouncer',   group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: unlockCost('wpn_bouncer') },
-  { id: 'wpn_lightning', group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: unlockCost('wpn_lightning') },
-  { id: 'wpn_homing',    group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: unlockCost('wpn_homing') },
-  { id: 'wpn_cannon',    group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: unlockCost('wpn_cannon') },
-  // ── Weapon group: performance mods (non-gun slots) ──
-  { id: 'gunnery',    group: 'weapon', kind: 'weapon-mod', label: 'Gunnery',    desc: '+12% weapon damage / level', upgradeId: 'gunnery' },
-  { id: 'autoloader', group: 'weapon', kind: 'weapon-mod', label: 'Autoloader', desc: '-8% fire cooldown / level',  upgradeId: 'autoloader' },
-  { id: 'overcharge', group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: unlockCost('overcharge') },
-] as const;
+  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk })),
+  { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true } },
+  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk })),
+  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk })),
+  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk })),
+  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk })),
+  // ── Weapon group: guns (gun hexes only) ──
+  { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0 },
+  { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
+  { id: 'wpn_shotgun',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
+  // Player-facing name unified to "Laser" (pivot 1d, user decision); code
+  // identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
+  { id: 'wpn_bouncer',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000 },
+  { id: 'wpn_lightning', family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
+  { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
+  { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
+  // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk })),
+  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk })),
+  { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true } },
+];
 
 export function moduleDef(id: string): ModuleDef | undefined {
   return MODULE_DEFS.find(d => d.id === id);
 }
-/** True when `kind` may sit in `group` slot index `idx` (gun slots are the
+/** True when `def` may sit in `group` slot index `idx` (gun slots are the
  *  first WEAPON_GUN_SLOTS of the weapon group; everything else per group). */
 export function moduleFitsSlot(def: ModuleDef, group: ModuleGroup, idx: number): boolean {
   if (def.group !== group) return false;
@@ -2527,56 +2524,6 @@ export function moduleFitsSlot(def: ModuleDef, group: ModuleGroup, idx: number):
     return def.kind === 'weapon' ? idx < WEAPON_GUN_SLOTS : idx >= WEAPON_GUN_SLOTS;
   }
   return def.kind === 'ship' || def.kind === 'ship-part';
-}
-
-// Per-LEVEL effect magnitudes (read by GameEngine.applyUpgrades + the
-// movement hook).  A normal card grants 1 level; powerful (every-4th-wave)
-// cards grant +2/+3/+4 levels, so they're worth that many of these.  Base
-// values they modify: HP 100, shield SHIELD_CONSTANTS.MAX_CHARGE, recharge
-// SHIELD_CONSTANTS.RECHARGE_RATE.
-export const UPGRADE_EFFECTS = {
-  HULL_HP_PER_LEVEL: 25,
-  PLATING_SHIELD_PER_LEVEL: 15,
-  CAPACITOR_RECHARGE_FRAC_PER_LEVEL: 0.25,
-  ENGINE_SPEED_FRAC_PER_LEVEL: 0.08,
-  THRUSTERS_ACCEL_FRAC_PER_LEVEL: 0.12,
-  GUNNERY_DAMAGE_FRAC_PER_LEVEL: 0.12,
-  AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL: 0.08,
-  AUTOLOADER_COOLDOWN_FLOOR: 0.4, // never below 40% of base cadence
-};
-
-// ── Stat-upgrade (Augment) pricing — purchase-only progression (pivot 1c) ────
-// upgradeCost(id, level) = next-level price when the stat sits at `level`.
-// Per-level escalating geometric curve; tuned against the 1a salvage income
-// (≈ 8-13 units ≈ 8k-13k credits per early wave with the clear spray):
-//   - Hull / Plating cheapest (defensive comfort, ~half a wave for L1)
-//   - Autoloader steepest — it's the premium weapon stat post-ammo (fire
-//     cadence is the only in-combat brake left)
-// L1 prices sit below the first weapon (Burst 25k) so "a stat level or two"
-// slots naturally between weapon purchases (WEAPONS_AMMO_PLAN §5 order:
-// first weapon → Shield → stat levels → second weapon → Overcharge → depth).
-// Numbers provisional pending playtest.
-export const UPGRADE_COST: {
-  BASE: Record<UpgradeId, number>;
-  RATIO: Record<UpgradeId, number>;
-} = {
-  BASE: {
-    hull: 4000, plating: 4000, capacitor: 5000,
-    engine: 6000, thrusters: 6000, gunnery: 8000,
-    autoloader: 10000,
-  },
-  RATIO: {
-    hull: 1.45, plating: 1.45, capacitor: 1.45,
-    engine: 1.45, thrusters: 1.45, gunnery: 1.5,
-    autoloader: 1.6,
-  },
-};
-
-/** Salvage price of the NEXT level of `id` when the stat currently sits at
- *  `level` (geometric; rounded to a clean 100). */
-export function upgradeCost(id: UpgradeId, level: number): number {
-  const raw = UPGRADE_COST.BASE[id] * Math.pow(UPGRADE_COST.RATIO[id], level);
-  return Math.round(raw / 100) * 100;
 }
 
 // ── Timed-wave config ────────────────────────────────────────────────────────
@@ -2761,7 +2708,7 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // 50-100 % for a player who mines casually — call it ~25 units collected by
 // wave 3.  At 1 000 credits/unit the first weapon (Burst, 25 000) lands
 // around wave 2-4, matching the plan target (WEAPONS_AMMO_PLAN §5) without
-// touching the UNLOCK_DEFS price ladder.
+// touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
@@ -2808,6 +2755,37 @@ export const STATION_CONSTANTS = {
   // the full repair the button heals what they CAN pay for.
   REPAIR_COST_PER_HP: 30,
 };
+
+// ── Station variants + services (module-config increment) ───────────────────
+// Space stations carry a SERVICES mix; the docked UI shows only the panels
+// the station offers.  The HOME station (map center — in the future
+// persistent state, created on player creation) has the DRYDOCK: the only
+// place modules move between inventory and the hex slots, plus hull
+// repair.  Shop stations sell module ITEMS into the inventory — buying
+// happens where the shop is, outfitting happens at the drydock.  Future
+// variations (missions, hangar/ship purchases, trade) slot in as new
+// service flags.
+export type StationKind = 'home' | 'shipwright' | 'armory';
+export interface StationServices {
+  drydock: boolean;    // move/install modules (inventory ↔ hex slots)
+  repair: boolean;     // pay-per-HP hull repair
+  shipShop: boolean;   // sells ship-group modules
+  weaponShop: boolean; // sells weapon-group modules
+}
+export const STATION_VARIANTS: Record<StationKind, { name: string; color: string; services: StationServices }> = {
+  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true,  repair: true,  shipShop: false, weaponShop: false } },
+  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: false, repair: false, shipShop: true,  weaponShop: false } },
+  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: false, repair: false, shipShop: false, weaponShop: true } },
+};
+/** Overworld station placement (world units; map is 12k, torus).  The home
+ *  station sits at the player-spawn center; the two shop stations are set
+ *  well apart so finding them is a first flight (chevrons + minimap dots
+ *  point the way). */
+export const OVERWORLD_STATIONS: readonly { kind: StationKind; x: number; y: number }[] = [
+  { kind: 'home',       x: 0,     y: 0 },
+  { kind: 'shipwright', x: -3600, y: -2400 },
+  { kind: 'armory',     x: 3600,  y: 2400 },
+];
 
 // ── Overworld map (wave-free home map, increment 1e) ────────────────────────
 // Population is standard mixed terrain (MAP_POPULATION[OVERWORLD]) plus the

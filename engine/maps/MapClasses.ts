@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -384,34 +384,41 @@ export class OverworldMap extends BaseMapLayer {
       ));
     }
 
-    // Clear the station's home patch: nothing generates on top of it (the
-    // clearance doubles as the spawn-safe bubble — the player spawns just
-    // off the station).
-    const clear = STATION_CONSTANTS.CLEARANCE;
-    this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
-        return d2 > clear * clear;
-    });
+    // Clear every station's home patch: nothing generates on top of them
+    // (the home station's clearance doubles as the spawn-safe bubble —
+    // the player spawns just off it).
+    const clear2 = STATION_CONSTANTS.CLEARANCE ** 2;
+    this.entities = this.entities.filter(e =>
+        OVERWORLD_STATIONS.every(st => {
+            const dx = e.position.x - st.x, dy = e.position.y - st.y;
+            return dx * dx + dy * dy > clear2;
+        })
+    );
 
-    // The station itself — an indestructible, non-colliding INTERACTABLE
-    // at map center (mass ∞ + no dropType: skipped by the broadphase, the
-    // static grid, and the flow-field obstacle bake).  GameEngine finds it
-    // by the isStation flag at map load and owns the docking logic.
-    this.entities.push({
-      id: nextId('station'),
-      type: EntityType.INTERACTABLE,
-      isStation: true,
-      name: STATION_CONSTANTS.NAME,
-      position: { x: 0, y: 0 },
-      velocity: { x: 0, y: 0 },
-      size: { x: STATION_CONSTANTS.SIZE, y: STATION_CONSTANTS.SIZE },
-      rotation: 0,
-      color: STATION_CONSTANTS.COLOR,
-      active: true,
-      health: 1,
-      maxHealth: 1,
-      mass: Infinity,
-    });
+    // The stations — indestructible, non-colliding INTERACTABLEs (mass ∞
+    // + no dropType: skipped by the broadphase, the static grid, and the
+    // flow-field obstacle bake).  Each carries its variant kind; the
+    // SERVICES mix (drydock / repair / shops) lives in STATION_VARIANTS.
+    // GameEngine collects them by the isStation flag at map load.
+    for (const st of OVERWORLD_STATIONS) {
+      const variant = STATION_VARIANTS[st.kind];
+      this.entities.push({
+        id: nextId('station'),
+        type: EntityType.INTERACTABLE,
+        isStation: true,
+        stationKind: st.kind,
+        name: variant.name,
+        position: { x: st.x, y: st.y },
+        velocity: { x: 0, y: 0 },
+        size: { x: STATION_CONSTANTS.SIZE, y: STATION_CONSTANTS.SIZE },
+        rotation: 0,
+        color: variant.color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        mass: Infinity,
+      });
+    }
   }
 }
 

@@ -668,6 +668,10 @@ export interface GameEntity {
   // pure scenery + a dock zone.  Docking logic lives in GameEngine; the
   // bespoke draw keys off this flag.
   isStation?: boolean;
+  // Which station variant this POI is ('home' | 'shipwright' | 'armory' —
+  // see STATION_VARIANTS): drives its name/colour and the SERVICES the
+  // docked UI offers (drydock / repair / ship shop / weapon shop).
+  stationKind?: string;
   // Stamped each sim step by the dock proximity check: true while the player
   // is inside STATION_CONSTANTS.DOCK_RANGE.  RenderSystem pulses the dock
   // ring when set — the "dock available" affordance in world space.
@@ -1241,37 +1245,40 @@ export interface EngineStats {
   /** Salvage-pickup flash for the HUD chip: credits gained in the current
    *  flash window + remaining-window fraction for fade. */
   salvageFlash?: { amount: number; fraction: number };
-  /** Per-upgrade level snapshot for the DBG Upgrades panel. */
-  upgrades?: { id: string; label: string; level: number; max: number }[];
   /** Effective player stats for the player menu (pause screen). */
   playerStats?: {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
     damageMult: number; cooldownMult: number; speedMult: number;
   };
-  /** Current run unlocks for the player menu (real ownership). */
-  unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
-  /** Hex-slot outfitting snapshot (built while paused OR docked; the
-   *  station UI is the only place installs/purchases act).  `ship` /
-   *  `weapon` are the two 7-hex groups (index 0 = center tile; weapon
-   *  indices 0..1 are the GUN slots); null = empty slot.  `catalog` is the
-   *  full module shop: `cost` is the purchase price (or the NEXT-level
-   *  price once a leveled module is owned); a `locked` module
-   *  (shield-dependent) renders visible-but-locked so the dependency
-   *  reads as shop ordering. */
+  /** Hex-slot outfitting snapshot (built while paused OR docked).
+   *  `ship` / `weapon` are the two 7-hex groups (index 0 = center tile;
+   *  weapon indices 0..1 are the GUN slots); `inventory` is the tile grid
+   *  purchases land in.  `active` = the module's adjacency requirement is
+   *  met (MODULE_REQUIREMENTS fixpoint) — inactive modules contribute
+   *  nothing and render dimmed with `requires` naming the missing
+   *  contact.  `catalog` is the full module-item shop (fixed Mk variety
+   *  prices — no upgrades); `affordable` includes having a free
+   *  inventory tile. */
   outfitting?: {
-    ship: ({ id: string; label: string; kind: string; level?: number } | null)[];
-    weapon: ({ id: string; label: string; kind: string; level?: number } | null)[];
+    ship: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
+    weapon: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
+    inventory: ({ id: string; label: string; kind: string; family: string; group: string } | null)[];
     catalog: {
-      id: string; group: 'ship' | 'weapon'; kind: string; label: string; desc: string;
-      owned: boolean; installed: boolean; level?: number;
-      cost: number; affordable: boolean; locked: boolean;
+      id: string; group: string; kind: string; label: string; desc: string;
+      cost: number; affordable: boolean;
     }[];
   };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while
-   *  set — cardChoicePending-style short-circuit). */
-  dock?: { inRange: boolean; docked: boolean };
+   *  set — cardChoicePending-style short-circuit).  `name`/`services`
+   *  describe the nearest/docked station so the UI shows the right
+   *  header + panels (drydock / repair / shops per STATION_VARIANTS). */
+  dock?: {
+    inRange: boolean; docked: boolean;
+    name?: string;
+    services?: { drydock: boolean; repair: boolean; shipShop: boolean; weaponShop: boolean };
+  };
   /** Station services snapshot (built only while docked).  Hull repair is
    *  pay-per-HP, pro-rated: a partial repair heals what the player can
    *  afford.  `fullRepairCost` = missingHull × repairCostPerHp. */

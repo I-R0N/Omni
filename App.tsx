@@ -301,16 +301,16 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleTraits();
   };
 
-  const handleCycleUpgrade = (id: string) => {
-      if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
+  const handleGrantModule = (id: string) => {
+      if (engineRef.current) engineRef.current.debugGrantModule(id);
   };
 
-  const handleMaxUpgrades = () => {
-      if (engineRef.current) engineRef.current.maxAllUpgrades();
+  const handleOutfitAll = () => {
+      if (engineRef.current) engineRef.current.debugOutfitAll();
   };
 
-  const handleResetUpgrades = () => {
-      if (engineRef.current) engineRef.current.resetUpgrades();
+  const handleResetOutfit = () => {
+      if (engineRef.current) engineRef.current.resetOutfit();
   };
 
   const handleAddCredits = () => {
@@ -335,8 +335,11 @@ const App: React.FC = () => {
       return engineRef.current ? engineRef.current.perfRecExport() : '';
   };
 
-  const handleInstallModule = (group: 'ship' | 'weapon', slot: number, moduleId: string | null) => {
-      if (engineRef.current) engineRef.current.installModule(group, slot, moduleId);
+  const handleMoveModule = (
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ) => {
+      if (engineRef.current) engineRef.current.moveModule(from, to);
   };
 
   const handlePurchaseModule = (id: string) => {
@@ -361,14 +364,6 @@ const App: React.FC = () => {
 
   const handleTeleportStation = () => {
       if (engineRef.current) engineRef.current.debugTeleportToStation();
-  };
-
-  const handleUnlockAll = () => {
-      if (engineRef.current) engineRef.current.debugUnlockAll();
-  };
-
-  const handleResetUnlocks = () => {
-      if (engineRef.current) engineRef.current.debugResetUnlocks();
   };
 
   const handleToggleFFOverlayVectors = () => {
@@ -480,24 +475,22 @@ const App: React.FC = () => {
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}
-        onCycleUpgrade={handleCycleUpgrade}
-        onMaxUpgrades={handleMaxUpgrades}
-        onResetUpgrades={handleResetUpgrades}
+        onGrantModule={handleGrantModule}
+        onOutfitAll={handleOutfitAll}
+        onResetOutfit={handleResetOutfit}
         onAddCredits={handleAddCredits}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
-        onInstallModule={handleInstallModule}
+        onMoveModule={handleMoveModule}
         onPurchaseModule={handlePurchaseModule}
         onDock={handleDock}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
         onGrantWeapon={handleGrantWeapon}
         onTeleportStation={handleTeleportStation}
-        onUnlockAll={handleUnlockAll}
-        onResetUnlocks={handleResetUnlocks}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
