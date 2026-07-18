@@ -590,3 +590,46 @@ so any of these warrants its own branch + verification.
 Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
 `SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
 `PERF_TASKS` in `constants.ts`.
+
+---
+
+## Ship-design directions (station/module follow-up, 2026-07-18)
+
+Two competing designs for how PLAYER SHIPS relate to the hex-slot module
+system. **Option A is the chosen direction** (user decision during the
+station-poi increment); Option B is preserved for reference — it was the
+original "ship-part modules" sketch and was explicitly superseded.
+
+### Option A — Ship catalog (CHOSEN)
+
+Ships are discrete purchasable items, each with its OWN SPRITE and a fixed
+outfitting envelope. Modules stay pure equipment; the ship is the frame
+they plug into.
+
+- Each ship defines: inventory tile count, ship-group installation slot
+  count/shape, weapon-group slot count/shape (incl. how many GUN slots —
+  the "more weapon slots" major upgrade becomes a ship purchase), base
+  stats, and one bespoke sprite. No per-part sprite compositing.
+- **Special ships** can grant positional boosts: designated installation
+  slots that amplify whatever module sits in them (e.g. "+25% to the
+  module in the aft slot") — making slot LAYOUT a purchasable identity.
+- Progression: the starter ship is deliberately cramped (small inventory,
+  few slots); bigger/specialist hulls are late-game salvage sinks.
+- Pairs with the future persistent overworld: the ship you fly is the
+  run-to-run persistent artifact; the base station is where the hangar
+  lives.
+
+### Option B — Modular physical ship (SUPERSEDED)
+
+The ship's LOOK and performance are composed from installed `ship-part`
+modules — hull, engine housing, wings, nosecone/armor — each contributing
+performance characteristics (health, armor, max speed, acceleration) and
+a sprite layer; the rendered ship is the composite of its parts.
+
+- Was the original intent behind the reserved `'ship-part'` module kind.
+- Cost: needs per-part sprite art for every combination axis, a sprite
+  compositing/anchoring system, and careful hitbox management as parts
+  change silhouette.
+- Rejected in favor of Option A: one sprite per ship reads better, is far
+  cheaper to produce, and positional slot boosts recover most of the
+  build-identity upside without compositing.
