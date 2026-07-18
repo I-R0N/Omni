@@ -478,15 +478,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `WEAPONS`, `WEAPON_LIST`.  Ammo is DELETED as a system (pivot 1b): no
   drops, pool, per-shot costs, HUD strip, select gating, or dry-fallback —
   weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
-  `GameEngine.equippedWeapons` holds exactly 2 slots (null = empty; new
-  run = Blaster + empty); any 2 OWNED weapons may be equipped (the Blaster
-  is fully swappable out), cycle/select run over the slots only
-  (`WeaponSystem.cycleWeapon`/`selectWeapon`), and swaps are STATION-ONLY
-  (1e): free while `dockedAtStation` (station UI Loadout panel →
-  `GameEngine.equipWeapon`, which REJECTS while undocked — undocked =
-  committed loadout; the DBG weapon grant bypasses via
-  `equipWeaponInternal`).  Buying a weapon auto-equips it into the
-  first EMPTY slot.  The HUD is a 2-slot readout
+  `GameEngine.equippedWeapons` holds exactly 2 slots — DERIVED from the
+  weapon hex group's GUN slots since the module system (see MODULE_DEFS
+  below): `weaponSlots[0..WEAPON_GUN_SLOTS-1]` are the gun hexes, and
+  `syncLoadoutFromSlots()` rebuilds the 2-slot loadout from them (more
+  gun slots is the designed future major upgrade; WeaponSystem is
+  untouched).  Cycle/select run over the slots only
+  (`WeaponSystem.cycleWeapon`/`selectWeapon`); installs are STATION-ONLY:
+  free while `dockedAtStation` (`GameEngine.installModule`, REJECTS while
+  undocked — undocked = committed outfit; DBG paths bypass via
+  `installModuleInternal`).  Buying a weapon auto-installs it into the
+  first EMPTY gun hex.  The HUD is a 2-slot readout
   (`RenderSystem.renderLoadoutHUD` + `computeLoadoutHUDLayout`; active
   slot highlighted, charge ring unchanged on the ship).  Charged shots
   cost only the 1.0s hold.  Bouncer/Lightning cooldowns were raised
@@ -554,10 +556,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   / `overchargeUnlocked`), synced to the player entity
   (`ownedWeapons` / `overchargeUnlocked`) so WeaponSystem gates weapon
   cycle/select + charged shots; `applyUpgrades` gates `maxShield` to 0
-  until Shield is owned.  `EngineStats.shop` (`.unlocks` Modules +
-  `.augments` per-level stat prices, built while paused OR docked)
-  drives the station Drydock panels; DBG "Unlock all" / "Relock" +
-  the per-weapon grant rows cover wave-map testing.
+  until the Shield module is INSTALLED (module system — see
+  `MODULE_DEFS` above; the old `EngineStats.shop`/`loadout` snapshots
+  are replaced by `EngineStats.outfitting`).  DBG "Unlock all" /
+  "Relock" + the per-weapon grant rows cover wave-map testing.
   NOTE: per-wave enemy stat scaling is still a planned increment.
 - Wave-clear reward beat (pivot 1c): with the cards gone,
   `handleWaveCleared` sprays `SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS`
@@ -612,6 +614,29 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `systemsDisabled` flag so the weapon can't fire and the shield neither
   absorbs nor recharges, Stage 3c).  HUD badge (amber for disable); DBG
   "Corrode" / "Disable" self-apply (`EngineStats.statusEffects`).
+- `MODULE_DEFS` / `moduleDef()` / `moduleFitsSlot()` /
+  `MODULE_SLOT_COUNT` / `WEAPON_GUN_SLOTS` — the hex-slot outfitting
+  system (station follow-up).  EVERY unlock + stat upgrade is an
+  installable MODULE; the ship carries two 7-hex groups (center + one
+  tile per side): SHIP (shield / hull / plating / capacitor / engine /
+  thrusters) and WEAPON (the 7 guns — gun hexes 0..1 only — plus
+  gunnery / autoloader / overcharge in the mod hexes).  Kind
+  `'ship-part'` is RESERVED for the future hull/wings/nosecone design
+  modules (performance profiles + ship sprites) — schema only today.
+  OWNERSHIP stays on the pre-module substrate (`unlockedWeapons`,
+  `shieldUnlocked`, `overchargeUnlocked`, `upgradeLevels ≥ 1`);
+  installation state is `GameEngine.shipSlots`/`weaponSlots`, and a
+  module's effect applies ONLY while installed
+  (`applyUpgrades`/`effLevel` gate on `moduleInstalled`; new run = bare
+  hexes + Blaster on gun hex 0).  Leveled modules keep the escalating
+  `upgradeCost()` curve — buying L1 grants + auto-installs, further
+  levels are bought on the installed tile.  Purchases route through
+  `purchaseModule` (→ `purchaseUnlock`/`purchaseUpgrade`);
+  `EngineStats.outfitting` (slots + full catalog, built while paused OR
+  docked) drives the station's two hex flowers + detail strip + shop.
+  Guard rails: the last mounted gun can't be removed; a module installed
+  elsewhere MOVES (in-group swap when both fit); `pruneSlots()` drops
+  no-longer-owned modules after any relock/reset.
 - `STATION_CONSTANTS` / `OVERWORLD_CONSTANTS` (increment 1e) — the
   space-station POI (size / colour / `DOCK_RANGE` / placement
   `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is pay-per-HP,
@@ -972,10 +997,10 @@ button in `UIOverlay.tsx`.
   collision/flow side effects.  The existing POI paths give it a minimap
   dot, an off-screen chevron, and `handleAsteroidRespawn` avoidance for
   free.  Docking state lives on `GameEngine` (`station` /
-  `dockedAtStation` / `dockInRange`); commerce methods (`equipWeapon` /
-  `purchaseUnlock` / `purchaseUpgrade` / `repairHull`) all REJECT while
-  undocked, and `pauseGame()` is a no-op while docked (one full-screen
-  overlay at a time).
+  `dockedAtStation` / `dockInRange`); commerce methods (`installModule` /
+  `purchaseModule` → `purchaseUnlock`/`purchaseUpgrade` / `repairHull`)
+  all REJECT while undocked, and `pauseGame()` is a no-op while docked
+  (one full-screen overlay at a time).
 - **The debug menu lives in the pause Player Menu** ("Debug Menu"
   collapsible section) — the old floating top-left DBG button/panel is
   gone.  The 'Overlays' row inside is the old master toggle (renderer

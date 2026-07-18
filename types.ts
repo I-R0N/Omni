@@ -1251,21 +1251,22 @@ export interface EngineStats {
   };
   /** Current run unlocks for the player menu (real ownership). */
   unlocks?: { weapons: string[]; shield: boolean; overcharge: boolean };
-  /** 2-slot equip loadout for the pause-menu swap UI (populated only while
-   *  paused).  `slots` holds the equipped weapon (or null = empty slot);
-   *  `owned` is everything that CAN be equipped.  ids are WeaponType values. */
-  loadout?: {
-    slots: ({ id: string; name: string } | null)[];
-    owned: { id: string; name: string }[];
-  };
-  /** Drydock shop catalog (populated only while paused).  `unlocks` are the
-   *  one-time Modules; `augments` are per-level stat upgrades priced by the
-   *  escalating upgradeCost() curve (purchase-only progression, pivot 1c).
-   *  A `locked` augment (shield-dependent, Shield not owned) renders
-   *  visible-but-locked so the dependency reads as shop ordering. */
-  shop?: {
-    unlocks: { id: string; label: string; desc: string; owned: boolean; cost: number; affordable: boolean }[];
-    augments: { id: string; label: string; desc: string; level: number; cost: number; affordable: boolean; locked: boolean }[];
+  /** Hex-slot outfitting snapshot (built while paused OR docked; the
+   *  station UI is the only place installs/purchases act).  `ship` /
+   *  `weapon` are the two 7-hex groups (index 0 = center tile; weapon
+   *  indices 0..1 are the GUN slots); null = empty slot.  `catalog` is the
+   *  full module shop: `cost` is the purchase price (or the NEXT-level
+   *  price once a leveled module is owned); a `locked` module
+   *  (shield-dependent) renders visible-but-locked so the dependency
+   *  reads as shop ordering. */
+  outfitting?: {
+    ship: ({ id: string; label: string; kind: string; level?: number } | null)[];
+    weapon: ({ id: string; label: string; kind: string; level?: number } | null)[];
+    catalog: {
+      id: string; group: 'ship' | 'weapon'; kind: string; label: string; desc: string;
+      owned: boolean; installed: boolean; level?: number;
+      cost: number; affordable: boolean; locked: boolean;
+    }[];
   };
   /** Station docking state (Overworld only).  `inRange` drives the DOCK
    *  affordance; `docked` opens the station UI (the sim is frozen while

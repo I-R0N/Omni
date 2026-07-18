@@ -110,11 +110,11 @@ interface UIOverlayProps {
   onPerfRecToggle?: () => void;
   onPerfRecCycleScene?: () => void;
   onPerfRecExport?: () => string;
-  onPurchaseUnlock?: (id: string) => void;
-  onPurchaseUpgrade?: (id: string) => void;
-  // 2-slot loadout swap — STATION-ONLY (1e): the station UI is the sole
-  // caller; the engine rejects swaps while undocked.
-  onEquipWeapon?: (slot: number, weaponId: string | null) => void;
+  // Hex-slot outfitting — STATION-ONLY: the station UI is the sole caller;
+  // the engine rejects installs/purchases while undocked.  purchase routes
+  // leveled modules to the per-level cost curve, one-time to their price.
+  onInstallModule?: (group: 'ship' | 'weapon', slot: number, moduleId: string | null) => void;
+  onPurchaseModule?: (id: string) => void;
   // Station docking (Overworld): dock from the in-range affordance, undock
   // from the station UI, repair hull (pay-per-HP, pro-rated).
   onDock?: () => void;
@@ -209,9 +209,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPerfRecToggle,
   onPerfRecCycleScene,
   onPerfRecExport,
-  onPurchaseUnlock,
-  onPurchaseUpgrade,
-  onEquipWeapon,
+  onInstallModule,
+  onPurchaseModule,
   onDock,
   onUndock,
   onRepairHull,
@@ -276,6 +275,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // (awake) / asleep (dynamic-sleeping).  Display only — does not change
   // sleeping behaviour (that's the Shards & Physics ▸ Sleep toggle).
   const [entityCountMode, setEntityCountMode] = useState<'total' | 'active' | 'asleep'>('total');
+  // Hex-slot outfitting: the currently selected hex (station UI).  The
+  // detail strip below the flowers acts on this slot.
+  const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon'; i: number } | null>(null);
 
   // Labeled grid of map buttons, shared by the main menu and the pause
   // screen.  Selecting one routes through onSetMapType — a no-op-style
@@ -503,9 +505,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   needed) + equip.  S1/S2 = current loadout slot. */}
               {renderSectionHeader('weapons', 'Weapons')}
               {!collapsed.weapons && (stats.weaponCatalog ?? []).map(w =>
-                ctrlRow(w.name, () => onGrantWeapon?.(w.id),
-                  w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
-                  `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then equips it into the first empty loadout slot (or swaps out the inactive slot). S1/S2 = equipped slot.`))}
+                <React.Fragment key={w.id}>
+                  {ctrlRow(w.name, () => onGrantWeapon?.(w.id),
+                    w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
+                    `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then mounts it on a gun hex (first empty, else the inactive one). S1/S2 = gun hex.`)}
+                </React.Fragment>)}
 
               {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
               {renderSectionHeader('dragon', 'Dragon')}
@@ -983,6 +987,77 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           here, locked everywhere else), and pay-per-HP hull repair. */}
       {stats.gameState === GameState.PLAYING && stats.dock?.docked && (() => {
         const ps = stats.playerStats;
+        const out = stats.outfitting;
+        // ── Hex-slot outfitting geometry ── flat-top hexes in a 7-tile
+        // flower (center + one at each side).  Offsets are in (W, H) units;
+        // H ≈ 0.866 W keeps the hexes regular.  Borders can't follow a
+        // clip-path, so each tile is an accent-coloured outer hex with an
+        // inset inner hex as the face.
+        const HEXW = 76, HEXH = 66;
+        const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+        const HEX_OFF = [
+          { x: 0, y: 0 },                          // 0 — center
+          { x: 0, y: -1 }, { x: 0.75, y: -0.5 },   // 1 top, 2 top-right
+          { x: 0.75, y: 0.5 }, { x: 0, y: 1 },     // 3 bottom-right, 4 bottom
+          { x: -0.75, y: 0.5 }, { x: -0.75, y: -0.5 }, // 5 bottom-left, 6 top-left
+        ];
+        const GUN_SLOTS = 2; // weapon-group slots 0..1 hold guns (WEAPON_GUN_SLOTS mirror)
+        const slotKindOf = (g: 'ship' | 'weapon', i: number) =>
+          g === 'weapon' ? (i < GUN_SLOTS ? 'weapon' : 'weapon-mod') : 'ship';
+        const kindFits = (g: 'ship' | 'weapon', i: number, kind: string) =>
+          g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : kind === slotKindOf(g, i);
+        const gunCount = (out?.weapon ?? []).slice(0, GUN_SLOTS).filter(Boolean).length;
+        const selMod = selSlot && out ? (selSlot.g === 'ship' ? out.ship : out.weapon)[selSlot.i] : null;
+        const selCat = selMod ? out?.catalog.find(c => c.id === selMod.id) : undefined;
+        const candidates = selSlot && out
+          ? out.catalog.filter(c => c.owned && !c.installed && c.group === selSlot.g && kindFits(selSlot.g, selSlot.i, c.kind))
+          : [];
+        const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string) => {
+          const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
+          const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
+          return (
+            <div className="flex flex-col items-center gap-1.5">
+              <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>{title}</h3>
+              <div className="relative" style={{ width: cw, height: ch }}>
+                {slots.map((m, i) => {
+                  const off = HEX_OFF[i] ?? HEX_OFF[0];
+                  const isGun = g === 'weapon' && i < GUN_SLOTS;
+                  const sel = selSlot?.g === g && selSlot.i === i;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelSlot(sel ? null : { g, i })}
+                      className="absolute transition-transform active:scale-95"
+                      style={{
+                        width: HEXW, height: HEXH,
+                        left: cw / 2 + off.x * HEXW - HEXW / 2,
+                        top: ch / 2 + off.y * HEXH - HEXH / 2,
+                        clipPath: HEX_CLIP,
+                        background: sel ? '#f8fafc' : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
+                      }}
+                      title={m ? m.label : `Empty ${slotKindOf(g, i).replace('-', ' ')} slot`}
+                    >
+                      <span
+                        className="absolute flex flex-col items-center justify-center text-center"
+                        style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                      >
+                        {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{i + 1}</span>}
+                        {m ? (
+                          <>
+                            <span className="text-[9px] font-bold uppercase tracking-tight text-slate-100 leading-tight px-1.5">{m.label}</span>
+                            {m.level !== undefined && <span className="text-[8px] text-emerald-300 font-bold leading-none mt-0.5">Lv {m.level}</span>}
+                          </>
+                        ) : (
+                          <span className="text-slate-500 text-base font-bold leading-none">+</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        };
         return (
         <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
@@ -1023,87 +1098,111 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            {/* Loadout — 2 equip slots.  Swaps are free while docked; the
-                engine rejects them everywhere else (undocked = committed). */}
-            {stats.loadout && (
-              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
-                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
-                <div className="flex flex-col gap-1.5">
-                  {stats.loadout.slots.map((slot, i) => (
-                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
-                      {(stats.loadout?.owned ?? []).map(w => (
+            {/* Hex-slot outfitting — two 7-hex flowers (SHIP / WEAPON).
+                Every unlock + stat upgrade is a MODULE; effects apply only
+                while installed.  Weapon hexes W1/W2 are the GUN slots (the
+                2-slot loadout; more gun slots = future major upgrade). */}
+            {out && (
+              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3 flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2 justify-items-center">
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7')}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed')}
+                </div>
+
+                {/* Detail strip — acts on the selected hex */}
+                <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
+                  {!selSlot ? (
+                    <span className="text-slate-500 text-[11px]">Select a hex slot to install, move, or upgrade a module.</span>
+                  ) : selMod ? (
+                    <>
+                      <div className="text-xs">
+                        <span className="text-white font-bold uppercase tracking-wide">{selMod.label}</span>
+                        <span className="text-slate-500 ml-2 text-[10px] uppercase">{selMod.kind.replace('-', ' ')}</span>
+                        {selMod.level !== undefined && <span className="text-emerald-300 ml-2 font-bold text-[11px]">Lv {selMod.level}</span>}
+                        {selCat?.desc && <div className="text-slate-400 text-[10px] mt-0.5">{selCat.desc}</div>}
+                      </div>
+                      <div className="flex gap-1.5">
+                        {selMod.level !== undefined && selCat && (
+                          <button
+                            disabled={!selCat.affordable}
+                            onClick={() => onPurchaseModule?.(selMod.id)}
+                            className={`px-3 py-1 rounded text-[11px] font-bold transition-all ${
+                              selCat.affordable
+                                ? 'bg-emerald-700/50 hover:bg-emerald-600/70 text-emerald-100 active:scale-95'
+                                : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            Upgrade ◈{selCat.cost.toLocaleString()}
+                          </button>
+                        )}
                         <button
-                          key={w.id}
-                          onClick={() => onEquipWeapon?.(i, w.id)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
-                            slot?.id === w.id
-                              ? 'bg-sky-600/70 text-white'
-                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
-                          }`}
+                          disabled={selMod.kind === 'weapon' && gunCount <= 1}
+                          onClick={() => { onInstallModule?.(selSlot.g, selSlot.i, null); }}
+                          title={selMod.kind === 'weapon' && gunCount <= 1 ? 'The ship must keep at least one gun mounted' : 'Uninstall (stays owned)'}
+                          className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {w.name}
+                          ✕ Remove
                         </button>
-                      ))}
-                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
-                        <button
-                          onClick={() => onEquipWeapon?.(i, null)}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
-                        >
-                          ✕ empty
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
+                        Install · {slotKindOf(selSlot.g, selSlot.i).replace('-', ' ')}
+                      </span>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {candidates.length === 0 ? (
+                          <span className="text-slate-500 text-[11px]">No uninstalled {slotKindOf(selSlot.g, selSlot.i).replace('-', ' ')} modules owned — buy one below.</span>
+                        ) : candidates.map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => onInstallModule?.(selSlot.g, selSlot.i, c.id)}
+                            className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95"
+                          >
+                            {c.label}{c.level !== undefined ? ` Lv${c.level}` : ''}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Drydock — purchase-only progression: one-time Modules +
-                per-level stat Augments, both bought with Salvage. */}
-            {stats.shop && (
+            {/* Drydock module shop — buying a module auto-installs it into
+                the first free compatible hex; buying an owned leveled module
+                buys its next level. */}
+            {out && (
               <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
-                <div>
-                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.unlocks.map(u => (
-                      <button
-                        key={u.id}
-                        disabled={u.owned || !u.affordable}
-                        onClick={() => onPurchaseUnlock?.(u.id)}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{u.label}</span>
-                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
-                      </button>
-                    ))}
+                {(['ship', 'weapon'] as const).map(g => (
+                  <div key={g}>
+                    <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
+                      Drydock · {g === 'ship' ? 'Ship Modules' : 'Weapon Modules'}
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {out.catalog.filter(c => c.group === g && c.cost > 0).map(c => {
+                        const done = c.owned && c.level === undefined; // one-time & owned: nothing to buy
+                        return (
+                          <button
+                            key={c.id}
+                            disabled={done || !c.affordable}
+                            onClick={() => onPurchaseModule?.(c.id)}
+                            title={c.locked ? 'Requires the Shield module' : c.desc}
+                            className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                              done ? 'bg-slate-700/40 text-slate-500 cursor-default'
+                                : c.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
+                                  : c.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            <span className="font-bold">{c.label}{c.level !== undefined && <span className="text-[9px] opacity-70 ml-1">Lv{c.level}</span>}</span>
+                            <span className="tabular-nums">{done ? 'OWNED' : c.locked ? '🔒 SHIELD' : `◈${c.cost.toLocaleString()}`}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Augments</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.augments.map(a => (
-                      <button
-                        key={a.id}
-                        disabled={a.locked || !a.affordable}
-                        onClick={() => onPurchaseUpgrade?.(a.id)}
-                        title={a.locked ? 'Requires the Shield module' : a.desc}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          a.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
-                            : a.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{a.label} <span className="text-[9px] opacity-70">Lv{a.level}</span></span>
-                        <span className="tabular-nums">{a.locked ? '🔒 SHIELD' : `◈${a.cost.toLocaleString()}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                ))}
               </div>
             )}
           </div>

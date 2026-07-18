@@ -335,16 +335,12 @@ const App: React.FC = () => {
       return engineRef.current ? engineRef.current.perfRecExport() : '';
   };
 
-  const handlePurchaseUnlock = (id: string) => {
-      if (engineRef.current) engineRef.current.purchaseUnlock(id);
+  const handleInstallModule = (group: 'ship' | 'weapon', slot: number, moduleId: string | null) => {
+      if (engineRef.current) engineRef.current.installModule(group, slot, moduleId);
   };
 
-  const handleEquipWeapon = (slot: number, weaponId: string | null) => {
-      if (engineRef.current) engineRef.current.equipWeapon(slot, weaponId);
-  };
-
-  const handlePurchaseUpgrade = (id: string) => {
-      if (engineRef.current) engineRef.current.purchaseUpgrade(id);
+  const handlePurchaseModule = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseModule(id);
   };
 
   const handleDock = () => {
@@ -493,9 +489,8 @@ const App: React.FC = () => {
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
-        onPurchaseUnlock={handlePurchaseUnlock}
-        onEquipWeapon={handleEquipWeapon}
-        onPurchaseUpgrade={handlePurchaseUpgrade}
+        onInstallModule={handleInstallModule}
+        onPurchaseModule={handlePurchaseModule}
         onDock={handleDock}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}

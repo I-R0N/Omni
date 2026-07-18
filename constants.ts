@@ -2459,6 +2459,76 @@ export const UNLOCK_DEFS: readonly UnlockDef[] = [
   { id: 'wpn_cannon',    kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
 ] as const;
 
+// ── Modules: hex-slot outfitting (station increment follow-up) ───────────────
+// EVERY unlock and stat upgrade is an installable MODULE.  The ship carries
+// two 7-hex groups (a center tile + one at each of its 6 sides): the SHIP
+// group and the WEAPON group.  Slots start mostly empty; a module's effect
+// applies ONLY while it is installed in a slot.  Within the WEAPON group,
+// slots 0..WEAPON_GUN_SLOTS-1 are the GUN slots — the only ones that accept
+// kind 'weapon' (the 2-slot loadout lives on, and "more gun slots" is the
+// designed future major upgrade).  The remaining weapon slots take
+// kind 'weapon-mod' (fire-rate / damage / overcharge).  Kind 'ship-part'
+// is RESERVED for the future hull/engine/wings/nosecone design modules
+// (performance profiles + ship sprites) — schema only today.
+//
+// Ownership stays on the existing substrate (unlockedWeapons / shieldUnlocked
+// / overchargeUnlocked / upgradeLevels ≥ 1), and leveled modules keep the
+// escalating upgradeCost() curve — buying level 1 grants the module, further
+// levels are bought while it's installed.  Installation state lives on
+// GameEngine (shipSlots / weaponSlots); rearrangement is free while DOCKED
+// and rejected everywhere else, like all commerce.
+export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
+export type ModuleGroup = 'ship' | 'weapon';
+export interface ModuleDef {
+  id: string;              // unlock ids ('shield', 'wpn_burst', …) and UpgradeIds ('hull', …) reused
+  group: ModuleGroup;
+  kind: ModuleKind;
+  label: string;
+  desc: string;
+  weapon?: WeaponType;     // kind 'weapon' only
+  upgradeId?: UpgradeId;   // leveled modules — price via upgradeCost(), effect via UPGRADE_EFFECTS
+  cost?: number;           // one-time modules — price (leveled modules price via the curve)
+  requires?: 'shield';     // shown locked in the shop until Shield is OWNED (existing rule)
+}
+export const MODULE_SLOT_COUNT = 7;  // hex flower: 1 center + 6 sides
+export const WEAPON_GUN_SLOTS = 2;   // weapon-group slots 0..1 hold guns
+
+const unlockCost = (id: string): number => UNLOCK_DEFS.find(d => d.id === id)!.cost;
+export const MODULE_DEFS: readonly ModuleDef[] = [
+  // ── Ship group ──
+  { id: 'shield',     group: 'ship', kind: 'ship', label: 'Shield',     desc: 'Deflector shield',  cost: unlockCost('shield') },
+  { id: 'hull',       group: 'ship', kind: 'ship', label: 'Hull',       desc: '+25 max HP / level',        upgradeId: 'hull' },
+  { id: 'plating',    group: 'ship', kind: 'ship', label: 'Plating',    desc: '+15 max shield / level',    upgradeId: 'plating',   requires: 'shield' },
+  { id: 'capacitor',  group: 'ship', kind: 'ship', label: 'Capacitor',  desc: '+25% shield regen / level', upgradeId: 'capacitor', requires: 'shield' },
+  { id: 'engine',     group: 'ship', kind: 'ship', label: 'Engine',     desc: '+8% top speed / level',     upgradeId: 'engine' },
+  { id: 'thrusters',  group: 'ship', kind: 'ship', label: 'Thrusters',  desc: '+12% acceleration / level', upgradeId: 'thrusters' },
+  // ── Weapon group: guns (gun slots only) ──
+  { id: 'wpn_blaster',   group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm', cost: 0 },
+  { id: 'wpn_burst',     group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: unlockCost('wpn_burst') },
+  { id: 'wpn_shotgun',   group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: unlockCost('wpn_shotgun') },
+  { id: 'wpn_bouncer',   group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: unlockCost('wpn_bouncer') },
+  { id: 'wpn_lightning', group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: unlockCost('wpn_lightning') },
+  { id: 'wpn_homing',    group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: unlockCost('wpn_homing') },
+  { id: 'wpn_cannon',    group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: unlockCost('wpn_cannon') },
+  // ── Weapon group: performance mods (non-gun slots) ──
+  { id: 'gunnery',    group: 'weapon', kind: 'weapon-mod', label: 'Gunnery',    desc: '+12% weapon damage / level', upgradeId: 'gunnery' },
+  { id: 'autoloader', group: 'weapon', kind: 'weapon-mod', label: 'Autoloader', desc: '-8% fire cooldown / level',  upgradeId: 'autoloader' },
+  { id: 'overcharge', group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: unlockCost('overcharge') },
+] as const;
+
+export function moduleDef(id: string): ModuleDef | undefined {
+  return MODULE_DEFS.find(d => d.id === id);
+}
+/** True when `kind` may sit in `group` slot index `idx` (gun slots are the
+ *  first WEAPON_GUN_SLOTS of the weapon group; everything else per group). */
+export function moduleFitsSlot(def: ModuleDef, group: ModuleGroup, idx: number): boolean {
+  if (def.group !== group) return false;
+  if (group === 'weapon') {
+    return def.kind === 'weapon' ? idx < WEAPON_GUN_SLOTS : idx >= WEAPON_GUN_SLOTS;
+  }
+  return def.kind === 'ship' || def.kind === 'ship-part';
+}
+
 // Per-LEVEL effect magnitudes (read by GameEngine.applyUpgrades + the
 // movement hook).  A normal card grants 1 level; powerful (every-4th-wave)
 // cards grant +2/+3/+4 levels, so they're worth that many of these.  Base
