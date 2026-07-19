@@ -1144,7 +1144,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           );
         };
         return (
-        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1326,7 +1326,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto py-8">
+        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8">
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
             OMNIVERSE
           </h1>
@@ -1380,7 +1380,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         );
         return (
-        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">

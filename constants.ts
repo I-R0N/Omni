@@ -2491,6 +2491,11 @@ const statMks = (
 
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
+  // Every run STARTS with the free Base Hull mounted on the center ship
+  // hex (mirror of the starter Blaster on gun hex W1): it adds no stats
+  // but is the adjacency ROOT the whole ship-module tree chains from, so
+  // bought modules work out of the box.  cost 0 keeps it out of the shop.
+  { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0 },
   ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk })),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true } },
   ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk })),

@@ -69,7 +69,10 @@ engine/
                           SingleVariantTileFieldMap base
     TileGenerator.ts      Hex-grid placement, cluster gen, HEX_* constants
   systems/
-    InputSystem.ts        Keyboard/mouse state
+    InputSystem.ts        Keyboard/mouse/touch state.  Pointer gestures
+                          engage game input ONLY when they start on the
+                          CANVAS — overlay-targeted events are skipped
+                          entirely so menus keep native touch scrolling
     PhysicsSystem.ts      Static + dynamic spatial grids, SAT broadphase,
                           collision resolution, gravity, per-entity damping
     RenderSystem.ts       Canvas2D draw pass, tint cache, damage text,
@@ -519,7 +522,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   survivors — lethal hits and dent tiles show nothing, so the
   one-shot majority and the kill-frame overlap are gone; damage chips
   render small + muted-red, distinct from gold points.)
-- The run starts LEAN (bare hexes + Blaster on gun hex W1, empty
+- The run starts LEAN (free Base Hull on the center ship hex — the
+  adjacency root, zero stats — + Blaster on gun hex W1, empty
   inventory, no shield, no charged shots); everything else is bought as
   module items at the shop stations and outfitted at the drydock (see
   MODULE_DEFS above).  `applyModuleEffects` gates `maxShield` to 0

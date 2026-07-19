@@ -144,7 +144,11 @@ export class GameEngine {
   // slots.  A module FUNCTIONS only while installed AND its adjacency
   // requirement is met (MODULE_REQUIREMENTS fixpoint — see
   // computeActiveSlots); `activeShip`/`activeWeapon` cache the result.
-  private shipSlots: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
+  private shipSlots: (string | null)[] = (() => {
+      const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
+      s[0] = 'hull_base'; // free starter hull — the adjacency root, mounted center
+      return s;
+  })();
   private weaponSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
       s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
@@ -3204,12 +3208,14 @@ export class GameEngine {
       this.player.shield = this.player.maxShield ?? 0;
   }
 
-  /** Run reset + DBG relock: back to the lean start — bare hexes, empty
-   *  inventory, the starter Blaster on gun hex W1. */
+  /** Run reset + DBG relock: back to the lean start — empty inventory,
+   *  the free Base Hull on the center ship hex (adjacency root) and the
+   *  starter Blaster on gun hex W1. */
   public resetOutfit() {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
       this.inventory.fill(null);
+      this.shipSlots[0] = 'hull_base';
       this.weaponSlots[0] = 'wpn_blaster';
       this.player.currentWeapon = WeaponType.BLASTER;
       this.currentWeaponIndex = 0;
