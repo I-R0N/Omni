@@ -102,9 +102,12 @@ export class WeaponSystem {
     onShake?: (amount: number) => void,
     charged: boolean = false,
   ): boolean {
+    // Weaponless flight (no gun mounted) is a legal outfit — nothing to
+    // fire.  The weight system pays this back as an acceleration boost.
+    if (player.currentWeapon === undefined) return false;
     if (player.weaponCooldown && player.weaponCooldown > 0) return false;
 
-    const weaponType = player.currentWeapon || WeaponType.BLASTER;
+    const weaponType = player.currentWeapon;
     const baseConfig = WEAPONS[weaponType];
 
     // Charged shots require the Overcharge unlock; there is no resource

@@ -594,11 +594,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   Mk I/II/III varieties (own price ≈ the cumulative old level-curve
   cost, own fixed effect — no levels, no in-place upgrades), guns and
   Shield/Overcharge are single varieties.  Purchases land in the
-  INVENTORY (12 tiles, duplicates allowed and stacking); outfitting is
-  moving items between inventory tiles and the two 7-hex groups — SHIP
-  and WEAPON (weapon hexes 0..1 = the GUN slots; the 2-slot loadout
-  lives on as those tiles, `equippedWeapons` derived via
-  `syncLoadoutFromSlots`).  ADJACENCY REQUIREMENTS: an installed module
+  INVENTORY (12 tiles rendered as a honeycomb of hex tiles, duplicates
+  allowed and stacking); outfitting is moving hex tiles between the
+  inventory and the two 7-hex groups — SHIP and WEAPON.  GUN placement
+  is SLOT-AGNOSTIC: guns mix freely with weapon mods anywhere in the
+  weapon flower, capped at `MAX_INSTALLED_GUNS` (2) MOUNTED at once
+  (a count guard in `moveModuleInternal`, surfaced as the "Guns N/2"
+  chip; the ≤2 mounted guns in slot order ARE `equippedWeapons` via
+  `syncLoadoutFromSlots`, badged W1/W2 dynamically).  WEAPONLESS flight
+  is allowed (the Blaster is removable): firing gates off while
+  `player.currentWeapon` is undefined, and every gun carries a
+  `weight` — thrust scales by `WEAPON_WEIGHT.BASE_BOOST / (1 + DRAG ×
+  Σweight)`, so no gun = +10% acceleration, Blaster-only = the 1.0
+  baseline, heavy arsenals drag (the gamification hook heavier gun
+  unlocks trade against).  ADJACENCY REQUIREMENTS: an installed module
   FUNCTIONS only while it touches an ACTIVE module of its required
   family — engine⇢hull, thrusters⇢engine, shield/plating⇢hull,
   capacitor⇢shield, weapon-mods⇢gun; hull + guns are the roots, so a

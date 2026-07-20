@@ -1263,6 +1263,10 @@ export interface EngineStats {
   outfitting?: {
     ship: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
     weapon: ({ id: string; label: string; kind: string; family: string; active: boolean; requires?: string } | null)[];
+    /** Mounted-gun count vs. the slot-agnostic gun limit ("Guns N/2" in
+     *  the docking UI; weaponless is allowed — guns carry weight). */
+    gunsMounted: number;
+    maxGuns: number;
     inventory: ({ id: string; label: string; kind: string; family: string; group: string } | null)[];
     catalog: {
       id: string; group: string; kind: string; label: string; desc: string;

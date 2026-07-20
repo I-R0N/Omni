@@ -1068,19 +1068,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           { x: 0.75, y: 0.5 }, { x: 0, y: 1 },
           { x: -0.75, y: 0.5 }, { x: -0.75, y: -0.5 },
         ];
-        const GUN_SLOTS = 2; // weapon-group slots 0..1 hold guns (WEAPON_GUN_SLOTS mirror)
-        const slotKindOf = (g: 'ship' | 'weapon', i: number) =>
-          g === 'weapon' ? (i < GUN_SLOTS ? 'weapon' : 'weapon-mod') : 'ship';
-        const kindFits = (g: 'ship' | 'weapon', i: number, kind: string) =>
-          g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : kind === slotKindOf(g, i);
-        const gunCount = (out?.weapon ?? []).slice(0, GUN_SLOTS).filter(Boolean).length;
+        // Placement is slot-agnostic within a group; the gun LIMIT is a
+        // count (Guns N/maxGuns), not a slot type.  Mounted guns get a
+        // dynamic W1/W2 badge in slot order.
+        const kindFits = (g: 'ship' | 'weapon', kind: string) =>
+          g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : (kind === 'weapon' || kind === 'weapon-mod');
+        const gunCount = out?.gunsMounted ?? 0;
+        const maxGuns = out?.maxGuns ?? 2;
+        const gunOrder = new Map<number, number>();
+        (out?.weapon ?? []).forEach((m, i) => { if (m?.kind === 'weapon') gunOrder.set(i, gunOrder.size); });
         const selMod = selSlot && out ? (selSlot.g === 'ship' ? out.ship : out.weapon)[selSlot.i] : null;
         const firstFreeInv = (out?.inventory ?? []).findIndex(t => t === null);
-        // Inventory items (with their tile index) that fit the selected empty hex.
+        // Inventory items (with their tile index) that fit the selected empty
+        // hex; guns at the mounted limit stay listed but disabled.
         const candidates = selSlot && out
           ? out.inventory
               .map((m, idx) => ({ m, idx }))
-              .filter(e => e.m !== null && e.m.group === selSlot.g && kindFits(selSlot.g, selSlot.i, e.m.kind))
+              .filter(e => e.m !== null && e.m.group === selSlot.g && kindFits(selSlot.g, e.m.kind))
           : [];
         const beginDrag = (area: 'inventory' | 'ship' | 'weapon', idx: number, label: string) =>
           (e: React.PointerEvent) => {
@@ -1095,11 +1099,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
           return (
             <div className="flex flex-col items-center gap-1.5">
-              <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>{title}</h3>
+              <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>
+                {title}
+                {g === 'weapon' && (
+                  <span
+                    className={`ml-2 px-1.5 py-0.5 rounded text-[9px] tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
+                    title={`Mounted guns — limited to ${maxGuns} at a time (any hex; more slots is a future ship upgrade). Weaponless is allowed: guns weigh the ship down, flying light boosts acceleration.`}
+                  >
+                    Guns {gunCount}/{maxGuns}
+                  </span>
+                )}
+              </h3>
               <div className="relative" style={{ width: cw, height: ch }}>
                 {slots.map((m, i) => {
                   const off = HEX_OFF[i] ?? HEX_OFF[0];
-                  const isGun = g === 'weapon' && i < GUN_SLOTS;
+                  const isGun = m?.kind === 'weapon';
                   const sel = selSlot?.g === g && selSlot.i === i;
                   const offline = m !== null && !m.active;
                   return (
@@ -1120,13 +1134,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       }}
                       title={m
                         ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
-                        : `Empty ${slotKindOf(g, i).replace('-', ' ')} slot`}
+                        : `Empty ${g} slot`}
                     >
                       <span
                         className="absolute flex flex-col items-center justify-center text-center"
                         style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
                       >
-                        {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{i + 1}</span>}
+                        {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{(gunOrder.get(i) ?? 0) + 1}</span>}
                         {m ? (
                           <>
                             <span className={`text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
@@ -1202,27 +1216,52 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed')}
                 </div>
 
-                {/* Inventory tile grid — purchases land here; drag onto a hex to install */}
+                {/* Inventory — a honeycomb of hex tiles (same tile language
+                    as the install flowers): purchases land here; drag a tile
+                    onto a flower hex to install it. */}
                 <div className="flex flex-col items-center gap-1.5">
                   <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest">Inventory</h3>
-                  <div className="grid grid-cols-6 gap-1.5">
-                    {(out.inventory ?? []).map((m, i) => (
-                      <button
-                        key={i}
-                        data-tile={`inventory:${i}`}
-                        onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
-                        style={{ touchAction: 'none' }}
-                        className={`w-[74px] h-[44px] rounded border text-[9px] font-bold uppercase leading-tight px-1 transition-colors ${
-                          m !== null
-                            ? 'bg-slate-900 border-amber-500/50 text-slate-100'
-                            : 'bg-slate-800/50 border-slate-700/60 text-slate-600'
-                        }`}
-                        title={m ? `${m.label} — drag onto a hex slot to install` : 'Empty inventory tile'}
-                      >
-                        {m ? m.label : '·'}
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    const IW = 66, IH = 57; // small flat-top hexes, H ≈ 0.866 W
+                    const COLS = 6;
+                    const cw = 0.75 * IW * (COLS - 1) + IW;
+                    const rows = Math.ceil((out.inventory ?? []).length / COLS);
+                    const ch = IH * rows + IH / 2 + 4;
+                    return (
+                      <div className="relative" style={{ width: cw, height: ch }}>
+                        {(out.inventory ?? []).map((m, i) => {
+                          const col = i % COLS, row = Math.floor(i / COLS);
+                          return (
+                            <button
+                              key={i}
+                              data-tile={`inventory:${i}`}
+                              onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
+                              className="absolute transition-transform active:scale-95"
+                              style={{
+                                width: IW, height: IH, touchAction: 'none',
+                                left: col * 0.75 * IW,
+                                top: row * IH + (col % 2 === 1 ? IH / 2 : 0),
+                                clipPath: HEX_CLIP,
+                                background: m !== null ? '#b45309' : '#334155',
+                              }}
+                              title={m ? `${m.label} — drag onto a hex slot to install` : 'Empty inventory tile'}
+                            >
+                              <span
+                                className="absolute flex items-center justify-center text-center"
+                                style={{ inset: 2, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                              >
+                                {m ? (
+                                  <span className="text-[8px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{m.label}</span>
+                                ) : (
+                                  <span className="text-slate-600 text-xs font-bold leading-none">·</span>
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Detail strip — tap fallback for install/remove (drag works too) */}
@@ -1242,10 +1281,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       </div>
                       {canEdit && (
                         <button
-                          disabled={firstFreeInv === -1 || (selMod.kind === 'weapon' && gunCount <= 1)}
+                          disabled={firstFreeInv === -1}
                           onClick={() => { onMoveModule?.({ area: selSlot.g, idx: selSlot.i }, { area: 'inventory', idx: firstFreeInv }); }}
-                          title={selMod.kind === 'weapon' && gunCount <= 1 ? 'The ship must keep at least one gun mounted'
-                            : firstFreeInv === -1 ? 'Inventory full' : 'Move to inventory'}
+                          title={firstFreeInv === -1 ? 'Inventory full'
+                            : selMod.kind === 'weapon' ? 'Unmount (weaponless flight is allowed — flying light boosts acceleration)'
+                            : 'Move to inventory'}
                           className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           ✕ To inventory
@@ -1255,22 +1295,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ) : (
                     <>
                       <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
-                        Install · {slotKindOf(selSlot.g, selSlot.i).replace('-', ' ')}
+                        Install · {selSlot.g} module
                       </span>
                       <div className="flex gap-1.5 flex-wrap">
                         {!canEdit ? (
                           <span className="text-slate-500 text-[11px]">Outfitting locked — no drydock at this station.</span>
                         ) : candidates.length === 0 ? (
                           <span className="text-slate-500 text-[11px]">No matching modules in the inventory — buy some at a shop station.</span>
-                        ) : candidates.map(c => (
-                          <button
-                            key={c.idx}
-                            onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g, idx: selSlot.i })}
-                            className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95"
-                          >
-                            {c.m!.label}
-                          </button>
-                        ))}
+                        ) : candidates.map(c => {
+                          const gunBlocked = c.m!.kind === 'weapon' && gunCount >= maxGuns;
+                          return (
+                            <button
+                              key={c.idx}
+                              disabled={gunBlocked}
+                              onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g, idx: selSlot.i })}
+                              title={gunBlocked ? `Gun limit reached (${gunCount}/${maxGuns}) — unmount a gun first` : undefined}
+                              className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {c.m!.label}{gunBlocked ? ' ⛔' : ''}
+                            </button>
+                          );
+                        })}
                       </div>
                     </>
                   )}

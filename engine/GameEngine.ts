@@ -20,7 +20,7 @@ import { nextId } from './systems/IdAllocator';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, WEAPON_GUN_SLOTS, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -140,8 +140,10 @@ export class GameEngine {
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
   // items between inventory tiles and the two 7-hex groups.  Index 0 is
-  // the center hex; weapon indices 0..WEAPON_GUN_SLOTS-1 are the GUN
-  // slots.  A module FUNCTIONS only while installed AND its adjacency
+  // the center hex.  Guns mix freely with weapon mods in the weapon
+  // flower, capped at MAX_INSTALLED_GUNS mounted (slot-agnostic count;
+  // weaponless is allowed).  A module FUNCTIONS only while installed
+  // AND its adjacency
   // requirement is met (MODULE_REQUIREMENTS fixpoint — see
   // computeActiveSlots); `activeShip`/`activeWeapon` cache the result.
   private shipSlots: (string | null)[] = (() => {
@@ -1372,7 +1374,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || '',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -1627,7 +1629,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -2827,7 +2829,7 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = (this.player.overchargeUnlocked && heldFor > 0 && !this.player.systemsDisabled)
+    this.player.chargeProgress = (this.player.overchargeUnlocked && this.player.currentWeapon !== undefined && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
@@ -3130,11 +3132,14 @@ export class GameEngine {
       this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
       let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
       let shieldCore = false, overcharge = false;
+      let gunWeight = 0;
       const fold = (slots: (string | null)[], active: boolean[]) => {
           for (let i = 0; i < slots.length; i++) {
               const id = slots[i];
               if (id === null || !active[i]) continue;
-              const e = moduleDef(id)?.effect;
+              const d = moduleDef(id);
+              gunWeight += d?.weight ?? 0;
+              const e = d?.effect;
               if (!e) continue;
               maxHp += e.maxHp ?? 0;
               maxShield += e.maxShield ?? 0;
@@ -3150,7 +3155,10 @@ export class GameEngine {
       fold(this.shipSlots, this.activeShip);
       fold(this.weaponSlots, this.activeWeapon);
       this.moduleSpeedMult = 1 + speed;
-      this.moduleThrustMult = 1 + accel;
+      // Weapon weight: flying light is faster — no gun mounted earns the
+      // BASE_BOOST, heavier arsenals drag (Blaster-only ≈ the 1.0 baseline).
+      this.moduleThrustMult = (1 + accel)
+          * (WEAPON_WEIGHT.BASE_BOOST / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight));
       const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
@@ -3410,24 +3418,30 @@ export class GameEngine {
   private syncUnlocksToPlayer() {
       this.player.ownedWeapons = this.equippedWeapons.filter((w): w is WeaponType => w !== null);
       this.player.equippedWeapons = [...this.equippedWeapons];
-      // The active weapon must always be equipped — if a move removed it,
-      // fall to the first filled slot.
+      // The active weapon must be a mounted gun — if a move removed it,
+      // fall to the first mounted gun, or to NONE (weaponless flight is
+      // allowed; firing is gated off while currentWeapon is undefined).
       const cur = this.player.currentWeapon;
       if (cur === undefined || !this.equippedWeapons.includes(cur)) {
-          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null) ?? WeaponType.BLASTER;
+          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null);
           this.player.currentWeapon = first;
           this.player.burstQueue = 0;
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(first);
+          this.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
       }
   }
 
-  /** Rebuild the derived 2-slot weapon loadout from the gun hexes, then
-   *  re-sync the player entity + recompute module activity/effects. */
+  /** Rebuild the derived weapon loadout from the mounted guns (any
+   *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
+   *  then re-sync the player entity + recompute activity/effects. */
   private syncLoadoutFromSlots() {
-      for (let i = 0; i < WEAPON_GUN_SLOTS; i++) {
+      const guns: WeaponType[] = [];
+      for (let i = 0; i < this.weaponSlots.length; i++) {
           const id = this.weaponSlots[i];
           const def = id !== null ? moduleDef(id) : undefined;
-          this.equippedWeapons[i] = def?.weapon ?? null;
+          if (def?.weapon !== undefined) guns.push(def.weapon);
+      }
+      for (let i = 0; i < this.equippedWeapons.length; i++) {
+          this.equippedWeapons[i] = guns[i] ?? null;
       }
       this.syncUnlocksToPlayer();
       this.applyModuleEffects();
@@ -3485,15 +3499,18 @@ export class GameEngine {
           if (!dDef) return false;
           if (from.area !== 'inventory' && !moduleFitsSlot(dDef, from.area, from.idx)) return false;
       }
-      // Last-gun guard.
-      if (def.kind === 'weapon' && from.area === 'weapon' && from.idx < WEAPON_GUN_SLOTS) {
-          const staysInGunRow = to.area === 'weapon' && to.idx < WEAPON_GUN_SLOTS;
-          const swapBringsGun = dDef?.kind === 'weapon';
-          const gunsMounted = this.weaponSlots.slice(0, WEAPON_GUN_SLOTS).filter(s => s !== null).length;
-          if (!staysInGunRow && !swapBringsGun && gunsMounted <= 1) return false;
-      }
+      // Apply, then enforce the slot-agnostic gun COUNT limit — a move may
+      // not leave more than MAX_INSTALLED_GUNS guns mounted in the weapon
+      // flower (weaponless is fine; there is no minimum).
       fromSlots[from.idx] = displaced;
       toSlots[to.idx] = id;
+      const gunsMounted = this.weaponSlots.reduce(
+          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
+      if (gunsMounted > MAX_INSTALLED_GUNS) {
+          fromSlots[from.idx] = id;
+          toSlots[to.idx] = displaced;
+          return false;
+      }
       this.syncLoadoutFromSlots();
       return true;
   }
@@ -3531,12 +3548,19 @@ export class GameEngine {
   public debugGrantWeapon(id: string) {
       const mDef = MODULE_DEFS.find(m => m.weapon === (id as WeaponType));
       if (!mDef) return;
-      if (this.weaponSlots.slice(0, WEAPON_GUN_SLOTS).includes(mDef.id)) return;
-      let slot = -1;
-      for (let i = 0; i < WEAPON_GUN_SLOTS; i++) if (this.weaponSlots[i] === null) { slot = i; break; }
-      if (slot === -1) {
-          const activeIdx = this.equippedWeapons.indexOf(this.player.currentWeapon ?? WeaponType.BLASTER);
-          slot = activeIdx === 0 ? 1 : 0;
+      if (this.weaponSlots.includes(mDef.id)) return; // already mounted
+      const gunSlots = this.weaponSlots
+          .map((s, i) => ({ s, i }))
+          .filter(e => e.s !== null && moduleDef(e.s)?.kind === 'weapon');
+      let slot: number;
+      if (gunSlots.length < MAX_INSTALLED_GUNS) {
+          slot = this.weaponSlots.indexOf(null);
+          if (slot === -1) slot = gunSlots.length > 0 ? gunSlots[gunSlots.length - 1].i : 0;
+      } else {
+          // At the gun limit — replace the mounted gun the ACTIVE weapon is
+          // not, so the weapon under test doesn't yank the one being fired.
+          const victim = gunSlots.find(e => moduleDef(e.s!)?.weapon !== this.player.currentWeapon) ?? gunSlots[0];
+          slot = victim.i;
       }
       const displaced = this.weaponSlots[slot];
       if (displaced !== null) {
@@ -3555,8 +3579,8 @@ export class GameEngine {
           name: d.label,
           owned: this.weaponSlots.includes(d.id) || this.inventory.includes(d.id),
           slot: (() => {
-              const i = this.weaponSlots.indexOf(d.id);
-              return i >= 0 && i < WEAPON_GUN_SLOTS ? i : null;
+              const i = d.weapon !== undefined ? this.equippedWeapons.indexOf(d.weapon) : -1;
+              return i === -1 ? null : i;
           })(),
       }));
   }
@@ -3573,9 +3597,13 @@ export class GameEngine {
               requires: req !== undefined ? (req[0] as string) : undefined,
           };
       });
+      const gunsMounted = this.weaponSlots.reduce(
+          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
       return {
           ship: hexSnap(this.shipSlots, this.activeShip),
           weapon: hexSnap(this.weaponSlots, this.activeWeapon),
+          gunsMounted,
+          maxGuns: MAX_INSTALLED_GUNS,
           inventory: this.inventory.map(id => {
               if (id === null) return null;
               const def = moduleDef(id)!;

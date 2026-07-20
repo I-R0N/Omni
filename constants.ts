@@ -2401,9 +2401,13 @@ export const SCORE_CONSTANTS = {
 // purchase you swap in).  Purchases land in the INVENTORY (a tile grid);
 // outfitting is moving items between inventory tiles and the two 7-hex
 // installation groups (SHIP / WEAPON — a center tile + one at each side).
-// Weapon-group slots 0..WEAPON_GUN_SLOTS-1 are the GUN slots (the 2-slot
-// loadout lives on as those hexes; more gun slots is a future ship
-// purchase — see the ship-catalog entry in docs/PARKING_LOT.md).
+// Gun placement is SLOT-AGNOSTIC: a gun may sit in ANY weapon-group hex,
+// but no more than MAX_INSTALLED_GUNS may be mounted at once (the 2-gun
+// loadout lives on as a COUNT limit, clearly surfaced as "Guns N/2" in
+// the docking UI; raising the limit is a future ship purchase — see the
+// ship-catalog entry in docs/PARKING_LOT.md).  Going WEAPONLESS is
+// allowed — every gun carries a WEIGHT, and a light ship accelerates
+// harder (WEAPON_WEIGHT below).
 //
 // ADJACENCY REQUIREMENTS (MODULE_REQUIREMENTS): an installed module only
 // FUNCTIONS while it touches an ACTIVE module of its required family —
@@ -2447,14 +2451,29 @@ export interface ModuleDef {
   desc: string;
   cost: number;
   weapon?: WeaponType;     // family 'gun' only
+  // Gun mass (family 'gun'): mounted weight drags acceleration via the
+  // WEAPON_WEIGHT curve — no gun mounted = a slight accel boost.
+  weight?: number;
   effect?: ModuleEffect;
 }
 
 export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
-export const WEAPON_GUN_SLOTS = 2;    // weapon-group slots 0..1 hold guns
+export const MAX_INSTALLED_GUNS = 2;  // gun COUNT limit in the weapon group (slot-agnostic)
 export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)
 // Autoloader stack floor — cadence never drops below 40% of base.
 export const COOLDOWN_FLOOR = 0.4;
+
+// ── Weapon weight → acceleration ────────────────────────────────────────────
+// Every mounted gun weighs the ship down; thrust is scaled by
+//   BASE_BOOST / (1 + DRAG_PER_WEIGHT × Σ mounted-gun weight)
+// tuned so the starter Blaster (weight 1) is EXACTLY the old 1.0 baseline:
+// flying weaponless gives the +10% BASE_BOOST, heavy arsenals (Cannon +
+// Homing ≈ 4.5 weight) drag to ≈0.76×.  This is the gamification hook the
+// heavier gun unlocks trade against.  Numbers provisional pending playtest.
+export const WEAPON_WEIGHT = {
+  BASE_BOOST: 1.10,
+  DRAG_PER_WEIGHT: 0.10,
+};
 
 /** Which family an installed module must TOUCH (an ACTIVE module of any
  *  listed family, adjacent per HEX_ADJACENCY) to function.  Absent =
@@ -2503,15 +2522,15 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk })),
   ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk })),
   // ── Weapon group: guns (gun hexes only) ──
-  { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0 },
-  { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000 },
-  { id: 'wpn_shotgun',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500 },
+  { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0, weight: 1.0 },
+  { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000, weight: 1.3 },
+  { id: 'wpn_shotgun',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500, weight: 1.5 },
   // Player-facing name unified to "Laser" (pivot 1d, user decision); code
   // identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
-  { id: 'wpn_bouncer',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000 },
-  { id: 'wpn_lightning', family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000 },
-  { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000 },
-  { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000 },
+  { id: 'wpn_bouncer',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000, weight: 1.6 },
+  { id: 'wpn_lightning', family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000, weight: 1.8 },
+  { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
+  { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
   ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk })),
   ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk })),
@@ -2521,13 +2540,13 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
 export function moduleDef(id: string): ModuleDef | undefined {
   return MODULE_DEFS.find(d => d.id === id);
 }
-/** True when `def` may sit in `group` slot index `idx` (gun slots are the
- *  first WEAPON_GUN_SLOTS of the weapon group; everything else per group). */
-export function moduleFitsSlot(def: ModuleDef, group: ModuleGroup, idx: number): boolean {
+/** True when `def` may sit in `group` slot index `idx`.  Placement is
+ *  slot-agnostic within a group (guns + weapon mods mix freely in the
+ *  weapon flower — the gun LIMIT is a count, enforced at move time);
+ *  `idx` stays in the signature for future per-slot ship layouts. */
+export function moduleFitsSlot(def: ModuleDef, group: ModuleGroup, _idx: number): boolean {
   if (def.group !== group) return false;
-  if (group === 'weapon') {
-    return def.kind === 'weapon' ? idx < WEAPON_GUN_SLOTS : idx >= WEAPON_GUN_SLOTS;
-  }
+  if (group === 'weapon') return def.kind === 'weapon' || def.kind === 'weapon-mod';
   return def.kind === 'ship' || def.kind === 'ship-part';
 }
 
