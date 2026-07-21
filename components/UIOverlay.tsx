@@ -1116,6 +1116,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   const isGun = m?.kind === 'weapon';
                   const sel = selSlot?.g === g && selSlot.i === i;
                   const offline = m !== null && !m.active;
+                  const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
                   return (
                     <button
                       key={i}
@@ -1125,6 +1126,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       className="absolute transition-transform active:scale-95"
                       style={{
                         width: HEXW, height: HEXH, touchAction: 'none',
+                        opacity: lifted ? 0.35 : undefined,
                         left: cw / 2 + off.x * HEXW - HEXW / 2,
                         top: ch / 2 + off.y * HEXH - HEXH / 2,
                         clipPath: HEX_CLIP,
@@ -1231,6 +1233,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                       <div className="relative" style={{ width: cw, height: ch }}>
                         {(out.inventory ?? []).map((m, i) => {
                           const col = i % COLS, row = Math.floor(i / COLS);
+                          const lifted = dragging?.moved === true && dragging.area === 'inventory' && dragging.idx === i;
                           return (
                             <button
                               key={i}
@@ -1239,6 +1242,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                               className="absolute transition-transform active:scale-95"
                               style={{
                                 width: IW, height: IH, touchAction: 'none',
+                                opacity: lifted ? 0.35 : undefined,
                                 left: col * 0.75 * IW,
                                 top: row * IH + (col % 2 === 1 ? IH / 2 : 0),
                                 clipPath: HEX_CLIP,
@@ -1356,15 +1360,35 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             )}
           </div>
 
-          {/* Drag ghost */}
-          {dragging && dragging.moved && (
-            <div
-              className="fixed z-[70] pointer-events-none px-2.5 py-1 rounded bg-sky-600/90 text-white text-[10px] font-bold uppercase tracking-wide shadow-xl"
-              style={{ left: dragging.x + 10, top: dragging.y + 10 }}
-            >
-              {dragging.label}
-            </div>
-          )}
+          {/* Drag ghost — the tile stays a HEX while being dragged: same
+              clip-path, size, and accent as its source tile, floating just
+              above the pointer (visible over a finger on touch). */}
+          {dragging && dragging.moved && (() => {
+            const srcTile = dragging.area === 'inventory' ? out?.inventory?.[dragging.idx]
+              : dragging.area === 'ship' ? out?.ship?.[dragging.idx]
+              : out?.weapon?.[dragging.idx];
+            const GW = dragging.area === 'inventory' ? 66 : HEXW;
+            const GH = dragging.area === 'inventory' ? 57 : HEXH;
+            const accent = srcTile?.kind === 'weapon' ? '#f59e0b'
+              : dragging.area === 'ship' ? '#0284c7'
+              : dragging.area === 'weapon' ? '#7c3aed'
+              : '#b45309';
+            return (
+              <div
+                className="fixed z-[70] pointer-events-none"
+                style={{ left: dragging.x - GW / 2, top: dragging.y - GH * 0.75 - 12, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.6))' }}
+              >
+                <div style={{ width: GW, height: GH, clipPath: HEX_CLIP, background: accent, opacity: 0.95, position: 'relative' }}>
+                  <span
+                    className="absolute flex items-center justify-center text-center"
+                    style={{ inset: 2.5, clipPath: HEX_CLIP, background: '#0f172a' }}
+                  >
+                    <span className="text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{dragging.label}</span>
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
         );
       })()}
