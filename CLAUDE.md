@@ -631,15 +631,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
   pay-per-HP, PRO-RATED) and the wave-free Overworld's roaming-dragon
-  respawn timers.  THREE stations with per-variant SERVICES
-  (`StationServices`): HOME STATION at map center (drydock + repair —
-  the only place modules move between inventory and hexes; the future
-  persistent state's player-created base), SHIPWRIGHT (ship-module
-  shop), ARMORY (weapon-module shop).  Docking = proximity to the
-  NEAREST in-range station + E key / HUD DOCK button; docked = sim
-  frozen (loop short-circuit); the docked UI shows only the panels the
-  station's services offer.  Buying happens at shops (→ inventory),
-  outfitting at the drydock — the flight between them is the loop.
+  respawn timers.  EVERY station has (at minimum) DRYDOCK functionality
+  — dock anywhere and reconfigure the ship; hull repair rides along as
+  part of drydock work.  FOUR stations with per-variant SERVICES
+  (`StationServices`) on top of that baseline: HOME STATION at map
+  center (drydock only — the future persistent state's player-created
+  base), SHIPWRIGHT (+ ship-module shop), ARMORY (+ weapon-module
+  shop), TRADE HUB (+ both shops).  Docking = proximity to the NEAREST
+  in-range station + E key / HUD DOCK button; docked = sim frozen (loop
+  short-circuit); the docked UI shows only the panels the station's
+  services offer.  Purchases land in the inventory and can be
+  outfitted on the spot.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the
   income arithmetic

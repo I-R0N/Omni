@@ -2782,33 +2782,37 @@ export const STATION_CONSTANTS = {
 
 // ── Station variants + services (module-config increment) ───────────────────
 // Space stations carry a SERVICES mix; the docked UI shows only the panels
-// the station offers.  The HOME station (map center — in the future
-// persistent state, created on player creation) has the DRYDOCK: the only
-// place modules move between inventory and the hex slots, plus hull
-// repair.  Shop stations sell module ITEMS into the inventory — buying
-// happens where the shop is, outfitting happens at the drydock.  Future
-// variations (missions, hangar/ship purchases, trade) slot in as new
+// the station offers.  EVERY station has (at minimum) DRYDOCK
+// functionality — dock anywhere and reconfigure the ship (move modules
+// between inventory and hex slots); hull repair rides along as part of
+// drydock work.  On top of that baseline, stations add shop sites: the
+// current roster is the player's HOME base (drydock only — in the future
+// persistent state, created on player creation), a SHIP-systems shop, a
+// WEAPON-systems shop, and a TRADE HUB carrying both.  Future variations
+// (missions, hangar/ship purchases, other sites to visit) slot in as new
 // service flags.
-export type StationKind = 'home' | 'shipwright' | 'armory';
+export type StationKind = 'home' | 'shipwright' | 'armory' | 'tradehub';
 export interface StationServices {
-  drydock: boolean;    // move/install modules (inventory ↔ hex slots)
-  repair: boolean;     // pay-per-HP hull repair
+  drydock: boolean;    // move/install modules (inventory ↔ hex slots) — true everywhere today
+  repair: boolean;     // pay-per-HP hull repair (part of drydock work)
   shipShop: boolean;   // sells ship-group modules
   weaponShop: boolean; // sells weapon-group modules
 }
 export const STATION_VARIANTS: Record<StationKind, { name: string; color: string; services: StationServices }> = {
-  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true,  repair: true,  shipShop: false, weaponShop: false } },
-  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: false, repair: false, shipShop: true,  weaponShop: false } },
-  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: false, repair: false, shipShop: false, weaponShop: true } },
+  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true, repair: true, shipShop: false, weaponShop: false } },
+  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: true, repair: true, shipShop: true,  weaponShop: false } },
+  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true } },
+  tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true } },
 };
 /** Overworld station placement (world units; map is 12k, torus).  The home
- *  station sits at the player-spawn center; the two shop stations are set
- *  well apart so finding them is a first flight (chevrons + minimap dots
- *  point the way). */
+ *  station sits at the player-spawn center; the shop stations are spread
+ *  well apart so finding each is a flight (chevrons + minimap dots point
+ *  the way). */
 export const OVERWORLD_STATIONS: readonly { kind: StationKind; x: number; y: number }[] = [
   { kind: 'home',       x: 0,     y: 0 },
   { kind: 'shipwright', x: -3600, y: -2400 },
   { kind: 'armory',     x: 3600,  y: 2400 },
+  { kind: 'tradehub',   x: 3800,  y: -2600 },
 ];
 
 // ── Overworld map (wave-free home map, increment 1e) ────────────────────────
