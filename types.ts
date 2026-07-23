@@ -1267,7 +1267,9 @@ export interface EngineStats {
      *  the docking UI; weaponless is allowed — guns carry weight). */
     gunsMounted: number;
     maxGuns: number;
-    inventory: ({ id: string; label: string; kind: string; family: string; group: string } | null)[];
+    /** `sellValue`/`scrapValue` are the rounded MODULE_RESALE payouts —
+     *  sell-back needs a station (any), scrap works anywhere. */
+    inventory: ({ id: string; label: string; kind: string; family: string; group: string; sellValue: number; scrapValue: number } | null)[];
     catalog: {
       id: string; group: string; kind: string; label: string; desc: string;
       cost: number; affordable: boolean;

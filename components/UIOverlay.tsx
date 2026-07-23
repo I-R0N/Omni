@@ -121,6 +121,11 @@ interface UIOverlayProps {
     to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ) => void;
   onPurchaseModule?: (id: string) => void;
+  // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
+  // station — any, every station drydocks; scrap (9%) works from anywhere
+  // on the map (the pause-menu cargo panel's only cash-out).
+  onSellModule?: (idx: number) => void;
+  onScrapModule?: (idx: number) => void;
   // Station docking (Overworld): dock from the in-range affordance, undock
   // from the station UI, repair hull (pay-per-HP, pro-rated).
   onDock?: () => void;
@@ -215,6 +220,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onPerfRecExport,
   onMoveModule,
   onPurchaseModule,
+  onSellModule,
+  onScrapModule,
   onDock,
   onUndock,
   onRepairHull,
@@ -277,9 +284,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // (awake) / asleep (dynamic-sleeping).  Display only — does not change
   // sleeping behaviour (that's the Shards & Physics ▸ Sleep toggle).
   const [entityCountMode, setEntityCountMode] = useState<'total' | 'active' | 'asleep'>('total');
-  // Hex-slot outfitting: the currently selected hex (station UI).  The
+  // Hex-slot outfitting: the currently selected tile (station UI + pause
+  // cargo panel).  'inventory' selections drive the sell/scrap strip; the
   // detail strip below the flowers acts on this slot.
-  const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon'; i: number } | null>(null);
+  const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon' | 'inventory'; i: number } | null>(null);
   // Drag-and-drop outfitting (drydock only): pointer-based so touch and
   // mouse both work.  A press that never travels >8px falls through to
   // the normal click (hex selection); a real drag suppresses the click
@@ -326,6 +334,305 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       window.removeEventListener('pointerup', onUp);
     };
   }, [dragging !== null]);
+
+  // ── Shared hex-outfitting widgets ─────────────────────────────────────
+  // Used by BOTH the docked station UI and the pause-menu cargo panel.
+  // Flat-top hexes in a 7-tile flower (center + one at each side); borders
+  // can't follow a clip-path, so each tile is an accent-coloured outer hex
+  // with an inset inner face.
+  const out = stats.outfitting;
+  const dockedSvc = stats.dock?.docked ? stats.dock.services : undefined;
+  // Installed hexes are drydock-only; the inventory is the player's cargo
+  // hold — reorderable (and scrappable) from anywhere on the map.
+  const canEditInstalled = dockedSvc?.drydock === true;
+  const HEXW = 76, HEXH = 66;
+  const INVW = 66, INVH = 57; // small flat-top hexes, H ≈ 0.866 W
+  const INV_COLS = 6;
+  const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+  const HEX_OFF = [
+    { x: 0, y: 0 },
+    { x: 0, y: -1 }, { x: 0.75, y: -0.5 },
+    { x: 0.75, y: 0.5 }, { x: 0, y: 1 },
+    { x: -0.75, y: 0.5 }, { x: -0.75, y: -0.5 },
+  ];
+  // Placement is slot-agnostic within a group; the gun LIMIT is a count
+  // (Guns N/maxGuns), not a slot type.  Mounted guns get a dynamic W1/W2
+  // badge in slot order.
+  const kindFits = (g: 'ship' | 'weapon', kind: string) =>
+    g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : (kind === 'weapon' || kind === 'weapon-mod');
+  const gunCount = out?.gunsMounted ?? 0;
+  const maxGuns = out?.maxGuns ?? 2;
+  const gunOrder = new Map<number, number>();
+  (out?.weapon ?? []).forEach((m, i) => { if (m?.kind === 'weapon') gunOrder.set(i, gunOrder.size); });
+  const selHexMod = selSlot && out && selSlot.g !== 'inventory'
+    ? (selSlot.g === 'ship' ? out.ship : out.weapon)[selSlot.i] : null;
+  const selInvMod = selSlot && out && selSlot.g === 'inventory'
+    ? out.inventory[selSlot.i] : null;
+  const firstFreeInv = (out?.inventory ?? []).findIndex(t => t === null);
+  // Inventory items (with their tile index) that fit the selected empty
+  // hex; guns at the mounted limit stay listed but disabled.
+  const candidates = selSlot && out && selSlot.g !== 'inventory'
+    ? out.inventory
+        .map((m, idx) => ({ m, idx }))
+        .filter(e => e.m !== null && e.m.group === selSlot.g && kindFits(selSlot.g as 'ship' | 'weapon', e.m.kind))
+    : [];
+  const beginDrag = (area: 'inventory' | 'ship' | 'weapon', idx: number, label: string) =>
+    (e: React.PointerEvent) => {
+      // No preventDefault — the compatibility click must still fire so a
+      // drag-less press falls through to tap-selection.  touch-action:
+      // none on the tiles handles scroll capture on touch instead.
+      // Cargo (inventory) tiles drag anywhere; installed hexes only at a
+      // docked drydock.
+      if (area !== 'inventory' && !canEditInstalled) return;
+      setDragging({ area, idx, label, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, moved: false });
+    };
+  /** One 7-hex flower.  `interactive: false` (pause menu) renders a
+   *  read-only display: still tap-selectable for info, but no drag
+   *  source and no [data-tile] drop target. */
+  const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string, interactive: boolean) => {
+    const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
+    const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>
+          {title}
+          {g === 'weapon' && (
+            <span
+              className={`ml-2 px-1.5 py-0.5 rounded text-[9px] tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
+              title={`Mounted guns — limited to ${maxGuns} at a time (any hex; more slots is a future ship upgrade). Weaponless is allowed: guns weigh the ship down, flying light boosts acceleration.`}
+            >
+              Guns {gunCount}/{maxGuns}
+            </span>
+          )}
+        </h3>
+        <div className="relative" style={{ width: cw, height: ch }}>
+          {slots.map((m, i) => {
+            const off = HEX_OFF[i] ?? HEX_OFF[0];
+            const isGun = m?.kind === 'weapon';
+            const sel = selSlot?.g === g && selSlot.i === i;
+            const offline = m !== null && !m.active;
+            const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
+            return (
+              <button
+                key={i}
+                data-tile={interactive ? `${g}:${i}` : undefined}
+                onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
+                className="absolute transition-transform active:scale-95"
+                style={{
+                  width: HEXW, height: HEXH, touchAction: 'none',
+                  opacity: lifted ? 0.35 : undefined,
+                  left: cw / 2 + off.x * HEXW - HEXW / 2,
+                  top: ch / 2 + off.y * HEXH - HEXH / 2,
+                  clipPath: HEX_CLIP,
+                  background: sel ? '#f8fafc'
+                    : offline ? '#9f1239'
+                    : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
+                }}
+                title={m
+                  ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
+                  : `Empty ${g} slot`}
+              >
+                <span
+                  className="absolute flex flex-col items-center justify-center text-center"
+                  style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                >
+                  {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{(gunOrder.get(i) ?? 0) + 1}</span>}
+                  {m ? (
+                    <>
+                      <span className={`text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
+                      {offline && <span className="text-[7px] text-rose-400/90 font-bold leading-none mt-0.5">OFFLINE</span>}
+                    </>
+                  ) : (
+                    <span className="text-slate-500 text-base font-bold leading-none">+</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** The cargo-hold honeycomb.  Tiles are drag-reorderable and
+   *  tap-selectable (sell/scrap strip) EVERYWHERE; `installable` only
+   *  changes the hint text (station = drag onto a hex to install). */
+  const renderInventoryHex = (installable: boolean) => {
+    const cw = 0.75 * INVW * (INV_COLS - 1) + INVW;
+    const rows = Math.ceil((out?.inventory ?? []).length / INV_COLS);
+    const ch = INVH * rows + INVH / 2 + 4;
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest">Inventory</h3>
+        <div className="relative" style={{ width: cw, height: ch }}>
+          {(out?.inventory ?? []).map((m, i) => {
+            const col = i % INV_COLS, row = Math.floor(i / INV_COLS);
+            const sel = selSlot?.g === 'inventory' && selSlot.i === i;
+            const lifted = dragging?.moved === true && dragging.area === 'inventory' && dragging.idx === i;
+            return (
+              <button
+                key={i}
+                data-tile={`inventory:${i}`}
+                onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g: 'inventory', i }); }}
+                className="absolute transition-transform active:scale-95"
+                style={{
+                  width: INVW, height: INVH, touchAction: 'none',
+                  opacity: lifted ? 0.35 : undefined,
+                  left: col * 0.75 * INVW,
+                  top: row * INVH + (col % 2 === 1 ? INVH / 2 : 0),
+                  clipPath: HEX_CLIP,
+                  background: sel ? '#f8fafc' : m !== null ? '#b45309' : '#334155',
+                }}
+                title={m
+                  ? (installable ? `${m.label} — drag onto a hex slot to install` : `${m.label} — tap for sell / scrap, drag to rearrange`)
+                  : 'Empty inventory tile'}
+              >
+                <span
+                  className="absolute flex items-center justify-center text-center"
+                  style={{ inset: 2, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                >
+                  {m ? (
+                    <span className="text-[8px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{m.label}</span>
+                  ) : (
+                    <span className="text-slate-600 text-xs font-bold leading-none">·</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** Detail strip under the tiles: hex info / install picker (station) or
+   *  read-only info (pause) for hex selections; SELL / SCRAP actions for
+   *  inventory selections (sell needs a station, scrap works anywhere). */
+  const renderModuleDetail = (ctx: 'station' | 'pause') => (
+    <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
+      {!selSlot ? (
+        <span className="text-slate-500 text-[11px]">
+          {ctx === 'station'
+            ? (canEditInstalled ? 'Drag modules between tiles, or tap a hex slot to inspect / install.' : 'Tap a hex slot to inspect the outfit.')
+            : 'Tap a tile to inspect. Cargo can be rearranged or scrapped here; outfitting needs a station drydock.'}
+        </span>
+      ) : selSlot.g === 'inventory' ? (
+        selInvMod ? (
+          <>
+            <div className="text-xs">
+              <span className="text-white font-bold uppercase tracking-wide">{selInvMod.label}</span>
+              <span className="text-slate-500 ml-2 text-[10px] uppercase">{selInvMod.kind.replace('-', ' ')}</span>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                disabled={!stats.dock?.docked || selInvMod.sellValue <= 0}
+                onClick={() => onSellModule?.(selSlot.i)}
+                title={!stats.dock?.docked
+                  ? 'Sell-back needs a station — dock anywhere to sell for 90% of cost'
+                  : selInvMod.sellValue <= 0 ? 'Worthless — scrap it instead' : 'Sell back for 90% of cost'}
+                className="px-3 py-1 rounded text-[11px] font-bold bg-emerald-800/60 hover:bg-emerald-700/70 text-emerald-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Sell ◈{selInvMod.sellValue.toLocaleString()}
+              </button>
+              <button
+                onClick={() => onScrapModule?.(selSlot.i)}
+                title="Break up for scrap — 9% of cost, works anywhere"
+                className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95"
+              >
+                Scrap ◈{selInvMod.scrapValue.toLocaleString()}
+              </button>
+            </div>
+          </>
+        ) : (
+          <span className="text-slate-500 text-[11px]">Empty inventory tile — purchases land here.</span>
+        )
+      ) : selHexMod ? (
+        <>
+          <div className="text-xs">
+            <span className="text-white font-bold uppercase tracking-wide">{selHexMod.label}</span>
+            <span className="text-slate-500 ml-2 text-[10px] uppercase">{selHexMod.kind.replace('-', ' ')}</span>
+            {selHexMod.active
+              ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
+              : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selHexMod.requires}</span>}
+          </div>
+          {ctx === 'station' && canEditInstalled && (
+            <button
+              disabled={firstFreeInv === -1}
+              onClick={() => { onMoveModule?.({ area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i }, { area: 'inventory', idx: firstFreeInv }); }}
+              title={firstFreeInv === -1 ? 'Inventory full'
+                : selHexMod.kind === 'weapon' ? 'Unmount (weaponless flight is allowed — flying light boosts acceleration)'
+                : 'Move to inventory'}
+              className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ✕ To inventory
+            </button>
+          )}
+          {ctx === 'pause' && (
+            <span className="text-slate-500 text-[10px]">Installed — reconfigure at a station drydock.</span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
+            Install · {selSlot.g} module
+          </span>
+          <div className="flex gap-1.5 flex-wrap">
+            {ctx === 'pause' || !canEditInstalled ? (
+              <span className="text-slate-500 text-[11px]">
+                {ctx === 'pause' ? 'Empty slot — outfit at a station drydock.' : 'Outfitting locked — no drydock at this station.'}
+              </span>
+            ) : candidates.length === 0 ? (
+              <span className="text-slate-500 text-[11px]">No matching modules in the inventory — buy some at a shop station.</span>
+            ) : candidates.map(c => {
+              const gunBlocked = c.m!.kind === 'weapon' && gunCount >= maxGuns;
+              return (
+                <button
+                  key={c.idx}
+                  disabled={gunBlocked}
+                  onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i })}
+                  title={gunBlocked ? `Gun limit reached (${gunCount}/${maxGuns}) — unmount a gun first` : undefined}
+                  className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {c.m!.label}{gunBlocked ? ' ⛔' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+  /** Drag ghost — the tile stays a HEX while being dragged: same
+   *  clip-path, size, and accent as its source tile, floating just above
+   *  the pointer (visible over a finger on touch).  Fixed-positioned, so
+   *  it renders once at the overlay root and serves both contexts. */
+  const renderDragGhost = () => {
+    if (!dragging || !dragging.moved) return null;
+    const srcTile = dragging.area === 'inventory' ? out?.inventory?.[dragging.idx]
+      : dragging.area === 'ship' ? out?.ship?.[dragging.idx]
+      : out?.weapon?.[dragging.idx];
+    const GW = dragging.area === 'inventory' ? INVW : HEXW;
+    const GH = dragging.area === 'inventory' ? INVH : HEXH;
+    const accent = srcTile?.kind === 'weapon' ? '#f59e0b'
+      : dragging.area === 'ship' ? '#0284c7'
+      : dragging.area === 'weapon' ? '#7c3aed'
+      : '#b45309';
+    return (
+      <div
+        className="fixed z-[70] pointer-events-none"
+        style={{ left: dragging.x - GW / 2, top: dragging.y - GH * 0.75 - 12, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.6))' }}
+      >
+        <div style={{ width: GW, height: GH, clipPath: HEX_CLIP, background: accent, opacity: 0.95, position: 'relative' }}>
+          <span
+            className="absolute flex items-center justify-center text-center"
+            style={{ inset: 2.5, clipPath: HEX_CLIP, background: '#0f172a' }}
+          >
+            <span className="text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{dragging.label}</span>
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   // Labeled grid of map buttons, shared by the main menu and the pause
   // screen.  Selecting one routes through onSetMapType — a no-op-style
@@ -1054,113 +1361,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           shop stations sell module ITEMS into the inventory. */}
       {stats.gameState === GameState.PLAYING && stats.dock?.docked && (() => {
         const ps = stats.playerStats;
-        const out = stats.outfitting;
         const svc = stats.dock?.services;
-        const canEdit = svc?.drydock === true;
-        // ── Hex geometry ── flat-top hexes in a 7-tile flower (center +
-        // one at each side).  Borders can't follow a clip-path, so each
-        // tile is an accent-coloured outer hex with an inset inner face.
-        const HEXW = 76, HEXH = 66;
-        const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
-        const HEX_OFF = [
-          { x: 0, y: 0 },
-          { x: 0, y: -1 }, { x: 0.75, y: -0.5 },
-          { x: 0.75, y: 0.5 }, { x: 0, y: 1 },
-          { x: -0.75, y: 0.5 }, { x: -0.75, y: -0.5 },
-        ];
-        // Placement is slot-agnostic within a group; the gun LIMIT is a
-        // count (Guns N/maxGuns), not a slot type.  Mounted guns get a
-        // dynamic W1/W2 badge in slot order.
-        const kindFits = (g: 'ship' | 'weapon', kind: string) =>
-          g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : (kind === 'weapon' || kind === 'weapon-mod');
-        const gunCount = out?.gunsMounted ?? 0;
-        const maxGuns = out?.maxGuns ?? 2;
-        const gunOrder = new Map<number, number>();
-        (out?.weapon ?? []).forEach((m, i) => { if (m?.kind === 'weapon') gunOrder.set(i, gunOrder.size); });
-        const selMod = selSlot && out ? (selSlot.g === 'ship' ? out.ship : out.weapon)[selSlot.i] : null;
-        const firstFreeInv = (out?.inventory ?? []).findIndex(t => t === null);
-        // Inventory items (with their tile index) that fit the selected empty
-        // hex; guns at the mounted limit stay listed but disabled.
-        const candidates = selSlot && out
-          ? out.inventory
-              .map((m, idx) => ({ m, idx }))
-              .filter(e => e.m !== null && e.m.group === selSlot.g && kindFits(selSlot.g, e.m.kind))
-          : [];
-        const beginDrag = (area: 'inventory' | 'ship' | 'weapon', idx: number, label: string) =>
-          (e: React.PointerEvent) => {
-            // No preventDefault — the compatibility click must still fire so
-            // a drag-less press falls through to tap-selection.  touch-action:
-            // none on the tiles handles scroll capture on touch instead.
-            if (!canEdit) return;
-            setDragging({ area, idx, label, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, moved: false });
-          };
-        const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string) => {
-          const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
-          const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
-          return (
-            <div className="flex flex-col items-center gap-1.5">
-              <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>
-                {title}
-                {g === 'weapon' && (
-                  <span
-                    className={`ml-2 px-1.5 py-0.5 rounded text-[9px] tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
-                    title={`Mounted guns — limited to ${maxGuns} at a time (any hex; more slots is a future ship upgrade). Weaponless is allowed: guns weigh the ship down, flying light boosts acceleration.`}
-                  >
-                    Guns {gunCount}/{maxGuns}
-                  </span>
-                )}
-              </h3>
-              <div className="relative" style={{ width: cw, height: ch }}>
-                {slots.map((m, i) => {
-                  const off = HEX_OFF[i] ?? HEX_OFF[0];
-                  const isGun = m?.kind === 'weapon';
-                  const sel = selSlot?.g === g && selSlot.i === i;
-                  const offline = m !== null && !m.active;
-                  const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
-                  return (
-                    <button
-                      key={i}
-                      data-tile={`${g}:${i}`}
-                      onPointerDown={m !== null ? beginDrag(g, i, m.label) : undefined}
-                      onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
-                      className="absolute transition-transform active:scale-95"
-                      style={{
-                        width: HEXW, height: HEXH, touchAction: 'none',
-                        opacity: lifted ? 0.35 : undefined,
-                        left: cw / 2 + off.x * HEXW - HEXW / 2,
-                        top: ch / 2 + off.y * HEXH - HEXH / 2,
-                        clipPath: HEX_CLIP,
-                        background: sel ? '#f8fafc'
-                          : offline ? '#9f1239'
-                          : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
-                      }}
-                      title={m
-                        ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
-                        : `Empty ${g} slot`}
-                    >
-                      <span
-                        className="absolute flex flex-col items-center justify-center text-center"
-                        style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
-                      >
-                        {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{(gunOrder.get(i) ?? 0) + 1}</span>}
-                        {m ? (
-                          <>
-                            <span className={`text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
-                            {offline && <span className="text-[7px] text-rose-400/90 font-bold leading-none mt-0.5">OFFLINE</span>}
-                          </>
-                        ) : (
-                          <span className="text-slate-500 text-base font-bold leading-none">+</span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        };
+        const canEdit = canEditInstalled;
         return (
-        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+        <div
+          /* No justify-center: on a scrollable flex column it clips
+             overflowing content above the reachable scroll area; the inner
+             wrapper's my-auto does the centering when content is short. */
+          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1214,116 +1422,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </p>
                 )}
                 <div className="grid grid-cols-2 gap-2 justify-items-center">
-                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7')}
-                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed')}
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', true)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', true)}
                 </div>
 
                 {/* Inventory — a honeycomb of hex tiles (same tile language
                     as the install flowers): purchases land here; drag a tile
-                    onto a flower hex to install it. */}
-                <div className="flex flex-col items-center gap-1.5">
-                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest">Inventory</h3>
-                  {(() => {
-                    const IW = 66, IH = 57; // small flat-top hexes, H ≈ 0.866 W
-                    const COLS = 6;
-                    const cw = 0.75 * IW * (COLS - 1) + IW;
-                    const rows = Math.ceil((out.inventory ?? []).length / COLS);
-                    const ch = IH * rows + IH / 2 + 4;
-                    return (
-                      <div className="relative" style={{ width: cw, height: ch }}>
-                        {(out.inventory ?? []).map((m, i) => {
-                          const col = i % COLS, row = Math.floor(i / COLS);
-                          const lifted = dragging?.moved === true && dragging.area === 'inventory' && dragging.idx === i;
-                          return (
-                            <button
-                              key={i}
-                              data-tile={`inventory:${i}`}
-                              onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
-                              className="absolute transition-transform active:scale-95"
-                              style={{
-                                width: IW, height: IH, touchAction: 'none',
-                                opacity: lifted ? 0.35 : undefined,
-                                left: col * 0.75 * IW,
-                                top: row * IH + (col % 2 === 1 ? IH / 2 : 0),
-                                clipPath: HEX_CLIP,
-                                background: m !== null ? '#b45309' : '#334155',
-                              }}
-                              title={m ? `${m.label} — drag onto a hex slot to install` : 'Empty inventory tile'}
-                            >
-                              <span
-                                className="absolute flex items-center justify-center text-center"
-                                style={{ inset: 2, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
-                              >
-                                {m ? (
-                                  <span className="text-[8px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{m.label}</span>
-                                ) : (
-                                  <span className="text-slate-600 text-xs font-bold leading-none">·</span>
-                                )}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-                </div>
+                    onto a flower hex to install it, or tap for sell/scrap. */}
+                {renderInventoryHex(true)}
 
-                {/* Detail strip — tap fallback for install/remove (drag works too) */}
-                <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
-                  {!selSlot ? (
-                    <span className="text-slate-500 text-[11px]">
-                      {canEdit ? 'Drag modules between tiles, or tap a hex slot to inspect / install.' : 'Tap a hex slot to inspect the outfit.'}
-                    </span>
-                  ) : selMod ? (
-                    <>
-                      <div className="text-xs">
-                        <span className="text-white font-bold uppercase tracking-wide">{selMod.label}</span>
-                        <span className="text-slate-500 ml-2 text-[10px] uppercase">{selMod.kind.replace('-', ' ')}</span>
-                        {selMod.active
-                          ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
-                          : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selMod.requires}</span>}
-                      </div>
-                      {canEdit && (
-                        <button
-                          disabled={firstFreeInv === -1}
-                          onClick={() => { onMoveModule?.({ area: selSlot.g, idx: selSlot.i }, { area: 'inventory', idx: firstFreeInv }); }}
-                          title={firstFreeInv === -1 ? 'Inventory full'
-                            : selMod.kind === 'weapon' ? 'Unmount (weaponless flight is allowed — flying light boosts acceleration)'
-                            : 'Move to inventory'}
-                          className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          ✕ To inventory
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
-                        Install · {selSlot.g} module
-                      </span>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {!canEdit ? (
-                          <span className="text-slate-500 text-[11px]">Outfitting locked — no drydock at this station.</span>
-                        ) : candidates.length === 0 ? (
-                          <span className="text-slate-500 text-[11px]">No matching modules in the inventory — buy some at a shop station.</span>
-                        ) : candidates.map(c => {
-                          const gunBlocked = c.m!.kind === 'weapon' && gunCount >= maxGuns;
-                          return (
-                            <button
-                              key={c.idx}
-                              disabled={gunBlocked}
-                              onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g, idx: selSlot.i })}
-                              title={gunBlocked ? `Gun limit reached (${gunCount}/${maxGuns}) — unmount a gun first` : undefined}
-                              className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              {c.m!.label}{gunBlocked ? ' ⛔' : ''}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
+                {/* Detail strip — tap fallback for install/remove/sell (drag works too) */}
+                {renderModuleDetail('station')}
               </div>
             )}
 
@@ -1360,38 +1469,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             )}
           </div>
 
-          {/* Drag ghost — the tile stays a HEX while being dragged: same
-              clip-path, size, and accent as its source tile, floating just
-              above the pointer (visible over a finger on touch). */}
-          {dragging && dragging.moved && (() => {
-            const srcTile = dragging.area === 'inventory' ? out?.inventory?.[dragging.idx]
-              : dragging.area === 'ship' ? out?.ship?.[dragging.idx]
-              : out?.weapon?.[dragging.idx];
-            const GW = dragging.area === 'inventory' ? 66 : HEXW;
-            const GH = dragging.area === 'inventory' ? 57 : HEXH;
-            const accent = srcTile?.kind === 'weapon' ? '#f59e0b'
-              : dragging.area === 'ship' ? '#0284c7'
-              : dragging.area === 'weapon' ? '#7c3aed'
-              : '#b45309';
-            return (
-              <div
-                className="fixed z-[70] pointer-events-none"
-                style={{ left: dragging.x - GW / 2, top: dragging.y - GH * 0.75 - 12, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.6))' }}
-              >
-                <div style={{ width: GW, height: GH, clipPath: HEX_CLIP, background: accent, opacity: 0.95, position: 'relative' }}>
-                  <span
-                    className="absolute flex items-center justify-center text-center"
-                    style={{ inset: 2.5, clipPath: HEX_CLIP, background: '#0f172a' }}
-                  >
-                    <span className="text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{dragging.label}</span>
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
         </div>
         );
       })()}
+
+      {/* Drag ghost — fixed-positioned, shared by the station UI and the
+          pause cargo panel. */}
+      {renderDragGhost()}
 
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
@@ -1449,7 +1533,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         );
         return (
-        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+        <div
+          /* No justify-center: on a scrollable flex column it clips
+             overflowing content above the reachable scroll area; the inner
+             wrapper's my-auto does the centering when content is short. */
+          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1474,49 +1562,36 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Ship status */}
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
-                <div className="flex flex-col gap-1 text-xs">
-                  {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
-                  {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
-                  {statLine('Damage', fmtMult(ps?.damageMult))}
-                  {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
-                  {statLine('Speed', fmtMult(ps?.speedMult))}
-                </div>
-              </div>
-
-              {/* Installed modules — readout of both hex groups; inactive
-                  (requirement-unmet) modules read struck-through. */}
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-                <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Installed Modules</h3>
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  {(() => {
-                    const mods = [...(stats.outfitting?.ship ?? []), ...(stats.outfitting?.weapon ?? [])]
-                      .filter((m): m is NonNullable<typeof m> => m !== null);
-                    if (mods.length === 0) {
-                      return <span className="text-slate-500 text-[11px]">Bare hexes — buy modules at the shop stations.</span>;
-                    }
-                    return mods.map((m, i) => (
-                      <span
-                        key={i}
-                        title={m.active ? m.label : `Offline — must touch ${m.requires ?? 'its requirement'}`}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${
-                          m.active ? 'bg-slate-700/70 text-slate-200' : 'bg-rose-900/40 text-rose-300 line-through'
-                        }`}
-                      >
-                        {m.label}
-                      </span>
-                    ));
-                  })()}
-                </div>
+            {/* Ship status */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+              <div className="flex flex-col gap-1 text-xs">
+                {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
+                {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
+                {statLine('Damage', fmtMult(ps?.damageMult))}
+                {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
+                {statLine('Speed', fmtMult(ps?.speedMult))}
               </div>
             </div>
 
-            {/* Commerce moved OUT of the pause menu (economy-pivot 1e):
-                shops sell to the inventory at SHOP stations; outfitting
-                happens at the HOME drydock. */}
+            {/* Modules & cargo — the same hex-tile language as the station
+                UI, but the flowers are READ-ONLY (no drag source, no drop
+                target: outfitting is drydock-only).  The inventory stays
+                fully live: drag to rearrange, tap a tile to SCRAP it for
+                9% anywhere (sell-back at 90% needs a station). */}
+            {stats.outfitting && (
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2 justify-items-center">
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', false)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', false)}
+                </div>
+                {renderInventoryHex(false)}
+                {renderModuleDetail('pause')}
+              </div>
+            )}
+
+            {/* Commerce lives at the stations (economy-pivot 1e): shops
+                sell to the inventory; outfitting needs a docked drydock. */}
             <p className="text-slate-500 text-[11px] text-center">
               Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
             </p>

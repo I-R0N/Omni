@@ -616,12 +616,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   inactive modules contribute nothing and render dimmed/OFFLINE with
   the missing contact named.  `applyModuleEffects` sums ACTIVE effects
   into the player's stats.  Engine API: `moveModule(from, to)`
-  (drydock-only; swap semantics; last-mounted-gun guard;
+  (drydock-only EXCEPT pure inventory↔inventory reorders — rearranging
+  cargo is legal anywhere; swap semantics; gun-count guard;
   inventory-full guard on uninstall) + `purchaseModule` (shop-station
-  only, lands in inventory).  `EngineStats.outfitting` (slots +
-  inventory + catalog) drives the station UI: two hex flowers, the
+  only, lands in inventory) + the `MODULE_RESALE` pair: `sellModule(idx)`
+  (SELL-BACK at 90% of cost, inventory tiles only, needs to be DOCKED at
+  any station — every station drydocks; cost-0 items rejected) and
+  `scrapModule(idx)` (SCRAP at 9% from ANYWHERE on the map — the steep
+  cut is the price of not flying to a station; also the only way to shed
+  cost-0 items).  `EngineStats.outfitting` (slots +
+  inventory + catalog; inventory items carry `sellValue`/`scrapValue`)
+  drives the station UI: two hex flowers, the
   inventory tile grid, pointer-based DRAG-AND-DROP (touch + mouse; a
-  <8px press falls through to tap-select), and the shop.  Kind
+  <8px press falls through to tap-select), and the shop.  The PAUSE menu
+  hosts the same widgets as a CARGO panel: READ-ONLY flowers (tap to
+  inspect; no drag source / drop target — outfitting stays drydock-only)
+  + the fully live inventory honeycomb (drag-reorder + tap → a detail
+  strip with Scrap enabled and Sell disabled-until-docked).  The shared
+  hex renderers (`renderHexGroup`/`renderInventoryHex`/
+  `renderModuleDetail`/`renderDragGhost`) live at UIOverlay component
+  scope, parameterised by context.  Kind
   `'ship-part'` stays reserved schema; the two competing ship-design
   directions (ship catalog CHOSEN vs modular physical ship SUPERSEDED)
   are recorded in docs/PARKING_LOT.md.  The old leveling substrate

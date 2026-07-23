@@ -346,6 +346,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.purchaseModule(id);
   };
 
+  const handleSellModule = (idx: number) => {
+      if (engineRef.current) engineRef.current.sellModule(idx);
+  };
+
+  const handleScrapModule = (idx: number) => {
+      if (engineRef.current) engineRef.current.scrapModule(idx);
+  };
+
   const handleDock = () => {
       if (engineRef.current) engineRef.current.dockAtStation();
   };
@@ -486,6 +494,8 @@ const App: React.FC = () => {
         onPerfRecExport={handlePerfRecExport}
         onMoveModule={handleMoveModule}
         onPurchaseModule={handlePurchaseModule}
+        onSellModule={handleSellModule}
+        onScrapModule={handleScrapModule}
         onDock={handleDock}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}

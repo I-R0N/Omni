@@ -2460,6 +2460,14 @@ export interface ModuleDef {
 export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
 export const MAX_INSTALLED_GUNS = 2;  // gun COUNT limit in the weapon group (slot-agnostic)
 export const INVENTORY_CAPACITY = 12; // inventory tile count (future ships vary this)
+// Module resale: SELL-BACK pays 90% of cost but needs a station (any —
+// every station drydocks); SCRAP pays 9% from anywhere on the map — the
+// steep cut is the price of not flying home.  Both act on INVENTORY
+// tiles only (uninstall first).
+export const MODULE_RESALE = {
+  SELL_FRACTION: 0.9,
+  SCRAP_FRACTION: 0.09,
+};
 // Autoloader stack floor — cadence never drops below 40% of base.
 export const COOLDOWN_FLOOR = 0.4;
 
