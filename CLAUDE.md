@@ -532,7 +532,6 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the per-variety grant rows + per-weapon grant rows cover wave-map
   testing (grants bypass the drydock guard and auto-install when a hex
   is free).
-  NOTE: per-wave enemy stat scaling is still a planned increment.
 - Wave-clear reward beat (pivot 1c): with the cards gone,
   `handleWaveCleared` sprays `SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS`
   salvage drops beside the player on every clear (alongside the
