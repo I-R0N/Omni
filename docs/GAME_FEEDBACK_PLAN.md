@@ -1234,6 +1234,72 @@ k. After N waves, spawn a portal to a new map.
     Next: 1e station-poi in a breakout session (separate
     PR), then (h) bosses.
 
+39. **station-poi (PR #73) — 1e shipped + the plan's biggest
+    over-delivery: Overworld hub map + hex-module outfitting
+    (2026-07-24).** The brief's core landed cleanly (station =
+    INTERACTABLE + mass ∞ + no dropType → zero broadphase/
+    static-grid/flow-field side effects; sim-freeze docking via
+    the old card-modal short-circuit; commerce relocated with
+    real commitment teeth — `moveModule` rejects undocked;
+    pro-rated pay-per-HP repair; CLAUDE.md + parking lot kept
+    in sync; plan doc untouched). Beyond the brief (~2.1k
+    insertions, user-driven in-session):
+    a. **OVERWORLD map** — new wave-free full-game MapType:
+       three stations (HOME center / SHIPWRIGHT / ARMORY, plus
+       a TRADE HUB variant defined), ambient fauna + score-
+       cadence rivals + an auto-respawning roaming dragon,
+       player spawns dock-adjacent at HOME.
+    b. **Hex-slot module outfitting REPLACED the 1c
+       progression substrate** (UPGRADE_DEFS / UNLOCK_DEFS /
+       upgradeCost() DELETED one week after 1c built them —
+       churn cost noted): every piece of progression is a
+       discrete Mk I/II/III module item; adjacency
+       requirements with an active-set fixpoint; 12-tile
+       inventory honeycomb + drag-and-drop; weapon weight/
+       drag; removable Blaster (weaponless flight); guns
+       capped at 2 mounted — `equippedWeapons` is now DERIVED
+       from the gun hexes (WeaponSystem untouched); sell-back
+       90% docked / scrap 9% anywhere; pause-menu read-only
+       cargo panel. Free Base Hull starter (adjacency root).
+    c. **Mid-wave docking rule resolved BY ARCHITECTURE**:
+       stations exist ONLY on the wave-free Overworld, so
+       docking and waves never coexist. Valid — but the
+       CONSEQUENCE is a currently DISJOINT game: wave maps
+       have no commerce (DBG grants are the test path), the
+       Overworld has no waves, and NO in-game path connects
+       them. A run cannot yet span earn → outfit → fight.
+    d. **(k) is therefore upgraded from "thin extension
+       point" to THE KEYSTONE of the loop** — portals must
+       connect Overworld ↔ wave maps AND carry run state
+       (credits, inventory, outfit, score) across map
+       transitions; nothing does that today
+       (resetAndLoadSelectedMap resets everything). This is
+       (k)'s real scope beyond the portal entity +
+       descriptors.
+    e. **waves-to-nodes deferral MOOTED in substance** — the
+       hub exists, the existing wave maps ARE the nodes, and
+       (k) connects them; the WaveSystem re-plumbing we
+       deferred turned out unnecessary. (h) bosses converge
+       back to "node capstones" naturally (wave-map
+       capstones).
+    f. **Guardrail tension seen and accepted**: the strategy
+       doc says avoid inventory-heavy systems; hex
+       cargo/outfitting is EQUIPMENT inventory (purchases —
+       materials stay physical), so the economy philosophy's
+       letter survives, but this is deliberately close to the
+       line. Ship catalog (Option A, parking lot) is the
+       chosen future direction; capacity ceilings
+       (MAX_INSTALLED_GUNS=2, INVENTORY_CAPACITY=12) are
+       ship-stats-in-waiting — no standalone slot purchases
+       meanwhile.
+    g. New parking-lot entries from the session (triage
+       pending user ruling): NPC station traffic, salvage
+       death penalty (now with an uninsured-cargo option),
+       economy & progression tuning pass (bucket of 5
+       provisional-number debts), persistent state (gated on
+       the tuning pass; Overworld-plan opening act),
+       pause-menu stat legibility.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1402,7 +1468,11 @@ observes the three strategy guardrails (decision #36e).
      spray is the reward beat.
    - ~~1d. **weapon-identity-tuning**~~ — **DONE** (PR #72). Seeker
      6→8; player-facing name unified to **"Laser"** (decision #38a).
-   - 1e. **station-poi** — station entity at map center; dock
+   - ~~1e. **station-poi**~~ — **DONE** (PR #73, decision #39) — plus
+     the Overworld hub map + the hex-module outfitting rework that
+     replaced the 1c substrate. Original sub-item text below kept for
+     history; see decision #39 for what actually shipped.
+     station entity at map center; dock
      interaction; shop UI relocates out of the pause menu; hull repair
      + station-only loadout swap. MUST define the mid-wave docking rule
      (waves stay on the base map this plan). Medium. Accepted scope
@@ -1413,9 +1483,14 @@ observes the three strategy guardrails (decision #36e).
    (wire evasive / front-shield / regen traits against the
    counterplay table).
 3. **(k) Portals + map descriptors** — the traversable portal entity on
-   the thin descriptor layer. The plan's one architectural extension
-   point for the overworld. Unchanged by the pivot (waves-to-nodes
-   was the extension that would have grown it; deferred).
+   the thin descriptor layer. **Upgraded to THE KEYSTONE of the game
+   loop by PR #73 (decision #39d)**: the Overworld hub and the wave
+   maps are currently disjoint (no in-game path; wave maps have no
+   commerce), so (k) must connect Overworld ↔ wave maps via portals
+   AND carry run state (credits / inventory / outfit / score) across
+   map transitions — nothing does that today. Descriptor layer stays
+   thin as scoped in #36e; the run-state carry is the real added
+   scope.
 4. **Phase 3 pairs in parallel** (below): A = (i) death screen;
    B = (a) SFX → (b) explosion variety; C = (c2) controller/joystick →
    (c1) menu help.
