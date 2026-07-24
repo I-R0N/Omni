@@ -1292,13 +1292,34 @@ k. After N waves, spawn a portal to a new map.
        (MAX_INSTALLED_GUNS=2, INVENTORY_CAPACITY=12) are
        ship-stats-in-waiting — no standalone slot purchases
        meanwhile.
-    g. New parking-lot entries from the session (triage
-       pending user ruling): NPC station traffic, salvage
-       death penalty (now with an uninsured-cargo option),
-       economy & progression tuning pass (bucket of 5
-       provisional-number debts), persistent state (gated on
-       the tuning pass; Overworld-plan opening act),
-       pause-menu stat legibility.
+    g. New parking-lot entries from the session: NPC station
+       traffic, salvage death penalty (now with an
+       uninsured-cargo option), economy & progression tuning
+       pass (bucket of 5 provisional-number debts),
+       persistent state (gated on the tuning pass;
+       Overworld-plan opening act), pause-menu stat
+       legibility. Triage ruled in decision #40.
+
+40. **Parking-lot triage ruled; (k) moved ahead of (h)
+    (user, 2026-07-24).** Three promotions into the plan:
+    a. **Economy & progression tuning pass** → new roadmap
+       step 6, deliberately LAST before ship-it so every
+       income-shaping system has landed. Absorbs the salvage
+       death penalty decision (user severity call at that
+       time), Overworld income pacing, enemy-growth vs
+       module-power, Mk trade-in, weapon weight, resale
+       fractions, and the PR #72 absolute-prices watch.
+    b. **Stat legibility (per-module attribution)** → Phase 3
+       Pair A row (with the death screen).
+    c. **NPC station traffic (cheap version)** → polish batch
+       as optional, explicitly first-to-cut.
+    Staying parked for the Overworld plan: persistent state
+    (gated on the tuning pass) and the ship catalog (Option
+    A; capacity ceilings remain ship-stats-in-waiting — no
+    standalone slot purchases meanwhile). Sequencing: (k)
+    portals runs NEXT, before (h) bosses — it is the keystone
+    (decision #39d) and (h)'s "wave-map capstone" framing
+    depends on the connected loop existing.
 
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
@@ -1477,28 +1498,41 @@ observes the three strategy guardrails (decision #36e).
      + station-only loadout swap. MUST define the mid-wave docking rule
      (waves stay on the base map this plan). Medium. Accepted scope
      flag, decision #37f.
-2. **(h) Bosses** — BASE-MAP wave capstones (waves-to-nodes deferred).
-   Consumes doc §6 (model (d): salvage/discount payouts, NO unlock
-   plumbing; weapon-bosses wield themed player archetypes) + §7
-   (wire evasive / front-shield / regen traits against the
-   counterplay table).
-3. **(k) Portals + map descriptors** — the traversable portal entity on
-   the thin descriptor layer. **Upgraded to THE KEYSTONE of the game
-   loop by PR #73 (decision #39d)**: the Overworld hub and the wave
-   maps are currently disjoint (no in-game path; wave maps have no
-   commerce), so (k) must connect Overworld ↔ wave maps via portals
-   AND carry run state (credits / inventory / outfit / score) across
-   map transitions — nothing does that today. Descriptor layer stays
+2. **(k) Portals + map descriptors** (moved ahead of (h) — user call,
+   2026-07-24) — the traversable portal entity on the thin descriptor
+   layer. **Upgraded to THE KEYSTONE of the game loop by PR #73
+   (decision #39d)**: the Overworld hub and the wave maps are
+   currently disjoint (no in-game path; wave maps have no commerce),
+   so (k) must connect Overworld ↔ wave maps via portals AND carry
+   run state (credits / inventory / outfit / score) across map
+   transitions — nothing does that today. Descriptor layer stays
    thin as scoped in #36e; the run-state carry is the real added
    scope.
-4. **Phase 3 pairs in parallel** (below): A = (i) death screen;
-   B = (a) SFX → (b) explosion variety; C = (c2) controller/joystick →
-   (c1) menu help.
+3. **(h) Bosses** — WAVE-MAP capstones (the wave maps are the nodes,
+   decision #39e). Consumes doc §6 (model (d): salvage/discount
+   payouts, NO unlock plumbing; weapon-bosses wield themed player
+   archetypes) + §7 (wire evasive / front-shield / regen traits
+   against the counterplay table).
+4. **Phase 3 pairs in parallel** (below): A = (i) death screen +
+   stat-legibility (per-module attribution — parking-lot promotion,
+   decision #40); B = (a) SFX → (b) explosion variety;
+   C = (c2) controller/joystick → (c1) menu help.
 5. **Polish batch** — material-palette-residual + map-composition +
    minimap-faithfulness bundled into 1–2 small sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
-   "maps become known for characteristics").
-6. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
+   "maps become known for characteristics"). Optional, FIRST TO CUT:
+   NPC station traffic, cheap version (1–2 shuttles between Overworld
+   stations reusing rival sprites + openPortal; parking-lot promotion,
+   decision #40).
+6. **Economy & progression tuning pass** (parking-lot promotion,
+   decision #40) — one playtest-driven session tuning together:
+   Overworld income pacing, per-wave enemy growth vs discrete module
+   power, Mk trade-in, weapon-weight numbers, resale fractions, AND
+   the **salvage death penalty decision** (severity is a user call;
+   must be tuned WITH repair cost + resale or incentives invert).
+   Absorbs the PR #72 "absolute prices" playtest watch. Runs last so
+   every system that shapes income has landed.
+7. **Final playtest + ship-it PR** — `claude/game-feedback-plan-UN3MV`
    → `main`, one deploy.
 
 Explicitly OUT of this plan (moved to the Overworld plan): continuous
@@ -1522,6 +1556,7 @@ each pair.
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
 | i | Death/completion screen | pending | `claude/death-screen-<suffix>` | UIOverlay + EngineStats fields (kills, time elapsed, wave). Independent. |
+| stat-legibility | Per-module effect attribution in the pause menu | pending | `claude/stat-legibility-<suffix>` | Parking-lot promotion (decision #40). Expand Ship Status to the full derived-stat set with per-module contribution breakdown; tapping a hex highlights the stats it feeds. `applyModuleEffects` already sums ACTIVE effects — expose the breakdown on `EngineStats.outfitting`. Near-necessary now that adjacency/OFFLINE states exist. |
 
 ### Pair B — Audio/FX
 
