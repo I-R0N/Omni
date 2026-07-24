@@ -59,14 +59,17 @@ export class InputSystem {
     this.mousePosition = { x: e.clientX, y: e.clientY };
   };
 
-  // Helper to detect if we should ignore input (e.g. clicking UI buttons)
+  // Game input engages ONLY when the gesture starts on the game CANVAS.
+  // Everything else is the React overlay (menus, buttons, scroll panes):
+  // skipping those events entirely — instead of only skipping <button>
+  // targets, as before — leaves native behaviour intact, most importantly
+  // TOUCH SCROLLING inside the overlay menus (the window-level
+  // preventDefault below was eating every scroll gesture on touch
+  // devices).  Touch events retarget to the element the touch STARTED
+  // on, so a game drag that began on the canvas keeps driving movement
+  // even when the finger crosses a HUD element.
   private shouldIgnoreEvent(e: Event): boolean {
-    const target = e.target as HTMLElement;
-    // Check if clicking on a button or inside a button (e.g. span inside button)
-    if (target && (target.tagName === 'BUTTON' || target.closest('button'))) {
-      return true;
-    }
-    return false;
+    return !(e.target instanceof HTMLCanvasElement);
   }
 
   private handleMouseDown = (e: MouseEvent) => {

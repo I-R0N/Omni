@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtype } from '../types';
 
 // Map menu is split into two labeled groups: the full-game "Maps" and the
@@ -7,6 +7,9 @@ import { EngineStats, MapType, GameState, TrailShape, TrailEmitMode, EnemySubtyp
 // stress map).  Both the main menu and the pause screen render the same
 // groups via renderMapGroup().
 const REAL_MAPS: { type: MapType; label: string }[] = [
+  // Wave-free home map: station POI (shop / loadout / repair) + ambient
+  // roamers (bubbles, rivals, dragon).  No waves.
+  { type: MapType.OVERWORLD,   label: 'Overworld' },
   { type: MapType.UNIVERSE,    label: 'Deep Space' },
   { type: MapType.RING,        label: 'Ring World' },
   { type: MapType.SEVEN_RINGS, label: 'Seven Rings' },
@@ -95,9 +98,12 @@ interface UIOverlayProps {
   onApplyCorrosion?: () => void;
   onApplyDisable?: () => void;
   onToggleTraits?: () => void;
-  onCycleUpgrade?: (id: string) => void;
-  onMaxUpgrades?: () => void;
-  onResetUpgrades?: () => void;
+  // DBG module grants (modules are discrete Mk-variety ITEMS now — no
+  // levels): grant a variety into the inventory (auto-installs if a hex
+  // is free), outfit a full canonical loadout, or reset to the lean start.
+  onGrantModule?: (id: string) => void;
+  onOutfitAll?: () => void;
+  onResetOutfit?: () => void;
   onAddCredits?: () => void;
   onSpawnDragon?: (type: string) => void;
   onSpawnRival?: (disposition: string) => void;
@@ -107,13 +113,28 @@ interface UIOverlayProps {
   onPerfRecToggle?: () => void;
   onPerfRecCycleScene?: () => void;
   onPerfRecExport?: () => string;
-  onPurchaseUnlock?: (id: string) => void;
-  onPurchaseUpgrade?: (id: string) => void;
-  // 2-slot loadout swap (interim pause-menu home until the station lands):
-  // equip owned weapon `weaponId` into slot 0/1, or null to empty the slot.
-  onEquipWeapon?: (slot: number, weaponId: string | null) => void;
-  onUnlockAll?: () => void;
-  onResetUnlocks?: () => void;
+  // Hex-slot outfitting — STATION-ONLY: the station UI is the sole caller;
+  // the engine rejects installs/purchases while undocked.  purchase routes
+  // leveled modules to the per-level cost curve, one-time to their price.
+  onMoveModule?: (
+    from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+    to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ) => void;
+  onPurchaseModule?: (id: string) => void;
+  // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
+  // station — any, every station drydocks; scrap (9%) works from anywhere
+  // on the map (the pause-menu cargo panel's only cash-out).
+  onSellModule?: (idx: number) => void;
+  onScrapModule?: (idx: number) => void;
+  // Station docking (Overworld): dock from the in-range affordance, undock
+  // from the station UI, repair hull (pay-per-HP, pro-rated).
+  onDock?: () => void;
+  onUndock?: () => void;
+  onRepairHull?: () => void;
+  // DBG: grant + equip a weapon (pause-menu debug Weapons rows) and
+  // teleport the player to the station's doorstep (Overworld only).
+  onGrantWeapon?: (id: string) => void;
+  onTeleportStation?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
   onToggleFFOverlayObstacles?: () => void;
@@ -188,20 +209,24 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onApplyCorrosion,
   onApplyDisable,
   onToggleTraits,
-  onCycleUpgrade,
-  onMaxUpgrades,
-  onResetUpgrades,
+  onGrantModule,
+  onOutfitAll,
+  onResetOutfit,
   onAddCredits,
   onSpawnDragon,
   onSpawnRival,
   onPerfRecToggle,
   onPerfRecCycleScene,
   onPerfRecExport,
-  onPurchaseUnlock,
-  onPurchaseUpgrade,
-  onEquipWeapon,
-  onUnlockAll,
-  onResetUnlocks,
+  onMoveModule,
+  onPurchaseModule,
+  onSellModule,
+  onScrapModule,
+  onDock,
+  onUndock,
+  onRepairHull,
+  onGrantWeapon,
+  onTeleportStation,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
   onToggleFFOverlayObstacles,
@@ -228,13 +253,14 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, upgrades: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, perfrec: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
-    // outer pause-only Switch Map / Test wrapper.
-    fieldmaps: true, switchmap: true,
+    // outer pause-only Switch Map / Test wrapper.  'debug' is the pause-menu
+    // Debug Menu wrapper (the DBG panel's home since the station increment).
+    fieldmaps: true, switchmap: true, debug: true,
   }));
   const toggleSection = (name: string) =>
     setCollapsed(prev => ({ ...prev, [name]: !prev[name] }));
@@ -258,6 +284,355 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // (awake) / asleep (dynamic-sleeping).  Display only — does not change
   // sleeping behaviour (that's the Shards & Physics ▸ Sleep toggle).
   const [entityCountMode, setEntityCountMode] = useState<'total' | 'active' | 'asleep'>('total');
+  // Hex-slot outfitting: the currently selected tile (station UI + pause
+  // cargo panel).  'inventory' selections drive the sell/scrap strip; the
+  // detail strip below the flowers acts on this slot.
+  const [selSlot, setSelSlot] = useState<{ g: 'ship' | 'weapon' | 'inventory'; i: number } | null>(null);
+  // Drag-and-drop outfitting (drydock only): pointer-based so touch and
+  // mouse both work.  A press that never travels >8px falls through to
+  // the normal click (hex selection); a real drag suppresses the click
+  // and drops onto the [data-tile] under the pointer.
+  const [dragging, setDragging] = useState<{
+    area: 'inventory' | 'ship' | 'weapon'; idx: number; label: string;
+    sx: number; sy: number; x: number; y: number; moved: boolean;
+  } | null>(null);
+  const dragRef = useRef(dragging);
+  dragRef.current = dragging;
+  const suppressClickRef = useRef(false);
+  const onMoveModuleRef = useRef(onMoveModule);
+  onMoveModuleRef.current = onMoveModule;
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => setDragging(d => {
+      if (!d) return d;
+      const moved = d.moved || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 8;
+      return { ...d, x: e.clientX, y: e.clientY, moved };
+    });
+    const onUp = (e: PointerEvent) => {
+      const d = dragRef.current;
+      setDragging(null);
+      if (!d || !d.moved) return;
+      // A real drag happened — swallow the click that follows pointerup.
+      suppressClickRef.current = true;
+      setTimeout(() => { suppressClickRef.current = false; }, 0);
+      const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest?.('[data-tile]') as HTMLElement | null;
+      const tile = el?.getAttribute('data-tile');
+      if (!tile) return;
+      const [area, idxStr] = tile.split(':');
+      const idx = parseInt(idxStr, 10);
+      if (!area || Number.isNaN(idx)) return;
+      if (area === d.area && idx === d.idx) return;
+      onMoveModuleRef.current?.(
+        { area: d.area, idx: d.idx },
+        { area: area as 'inventory' | 'ship' | 'weapon', idx },
+      );
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [dragging !== null]);
+
+  // ── Shared hex-outfitting widgets ─────────────────────────────────────
+  // Used by BOTH the docked station UI and the pause-menu cargo panel.
+  // Flat-top hexes in a 7-tile flower (center + one at each side); borders
+  // can't follow a clip-path, so each tile is an accent-coloured outer hex
+  // with an inset inner face.
+  const out = stats.outfitting;
+  const dockedSvc = stats.dock?.docked ? stats.dock.services : undefined;
+  // Installed hexes are drydock-only; the inventory is the player's cargo
+  // hold — reorderable (and scrappable) from anywhere on the map.
+  const canEditInstalled = dockedSvc?.drydock === true;
+  const HEXW = 76, HEXH = 66;
+  const INVW = 66, INVH = 57; // small flat-top hexes, H ≈ 0.866 W
+  const INV_COLS = 6;
+  const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+  const HEX_OFF = [
+    { x: 0, y: 0 },
+    { x: 0, y: -1 }, { x: 0.75, y: -0.5 },
+    { x: 0.75, y: 0.5 }, { x: 0, y: 1 },
+    { x: -0.75, y: 0.5 }, { x: -0.75, y: -0.5 },
+  ];
+  // Placement is slot-agnostic within a group; the gun LIMIT is a count
+  // (Guns N/maxGuns), not a slot type.  Mounted guns get a dynamic W1/W2
+  // badge in slot order.
+  const kindFits = (g: 'ship' | 'weapon', kind: string) =>
+    g === 'ship' ? (kind === 'ship' || kind === 'ship-part') : (kind === 'weapon' || kind === 'weapon-mod');
+  const gunCount = out?.gunsMounted ?? 0;
+  const maxGuns = out?.maxGuns ?? 2;
+  const gunOrder = new Map<number, number>();
+  (out?.weapon ?? []).forEach((m, i) => { if (m?.kind === 'weapon') gunOrder.set(i, gunOrder.size); });
+  const selHexMod = selSlot && out && selSlot.g !== 'inventory'
+    ? (selSlot.g === 'ship' ? out.ship : out.weapon)[selSlot.i] : null;
+  const selInvMod = selSlot && out && selSlot.g === 'inventory'
+    ? out.inventory[selSlot.i] : null;
+  const firstFreeInv = (out?.inventory ?? []).findIndex(t => t === null);
+  // Inventory items (with their tile index) that fit the selected empty
+  // hex; guns at the mounted limit stay listed but disabled.
+  const candidates = selSlot && out && selSlot.g !== 'inventory'
+    ? out.inventory
+        .map((m, idx) => ({ m, idx }))
+        .filter(e => e.m !== null && e.m.group === selSlot.g && kindFits(selSlot.g as 'ship' | 'weapon', e.m.kind))
+    : [];
+  const beginDrag = (area: 'inventory' | 'ship' | 'weapon', idx: number, label: string) =>
+    (e: React.PointerEvent) => {
+      // No preventDefault — the compatibility click must still fire so a
+      // drag-less press falls through to tap-selection.  touch-action:
+      // none on the tiles handles scroll capture on touch instead.
+      // Cargo (inventory) tiles drag anywhere; installed hexes only at a
+      // docked drydock.
+      if (area !== 'inventory' && !canEditInstalled) return;
+      setDragging({ area, idx, label, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, moved: false });
+    };
+  /** One 7-hex flower.  `interactive: false` (pause menu) renders a
+   *  read-only display: still tap-selectable for info, but no drag
+   *  source and no [data-tile] drop target. */
+  const renderHexGroup = (g: 'ship' | 'weapon', title: string, accentText: string, accentBg: string, interactive: boolean) => {
+    const slots = g === 'ship' ? (out?.ship ?? []) : (out?.weapon ?? []);
+    const cw = HEXW * 2.5 + 10, ch = HEXH * 3 + 10;
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <h3 className={`text-[11px] font-bold uppercase tracking-widest ${accentText}`}>
+          {title}
+          {g === 'weapon' && (
+            <span
+              className={`ml-2 px-1.5 py-0.5 rounded text-[9px] tabular-nums ${gunCount >= maxGuns ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700/70 text-slate-300'}`}
+              title={`Mounted guns — limited to ${maxGuns} at a time (any hex; more slots is a future ship upgrade). Weaponless is allowed: guns weigh the ship down, flying light boosts acceleration.`}
+            >
+              Guns {gunCount}/{maxGuns}
+            </span>
+          )}
+        </h3>
+        <div className="relative" style={{ width: cw, height: ch }}>
+          {slots.map((m, i) => {
+            const off = HEX_OFF[i] ?? HEX_OFF[0];
+            const isGun = m?.kind === 'weapon';
+            const sel = selSlot?.g === g && selSlot.i === i;
+            const offline = m !== null && !m.active;
+            const lifted = dragging?.moved === true && dragging.area === g && dragging.idx === i;
+            return (
+              <button
+                key={i}
+                data-tile={interactive ? `${g}:${i}` : undefined}
+                onPointerDown={interactive && m !== null ? beginDrag(g, i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g, i }); }}
+                className="absolute transition-transform active:scale-95"
+                style={{
+                  width: HEXW, height: HEXH, touchAction: 'none',
+                  opacity: lifted ? 0.35 : undefined,
+                  left: cw / 2 + off.x * HEXW - HEXW / 2,
+                  top: ch / 2 + off.y * HEXH - HEXH / 2,
+                  clipPath: HEX_CLIP,
+                  background: sel ? '#f8fafc'
+                    : offline ? '#9f1239'
+                    : m ? (isGun ? '#f59e0b' : accentBg) : '#475569',
+                }}
+                title={m
+                  ? (m.active ? m.label : `${m.label} — OFFLINE: must touch ${m.requires ?? 'its requirement'}`)
+                  : `Empty ${g} slot`}
+              >
+                <span
+                  className="absolute flex flex-col items-center justify-center text-center"
+                  style={{ inset: 2.5, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                >
+                  {isGun && <span className="text-[7px] font-bold text-amber-400/90 tracking-widest leading-none mb-0.5">W{(gunOrder.get(i) ?? 0) + 1}</span>}
+                  {m ? (
+                    <>
+                      <span className={`text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 ${offline ? 'text-rose-400' : 'text-slate-100'}`}>{m.label}</span>
+                      {offline && <span className="text-[7px] text-rose-400/90 font-bold leading-none mt-0.5">OFFLINE</span>}
+                    </>
+                  ) : (
+                    <span className="text-slate-500 text-base font-bold leading-none">+</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** The cargo-hold honeycomb.  Tiles are drag-reorderable and
+   *  tap-selectable (sell/scrap strip) EVERYWHERE; `installable` only
+   *  changes the hint text (station = drag onto a hex to install). */
+  const renderInventoryHex = (installable: boolean) => {
+    const cw = 0.75 * INVW * (INV_COLS - 1) + INVW;
+    const rows = Math.ceil((out?.inventory ?? []).length / INV_COLS);
+    const ch = INVH * rows + INVH / 2 + 4;
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest">Inventory</h3>
+        <div className="relative" style={{ width: cw, height: ch }}>
+          {(out?.inventory ?? []).map((m, i) => {
+            const col = i % INV_COLS, row = Math.floor(i / INV_COLS);
+            const sel = selSlot?.g === 'inventory' && selSlot.i === i;
+            const lifted = dragging?.moved === true && dragging.area === 'inventory' && dragging.idx === i;
+            return (
+              <button
+                key={i}
+                data-tile={`inventory:${i}`}
+                onPointerDown={m !== null ? beginDrag('inventory', i, m.label) : undefined}
+                onClick={() => { if (suppressClickRef.current) return; setSelSlot(sel ? null : { g: 'inventory', i }); }}
+                className="absolute transition-transform active:scale-95"
+                style={{
+                  width: INVW, height: INVH, touchAction: 'none',
+                  opacity: lifted ? 0.35 : undefined,
+                  left: col * 0.75 * INVW,
+                  top: row * INVH + (col % 2 === 1 ? INVH / 2 : 0),
+                  clipPath: HEX_CLIP,
+                  background: sel ? '#f8fafc' : m !== null ? '#b45309' : '#334155',
+                }}
+                title={m
+                  ? (installable ? `${m.label} — drag onto a hex slot to install` : `${m.label} — tap for sell / scrap, drag to rearrange`)
+                  : 'Empty inventory tile'}
+              >
+                <span
+                  className="absolute flex items-center justify-center text-center"
+                  style={{ inset: 2, clipPath: HEX_CLIP, background: m ? '#0f172a' : '#1e293b' }}
+                >
+                  {m ? (
+                    <span className="text-[8px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{m.label}</span>
+                  ) : (
+                    <span className="text-slate-600 text-xs font-bold leading-none">·</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  /** Detail strip under the tiles: hex info / install picker (station) or
+   *  read-only info (pause) for hex selections; SELL / SCRAP actions for
+   *  inventory selections (sell needs a station, scrap works anywhere). */
+  const renderModuleDetail = (ctx: 'station' | 'pause') => (
+    <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
+      {!selSlot ? (
+        <span className="text-slate-500 text-[11px]">
+          {ctx === 'station'
+            ? (canEditInstalled ? 'Drag modules between tiles, or tap a hex slot to inspect / install.' : 'Tap a hex slot to inspect the outfit.')
+            : 'Tap a tile to inspect. Cargo can be rearranged or scrapped here; outfitting needs a station drydock.'}
+        </span>
+      ) : selSlot.g === 'inventory' ? (
+        selInvMod ? (
+          <>
+            <div className="text-xs">
+              <span className="text-white font-bold uppercase tracking-wide">{selInvMod.label}</span>
+              <span className="text-slate-500 ml-2 text-[10px] uppercase">{selInvMod.kind.replace('-', ' ')}</span>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                disabled={!stats.dock?.docked || selInvMod.sellValue <= 0}
+                onClick={() => onSellModule?.(selSlot.i)}
+                title={!stats.dock?.docked
+                  ? 'Sell-back needs a station — dock anywhere to sell for 90% of cost'
+                  : selInvMod.sellValue <= 0 ? 'Worthless — scrap it instead' : 'Sell back for 90% of cost'}
+                className="px-3 py-1 rounded text-[11px] font-bold bg-emerald-800/60 hover:bg-emerald-700/70 text-emerald-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Sell ◈{selInvMod.sellValue.toLocaleString()}
+              </button>
+              <button
+                onClick={() => onScrapModule?.(selSlot.i)}
+                title="Break up for scrap — 9% of cost, works anywhere"
+                className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95"
+              >
+                Scrap ◈{selInvMod.scrapValue.toLocaleString()}
+              </button>
+            </div>
+          </>
+        ) : (
+          <span className="text-slate-500 text-[11px]">Empty inventory tile — purchases land here.</span>
+        )
+      ) : selHexMod ? (
+        <>
+          <div className="text-xs">
+            <span className="text-white font-bold uppercase tracking-wide">{selHexMod.label}</span>
+            <span className="text-slate-500 ml-2 text-[10px] uppercase">{selHexMod.kind.replace('-', ' ')}</span>
+            {selHexMod.active
+              ? <span className="text-emerald-300 ml-2 font-bold text-[10px] uppercase">Online</span>
+              : <span className="text-rose-400 ml-2 font-bold text-[10px] uppercase">Offline — must touch {selHexMod.requires}</span>}
+          </div>
+          {ctx === 'station' && canEditInstalled && (
+            <button
+              disabled={firstFreeInv === -1}
+              onClick={() => { onMoveModule?.({ area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i }, { area: 'inventory', idx: firstFreeInv }); }}
+              title={firstFreeInv === -1 ? 'Inventory full'
+                : selHexMod.kind === 'weapon' ? 'Unmount (weaponless flight is allowed — flying light boosts acceleration)'
+                : 'Move to inventory'}
+              className="px-3 py-1 rounded text-[11px] font-bold bg-slate-800/70 hover:bg-red-900/50 text-slate-400 hover:text-red-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ✕ To inventory
+            </button>
+          )}
+          {ctx === 'pause' && (
+            <span className="text-slate-500 text-[10px]">Installed — reconfigure at a station drydock.</span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider shrink-0">
+            Install · {selSlot.g} module
+          </span>
+          <div className="flex gap-1.5 flex-wrap">
+            {ctx === 'pause' || !canEditInstalled ? (
+              <span className="text-slate-500 text-[11px]">
+                {ctx === 'pause' ? 'Empty slot — outfit at a station drydock.' : 'Outfitting locked — no drydock at this station.'}
+              </span>
+            ) : candidates.length === 0 ? (
+              <span className="text-slate-500 text-[11px]">No matching modules in the inventory — buy some at a shop station.</span>
+            ) : candidates.map(c => {
+              const gunBlocked = c.m!.kind === 'weapon' && gunCount >= maxGuns;
+              return (
+                <button
+                  key={c.idx}
+                  disabled={gunBlocked}
+                  onClick={() => onMoveModule?.({ area: 'inventory', idx: c.idx }, { area: selSlot.g as 'ship' | 'weapon', idx: selSlot.i })}
+                  title={gunBlocked ? `Gun limit reached (${gunCount}/${maxGuns}) — unmount a gun first` : undefined}
+                  className="px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-sky-700/50 hover:bg-sky-600/70 text-sky-100 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {c.m!.label}{gunBlocked ? ' ⛔' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+  /** Drag ghost — the tile stays a HEX while being dragged: same
+   *  clip-path, size, and accent as its source tile, floating just above
+   *  the pointer (visible over a finger on touch).  Fixed-positioned, so
+   *  it renders once at the overlay root and serves both contexts. */
+  const renderDragGhost = () => {
+    if (!dragging || !dragging.moved) return null;
+    const srcTile = dragging.area === 'inventory' ? out?.inventory?.[dragging.idx]
+      : dragging.area === 'ship' ? out?.ship?.[dragging.idx]
+      : out?.weapon?.[dragging.idx];
+    const GW = dragging.area === 'inventory' ? INVW : HEXW;
+    const GH = dragging.area === 'inventory' ? INVH : HEXH;
+    const accent = srcTile?.kind === 'weapon' ? '#f59e0b'
+      : dragging.area === 'ship' ? '#0284c7'
+      : dragging.area === 'weapon' ? '#7c3aed'
+      : '#b45309';
+    return (
+      <div
+        className="fixed z-[70] pointer-events-none"
+        style={{ left: dragging.x - GW / 2, top: dragging.y - GH * 0.75 - 12, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.6))' }}
+      >
+        <div style={{ width: GW, height: GH, clipPath: HEX_CLIP, background: accent, opacity: 0.95, position: 'relative' }}>
+          <span
+            className="absolute flex items-center justify-center text-center"
+            style={{ inset: 2.5, clipPath: HEX_CLIP, background: '#0f172a' }}
+          >
+            <span className="text-[9px] font-bold uppercase tracking-tight leading-tight px-1.5 text-slate-100">{dragging.label}</span>
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   // Labeled grid of map buttons, shared by the main menu and the pause
   // screen.  Selecting one routes through onSetMapType — a no-op-style
@@ -390,35 +765,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     entityCountMode === 'asleep' ? asleepEntities
     : entityCountMode === 'active' ? Math.max(0, totalEntities - asleepEntities)
     : totalEntities;
-  return (
-    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
-
-      {/* ── Top Bar ── */}
-      <div className="flex justify-between items-start">
-
-        {/* Top-left: debug panel (visible only when debug is on).  Lifted to
-            z-[60] so it sits ABOVE the paused Player Menu overlay (z-50) —
-            lets debug features be toggled while the game is paused. */}
-        <div className="flex flex-col gap-1 relative z-[60]">
-          {/* Debug toggle button — always visible */}
-          <button
-            onClick={onToggleDebug}
-            className={`pointer-events-auto self-start px-2 py-1 rounded text-[10px] font-mono font-bold tracking-widest border transition-all ${
-              stats.debugMode
-                ? 'bg-amber-500/30 border-amber-400/70 text-amber-300'
-                : 'bg-slate-800/70 border-slate-600/50 text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            DBG
-          </button>
-
-          {/* Debug info + perf instrumentation panel.  Shown only while
-              debug mode is active (DBG button).  Deliberately small and
-              semi-transparent (~35% bg opacity, 8-9 px font, tight leading)
-              so it never hides the player ship while dev stats stream. */}
-          {stats.debugMode && (
-            <div className="pointer-events-none bg-slate-900/35 border border-amber-500/30 rounded px-1.5 py-1 text-[9px] leading-tight font-mono text-slate-300/90 min-w-[132px]">
-              <div className="text-amber-400/90 font-bold tracking-wider text-[8px]">DEBUG</div>
+  // ── Debug menu content ────────────────────────────────────────────────
+  // Relocated INTO the pause Player Menu as a proper section (station
+  // increment decision) — the old floating top-left DBG button + dropdown
+  // panel is gone.  Kept as a plain JSX const so the pause overlay slots
+  // it under its collapsible "Debug Menu" header.  The 'Overlays' row is
+  // the old DBG master toggle: it still gates the renderer's debug
+  // overlays (collision polygons, input vector, tile outlines).
+  const debugSections = (
+    <div className="font-mono text-[9px] leading-tight text-slate-300/90">
+              {ctrlRow('Overlays', onToggleDebug,
+                stats.debugMode ? 'On' : 'Off',
+                'Renderer debug overlays (collision polygons, player input vector). The old DBG master toggle — menu sections below work regardless.')}
 
               {/* ── Stats (top of menu — default open) ─────────────── */}
               {renderSectionHeader('stats', 'Stats')}
@@ -473,26 +831,58 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Traits', onToggleTraits,
                   stats.traitsEnabled === false ? 'Off' : 'On',
                   'Enemy counterplay traits (armor chip-resist, …). ON: the Tank shrugs off small per-hit damage so heavy weapons are demanded — its damage numbers read low when chipped. OFF disables the soft-counter engine.')}
+                {ctrlRow('Station', onTeleportStation, 'Go',
+                  'Teleport the player to the station\'s doorstep (docking-test harness). Overworld only — no-op on maps without a station.')}
               </>)}
 
-              {/* ── Upgrades (progression spine — DBG) ─────────────── */}
-              {renderSectionHeader('upgrades', 'Upgrades')}
-              {!collapsed.upgrades && (<>
+              {/* ── Modules (DBG grants — varieties at fixed marks) ── */}
+              {renderSectionHeader('modules', 'Modules')}
+              {!collapsed.modules && (<>
                 {statRow('Salvage', (stats.credits ?? 0).toLocaleString(), 'text-amber-300')}
-                {(stats.upgrades ?? []).map(u =>
-                  ctrlRow(u.label, () => onCycleUpgrade?.(u.id), `Lv ${u.level}/${u.max}`,
-                    `Cycle ${u.label} upgrade level (DBG). Click bumps the level and wraps back to 0 at max; applies live to the player's effective stats.`))}
                 {ctrlRow('+1k Salv', onAddCredits, 'Grant',
-                  'Grant 1000 Salvage for testing the (future) shop.')}
-                {ctrlRow('Max all', onMaxUpgrades, 'Max',
-                  'Set every upgrade to its max level.')}
-                {ctrlRow('Reset', onResetUpgrades, 'Clear',
-                  'Reset every upgrade back to level 0.')}
-                {ctrlRow('Unlock all', onUnlockAll, 'Unlock',
-                  'Unlock every weapon + Shield + Overcharge (DBG).')}
-                {ctrlRow('Relock', onResetUnlocks, 'Lean',
-                  'Relock everything to the lean run-start loadout (Blaster only, no shield/overcharge).')}
+                  'Grant 1000 Salvage for testing the station shops.')}
+                {([
+                  ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
+                  ['engine', 'Engine'], ['thrusters', 'Thrusters'],
+                  ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
+                ] as const).map(([fam, label]) => (
+                  <div key={fam} className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                    <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{label}</span>
+                    <span className="flex gap-0.5">
+                      {[1, 2, 3].map(mk => (
+                        <button
+                          key={mk}
+                          onClick={() => onGrantModule?.(`${fam}_mk${mk}`)}
+                          className="bg-slate-800/70 border border-slate-600/60 rounded px-1 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                          title={`Grant ${label} Mk ${mk} into the inventory (DBG). Auto-installs if a compatible hex is free — modules are fixed items, no levels.`}
+                        >
+                          M{mk}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+                {ctrlRow('Shield', () => onGrantModule?.('shield'), 'Grant',
+                  'Grant the Shield core module (DBG). Needs to touch a hull module on the ship flower to function.')}
+                {ctrlRow('Overcharge', () => onGrantModule?.('overcharge'), 'Grant',
+                  'Grant the Overcharge module (DBG). Needs to touch a gun on the weapon flower to function.')}
+                {ctrlRow('Outfit all', onOutfitAll, 'Max',
+                  'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).')}
+                {ctrlRow('Reset', onResetOutfit, 'Lean',
+                  'Reset to the lean run start: bare hexes, empty inventory, Blaster on gun hex W1.')}
               </>)}
+
+              {/* ── Weapons (DBG grant + equip) ────────────────────── */}
+              {/* With commerce station-only, this is the wave-map test
+                  path for getting a weapon in hand: click = unlock (if
+                  needed) + equip.  S1/S2 = current loadout slot. */}
+              {renderSectionHeader('weapons', 'Weapons')}
+              {!collapsed.weapons && (stats.weaponCatalog ?? []).map(w =>
+                <React.Fragment key={w.id}>
+                  {ctrlRow(w.name, () => onGrantWeapon?.(w.id),
+                    w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
+                    `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then mounts it on a gun hex (first empty, else the inactive one). S1/S2 = gun hex.`)}
+                </React.Fragment>)}
 
               {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
               {renderSectionHeader('dragon', 'Dragon')}
@@ -840,9 +1230,17 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   {statRow(' ·tLit-N', perf.tileLightingCount)}
                 </>)}
               </>)}
-            </div>
-          )}
-        </div>
+    </div>
+  );
+
+  return (
+    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+
+      {/* ── Top Bar ── */}
+      <div className="flex justify-between items-start">
+        {/* Top-left intentionally empty — the debug menu now lives in the
+            pause Player Menu (Debug Menu section). */}
+        <div />
 
         {/* Top-right: wave HUD + pause button */}
         <div className="flex items-start gap-3">
@@ -901,6 +1299,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </span>
                 </div>
               );})}
+              {stats.wavesEnabled !== false && (
               <div
                 onClick={isGrace ? onSkipWave : undefined}
                 className={`bg-slate-900/75 border rounded-lg px-4 py-1.5 shadow-lg backdrop-blur-sm text-right transition-all ${
@@ -924,11 +1323,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </p>
                 )}
               </div>
+              )}
             </div>
           )}
 
-          {/* Pause button */}
-          {stats.gameState === GameState.PLAYING && (
+          {/* Pause button — hidden while docked (the station UI already
+              freezes the sim and owns the screen) */}
+          {stats.gameState === GameState.PLAYING && !stats.dock?.docked && (
             <button
               onClick={onPause}
               className="pointer-events-auto bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg p-2.5 shadow-lg border border-slate-600/60 transition-all active:scale-95"
@@ -943,9 +1344,142 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       </div>
 
+      {/* ── Dock affordance (Overworld station) ── */}
+      {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && (
+        <button
+          onClick={onDock}
+          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
+        >
+          ⚓ Dock <span className="text-sky-200 text-[10px] font-mono normal-case">[E]</span>
+        </button>
+      )}
+
+      {/* ── Station UI (docked) ── */}
+      {/* The sim is frozen while docked (loop short-circuit).  Panels are
+          gated by the station's SERVICES: the HOME drydock hosts the hex
+          flowers + inventory (drag-and-drop outfitting) + hull repair;
+          shop stations sell module ITEMS into the inventory. */}
+      {stats.gameState === GameState.PLAYING && stats.dock?.docked && (() => {
+        const ps = stats.playerStats;
+        const svc = stats.dock?.services;
+        const canEdit = canEditInstalled;
+        return (
+        <div
+          /* No justify-center: on a scrollable flex column it clips
+             overflowing content above the reachable scroll area; the inner
+             wrapper's my-auto does the centering when content is short. */
+          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
+          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-sky-300 tracking-[0.2em]">⬡ {stats.dock?.name ?? 'STATION'}</h2>
+              <span className="text-amber-300 text-sm font-bold tabular-nums">◈ {(stats.credits ?? 0).toLocaleString()} Salvage</span>
+            </div>
+
+            <button
+              onClick={onUndock}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              UNDOCK <span className="text-emerald-200 text-[10px] font-mono">[E]</span>
+            </button>
+
+            {/* Hull repair — pay-per-HP, pro-rated (repair-service stations) */}
+            {svc?.repair && (
+            <div className="bg-slate-800/60 border border-rose-600/30 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-xs">
+                <h3 className="text-rose-300 text-[11px] font-bold uppercase tracking-widest mb-1">Hull Repair</h3>
+                <span className="text-slate-400">Hull </span>
+                <span className="text-white font-bold tabular-nums">{ps?.health ?? 0} / {ps?.maxHealth ?? 100}</span>
+                <span className="text-slate-500 ml-2 text-[10px]">◈{stats.station?.repairCostPerHp ?? 0}/HP · partial repair if short</span>
+              </div>
+              <button
+                disabled={!stats.station?.canRepair}
+                onClick={onRepairHull}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                  stats.station?.canRepair
+                    ? 'bg-rose-700/60 hover:bg-rose-600/70 text-rose-100 active:scale-95'
+                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {(stats.station?.missingHull ?? 0) <= 0
+                  ? 'HULL FULL'
+                  : `REPAIR ◈${(stats.station?.fullRepairCost ?? 0).toLocaleString()}`}
+              </button>
+            </div>
+            )}
+
+            {/* Hex outfitting + inventory.  Modules FUNCTION only while
+                their adjacency requirement is met (engine⇢hull,
+                thrusters⇢engine, shield/plating⇢hull, capacitor⇢shield,
+                weapon-mods⇢gun; hull + guns are the roots).  Drag tiles
+                between the inventory and the flowers — drydock only. */}
+            {out && (
+              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3 flex flex-col gap-2">
+                {!canEdit && (
+                  <p className="text-slate-500 text-[10px] text-center -mb-1">
+                    No drydock here — outfitting is locked. Swap modules at the <span className="text-sky-400 font-bold">Home Station</span>.
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2 justify-items-center">
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', true)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', true)}
+                </div>
+
+                {/* Inventory — a honeycomb of hex tiles (same tile language
+                    as the install flowers): purchases land here; drag a tile
+                    onto a flower hex to install it, or tap for sell/scrap. */}
+                {renderInventoryHex(true)}
+
+                {/* Detail strip — tap fallback for install/remove/sell (drag works too) */}
+                {renderModuleDetail('station')}
+              </div>
+            )}
+
+            {/* Module shops — items are fixed Mk varieties (no upgrades);
+                a purchase lands in the inventory. */}
+            {out && (svc?.shipShop || svc?.weaponShop) && (
+              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
+                {(['ship', 'weapon'] as const).filter(g => (g === 'ship' ? svc?.shipShop : svc?.weaponShop)).map(g => (
+                  <div key={g}>
+                    <h3 className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${g === 'ship' ? 'text-sky-300' : 'text-violet-300'}`}>
+                      Shop · {g === 'ship' ? 'Ship Modules' : 'Weapon Modules'}
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {out.catalog.filter(c => c.group === g).map(c => (
+                        <button
+                          key={c.id}
+                          disabled={!c.affordable}
+                          onClick={() => onPurchaseModule?.(c.id)}
+                          title={`${c.desc} — bought into the inventory`}
+                          className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
+                            c.affordable
+                              ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
+                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <span className="font-bold">{c.label}</span>
+                          <span className="tabular-nums">◈{c.cost.toLocaleString()}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+        );
+      })()}
+
+      {/* Drag ghost — fixed-positioned, shared by the station UI and the
+          pause cargo panel. */}
+      {renderDragGhost()}
+
       {/* ── Main Menu ── */}
       {stats.gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto py-8">
+        <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center pointer-events-auto z-50 overflow-y-auto overscroll-contain py-8">
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500 mb-2 tracking-tight drop-shadow-lg">
             OMNIVERSE
           </h1>
@@ -999,7 +1533,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           </div>
         );
         return (
-        <div className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto z-50 p-4 overflow-y-auto">
+        <div
+          /* No justify-center: on a scrollable flex column it clips
+             overflowing content above the reachable scroll area; the inner
+             wrapper's my-auto does the centering when content is short. */
+          className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
           <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
@@ -1024,130 +1562,39 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Ship status */}
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
-                <div className="flex flex-col gap-1 text-xs">
-                  {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
-                  {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
-                  {statLine('Damage', fmtMult(ps?.damageMult))}
-                  {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
-                  {statLine('Speed', fmtMult(ps?.speedMult))}
-                </div>
-              </div>
-
-              {/* Session upgrades */}
-              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-                <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Augments</h3>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                  {(stats.upgrades ?? []).map(u => (
-                    <div key={u.id} className="flex justify-between gap-1">
-                      <span className={u.level > 0 ? 'text-slate-200' : 'text-slate-500'}>{u.label}</span>
-                      <span className={`font-bold tabular-nums ${u.level >= 4 ? 'text-amber-300' : u.level > 0 ? 'text-white' : 'text-slate-600'}`}>
-                        Lv {u.level}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Unlocks */}
+            {/* Ship status */}
             <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
-              <h3 className="text-violet-300 text-[11px] font-bold uppercase tracking-widest mb-2">Modules Installed</h3>
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {(stats.unlocks?.weapons ?? []).map(w => (
-                  <span key={w} className="px-2 py-0.5 rounded bg-slate-700/70 text-slate-200 text-[10px] font-bold uppercase tracking-wide">{w}</span>
-                ))}
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.shield ? 'bg-sky-700/70 text-sky-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Shield</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${stats.unlocks?.overcharge ? 'bg-orange-700/70 text-orange-100' : 'bg-slate-800 text-slate-600 line-through'}`}>Overcharge</span>
+              <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Ship Status</h3>
+              <div className="flex flex-col gap-1 text-xs">
+                {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
+                {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
+                {statLine('Damage', fmtMult(ps?.damageMult))}
+                {statLine('Fire rate', fmtMult(ps ? 1 / ps.cooldownMult : 1))}
+                {statLine('Speed', fmtMult(ps?.speedMult))}
               </div>
             </div>
 
-            {/* Loadout — 2 equip slots.  Interim home: swaps are free here in
-                the pause menu until the station POI (1e) takes over. */}
-            {stats.loadout && (
-              <div className="bg-slate-800/60 border border-sky-600/30 rounded-lg p-3">
-                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest mb-2">Loadout · 2 Slots</h3>
-                <div className="flex flex-col gap-1.5">
-                  {stats.loadout.slots.map((slot, i) => (
-                    <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-slate-400 text-[10px] font-bold w-12 shrink-0">SLOT {i + 1}</span>
-                      {(stats.loadout?.owned ?? []).map(w => (
-                        <button
-                          key={w.id}
-                          onClick={() => onEquipWeapon?.(i, w.id)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
-                            slot?.id === w.id
-                              ? 'bg-sky-600/70 text-white'
-                              : 'bg-slate-700/50 hover:bg-slate-600/70 text-slate-300'
-                          }`}
-                        >
-                          {w.name}
-                        </button>
-                      ))}
-                      {slot && (stats.loadout?.slots ?? []).filter(Boolean).length > 1 && (
-                        <button
-                          onClick={() => onEquipWeapon?.(i, null)}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800/70 hover:bg-red-900/50 text-slate-500 hover:text-red-200 transition-all active:scale-95"
-                        >
-                          ✕ empty
-                        </button>
-                      )}
-                    </div>
-                  ))}
+            {/* Modules & cargo — the same hex-tile language as the station
+                UI, but the flowers are READ-ONLY (no drag source, no drop
+                target: outfitting is drydock-only).  The inventory stays
+                fully live: drag to rearrange, tap a tile to SCRAP it for
+                9% anywhere (sell-back at 90% needs a station). */}
+            {stats.outfitting && (
+              <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3 flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2 justify-items-center">
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', false)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', false)}
                 </div>
+                {renderInventoryHex(false)}
+                {renderModuleDetail('pause')}
               </div>
             )}
 
-            {/* Drydock — purchase-only progression (pivot 1c): one-time
-                Modules + per-level stat Augments, both bought with Salvage. */}
-            {stats.shop && (
-              <div className="bg-slate-800/60 border border-amber-600/30 rounded-lg p-3 flex flex-col gap-3">
-                <div>
-                  <h3 className="text-amber-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Modules</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.unlocks.map(u => (
-                      <button
-                        key={u.id}
-                        disabled={u.owned || !u.affordable}
-                        onClick={() => onPurchaseUnlock?.(u.id)}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          u.owned ? 'bg-slate-700/40 text-slate-500 cursor-default'
-                            : u.affordable ? 'bg-violet-700/40 hover:bg-violet-600/60 text-violet-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{u.label}</span>
-                        <span className="tabular-nums">{u.owned ? 'OWNED' : `◈${u.cost}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-emerald-300 text-[11px] font-bold uppercase tracking-widest mb-2">Drydock · Augments</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {stats.shop.augments.map(a => (
-                      <button
-                        key={a.id}
-                        disabled={a.locked || !a.affordable}
-                        onClick={() => onPurchaseUpgrade?.(a.id)}
-                        title={a.locked ? 'Requires the Shield module' : a.desc}
-                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-[11px] transition-all ${
-                          a.locked ? 'bg-slate-800/60 text-slate-600 cursor-not-allowed'
-                            : a.affordable ? 'bg-emerald-700/40 hover:bg-emerald-600/60 text-emerald-100 active:scale-95'
-                              : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="font-bold">{a.label} <span className="text-[9px] opacity-70">Lv{a.level}</span></span>
-                        <span className="tabular-nums">{a.locked ? '🔒 SHIELD' : `◈${a.cost.toLocaleString()}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Commerce lives at the stations (economy-pivot 1e): shops
+                sell to the inventory; outfitting needs a docked drydock. */}
+            <p className="text-slate-500 text-[11px] text-center">
+              Buy modules at the <span className="text-emerald-400 font-bold">Shipwright</span> / <span className="text-purple-400 font-bold">Armory</span>; outfit &amp; repair at the <span className="text-sky-400 font-bold">Home Station</span> drydock.
+            </p>
 
             {/* Live switcher — maps + enemy-test override (controlled
                 collapse so it survives the 60 Hz overlay re-render) */}
@@ -1161,6 +1608,22 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {!collapsed.switchmap && (
                 <div className="mt-4 flex flex-col items-center gap-4">
                   {renderTestPanel()}
+                </div>
+              )}
+            </div>
+
+            {/* Debug menu — the DBG panel's proper pause-menu home (the old
+                floating top-left dropdown button is gone). */}
+            <div className="text-center">
+              <button
+                onClick={() => toggleSection('debug')}
+                className="pointer-events-auto cursor-pointer text-amber-400/80 text-[11px] uppercase tracking-widest select-none hover:text-amber-300"
+              >
+                Debug Menu {collapsed.debug ? '▸' : '▾'}
+              </button>
+              {!collapsed.debug && (
+                <div className="mt-3 mx-auto w-full max-w-xs bg-slate-900/70 border border-amber-500/30 rounded-lg px-3 py-2 text-left">
+                  {debugSections}
                 </div>
               )}
             </div>

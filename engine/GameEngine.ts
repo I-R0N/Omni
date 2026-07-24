@@ -17,10 +17,10 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { BaseMapLayer, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
+import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, UPGRADE_DEFS, UPGRADE_EFFECTS, UpgradeId, upgradeCost, UNLOCK_DEFS, UnlockDef, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -130,26 +130,35 @@ export class GameEngine {
   private comboTimer: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
-  // the field (the score 1:1 mirror is gone) — and per-upgrade levels.
-  // applyUpgrades() folds the levels into the player's effective stats; all
-  // reset per run.  Behaviour-changing unlocks + shop UI build on top.
+  // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
+  // shop stations; all reset per run.
   private credits: number = 0;
-  private upgradeLevels: Record<UpgradeId, number> = {
-      hull: 0, plating: 0, capacitor: 0, engine: 0,
-      thrusters: 0, gunnery: 0, autoloader: 0,
-  };
-  // ── Unlocks ─────────────────────────────────────────────────────────────
-  // The run starts LEAN: Blaster only, no shield, no charged shots.  Bought
-  // in the Drydock (Salvage).  Synced to
-  // the player entity (ownedWeapons / overchargeUnlocked) for WeaponSystem.
-  private unlockedWeapons: Set<WeaponType> = new Set([WeaponType.BLASTER]);
-  // 2-slot equip loadout (pivot 1b).  Exactly 2 entries; null = empty slot.
-  // New run = [Blaster, empty].  Owned governs what CAN be equipped;
-  // equipped governs what cycle/select/fire may use.  Swaps happen in the
-  // pause-menu Drydock (interim home until the station POI lands in 1e).
+  // 2-slot equip loadout (pivot 1b) — DERIVED from the weapon-group GUN
+  // hexes via syncLoadoutFromSlots (WeaponSystem is untouched).
   private equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
-  private shieldUnlocked: boolean = false;
-  private overchargeUnlocked: boolean = false;
+  // ── Hex-slot outfitting with inventory (module-config increment) ────────
+  // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
+  // land in `inventory` (tile grid, duplicates allowed); outfitting moves
+  // items between inventory tiles and the two 7-hex groups.  Index 0 is
+  // the center hex.  Guns mix freely with weapon mods in the weapon
+  // flower, capped at MAX_INSTALLED_GUNS mounted (slot-agnostic count;
+  // weaponless is allowed).  A module FUNCTIONS only while installed
+  // AND its adjacency
+  // requirement is met (MODULE_REQUIREMENTS fixpoint — see
+  // computeActiveSlots); `activeShip`/`activeWeapon` cache the result.
+  private shipSlots: (string | null)[] = (() => {
+      const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
+      s[0] = 'hull_base'; // free starter hull — the adjacency root, mounted center
+      return s;
+  })();
+  private weaponSlots: (string | null)[] = (() => {
+      const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
+      s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
+      return s;
+  })();
+  private inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
+  private activeShip: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+  private activeWeapon: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
   // The one live "+N" points popup, if any.  New awards accumulate into it
   // (O(1)) so a burst of kills reads as one growing number instead of a
   // pile — and without scanning the damage-text array per award.
@@ -298,6 +307,25 @@ export class GameEngine {
   private dragonsKilled = 0; // kill payout doubles each kill (3000 → 6000 → 12000 …)
   private rivals: RivalInstance[] = [];  // Stage 7 player-like roamers
   private nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL; // score at which the next rival warps in
+
+  // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
+  // The station lives on the OVERWORLD map (found by isStation at map load).
+  // Docking = proximity (one O(1) torus distance per sim step) + an explicit
+  // action (E key / HUD DOCK button).  While `dockedAtStation` the loop
+  // short-circuits the sim exactly like the removed cardChoicePending card
+  // modal did (field stays drawn behind the React station UI) and the
+  // station UI hosts the Drydock shop, the loadout swaps, and hull repair.
+  // Undocked = locked loadout: equipWeapon / purchaseUnlock / purchase-
+  // Upgrade are guarded on this flag.
+  private stations: GameEntity[] = [];
+  private nearestStation: GameEntity | null = null; // nearest in dock range this step
+  private dockedStation: GameEntity | null = null;
+  private dockedAtStation: boolean = false;
+  private dockInRange: boolean = false;
+  private dockKeyHeld: boolean = false; // E-key edge detector (dock + undock)
+  // Overworld roaming dragon — first spawn shortly after run start, then a
+  // fresh rift a while after the previous dragon dies or leaves.
+  private overworldDragonTimer: number = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
 
   // Overlay toggles — gate the RenderSystem's asteroid/shard FF overlay
   // pass on/off independently.  All default OFF; debug-only.
@@ -1255,7 +1283,7 @@ export class GameEngine {
       shieldHitFlash: 0
     };
     this.syncUnlocksToPlayer();
-    this.applyUpgrades(); // initialise upgrade-derived stat fields (all at L0)
+    this.syncLoadoutFromSlots(); // derive loadout from gun hexes + apply module effects
 
     this.camera = {
       position: { x: 0, y: 0 },
@@ -1271,6 +1299,7 @@ export class GameEngine {
    *  restartGame() share a single construction path. */
   private buildMap(type: MapType): BaseMapLayer {
     switch (type) {
+      case MapType.OVERWORLD:            return new OverworldMap();
       case MapType.RING:                 return new RingMap();
       case MapType.SEVEN_RINGS:          return new SevenRingsMap();
       case MapType.POCKET:               return new PocketMap();
@@ -1345,11 +1374,12 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || '',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
       waveStatus: 'active',
+      wavesEnabled: true, // skip only exists during wave gameplay
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
@@ -1362,7 +1392,6 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
-      upgrades: this.upgradeSnapshot(),
       playerStats: this.gameState === GameState.PAUSED ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
@@ -1370,15 +1399,9 @@ export class GameEngine {
         maxShield: this.player.maxShield ?? 0,
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
-        speedMult: this.upgradeSpeedMult(),
+        speedMult: this.moduleSpeedMult,
       } : undefined,
-      unlocks: this.gameState === GameState.PAUSED ? {
-        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
-        shield: this.shieldUnlocked,
-        overcharge: this.overchargeUnlocked,
-      } : undefined,
-      loadout: this.gameState === GameState.PAUSED ? this.loadoutSnapshot() : undefined,
-      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
+      outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1450,7 +1473,9 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    if (this.gameState === GameState.PLAYING) {
+    // The docked station UI already freezes the sim; stacking the pause
+    // menu on top of it would double up two full-screen overlays.
+    if (this.gameState === GameState.PLAYING && !this.dockedAtStation) {
         this.gameState = GameState.PAUSED;
     }
   }
@@ -1484,16 +1509,23 @@ export class GameEngine {
       this.dragonsKilled = 0; // reset the doubling payout per run
       this.rivals = []; // rival ships die with the old map
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
+      // Station / docking state — the station entity itself is rebuilt with
+      // the map (loadMap re-finds it); the overworld dragon timer restarts
+      // its first-spawn countdown.
+      this.dockedAtStation = false;
+      this.dockInRange = false;
+      this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
       this.loadMap(this.buildMap(this.selectedMapType));
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
-      this.resetUnlocks(); // back to lean (Blaster only, no shield/overcharge)
-      this.resetUpgrades();
+      this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
 
-      // Reset Player
-      this.player.position = { x: 0, y: 0 };
+      // Reset Player — at the map's declared spawn point (the Overworld
+      // spawns the player beside the station rather than at the origin).
+      const spawn = this.currentMap?.playerSpawn ?? { x: 0, y: 0 };
+      this.player.position = { ...spawn };
       this.player.velocity = { x: 0, y: 0 };
       this.player.health = this.player.maxHealth;
       this.player.shield = this.player.maxShield;
@@ -1514,7 +1546,7 @@ export class GameEngine {
       this.player.size = { x: SPRITE_CONSTANTS.PLAYER_BASE_SIZE, y: SPRITE_CONSTANTS.PLAYER_BASE_SIZE };
 
       this.camera.zoom = CAMERA_CONSTANTS.DEFAULT_ZOOM;
-      this.camera.position = { x: 0, y: 0 };
+      this.camera.position = { ...spawn };
       this.shakeTimer = 0;
       this.camera.shakeOffset = { x: 0, y: 0 };
   }
@@ -1574,6 +1606,10 @@ export class GameEngine {
     // recorder (feed only real PLAYING frames so idle/paused vsync doesn't
     // pollute the FPS distribution).  `frameTime` is the true rAF delta.
     const perf = this.buildPerfSnapshot();
+    // Menu-grade snapshots (loadout / shop / stats) are built while the
+    // pause menu OR the docked station UI is up — both are sim-frozen
+    // full-screen overlays that need them.
+    const menuOpen = this.gameState === GameState.PAUSED || this.dockedAtStation;
     if (this.perfRecorder.recording && this.gameState === GameState.PLAYING) {
       // frameTime (raw rAF delta), the raw per-frame render + sim (aligned to
       // the SAME just-finished frame — sample() runs at the top of the next
@@ -1593,11 +1629,12 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: WEAPONS[this.player.currentWeapon || WeaponType.BLASTER].name,
+      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
       waveStatus: wsMap[this.waveState],
+      wavesEnabled: this.wavesEnabled,
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
@@ -1610,23 +1647,19 @@ export class GameEngine {
         amount: this.player.salvagePickupFlash.amount,
         fraction: Math.max(0, this.player.salvagePickupFlash.timer / 0.75),
       } : undefined,
-      upgrades: this.upgradeSnapshot(),
-      playerStats: this.gameState === GameState.PAUSED ? {
+      playerStats: menuOpen ? {
         health: Math.max(0, Math.round(this.player.health)),
         maxHealth: this.player.maxHealth,
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: this.player.maxShield ?? 0,
         damageMult: this.player.damageMult ?? 1,
         cooldownMult: this.player.cooldownMult ?? 1,
-        speedMult: this.upgradeSpeedMult(),
+        speedMult: this.moduleSpeedMult,
       } : undefined,
-      unlocks: this.gameState === GameState.PAUSED ? {
-        weapons: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => WEAPONS[w].name),
-        shield: this.shieldUnlocked,
-        overcharge: this.overchargeUnlocked,
-      } : undefined,
-      loadout: this.gameState === GameState.PAUSED ? this.loadoutSnapshot() : undefined,
-      shop: this.gameState === GameState.PAUSED ? this.shopSnapshot() : undefined,
+      outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      dock: this.dockStatsSnapshot(),
+      station: this.dockedAtStation ? this.stationSnapshot() : undefined,
+      weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1703,6 +1736,21 @@ export class GameEngine {
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Docked at the station: freeze the sim (the field stays drawn behind
+    // the React station UI) until the player undocks — the same short-
+    // circuit the removed between-wave card modal used.  The E key undocks
+    // (edge-triggered on the shared latch); the station UI's UNDOCK button
+    // routes through undock() as well.
+    if (this.dockedAtStation) {
+        const eDown = this.input.isKeyDown('KeyE');
+        if (eDown && !this.dockKeyHeld) this.undock();
+        this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2590,6 +2638,26 @@ export class GameEngine {
     this.updateDragons(dt);
     this.updateRivals(dt);
 
+    // Station docking (Overworld) — one O(1) torus-wrapped distance to the
+    // fixed station point + the E-key edge check.  No scan, no
+    // PerfController task needed.
+    this.updateStationDocking();
+    // Overworld roaming dragon — keep one alive: first spawn shortly after
+    // run start, then a fresh rift a while after the previous one dies or
+    // leaves (the timer re-arms while a dragon is up).
+    if (this.currentMap.type === MapType.OVERWORLD) {
+        if (this.dragons.length > 0) {
+            this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
+        } else {
+            this.overworldDragonTimer -= dt;
+            if (this.overworldDragonTimer <= 0) {
+                const types: (StructureVariant | 'mixed')[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
+                this.spawnDragon(types[Math.floor(Math.random() * types.length)]);
+                this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
+            }
+        }
+    }
+
     // Auto-collapse minimap
     if (this.minimapExpanded) {
         this.minimapTimer -= dt;
@@ -2602,8 +2670,8 @@ export class GameEngine {
     this.player.inputVector = moveDir; // Debug visualization assignment
     
     const moveConfig = PLAYER_MOVEMENT_CONFIG[this.currentMap.type];
-    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.upgradeThrustMult();
-    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.upgradeSpeedMult();
+    const acc = (moveConfig ? moveConfig.acceleration : PHYSICS_CONSTANTS.ACCELERATION) * getActivePlayerThrustMult() * this.moduleThrustMult;
+    const maxSpeed = (moveConfig ? moveConfig.maxSpeed : PHYSICS_CONSTANTS.MAX_SPEED) * getActivePlayerSpeedMult() * this.moduleSpeedMult;
 
     // Time-Scaled Input Acceleration
     // Input is applied per-frame (variable dt), so we must scale acceleration by dt
@@ -2761,7 +2829,7 @@ export class GameEngine {
     // Update player.chargeProgress for the charge-ring HUD.  Stored as
     // fraction of CHARGE_FULL ([0, 1]).  Ring snaps to "full" colour at 1.
     const heldFor = this.input.getMouseHoldDuration();
-    this.player.chargeProgress = (this.overchargeUnlocked && heldFor > 0 && !this.player.systemsDisabled)
+    this.player.chargeProgress = (this.player.overchargeUnlocked && this.player.currentWeapon !== undefined && heldFor > 0 && !this.player.systemsDisabled)
         ? Math.min(1, heldFor / INPUT_CONSTANTS.CHARGE_FULL)
         : 0;
 
@@ -3018,65 +3086,150 @@ export class GameEngine {
     }
   };
 
-  // ── Progression: upgrade application + DBG controls ─────────────────────
+  // ── Module effects + activity (adjacency requirements) ──────────────────
 
-  /** Engine/Thrusters levels feed the per-frame movement multipliers
-   *  alongside the existing DBG thrust/speed cycles. */
-  private upgradeSpeedMult(): number {
-      return 1 + UPGRADE_EFFECTS.ENGINE_SPEED_FRAC_PER_LEVEL * this.upgradeLevels.engine;
-  }
-  private upgradeThrustMult(): number {
-      return 1 + UPGRADE_EFFECTS.THRUSTERS_ACCEL_FRAC_PER_LEVEL * this.upgradeLevels.thrusters;
+  // Movement multipliers from ACTIVE engine/thruster modules — read in the
+  // per-frame movement line alongside the DBG thrust/speed cycles.
+  private moduleSpeedMult = 1;
+  private moduleThrustMult = 1;
+
+  /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
+   *  when its family has no requirement (hull / gun roots) or it touches
+   *  an ACTIVE module of its required family (HEX_ADJACENCY).  Chains
+   *  resolve naturally: thrusters need a LIVE engine, which needs a hull. */
+  private computeActiveSlots(slots: (string | null)[], out: boolean[]) {
+      for (let i = 0; i < out.length; i++) {
+          const id = slots[i];
+          const def = id !== null ? moduleDef(id) : undefined;
+          out[i] = def !== undefined && MODULE_REQUIREMENTS[def.family] === undefined;
+      }
+      let changed = true;
+      while (changed) {
+          changed = false;
+          for (let i = 0; i < slots.length; i++) {
+              const id = slots[i];
+              if (id === null || out[i]) continue;
+              const req = MODULE_REQUIREMENTS[moduleDef(id)!.family];
+              if (!req) continue;
+              for (const n of HEX_ADJACENCY[i]) {
+                  const nid = slots[n];
+                  if (nid !== null && out[n] && req.includes(moduleDef(nid)!.family)) {
+                      out[i] = true;
+                      changed = true;
+                      break;
+                  }
+              }
+          }
+      }
   }
 
-  /** Recompute every upgrade-derived player stat from the current levels.
-   *  Called at construction, on any level change, and on run reset.  Hull
-   *  heals the HP it adds so a purchase is felt immediately. */
-  private applyUpgrades() {
-      const lv = this.upgradeLevels;
-      const newMaxHp = 100 + UPGRADE_EFFECTS.HULL_HP_PER_LEVEL * lv.hull;
+  /** Recompute module activity (adjacency fixpoint) and fold the summed
+   *  effects of every ACTIVE module into the player's stats.  Called at
+   *  construction, on any outfit change, and on run reset.  Hull heals
+   *  the HP it adds so a purchase is felt immediately. */
+  private applyModuleEffects() {
+      this.computeActiveSlots(this.shipSlots, this.activeShip);
+      this.computeActiveSlots(this.weaponSlots, this.activeWeapon);
+      let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
+      let shieldCore = false, overcharge = false;
+      let gunWeight = 0;
+      const fold = (slots: (string | null)[], active: boolean[]) => {
+          for (let i = 0; i < slots.length; i++) {
+              const id = slots[i];
+              if (id === null || !active[i]) continue;
+              const d = moduleDef(id);
+              gunWeight += d?.weight ?? 0;
+              const e = d?.effect;
+              if (!e) continue;
+              maxHp += e.maxHp ?? 0;
+              maxShield += e.maxShield ?? 0;
+              regen += e.shieldRegenFrac ?? 0;
+              speed += e.speedFrac ?? 0;
+              accel += e.accelFrac ?? 0;
+              dmg += e.damageFrac ?? 0;
+              cool += e.cooldownFrac ?? 0;
+              if (e.shieldCore) shieldCore = true;
+              if (e.overcharge) overcharge = true;
+          }
+      };
+      fold(this.shipSlots, this.activeShip);
+      fold(this.weaponSlots, this.activeWeapon);
+      this.moduleSpeedMult = 1 + speed;
+      // Weapon weight: flying light is faster — no gun mounted earns the
+      // BASE_BOOST, heavier arsenals drag (Blaster-only ≈ the 1.0 baseline).
+      this.moduleThrustMult = (1 + accel)
+          * (WEAPON_WEIGHT.BASE_BOOST / (1 + WEAPON_WEIGHT.DRAG_PER_WEIGHT * gunWeight));
+      const newMaxHp = 100 + maxHp;
       const hpDelta = newMaxHp - this.player.maxHealth;
       this.player.maxHealth = newMaxHp;
       if (hpDelta > 0) this.player.health = Math.min(newMaxHp, this.player.health + hpDelta);
-      // Shield is gated behind its unlock — locked → no shield at all
-      // (Plating levels only matter once Shield is owned).
-      this.player.maxShield = this.shieldUnlocked
-          ? SHIELD_CONSTANTS.MAX_CHARGE + UPGRADE_EFFECTS.PLATING_SHIELD_PER_LEVEL * lv.plating
-          : 0;
+      // Shield exists only while a shield CORE is active; plating adds on top.
+      this.player.maxShield = shieldCore ? SHIELD_CONSTANTS.MAX_CHARGE + maxShield : 0;
       if ((this.player.shield ?? 0) > this.player.maxShield) this.player.shield = this.player.maxShield;
-      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE
-          * (1 + UPGRADE_EFFECTS.CAPACITOR_RECHARGE_FRAC_PER_LEVEL * lv.capacitor);
-      this.player.damageMult = 1 + UPGRADE_EFFECTS.GUNNERY_DAMAGE_FRAC_PER_LEVEL * lv.gunnery;
-      this.player.cooldownMult = Math.max(
-          UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FLOOR,
-          1 - UPGRADE_EFFECTS.AUTOLOADER_COOLDOWN_FRAC_PER_LEVEL * lv.autoloader,
-      );
+      this.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE * (1 + regen);
+      this.player.damageMult = 1 + dmg;
+      this.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
+      this.player.overchargeUnlocked = overcharge;
   }
 
-  /** Per-upgrade snapshot for the DBG panel + (future) shop. */
-  private upgradeSnapshot() {
-      return UPGRADE_DEFS.map(d => ({
-          id: d.id, label: d.label, level: this.upgradeLevels[d.id], max: d.max,
-      }));
-  }
+  // ── DBG module grants ───────────────────────────────────────────────────
 
-  /** DBG: bump an upgrade one level, wrapping max → 0, then re-apply. */
-  public cycleUpgrade(id: UpgradeId) {
-      const def = UPGRADE_DEFS.find(d => d.id === id);
+  /** DBG: grant one module variety into the inventory — and auto-install
+   *  it if a compatible hex is free (bypasses the drydock guard so
+   *  wave-map testing needs no station trip).  No-op when the inventory
+   *  is full. */
+  public debugGrantModule(id: string) {
+      const def = moduleDef(id);
       if (!def) return;
-      this.upgradeLevels[id] = (this.upgradeLevels[id] + 1) % (def.max + 1);
-      this.applyUpgrades();
+      const inv = this.inventory.indexOf(null);
+      if (inv === -1) return;
+      this.inventory[inv] = id;
+      const free = this.firstFreeSlotFor(def);
+      if (free !== -1) this.moveModuleInternal({ area: 'inventory', idx: inv }, { area: def.group, idx: free });
   }
-  /** DBG: max every upgrade. */
-  public maxAllUpgrades() {
-      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = d.max;
-      this.applyUpgrades();
+
+  /** DBG: outfit a full high-end loadout in a canonical layout that
+   *  satisfies every adjacency requirement, plus the remaining guns in
+   *  the inventory. */
+  public debugOutfitAll() {
+      this.shipSlots.fill(null);
+      this.weaponSlots.fill(null);
+      this.inventory.fill(null);
+      // Ship flower: hull core center; shield at 1 (touches hull);
+      // capacitor at 6 (touches shield); plating 2, engine 3, thrusters 4
+      // (touches engine).  Slot 5 left free.
+      this.shipSlots[0] = 'hull_mk3';
+      this.shipSlots[1] = 'shield';
+      this.shipSlots[6] = 'capacitor_mk3';
+      this.shipSlots[2] = 'plating_mk3';
+      this.shipSlots[3] = 'engine_mk3';
+      this.shipSlots[4] = 'thrusters_mk3';
+      // Weapon flower: two guns + the three mods around the center gun.
+      this.weaponSlots[0] = 'wpn_blaster';
+      this.weaponSlots[1] = 'wpn_cannon';
+      this.weaponSlots[2] = 'gunnery_mk3';
+      this.weaponSlots[3] = 'autoloader_mk3';
+      this.weaponSlots[4] = 'overcharge';
+      const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
+      for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
+      this.syncLoadoutFromSlots();
+      this.player.shield = this.player.maxShield ?? 0;
   }
-  /** DBG: clear every upgrade back to L0. */
-  public resetUpgrades() {
-      for (const d of UPGRADE_DEFS) this.upgradeLevels[d.id] = 0;
-      this.applyUpgrades();
+
+  /** Run reset + DBG relock: back to the lean start — empty inventory,
+   *  the free Base Hull on the center ship hex (adjacency root) and the
+   *  starter Blaster on gun hex W1. */
+  public resetOutfit() {
+      this.shipSlots.fill(null);
+      this.weaponSlots.fill(null);
+      this.inventory.fill(null);
+      this.shipSlots[0] = 'hull_base';
+      this.weaponSlots[0] = 'wpn_blaster';
+      this.player.currentWeapon = WeaponType.BLASTER;
+      this.currentWeaponIndex = 0;
+      this.syncLoadoutFromSlots();
   }
+
   /** DBG: grant Salvage for testing the shop. */
   public addDebugCredits(n: number) { this.credits += n; }
 
@@ -3148,163 +3301,363 @@ export class GameEngine {
     });
   }
 
-  // ── Unlocks + Drydock shop ──────────────────────────────────────────────
+  // ── Space station docking (economy-pivot 1e; multi-station) ──────────────
 
-  /** Push the unlock + loadout state onto the player entity so WeaponSystem
-   *  can gate weapon cycle/select + charged shots without reaching into the
-   *  engine. */
+  /** Per-sim-step dock check: find the nearest station in DOCK_RANGE
+   *  (tiny fixed list — the Overworld has 3), stamp the world-space
+   *  affordance onto it, and dock on the E-key edge.  Runs only while
+   *  PLAYING and undocked (the docked branch lives in the loop's freeze
+   *  short-circuit). */
+  private updateStationDocking() {
+    let nearest: GameEntity | null = null;
+    let nearestD2 = Infinity;
+    const r2 = STATION_CONSTANTS.DOCK_RANGE * STATION_CONSTANTS.DOCK_RANGE;
+    for (let i = 0; i < this.stations.length; i++) {
+        const s = this.stations[i];
+        if (!s.active) continue;
+        const dx = wrapDeltaX(s.position.x, this.player.position.x);
+        const dy = wrapDeltaY(s.position.y, this.player.position.y);
+        const d2 = dx * dx + dy * dy;
+        const inRange = d2 <= r2 && !this.player.isExploding;
+        s.stationDockReady = inRange;
+        if (inRange && d2 < nearestD2) { nearest = s; nearestD2 = d2; }
+    }
+    this.nearestStation = nearest;
+    this.dockInRange = nearest !== null;
+
+    const eDown = this.input.isKeyDown('KeyE');
+    if (this.dockInRange && eDown && !this.dockKeyHeld) this.dockAtStation();
+    this.dockKeyHeld = eDown;
+  }
+
+  /** Dock at the nearest in-range station: freeze the sim and open its
+   *  station UI (panels per STATION_VARIANTS services).  The ship parks
+   *  (velocity zeroed) so undocking resumes stationary. */
+  public dockAtStation(): boolean {
+    if (this.gameState !== GameState.PLAYING) return false;
+    if (this.dockedAtStation || !this.nearestStation || this.player.isExploding) return false;
+    this.dockedAtStation = true;
+    this.dockedStation = this.nearestStation;
+    this.player.velocity.x = 0;
+    this.player.velocity.y = 0;
+    return true;
+  }
+
+  /** Undock: release the sim freeze.  Mirrors resumeGame's accumulator
+   *  hygiene so the first post-dock frame doesn't integrate stale time. */
+  public undock() {
+    if (!this.dockedAtStation) return;
+    this.dockedAtStation = false;
+    this.dockedStation = null;
+    this.lastTime = performance.now();
+    this.simAccumulator = 0;
+  }
+
+  /** Hull repair — pay-per-HP, PRO-RATED.  Only at stations offering the
+   *  repair service.  Shield is untouched — it recharges in the field. */
+  public repairHull(): boolean {
+    if (!this.dockedServices()?.repair) return false;
+    const missing = Math.ceil(this.player.maxHealth - this.player.health);
+    if (missing <= 0) return false;
+    const per = STATION_CONSTANTS.REPAIR_COST_PER_HP;
+    const heal = Math.min(missing, Math.floor(this.credits / per));
+    if (heal <= 0) return false;
+    this.credits -= heal * per;
+    this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+    this.pushPlayerMessage(`+${heal} hull`, '#4ade80');
+    return true;
+  }
+
+  /** Dock state for EngineStats: in-range/docked + the station's name and
+   *  services so the UI shows the right affordance + panels. */
+  private dockStatsSnapshot() {
+    if (this.stations.length === 0) return undefined;
+    const s = this.dockedAtStation ? this.dockedStation : this.nearestStation;
+    const kind = s?.stationKind as StationKind | undefined;
+    const variant = kind !== undefined ? STATION_VARIANTS[kind] : undefined;
+    return {
+        inRange: this.dockInRange,
+        docked: this.dockedAtStation,
+        name: variant?.name ?? s?.name,
+        services: variant ? { ...variant.services } : undefined,
+    };
+  }
+
+  /** Station services snapshot for the docked UI (repair panel). */
+  private stationSnapshot() {
+    const per = STATION_CONSTANTS.REPAIR_COST_PER_HP;
+    const missing = Math.max(0, Math.ceil(this.player.maxHealth - this.player.health));
+    return {
+        repairCostPerHp: per,
+        missingHull: missing,
+        fullRepairCost: missing * per,
+        canRepair: missing > 0 && this.credits >= per,
+    };
+  }
+
+  /** DBG: teleport the player to a station's doorstep, cycling through
+   *  the stations on repeated presses (Overworld only — no-op on maps
+   *  without stations). */
+  public debugTeleportToStation() {
+    if (this.stations.length === 0) return;
+    this.teleportStationIdx = (this.teleportStationIdx + 1) % this.stations.length;
+    const s = this.stations[this.teleportStationIdx];
+    this.player.position.x = s.position.x;
+    this.player.position.y = s.position.y + STATION_CONSTANTS.DOCK_RANGE * 0.8;
+    wrapPosition(this.player.position);
+    this.player.velocity.x = 0;
+    this.player.velocity.y = 0;
+  }
+  private teleportStationIdx = -1;
+
+  // ── Outfitting: loadout sync, tile moves, purchases, snapshots ──────────
+
+  /** Push the gun + module state onto the player entity so WeaponSystem
+   *  can gate weapon cycle/select + charged shots without reaching into
+   *  the engine.  ownedWeapons = the INSTALLED guns (the usable set). */
   private syncUnlocksToPlayer() {
-      this.player.ownedWeapons = WEAPON_LIST.filter(w => this.unlockedWeapons.has(w));
+      this.player.ownedWeapons = this.equippedWeapons.filter((w): w is WeaponType => w !== null);
       this.player.equippedWeapons = [...this.equippedWeapons];
-      this.player.overchargeUnlocked = this.overchargeUnlocked;
-      // The active weapon must always be equipped — if a swap removed it,
-      // fall to the first filled slot.
+      // The active weapon must be a mounted gun — if a move removed it,
+      // fall to the first mounted gun, or to NONE (weaponless flight is
+      // allowed; firing is gated off while currentWeapon is undefined).
       const cur = this.player.currentWeapon;
       if (cur === undefined || !this.equippedWeapons.includes(cur)) {
-          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null) ?? WeaponType.BLASTER;
+          const first = this.equippedWeapons.find((w): w is WeaponType => w !== null);
           this.player.currentWeapon = first;
           this.player.burstQueue = 0;
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(first);
+          this.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
       }
+  }
+
+  /** Rebuild the derived weapon loadout from the mounted guns (any
+   *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
+   *  then re-sync the player entity + recompute activity/effects. */
+  private syncLoadoutFromSlots() {
+      const guns: WeaponType[] = [];
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const id = this.weaponSlots[i];
+          const def = id !== null ? moduleDef(id) : undefined;
+          if (def?.weapon !== undefined) guns.push(def.weapon);
+      }
+      for (let i = 0; i < this.equippedWeapons.length; i++) {
+          this.equippedWeapons[i] = guns[i] ?? null;
+      }
+      this.syncUnlocksToPlayer();
+      this.applyModuleEffects();
+  }
+
+  /** First empty slot of the module's group that accepts its kind, or -1. */
+  private firstFreeSlotFor(def: ModuleDef): number {
+      const slots = def.group === 'ship' ? this.shipSlots : this.weaponSlots;
+      for (let i = 0; i < slots.length; i++) {
+          if (slots[i] === null && moduleFitsSlot(def, def.group, i)) return i;
+      }
+      return -1;
+  }
+
+  private areaSlots(area: 'inventory' | 'ship' | 'weapon'): (string | null)[] {
+      return area === 'inventory' ? this.inventory
+          : area === 'ship' ? this.shipSlots : this.weaponSlots;
   }
 
   /**
-   * Equip an owned weapon into loadout slot 0/1 (or null to empty slot 2's
-   * position).  Free while at the (interim) pause-menu Drydock — station-only
-   * commitment arrives with 1e.  If the weapon already sits in the OTHER
-   * slot, the two slots swap.  Rejects: unowned weapons, and emptying the
-   * last filled slot.  Returns true when the loadout changed.
+   * Move a module item between tiles: inventory↔inventory (reorder),
+   * inventory→hex (install), hex→inventory (uninstall), hex↔hex (move).
+   * An occupied destination SWAPS when the displaced item fits the
+   * source tile.  DRYDOCK-ONLY: rejected unless docked at a station with
+   * a drydock (DBG paths bypass via moveModuleInternal) — EXCEPT pure
+   * inventory↔inventory reorders, which are legal anywhere (rearranging
+   * cargo is not outfitting).
    */
-  public equipWeapon(slot: number, weaponId: string | null): boolean {
-      if (slot !== 0 && slot !== 1) return false;
-      const other = 1 - slot;
-      if (weaponId === null) {
-          if (this.equippedWeapons[other] === null) return false; // can't empty both
-          if (this.equippedWeapons[slot] === null) return false;  // already empty
-          this.equippedWeapons[slot] = null;
-          this.syncUnlocksToPlayer();
-          return true;
-      }
-      const w = WEAPON_LIST.find(t => t === weaponId);
-      if (w === undefined || !this.unlockedWeapons.has(w)) return false;
-      if (this.equippedWeapons[slot] === w) return false; // no-op
-      if (this.equippedWeapons[other] === w) {
-          // Already in the other slot — swap the two slots.
-          this.equippedWeapons[other] = this.equippedWeapons[slot];
-      }
-      this.equippedWeapons[slot] = w;
-      this.syncUnlocksToPlayer();
+  public moveModule(
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ): boolean {
+      const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
+      if (!cargoOnly && !this.dockedServices()?.drydock) return false;
+      return this.moveModuleInternal(from, to);
+  }
+
+  /** SELL an inventory module back for MODULE_RESALE.SELL_FRACTION of its
+   *  cost.  Needs a station (any — every station drydocks); acts on
+   *  INVENTORY tiles only, so installed modules must be uninstalled
+   *  first.  Free items (Base Hull) can't be sold — scrap those. */
+  public sellModule(idx: number): boolean {
+      if (!this.dockedAtStation) return false;
+      const value = this.resaleValue(idx, MODULE_RESALE.SELL_FRACTION);
+      if (value === null || value <= 0) return false;
+      this.inventory[idx] = null;
+      this.credits += value;
       return true;
   }
 
-  /** Pause-menu loadout snapshot (slots + what can be equipped). */
-  private loadoutSnapshot() {
-      const entry = (w: WeaponType | null) => w === null ? null : { id: w as string, name: WEAPONS[w].name };
-      return {
-          slots: this.equippedWeapons.map(entry),
-          owned: WEAPON_LIST.filter(w => this.unlockedWeapons.has(w)).map(w => entry(w)!),
-      };
+  /** SCRAP an inventory module from ANYWHERE for
+   *  MODULE_RESALE.SCRAP_FRACTION of its cost — the jettison-for-pennies
+   *  option when no station is near (also the only way to shed cost-0
+   *  items like a spare Base Hull, which pay nothing). */
+  public scrapModule(idx: number): boolean {
+      const value = this.resaleValue(idx, MODULE_RESALE.SCRAP_FRACTION);
+      if (value === null) return false;
+      this.inventory[idx] = null;
+      this.credits += value;
+      return true;
   }
 
-  private isUnlockOwned(def: UnlockDef): boolean {
-      if (def.kind === 'shield') return this.shieldUnlocked;
-      if (def.kind === 'overcharge') return this.overchargeUnlocked;
-      return def.weapon !== undefined && this.unlockedWeapons.has(def.weapon);
+  /** Rounded resale payout for an inventory tile, or null when the tile
+   *  is empty/invalid. */
+  private resaleValue(idx: number, fraction: number): number | null {
+      if (idx < 0 || idx >= this.inventory.length) return null;
+      const id = this.inventory[idx];
+      if (id === null) return null;
+      const def = moduleDef(id);
+      if (!def) return null;
+      return Math.round(def.cost * fraction);
   }
 
-  /** Grant an unlock (free path: DBG; the shop deducts first). */
-  private applyUnlock(def: UnlockDef) {
-      if (def.kind === 'shield') {
-          this.shieldUnlocked = true;
-          this.applyUpgrades();
-          this.player.shield = this.player.maxShield ?? 0; // hand over a full shield
-      } else if (def.kind === 'overcharge') {
-          this.overchargeUnlocked = true;
-          this.syncUnlocksToPlayer();
-      } else if (def.weapon !== undefined) {
-          this.unlockedWeapons.add(def.weapon);
-          // Auto-equip into the first EMPTY loadout slot for immediate payoff
-          // (the doc §4 "first purchase fills slot 2" beat).  With both slots
-          // full the weapon is owned only — swap at the Drydock.
-          const empty = this.equippedWeapons.indexOf(null);
-          this.syncUnlocksToPlayer();
-          if (empty !== -1) {
-              this.equipWeapon(empty, def.weapon);
-              this.currentWeaponIndex = this.weapons.selectWeapon(this.player, def.weapon);
-          }
+  /** The actual tile move/swap.  Guards: destination kind fit, displaced
+   *  item must fit the vacated tile, and the last mounted gun can never
+   *  leave the gun hexes without another gun taking its place. */
+  private moveModuleInternal(
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ): boolean {
+      const fromSlots = this.areaSlots(from.area);
+      const toSlots = this.areaSlots(to.area);
+      if (from.idx < 0 || from.idx >= fromSlots.length) return false;
+      if (to.idx < 0 || to.idx >= toSlots.length) return false;
+      if (from.area === to.area && from.idx === to.idx) return false;
+      const id = fromSlots[from.idx];
+      if (id === null) return false;
+      const def = moduleDef(id);
+      if (!def) return false;
+      const displaced = toSlots[to.idx];
+      const dDef = displaced !== null ? moduleDef(displaced) : undefined;
+      if (to.area !== 'inventory' && !moduleFitsSlot(def, to.area, to.idx)) return false;
+      if (displaced !== null) {
+          if (!dDef) return false;
+          if (from.area !== 'inventory' && !moduleFitsSlot(dDef, from.area, from.idx)) return false;
       }
+      // Apply, then enforce the slot-agnostic gun COUNT limit — a move may
+      // not leave more than MAX_INSTALLED_GUNS guns mounted in the weapon
+      // flower (weaponless is fine; there is no minimum).
+      fromSlots[from.idx] = displaced;
+      toSlots[to.idx] = id;
+      const gunsMounted = this.weaponSlots.reduce(
+          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
+      if (gunsMounted > MAX_INSTALLED_GUNS) {
+          fromSlots[from.idx] = id;
+          toSlots[to.idx] = displaced;
+          return false;
+      }
+      this.syncLoadoutFromSlots();
+      return true;
   }
 
-  /** Buy a one-time unlock (Module) with Salvage. */
-  public purchaseUnlock(id: string): boolean {
-      const def = UNLOCK_DEFS.find(d => d.id === id);
-      if (!def || this.isUnlockOwned(def) || this.credits < def.cost) return false;
+  /** Services of the currently docked station (null when undocked). */
+  private dockedServices(): StationServices | null {
+      const kind = this.dockedAtStation
+          ? (this.dockedStation?.stationKind as StationKind | undefined)
+          : undefined;
+      return kind !== undefined ? STATION_VARIANTS[kind].services : null;
+  }
+
+  /** Buy a module ITEM into the inventory.  Requires being docked at a
+   *  station whose shop carries the module's group, the salvage, and a
+   *  free inventory tile.  NO auto-install — outfitting happens at a
+   *  drydock (the shop and the drydock may be different stations). */
+  public purchaseModule(moduleId: string): boolean {
+      const def = moduleDef(moduleId);
+      const svc = this.dockedServices();
+      if (!def || !svc) return false;
+      if (def.group === 'ship' ? !svc.shipShop : !svc.weaponShop) return false;
+      if (def.cost <= 0 || this.credits < def.cost) return false;
+      const inv = this.inventory.indexOf(null);
+      if (inv === -1) return false; // inventory full
       this.credits -= def.cost;
-      this.applyUnlock(def);
+      this.inventory[inv] = moduleId;
       return true;
   }
 
-  /** DBG: unlock everything (weapons, shield, overcharge). */
-  public debugUnlockAll() {
-      for (const w of WEAPON_LIST) this.unlockedWeapons.add(w);
-      this.shieldUnlocked = true;
-      this.overchargeUnlocked = true;
-      this.syncUnlocksToPlayer();
-      this.applyUpgrades();
-      this.player.shield = this.player.maxShield ?? 0;
+  /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
+   *  Weapons rows — the wave-map test path; bypasses the drydock guard).
+   *  Fills the first empty gun hex, else replaces the hex the ACTIVE
+   *  weapon is not in; a displaced gun drops to the inventory if there
+   *  is room (else it is scrapped — DBG only). */
+  public debugGrantWeapon(id: string) {
+      const mDef = MODULE_DEFS.find(m => m.weapon === (id as WeaponType));
+      if (!mDef) return;
+      if (this.weaponSlots.includes(mDef.id)) return; // already mounted
+      const gunSlots = this.weaponSlots
+          .map((s, i) => ({ s, i }))
+          .filter(e => e.s !== null && moduleDef(e.s)?.kind === 'weapon');
+      let slot: number;
+      if (gunSlots.length < MAX_INSTALLED_GUNS) {
+          slot = this.weaponSlots.indexOf(null);
+          if (slot === -1) slot = gunSlots.length > 0 ? gunSlots[gunSlots.length - 1].i : 0;
+      } else {
+          // At the gun limit — replace the mounted gun the ACTIVE weapon is
+          // not, so the weapon under test doesn't yank the one being fired.
+          const victim = gunSlots.find(e => moduleDef(e.s!)?.weapon !== this.player.currentWeapon) ?? gunSlots[0];
+          slot = victim.i;
+      }
+      const displaced = this.weaponSlots[slot];
+      if (displaced !== null) {
+          const inv = this.inventory.indexOf(null);
+          if (inv !== -1) this.inventory[inv] = displaced;
+      }
+      this.weaponSlots[slot] = mDef.id;
+      this.syncLoadoutFromSlots();
   }
 
-  /** Reset unlocks back to the lean run-start loadout. */
-  private resetUnlocks() {
-      this.unlockedWeapons = new Set([WeaponType.BLASTER]);
-      this.shieldUnlocked = false;
-      this.overchargeUnlocked = false;
-      this.equippedWeapons = [WeaponType.BLASTER, null]; // slot 1 Blaster, slot 2 empty
-      this.player.currentWeapon = WeaponType.BLASTER;
-      this.currentWeaponIndex = 0;
-      this.syncUnlocksToPlayer();
+  /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
+   *  while paused): every gun variety with its presence + gun-hex index. */
+  private weaponCatalogSnapshot() {
+      return MODULE_DEFS.filter(d => d.family === 'gun').map(d => ({
+          id: d.weapon as string,
+          name: d.label,
+          owned: this.weaponSlots.includes(d.id) || this.inventory.includes(d.id),
+          slot: (() => {
+              const i = d.weapon !== undefined ? this.equippedWeapons.indexOf(d.weapon) : -1;
+              return i === -1 ? null : i;
+          })(),
+      }));
   }
-  /** DBG: relock everything to the lean loadout. */
-  public debugResetUnlocks() { this.resetUnlocks(); this.applyUpgrades(); }
 
-  /** Drydock catalog snapshot for the player menu (built only while paused).
-   *  Modules (one-time unlocks) + Augments (per-level stat upgrades priced
-   *  by the escalating upgradeCost() curve — purchase-only progression,
-   *  pivot 1c).  A shield-dependent augment (Plating / Capacitor) is shown
-   *  LOCKED until the Shield module is owned — visible so the dependency
-   *  reads as shop ordering, not filtered away (the old card-eligibility
-   *  machinery died with the cards). */
-  private shopSnapshot() {
+  /** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
+  private outfittingSnapshot() {
+      const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
+          if (id === null) return null;
+          const def = moduleDef(id)!;
+          const req = MODULE_REQUIREMENTS[def.family];
+          return {
+              id, label: def.label, kind: def.kind as string, family: def.family as string,
+              active: active[i],
+              requires: req !== undefined ? (req[0] as string) : undefined,
+          };
+      });
+      const gunsMounted = this.weaponSlots.reduce(
+          (n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
       return {
-          unlocks: UNLOCK_DEFS.map(d => {
-              const owned = this.isUnlockOwned(d);
-              return { id: d.id, label: d.label, desc: d.desc, owned, cost: d.cost, affordable: !owned && this.credits >= d.cost };
-          }),
-          augments: UPGRADE_DEFS.map(d => {
-              const level = this.upgradeLevels[d.id];
-              const cost = upgradeCost(d.id, level);
-              const locked = d.requires === 'shield' && !this.shieldUnlocked;
+          ship: hexSnap(this.shipSlots, this.activeShip),
+          weapon: hexSnap(this.weaponSlots, this.activeWeapon),
+          gunsMounted,
+          maxGuns: MAX_INSTALLED_GUNS,
+          inventory: this.inventory.map(id => {
+              if (id === null) return null;
+              const def = moduleDef(id)!;
               return {
-                  id: d.id as string, label: d.label, desc: d.desc, level, cost,
-                  locked,
-                  affordable: !locked && this.credits >= cost,
+                  id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
+                  sellValue: Math.round(def.cost * MODULE_RESALE.SELL_FRACTION),
+                  scrapValue: Math.round(def.cost * MODULE_RESALE.SCRAP_FRACTION),
               };
           }),
+          catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => ({
+              id: d.id, group: d.group as string, kind: d.kind as string,
+              label: d.label, desc: d.desc, cost: d.cost,
+              affordable: this.credits >= d.cost && this.inventory.includes(null),
+          })),
       };
-  }
-
-  /** Buy one level of a stat upgrade (Augment) with Salvage.  Locked
-   *  augments (shield-dependent, Shield not owned) can't be bought. */
-  public purchaseUpgrade(id: string): boolean {
-      const def = UPGRADE_DEFS.find(d => d.id === id);
-      if (!def) return false;
-      if (def.requires === 'shield' && !this.shieldUnlocked) return false;
-      const cost = upgradeCost(def.id, this.upgradeLevels[def.id]);
-      if (this.credits < cost) return false;
-      this.credits -= cost;
-      this.upgradeLevels[def.id] += 1; // uncapped, like the cards were
-      this.applyUpgrades();
-      return true;
   }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
@@ -5661,10 +6014,17 @@ export class GameEngine {
   }
 
   // Thin wrapper kept for internal call-site compatibility — delegates to WaveSystem.
+  /** True when the active map runs wave gameplay.  The OVERWORLD is the
+   *  wave-free home map (station + ambient fauna only) — WaveSystem is
+   *  initialised disabled there, exactly like difficulty "None". */
+  private get wavesEnabled(): boolean {
+    return this.currentMap?.type !== MapType.OVERWORLD;
+  }
+
   private initWaveSystem() {
     const ctx = this.waveContext();
     if (!ctx) return;
-    this.waves.init(ctx);
+    this.waves.init(ctx, this.wavesEnabled);
   }
 
 
@@ -5781,6 +6141,12 @@ export class GameEngine {
       this.renderer.buildStaticTileLayer(map.entities, map.width, map.height);
       // Fresh map — drop any queued nebula regens from the previous one.
       this.nebulas.reset();
+      // Cache the station POIs (Overworld only; empty elsewhere) so the
+      // per-step dock proximity check iterates a tiny fixed list.
+      this.stations = map.entities.filter(e => e.isStation);
+      this.dockedStation = null;
+      this.dockedAtStation = false;
+      this.dockInRange = false;
   }
 
   private draw() {

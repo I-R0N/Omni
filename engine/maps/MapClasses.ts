@@ -1,7 +1,7 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS } from '../../constants';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -324,6 +324,101 @@ export class UniverseMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+  }
+}
+
+/**
+ * Overworld — the wave-free home map (economy-pivot increment 1e).
+ * Standard mixed terrain (asteroids + glass/plastic/metal clusters +
+ * nebulae, counts read from MAP_POPULATION[OVERWORLD]) with the space
+ * station POI at map center.  WaveSystem never starts a wave here; the
+ * living-world population is the ambient systems (bubbles, rivals, the
+ * engine-respawned roaming dragon).  The player spawns just beside the
+ * station — inside dock range, so a fresh run opens with the DOCK
+ * affordance visible.
+ */
+export class OverworldMap extends BaseMapLayer {
+  public static readonly WIDTH  = 12000;
+  public static readonly HEIGHT = 12000;
+
+  constructor() {
+    super('overworld_01', 'Overworld', MapType.OVERWORLD);
+    this.width  = OverworldMap.WIDTH;
+    this.height = OverworldMap.HEIGHT;
+    this.playerSpawn = { x: 0, y: STATION_CONSTANTS.DOCK_RANGE * 0.8 };
+  }
+
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const gen = getRockShardFreeSpawn(MapType.OVERWORLD);
+    this.spawnAsteroids(gen.count, gen.minSize, gen.maxSize, gen.radius, gen.speedMultiplier);
+    for (const e of this.entities) wrapPosition(e.position);
+
+    // Same 95 %-of-map cluster zone as the UniverseMap (5 % dead ring at
+    // the wrap seam); counts come straight from MAP_POPULATION.
+    const CLUSTER_W = MAP_WIDTH  * 0.95;
+    const CLUSTER_H = MAP_HEIGHT * 0.95;
+    const occupied = new Set<string>();
+    const pop = MAP_POPULATION[MapType.OVERWORLD];
+    const cluster = (variant: StructureVariant, key: 'glass-tile' | 'plastic-tile' | 'metal-tile') => {
+      const c = pop[key]?.tileCluster;
+      if (!c) return;
+      this.entities.push(...TileGenerator.generateClusteredMesh(
+          CLUSTER_W, CLUSTER_H, 22,
+          c.clusterCount, c.minClusterSize, c.maxClusterSize, occupied, variant
+      ));
+    };
+    cluster('glass', 'glass-tile');
+    cluster('plastic', 'plastic-tile');
+    cluster('metal', 'metal-tile');
+
+    const neb = pop['nebula-tile']?.tileCluster;
+    if (neb) {
+      this.entities.push(...TileGenerator.generateNebulaClusters(
+          CLUSTER_W, CLUSTER_H, 22,
+          neb.clusterCount, neb.minClusterSize, neb.maxClusterSize,
+          occupied,
+          this.nebulaClusterCenters
+      ));
+    }
+
+    // Clear every station's home patch: nothing generates on top of them
+    // (the home station's clearance doubles as the spawn-safe bubble —
+    // the player spawns just off it).
+    const clear2 = STATION_CONSTANTS.CLEARANCE ** 2;
+    this.entities = this.entities.filter(e =>
+        OVERWORLD_STATIONS.every(st => {
+            const dx = e.position.x - st.x, dy = e.position.y - st.y;
+            return dx * dx + dy * dy > clear2;
+        })
+    );
+
+    // The stations — indestructible, non-colliding INTERACTABLEs (mass ∞
+    // + no dropType: skipped by the broadphase, the static grid, and the
+    // flow-field obstacle bake).  Each carries its variant kind; the
+    // SERVICES mix (drydock / repair / shops) lives in STATION_VARIANTS.
+    // GameEngine collects them by the isStation flag at map load.
+    for (const st of OVERWORLD_STATIONS) {
+      const variant = STATION_VARIANTS[st.kind];
+      this.entities.push({
+        id: nextId('station'),
+        type: EntityType.INTERACTABLE,
+        isStation: true,
+        stationKind: st.kind,
+        name: variant.name,
+        position: { x: st.x, y: st.y },
+        velocity: { x: 0, y: 0 },
+        size: { x: STATION_CONSTANTS.SIZE, y: STATION_CONSTANTS.SIZE },
+        rotation: 0,
+        color: variant.color,
+        active: true,
+        health: 1,
+        maxHealth: 1,
+        mass: Infinity,
+      });
+    }
   }
 }
 

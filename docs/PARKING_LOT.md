@@ -265,7 +265,14 @@ implicitly fine since they're 1-HP). This generalizes that idea to everyone.
 
 ---
 
-## Weapon ammo model + menu clarity + purchase-UI parity
+## Weapon ammo model + menu clarity + purchase-UI parity — SUPERSEDED
+
+> **SUPERSEDED (2026-07-24, station/module increments):** item 1 shipped as
+> the weapons-ammo pivot (ammo deleted entirely — pivot 1b); items 2–3 were
+> replaced wholesale by the hex-slot module UI (guns are module items in the
+> shared hex flowers/inventory/shop renderers, so locked-vs-unlocked and
+> purchase-UI parity no longer exist as separate surfaces).  Kept for
+> reference only.
 
 **Context / request:** Three related weapon-UX asks.
 
@@ -590,3 +597,143 @@ so any of these warrants its own branch + verification.
 Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
 `SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
 `PERF_TASKS` in `constants.ts`.
+
+---
+
+## Ship-design directions (station/module follow-up, 2026-07-18)
+
+Two competing designs for how PLAYER SHIPS relate to the hex-slot module
+system. **Option A is the chosen direction** (user decision during the
+station-poi increment); Option B is preserved for reference — it was the
+original "ship-part modules" sketch and was explicitly superseded.
+
+### Option A — Ship catalog (CHOSEN)
+
+Ships are discrete purchasable items, each with its OWN SPRITE and a fixed
+outfitting envelope. Modules stay pure equipment; the ship is the frame
+they plug into.
+
+- Each ship defines: inventory tile count, ship-group installation slot
+  count/shape, weapon-group slot count/shape (incl. how many GUN slots —
+  the "more weapon slots" major upgrade becomes a ship purchase), base
+  stats, and one bespoke sprite. No per-part sprite compositing.
+- **Special ships** can grant positional boosts: designated installation
+  slots that amplify whatever module sits in them (e.g. "+25% to the
+  module in the aft slot") — making slot LAYOUT a purchasable identity.
+- Progression: the starter ship is deliberately cramped (small inventory,
+  few slots); bigger/specialist hulls are late-game salvage sinks.
+- Pairs with the future persistent overworld: the ship you fly is the
+  run-to-run persistent artifact; the base station is where the hangar
+  lives.
+- **Capacity ceilings are ship stats-in-waiting** (2026-07-24 addendum):
+  `MAX_INSTALLED_GUNS = 2` and `INVENTORY_CAPACITY = 12` are deliberately
+  hard constants today, both marked in code as "future ships vary this."
+  Under this catalog they become per-ship envelope fields, and raising
+  them is the headline reason to buy a bigger hull.  Until the catalog
+  lands, resist standalone "+1 gun slot" purchases — that undercuts the
+  ship catalog's value proposition.
+
+### Option B — Modular physical ship (SUPERSEDED)
+
+The ship's LOOK and performance are composed from installed `ship-part`
+modules — hull, engine housing, wings, nosecone/armor — each contributing
+performance characteristics (health, armor, max speed, acceleration) and
+a sprite layer; the rendered ship is the composite of its parts.
+
+- Was the original intent behind the reserved `'ship-part'` module kind.
+- Cost: needs per-part sprite art for every combination axis, a sprite
+  compositing/anchoring system, and careful hitbox management as parts
+  change silhouette.
+- Rejected in favor of Option A: one sprite per ship reads better, is far
+  cheaper to produce, and positional slot boosts recover most of the
+  build-identity upside without compositing.
+
+---
+
+## Station-economy follow-ups (2026-07-24)
+
+Items tabled during the station / module-outfitting / sell-scrap
+increments (PR #73).  Enemy-side *feel* numbers stay in the
+"Exotic-enemy roster — balance / tuning pass" entry above; these are the
+economy and station-life follow-ups.
+
+### NPC station traffic (ambience)
+
+Stations are pure player POIs today — nothing else visits them.  Add
+ambient NPC ships that fly to / dock at / depart stations (reusing the
+rival sprite pool + the reusable `openPortal` VFX) so stations read as
+living infrastructure, not vending machines.  Pure ambience: no commerce
+simulation, no interaction beyond maybe collision avoidance.  Cheap
+version: 1–2 shuttles per station on a loop between stations, despawning
+at range.  Touch points: a lean engine-managed roamer like
+`RivalInstance` (AISystem skip-flag pattern), `STATION_VARIANTS`,
+`GameEngine.openPortal`.
+
+### Salvage death penalty
+
+Death currently costs the run, but salvage carries no risk once
+collected.  Options to make dying expensive without a full roguelike
+reset: drop a fraction of carried credits at the death site (recoverable
+corpse-run style), a flat percentage tax, or uninsured-cargo (inventory
+tiles at risk, installed modules safe — pairs naturally with the hex
+cargo model and would make sell-back-before-danger a real decision).
+Needs a user decision on severity; interacts with the repair cost (dying
+vs repairing must not invert incentives).  Touch points:
+`handleEntityDeath` player branch, `credits`, possibly `DropSystem` for
+a recoverable drop.
+
+### Economy & progression tuning pass
+
+Module prices were mapped 1:1 onto the old level-curve totals, but the
+surrounding systems all moved — a holistic pass is owed once real
+playtime accumulates.  One bucket, tune together:
+
+- **Overworld income pacing** — the wave-free map earns only ambient
+  salvage (bubbles / rivals / dragon, no wave sprays); check
+  time-to-first-Hull and time-to-Mk-III against intended session length.
+- **Per-wave enemy growth vs module power curve** — `ENEMY_SCALING` is
+  implemented and tuned gentle; retune the player-vs-enemy power pacing
+  now that player power arrives in discrete module purchases, not smooth
+  levels.  (Per-enemy feel numbers live in the exotic-roster entry.)
+- **Mk trade-in** — duplicates stack and Mk II doesn't obsolete Mk I;
+  90% sell-back mostly covers respec, but consider a true trade-in (old
+  mark credited against the next mark) if buy-sell-buy feels clunky.
+- **Weapon weight numbers** — `WEAPON_WEIGHT` (BASE_BOOST 1.10, DRAG
+  0.10) is explicitly provisional; verify weaponless flight feels like a
+  real option and heavy arsenals a real cost.
+- **Resale fractions** — 90% sell-back makes respeccing nearly free
+  (possibly fine — outfitting experimentation is the fun); revisit
+  `MODULE_RESALE` (and the 9% scrap floor) once the death penalty /
+  income pacing land, since all three shape how precious credits feel.
+
+Knobs: `MODULE_DEFS` costs, `SALVAGE_CONSTANTS`, `MODULE_RESALE`,
+`WEAPON_WEIGHT`, `ENEMY_SCALING`, `STATION_CONSTANTS.REPAIR_COST_PER_HP`.
+
+### Persistent state (what survives a run) — DEPENDENT on the tuning pass
+
+**Follow-up to, and dependent on, the economy tuning pass above — do not
+start this until that pass has landed.**  HOME station is already
+described as "the future persistent base" but nothing defines what
+persists.  Open questions to settle before building: does the outfitted
+ship persist run-to-run (the natural reading of the ship catalog), do
+credits / inventory persist or reset, is the Overworld the persistent
+hub with wave maps as excursions, and where does state live
+(localStorage is the only option — no backend).  Persistence changes the
+meaning of every price in the economy, so re-run the tuning numbers with
+persistence in view.
+
+### Pause-menu stat legibility — per-module effect attribution
+
+(Note: ship modules already function with the free Base Hull — it is the
+family-`hull` adjacency root on the center hex, touching all six ring
+slots — so there is no first-purchase gate to soften.)  What's wanted: a
+clear display of player / ship / weapon stats in the pause menu with an
+intuitive understanding of what each installed module contributes.
+Candidate shape: expand the Ship Status panel to the full derived-stat
+set (hull, shield, regen, damage, fire rate, speed, acceleration
+including weapon-weight drag), each stat expandable to its contributing
+modules; and/or tapping a hex highlights the stats it feeds, with the
+module's exact effect shown in the detail strip.  Touch points:
+`applyModuleEffects` already sums ACTIVE effects — expose a per-module
+breakdown on `EngineStats.outfitting`; `UIOverlay` pause Ship Status +
+`renderModuleDetail`.

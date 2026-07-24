@@ -301,16 +301,16 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleTraits();
   };
 
-  const handleCycleUpgrade = (id: string) => {
-      if (engineRef.current) engineRef.current.cycleUpgrade(id as any);
+  const handleGrantModule = (id: string) => {
+      if (engineRef.current) engineRef.current.debugGrantModule(id);
   };
 
-  const handleMaxUpgrades = () => {
-      if (engineRef.current) engineRef.current.maxAllUpgrades();
+  const handleOutfitAll = () => {
+      if (engineRef.current) engineRef.current.debugOutfitAll();
   };
 
-  const handleResetUpgrades = () => {
-      if (engineRef.current) engineRef.current.resetUpgrades();
+  const handleResetOutfit = () => {
+      if (engineRef.current) engineRef.current.resetOutfit();
   };
 
   const handleAddCredits = () => {
@@ -335,24 +335,43 @@ const App: React.FC = () => {
       return engineRef.current ? engineRef.current.perfRecExport() : '';
   };
 
-  const handlePurchaseUnlock = (id: string) => {
-      if (engineRef.current) engineRef.current.purchaseUnlock(id);
+  const handleMoveModule = (
+      from: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+      to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
+  ) => {
+      if (engineRef.current) engineRef.current.moveModule(from, to);
   };
 
-  const handleEquipWeapon = (slot: number, weaponId: string | null) => {
-      if (engineRef.current) engineRef.current.equipWeapon(slot, weaponId);
+  const handlePurchaseModule = (id: string) => {
+      if (engineRef.current) engineRef.current.purchaseModule(id);
   };
 
-  const handlePurchaseUpgrade = (id: string) => {
-      if (engineRef.current) engineRef.current.purchaseUpgrade(id);
+  const handleSellModule = (idx: number) => {
+      if (engineRef.current) engineRef.current.sellModule(idx);
   };
 
-  const handleUnlockAll = () => {
-      if (engineRef.current) engineRef.current.debugUnlockAll();
+  const handleScrapModule = (idx: number) => {
+      if (engineRef.current) engineRef.current.scrapModule(idx);
   };
 
-  const handleResetUnlocks = () => {
-      if (engineRef.current) engineRef.current.debugResetUnlocks();
+  const handleDock = () => {
+      if (engineRef.current) engineRef.current.dockAtStation();
+  };
+
+  const handleUndock = () => {
+      if (engineRef.current) engineRef.current.undock();
+  };
+
+  const handleRepairHull = () => {
+      if (engineRef.current) engineRef.current.repairHull();
+  };
+
+  const handleGrantWeapon = (id: string) => {
+      if (engineRef.current) engineRef.current.debugGrantWeapon(id);
+  };
+
+  const handleTeleportStation = () => {
+      if (engineRef.current) engineRef.current.debugTeleportToStation();
   };
 
   const handleToggleFFOverlayVectors = () => {
@@ -464,20 +483,24 @@ const App: React.FC = () => {
         onApplyCorrosion={handleApplyCorrosion}
         onApplyDisable={handleApplyDisable}
         onToggleTraits={handleToggleTraits}
-        onCycleUpgrade={handleCycleUpgrade}
-        onMaxUpgrades={handleMaxUpgrades}
-        onResetUpgrades={handleResetUpgrades}
+        onGrantModule={handleGrantModule}
+        onOutfitAll={handleOutfitAll}
+        onResetOutfit={handleResetOutfit}
         onAddCredits={handleAddCredits}
         onSpawnDragon={handleSpawnDragon}
         onSpawnRival={handleSpawnRival}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}
-        onPurchaseUnlock={handlePurchaseUnlock}
-        onEquipWeapon={handleEquipWeapon}
-        onPurchaseUpgrade={handlePurchaseUpgrade}
-        onUnlockAll={handleUnlockAll}
-        onResetUnlocks={handleResetUnlocks}
+        onMoveModule={handleMoveModule}
+        onPurchaseModule={handlePurchaseModule}
+        onSellModule={handleSellModule}
+        onScrapModule={handleScrapModule}
+        onDock={handleDock}
+        onUndock={handleUndock}
+        onRepairHull={handleRepairHull}
+        onGrantWeapon={handleGrantWeapon}
+        onTeleportStation={handleTeleportStation}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}
         onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
