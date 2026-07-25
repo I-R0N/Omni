@@ -1628,7 +1628,11 @@ export class GameEngine {
           duration: PORTAL_CONSTANTS.BURST_DURATION,
       });
 
-      this.selectedMapType = dest.mapType;
+      // NOTE: `selectedMapType` is deliberately NOT updated.  It means
+      // "the map a NEW RUN builds" — set by the menu's map grid — and a
+      // portal is travel within a run, not a new selection.  So restarting
+      // after a portal trip returns to the player's chosen start map (the
+      // hub by default) rather than stranding the next run in an arena.
       this.loadMapFresh(dest.mapType);
       this.placePlayerAtSpawn();
       // Combat state belongs to the fight left behind: shield resumes its
