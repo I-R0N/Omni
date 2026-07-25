@@ -3898,19 +3898,39 @@ export class RenderSystem {
                 ctx.fillStyle = '#0b0616';
                 ctx.fill();
 
-                // Counter-rotating arc rings — three broken arcs per ring,
-                // spinning opposite ways, which reads as a vortex.
+                // Rim of the event horizon — a hard bright edge so the hole
+                // reads against a busy nebula backdrop.
+                ctx.globalAlpha = 0.9;
                 ctx.strokeStyle = entity.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Counter-rotating arc rings — three broken arcs per ring,
+                // spinning opposite ways, which reads as a vortex.  The
+                // inner ring gets a white highlight pass so the swirl stays
+                // legible at gameplay zoom.
                 for (let ring = 0; ring < 2; ring++) {
-                    const rr = r * (ring === 0 ? 0.72 : 0.95);
+                    const rr = r * (ring === 0 ? 0.78 : 1.0);
                     const dir = ring === 0 ? 1 : -1;
-                    ctx.globalAlpha = ring === 0 ? 0.95 : 0.6;
-                    ctx.lineWidth = ring === 0 ? 4 : 2.5;
                     for (let i = 0; i < 3; i++) {
                         const a0 = spin * dir + (i / 3) * Math.PI * 2;
+                        const a1 = a0 + Math.PI * 0.44;
+                        ctx.globalAlpha = ring === 0 ? 1.0 : 0.7;
+                        ctx.strokeStyle = entity.color;
+                        ctx.lineWidth = ring === 0 ? 6 : 3.5;
                         ctx.beginPath();
-                        ctx.arc(0, 0, rr, a0, a0 + Math.PI * 0.44);
+                        ctx.arc(0, 0, rr, a0, a1);
                         ctx.stroke();
+                        if (ring === 0) {
+                            ctx.globalAlpha = 0.85;
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 1.6;
+                            ctx.beginPath();
+                            ctx.arc(0, 0, rr, a0, a1);
+                            ctx.stroke();
+                        }
                     }
                 }
 
@@ -3922,11 +3942,11 @@ export class RenderSystem {
                 ctx.fill();
 
                 // Destination tag — the portal always says where it goes.
-                ctx.globalAlpha = 0.9;
-                ctx.fillStyle = entity.color;
-                ctx.font = 'bold 12px monospace';
+                ctx.globalAlpha = 0.95;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 13px monospace';
                 ctx.textAlign = 'center';
-                ctx.fillText(`↝ ${(entity.name ?? '').toUpperCase()}`, 0, r + 24);
+                ctx.fillText(`↝ ${(entity.name ?? '').toUpperCase()}`, 0, r + 26);
                 ctx.globalAlpha = 1.0;
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {

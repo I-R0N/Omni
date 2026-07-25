@@ -2843,7 +2843,8 @@ export const OVERWORLD_CONSTANTS = {
 // dot and an off-screen chevron for free.  Destinations are MAP-DESCRIPTOR
 // IDS (engine/maps/MapDescriptors.ts), never bare MapType values.
 export const PORTAL_CONSTANTS = {
-  SIZE: 150,                 // world-unit diameter of the rift mouth
+  SIZE: 200,                 // world-unit diameter of the rift mouth (reads as
+                             // a landmark at gameplay zoom, like the station)
   COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
   RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
   // Interaction proximity.  Slightly under the station's DOCK_RANGE so that
