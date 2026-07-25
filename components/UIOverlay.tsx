@@ -131,6 +131,9 @@ interface UIOverlayProps {
   onDock?: () => void;
   onUndock?: () => void;
   onRepairHull?: () => void;
+  // Map portals (roadmap step (k)): travel to the in-range rift's
+  // destination.  Shares the E key with docking — see stats.portal.
+  onEnterPortal?: () => void;
   // DBG: grant + equip a weapon (pause-menu debug Weapons rows) and
   // teleport the player to the station's doorstep (Overworld only).
   onGrantWeapon?: (id: string) => void;
@@ -224,6 +227,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onScrapModule,
   onDock,
   onUndock,
+  onEnterPortal,
   onRepairHull,
   onGrantWeapon,
   onTeleportStation,
@@ -242,7 +246,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onSkipWave,
   difficulty = 3,
   onSetDifficulty,
-  mapType = MapType.UNIVERSE,
+  mapType = MapType.OVERWORLD,
   onSetMapType,
   onSetForcedEnemy,
 }) => {
@@ -1344,13 +1348,26 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
       </div>
 
-      {/* ── Dock affordance (Overworld station) ── */}
+      {/* ── Interaction affordance (station dock / portal travel) ── */}
+      {/* Stations and portals share the E key; the engine arbitrates by
+          nearest-in-range, so at most one of these is ever offered and the
+          button names the action E will take. */}
       {stats.gameState === GameState.PLAYING && stats.dock?.inRange && !stats.dock.docked && (
         <button
           onClick={onDock}
           className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-sky-600/85 hover:bg-sky-500 border border-sky-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
         >
           ⚓ Dock <span className="text-sky-200 text-[10px] font-mono normal-case">[E]</span>
+        </button>
+      )}
+
+      {stats.gameState === GameState.PLAYING && stats.portal && !stats.dock?.docked && (
+        <button
+          onClick={onEnterPortal}
+          className="pointer-events-auto absolute bottom-28 left-1/2 -translate-x-1/2 bg-violet-600/85 hover:bg-violet-500 border border-violet-300/70 text-white font-bold text-sm tracking-widest uppercase px-6 py-2.5 rounded-full shadow-2xl backdrop-blur-sm animate-pulse transition-all active:scale-95"
+        >
+          ↝ {stats.portal.isReturn ? 'Return to' : 'Enter'} {stats.portal.name}{' '}
+          <span className="text-violet-200 text-[10px] font-mono normal-case">[E]</span>
         </button>
       )}
 

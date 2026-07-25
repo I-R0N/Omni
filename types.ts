@@ -677,6 +677,23 @@ export interface GameEntity {
   // ring when set — the "dock available" affordance in world space.
   stationDockReady?: boolean;
 
+  // ── Map portal (roadmap step (k)) ────────────────────────────────────────
+  // Traversable rift connecting the hub to a wave arena (and back).  Same
+  // entity recipe as the station above — EntityType.INTERACTABLE, no
+  // dropType, mass ∞ — so it is pure scenery + an interaction zone with
+  // zero broadphase / static-grid / flow-field side effects.  Transit logic
+  // lives in GameEngine.transitionToMap; the bespoke draw keys off this flag.
+  isPortal?: boolean;
+  // Destination MAP-DESCRIPTOR ID (engine/maps/MapDescriptors.ts), never a
+  // bare MapType — the descriptor layer is what the future overworld phase
+  // references too.  `name` carries the destination's display name.
+  portalTargetId?: string;
+  // Stamped each sim step by the interaction proximity check: true while the
+  // player is inside PORTAL_CONSTANTS.USE_RANGE *and* this portal won the
+  // nearest-in-range arbitration against every other portal and station.
+  // RenderSystem pulses the entry ring when set (the world-space affordance).
+  portalReady?: boolean;
+
   // Stamped by the damage paths when the killing blow came from the player
   // (projectile, crash, lightning chain, cannon AoE).  handleEntityDeath
   // awards shard/tile destruction points only when set, then clears it so
@@ -1284,6 +1301,18 @@ export interface EngineStats {
     inRange: boolean; docked: boolean;
     name?: string;
     services?: { drydock: boolean; repair: boolean; shipShop: boolean; weaponShop: boolean };
+  };
+  /** Nearest in-range map portal, if one won the interaction arbitration
+   *  this step (roadmap step (k)).  Present ⇒ the E key / HUD affordance
+   *  ENTERS this portal rather than docking; `dock.inRange` is false in
+   *  that case, so exactly one affordance is ever offered.  `name` is the
+   *  destination's display name, `targetId` its map-descriptor id. */
+  portal?: {
+    name: string;
+    targetId: string;
+    /** True on an arena's way home, false on a hub rift out to an arena —
+     *  lets the affordance read "RETURN" instead of "ENTER". */
+    isReturn: boolean;
   };
   /** Station services snapshot (built only while docked).  Hull repair is
    *  pay-per-HP, pro-rated: a partial repair heals what the player can

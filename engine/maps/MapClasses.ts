@@ -1,7 +1,8 @@
 
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
-import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS } from '../../constants';
+import { COLORS, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
+import { mapDescriptor, HUB_DESCRIPTOR } from './MapDescriptors';
 import { sampleFlow, FlowVector } from '../systems/FlowField';
 import { nextId } from '../systems/IdAllocator';
 import { MAP_WIDTH, MAP_HEIGHT, wrapPosition } from '../toroidal';
@@ -36,6 +37,50 @@ export abstract class BaseMapLayer {
   }
 
   abstract init(): void;
+
+  /**
+   * Spawn a traversable rift leading to the map descriptor `targetId`
+   * (roadmap step (k)).  The entity recipe is the space station's exactly
+   * — EntityType.INTERACTABLE + mass ∞ + no dropType — so the physics
+   * broadphase skips every pair it is in, the static grid and the
+   * flow-field obstacle bake exclude it, and the existing POI paths hand
+   * it a minimap dot, an off-screen chevron, and asteroid-respawn
+   * avoidance for free.  The destination's display name rides on `name`.
+   */
+  protected addPortal(targetId: string, pos: Vector2, color: string) {
+    this.entities.push({
+      id: nextId('portal'),
+      type: EntityType.INTERACTABLE,
+      isPortal: true,
+      portalTargetId: targetId,
+      name: mapDescriptor(targetId)?.name ?? targetId,
+      position: { x: pos.x, y: pos.y },
+      velocity: { x: 0, y: 0 },
+      size: { x: PORTAL_CONSTANTS.SIZE, y: PORTAL_CONSTANTS.SIZE },
+      rotation: 0,
+      color,
+      active: true,
+      health: 1,
+      maxHealth: 1,
+      mass: Infinity,
+    });
+  }
+
+  /**
+   * The way home: one ALWAYS-ACTIVE return rift beside this arena's
+   * player spawn.  Called by the four portal-linked arena maps (the
+   * showcase field maps stay menu-only and carry no portals).  The
+   * offset lands inside the spawn safe zone those maps already clear,
+   * so no extra terrain filtering is needed.
+   */
+  protected addReturnPortal() {
+    const pos = {
+      x: this.playerSpawn.x + RETURN_PORTAL_OFFSET.x,
+      y: this.playerSpawn.y + RETURN_PORTAL_OFFSET.y,
+    };
+    wrapPosition(pos);
+    this.addPortal(HUB_DESCRIPTOR.id, pos, PORTAL_CONSTANTS.RETURN_COLOR);
+  }
 
   /**
    * Per-map flow sampler.  Default is the global analytical meander used
@@ -324,6 +369,10 @@ export class UniverseMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+
+    // The way home — added AFTER the spawn-clearance filter so the rift
+    // isn't swept up by it.
+    this.addReturnPortal();
   }
 }
 
@@ -384,14 +433,19 @@ export class OverworldMap extends BaseMapLayer {
       ));
     }
 
-    // Clear every station's home patch: nothing generates on top of them
-    // (the home station's clearance doubles as the spawn-safe bubble —
-    // the player spawns just off it).
+    // Clear every station's and every portal's home patch: nothing
+    // generates on top of them (the home station's clearance doubles as
+    // the spawn-safe bubble — the player spawns just off it).
     const clear2 = STATION_CONSTANTS.CLEARANCE ** 2;
+    const portalClear2 = PORTAL_CONSTANTS.CLEARANCE ** 2;
     this.entities = this.entities.filter(e =>
         OVERWORLD_STATIONS.every(st => {
             const dx = e.position.x - st.x, dy = e.position.y - st.y;
             return dx * dx + dy * dy > clear2;
+        })
+        && HUB_PORTAL_SITES.every(p => {
+            const dx = e.position.x - p.x, dy = e.position.y - p.y;
+            return dx * dx + dy * dy > portalClear2;
         })
     );
 
@@ -418,6 +472,13 @@ export class OverworldMap extends BaseMapLayer {
         maxHealth: 1,
         mass: Infinity,
       });
+    }
+
+    // The rifts out to the wave arenas — one per full-game arena, spread
+    // clear of the stations and each other.  Destinations are descriptor
+    // ids; GameEngine.transitionToMap resolves them at entry time.
+    for (const p of HUB_PORTAL_SITES) {
+      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
     }
   }
 }
@@ -474,6 +535,9 @@ export class RingMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 350 * 350;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 
@@ -541,6 +605,9 @@ export class SevenRingsMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > safeClearSq;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 
@@ -618,6 +685,9 @@ export class PocketMap extends BaseMapLayer {
         const d2 = e.position.x ** 2 + e.position.y ** 2;
         return d2 > 120 * 120;
     });
+
+    // The way home — added AFTER the spawn-clearance filter.
+    this.addReturnPortal();
   }
 }
 

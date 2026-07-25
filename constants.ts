@@ -2834,6 +2834,52 @@ export const OVERWORLD_CONSTANTS = {
   DRAGON_RESPAWN_SEC: 90,
 };
 
+// ── Map portals (roadmap step (k)) ─────────────────────────────────────────
+// Traversable rifts that connect the wave-free hub to the wave arenas — the
+// in-game path that makes a run span earn → outfit → fight (decision #39d).
+// A portal is the STATION's entity recipe exactly: INTERACTABLE + mass ∞ +
+// no dropType, so the broadphase, the static grid, and the flow-field
+// obstacle bake all skip it, while the existing POI paths hand it a minimap
+// dot and an off-screen chevron for free.  Destinations are MAP-DESCRIPTOR
+// IDS (engine/maps/MapDescriptors.ts), never bare MapType values.
+export const PORTAL_CONSTANTS = {
+  SIZE: 150,                 // world-unit diameter of the rift mouth
+  COLOR: '#a855f7',          // violet — the established rift language (dragon/rival warps)
+  RETURN_COLOR: '#38bdf8',   // sky — return rifts match the hub/station palette
+  // Interaction proximity.  Slightly under the station's DOCK_RANGE so that
+  // when a portal and a station overlap in range the nearest-wins arbiter
+  // has a clear winner rather than a coin flip at the boundary.
+  USE_RANGE: 240,
+  // Placement clearance: map generation drops entities seeded inside this
+  // radius so a portal never spawns buried in a cluster (mirrors the
+  // station's CLEARANCE).
+  CLEARANCE: 460,
+  // Transit VFX — the openPortal() burst fired on departure and arrival.
+  // The IDLE rift is pure render-side animation (RenderSystem), so a live
+  // portal costs no particles until it's actually used.
+  BURST_RADIUS: 320,
+  BURST_DURATION: 0.75,
+};
+
+/** Hub portal placement (world units; the Overworld is 12k square, torus).
+ *  One portal per full-game arena, spread well clear of the four stations
+ *  at (0,0) / (-3600,-2400) / (3600,2400) / (3800,-2600) and of each other,
+ *  so reaching one is a flight — chevrons + minimap dots point the way.
+ *  Showcase maps get NO portal: they stay menu-only. */
+export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
+  { targetId: 'arena_universe',    x: -3600, y:  2400 },
+  { targetId: 'arena_ring',        x:     0, y: -4200 },
+  { targetId: 'arena_seven_rings', x:     0, y:  4200 },
+  { targetId: 'arena_pocket',      x: -4400, y:     0 },
+];
+
+/** Where an arena's return portal sits relative to that map's playerSpawn.
+ *  Close enough to be visible from the arrival point (the way home is never
+ *  a search) and INSIDE the 350-unit spawn safe zone the arena maps already
+ *  clear, so no extra terrain filtering is needed — yet outside USE_RANGE,
+ *  so arriving in an arena never puts the player straight back on the exit. */
+export const RETURN_PORTAL_OFFSET = { x: 0, y: -300 };
+
 export const DROP_CONFIG = {
   // Salvage-spawn probabilities — carried over 1:1 from the old ammo-roll
   // chances (WEAPONS_AMMO_PLAN §4: reuse today's rates as the starting

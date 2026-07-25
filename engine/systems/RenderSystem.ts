@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -3850,6 +3850,83 @@ export class RenderSystem {
                 ctx.font = 'bold 12px monospace';
                 ctx.textAlign = 'center';
                 ctx.fillText(entity.name ?? 'STATION', 0, r + 24);
+                ctx.globalAlpha = 1.0;
+
+            } else if (entity.type === EntityType.INTERACTABLE && entity.isPortal) {
+                // ── Map portal (roadmap step (k)) ─────────────────────────
+                // A persistent rift in the flat-shape language: counter-
+                // rotating arc rings around a dark event horizon, with a
+                // slow breathing pulse.  All animation is render-side
+                // (nowSec) — the entity is static, mass-∞ scenery, and the
+                // idle rift costs NO particles (the openPortal burst only
+                // fires on an actual transit).
+                const r = entity.size.x / 2;
+                const breathe = 0.85 + 0.15 * Math.sin(nowSec * 1.6);
+                const spin = nowSec * 0.5;
+
+                // Entry-available halo at the use radius, pulsing while the
+                // player is in range and this portal won the arbitration —
+                // the world-space half of the "press E" affordance (mirrors
+                // the station's dock halo).
+                if (entity.portalReady) {
+                    const pulse = 0.5 + 0.5 * Math.sin(nowSec * 3.2);
+                    ctx.globalAlpha = 0.10 + pulse * 0.12;
+                    ctx.strokeStyle = entity.color;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, PORTAL_CONSTANTS.USE_RANGE, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Outward bloom — the rift bleeding light into the field.
+                const bloomR = r * 2.1 * breathe;
+                const [pr, pg, pb] = hexToRgb(entity.color);
+                const bloom = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, bloomR);
+                bloom.addColorStop(0, `rgba(${pr}, ${pg}, ${pb}, 0.45)`);
+                bloom.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
+                ctx.globalAlpha = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, 0, bloomR, 0, Math.PI * 2);
+                ctx.fillStyle = bloom;
+                ctx.fill();
+
+                // Event horizon — a dark disc so the rift reads as a hole,
+                // not a light source.
+                ctx.globalAlpha = 0.92;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
+                ctx.fillStyle = '#0b0616';
+                ctx.fill();
+
+                // Counter-rotating arc rings — three broken arcs per ring,
+                // spinning opposite ways, which reads as a vortex.
+                ctx.strokeStyle = entity.color;
+                for (let ring = 0; ring < 2; ring++) {
+                    const rr = r * (ring === 0 ? 0.72 : 0.95);
+                    const dir = ring === 0 ? 1 : -1;
+                    ctx.globalAlpha = ring === 0 ? 0.95 : 0.6;
+                    ctx.lineWidth = ring === 0 ? 4 : 2.5;
+                    for (let i = 0; i < 3; i++) {
+                        const a0 = spin * dir + (i / 3) * Math.PI * 2;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, rr, a0, a0 + Math.PI * 0.44);
+                        ctx.stroke();
+                    }
+                }
+
+                // Hot core — the throat of the rift, breathing.
+                ctx.globalAlpha = 0.55 + 0.35 * breathe;
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.2 * breathe, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+
+                // Destination tag — the portal always says where it goes.
+                ctx.globalAlpha = 0.9;
+                ctx.fillStyle = entity.color;
+                ctx.font = 'bold 12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`↝ ${(entity.name ?? '').toUpperCase()}`, 0, r + 24);
                 ctx.globalAlpha = 1.0;
 
             } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
