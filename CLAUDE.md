@@ -718,7 +718,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   landmark, so its arrow only appears once the player is within range,
   and inside that range it is PERSISTENT (exempt from the
   chevrons-offscreen-only suppression) and labelled with the
-  destination name.  Portals keep their minimap dot at every distance.
+  destination name.  Because the chevron is range-gated, the MINIMAP is
+  how a portal gets found: `MINIMAP_CONSTANTS.PORTAL_BLIP` draws it as an
+  ANOMALY — a spinning colour-filled diamond with an expanding radar
+  ping — and, like an enemy blip, it CLAMPS to the minimap border when
+  out of range instead of being culled the way other POI dots are.  The
+  fill carries the portal colour, so an outbound rift (violet) and a
+  return rift (sky) read differently at a glance.
   Showcase maps get NO portals — they stay menu-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the

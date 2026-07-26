@@ -5505,6 +5505,69 @@ export class RenderSystem {
               continue;
           }
 
+          if (entity.isPortal === true) {
+              // ── Portal anomaly contact ────────────────────────────────
+              // The chevron is range-gated now, so the minimap is how a
+              // portal gets FOUND.  Two consequences, both handled here:
+              // it clamps to the border instead of being culled when it
+              // falls outside the minimap range (same trick as enemy
+              // blips), and it draws as a spinning diamond with a radar
+              // ping expanding out of it so it can't be mistaken for the
+              // station dots sharing the map.
+              const pb = MINIMAP_CONSTANTS.PORTAL_BLIP;
+              let ex = item.dx * scale;
+              let ey = item.dy * scale;
+              const pExtent = Math.max(Math.abs(ex), Math.abs(ey));
+              const pClampHalf = currentSize / 2 - pb.EDGE_INSET;
+              const pClamped = pExtent > pClampHalf;
+              if (pClamped) {
+                  const f = pClampHalf / pExtent;
+                  ex *= f; ey *= f;
+              }
+              const px = centerX + ex;
+              const py = centerY + ey;
+              const baseAlpha = pClamped ? pb.CLAMPED_ALPHA_MULT : 1;
+              const nowMs = performance.now();
+              // Ping phase 0→1; the ring expands and fades over each cycle.
+              const ping = (nowMs / 1000 * pb.PULSE_HZ) % 1;
+
+              // Expanding radar ping.
+              ctx.globalAlpha = baseAlpha * pb.RING_ALPHA * (1 - ping);
+              ctx.strokeStyle = entity.color;
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(px, py, pb.RING_MIN + (pb.RING_MAX - pb.RING_MIN) * ping, 0, Math.PI * 2);
+              ctx.stroke();
+
+              // Slowly-rotating diamond contact — geometric, so it reads
+              // as an anomaly against the round dots around it.
+              const spin = nowMs / 1000 * pb.SPIN_HZ * Math.PI * 2;
+              ctx.globalAlpha = baseAlpha;
+              ctx.translate(px, py);
+              ctx.rotate(spin);
+              ctx.beginPath();
+              ctx.moveTo(0, -pb.RADIUS);
+              ctx.lineTo(pb.RADIUS, 0);
+              ctx.lineTo(0, pb.RADIUS);
+              ctx.lineTo(-pb.RADIUS, 0);
+              ctx.closePath();
+              ctx.fillStyle = entity.color;
+              ctx.fill();
+              ctx.strokeStyle = `rgba(255,255,255,${pb.OUTLINE_ALPHA})`;
+              ctx.lineWidth = pb.OUTLINE_WIDTH;
+              ctx.stroke();
+              ctx.rotate(-spin);
+              ctx.translate(-px, -py);
+
+              // Hot centre pip.
+              ctx.beginPath();
+              ctx.arc(px, py, pb.CORE_RADIUS, 0, Math.PI * 2);
+              ctx.fillStyle = '#ffffff';
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              continue;
+          }
+
           const dotX = centerX + item.dx * scale;
           const dotY = centerY + item.dy * scale;
 

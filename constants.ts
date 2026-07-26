@@ -832,6 +832,29 @@ export const MINIMAP_CONSTANTS = {
     PULSE_MIN_ALPHA: 0.55,
     CLAMPED_ALPHA_MULT: 0.75,
   },
+  // Portal blips read as ANOMALIES, not dots.  A portal's chevron is
+  // range-gated (PORTAL_CONSTANTS.INDICATOR_RANGE), so the minimap is now
+  // the primary way to FIND one — which means a portal must (a) never be
+  // culled for being out of range, and (b) be instantly distinguishable
+  // from the station / POI dots it sits among.  So: a rotated-square
+  // contact with a radar ping expanding out of it, clamped to the border
+  // like an enemy blip when it is off-range rather than disappearing.
+  PORTAL_BLIP: {
+    RADIUS: 4.5,          // half-diagonal of the diamond contact
+    CORE_RADIUS: 1.1,     // bright centre pip — kept small so the coloured
+                          // fill still reads (the fill is what distinguishes
+                          // an outbound rift from a return one)
+    OUTLINE_ALPHA: 0.5,   // white edge: enough to crisp the shape against the
+                          // dark map, not enough to wash the fill out
+    OUTLINE_WIDTH: 0.9,
+    EDGE_INSET: 5,        // px inside the minimap border when clamped
+    PULSE_HZ: 0.8,        // slow sweep — reads as a beacon, not an alarm
+    RING_MIN: 4,          // ping ring start radius (px)
+    RING_MAX: 11,         // ping ring end radius (px)
+    RING_ALPHA: 0.55,     // ring alpha at the start of a ping (fades to 0)
+    CLAMPED_ALPHA_MULT: 0.8,
+    SPIN_HZ: 0.15,        // slow rotation of the diamond
+  },
 };
 
 export const INPUT_CONSTANTS = {
