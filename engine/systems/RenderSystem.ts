@@ -1454,7 +1454,14 @@ export class RenderSystem {
             const halfSize = Math.max(entity.size.x, entity.size.y) * 0.5;
             const onScreen = rx >= camX - halfW - halfSize && rx <= camX + halfW + halfSize
                           && ry >= camY - halfH - halfSize && ry <= camY + halfH + halfSize;
-            this._indicatorBuffer.push({ entity, distSq, onScreen });
+            // Map portals are RANGE-GATED (roadmap step (k)): a rift is a
+            // fixed landmark, so a chevron for one across the map is noise
+            // rather than navigation.  Gate the INDICATOR only — the portal
+            // keeps its minimap dot at every distance (the pushes below are
+            // deliberately left alone).
+            const farPortal = entity.isPortal === true
+                && distSq > PORTAL_CONSTANTS.INDICATOR_RANGE * PORTAL_CONSTANTS.INDICATOR_RANGE;
+            if (!farPortal) this._indicatorBuffer.push({ entity, distSq, onScreen });
         }
 
         // Structures use the pre-rendered static minimap layer — skip them
@@ -5140,18 +5147,31 @@ export class RenderSystem {
       // Limit drawing counts per type to avoid clutter, but keep sorted draw order
       let enemiesDrawn = 0;
       let poisDrawn = 0;
+      let portalsDrawn = 0;
 
       for (let i = 0; i < targets.length; i++) {
           const item = targets[i];
           const t = item.entity;
+          const isPortal = t.isPortal === true;
 
           // Offscreen-only mode: the player can already see an on-screen
           // entity, so its chevron is redundant clutter — skip it.
-          if (this.chevronsOffscreenOnly && item.onScreen) continue;
+          // PORTALS ARE EXEMPT: their arrow is already range-gated to
+          // PORTAL_CONSTANTS.INDICATOR_RANGE, and inside that range it is a
+          // deliberate, labelled navigation cue that should stay on screen
+          // while the player lines up the approach.
+          if (this.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
 
           if (t.type === EntityType.ENEMY) {
               if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
               enemiesDrawn++;
+          } else if (isPortal) {
+              // Portals get their OWN budget rather than competing with the
+              // stations for MAX_VISIBLE.  The buffer is sorted farthest-
+              // first, so on the hub (4 stations) a nearby portal would
+              // otherwise be the one starved out of the shared cap.
+              if (portalsDrawn >= MAX_VISIBLE) continue;
+              portalsDrawn++;
           } else {
               if (poisDrawn >= MAX_VISIBLE) continue;
               poisDrawn++;
@@ -5207,16 +5227,36 @@ export class RenderSystem {
           ctx.lineWidth = 1;
           ctx.stroke();
 
-          // Distance Text (only if far)
+          // Label under the arrow.  A portal always names its DESTINATION —
+          // the chevron is how the player picks which rift to fly to, so an
+          // unlabelled arrow would be ambiguous the moment two are in range.
+          // Distance text keeps its existing far-only rule and stacks below.
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
+          const showDist = item.distSq > threshold;
+          const portalName = isPortal ? (t.name ?? '') : '';
 
-          if (item.distSq > threshold) {
+          if (showDist || portalName) {
                ctx.rotate(-angle);
-               ctx.fillStyle = 'rgba(255,255,255,0.7)';
-               ctx.font = '10px monospace';
                ctx.textAlign = 'center';
-               const d = Math.round(dist);
-               ctx.fillText(`${d}m`, 0, 24);
+               let ty = 24;
+               if (portalName) {
+                   // Chevrons at similar bearings crowd the same arc of the
+                   // indicator ring, so the destination name is outlined to
+                   // stay readable when it lands on a neighbour's label.
+                   const label = portalName.toUpperCase();
+                   ctx.font = 'bold 10px monospace';
+                   ctx.lineWidth = 3;
+                   ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                   ctx.strokeText(label, 0, ty);
+                   ctx.fillStyle = t.color;
+                   ctx.fillText(label, 0, ty);
+                   ty += 12;
+               }
+               if (showDist) {
+                   ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                   ctx.font = '10px monospace';
+                   ctx.fillText(`${Math.round(dist)}m`, 0, ty);
+               }
           }
 
           ctx.restore();

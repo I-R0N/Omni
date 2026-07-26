@@ -714,6 +714,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   to its `playerSpawn`, inside the spawn safe zone those maps already
   clear.  `USE_RANGE` sits just under the station's `DOCK_RANGE` so the
   shared-E nearest-wins arbitration has a clear winner at the boundary.
+  `INDICATOR_RANGE` gates the off-screen chevron: a portal is a FIXED
+  landmark, so its arrow only appears once the player is within range,
+  and inside that range it is PERSISTENT (exempt from the
+  chevrons-offscreen-only suppression) and labelled with the
+  destination name.  Portals keep their minimap dot at every distance.
   Showcase maps get NO portals — they stay menu-only.
 - `SALVAGE_CONSTANTS` (the money economy: credits-per-drop conversion,
   drop colour, snitch-catch + wave-clear spray sizes — includes the

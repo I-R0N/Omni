@@ -2860,6 +2860,13 @@ export const PORTAL_CONSTANTS = {
   // portal costs no particles until it's actually used.
   BURST_RADIUS: 320,
   BURST_DURATION: 0.75,
+  // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
+  // for a rift on the far side of the map is noise, not navigation — the
+  // arrow only appears once the player is close enough for that rift to be
+  // a real option.  Inside this range the arrow is PERSISTENT: unlike other
+  // POIs it is not suppressed when the portal itself is on screen, so the
+  // labelled cue stays put while the player lines up the approach.
+  INDICATOR_RANGE: 1500,
 };
 
 /** Hub portal placement (world units; the Overworld is 12k square, torus).
