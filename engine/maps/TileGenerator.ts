@@ -210,23 +210,39 @@ export class TileGenerator {
     const cx = (c * w) + offset;
     const cy = r * (h * 0.75);
 
-    // Hexagon Vertices
-    const pts = [
-        { x: 0, y: -h/2 },
-        { x: w/2, y: -h/4 },
-        { x: w/2, y: h/4 },
-        { x: 0, y: h/2 },
-        { x: -w/2, y: h/4 },
-        { x: -w/2, y: -h/4 }
-    ];
+    entities.push(TileGenerator.buildStructureTile(c, r, cx, cy, w, h, variant));
+  }
 
-    entities.push(TileGenerator.buildStructureTile(c, r, cx, cy, w, h, pts, variant));
+  /**
+   * Fresh canonical hex silhouette for a w × h tile.  ALWAYS returns
+   * newly-allocated points — never a shared constant — because tile
+   * polygons are mutated IN PLACE by the dent / crash paths.
+   */
+  public static hexPolygon(w: number, h: number): Vector2[] {
+    return [
+        { x:  0,     y: -h / 2 },
+        { x:  w / 2, y: -h / 4 },
+        { x:  w / 2, y:  h / 4 },
+        { x:  0,     y:  h / 2 },
+        { x: -w / 2, y:  h / 4 },
+        { x: -w / 2, y: -h / 4 },
+    ];
   }
 
   /**
    * Build a STRUCTURE tile populated per variant config — shared by the
    * cluster generator and by MapClasses' ring emitter so both paths agree
    * on the health/sprite/colour wiring per variant.
+   *
+   * GEOMETRY OWNERSHIP (load-bearing): the returned tile ALWAYS owns its
+   * `polygonPoints` outright — a fresh array of fresh {x,y} objects.  Tile
+   * polygons are mutated in place by the dent path (PhysicsSystem
+   * applyDentStep) and by the crash rescale, so two tiles sharing one
+   * array deform together: hit one, the whole cohort visibly crumples and
+   * their SAT hitboxes change with it.  Callers therefore CANNOT hand in a
+   * polygon to alias — `pts` is optional (omit it for the canonical hex)
+   * and is DEEP-COPIED when supplied.  Do not "optimise" this by hoisting
+   * a shared array; that is precisely the bug this signature prevents.
    */
   public static buildStructureTile(
       c: number,
@@ -235,9 +251,15 @@ export class TileGenerator {
       cy: number,
       w: number,
       h: number,
-      pts: Vector2[],
-      variant: StructureVariant
+      variant: StructureVariant,
+      pts?: readonly Vector2[],
   ): GameEntity {
+    // Own the geometry unconditionally: build the canonical hex, or take a
+    // DEEP copy of the caller's shape (new array AND new point objects —
+    // a shallow slice would still alias the mutable {x,y}s).
+    const ownPts: Vector2[] = pts
+      ? pts.map(p => ({ x: p.x, y: p.y }))
+      : TileGenerator.hexPolygon(w, h);
     const cfg = STRUCTURE_VARIANTS[variant];
     // Map STRUCTURE_VARIANTS key ('glass' / 'plastic' / 'metal' /
     // 'indestructible' / 'rock') to the unified shardVariant id
@@ -277,7 +299,7 @@ export class TileGenerator {
         health: rockHp ?? cfg.health,
         maxHealth: rockHp ?? cfg.health,
         mass: cfg.mass,
-        polygonPoints: pts,
+        polygonPoints: ownPts,
         sprite: cfg.sprite,
         // Stash the odd-r offset grid cell so ShardSystem can count
         // same-variant hex neighbours for the material-tile brightness
@@ -404,6 +426,62 @@ export class TileGenerator {
     const dirs = (row % 2 === 0) ? evenDirs : oddDirs;
 
     return dirs.map(d => ({ c: col + d.c, r: row + d.r }));
+  }
+}
+
+/**
+ * Map-load invariant: no two entities may SHARE mutable polygon geometry.
+ *
+ * `buildStructureTile` makes aliasing impossible for anything built through
+ * it, but nothing stops a future map from hand-rolling a GameEntity literal
+ * and reusing one points array across a loop.  That mistake is invisible at
+ * build time and shows up much later as a gameplay oddity (a whole cohort of
+ * tiles denting in lockstep, hitboxes changing on tiles nobody shot), so it
+ * is worth one cheap pass to catch it the moment a map is loaded.
+ *
+ * Checks BOTH levels of aliasing, because the dent path mutates the point
+ * objects themselves: a shared array, and distinct arrays holding shared
+ * {x,y} objects.  O(total vertices), once per map load — negligible next to
+ * the static-grid build and flow-field bake in the same function.
+ *
+ * Reports rather than throws: a shared polygon degrades the map, it doesn't
+ * make it unplayable, and crashing the load would be a worse failure mode.
+ */
+export function assertPolygonsUnaliased(entities: GameEntity[], mapName: string): void {
+  const seenArrays = new Set<readonly Vector2[]>();
+  const seenPoints = new Set<Vector2>();
+  let sharedArrays = 0;
+  let sharedPoints = 0;
+  let firstOffender = '';
+
+  for (const e of entities) {
+    const pts = e.polygonPoints;
+    if (!pts || pts.length === 0) continue;
+    if (seenArrays.has(pts)) {
+      sharedArrays++;
+      if (!firstOffender) firstOffender = e.shardVariant ?? e.type;
+    } else {
+      seenArrays.add(pts);
+    }
+    for (const p of pts) {
+      if (seenPoints.has(p)) {
+        sharedPoints++;
+        if (!firstOffender) firstOffender = e.shardVariant ?? e.type;
+      } else {
+        seenPoints.add(p);
+      }
+    }
+  }
+
+  if (sharedArrays > 0 || sharedPoints > 0) {
+    console.error(
+      `[TileGenerator] Aliased polygon geometry on map "${mapName}": ` +
+      `${sharedArrays} entities share a polygon array, ${sharedPoints} vertices are shared objects ` +
+      `(first seen on "${firstOffender}").  Polygons are mutated in place by the dent/crash paths, ` +
+      `so these entities will deform together and their hitboxes will change in lockstep.  ` +
+      `Build tiles via TileGenerator.buildStructureTile (which owns its geometry) rather than ` +
+      `reusing one points array across a loop.`,
+    );
   }
 }
 

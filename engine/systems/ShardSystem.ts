@@ -2314,15 +2314,7 @@ export class ShardSystem {
     // sqrt(3)*HEX_SIZE; height is 2*HEX_SIZE.
     const w = Math.sqrt(3) * HEX_SIZE;
     const h = 2 * HEX_SIZE;
-    const pts: Vector2[] = [
-      { x:  0,    y: -h / 2 },
-      { x:  w / 2, y: -h / 4 },
-      { x:  w / 2, y:  h / 4 },
-      { x:  0,    y:  h / 2 },
-      { x: -w / 2, y:  h / 4 },
-      { x: -w / 2, y: -h / 4 },
-    ];
-    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, pts, material);
+    const tile = TileGenerator.buildStructureTile(chosen.c, chosen.r, p.x, p.y, w, h, material);
     // Carry a density tier onto the new tile (today: metal, from the
     // crystallising composite's shard layers).  Drives brightness via
     // metalDensityBrightness and, for metal, scales HP so a denser tile
