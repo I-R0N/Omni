@@ -964,14 +964,9 @@ function emitGlassTileRing(
   const maxRow = Math.ceil((radius + HEX_SIZE) / HEX_V_SPACING) + 1;
   const w = HEX_WIDTH;
   const h = 2 * HEX_SIZE;
-  const pts: Vector2[] = [
-    { x: 0, y: -h/2 },
-    { x: w/2, y: -h/4 },
-    { x: w/2, y: h/4 },
-    { x: 0, y: h/2 },
-    { x: -w/2, y: h/4 },
-    { x: -w/2, y: -h/4 },
-  ];
+  // NOTE: no hoisted points array here.  buildStructureTile mints each
+  // tile its own polygon; tile geometry is mutated in place by the dent
+  // path, so one shared array would make the whole ring deform as a unit.
   const stride = Math.max(1, Math.round(keepEvery));
   // Collect ring candidates so they can be thinned evenly by angle.
   // Tiles stay on their hex-grid coords (c, r) — only which ones are
@@ -989,6 +984,6 @@ function emitGlassTileRing(
   for (let i = 0; i < cand.length; i++) {
     if (stride > 1 && (i % stride) !== 0) continue;
     const t = cand[i];
-    entities.push(TileGenerator.buildStructureTile(t.c, t.r, t.x, t.y, w, h, pts, variant));
+    entities.push(TileGenerator.buildStructureTile(t.c, t.r, t.x, t.y, w, h, variant));
   }
 }
