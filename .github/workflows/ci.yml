@@ -1,0 +1,55 @@
+name: CI
+
+# A minimal merge gate: does the project still build?
+#
+# This is deliberately the ONLY hard check. It needs no secrets, so unlike
+# "PR preview" it also runs for pull requests opened from forks — which keeps
+# a read-only / fork-based collaborator workflow viable.
+#
+# Nominate this job ("build") as a required status check in the branch
+# protection rule for `main`. See docs/COLLABORATION.md.
+#
+# NOT gated here: `tsc --noEmit`. `vite build` uses esbuild, which strips
+# TypeScript types WITHOUT checking them, so a green build does not mean the
+# project type-checks. There are known pre-existing type errors on `main`;
+# adding the type-check as a gate today would block every PR. See
+# docs/COLLABORATION.md ("Type checking") before turning it on.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Build standalone HTML
+        # The same inlining step the preview and publish workflows run. Catches
+        # breakage in scripts/inline-build.mjs (e.g. a renamed/missing asset)
+        # before it reaches a preview or the public mirror.
+        run: node scripts/inline-build.mjs

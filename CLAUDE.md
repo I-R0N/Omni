@@ -754,8 +754,13 @@ button in `UIOverlay.tsx`.
   `omniverse-standalone.html`, a single-file portable build with CSS, JS,
   and referenced PNGs inlined as data URIs.
 - **No test runner or linter is configured.** Don't invent one unless the
-  user asks. There is no standalone `tsc --noEmit` script either; type
-  errors surface during `vite build`.
+  user asks.
+- **`npm run build` does NOT type-check.** `vite build` uses esbuild, which
+  strips TypeScript types without checking them — a green build says nothing
+  about type correctness. There is no `typecheck` script; `npx tsc --noEmit`
+  runs the check by hand and currently reports pre-existing errors on `main`
+  (`constants.ts` / `engine/systems/ShardSystem.ts`, `ShardMergePolicy`).
+  See `docs/COLLABORATION.md` §7 before wiring it into CI.
 
 ---
 
@@ -1038,10 +1043,26 @@ button in `UIOverlay.tsx`.
 
 - Default branch: `main`.
 - Feature work lives on `claude/<feature-name>-<suffix>` branches.
-- Two GitHub Actions: `pr-preview.yml` (Netlify deploy previews),
-  `publish-standalone.yml` (releases the single-file standalone build).
-- No CI type-check or test gates today — local `npm run build` is the
-  last-mile validation.
+- **Never merge your own pull request.** This repo runs on an
+  approval-gated model: anyone may open a PR, only the owner (`@I-R0N`)
+  merges it. Open the PR, make sure CI is green, and stop — do not click
+  merge, do not enable auto-merge, and do not push directly to `main`.
+  Full rationale, access setup, and the review flow live in
+  `docs/COLLABORATION.md`; reviewer assignment is `.github/CODEOWNERS`.
+- Three GitHub Actions:
+  - `ci.yml` — the merge gate. `npm ci && npm run build` plus the
+    standalone inline step. No secrets, so it also runs on fork PRs.
+    This is the job to nominate as a required status check.
+  - `pr-preview.yml` — builds the single-file standalone and publishes it
+    to the public `i-r0n/omni-standalone` mirror, then posts/updates a
+    githack preview link on the PR (NOT a Netlify preview). Skipped for
+    fork PRs, which can't read the deploy secret.
+  - `publish-standalone.yml` — mirrors every push to `main` to the same
+    public standalone repo.
+- `.github/pull_request_template.md` structures PR descriptions; its
+  checklist mirrors the §8 invariants most likely to be violated.
+- Local `npm run build` is still the last-mile validation before pushing —
+  but see §7: it does not type-check.
 
 ---
 

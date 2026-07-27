@@ -1,0 +1,20 @@
+# Code owners for Omni.
+#
+# Every pull request automatically requests review from the owner listed
+# here, and — once branch protection requires code-owner review — cannot be
+# merged without their approval.
+#
+# NOTE ON PLAN GATING: CODEOWNERS is only honoured in *private* repositories
+# on GitHub Pro/Team/Enterprise. On GitHub Free this file is inert but
+# harmless; it starts working the moment the repo is on Pro or made public.
+# See docs/COLLABORATION.md for the enforcement setup.
+
+# Default owner for everything in the repo.
+*                       @I-R0N
+
+# The spec, the collaboration rules, and the release/preview plumbing are the
+# highest-blast-radius files in the repo — call them out explicitly so the
+# review request is unambiguous even if the default rule is ever narrowed.
+/CLAUDE.md              @I-R0N
+/docs/COLLABORATION.md  @I-R0N
+/.github/               @I-R0N
