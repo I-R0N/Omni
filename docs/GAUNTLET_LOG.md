@@ -18,7 +18,7 @@ edited here.
 ## Milestone queue
 
 - [x] **M1** — (h) Bosses: framework + first boss (+ `evasive` trait)
-- [ ] **M2** — (h) Bosses: second boss + `front-shield` / `regen` traits
+- [x] **M2** — (h) Bosses: second boss + `front-shield` / `regen` traits
 - [ ] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
 - [ ] **M4** — Phase 3 Pair B: SFX, then explosion variety
 - [ ] **M5** — Phase 3 Pair C: controller/joystick, then menu help
@@ -79,6 +79,54 @@ model-(d) payout with no weapon unlocks, and the wave-5 capstone cadence.
 they get tuned against real income in M7.  The Reaver's phase-3 armor
 (`chipThreshold` 6) is the same threshold as the Tank; if the Tank's
 number moves in M7 the boss should move with it.
+
+### Iteration 2 — 2026-08-01 — M2: BASTION + front-shield / regen
+
+**Shipped** (commit `22cf376`):
+
+- `EnemySubtype.BOSS_SIEGE` + the `'bastion'` hull, `BOSS_WEAPONS.SIEGE`
+  (spreads the player `WEAPONS[CANNON]`), the archetype row (2-shell
+  `burst`, 1.0s telegraph) and a 3-phase `BOSS_DEFS` entry.
+- `EnemyTraitSet.frontShield` + `PhysicsSystem.frontShieldCoversHit` +
+  the reduction in the projectile damage path.
+- `EnemyTraitSet.regen` + `noteTraitDamage()` (constants) called from all
+  three player damage paths (projectile, lightning chain, shockwave ring)
+  + `GameEngine.updateEnemyRegen`.
+- `BOSS_ROTATION` now cycles Reaver → Bastion; DBG row for each.
+- RenderSystem: the `'bastion'` hull and the front-shield sector arc.
+- CLAUDE.md updated in the same commit.
+
+**Validation**: build green; M1's smoke still passes unchanged (25
+assertions); a new M2 smoke adds 21 — hull, all three phase stamps,
+directional reduction MEASURED front vs rear through the real physics
+path (20.0 rear vs 5.0 front), regen healing, chip healing through, a
+burst gating it, the turret escort, payout, and the boss rotation.
+
+**A real bug the smoke caught**: the first pass used a SLIDING burst
+window (every hit refreshed the timer). That measures "damage until the
+player pauses", so a sustained Blaster stream reaches the threshold in
+four shots and chip damage stops healing through — the trait inverted.
+Changed to a FIXED bucket (only the first hit arms the timer). The
+arithmetic then lands on the §7 table by construction; the numbers are
+in the code comment.
+
+**Weapon × live-trait coverage** — every weapon is a right answer
+somewhere in the table as SHIPPED (WEAPONS_AMMO_PLAN §7 asks for this):
+
+| Weapon | Its live answer | Where that lives now |
+|---|---|---|
+| Blaster | armor (charged slug ≥ threshold) | Tank, Reaver p3 |
+| Burst Rifle | stationary high-HP sustained DPS | Turret, Nest, Bastion p3 escort |
+| Shotgun | evasive (cone forgives juking) + regen (18-21/bucket burst) | Reaver p1-2, Bastion p2-3 |
+| Pierce Beam / Bouncer | front-shield (ricochets arrive from behind) | Bastion p1-2 |
+| Lightning | armor + evasive + front-shield (chain damage bypasses the projectile path entirely) | all four |
+| Seeker | evasive — the designated answer (dodge is blind to homing) | Reaver p1-2 |
+| Cannon | armor (designated) + front-shield (AoE ring bypasses) + regen (28 burst) | all four |
+
+**Watches**: Bastion's 220 HP against phase-2 regen 3.5/s is a real DPS
+floor — a weaponless or single-Blaster loadout may not be able to kill
+it at all. That is arguably correct for a capstone, but it interacts
+with the weaponless-flight watch and belongs in the M10 mechanical pass.
 
 ---
 
@@ -161,6 +209,57 @@ and it costs nothing.
 
 **Revert**: delete the two assignments in `App.tsx`.
 
+### M2-D1 — front-shield is a REDUCTION on facing, not a second shield pool
+
+**Chosen**: `frontShield` is a permanent damage reduction over a sector
+centred on the entity's `rotation`, with no pool.
+
+**Alternatives**: (a) reuse the Bulwark's `shieldArc*` pool with a big
+capacity — rejected because a pool always depletes, so face-tanking
+eventually works and the trait teaches nothing; (b) a separate slewing
+angle like `shieldArcAngle` — rejected because centring on `rotation`
+makes flanking a *movement* problem the AI already participates in (the
+boss turns to face you), which is the readable version.
+
+**Revert**: delete the `frontShield` branch in the PhysicsSystem damage
+path and the trait entries.
+
+### M2-D2 — the regen burst window is a FIXED bucket
+
+**Chosen**: the first hit opens the window; later hits inside it
+accumulate but do NOT re-arm the timer.
+
+**Why**: the sliding version (the first pass) measures cumulative damage
+until the player stops shooting, so every sustained weapon eventually
+gates it and the "chip heals through" half of the trait disappears. The
+fixed bucket makes the threshold a genuine damage-per-0.35s test. The
+smoke caught this — the failing assertion was "spread-out chip never
+trips the burst gate".
+
+**Revert**: move `regenBurstTimer = r.burstWindow` back outside the
+`if` in `noteTraitDamage`.
+
+### M2-D3 — mitigation is applied BEFORE the burst window
+
+**Chosen**: `noteTraitDamage` is fed the POST-armor, POST-front-shield
+damage.
+
+**Why**: the gate should measure what actually landed, and the
+consequence is a good one — bursting a plated target means bursting it
+from behind, which is precisely the "both lessons at once" difficulty
+Bastion's phase 2 is for. **Alternative**: feed raw damage, which would
+make the front-shield irrelevant to the regen check and let a player
+burst through the plate face-on.
+
+### M2-D4 — boss escorts seed at 15% of their cadence
+
+**Chosen**: `applyBossPhase` seeds `spawnTimer = interval * 0.15` (the
+Nest's own randomised 0.4-1.0 seed is unchanged).
+
+**Why**: a phase that announces reinforcements and then makes the player
+wait a full 9s interval doesn't read as a phase change. Caught by the
+smoke, which found the escort missing at 3.4s of sim time.
+
 ---
 
 ## For user review
@@ -179,6 +278,10 @@ _(anything provisional or needing a human ruling)_
 | `BOSS_SCATTER` health / size / speed | 130 / 76 / 6.2 | first-pass boss stats |
 | `BOSS_WEAPONS.SCATTER` damage / count | 5 / 7 | 35 on a full cone |
 | `ENEMY_TRAITS[BOSS_SCATTER].evasive` | sense 340, miss 46, impulse 7.5, cd 0.85 | dodge feel |
+| `BOSS_SIEGE` health / size / speed | 220 / 92 / 2.6 | first-pass boss stats |
+| `BOSS_WEAPONS.SIEGE` damage / AoE | 13 + 8 splash @ r120 | 2-shell salvo |
+| `frontShield` | 190°, 0.75 reduction | plate strength |
+| `regen` p2 / p3 | 3.5 / 6 hp/s, window 0.35s, threshold 16, pause 2.5s | burst gate |
 
 ### Open for a human ruling
 
@@ -188,3 +291,10 @@ _(anything provisional or needing a human ruling)_
   i.e. the first boss lands ON the Bulwark teaching wave, replacing most
   of it.  Playable, but a human may prefer the cadence offset (e.g. every
   6th) so the scripted intros finish first.  One constant.
+- **Bastion's DPS floor.** 220 HP with phase-2 regen at 3.5 hp/s means a
+  loadout below ~4 sustained DPS literally cannot kill it, and a
+  Blaster-only loadout (16 DPS gross, but chip damage heals through the
+  burst gate by design) has to lean on charged shots. That is defensible
+  for a capstone, but it collides with the standing "weaponless flight
+  viability" watch. Flagged for M10; the fix, if wanted, is a lower
+  `perSec` rather than more HP.
