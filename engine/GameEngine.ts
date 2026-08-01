@@ -2894,11 +2894,13 @@ export class GameEngine {
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood spawns its first batch on
     // the same step it is entered.
-    this.updateBosses(dt);
-    // (h) regen trait: heal-over-time with a burst-window check.  After the
-    // phase pass so a phase that just granted/dropped regen ticks correctly
-    // from the same step.
-    this.updateEnemyRegen(dt);
+    // (h) bosses + the regen trait share ONE walk of the enemy index (M8 perf
+    // pass: two O(E) passes over the same list, merged — zero behaviour
+    // change, since both are strictly per-entity and order-independent
+    // between entities).  Phase stamping still happens before the regen tick
+    // FOR A GIVEN ENEMY, so a phase that just granted or dropped regen ticks
+    // correctly on the same step.
+    this.updateBossesAndTraits(dt);
 
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
@@ -5551,24 +5553,18 @@ export class GameEngine {
    * ungated like the kamikaze/nest passes.  Honours `physics.traitsEnabled`
    * so the DBG "Traits" toggle turns the whole soft-counter layer off.
    */
-  private updateEnemyRegen(dt: number) {
-      if (!this.physics.traitsEnabled) return;
-      const enemies = this.entityIndex.enemies;
-      for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i];
-          const r = e.regen;
-          if (!r || !e.active || e.isExploding) continue;
-          if ((e.regenBurstTimer ?? 0) > 0) {
-              e.regenBurstTimer! -= dt;
-              if (e.regenBurstTimer! <= 0) { e.regenBurstTimer = 0; e.regenBurst = 0; }
-          }
-          if ((e.regenPause ?? 0) > 0) {
-              e.regenPause = Math.max(0, e.regenPause! - dt);
-              continue;
-          }
-          if (e.health >= e.maxHealth) continue;
-          e.health = Math.min(e.maxHealth, e.health + r.perSec * dt);
+  private tickEnemyRegen(e: GameEntity, dt: number) {
+      const r = e.regen!;
+      if ((e.regenBurstTimer ?? 0) > 0) {
+          e.regenBurstTimer! -= dt;
+          if (e.regenBurstTimer! <= 0) { e.regenBurstTimer = 0; e.regenBurst = 0; }
       }
+      if ((e.regenPause ?? 0) > 0) {
+          e.regenPause = Math.max(0, e.regenPause! - dt);
+          return;
+      }
+      if (e.health >= e.maxHealth) return;
+      e.health = Math.min(e.maxHealth, e.health + r.perSec * dt);
   }
 
   // ── NPC station traffic (polish batch, cheap version) ─────────────────────
@@ -5715,13 +5711,19 @@ export class GameEngine {
    * O(enemies) with an early flag check and no work on a non-transition step,
    * so it stays ungated like the kamikaze/nest passes.
    */
-  private updateBosses(_dt: number) {
+  private updateBossesAndTraits(dt: number) {
       if (!this.currentMap) return;
       const enemies = this.entityIndex.enemies;
+      const traits = this.physics.traitsEnabled;
       let live: GameEntity | null = null;
       for (let i = 0; i < enemies.length; i++) {
           const b = enemies[i];
-          if (b.isBoss !== true || !b.active || b.isExploding) continue;
+          if (!b.active || b.isExploding) continue;
+
+          // ── REGEN trait (any enemy, not just bosses) ──
+          if (traits && b.regen) this.tickEnemyRegen(b, dt);
+
+          if (b.isBoss !== true) continue;
           // The HUD bar tracks the most-wounded live boss (the one being fought).
           if (!live || (b.health / Math.max(1, b.maxHealth)) < (live.health / Math.max(1, live.maxHealth))) live = b;
 

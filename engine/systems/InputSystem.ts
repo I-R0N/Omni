@@ -36,6 +36,13 @@ export class InputSystem {
   private padFireStart = 0;
   /** Connected pad id, or null.  Surfaced so the HUD can announce it. */
   private padId: string | null = null;
+  /** Set by the browser's own gamepadconnected/disconnected events.  While
+   *  false, `pollGamepad` returns immediately WITHOUT calling
+   *  `navigator.getGamepads()` — that call allocates a fresh snapshot array
+   *  every invocation, and paying for it 60 times a second on the ~99 % of
+   *  sessions with no pad attached is pure garbage (M8 perf pass; zero
+   *  behaviour change, since the events fire exactly when a pad appears). */
+  private padPresent = false;
   /** Edge-triggered cycle-weapon requests, drained by the engine. */
   private cycleEvents = 0;
   /** Key-press edges since the last drain — keyboard AND pad buttons that map
@@ -56,6 +63,12 @@ export class InputSystem {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
 
+    // Gamepad presence — see `padPresent`.  Browsers fire these exactly when
+    // a pad appears or goes away, so gating the per-frame poll on them costs
+    // nothing and saves an allocation per frame for every session without one.
+    window.addEventListener('gamepadconnected', this.handlePadConnected);
+    window.addEventListener('gamepaddisconnected', this.handlePadDisconnected);
+
     // Mouse
     window.addEventListener('mousemove', this.handleMouseMove);
     window.addEventListener('mousedown', this.handleMouseDown);
@@ -68,6 +81,26 @@ export class InputSystem {
     window.addEventListener('touchmove', this.handleTouchMove, { passive: false });
     window.addEventListener('touchend', this.handleTouchEnd);
     window.addEventListener('touchcancel', this.handleTouchEnd);
+  }
+
+  private handlePadConnected = () => { this.padPresent = true; };
+  private handlePadDisconnected = () => {
+    // Stay on the polling path for one more frame if another pad is still
+    // attached; otherwise clear and drop back to the fast path immediately.
+    this.padPresent = typeof navigator !== 'undefined'
+      && typeof navigator.getGamepads === 'function'
+      && Array.from(navigator.getGamepads()).some(p => p && p.connected);
+    if (!this.padPresent) this.clearPadState();
+  };
+
+  /** Drop every pad-owned bit of state — a yanked cable must not leave the
+   *  ship thrusting or a virtual key stuck down. */
+  private clearPadState() {
+    this.padId = null;
+    this.padKeys.clear();
+    this.padMove.x = 0; this.padMove.y = 0;
+    this.padAim = null;
+    this.padFiring = false;
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
@@ -193,6 +226,9 @@ export class InputSystem {
    * announce it once — the HUD hint the milestone asks for.
    */
   public pollGamepad(): { justConnected: string | null } {
+    // Fast path: no pad has ever announced itself, so skip the allocating
+    // getGamepads() snapshot entirely (see `padPresent`).
+    if (!this.padPresent) return { justConnected: null };
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;
     if (!nav || typeof nav.getGamepads !== 'function') return { justConnected: null };
     const pads = nav.getGamepads();
@@ -202,15 +238,8 @@ export class InputSystem {
       if (p && p.connected) { pad = p; break; }
     }
     if (!pad) {
-      // Disconnected: drop every pad-owned bit of state so a yanked cable
-      // can't leave the ship thrusting or a virtual key stuck down.
-      if (this.padId !== null) {
-        this.padId = null;
-        this.padKeys.clear();
-        this.padMove.x = 0; this.padMove.y = 0;
-        this.padAim = null;
-        this.padFiring = false;
-      }
+      if (this.padId !== null) this.clearPadState();
+      this.padPresent = false; // back to the allocation-free fast path
       return { justConnected: null };
     }
     const justConnected = this.padId === null ? pad.id : null;
@@ -401,6 +430,8 @@ export class InputSystem {
   public cleanup() {
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('gamepadconnected', this.handlePadConnected);
+    window.removeEventListener('gamepaddisconnected', this.handlePadDisconnected);
     window.removeEventListener('mousemove', this.handleMouseMove);
     window.removeEventListener('mousedown', this.handleMouseDown);
     window.removeEventListener('mouseup', this.handleMouseUp);

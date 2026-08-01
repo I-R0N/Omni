@@ -1337,6 +1337,12 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   a pad press and the rule that proximity interactables share ONE key
   survives untouched.  A disconnect clears every pad-owned bit of
   state — a yanked cable must not leave the ship thrusting.
+  The poll is GATED on `padPresent`, set by the browser's own
+  `gamepadconnected` / `gamepaddisconnected` events: `getGamepads()`
+  allocates a fresh snapshot array on every call, and paying for that
+  60×/s on the sessions with no pad is pure garbage (M8 perf pass).
+  A test stub therefore has to dispatch the event, not just replace
+  `navigator.getGamepads`.
 - **Edge-triggered actions drain `takeKeyEdges()`, never poll
   `isKeyDown`.** A real Escape or Q tap is routinely shorter than a
   frame, so a per-frame poll drops it.  `handleKeyDown` records the
