@@ -2349,7 +2349,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // not named here falls back to ENEMY_WEAPON.
 //
 // Damage numbers are PROVISIONAL (first-pass boss tuning; revisit in M7).
-export const BOSS_WEAPONS: Record<'SCATTER', Partial<WeaponConfig>> = {
+export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = {
   // Reaver's scattergun — the player Shotgun's cone and pellet look, slowed
   // down and given per-pellet bite so a full cone at close range really hurts
   // but a single clipped pellet doesn't.
@@ -2364,6 +2364,25 @@ export const BOSS_WEAPONS: Record<'SCATTER', Partial<WeaponConfig>> = {
     lifetime: 0.95,
     recoil: 0,         // enemies don't take recoil
     pierce: 0,
+  },
+  // Bastion's siege gun — the player Plasma Cannon's purple slug and AoE
+  // splash, slowed to a siege beat and fired as a 2-shell salvo (`burst` on
+  // the archetype) so the shells are dodgeable individually but the pair
+  // brackets a stationary player.  Enemy-owned AoE, so the shockwave ring
+  // threatens the player and catches other enemies as collateral, exactly like
+  // the Kamikaze's.
+  SIEGE: {
+    ...WEAPONS[WeaponType.CANNON],
+    name: 'Bastion Siege Gun',
+    cooldown: 2.6,     // vs the player's 1.40 — a long, telegraphed reload
+    damage: 13,
+    speed: 9,          // slow shells: the dodge window IS the counterplay
+    lifetime: 4.0,
+    size: 14,
+    recoil: 0,
+    explosionRadius: 120,
+    explosionDamage: 8,
+    explosionKnockback: 5,
   },
 };
 
@@ -3363,6 +3382,21 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     weapon: BOSS_WEAPONS.SCATTER,
     telegraph: 0.45,
   },
+  // Bastion (BOSS_SIEGE): the second weapon-boss and the Reaver's opposite —
+  // slow, huge and heavily plated, lobbing the player's own Plasma Cannon in
+  // 2-shell salvos from range.  Its counterplay identity is the FRONT-SHIELD
+  // (get around it, or use something that ignores facing) plus a burst-checked
+  // REGEN from phase 2 (chip damage heals through; a cone or a slug doesn't).
+  // SHOOTING role — it holds distance and shells you.
+  [EnemySubtype.BOSS_SIEGE]: {
+    color: '#c084fc', size: 92, health: 220,
+    maxSpeed: 2.6, accel: 1.8, turnRate: 0.9,
+    sprite: ASSETS.ENEMY_TANK, mass: 160, shape: 'bastion',
+    shoots: true, contactDamage: 20,
+    weapon: BOSS_WEAPONS.SIEGE,
+    burst: { size: 2, gap: 0.5 },
+    telegraph: 1.0,
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3561,9 +3595,57 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 //   missRadius  — perpendicular miss distance that still counts as "aimed at me"
 //   impulse     — lateral velocity kick applied to the juke
 //   cooldown    — seconds between jukes (the counterplay window)
+//
+// FRONT-SHIELD ((h) bosses): a permanent directional armour plate centred on
+// the entity's FACING — hits inside `deg` are cut by `reduction`, with no pool
+// to deplete, so face-tanking never becomes viable.  The answers fall out of
+// where damage is applied rather than from special cases: Pierce Beam/Bouncer
+// ricochets arrive from behind, Lightning chains and Cannon AoE damage OUTSIDE
+// the projectile path entirely, and a slow fortress can simply be flanked.
+//
+// REGEN ((h) bosses): heals `perSec`, but damage accumulated inside a rolling
+// `burstWindow` that reaches `burstThreshold` suppresses it for `pause`
+// seconds.  A steady chip stream never clears the threshold and heals through;
+// a Shotgun cone (6-7 pellets in one frame) or a Cannon slug + splash does —
+// exactly the "front-loaded burst" answer of WEAPONS_AMMO_PLAN §7.
 export interface EnemyTraitSet {
   armor?: { chipThreshold: number; reduction: number };
   evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
+  frontShield?: { deg: number; reduction: number };
+  regen?: { perSec: number; burstWindow: number; burstThreshold: number; pause: number };
+}
+
+/**
+ * Feed a damage event into an entity's REGEN burst window.  Called from EVERY
+ * player damage path (projectile, lightning chain, shockwave ring) so a burst
+ * assembled out of splash or chain damage counts the same as one out of
+ * pellets.  No-op for entities without the trait, so the call sites stay cheap.
+ *
+ * The window is a FIXED bucket, not a sliding one: the first hit opens it and
+ * it expires on schedule regardless of what lands inside.  This is the whole
+ * mechanic — a REFRESHING window would just measure "damage until the player
+ * pauses", which any sustained weapon clears eventually, and chip damage would
+ * stop healing through.  Fixed buckets mean:
+ *   Blaster    4 dmg / 0.25s  →  8 per 0.35s bucket   → never gates (heals through)
+ *   Burst Rifle 5 × 3 @ 0.1s  → 15 per bucket         → just under the gate
+ *   Shotgun    6-7 pellets in ONE frame  → 18-21      → gates
+ *   Cannon     18 direct + 10 splash     → 28         → gates
+ * i.e. exactly the "front-loaded burst" answers of WEAPONS_AMMO_PLAN §7.
+ */
+export function noteTraitDamage(target: GameEntity, damage: number) {
+  const r = target.regen;
+  if (!r || !(damage > 0)) return;
+  if ((target.regenBurstTimer ?? 0) <= 0) {
+    // Open a fresh bucket.  Only this branch (re)arms the timer.
+    target.regenBurst = 0;
+    target.regenBurstTimer = r.burstWindow;
+  }
+  target.regenBurst = (target.regenBurst ?? 0) + damage;
+  if (target.regenBurst >= r.burstThreshold) {
+    target.regenPause = r.pause;
+    target.regenBurst = 0;
+    target.regenBurstTimer = 0;
+  }
 }
 export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
@@ -3571,6 +3653,11 @@ export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   // is actually HIT.  Phase 3 adds armor on top (see BOSS_DEFS).
   [EnemySubtype.BOSS_SCATTER]: {
     evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 },
+  },
+  // Bastion (boss 2): a frontal plate you have to get around.  Regen joins in
+  // phase 2 (see BOSS_DEFS) so the two lessons arrive one at a time.
+  [EnemySubtype.BOSS_SIEGE]: {
+    frontShield: { deg: 190, reduction: 0.75 },
   },
 };
 
@@ -3590,6 +3677,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
   [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
   [EnemySubtype.BOSS_SCATTER]: EnemyRole.RAMMING, // closes to shotgun range and brawls
+  [EnemySubtype.BOSS_SIEGE]:   EnemyRole.SHOOTING, // holds distance and shells
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3628,6 +3716,7 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   // (h) bosses ride the EXISTING strategies — the boss-ness lives in BOSS_DEFS
   // phases + traits, not in a bespoke movement routine.
   [EnemySubtype.BOSS_SCATTER]: { move: 'dogfighter' },
+  [EnemySubtype.BOSS_SIEGE]:   { move: 'skirmisher' },
 };
 
 // ── (h) Bosses ────────────────────────────────────────────────────────────────
@@ -3738,11 +3827,59 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
     ],
   },
+
+  // ── Bastion — the siege boss ──
+  // Deliberately the Reaver's inverse in every axis: slow instead of fast,
+  // ranged instead of close, plated instead of evasive, and it teaches its two
+  // traits one at a time rather than trading one for another.
+  // Phase 1  a frontal plate + slow shells: face-tanking is punished, so the
+  //          lesson is "get around it, or bring something that ignores facing"
+  //          (Lightning chains, Bouncer ricochets, Cannon splash).
+  // Phase 2  REGEN joins the plate — now chip damage heals through and you
+  //          also need a burst window.  Both traits at once is the hard part.
+  // Phase 3  the plate is blown off (frontShield gone) and regen goes UP: a
+  //          pure damage race where burst is the only answer.  A TURRET escort
+  //          denies the easy circle-strafe that phase 1 taught you.
+  [EnemySubtype.BOSS_SIEGE]: {
+    name: 'BASTION',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#c084fc',
+        traits: { frontShield: { deg: 190, reduction: 0.75 } },
+      },
+      {
+        atHealthFrac: 0.6,
+        announce: 'BASTION SEALS ITS HULL',
+        color: '#a855f7',
+        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.1 },
+        traits: {
+          frontShield: { deg: 190, reduction: 0.75 },
+          // 3.5 hp/s against a 220-hp boss: a Blaster (4 dmg / 0.25s = 16 dps)
+          // still out-damages it, but only just — and the burst gate is what
+          // actually opens the kill.  PROVISIONAL.
+          regen: { perSec: 3.5, burstWindow: 0.35, burstThreshold: 16, pause: 2.5 },
+        },
+      },
+      {
+        atHealthFrac: 0.3,
+        announce: 'BASTION — PLATING BREACHED',
+        color: '#f472b6',
+        speedMult: 1.35,
+        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 1.6, explosionRadius: 150 },
+        spawner: { subtype: EnemySubtype.TURRET, interval: 9.0, batch: 1, maxBrood: 2 },
+        traits: { regen: { perSec: 6, burstWindow: 0.35, burstThreshold: 16, pause: 2.5 } },
+      },
+    ],
+  },
 };
 
 /** Boss rotation — a boss wave takes the next entry, cycling.  Order is the
  *  intended teaching order (evasion first, then the heavier lessons). */
-export const BOSS_ROTATION: EnemySubtype[] = [EnemySubtype.BOSS_SCATTER];
+export const BOSS_ROTATION: EnemySubtype[] = [
+  EnemySubtype.BOSS_SCATTER,
+  EnemySubtype.BOSS_SIEGE,
+];
 
 /** True when the 0-based wave index is a boss-capstone wave. */
 export function isBossWave(index: number): boolean {

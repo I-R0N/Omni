@@ -152,6 +152,10 @@ export enum EnemySubtype {
   //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
   //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon-parity).
   BOSS_SCATTER = 'BOSS_SCATTER',
+  //   BOSS_SIEGE — "Bastion": a slow artillery fortress wielding a themed
+  //   variant of the player's own Cannon, behind a FRONT-SHIELD plate and a
+  //   burst-checked REGEN.
+  BOSS_SIEGE = 'BOSS_SIEGE',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
@@ -159,8 +163,10 @@ export enum EnemySubtype {
 export type EnemyShape =
   | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon'
   // (h) bosses — 'talon' is a forward-raked twin-prong warship hull: big,
-  // predatory, and unlike any of the rank-and-file silhouettes.
-  | 'talon';
+  // predatory, and unlike any of the rank-and-file silhouettes.  'bastion' is
+  // its opposite: a squat armoured wedge with a heavy frontal glacis plate,
+  // so the shielded face reads even before the trait fires.
+  | 'talon' | 'bastion';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -461,6 +467,22 @@ export interface GameEntity {
   // applied by AISystem.applyEvasiveDodge.  `dodgeTimer` is the live cooldown.
   evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
   dodgeTimer?: number;
+  // Counterplay trait: FRONT-SHIELD — a permanent directional armour plate
+  // centred on the entity's FACING (not on a separate slewed angle like the
+  // Bulwark's `shieldArc*` pool).  Projectile hits arriving inside the covered
+  // sector are cut by `reduction`; there is nothing to deplete, so face-tanking
+  // never stops working — you flank it, or use something that ignores facing.
+  // Lightning chains and AoE rings damage outside the projectile path, so they
+  // bypass it for free (WEAPONS_AMMO_PLAN §7).
+  frontShield?: { deg: number; reduction: number };
+  // Counterplay trait: REGEN — heals `perSec`, but a BURST shuts it off: damage
+  // accumulated inside a rolling `burstWindow` that reaches `burstThreshold`
+  // pauses regen for `pause` seconds.  So sustained chip heals through while a
+  // Shotgun cone or a Cannon slug opens a real burn window.
+  regen?: { perSec: number; burstWindow: number; burstThreshold: number; pause: number };
+  regenBurst?: number;       // damage accumulated in the live burst window
+  regenBurstTimer?: number;  // seconds left in that window
+  regenPause?: number;       // seconds regen stays suppressed
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;

@@ -4204,6 +4204,23 @@ export class RenderSystem {
           ctx.stroke();
           ctx.globalAlpha = 1;
       }
+      // ── Front-shield plate ((h) Bastion): the covered sector drawn as a
+      // thick arc on the hull's FACING, so "shoot it from behind" is legible
+      // in the world without a HUD hint.  The trait has no pool, so the arc
+      // never depletes — only the phase that drops it makes it disappear.
+      // Local space is already rotated with the entity, so the arc is centred
+      // on +x (= facing) with no extra trig.
+      if (entity.frontShield) {
+          const rp = Math.max(entity.size.x, entity.size.y) * 0.5;
+          const half = (entity.frontShield.deg * Math.PI / 180) / 2;
+          ctx.strokeStyle = '#e0f2fe';
+          ctx.globalAlpha = 0.34 + 0.10 * Math.sin(nowSec * 1.6);
+          ctx.lineWidth = Math.max(2.5, rp * 0.13);
+          ctx.beginPath();
+          ctx.arc(0, 0, rp * 1.06, -half, half);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+      }
       // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
       // appears in large clouds, so it skips the full ship treatment (flame
       // plume + cached body gradient + core eye + per-frame radial gradients) —
@@ -4952,6 +4969,25 @@ export class RenderSystem {
               ctx.lineTo(-r * 0.58, -r * 0.34);
               ctx.lineTo(-r * 0.42, -r * 0.92);          // port wingtip
               ctx.lineTo(r * 0.22, -r * 0.62);           // port shoulder
+              break;
+          }
+          case 'bastion': {
+              // (h) siege-boss hull — a squat armoured wedge dominated by a
+              // heavy frontal glacis plate, with a stepped casemate body and a
+              // blunt engine block.  The flat, wide prow is the read: this
+              // thing is built to be shot at from the front.
+              ctx.moveTo(r * 0.86, -r * 0.52);           // glacis top corner
+              ctx.lineTo(r * 0.98, -r * 0.18);           // plate nose
+              ctx.lineTo(r * 0.98, r * 0.18);
+              ctx.lineTo(r * 0.86, r * 0.52);            // glacis bottom corner
+              ctx.lineTo(r * 0.40, r * 0.80);            // shoulder step
+              ctx.lineTo(-r * 0.30, r * 0.92);           // hull flank
+              ctx.lineTo(-r * 0.62, r * 0.56);
+              ctx.lineTo(-r * 0.98, r * 0.34);           // engine block
+              ctx.lineTo(-r * 0.98, -r * 0.34);
+              ctx.lineTo(-r * 0.62, -r * 0.56);
+              ctx.lineTo(-r * 0.30, -r * 0.92);
+              ctx.lineTo(r * 0.40, -r * 0.80);
               break;
           }
           case 'triangle':

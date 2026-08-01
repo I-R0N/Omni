@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2754,6 +2754,10 @@ export class GameEngine {
     // pass, so a phase that raises an escort brood spawns its first batch on
     // the same step it is entered.
     this.updateBosses(dt);
+    // (h) regen trait: heal-over-time with a burst-window check.  After the
+    // phase pass so a phase that just granted/dropped regen ticks correctly
+    // from the same step.
+    this.updateEnemyRegen(dt);
 
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
@@ -4441,6 +4445,7 @@ export class GameEngine {
               if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
 
               target.health -= dmg;
+              noteTraitDamage(target, dmg); // (h) regen burst window
               target.hitFlash = 0.15;
               target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
               this.spawnDamageText(target.position, dmg, target);
@@ -5181,6 +5186,9 @@ export class GameEngine {
                       e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
                   if (!isIndestructible) e.health -= applied;
+                  // (h) regen burst window: splash counts toward a burst, which
+                  // is what makes the Cannon a real answer to the regen trait.
+                  noteTraitDamage(e, applied);
                   if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
                   // Third-party retaliation (Stage 5): an AoE that catches a
                   // bubble makes it target the blast's owner.
@@ -5244,6 +5252,37 @@ export class GameEngine {
       forcedEnemy: this.forcedTestEnemy,
       onBossSpawn: this.handleBossSpawn,
     };
+  }
+
+  /**
+   * REGEN counterplay trait tick ((h)).  For every enemy carrying the trait:
+   * age the rolling burst window, count down the suppression timer, and heal
+   * `perSec` while not suppressed.  Kept a separate pass from updateBosses
+   * because the trait is generic — a rank-and-file enemy can carry it without
+   * being a boss.
+   *
+   * O(enemies) behind an early `regen` check and no allocation, so it rides
+   * ungated like the kamikaze/nest passes.  Honours `physics.traitsEnabled`
+   * so the DBG "Traits" toggle turns the whole soft-counter layer off.
+   */
+  private updateEnemyRegen(dt: number) {
+      if (!this.physics.traitsEnabled) return;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          const r = e.regen;
+          if (!r || !e.active || e.isExploding) continue;
+          if ((e.regenBurstTimer ?? 0) > 0) {
+              e.regenBurstTimer! -= dt;
+              if (e.regenBurstTimer! <= 0) { e.regenBurstTimer = 0; e.regenBurst = 0; }
+          }
+          if ((e.regenPause ?? 0) > 0) {
+              e.regenPause = Math.max(0, e.regenPause! - dt);
+              continue;
+          }
+          if (e.health >= e.maxHealth) continue;
+          e.health = Math.min(e.maxHealth, e.health + r.perSec * dt);
+      }
   }
 
   /** Live-boss HUD readout ((h)) — undefined when no boss is alive, so the
@@ -5327,12 +5366,18 @@ export class GameEngine {
       if (arch) boss.maxSpeed = arch.maxSpeed * (phase.speedMult ?? 1);
       boss.weaponOverride = phase.weapon;
       boss.spawner = phase.spawner;
-      boss.spawnTimer = phase.spawner ? phase.spawner.interval * 0.35 : undefined;
+      // Seed the first escort batch SHORT (a fraction of the cadence) so the
+      // phase reads immediately — a phase that promises reinforcements and
+      // then makes you wait a full interval for them doesn't land.
+      boss.spawnTimer = phase.spawner ? phase.spawner.interval * 0.15 : undefined;
 
       // Traits REPLACE the previous phase's set — evasion can be traded away.
       boss.armor = phase.traits?.armor;
       boss.evasive = phase.traits?.evasive;
+      boss.frontShield = phase.traits?.frontShield;
+      boss.regen = phase.traits?.regen;
       if (!boss.evasive) boss.dodgeTimer = undefined;
+      if (!boss.regen) { boss.regenBurst = undefined; boss.regenBurstTimer = undefined; boss.regenPause = undefined; }
 
       // Shield: raise / re-arm, or drop it entirely when the phase has none.
       if (phase.shield) {

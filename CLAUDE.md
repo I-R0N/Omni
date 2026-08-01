@@ -638,7 +638,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (the Seeker is the designated answer, WEAPONS_AMMO_PLAN §7); lightning
   chains never exist as travelling projectiles so they always connect;
   and the one-juke-per-cooldown rule is why a Shotgun cone still lands.
-  front-shield / regen join with the second boss.
+  `frontShield` ((h) Bastion): a permanent directional armour plate on
+  the entity's FACING (`PhysicsSystem.frontShieldCoversHit` — same
+  travel-direction geometry as the Bulwark's `shieldCoversHit`, but
+  centred on `rotation` and with NO pool to deplete, so face-tanking
+  never becomes viable).  Its answers fall out of WHERE damage is
+  applied rather than from special cases: lightning chains and shockwave
+  rings damage in GameEngine, outside the projectile path, so they
+  bypass it for free; a Bouncer ricochet arrives from behind; and a slow
+  fortress can just be flanked.  `regen` ((h) Bastion): heals `perSec`,
+  suppressed for `pause` seconds when damage inside a FIXED (non-sliding)
+  `burstWindow` bucket reaches `burstThreshold`.  The fixed bucket is the
+  whole mechanic — a refreshing window would measure "damage until the
+  player stops", which any sustained weapon clears.  Ticked by
+  `GameEngine.updateEnemyRegen`; fed by `noteTraitDamage()` from every
+  player damage path, so splash and chain damage count toward a burst.
+  NOTE the ordering: armor and front-shield reduce damage BEFORE the
+  burst window sees it, so bursting a plated target means bursting it
+  from behind — that interaction is what makes Bastion's phase 2 (both
+  traits at once) the hard part of the fight.
 - `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
   `bossForWave()` / `BOSS_WEAPONS` — the (h) BOSS framework.  Bosses are
   WAVE-MAP CAPSTONES: every `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave
@@ -666,9 +684,19 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the bespoke `'talon'` hull; phase 1 jukes, phase 2 raises a tracking
   arc shield (flank it), phase 3 drops the shield, trades evasion for
   ARMOR and calls a SWARM escort — the answer flips from Seeker to a
-  big-hit weapon mid-fight.  HUD: `EngineStats.boss` drives a named
-  bar + phase pips; RenderSystem draws a phase-coloured aura ring.
-  DBG: pause ▸ Debug Menu ▸ "Bosses".
+  big-hit weapon mid-fight.  **BOSS_SIEGE "BASTION"** — the Reaver's
+  inverse on every axis: slow, huge, plated, lobbing the player's own
+  Plasma Cannon in 2-shell salvos (`BOSS_WEAPONS.SIEGE` spreads
+  `WEAPONS[CANNON]`, AoE and all) from range, on the `'bastion'` hull.
+  It teaches its two traits one at a time: phase 1 is the FRONT-SHIELD
+  alone, phase 2 adds REGEN on top (both at once — you need to flank AND
+  burst), phase 3 blows the plate off, raises regen and calls a TURRET
+  escort so the circle-strafe phase 1 taught you is denied.  Bosses
+  alternate down `BOSS_ROTATION` (wave 5 Reaver, wave 10 Bastion, …).
+  HUD: `EngineStats.boss` drives a named bar + phase pips; RenderSystem
+  draws a phase-coloured aura ring and, for a front-shielded entity, the
+  covered sector as an arc on the hull's facing.  DBG: pause ▸ Debug
+  Menu ▸ "Bosses".
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
   framework (generic: `StatusEffectKind` / `EffectPayload` /
   `StatusEffect` in `types.ts`).  An attack with `appliesEffect`

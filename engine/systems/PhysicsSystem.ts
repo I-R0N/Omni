@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, hitReactStrength, noteTraitDamage } from '../../constants';
 
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, wrapDeltaX, wrapDeltaY, wrapX, wrapY, onMapDimensionsChanged, isVisibleOnTorus } from '../toroidal';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1131,6 +1131,33 @@ export class PhysicsSystem {
           );
       }
       let d = bearing - (target.shieldArcAngle ?? 0);
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return Math.abs(d) <= half;
+  }
+
+  /**
+   * FRONT-SHIELD trait coverage ((h) Bastion).  Same geometry as
+   * `shieldCoversHit` — gated on the shot's TRAVEL direction so a fast bolt
+   * that overshoots can't tunnel past — but centred on the entity's ROTATION
+   * (it is a plate bolted to the prow, not a slewing sector), and read from
+   * the trait's own half-width.  Toroidal.
+   */
+  public static frontShieldCoversHit(target: GameEntity, proj: GameEntity): boolean {
+      const fs = target.frontShield;
+      if (!fs) return false;
+      const half = (fs.deg * Math.PI / 180) / 2;
+      let bearing: number;
+      const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
+      if (vx * vx + vy * vy > 1e-6) {
+          bearing = Math.atan2(-vy, -vx); // direction the shot came from
+      } else {
+          bearing = Math.atan2(
+              wrapDeltaY(target.position.y, proj.position.y),
+              wrapDeltaX(target.position.x, proj.position.x),
+          );
+      }
+      let d = bearing - target.rotation;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       return Math.abs(d) <= half;
@@ -2831,6 +2858,18 @@ export class PhysicsSystem {
           if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
               projDmg *= (1 - target.armor.reduction);
           }
+          // FRONT-SHIELD trait ((h) Bastion): a permanent armour plate on the
+          // entity's FACING.  Unlike the Bulwark's shield pool there is nothing
+          // to deplete, so face-tanking never becomes viable — flank it, or use
+          // damage that never comes through this path at all (lightning chains
+          // and shockwave rings apply damage in GameEngine, so they bypass it
+          // for free, and a ricochet arrives from behind).
+          if (this.traitsEnabled && target.frontShield && projDmg > 0
+              && PhysicsSystem.frontShieldCoversHit(target, proj)) {
+              projDmg *= (1 - target.frontShield.reduction);
+          }
+          // Feed the REGEN burst window ((h) Bastion) with what actually landed.
+          if (this.traitsEnabled && projDmg > 0) noteTraitDamage(target, projDmg);
           if (projDmg > 0) {
               // Indestructible tiles eat the projectile without losing
               // health — flash only, health stays pinned.  Everything
