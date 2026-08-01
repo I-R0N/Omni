@@ -931,7 +931,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderSectionHeader('boss', 'Bosses')}
               {!collapsed.boss && (
                 <div className="pointer-events-auto flex flex-wrap gap-2 px-1 py-1">
-                  {[{ k: 'BOSS_WARDEN', label: 'Warden' }].map(({ k, label }) => (
+                  {[{ k: 'BOSS_WARDEN', label: 'Warden' }, { k: 'BOSS_SCATTER', label: 'Reaver' }].map(({ k, label }) => (
                     <button
                       key={k}
                       onClick={() => onSpawnBoss && onSpawnBoss(k)}

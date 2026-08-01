@@ -1007,6 +1007,9 @@ export class GameEngine {
   /** Toggle the enemy counterplay traits (armor chip-resist, …) for A/B. */
   public toggleTraits() {
     this.physics.traitsEnabled = !this.physics.traitsEnabled;
+    // The AI-side trait (evasive) switches with the damage-side ones (armor) —
+    // one DBG toggle for the whole counterplay layer.
+    this.ai.traitsEnabled = this.physics.traitsEnabled;
   }
 
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */
@@ -2086,7 +2089,8 @@ export class GameEngine {
       // step, so enemies coast smoothly between AI updates (no snap).
       if (this.perfController.shouldRun('ai')) {
           const aiDt = dt * this.perfController.effectiveInterval('ai');
-          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField, this.entityIndex.asteroids);
+          this.ai.update(aiDt, this.entityIndex.enemies, this.player, this.flowField,
+              this.entityIndex.asteroids, this.entityIndex.projectiles);
       } else {
           this.ai.lastUpdateMs = 0; // amortize cost across skip steps in the overlay
       }
@@ -5365,6 +5369,8 @@ export class GameEngine {
 
       // Traits REPLACE the previous phase's set — a defence can be traded away.
       boss.armor = phase.traits?.armor;
+      boss.evasive = phase.traits?.evasive;
+      if (!boss.evasive) boss.dodgeTimer = undefined;
 
       // Shield: raise / re-arm, or drop it entirely when the phase has none.
       if (phase.shield) {

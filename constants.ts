@@ -2339,6 +2339,35 @@ export const ENEMY_WEAPON: WeaponConfig = {
   pierce: 0,
 };
 
+// ── Boss weapons ((h)) ────────────────────────────────────────────────────────
+// WEAPONS_AMMO_PLAN §6 weapon parity: a weapon-boss WIELDS a themed variant of
+// the literal PLAYER archetype, built by spreading the player's own WEAPONS
+// entry and overriding the enemy-facing numbers.  Same projectile family, cone
+// and colour the player knows — so the telegraph reads "that's MY shotgun" —
+// with NO parallel weapon table.  Overrides only: WeaponSystem merges these as
+// `{...ENEMY_WEAPON, ...arch.weapon, ...entity.weaponOverride}`, so anything
+// not named here falls back to ENEMY_WEAPON.
+//
+// Damage numbers are PROVISIONAL (first-pass boss tuning; the plan's step-6
+// economy/progression pass owns the real balance).
+export const BOSS_WEAPONS: Record<'SCATTER', Partial<WeaponConfig>> = {
+  // Reaver's scattergun — the player Shotgun's cone and pellet look, slowed to
+  // a readable boss beat and given per-pellet bite, so a full cone at brawling
+  // range really hurts while a single clipped pellet does not.
+  SCATTER: {
+    ...WEAPONS[WeaponType.SHOTGUN],
+    name: 'Reaver Scattergun',
+    cooldown: 1.5,     // vs the player's 0.65 — a boss beat you can read
+    damage: 5,         // per pellet (player: 3); 7 pellets = 35 on a full cone
+    count: 7,
+    spread: 21,
+    speed: 15,
+    lifetime: 0.95,
+    recoil: 0,         // enemies take no recoil
+    pierce: 0,
+  },
+};
+
 // --- ASSETS ---
 export { ASSETS };
 
@@ -3340,6 +3369,24 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     telegraph: 0.8,
     poise: { stunDamage: 12, knockScale: 0.12 },
   },
+  // Reaver (BOSS_SCATTER): the first WEAPON-boss.  A fast, forward-raked
+  // twin-prong brawler that wields a THEMED VARIANT OF THE PLAYER'S OWN
+  // SHOTGUN (BOSS_WEAPONS.SCATTER — same yellow pellet cone, enemy-tuned
+  // numbers), so the read is "that's MY shotgun" (WEAPONS_AMMO_PLAN §6).
+  // Its counterplay identity is the EVASIVE trait: it side-steps straight
+  // shots, so the Seeker (homing) is the designated answer while cones and
+  // chains still land.  RAMMING role — it closes to scattergun range and
+  // brawls, the opposite range band to the Warden.  Lighter poise than the
+  // Warden: it is a duellist, not a fortress, so a real hit still rocks it.
+  [EnemySubtype.BOSS_SCATTER]: {
+    color: '#fbbf24', size: 74, health: 105, // PROVISIONAL
+    maxSpeed: 6.2, accel: 5.0, turnRate: 2.4,
+    sprite: ASSETS.ENEMY_TANK, mass: 90, shape: 'talon',
+    shoots: true, contactDamage: 16,
+    weapon: BOSS_WEAPONS.SCATTER,
+    telegraph: 0.45,
+    poise: { stunDamage: 9, knockScale: 0.3 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3531,9 +3578,24 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 //
 // A trait SET is also what a (h) boss phase carries (BossPhaseDef.traits): a
 // phase REPLACES the set, so a boss can trade one defence for another as it
-// breaks down.  evasive / front-shield / regen join in milestones B2 / B3.
+// breaks down.  front-shield / regen join in milestone B3.
+//
+// EVASIVE ((h) bosses): the enemy senses STRAIGHT player projectiles closing on
+// it and JUKES sideways — a real dodge, not a damage-reduction fudge.  Three
+// deliberate blind spots keep the §7 counterplay table honest:
+//   - HOMING shots are ignored (they re-acquire mid-juke) — the SEEKER is the
+//     designated answer.
+//   - Lightning arcs never exist as travelling projectiles, so chains connect.
+//   - One juke per `cooldown`, so a Shotgun cone or a Cannon splash still lands.
+// Gated by `physics.traitsEnabled` (DBG "Traits") exactly like armor.
+//   sense       — radius (units) within which incoming shots are noticed
+//   missRadius  — perpendicular miss distance that still counts as "aimed at me"
+//   impulse     — lateral velocity kick applied to the juke
+//   cooldown    — seconds between jukes (the counterplay window)
+// Numbers PROVISIONAL.
 export interface EnemyTraitSet {
   armor?: { chipThreshold: number; reduction: number };
+  evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
 }
 export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
@@ -3541,6 +3603,11 @@ export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   // phase table re-states it (and trades it away in phase 2), but the archetype
   // row is what a DBG/one-off spawn gets before the first phase stamps.
   [EnemySubtype.BOSS_WARDEN]: { armor: { chipThreshold: 8, reduction: 0.65 } },
+  // Reaver (weapon boss 1): pure EVASION — no armor, so every weapon hurts it
+  // once it is actually HIT.  Its phase 3 trades evasion for armor (BOSS_DEFS).
+  [EnemySubtype.BOSS_SCATTER]: {
+    evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 },
+  },
 };
 
 // Maps each subtype to its role — used by AI routing and shooting logic.
@@ -3559,6 +3626,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
   [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
   [EnemySubtype.BOSS_WARDEN]: EnemyRole.SHOOTING, // holds mid-range and shells you
+  [EnemySubtype.BOSS_SCATTER]: EnemyRole.RAMMING, // closes to scattergun range and brawls
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3597,6 +3665,7 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   // (h) bosses ride the EXISTING strategies — the boss-ness lives in the
   // BOSS_DEFS phase table + traits, never in a bespoke movement routine.
   [EnemySubtype.BOSS_WARDEN]: { move: 'skirmisher' },
+  [EnemySubtype.BOSS_SCATTER]: { move: 'dogfighter' },
 };
 
 // ── (h) Bosses ────────────────────────────────────────────────────────────────
@@ -3712,11 +3781,51 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
     ],
   },
+  // ── Reaver — the scattergun boss (weapon-boss 1) ──
+  // Phase 1  brawls with the themed player Shotgun and JUKES straight shots:
+  //          the Seeker is the felt answer, everything else has to lead it.
+  // Phase 2  raises a TRACKING ARC SHIELD on top of the evasion — face-tanking
+  //          stops working and you have to flank (the Bulwark's soft counter at
+  //          boss scale).  Slower jukes, tighter/faster cone.
+  // Phase 3  shield gone, evasion TRADED for ARMOR, a wider point-blank cone
+  //          and a KAMIKAZE escort — the right answer flips from Seeker
+  //          (dodge) to a big-hit weapon (chip-resist) mid-fight.
+  [EnemySubtype.BOSS_SCATTER]: {
+    name: 'REAVER',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#fbbf24',
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 } },
+      },
+      {
+        atHealthFrac: 0.66,
+        announce: 'REAVER RAISES ITS GUARD',
+        color: '#f59e0b',
+        speedMult: 1.1,
+        shield: { amount: 90, regen: 6, arc: { deg: 160, slew: 2.4 } },
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 1.25, spread: 16, count: 8 },
+        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 1.1 } },
+      },
+      {
+        atHealthFrac: 0.33,
+        announce: 'REAVER — ENRAGED',
+        color: '#ef4444',
+        speedMult: 1.25,
+        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 0.95, spread: 30, count: 9, damage: 4 },
+        spawner: { subtype: EnemySubtype.KAMIKAZE, interval: 6.0, batch: 2, maxBrood: 4 },
+        traits: { armor: { chipThreshold: 6, reduction: 0.6 } },
+      },
+    ],
+  },
 };
 
 /** Boss rotation — each boss wave takes the next entry, cycling.  Order is the
  *  intended teaching order (the plain chassis lesson first). */
-export const BOSS_ROTATION: EnemySubtype[] = [EnemySubtype.BOSS_WARDEN];
+export const BOSS_ROTATION: EnemySubtype[] = [
+  EnemySubtype.BOSS_WARDEN,   // the plain chassis lesson first
+  EnemySubtype.BOSS_SCATTER,  // then evasion — bring the Seeker
+];
 
 /** True when the 0-based wave index is a boss-capstone wave. */
 export function isBossWave(index: number): boolean {

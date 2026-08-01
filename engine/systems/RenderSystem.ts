@@ -4954,6 +4954,27 @@ export class RenderSystem {
               ctx.lineTo(r * 0.52, -r * 0.52);
               break;
           }
+          case 'talon': {
+              // (h) boss hull — a forward-raked twin-prong warship: two long
+              // claws reaching past a notched prow, with a broad swept body and
+              // a flared tail.  Predatory where 'warden' is architectural, so
+              // the two capstones read as different silhouettes at a glance.
+              ctx.moveTo(r * 1.05, -r * 0.30);           // upper claw tip
+              ctx.lineTo(r * 0.34, -r * 0.16);           // claw root
+              ctx.lineTo(r * 0.46, 0);                   // prow notch
+              ctx.lineTo(r * 0.34, r * 0.16);
+              ctx.lineTo(r * 1.05, r * 0.30);            // lower claw tip
+              ctx.lineTo(r * 0.22, r * 0.62);            // starboard shoulder
+              ctx.lineTo(-r * 0.42, r * 0.92);           // starboard wingtip
+              ctx.lineTo(-r * 0.58, r * 0.34);
+              ctx.lineTo(-r * 0.95, r * 0.20);           // tail flare
+              ctx.lineTo(-r * 0.78, 0);
+              ctx.lineTo(-r * 0.95, -r * 0.20);
+              ctx.lineTo(-r * 0.58, -r * 0.34);
+              ctx.lineTo(-r * 0.42, -r * 0.92);          // port wingtip
+              ctx.lineTo(r * 0.22, -r * 0.62);           // port shoulder
+              break;
+          }
           case 'triangle':
           default:
               ctx.moveTo(r, 0); ctx.lineTo(-r * 0.75, r * 0.8); ctx.lineTo(-r * 0.75, -r * 0.8);

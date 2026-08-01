@@ -534,10 +534,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ORDINARY `EntityType.ENEMY` built from these same tables and tracked as a
   COUNTED wave enemy, so the existing clear-the-field rule already gates the
   wave on killing it.  What makes it a boss is a `BOSS_DEFS` row of PHASES
-  (see §5) plus the WaveSystem cadence; the roster today is BOSS_WARDEN
+  (see §5) plus the WaveSystem cadence.  Roster today: BOSS_WARDEN
   ("Warden", the chassis boss — a slow shielded bastion that shells you from
   mid-range, phase 2 blows the barrier + plating off and calls a SWARM
-  escort).  Optional ENEMY_VARIANTS
+  escort) and BOSS_SCATTER ("Reaver", the first WEAPON-boss — a fast brawler
+  that wields a themed variant of the PLAYER'S OWN Shotgun via
+  `BOSS_WEAPONS.SCATTER`, spread from `WEAPONS[SHOTGUN]` so the cone, colour
+  and pellet family are the ones the player knows: WEAPONS_AMMO_PLAN §6
+  weapon parity, no parallel weapon table.  Its identity is the EVASIVE
+  trait; phase 2 raises a tracking arc shield on top, phase 3 trades evasion
+  for ARMOR and calls a KAMIKAZE escort, so the right answer flips from
+  Seeker to a big-hit weapon mid-fight).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
@@ -646,7 +653,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   "Traits"); armored enemies show the REDUCED hit number as feedback.
   A trait SET is also what a boss PHASE carries (`BossPhaseDef.traits`) — a
   phase REPLACES the set, so a boss can trade a defence away as it breaks
-  down.  evasive / front-shield / regen join in the later (h) milestones.
+  down.  `evasive` (Reaver) is the AI-side trait: `AISystem.applyEvasiveDodge`
+  scans player-owned projectiles for one CLOSING on a collision course and
+  kicks the enemy perpendicular to it, once per `cooldown`.  It is blind to
+  HOMING shots BY DESIGN (the Seeker is the designated §7 answer), lightning
+  arcs never travel so chains always connect, and one juke per cooldown is
+  why a Shotgun cone still lands.  `AISystem.traitsEnabled` mirrors
+  `PhysicsSystem.traitsEnabled` so ONE DBG "Traits" toggle gates the whole
+  counterplay layer.  front-shield / regen join in milestone B3.
 - `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
   `bossForWave()` — the (h) BOSS capstone tables.  Every
   `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave of an ARENA is a boss wave

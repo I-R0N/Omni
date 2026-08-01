@@ -152,8 +152,11 @@ export enum EnemySubtype {
   // enemy, so the existing clear-the-field completion rule already gates on
   // killing it.  What makes it a boss is a BOSS_DEFS row (phases + payout)
   // plus the WaveSystem boss-wave cadence.
-  //   BOSS_WARDEN — the chassis boss: a shielded, armored siege platform.
+  //   BOSS_WARDEN  — the chassis boss: a shielded, armored siege platform.
+  //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
+  //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon parity).
   BOSS_WARDEN = 'BOSS_WARDEN',
+  BOSS_SCATTER = 'BOSS_SCATTER',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
@@ -162,8 +165,9 @@ export type EnemyShape =
   | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon'
   // (h) bosses — deliberately larger, heavier outlines than any rank-and-file
   // silhouette.  'warden' is a bastion prow: a broad ram face over a wide,
-  // buttressed hull.
-  | 'warden';
+  // buttressed hull.  'talon' is a forward-raked twin-prong warship: two long
+  // claws reaching past a notched prow.
+  | 'warden' | 'talon';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -469,6 +473,16 @@ export interface GameEntity {
   // Counterplay trait: armored enemies shrug off per-hit damage below
   // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
   armor?: { chipThreshold: number; reduction: number };
+  // Counterplay trait ((h) bosses): EVASIVE — the enemy actively side-steps
+  // incoming STRAIGHT player projectiles it senses on a collision course.
+  // Homing shots are deliberately NOT dodged (the Seeker is the designated
+  // answer, WEAPONS_AMMO_PLAN §7), and a cone/chain still lands because only
+  // one juke fires per `cooldown`.  Stamped at spawn from ENEMY_TRAITS (and
+  // re-stamped per boss phase); applied by AISystem.applyEvasiveDodge, gated
+  // by the same DBG "Traits" toggle as armor.  `dodgeTimer` is the live
+  // cooldown.
+  evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
+  dodgeTimer?: number;
   // Stagger resistance ((h) bosses).  Stamped at spawn from the archetype's
   // ENEMY_VARIANTS.poise; read by the PhysicsSystem hit-feedback block so chip
   // fire can't lock a heavy hull in permanent hit-stun or shove it around.
