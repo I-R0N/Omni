@@ -19,7 +19,7 @@ edited here.
 
 - [x] **M1** — (h) Bosses: framework + first boss (+ `evasive` trait)
 - [x] **M2** — (h) Bosses: second boss + `front-shield` / `regen` traits
-- [ ] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
+- [x] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
 - [ ] **M4** — Phase 3 Pair B: SFX, then explosion variety
 - [ ] **M5** — Phase 3 Pair C: controller/joystick, then menu help
 - [ ] **M6** — Polish batch: palette residual + map composition + minimap
@@ -127,6 +127,32 @@ somewhere in the table as SHIPPED (WEAPONS_AMMO_PLAN §7 asks for this):
 floor — a weaponless or single-Blaster loadout may not be able to kill
 it at all. That is arguably correct for a capstone, but it interacts
 with the weaponless-flight watch and belongs in the M10 mechanical pass.
+
+### Iteration 3 — 2026-08-01 — M3: death screen + stat legibility
+
+**Shipped** (commit `b439494`):
+
+- `GameState.GAME_OVER`; the loop's existing not-PLAYING early-out
+  freezes the sim behind the screen (no new freeze path).
+- Run-scoped tallies `runKills` / `runWavesCleared` / `runCreditsEarned` /
+  `runSeconds` + `runSummarySnapshot()` → `EngineStats.runSummary`.
+- `respawnFromDeath()` (RESPAWN, run intact) alongside the existing
+  `restartGame()` (END RUN).
+- `moduleContributions(def)` + `ModuleStatKey` (constants);
+  `OutfitSlotSnapshot.contrib` on every installed hex;
+  `playerStatsSnapshot()` with the full derived set (adds `thrustMult`,
+  `gunWeight`, `shieldRegen`, `overcharge`) — and the two duplicated
+  inline `playerStats` literals collapsed into it.
+- UIOverlay: the death screen, and Ship Status rebuilt as an
+  attribution-aware row list.
+- CLAUDE.md updated in the same commit (§3 lifecycle, §2 layout, §8).
+
+**Validation**: build green; new 28-assertion smoke all passing; M1 and
+M2 smokes still green.
+
+**Watches**: `runSeconds` is SIM time, so it excludes pauses and station
+visits — correct for "how long did the run take" but it will read lower
+than wall clock, which may surprise. Noted rather than changed.
 
 ---
 
@@ -260,6 +286,48 @@ Nest's own randomised 0.4-1.0 seed is unchanged).
 wait a full 9s interval doesn't read as a phase change. Caught by the
 smoke, which found the escort missing at 3.4s of sim time.
 
+### M3-D1 — death shows a summary but respawn stays FREE
+
+**Chosen**: death enters `GAME_OVER` and shows the run summary; RESPAWN
+returns the player to the map spawn with the entire run intact (credits,
+score, outfit, tallies); END RUN clears it.
+
+**Alternatives**: (a) death ENDS the run outright, arcade-style — which
+is what a "death screen" usually means and what the run-scoped economy
+implies; (b) keep the silent free respawn and show the summary only on a
+manual quit. (a) was rejected under the standing decision rule: the
+salvage death penalty severity is explicitly reserved for the user
+(decision #40a), and ending the run is the HARSHEST possible penalty,
+not the mildest. Shipping free respawn keeps today's behaviour exactly
+and leaves `respawnFromDeath()` as the one hook M7 attaches a cost to.
+(b) was rejected because the milestone asks for a death screen.
+
+**Revert**: replace the `gameState = GAME_OVER` line in the explosion
+branch with the old `this.respawnPlayer()` call.
+
+### M3-D2 — attribution is derived from `ModuleEffect`, not authored
+
+**Chosen**: `moduleContributions(def)` reads the def's own `effect`
+object (plus a gun's `weight`) and emits `{key, text}` pairs.
+
+**Why**: the failure mode of an attribution panel is drift — a hand-kept
+table that stops matching what the sim sums. Deriving from the same
+object `applyModuleEffects` folds makes that impossible, and it means a
+new `ModuleEffect` field is a one-line addition in two places rather
+than a hunt. **Alternative**: a `MODULE_ATTRIBUTION` table keyed by
+module id, which reads more freely but drifts.
+
+**Revert**: delete `moduleContributions` and the `contrib` field.
+
+### M3-D3 — offline modules still report contributions
+
+**Chosen**: `contrib` is populated for INACTIVE modules too; the UI
+renders them struck through in rose.
+
+**Why**: "this hex is dim" is a weak signal. "this hex would give you
++40 hull and gives you nothing" is the actual lesson of the adjacency
+system, and it is the cheapest possible way to teach it.
+
 ---
 
 ## For user review
@@ -284,6 +352,12 @@ _(anything provisional or needing a human ruling)_
 | `regen` p2 / p3 | 3.5 / 6 hp/s, window 0.35s, threshold 16, pause 2.5s | burst gate |
 
 ### Open for a human ruling
+
+- **Death consequence.** M3 ships free respawn behind a summary screen
+  (mildest candidate, per the decision rules). The real ruling —
+  free respawn / salvage cost / uninsured cargo / run over — is M7's,
+  and `respawnFromDeath()` is the single hook. Worth deciding before M7
+  runs so the tuning pass can price it.
 
 - **Boss cadence vs. wave length.** Every 5th wave was chosen because it
   matches the existing scripted-wave teaching block (7 authored waves) and
