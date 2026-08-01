@@ -1459,6 +1459,9 @@ export interface EngineStats {
    *  otherwise, so the settings row says "tap anywhere" rather than lying
    *  about being on. */
   audio?: { volume: number; muted: boolean; ready: boolean };
+  /** Connected gamepad id, or undefined (Phase 3 Pair C) — drives the HUD
+   *  hint and switches the help panel's default tab to the pad column. */
+  gamepad?: string;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

@@ -1442,6 +1442,7 @@ export class GameEngine {
       playerStats: this.gameState === GameState.PAUSED ? this.playerStatsSnapshot() : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
       audio: { volume: this.audio.volumeLevel, muted: this.audio.isMuted, ready: this.audio.ready },
+      gamepad: this.input.gamepadId ?? undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1724,6 +1725,41 @@ export class GameEngine {
   // other UI-facing value.  Nothing is persisted — this game has no storage.
 
   public setVolume(v: number) { this.audio.setVolume(v); }
+
+  /**
+   * Per-frame gamepad service (Phase 3 Pair C).  Reads the pad, announces a
+   * fresh connection once, and drains the two EDGE-triggered actions the pad
+   * owns that no existing latch covers — pause and weapon cycle.  Movement,
+   * aim, fire and interact need nothing here: they ride channels
+   * (`getMovementVector` / `getMousePosition` / the fire queues / the shared
+   * 'KeyE' latch) that already exist.
+   *
+   * Keyboard Escape / Q run through the SAME edges, so the pad work also gave
+   * keyboard players the two bindings the help panel now documents.
+   */
+  private pollGamepad() {
+      const { justConnected } = this.input.pollGamepad();
+      if (justConnected) {
+          this.pushPlayerMessage('CONTROLLER CONNECTED', '#38bdf8');
+      }
+
+      // Drain the key-press EDGES (keyboard keydowns + the pad's start button,
+      // which pushes the same virtual code).  Edges rather than a per-frame
+      // `isKeyDown` poll because a real Escape tap is routinely shorter than a
+      // frame, and a missed pause is the kind of bug players never forgive.
+      let cycles = this.input.takeCycleRequests();
+      const edges = this.input.takeKeyEdges();
+      for (let i = 0; i < edges.length; i++) {
+          const code = edges[i];
+          if (code === 'Escape') {
+              if (this.gameState === GameState.PLAYING) this.pauseGame();
+              else if (this.gameState === GameState.PAUSED) this.resumeGame();
+          } else if (code === 'KeyQ') {
+              cycles++;
+          }
+      }
+      for (let i = 0; i < cycles; i++) this.cycleWeapon();
+  }
   public toggleMute() { this.audio.toggleMute(); }
 
   /**
@@ -1843,6 +1879,7 @@ export class GameEngine {
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
       weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
       audio: { volume: this.audio.volumeLevel, muted: this.audio.isMuted, ready: this.audio.ready },
+      gamepad: this.input.gamepadId ?? undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1916,6 +1953,12 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
     });
+
+    // Gamepad (Phase 3 Pair C): one poll per rendered frame, ahead of every
+    // state branch so the pause/interact buttons work from any screen.  The
+    // pad folds into the shared movement / aim / fire channels, so nothing
+    // below this line knows it exists.
+    this.pollGamepad();
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates

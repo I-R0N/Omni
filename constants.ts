@@ -869,6 +869,42 @@ export const INPUT_CONSTANTS = {
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
 };
 
+// ── Gamepad (Phase 3 Pair C) ──────────────────────────────────────────────────
+// The pad is a THIRD input path alongside keyboard and touch, not a replacement
+// for either: InputSystem polls it once per frame and folds the result into the
+// SAME movement vector / aim position / fire-event queues the other two feed,
+// so nothing downstream in GameEngine knows a pad exists.
+//
+// Two of the mappings are deliberately indirect and worth knowing about:
+//  - The RIGHT STICK doesn't set a rotation.  It synthesises a virtual cursor
+//    position at AIM_RADIUS px from screen centre, which the existing
+//    "rotation = angle from centre to cursor" line then reads.  One aim path,
+//    three devices.
+//  - The face/menu buttons map to VIRTUAL KEY CODES, so `isKeyDown('KeyE')`
+//    (the dock/portal latch) is true for a pad press with no second handler —
+//    the standing rule that proximity interactables share one key survives.
+// Button indices are the W3C Standard Gamepad layout.
+export const GAMEPAD_CONSTANTS = {
+  /** Below this magnitude a stick reads as centred (drift rejection). */
+  DEADZONE: 0.22,
+  /** Movement magnitude is rescaled from DEADZONE..1 → 0..1 so the throttle
+   *  starts at zero right outside the deadzone instead of jumping. */
+  MOVE_CURVE: 1.0,
+  /** Virtual-cursor distance from screen centre the right stick aims at.
+   *  Only the ANGLE matters downstream, so this just has to be non-zero. */
+  AIM_RADIUS: 240,
+  /** Trigger axis/button value that counts as "pressed". */
+  TRIGGER_THRESHOLD: 0.4,
+  BUTTONS: {
+    FIRE: 0,        // A / cross — tap to shoot, hold to charge
+    INTERACT: 2,    // X / square — dock + portal (virtual 'KeyE')
+    CYCLE_L: 4,     // LB
+    CYCLE_R: 5,     // RB
+    TRIGGER_R: 7,   // RT — alternate fire
+    PAUSE: 9,       // start / options (virtual 'Escape')
+  },
+} as const;
+
 export const PHYSICS_CONSTANTS = {
   FRICTION: 0.999, // Fallback default
   ACCELERATION: 0.02, // Fallback default (Reduced from 0.04)

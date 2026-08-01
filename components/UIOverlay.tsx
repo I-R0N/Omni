@@ -267,6 +267,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
     // 'stats' stays open by default; every other section starts collapsed.
     player: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
+    controls: true,
     // Map menus — controlled (not native <details>) so the dropdown state
     // survives the ~60 Hz stats-driven re-render of this overlay.  'fieldmaps'
     // is the Material Field Maps group (menu + pause); 'switchmap' is the
@@ -520,6 +521,59 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   /** Detail strip under the tiles: hex info / install picker (station) or
    *  read-only info (pause) for hex selections; SELL / SCRAP actions for
    *  inventory selections (sell needs a station, scrap works anywhere). */
+  // ── Controls / help panel (Phase 3 Pair C) ────────────────────────────────
+  // One component, rendered in BOTH the main menu and the pause screen, so the
+  // reference is reachable before a run starts and mid-run without leaving the
+  // game.  The three columns are the three input paths the engine actually
+  // supports; the pad column highlights itself when one is connected.
+  const CONTROL_ROWS: { action: string; key: string; touch: string; pad: string }[] = [
+    { action: 'Move',            key: 'WASD / arrows',   touch: 'Hold + drag from centre', pad: 'Left stick' },
+    { action: 'Aim',             key: 'Mouse',           touch: 'Drag direction',          pad: 'Right stick' },
+    { action: 'Fire',            key: 'Click',           touch: 'Tap',                     pad: 'A / right trigger' },
+    { action: 'Charged shot',    key: 'Hold 1s, release', touch: 'Hold 1s, release',       pad: 'Hold 1s, release' },
+    { action: 'Swap weapon',     key: 'Q',               touch: 'Tap a loadout slot',      pad: 'LB / RB' },
+    { action: 'Dock / portal',   key: 'E',               touch: 'On-screen button',        pad: 'X' },
+    { action: 'Pause',           key: 'Esc',             touch: 'Pause button',            pad: 'Start' },
+    { action: 'Minimap',         key: 'Click the map',   touch: 'Tap the map',             pad: '—' },
+  ];
+  const renderControls = () => {
+    const padOn = !!stats.gamepad;
+    return (
+      <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+        <div className="flex items-baseline justify-between mb-2 gap-2 flex-wrap">
+          <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest">Controls</h3>
+          {padOn && (
+            <span className="text-sky-400 text-[10px] uppercase tracking-widest font-bold">
+              controller connected
+            </span>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] border-collapse min-w-[380px]">
+            <thead>
+              <tr className="text-slate-500 uppercase tracking-widest text-[9px]">
+                <th className="text-left font-bold pb-1">Action</th>
+                <th className="text-left font-bold pb-1">Keyboard</th>
+                <th className="text-left font-bold pb-1">Touch</th>
+                <th className={`text-left font-bold pb-1 ${padOn ? 'text-sky-400' : ''}`}>Controller</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CONTROL_ROWS.map(r => (
+                <tr key={r.action} className="border-t border-slate-700/40">
+                  <td className="py-1 pr-2 text-slate-300 font-bold whitespace-nowrap">{r.action}</td>
+                  <td className="py-1 pr-2 text-slate-400">{r.key}</td>
+                  <td className="py-1 pr-2 text-slate-400">{r.touch}</td>
+                  <td className={`py-1 ${padOn ? 'text-sky-200' : 'text-slate-400'}`}>{r.pad}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderModuleDetail = (ctx: 'station' | 'pause') => (
     <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 min-h-[52px] flex items-center justify-between gap-3 flex-wrap">
       {!selSlot ? (
@@ -1609,6 +1663,19 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           >
             START
           </button>
+
+          {/* Controls reference (Phase 3 Pair C) — collapsible so it doesn't
+              push START off a phone screen, and the SAME panel the pause menu
+              shows, so there's one place the bindings are written down. */}
+          <div className="w-full max-w-2xl px-4 mt-8">
+            <button
+              onClick={() => toggleSection('controls')}
+              className="pointer-events-auto cursor-pointer w-full text-slate-400 text-[11px] uppercase tracking-widest select-none hover:text-slate-200 py-2"
+            >
+              Controls {collapsed.controls ? '▸' : '▾'}
+            </button>
+            {!collapsed.controls && renderControls()}
+          </div>
         </div>
       )}
 
@@ -1804,6 +1871,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 </p>
               )}
             </div>
+
+            {renderControls()}
 
             {/* Modules & cargo — the same hex-tile language as the station
                 UI, but the flowers are READ-ONLY (no drag source, no drop

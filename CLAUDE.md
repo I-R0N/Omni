@@ -1265,6 +1265,27 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   EXPLOSION_HEAVY_MASS` rather than by an archetype list, so a NEW
   enemy gets the right death for free; `tint: true` mixes the entity's
   own colour into the debris so the hull stays recognisable.
+- **The gamepad is a third input PATH, not a third input system.**
+  `InputSystem.pollGamepad()` (called once per rendered frame by
+  `GameEngine.pollGamepad`, ahead of every state branch so the pause
+  button works from any screen) folds the pad into the channels
+  keyboard and touch already feed — nothing downstream branches on
+  device.  Two mappings are deliberately indirect: the RIGHT STICK
+  synthesises a virtual cursor at `GAMEPAD_CONSTANTS.AIM_RADIUS` from
+  screen centre, which the existing "rotation = angle from centre to
+  cursor" line reads (one aim path, three devices); and the face/menu
+  buttons map to VIRTUAL KEY CODES, so `isKeyDown('KeyE')` is true for
+  a pad press and the rule that proximity interactables share ONE key
+  survives untouched.  A disconnect clears every pad-owned bit of
+  state — a yanked cable must not leave the ship thrusting.
+- **Edge-triggered actions drain `takeKeyEdges()`, never poll
+  `isKeyDown`.** A real Escape or Q tap is routinely shorter than a
+  frame, so a per-frame poll drops it.  `handleKeyDown` records the
+  press EDGE (auto-repeat filtered), the pad's start button pushes the
+  same virtual `'Escape'` code, and `GameEngine.pollGamepad` drains the
+  queue — so pause and weapon-cycle work identically on both devices
+  and can't be missed.  Held-state actions (movement, the 'KeyE' dock
+  latch) correctly keep using `isKeyDown`.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through
