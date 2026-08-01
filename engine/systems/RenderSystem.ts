@@ -4672,9 +4672,13 @@ export class RenderSystem {
           this.buildEnemyPath(ctx, shape, r);
       }
 
-      // Dark outline.
+      // Dark outline.  Width scales with the hull radius (M9 visual pass): a
+      // flat 1.5 px reads fine on a 28-unit drone but vanishes on a 92-unit
+      // boss, where the body's radial gradient then swallows the silhouette
+      // and the ship reads as a glowing blob.  Keeping the outline
+      // proportional preserves the flat-polygon language at every scale.
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = Math.max(1.5, r * 0.05);
       ctx.stroke();
 
       // ── Tank (hexagon) internal detail: a heavy-armour read — an inset
@@ -5532,6 +5536,12 @@ export class RenderSystem {
           const sh1 = Math.min(sh, sRes - syMod);
           const sw2 = sw - sw1;
           const sh2 = sh - sh1;
+          // The static terrain layer is drawn UNDER the contacts at reduced
+          // alpha (M9 visual pass).  At full strength the baked tile/nebula
+          // colours are a saturated confetti that the station squares, portal
+          // diamonds and boss rings disappear into — the whole point of the
+          // faithfulness work is that a contact is findable at a glance.
+          ctx.globalAlpha = MINIMAP_CONSTANTS.STATIC_LAYER_ALPHA;
           // part 1 (no wrap)
           ctx.drawImage(staticCanvas,
               sxMod, syMod, sw1, sh1,
@@ -5548,6 +5558,7 @@ export class RenderSystem {
           if (sw2 > 0 && sh2 > 0) ctx.drawImage(staticCanvas,
               0, 0, sw2, sh2,
               mapX + sw1 * dScaleX, mapY + sh1 * dScaleY, sw2 * dScaleX, sh2 * dScaleY);
+          ctx.globalAlpha = 1;
       }
 
       // ── Dynamic entity dots (enemies, asteroids, drops, etc.) ─────────

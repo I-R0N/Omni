@@ -897,6 +897,12 @@ export const MINIMAP_CONSTANTS = {
     HALF: 3.2,            // half-edge of the square contact
     OUTLINE_ALPHA: 0.45,
   },
+  // Alpha of the baked static terrain layer, drawn UNDER the live contacts
+  // (M9 visual pass).  At 1.0 the tile/nebula colours are a saturated
+  // confetti that swallows the contact vocabulary above; pushing the terrain
+  // back to a readable ground plane is what makes a station square or a boss
+  // ring findable on a 75 px map.
+  STATIC_LAYER_ALPHA: 0.5,
 };
 
 export const INPUT_CONSTANTS = {
@@ -4209,7 +4215,11 @@ export const BOSS_CONSTANTS = {
  *  field maps onto machinery that already exists — see BOSS_CONSTANTS. */
 export interface BossPhaseDef {
   atHealthFrac: number;
-  /** Banner text on entry (a normal wave announcement). */
+  /** Banner text on entry (a normal wave announcement).  Keep it SHORT — the
+   *  banner is canvas-drawn at a fixed size and does not wrap, so anything
+   *  past ~16 characters runs off a phone-width screen (M9 visual pass).  The
+   *  boss's name is already on the HUD bar, so the banner only has to say what
+   *  just changed. */
   announce?: string;
   /** Hull tint for the phase (also the aura + HUD bar colour). */
   color?: string;
@@ -4254,7 +4264,7 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
       {
         atHealthFrac: 0.66,
-        announce: 'REAVER RAISES ITS GUARD',
+        announce: 'GUARD UP',
         color: '#f59e0b',
         speedMult: 1.1,
         shield: { amount: 90, regen: 6, arc: { deg: 160, slew: 2.4 } },
@@ -4263,7 +4273,7 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
       {
         atHealthFrac: 0.33,
-        announce: 'REAVER — ENRAGED',
+        announce: 'ENRAGED',
         color: '#ef4444',
         speedMult: 1.25,
         weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 0.95, spread: 30, count: 9, damage: 4 },
@@ -4295,7 +4305,7 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
       {
         atHealthFrac: 0.6,
-        announce: 'BASTION SEALS ITS HULL',
+        announce: 'HULL SEALED',
         color: '#a855f7',
         weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.1 },
         traits: {
@@ -4308,7 +4318,7 @@ export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
       },
       {
         atHealthFrac: 0.3,
-        announce: 'BASTION — PLATING BREACHED',
+        announce: 'PLATING BREACHED',
         color: '#f472b6',
         speedMult: 1.35,
         weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 1.6, explosionRadius: 150 },

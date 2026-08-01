@@ -5590,7 +5590,10 @@ export class GameEngine {
           const e: GameEntity = {
               id: nextId('shuttle'),
               type: EntityType.INTERACTABLE,
-              name: 'Shuttle',
+              // No `name`: the INTERACTABLE render path draws a permanent
+              // world-space label for named entities, and a floating "Shuttle"
+              // tag over ambient scenery is exactly the clutter the station
+              // and portal tags are supposed to earn (M9 visual pass).
               position: { x: anchor.x, y: anchor.y },
               velocity: { x: 0, y: 0 },
               size: { x: STATION_TRAFFIC.SIZE, y: STATION_TRAFFIC.SIZE },

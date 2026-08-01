@@ -550,8 +550,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             </span>
           )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px] border-collapse min-w-[380px]">
+        {/* min-w-0 is load-bearing: without it the table's min-width
+            propagates up through the flex column and pushes the WHOLE pause
+            panel wider than the viewport, clipping the sound slider and the
+            Ship Status hint (M9 visual pass). */}
+        <div className="overflow-x-auto min-w-0">
+          <table className="w-full text-[11px] border-collapse min-w-[340px]">
             <thead>
               <tr className="text-slate-500 uppercase tracking-widest text-[9px]">
                 <th className="text-left font-bold pb-1">Action</th>
@@ -1440,8 +1444,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           phase pips + a thin shield strip, so the fight has a legible
           state read at phone scale.  Pure EngineStats — no per-frame
           React state. */}
+      {/* Sits BELOW the top-right HUD chip stack, not beside it: at phone
+          width a centred bar and the right-aligned wave chip overlap outright
+          (M9 visual pass).  `top-32` clears the three-chip stack on a narrow
+          screen; desktop has room to pull it back up. */}
       {stats.gameState === GameState.PLAYING && stats.boss && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,78vw)]">
+        <div className="absolute top-32 sm:top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,88vw)]">
           <div className="flex items-baseline justify-between px-0.5 mb-1">
             <span
               className="text-[11px] font-extrabold uppercase tracking-[0.25em] drop-shadow"
@@ -1775,7 +1783,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
              overflowing content above the reachable scroll area; the inner
              wrapper's my-auto does the centering when content is short. */
           className="absolute inset-0 bg-slate-900/85 backdrop-blur-md flex flex-col items-center pointer-events-auto z-50 p-4 overflow-y-auto overscroll-contain">
-          <div className="w-full max-w-2xl flex flex-col gap-4 my-auto">
+          {/* min-w-0 on the column stops any wide child (the controls table)
+              from forcing the panel past the viewport — see the note there. */}
+          <div className="w-full max-w-2xl min-w-0 flex flex-col gap-4 my-auto">
 
             <div className="flex items-center justify-between">
               <h2 className="text-3xl font-bold text-white tracking-[0.2em]">PLAYER MENU</h2>
