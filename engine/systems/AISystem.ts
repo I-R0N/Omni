@@ -194,7 +194,12 @@ export class AISystem {
       const dy = wrapDeltaY(enemy.position.y, player.position.y);
       const dist = Math.sqrt(dx*dx + dy*dy);
 
-      const { PREFERRED_DIST, DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
+      const { DEADZONE, STRAFE_MODIFIER, LEAD_FACTOR, PROJECTILE_SPEED } = AI_CONFIG.SKIRMISHER;
+      // Per-archetype stand-off overrides the shared default — this is what
+      // gives an archetype its own RANGE BAND ((h): the siege boss stands well
+      // back and lobs).  Absent → the shared constant, so every rank-and-file
+      // skirmisher is unchanged.
+      const PREFERRED_DIST = config.preferredDistance ?? AI_CONFIG.SKIRMISHER.PREFERRED_DIST;
 
       // Aim-lead: predict where the player will be when the projectile arrives.
       // Movement still tracks the real player position for responsive seek/flee/strafe.

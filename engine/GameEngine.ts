@@ -21,7 +21,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -2764,6 +2764,9 @@ export class GameEngine {
     // pass, so a phase that raises an escort brood arms its timer on the same
     // step it is entered.  Also ticks the timed shop-discount window.
     this.updateBosses(dt);
+    // (h) regen trait: tick the burst buckets and heal.  Not boss-only — any
+    // enemy carrying the trait is served here.
+    this.updateEnemyRegen(dt);
 
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
@@ -4456,6 +4459,11 @@ export class GameEngine {
               if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
 
               target.health -= dmg;
+              // (h) regen: chain damage feeds the burst bucket like a pellet
+              // does.  Note the chain deliberately BYPASSES the front-shield
+              // plate — it never travels as a projectile, which is exactly why
+              // Lightning is a §7 answer to a directional defence.
+              noteTraitDamage(target, dmg);
               target.hitFlash = 0.15;
               target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
               this.spawnDamageText(target.position, dmg, target);
@@ -4991,18 +4999,36 @@ export class GameEngine {
   // it reads as a real shove (the hard cap would otherwise eat it).  Falloff
   // floors at 0.3 so a point-blank bomber always throws you.
   private applyKamikazeBlastToPlayer(bomb: GameEntity) {
+      this.applyBlastToPlayer(
+          bomb.position,
+          bomb.explosionRadius ?? 0,
+          bomb.explosionDamage ?? 0,
+          bomb.explosionKnockback ?? 0,
+      );
+  }
+
+  /**
+   * Apply an ENEMY-owned area blast to the player DIRECTLY — shield-respecting
+   * damage plus a launch, with distance falloff.  This exists (rather than
+   * letting the shockwave ring do it) because the ring only sweeps
+   * `currentMap.entities`, and the player is not in that list: it is appended
+   * to `frameEntities` each step.  So every enemy AoE that should hurt the
+   * player routes through here — the kamikaze detonation, and the (h) Bastion's
+   * siege shells.  Landing it at the impact point also means the shove is
+   * instant rather than gated on the ring's expanding wavefront reaching you.
+   */
+  private applyBlastToPlayer(pos: Vector2, radius: number, damage: number, knockback: number) {
       const p = this.player;
       if (p.isExploding) return;
-      const radius = bomb.explosionRadius ?? 0;
       if (radius <= 0) return;
-      const dx = wrapDeltaX(bomb.position.x, p.position.x);
-      const dy = wrapDeltaY(bomb.position.y, p.position.y);
+      const dx = wrapDeltaX(pos.x, p.position.x);
+      const dy = wrapDeltaY(pos.y, p.position.y);
       const dist = Math.hypot(dx, dy);
       if (dist > radius) return;
       const falloff = Math.max(0.3, 1 - dist / radius);
 
       // Damage (shield first, then hull) — mirrors the projectile/ram paths.
-      let dmg = (bomb.explosionDamage ?? 0) * falloff;
+      let dmg = damage * falloff;
       if ((p.shield ?? 0) > 0) {
           const absorbed = Math.min(p.shield!, dmg);
           p.shield! -= absorbed;
@@ -5016,9 +5042,9 @@ export class GameEngine {
       }
       p.hitFlash = 0.2;
 
-      // Launch: shove along the bomb→player vector (away from the blast) and
-      // raise the overshoot allowance so the cap doesn't clamp the impulse.
-      const k = (bomb.explosionKnockback ?? 0) * falloff;
+      // Launch: shove along the blast→player vector (away from it) and raise
+      // the overshoot allowance so the cap doesn't clamp the impulse.
+      const k = knockback * falloff;
       let nx: number, ny: number;
       if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
       else { const a = Math.random() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
@@ -5042,10 +5068,12 @@ export class GameEngine {
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
 
-      // Spawn the damaging shockwave ring.  Direct-hit target is excluded
-      // (it already took config.damage from the projectile collision) along
-      // with the player (cannon is player-owned; the ring shouldn't
-      // self-damage).
+      // Spawn the damaging shockwave ring for the WORLD (enemies, structures).
+      // The direct-hit target is excluded (it already took config.damage from
+      // the projectile collision) and so is the player — the ring only ever
+      // sweeps entities in currentMap.entities, which the player is not part
+      // of (it is appended to frameEntities), so the player is handled by the
+      // DIRECT path below exactly as the kamikaze blast is.
       this.spawnShockwave(impactPos, {
           radius: proj.explosionRadius!,
           damage: proj.explosionDamage ?? 0,
@@ -5055,6 +5083,21 @@ export class GameEngine {
           ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
           excludeIds: [directTarget.id, 'player'],
       });
+
+      // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
+      // Plasma Cannon, splash and all) must actually threaten the player —
+      // otherwise its signature weapon is a light show.  Same direct,
+      // shield-respecting blast the kamikaze uses, and for the same reason:
+      // the ring sweep never reaches the player.  A player-owned Cannon
+      // obviously doesn't self-damage.
+      if (proj.ownerType === EntityType.ENEMY && directTarget !== this.player) {
+          this.applyBlastToPlayer(
+              impactPos,
+              proj.explosionRadius!,
+              proj.explosionDamage ?? 0,
+              proj.explosionKnockback ?? 0,
+          );
+      }
   }
 
   // ─── Reusable expanding shockwave ──────────────────────────────────────
@@ -5196,6 +5239,11 @@ export class GameEngine {
                       e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                   }
                   if (!isIndestructible) e.health -= applied;
+                  // (h) regen: splash damage counts toward a burst too — but
+                  // ONLY when the blast is the player's (an enemy shell healing
+                  // its own boss through the bucket would be nonsense).  Like
+                  // the chain, a ring bypasses the front-shield plate.
+                  if (ring.ownerType === EntityType.PLAYER) noteTraitDamage(e, applied);
                   if (e.type === EntityType.ENEMY) e.provoked = true; // Stage 3a
                   // Third-party retaliation (Stage 5): an AoE that catches a
                   // bubble makes it target the blast's owner.
@@ -5371,6 +5419,13 @@ export class GameEngine {
       boss.armor = phase.traits?.armor;
       boss.evasive = phase.traits?.evasive;
       if (!boss.evasive) boss.dodgeTimer = undefined;
+      boss.frontShield = phase.traits?.frontShield;
+      boss.regen = phase.traits?.regen;
+      if (!boss.regen) {
+          boss.regenBucket = undefined;
+          boss.regenBucketTimer = undefined;
+          boss.regenBurnTimer = undefined;
+      }
 
       // Shield: raise / re-arm, or drop it entirely when the phase has none.
       if (phase.shield) {
@@ -5413,6 +5468,42 @@ export class GameEngine {
           lifetime: 0.5,
       });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.MEDIUM);
+  }
+
+  /**
+   * REGEN counterplay trait ((h), WEAPONS_AMMO_PLAN §7).  For each enemy
+   * carrying it: expire the FIXED burst bucket, count down any active burn,
+   * and otherwise heal `perSec` toward maxHealth.
+   *
+   * The bucket is filled by constants.noteTraitDamage() from every player
+   * damage path (projectile, lightning chain, shockwave ring), so splash and
+   * chain damage count toward a burst like pellets do.  Gated by the same DBG
+   * "Traits" toggle as the damage-side traits.
+   *
+   * O(enemies) with an early field check — the same shape as the kamikaze /
+   * nest passes, and it does nothing at all until an enemy has the trait.
+   */
+  private updateEnemyRegen(dt: number) {
+      if (!this.currentMap || !this.physics.traitsEnabled) return;
+      const enemies = this.entityIndex.enemies;
+      for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          const cfg = e.regen;
+          if (!cfg || !e.active || e.isExploding) continue;
+          // Bucket expiry — FIXED window: it runs out on schedule, no matter
+          // what landed inside (see the EnemyTraitSet comment).
+          if ((e.regenBucketTimer ?? 0) > 0) {
+              e.regenBucketTimer = (e.regenBucketTimer ?? 0) - dt;
+              if (e.regenBucketTimer! <= 0) { e.regenBucketTimer = 0; e.regenBucket = 0; }
+          }
+          if ((e.regenBurnTimer ?? 0) > 0) {
+              e.regenBurnTimer = Math.max(0, (e.regenBurnTimer ?? 0) - dt);
+              continue; // burning — no healing
+          }
+          if (e.health < e.maxHealth) {
+              e.health = Math.min(e.maxHealth, e.health + cfg.perSec * dt);
+          }
+      }
   }
 
   /**

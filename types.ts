@@ -155,8 +155,11 @@ export enum EnemySubtype {
   //   BOSS_WARDEN  — the chassis boss: a shielded, armored siege platform.
   //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
   //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon parity).
+  //   BOSS_SIEGE   — "Bastion": a long-range plated fortress wielding the
+  //   player's own Plasma Cannon; front-shield + regen.
   BOSS_WARDEN = 'BOSS_WARDEN',
   BOSS_SCATTER = 'BOSS_SCATTER',
+  BOSS_SIEGE = 'BOSS_SIEGE',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
@@ -166,8 +169,9 @@ export type EnemyShape =
   // (h) bosses — deliberately larger, heavier outlines than any rank-and-file
   // silhouette.  'warden' is a bastion prow: a broad ram face over a wide,
   // buttressed hull.  'talon' is a forward-raked twin-prong warship: two long
-  // claws reaching past a notched prow.
-  | 'warden' | 'talon';
+  // claws reaching past a notched prow.  'bastion' is a squat siege fortress:
+  // a heavy plated face over a wide blocky chassis.
+  | 'warden' | 'talon' | 'bastion';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -483,6 +487,24 @@ export interface GameEntity {
   // cooldown.
   evasive?: { sense: number; missRadius: number; impulse: number; cooldown: number };
   dodgeTimer?: number;
+  // Counterplay trait ((h) bosses): FRONT-SHIELD — a PERMANENT directional
+  // plate centred on the entity's `rotation` (no pool to deplete, unlike the
+  // Bulwark's arc shield).  Hits arriving within ±deg/2 of the facing are cut
+  // by `reduction`; open-side hits land in full.  Applied in the PhysicsSystem
+  // projectile-damage path, so lightning chains and shockwave rings — which
+  // damage in GameEngine — bypass it for free.  Gated by the DBG "Traits"
+  // toggle like armor.
+  frontShield?: { deg: number; reduction: number };
+  // Counterplay trait ((h) bosses): REGEN — heals `perSec` unless a damage
+  // BURST inside one FIXED bucket shuts it off for `burnSec`.  `regenBucket` /
+  // `regenBucketTimer` are the live bucket (armed by the first hit, expiring on
+  // schedule — NOT sliding, see the EnemyTraitSet comment); `regenBurnTimer` is
+  // the live suppression.  Fed by constants.noteTraitDamage() from every player
+  // damage path; ticked by GameEngine.updateEnemyRegen.
+  regen?: { perSec: number; burstDamage: number; windowSec: number; burnSec: number };
+  regenBucket?: number;
+  regenBucketTimer?: number;
+  regenBurnTimer?: number;
   // Stagger resistance ((h) bosses).  Stamped at spawn from the archetype's
   // ENEMY_VARIANTS.poise; read by the PhysicsSystem hit-feedback block so chip
   // fire can't lock a heavy hull in permanent hit-stun or shove it around.

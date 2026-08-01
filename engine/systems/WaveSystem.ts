@@ -313,7 +313,7 @@ export class WaveSystem {
       SWARM: 1, NEST: 3, BUBBLE: 2,
       // Bosses sit above the tier ladder — the tier only scales the normal
       // kill points; the real payout is the BOSS_CONSTANTS burst on top.
-      BOSS_WARDEN: 4, BOSS_SCATTER: 4,
+      BOSS_WARDEN: 4, BOSS_SCATTER: 4, BOSS_SIEGE: 4,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -340,6 +340,8 @@ export class WaveSystem {
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
       evasive: ENEMY_TRAITS[subtype]?.evasive,
+      frontShield: ENEMY_TRAITS[subtype]?.frontShield,
+      regen: ENEMY_TRAITS[subtype]?.regen,
       poise: config.poise,
       contactDamage: config.contactDamage,
       diesOnContact: config.diesOnContact,

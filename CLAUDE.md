@@ -544,7 +544,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   weapon parity, no parallel weapon table.  Its identity is the EVASIVE
   trait; phase 2 raises a tracking arc shield on top, phase 3 trades evasion
   for ARMOR and calls a KAMIKAZE escort, so the right answer flips from
-  Seeker to a big-hit weapon mid-fight).  Optional ENEMY_VARIANTS
+  Seeker to a big-hit weapon mid-fight) and BOSS_SIEGE ("Bastion", the
+  Reaver's inverse on every axis — slow, huge and plated, lobbing the
+  PLAYER'S OWN Plasma Cannon (`BOSS_WEAPONS.SIEGE`, splash and all) in
+  2-shell salvos from a LONG stand-off.  It is the only archetype that
+  overrides the shared skirmisher stand-off, via the ENEMY_VARIANTS
+  `preferredDistance` field — that is what gives it its own RANGE BAND.
+  Its traits are FRONT-SHIELD over REGEN; phase 2 runs both at once and
+  phase 3 blows the plate off and adds a TURRET escort).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
@@ -660,7 +667,28 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   arcs never travel so chains always connect, and one juke per cooldown is
   why a Shotgun cone still lands.  `AISystem.traitsEnabled` mirrors
   `PhysicsSystem.traitsEnabled` so ONE DBG "Traits" toggle gates the whole
-  counterplay layer.  front-shield / regen join in milestone B3.
+  counterplay layer.
+  `frontShield` (Bastion) is a PERMANENT directional plate centred on the
+  entity's FACING with NO pool to deplete — the Bulwark's arc geometry
+  generalized through the shared `PhysicsSystem.sectorCoversHit`, so
+  face-tanking never becomes viable.  Its answers fall out of WHERE damage
+  is applied rather than from special cases: lightning chains and shockwave
+  rings damage in GameEngine, OUTSIDE the projectile path, so they bypass
+  the plate for free; a Laser ricochet arrives from behind; and a slow
+  fortress can be flanked.
+  `regen` heals `perSec` unless a damage BURST shuts it off, and the burst
+  window is a FIXED BUCKET, not a sliding one — THAT is the mechanic.  The
+  first damaging hit arms the bucket and it expires on schedule regardless
+  of what lands inside; a refreshing window would instead measure "damage
+  until the player pauses", which any sustained weapon clears, so chip
+  damage would stop healing through and the trait would INVERT.  With fixed
+  buckets the arithmetic lands on the §7 table by construction.
+  `constants.noteTraitDamage()` feeds the bucket from EVERY player damage
+  path (projectile, lightning chain, shockwave ring), so splash and chain
+  damage count toward a burst like pellets do;
+  `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
+  front-shield reduce damage BEFORE the bucket sees it, so bursting a
+  plated target means bursting it FROM BEHIND.
 - `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
   `bossForWave()` — the (h) BOSS capstone tables.  Every
   `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave of an ARENA is a boss wave
@@ -1196,6 +1224,15 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   Playwright smokes can drive the real engine in a real browser without a
   test runner being added to the project (§7).  Two assignments, no
   per-frame cost beyond the stats one already happening.
+- **The player is NOT in `currentMap.entities`.** It is appended to
+  `frameEntities` each step instead.  So the shockwave ring
+  (`spawnShockwave` / `updateExplosionRings`, both of which walk
+  `currentMap.entities`) can never reach the player: every ENEMY-owned AoE
+  that should hurt the player routes through `applyBlastToPlayer(pos,
+  radius, damage, knockback)` — a direct, shield-respecting blast with
+  distance falloff.  The kamikaze detonation and the (h) Bastion's siege
+  shells are its two callers.  Landing it at the impact point also makes
+  the shove instant instead of gated on the ring's wavefront arriving.
 - **A boss discount must price BOTH sides of the shop.**
   `GameEngine.modulePrice(cost)` applies the (h) boss discount, and BOTH
   `purchaseModule` and `resaleValue` (sell + scrap) go through it.  If

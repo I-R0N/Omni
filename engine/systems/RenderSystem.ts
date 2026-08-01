@@ -4204,6 +4204,23 @@ export class RenderSystem {
           ctx.stroke();
           ctx.globalAlpha = 1;
       }
+      // ── Front-shield plate ((h) trait): a thick arc on the entity's FACING,
+      // so WHERE the plate is is legible in the world and "get behind it" is a
+      // readable instruction.  Drawn in the entity's local frame (rotation is
+      // already baked in), so the plate is centred on +x.  No pool bar — the
+      // plate never depletes; only the geometry matters.
+      if (entity.frontShield) {
+          const rp = Math.max(entity.size.x, entity.size.y) * 0.5;
+          const half = (entity.frontShield.deg * Math.PI / 180) / 2;
+          const flash = (entity.shieldHitFlash && entity.shieldHitFlash > 0) ? 1 : 0;
+          ctx.globalAlpha = 0.34 + flash * 0.45;
+          ctx.strokeStyle = flash ? '#ffffff' : '#e9d5ff';
+          ctx.lineWidth = Math.max(3, rp * 0.16);
+          ctx.beginPath();
+          ctx.arc(0, 0, rp * 1.05, -half, half);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+      }
       // ── Lightweight gnat render (Stage 4 perf): a die-on-contact gnat (Swarm)
       // appears in large clouds, so it skips the full ship treatment (flame
       // plume + cached body gradient + core eye + per-frame radial gradients) —
@@ -4973,6 +4990,28 @@ export class RenderSystem {
               ctx.lineTo(-r * 0.58, -r * 0.34);
               ctx.lineTo(-r * 0.42, -r * 0.92);          // port wingtip
               ctx.lineTo(r * 0.22, -r * 0.62);           // port shoulder
+              break;
+          }
+          case 'bastion': {
+              // (h) boss hull — a squat siege fortress: a heavy flat plated
+              // face (the front-shield reads as part of the silhouette) over a
+              // wide blocky chassis with recessed engine blocks aft.
+              ctx.moveTo(r * 0.72, -r * 0.70);           // plate, port corner
+              ctx.lineTo(r * 0.88, -r * 0.34);
+              ctx.lineTo(r * 0.94, 0);                   // plate apex
+              ctx.lineTo(r * 0.88, r * 0.34);
+              ctx.lineTo(r * 0.72, r * 0.70);            // plate, starboard corner
+              ctx.lineTo(r * 0.10, r * 0.88);
+              ctx.lineTo(-r * 0.46, r * 0.82);           // chassis shoulder
+              ctx.lineTo(-r * 0.52, r * 0.44);
+              ctx.lineTo(-r * 0.92, r * 0.38);           // engine block
+              ctx.lineTo(-r * 0.92, r * 0.12);
+              ctx.lineTo(-r * 0.66, 0);
+              ctx.lineTo(-r * 0.92, -r * 0.12);
+              ctx.lineTo(-r * 0.92, -r * 0.38);
+              ctx.lineTo(-r * 0.52, -r * 0.44);
+              ctx.lineTo(-r * 0.46, -r * 0.82);
+              ctx.lineTo(r * 0.10, -r * 0.88);
               break;
           }
           case 'triangle':
