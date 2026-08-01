@@ -5533,12 +5533,38 @@ export class GameEngine {
               y: boss.position.y + Math.sin(a) * d,
           });
       }
+      // ── The payoff moment ──────────────────────────────────────────────
+      // Same beat the dragon gets (dragonDeath is the precedent): a rift
+      // COLLAPSE where the entrance rift opened, a debris burst in the boss's
+      // phase colour, and a heavy shake — layered on top of the normal enemy
+      // explosion the death path still runs.  All existing machinery.
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,
           duration: BOSS_CONSTANTS.PORTAL_DURATION,
       });
+      this.spawnParticles(boss.position, BOSS_CONSTANTS.DEATH_DEBRIS, boss.color || '#f87171', {
+          speedMin: 3, speedMax: 15, sizeMin: 2, sizeMax: 6,
+          lifetimeMin: 0.4, lifetimeMax: 1.1,
+      });
+      this.spawnParticles(boss.position, Math.round(BOSS_CONSTANTS.DEATH_DEBRIS * 0.4), '#ffffff', {
+          speedMin: 6, speedMax: 20, sizeMin: 1, sizeMax: 2.5,
+          lifetimeMin: 0.25, lifetimeMax: 0.6,
+      });
       this.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
+
+      // Name the kill and its payout — the banner is what tells the player the
+      // capstone is DOWN and that the shop just got cheaper, which is
+      // otherwise only legible by opening a station menu.
+      const def = boss.enemySubtype ? BOSS_DEFS[boss.enemySubtype] : undefined;
+      const life = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+      this.waves.announcements.push({
+          text: `${def?.name ?? 'BOSS'} DESTROYED`,
+          subtext: `+${BOSS_CONSTANTS.SALVAGE_DROPS} SALVAGE  ·  ${Math.round(this.bossDiscount * 100)}% OFF FOR ${Math.round(BOSS_CONSTANTS.DISCOUNT_SECONDS)}S`,
+          color: boss.color || '#f87171',
+          lifetime: life,
+          maxLifetime: life,
+      });
       if (this.liveBoss === boss) this.liveBoss = null;
   }
 

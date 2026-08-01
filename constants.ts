@@ -839,6 +839,20 @@ export const MINIMAP_CONSTANTS = {
   // from the station / POI dots it sits among.  So: a rotated-square
   // contact with a radar ping expanding out of it, clamped to the border
   // like an enemy blip when it is off-range rather than disappearing.
+  // Boss blips ((h) capstones).  A boss is THE priority contact on a wave
+  // map, so it reads as a ringed target rather than another enemy dot —
+  // same clamp-instead-of-cull rule as an enemy blip, but bigger, with a
+  // slow targeting ring so it is findable at a glance on a 75px minimap.
+  BOSS_BLIP: {
+    RADIUS: 4.5,
+    RING_RADIUS: 8,
+    RING_WIDTH: 1.2,
+    RING_ALPHA: 0.75,
+    PULSE_HZ: 1.0,        // slower than the enemy pulse — a heartbeat, not an alarm
+    PULSE_MIN_ALPHA: 0.7,
+    EDGE_INSET: 6,
+    CLAMPED_ALPHA_MULT: 0.85,
+  },
   PORTAL_BLIP: {
     RADIUS: 4.5,          // half-diagonal of the diamond contact
     CORE_RADIUS: 1.1,     // bright centre pip — kept small so the coloured
@@ -3821,6 +3835,10 @@ export const BOSS_CONSTANTS = {
   DISCOUNT_FRACTION: 0.15,
   DISCOUNT_FRACTION_MAX: 0.35,
   DISCOUNT_SECONDS: 180,
+  /** Debris particles thrown on the death payoff beat (on top of the normal
+   *  enemy explosion).  Matches the dragon's scale — a capstone should read
+   *  as an event, not as a big drone popping. */
+  DEATH_DEBRIS: 26,
   /** Entrance / death rift VFX (GameEngine.openPortal). */
   PORTAL_RADIUS: 300,
   PORTAL_DURATION: 1.1,

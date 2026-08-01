@@ -707,9 +707,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   PAYOUT is model (d) (decision #37e): `payBossBounty` pays score + a
   PHYSICAL salvage spray (`SALVAGE_DROPS`) + a TIMED shop discount
   (`DISCOUNT_FRACTION` for `DISCOUNT_SECONDS`, stacking to
-  `DISCOUNT_FRACTION_MAX`).  There is deliberately NO weapon-unlock
-  plumbing — weapons stay purely purchased.  DBG: pause ▸ Debug Menu ▸
-  Bosses.
+  `DISCOUNT_FRACTION_MAX`), and stages the payoff BEAT on the dragon's
+  precedent: a rift collapse via `openPortal`, a `DEATH_DEBRIS` burst in
+  the phase colour, a heavy shake and a banner naming the boss and what
+  it just paid.  There is deliberately NO weapon-unlock plumbing —
+  weapons stay purely purchased.
+  LEGIBILITY: `EngineStats.boss` drives the HUD capstone bar (name,
+  phase pips, health bar + a numeric %, shield strip — sized so all of it
+  survives a 390px-wide screen); `EngineStats.bossDiscount` drives the
+  shop's discount banner; RenderSystem draws a phase-coloured aura ring
+  (`AURA_SCALE`/`AURA_ALPHA`) on the boss hull, an oversized SELF-LABELLED
+  off-screen chevron that is exempt from both the enemy-chevron budget and
+  the distance fade (losing the boss arrow behind a crowd of stragglers is
+  the case the arrow exists for), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
+  contact that clamps to the border instead of being culled.  DBG: pause ▸
+  Debug Menu ▸ Bosses.
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
   framework (generic: `StatusEffectKind` / `EffectPayload` /
   `StatusEffect` in `types.ts`).  An attack with `appliesEffect`

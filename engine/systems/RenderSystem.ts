@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, CameraState, EntityType, DamageText, PlayerHUDMessage, WeaponType, WaveAnnouncement, TrailPoint, TrailShape } from '../../types';
-import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS } from '../../constants';
+import { COLORS, ASSETS, MINIMAP_CONSTANTS, UI_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, WEAPONS, WEAPON_LIST, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, REGEN_POP_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, NEBULA_CONSTANTS, PLAYER_TRAIL_CONSTANTS, INPUT_CONSTANTS, CHARGE_CONSTANTS, densityTintMultiplier, metalDensityBrightness, METAL_HEX_CELLS, SHARD_VARIANTS, MATERIAL_DAMAGE_CRACKS, getActiveNebulaStretchK, getPlasticShardBaseShade, PLASTIC_SHARD_AUTOMATA, isPlasticAutomataBrighten, SHARD_LOD_CONSTANTS, getActiveGlassGlowColor, getActiveMetalGlowColor, getActivePlasticGlowBrightness, getActiveMetalGlowBrightness, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, BOSS_DEFS } from '../../constants';
 import type { ShardVariantId } from './ShardSystem.types';
 import { BackgroundManager } from './BackgroundManager';
 import { blendCompositionToHex } from '../NebulaColor';
@@ -5264,9 +5264,15 @@ export class RenderSystem {
           // while the player lines up the approach.
           if (this.chevronsOffscreenOnly && item.onScreen && !isPortal) continue;
 
+          const isBoss = t.isBoss === true;
           if (t.type === EntityType.ENEMY) {
-              if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
-              enemiesDrawn++;
+              // A (h) boss capstone never competes for the enemy chevron
+              // budget: losing the boss arrow behind a crowd of stragglers is
+              // exactly the case the arrow exists for.
+              if (!isBoss) {
+                  if (enemiesDrawn >= MAX_VISIBLE_ENEMY) continue;
+                  enemiesDrawn++;
+              }
           } else if (isPortal) {
               // Portals get their OWN budget rather than competing with the
               // stations for MAX_VISIBLE.  The buffer is sorted farthest-
@@ -5297,7 +5303,9 @@ export class RenderSystem {
           ctx.save();
           // Far enemies fade toward an alpha floor — still findable, but
           // a distant straggler doesn't shout like a closing threat.
-          if (t.type === EntityType.ENEMY && dist > ENEMY_FADE_START) {
+          // A boss never fades with distance — it is the thing you are
+          // supposed to be flying toward.
+          if (t.type === EntityType.ENEMY && !isBoss && dist > ENEMY_FADE_START) {
               const f = Math.min(1, (dist - ENEMY_FADE_START) / (ENEMY_FADE_END - ENEMY_FADE_START));
               ctx.globalAlpha = 1 - f * (1 - ENEMY_MIN_ALPHA);
           }
@@ -5308,11 +5316,13 @@ export class RenderSystem {
           ctx.beginPath();
 
           if (t.type === EntityType.ENEMY) {
-              // Caret (^) chevron pointing toward the enemy
-              const w = 7, h = 9;
+              // Caret (^) chevron pointing toward the enemy — scaled up for a
+              // boss so the capstone arrow reads apart from the stragglers'.
+              const k = isBoss ? 1.6 : 1;
+              const w = 7 * k, h = 9 * k;
               ctx.moveTo( h,  0);      // tip
               ctx.lineTo(-h,  w);      // bottom-left
-              ctx.lineTo(-h + 4,  0);  // inner notch
+              ctx.lineTo(-h + 4 * k,  0);  // inner notch
               ctx.lineTo(-h, -w);      // top-left
           } else {
               // Standard pointer for POIs
@@ -5335,12 +5345,16 @@ export class RenderSystem {
           // Distance text keeps its existing far-only rule and stacks below.
           const threshold = t.type === EntityType.ENEMY ? TEXT_THRESHOLD_ENEMY : TEXT_THRESHOLD_POI;
           const showDist = item.distSq > threshold;
-          const portalName = isPortal ? (t.name ?? '') : '';
+          // A boss labels itself for the same reason a portal does: an
+          // unlabelled arrow is ambiguous the moment anything else is on the
+          // ring, and the boss is the one you must not lose track of.
+          const portalName = isPortal ? (t.name ?? '')
+              : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
 
           if (showDist || portalName) {
                ctx.rotate(-angle);
                ctx.textAlign = 'center';
-               let ty = 24;
+               let ty = isBoss ? 30 : 24;
                if (portalName) {
                    // Chevrons at similar bearings crowd the same arc of the
                    // indicator ring, so the destination name is outlined to
@@ -5589,20 +5603,38 @@ export class RenderSystem {
           if (entity.type === EntityType.ENEMY) {
               // Out-of-range enemies clamp to the minimap border (square
               // clamp, slightly dimmer) instead of vanishing, so a distant
-              // straggler still registers at a glance.
+              // straggler still registers at a glance.  A (h) BOSS takes the
+              // same clamp but draws as a RINGED target — it is the priority
+              // contact on the map and has to be findable on a 75px minimap.
+              const bb = entity.isBoss === true ? MINIMAP_CONSTANTS.BOSS_BLIP : null;
+              const inset = bb ? bb.EDGE_INSET : blip.EDGE_INSET;
+              const half = currentSize / 2 - inset;
               let ex = item.dx * scale;
               let ey = item.dy * scale;
               const extent = Math.max(Math.abs(ex), Math.abs(ey));
-              const clamped = extent > clampHalf;
+              const clamped = extent > half;
               if (clamped) {
-                  const f = clampHalf / extent;
+                  const f = half / extent;
                   ex *= f; ey *= f;
               }
-              ctx.globalAlpha = clamped ? enemyPulseAlpha * blip.CLAMPED_ALPHA_MULT : enemyPulseAlpha;
+              const alpha = bb
+                  ? (bb.PULSE_MIN_ALPHA + (1 - bb.PULSE_MIN_ALPHA)
+                     * (0.5 + 0.5 * Math.sin(performance.now() / 1000 * bb.PULSE_HZ * Math.PI * 2)))
+                  : enemyPulseAlpha;
+              const mult = bb ? bb.CLAMPED_ALPHA_MULT : blip.CLAMPED_ALPHA_MULT;
+              ctx.globalAlpha = clamped ? alpha * mult : alpha;
               ctx.fillStyle = entity.color;
               ctx.beginPath();
-              ctx.arc(centerX + ex, centerY + ey, blip.RADIUS, 0, Math.PI * 2);
+              ctx.arc(centerX + ex, centerY + ey, bb ? bb.RADIUS : blip.RADIUS, 0, Math.PI * 2);
               ctx.fill();
+              if (bb) {
+                  ctx.globalAlpha = (clamped ? alpha * mult : alpha) * bb.RING_ALPHA;
+                  ctx.strokeStyle = entity.color;
+                  ctx.lineWidth = bb.RING_WIDTH;
+                  ctx.beginPath();
+                  ctx.arc(centerX + ex, centerY + ey, bb.RING_RADIUS, 0, Math.PI * 2);
+                  ctx.stroke();
+              }
               ctx.globalAlpha = 1;
               continue;
           }

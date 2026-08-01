@@ -1369,43 +1369,55 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
 
       {/* ── Boss bar ((h)) ──────────────────────────────────────────
-          Present only while a capstone boss is alive.  Named bar +
-          phase pips + a thin shield strip, so the fight has a legible
-          state read at phone scale.  Pure EngineStats — no per-frame
+          Present only while a capstone boss is alive.  Sized for PHONE
+          scale: the name and the percent readout are the two things
+          that have to survive a 390px-wide screen, so they anchor the
+          two ends of the row and the pips sit under them rather than
+          competing for the same line.  Pure EngineStats — no per-frame
           React state. */}
       {stats.gameState === GameState.PLAYING && stats.boss && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,78vw)]">
-          <div className="flex items-baseline justify-between px-0.5 mb-1">
+        <div className="absolute top-14 sm:top-16 left-1/2 -translate-x-1/2 pointer-events-none w-[min(560px,92vw)] px-1">
+          <div className="flex items-center justify-between gap-2 mb-1">
             <span
-              className="text-[11px] font-extrabold uppercase tracking-[0.25em] drop-shadow"
+              className="text-[12px] sm:text-[13px] font-extrabold uppercase tracking-[0.2em] drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] truncate"
               style={{ color: stats.boss.color }}
             >
               {stats.boss.name}
             </span>
-            <span className="flex gap-1 items-center">
-              {Array.from({ length: stats.boss.phaseCount }).map((_, i) => (
-                <span
-                  key={i}
-                  className="w-2 h-2 rounded-full border"
-                  style={{
-                    borderColor: stats.boss!.color,
-                    background: i <= stats.boss!.phase ? stats.boss!.color : 'transparent',
-                    opacity: i <= stats.boss!.phase ? 1 : 0.4,
-                  }}
-                />
-              ))}
+            <span className="flex items-center gap-1.5 shrink-0">
+              <span className="flex gap-1 items-center">
+                {Array.from({ length: stats.boss.phaseCount }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="w-2 h-2 rounded-full border"
+                    style={{
+                      borderColor: stats.boss!.color,
+                      background: i <= stats.boss!.phase ? stats.boss!.color : 'transparent',
+                      opacity: i <= stats.boss!.phase ? 1 : 0.4,
+                    }}
+                  />
+                ))}
+              </span>
+              <span
+                className="text-[12px] sm:text-[13px] font-extrabold tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]"
+                style={{ color: stats.boss.color }}
+              >
+                {Math.ceil(stats.boss.healthFrac * 100)}%
+              </span>
             </span>
           </div>
-          <div className="h-2.5 rounded-full bg-slate-900/80 border border-slate-600/60 overflow-hidden shadow-lg">
+          {/* Thicker than a normal HUD bar on purpose — at phone scale a
+              2px strip reads as decoration, not as the fight's state. */}
+          <div className="h-3.5 sm:h-3 rounded-full bg-slate-900/85 border border-slate-500/70 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
             <div
               className="h-full transition-[width] duration-150"
               style={{ width: `${stats.boss.healthFrac * 100}%`, background: stats.boss.color }}
             />
           </div>
           {stats.boss.shieldFrac > 0 && (
-            <div className="h-1 mt-0.5 rounded-full bg-slate-900/70 overflow-hidden">
+            <div className="h-1.5 mt-0.5 rounded-full bg-slate-900/70 overflow-hidden">
               <div
-                className="h-full bg-cyan-300/80 transition-[width] duration-150"
+                className="h-full bg-cyan-300/90 transition-[width] duration-150"
                 style={{ width: `${stats.boss.shieldFrac * 100}%` }}
               />
             </div>
