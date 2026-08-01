@@ -96,6 +96,7 @@ interface UIOverlayProps {
   onToggleAsteroidFlow?: () => void;
   onToggleSnitchCatchMode?: () => void;
   onCycleSnitchSpeed?: () => void;
+  onCycleDeathPenalty?: () => void;
   onCycleEnemyScale?: () => void;
   onCycleSwarmMove?: () => void;
   onApplyCorrosion?: () => void;
@@ -214,6 +215,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleAsteroidFlow,
   onToggleSnitchCatchMode,
   onCycleSnitchSpeed,
+  onCycleDeathPenalty,
   onCycleEnemyScale,
   onCycleSwarmMove,
   onApplyCorrosion,
@@ -884,6 +886,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Snitch spd', onCycleSnitchSpeed,
                   stats.snitchSpeedName ?? '1×',
                   'Snitch-speed multiplier (0.5 / 0.75 / 1 / 1.5 / 2×) scaling its speed live on top of the per-CATCH ramp. The first snitch flies at 0.05× player cruise and gains 0.05× each time one is CAUGHT (capped at 1.2×) — deferring the catch keeps it slow. This knob scales that for testing.')}
+                {ctrlRow('Death cost', onCycleDeathPenalty,
+                  stats.deathPenaltyName ?? 'none',
+                  'Salvage death penalty (none / repair / tithe / uninsured). The plan reserves this severity for a HUMAN ruling, so every candidate ships here and the default is none — respawn is free until someone picks otherwise. repair = a full hull repair at the station rate (so dying never beats flying home); tithe = 25% of held salvage; uninsured = all of it. Every mode keeps the run going.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

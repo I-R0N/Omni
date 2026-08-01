@@ -288,6 +288,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.toggleSnitchCatchMode();
   };
 
+  const handleCycleDeathPenalty = () => {
+      if (engineRef.current) engineRef.current.cycleDeathPenalty();
+  };
+
   const handleCycleSnitchSpeed = () => {
       if (engineRef.current) engineRef.current.cycleSnitchSpeed();
   };
@@ -509,6 +513,7 @@ const App: React.FC = () => {
         onToggleAsteroidFlow={handleToggleAsteroidFlow}
         onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
         onCycleSnitchSpeed={handleCycleSnitchSpeed}
+        onCycleDeathPenalty={handleCycleDeathPenalty}
         onCycleEnemyScale={handleCycleEnemyScale}
         onCycleSwarmMove={handleCycleSwarmMove}
         onApplyCorrosion={handleApplyCorrosion}

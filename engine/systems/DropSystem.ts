@@ -215,12 +215,16 @@ export class DropSystem {
 
       const kind = slots[i];
 
+      // Enemy salvage is TIER-SCALED (M7): a tier-3 heavy or a boss pays
+      // several units per drop where an asteroid pays one, so fighting the
+      // hard thing is worth more than mining the easy thing.
+      const units = DROP_CONFIG.SALVAGE_UNITS_PER_ENEMY_TIER * (enemy.enemyTier ?? 1);
       if (kind === 'salvagePrimary' && Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_PRIMARY) {
-        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 });
+        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 }, units);
         continue;
       }
       if (kind === 'salvageSecondary' && Math.random() < DROP_CONFIG.SALVAGE_DROP_CHANCE_ENEMY_SECONDARY) {
-        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 });
+        this.spawnSalvageDrop(entities, activeDrops, pos, { x: vx * 5, y: vy * 5 }, units);
         continue;
       }
 
@@ -1076,14 +1080,23 @@ export class DropSystem {
    * onto a single survivor — total salvage conservation across the
    * wave-cluster, single entity instead of many.
    */
+  /**
+   * Spawn one salvage drop.  `units` defaults to 1 — the value every
+   * environmental source pays.  ENEMY kills pass a tier-scaled amount (M7
+   * economy pass): killing a Tank should be worth more than popping an
+   * asteroid, both because it is harder and because combat is meant to be the
+   * primary income, not terrain mining.  Merges stay value-conserving, so a
+   * fat drop simply reads as a fatter chunk.
+   */
   public spawnSalvageDrop(
     entities: GameEntity[],
     activeDrops: GameEntity[],
     pos: Vector2,
     parentVelocity?: Vector2,
+    units: number = 1,
   ) {
     if (activeDrops.length >= DROP_CONFIG.MAX_ACTIVE_DROPS) return;
-    const amount = 1;
+    const amount = Math.max(1, Math.round(units));
     const drop = this.makeDropEntity(
       nextId('drop_salvage'),
       pos,

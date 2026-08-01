@@ -22,7 +22,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR } from './maps/MapD
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased, HEX_WIDTH, HEX_HEIGHT } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, STATION_TRAFFIC, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, moduleContributions, AUDIO_CONSTANTS, EXPLOSION_PROFILES, EXPLOSION_HEAVY_MASS, ExplosionClass, SfxId, WEAPON_SFX } from '../constants';
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleMetalGlowBrightness, getActiveMetalGlowBrightnessName, cycleGlassGlowColor, getActiveGlassGlowColorName, cycleMetalGlowColor, getActiveMetalGlowColorName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, cycleSwarmMove, getActiveSwarmMoveName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, WEAPON_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, STATION_TRAFFIC, getActiveDeathPenalty, getActiveDeathPenaltyName, cycleDeathPenalty as cycleDeathPenaltyConst, DEATH_PENALTY_TITHE_FRACTION, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, moduleContributions, AUDIO_CONSTANTS, EXPLOSION_PROFILES, EXPLOSION_HEAVY_MASS, ExplosionClass, SfxId, WEAPON_SFX } from '../constants';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
@@ -1488,6 +1488,7 @@ export class GameEngine {
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
+      deathPenaltyName: getActiveDeathPenaltyName(),
       enemyScaleName: getActiveEnemyScaleName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
@@ -1731,6 +1732,42 @@ export class GameEngine {
   public setVolume(v: number) { this.audio.setVolume(v); }
 
   /**
+   * Charge the run's DEATH PENALTY, if any (plan decision #40a).  The severity
+   * is a reserved user ruling, so every candidate ships behind the DBG
+   * "Death cost" cycle and the DEFAULT is 'none' — i.e. today's free respawn,
+   * unchanged, until someone chooses otherwise.
+   *
+   * 'repair' is priced with the station's own REPAIR_COST_PER_HP so it can
+   * never exceed the repair bill the player skipped by not flying home; that
+   * ordering is what stops "die on purpose" from being the cheap way to fix
+   * a hull.  All modes clamp at the player's held credits — a penalty must
+   * never leave a negative balance.
+   */
+  private applyDeathPenalty() {
+      const mode = getActiveDeathPenalty();
+      if (mode === 'none' || this.credits <= 0) return;
+      let cost = 0;
+      if (mode === 'repair') {
+          cost = Math.round(this.player.maxHealth * STATION_CONSTANTS.REPAIR_COST_PER_HP);
+      } else if (mode === 'tithe') {
+          cost = Math.round(this.credits * DEATH_PENALTY_TITHE_FRACTION);
+      } else {
+          cost = this.credits; // 'uninsured' — the cargo was not insured
+      }
+      cost = Math.min(cost, this.credits);
+      if (cost <= 0) return;
+      this.credits -= cost;
+      this.pushPlayerMessage(`-${cost.toLocaleString()} SALVAGE`, '#f87171');
+  }
+
+  /** DBG: cycle the death-penalty severity (decision #40a is a user ruling —
+   *  this is how a human tries each candidate).  Returns the new mode name. */
+  public cycleDeathPenalty(): string {
+      cycleDeathPenaltyConst();
+      return getActiveDeathPenaltyName();
+  }
+
+  /**
    * Per-frame gamepad service (Phase 3 Pair C).  Reads the pad, announces a
    * fresh connection once, and drains the two EDGE-triggered actions the pad
    * owns that no existing latch covers — pause and weapon cycle.  Movement,
@@ -1777,6 +1814,7 @@ export class GameEngine {
    */
   public respawnFromDeath() {
       if (this.gameState !== GameState.GAME_OVER) return;
+      this.applyDeathPenalty();
       this.respawnPlayer();
       this.gameState = GameState.PLAYING;
       this.lastTime = performance.now(); // no physics jump across the screen
@@ -1925,6 +1963,7 @@ export class GameEngine {
       asteroidFlowEnabled: this.asteroidFlowEnabled,
       snitchCatchMode: this.snitchCatchMode,
       snitchSpeedName: getActiveSnitchSpeedName(),
+      deathPenaltyName: getActiveDeathPenaltyName(),
       enemyScaleName: getActiveEnemyScaleName(),
       swarmMoveName: getActiveSwarmMoveName(),
       enemyScaleInfo: `hp ×${enemyHpMult(this.waveIndex).toFixed(2)} · dmg ×${enemyDamageMult(this.waveIndex).toFixed(2)}`,
@@ -3834,15 +3873,26 @@ export class GameEngine {
       return true;
   }
 
-  /** Rounded resale payout for an inventory tile, or null when the tile
-   *  is empty/invalid. */
+  /**
+   * Rounded resale payout for an inventory tile, or null when the tile is
+   * empty/invalid.
+   *
+   * Priced off the CURRENT SHOP PRICE (`modulePrice`), not the catalog cost.
+   * This matters the moment a boss discount exists: buying at 75 % of cost and
+   * selling back at 90 % of FULL cost is a 15 %-per-cycle money pump, which is
+   * an infinite-credits exploit rather than a reward.  Pricing both sides off
+   * the same discounted number keeps buy-sell-buy a guaranteed loss at every
+   * discount level, which is what a resale fraction below 1 is for.
+   * (Caught in the M7 economy pass; the M1 note claiming this was already
+   * safe had the arithmetic backwards.)
+   */
   private resaleValue(idx: number, fraction: number): number | null {
       if (idx < 0 || idx >= this.inventory.length) return null;
       const id = this.inventory[idx];
       if (id === null) return null;
       const def = moduleDef(id);
       if (!def) return null;
-      return Math.round(def.cost * fraction);
+      return Math.round(this.modulePrice(def.cost) * fraction);
   }
 
   /** The actual tile move/swap.  Guards: destination kind fit, displaced
@@ -4027,10 +4077,13 @@ export class GameEngine {
           inventory: this.inventory.map(id => {
               if (id === null) return null;
               const def = moduleDef(id)!;
+              // Both payouts are quoted off the CURRENT shop price, matching
+              // `resaleValue` — see the exploit note there.
+              const price = this.modulePrice(def.cost);
               return {
                   id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
-                  sellValue: Math.round(def.cost * MODULE_RESALE.SELL_FRACTION),
-                  scrapValue: Math.round(def.cost * MODULE_RESALE.SCRAP_FRACTION),
+                  sellValue: Math.round(price * MODULE_RESALE.SELL_FRACTION),
+                  scrapValue: Math.round(price * MODULE_RESALE.SCRAP_FRACTION),
               };
           }),
           // Catalog prices are the DISCOUNTED prices the shop will actually

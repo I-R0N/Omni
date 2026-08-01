@@ -1062,6 +1062,35 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   mid-wave-powerup drop entity in code today, even though `gold` is
   initialized on the player and `dropComposition` can in principle hold
   more variants.
+- **The economy is MEASURED, not guessed** (M7 tuning pass).  A scripted
+  auto-pilot harness drives real runs and reports credits/minute, which
+  is what `SALVAGE_CONSTANTS` and `DROP_CONFIG` are tuned against.  The
+  three findings that shaped the current numbers, so they don't get
+  re-broken: (1) income ran 37,800/min against a catalog topping out at
+  60,000 — the whole catalog in three minutes — fixed by moving
+  `CREDITS_PER_DROP` 1000 → 100 rather than re-pricing 25 modules;
+  (2) the income split was 22 % combat / 78 % TERRAIN, i.e. the optimal
+  play was to ignore enemies and mine asteroids — fixed by trimming the
+  environmental drop chances and making enemy salvage TIER-SCALED
+  (`DROP_CONFIG.SALVAGE_UNITS_PER_ENEMY_TIER`), so killing the hard
+  thing beats popping the easy thing; (3) resale was priced off the
+  FULL catalog cost while purchases were discounted, which at the
+  boss-discount cap was a 15 %-per-cycle money pump —
+  `resaleValue` now prices off `modulePrice()` like the shop does, and
+  the invariant "buy-sell-buy always loses money at every discount
+  level" is smoke-asserted.  Current measured rates: ≈5,700/min in a
+  wave arena, ≈1,400/min on the wave-free hub.  The hub is the SPEND
+  side and the arenas the EARN side by design.
+- **The salvage DEATH PENALTY is a user ruling, shipped as a knob.**
+  Plan decision #40a reserves the severity for a human, so all four
+  candidates (`DEATH_PENALTY_CYCLE`: none / repair / tithe /
+  uninsured) ship behind the DBG "Death cost" row with the MILDEST —
+  `none`, today's free respawn — as the default.  Charged in
+  `GameEngine.applyDeathPenalty` from `respawnFromDeath`.  `repair` is
+  priced with the station's own `REPAIR_COST_PER_HP` so dying can
+  never be cheaper than the repair it skipped; every mode clamps at
+  held credits so a penalty can't go negative; every mode keeps the
+  RUN going (ending it stays the player's choice on the death screen).
 - **Salvage is the money.** Collecting a salvage drop is the ONLY way to
   earn `GameEngine.credits` — the old `awardScore` 1:1 score→Salvage
   mirror is REMOVED (score stays the pure performance metric).  Each

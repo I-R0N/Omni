@@ -3161,21 +3161,76 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // around wave 2-4, matching the plan target (WEAPONS_AMMO_PLAN §5) without
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
-  CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
+  // ── M7 economy pass — MEASURED, not guessed ────────────────────────────
+  // A scripted auto-pilot run measured income at 37,800 credits/min in a wave
+  // arena against a catalog topping out at 60,000.  That buys the entire
+  // catalog inside three minutes: the price curve existed but had no room to
+  // mean anything, and repair (3,000 for a full hull) cost five seconds of
+  // income.  This is the "absolute prices" watch PR #72 left open.
+  //
+  // The fix is ONE constant rather than re-pricing 25 modules: the curve is
+  // readable and deliberate, so income moved to fit it instead.  At 100/unit
+  // the measured arena rate becomes ≈3,800/min — Hull Mk I in about a minute,
+  // a mid-tier gun in ~7, the Cannon in ~16, and a full hull repair costs a
+  // real 45 seconds of fighting.  Wave-free hub income lands ≈520/min, which
+  // is deliberately NOT a progression path: the Overworld is where you SPEND
+  // and the arenas are where you EARN (decision #39d's loop).
+  CREDITS_PER_DROP: 100,      // credits per salvage unit, applied at collection
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)
   // Snitch-catch payout: the snitch pays score but score no longer mints
-  // credits, so the catch also sprays this many salvage units (≈ a wave-and-
-  // a-half of combat income — it's the biggest chase reward in the game).
-  SNITCH_CATCH_DROPS: 8,
+  // credits, so the catch also sprays this many salvage units.  Re-sized in
+  // M7 against MEASURED per-wave combat income (≈35 units/wave): 8 units was
+  // a quarter of a wave for the hardest chase in the game, which is not "the
+  // biggest chase reward".  30 units ≈ most of a wave.
+  SNITCH_CATCH_DROPS: 30,
   // Wave-clear reward beat (pivot 1c — replaced the free upgrade cards):
   // every wave clear sprays this many salvage units beside the player.
-  // Sizing: combat income runs ≈ 4.8-7.2 units/wave (0.8 × budget), so +3
-  // is a noticeable ~50% early-wave topper without dwarfing the fighting
-  // itself.  The early-clear SPEED bonus stays score-only.
-  WAVE_CLEAR_DROPS: 3,
+  // The old sizing assumed 4.8-7.2 units/wave of combat income; M7 MEASURED
+  // ≈35 units/wave, so +3 was a ~9 % rounding error rather than a reward
+  // beat.  10 units restores the intended ~30 % topper.  The early-clear
+  // SPEED bonus stays score-only.
+  WAVE_CLEAR_DROPS: 10,
 };
+
+// ── Salvage death penalty (plan decision #40a — RESERVED FOR THE USER) ───────
+// The plan explicitly reserves the SEVERITY of the death penalty for a human
+// ruling, and it has to be tuned together with repair cost and resale or the
+// incentives invert (a penalty harsher than the repair bill makes dying on
+// purpose cheaper than flying home).  So all four candidates ship, selectable
+// live from the DBG panel, with the MILDEST as the default — nothing about
+// today's behaviour changes until someone picks otherwise.
+//
+//   none        respawn free.  TODAY'S BEHAVIOUR, and the default.
+//   repair      respawn costs a full hull repair, priced with the station's
+//               own REPAIR_COST_PER_HP — so dying is exactly as expensive as
+//               the repair you avoided by not flying home.  The mildest
+//               candidate that still has teeth, and the one that composes
+//               correctly with the repair economy.
+//   tithe       lose a fraction of HELD salvage (uninsured cargo, partial).
+//   uninsured   lose ALL held salvage (the parking-lot "uninsured cargo"
+//               option in full).
+// Every candidate keeps the run going; ending the run outright stays the
+// player's own choice on the death screen.
+export type DeathPenaltyMode = 'none' | 'repair' | 'tithe' | 'uninsured';
+export const DEATH_PENALTY_CYCLE: ReadonlyArray<DeathPenaltyMode> =
+  ['none', 'repair', 'tithe', 'uninsured'] as const;
+/** Fraction of held salvage lost under 'tithe'.  PROVISIONAL. */
+export const DEATH_PENALTY_TITHE_FRACTION = 0.25;
+
+let activeDeathPenaltyIndex = 0; // 'none' — the mildest candidate
+
+export function getActiveDeathPenalty(): DeathPenaltyMode {
+  return DEATH_PENALTY_CYCLE[activeDeathPenaltyIndex];
+}
+export function getActiveDeathPenaltyName(): string {
+  return DEATH_PENALTY_CYCLE[activeDeathPenaltyIndex];
+}
+export function cycleDeathPenalty(): number {
+  activeDeathPenaltyIndex = (activeDeathPenaltyIndex + 1) % DEATH_PENALTY_CYCLE.length;
+  return activeDeathPenaltyIndex;
+}
 
 // ── Space station POI (economy-pivot increment 1e) ──────────────────────────
 // One station sits at the center of the OVERWORLD map — the home of the
@@ -3339,14 +3394,26 @@ export const DROP_CONFIG = {
   // chances (WEAPONS_AMMO_PLAN §4: reuse today's rates as the starting
   // point).  Every salvage drop carries value 1; there is no per-source
   // amount anymore.
-  SALVAGE_DROP_CHANCE_ASTEROID:        0.45, // 45 % chance an asteroid drops salvage
-  SALVAGE_DROP_CHANCE_DENT_SHARD:      0.85, // dent shards take several hits — higher reward
+  // M7 economy pass: the measured income split was 22 % combat / 78 % TERRAIN
+  // — i.e. the optimal play was to ignore enemies and mine asteroids, which
+  // inverts the loop the whole game is built around.  Terrain still pays
+  // (materials being physically valuable is the point of the material sim),
+  // but it is now the side income, not the main one.  Environmental chances
+  // came down; enemy drops went up AND became tier-scaled below.
+  SALVAGE_DROP_CHANCE_ASTEROID:        0.28, // was 0.45
+  SALVAGE_DROP_CHANCE_DENT_SHARD:      0.55, // was 0.85 — dent shards take several hits,
+                                             // so they keep the higher rate
   // Plastic-shards may break into a small number of sub-shards (each
   // a drop opportunity), so their per-shard drop chance is cut well
   // below the generic dent-shard rate.
   SALVAGE_DROP_CHANCE_PLASTIC_SHARD:   0.20,
-  SALVAGE_DROP_CHANCE_ENEMY_PRIMARY:   0.55, // primary enemy salvage roll
-  SALVAGE_DROP_CHANCE_ENEMY_SECONDARY: 0.25, // secondary roll (independent)
+  SALVAGE_DROP_CHANCE_ENEMY_PRIMARY:   0.85, // primary enemy salvage roll (was 0.55)
+  SALVAGE_DROP_CHANCE_ENEMY_SECONDARY: 0.55, // secondary roll, independent (was 0.25)
+  // Salvage UNITS per enemy-tier on each enemy drop (M7).  A tier-1 gnat pays
+  // 2 units, a tier-3 heavy 6, a tier-4 boss 8 — so killing the hard thing
+  // beats popping the easy thing, which is both the correct incentive and the
+  // more legible one.
+  SALVAGE_UNITS_PER_ENEMY_TIER:        2,
   // Health
   HEALTH_HEAL_AMOUNT:        100,   // HP restored per milestone (wave-clear) health drop
   // Enemy-kill health drops (added because the expanded roster hits harder).
@@ -4121,8 +4188,10 @@ export const BOSS_CONSTANTS = {
   /** Score paid on a boss kill (on top of the normal tier kill points). */
   SCORE: 2500,
   /** Salvage drops sprayed on a boss kill — the model-(d) income accelerator.
-   *  PROVISIONAL: sized ≈ 3× the wave-clear spray. */
-  SALVAGE_DROPS: 36,
+   *  M7-sized against MEASURED per-wave combat income (≈35 units): a capstone
+   *  that arrives every 5th wave should pay a few waves' worth, so 90 units
+   *  ≈ 2.5 waves on top of the tier-4 kill drops and the shop discount. */
+  SALVAGE_DROPS: 90,
   /** Shop discount earned per boss kill, and the run cap.  Applied to every
    *  station purchase as `cost × (1 - discount)`.  PROVISIONAL. */
   DISCOUNT_PER_KILL: 0.05,

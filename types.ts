@@ -1462,6 +1462,9 @@ export interface EngineStats {
   /** Connected gamepad id, or undefined (Phase 3 Pair C) — drives the HUD
    *  hint and switches the help panel's default tab to the pad column. */
   gamepad?: string;
+  /** Active death-penalty candidate (plan decision #40a is a user ruling —
+   *  this is the DBG cycle's live readout). */
+  deathPenaltyName?: string;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;
