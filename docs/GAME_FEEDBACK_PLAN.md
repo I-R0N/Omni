@@ -1321,6 +1321,40 @@ k. After N waves, spawn a portal to a new map.
     (decision #39d) and (h)'s "wave-map capstone" framing
     depends on the connected loop existing.
 
+41. **(k) SHIPPED (PR #74) + side-fix PR #75 + the gauntlet
+    experiment (PR #76, closed unmerged) (2026-08-01).**
+    a. **PR #74 — portals + map descriptors, per brief.**
+       `engine/maps/MapDescriptors.ts`: thin MAP_DESCRIPTORS
+       registry (stable ids, hub/arena kind, wavesEnabled;
+       BY_ID/BY_MAP_TYPE lookups; default start = the hub).
+       `GameEngine.transitionToMap(descriptorId)` preserves
+       run state (credits/score/outfit/inventory/health)
+       while loadMap rebuilds per-map systems; new-run reset
+       unchanged. Portal POIs follow the station recipe
+       (INTERACTABLE, portalTargetId → arena; return portal
+       on arenas), with labelled arrows (1500-unit gate) and
+       minimap anomaly contacts that clamp instead of
+       vanishing. Excursions start fresh per entry; death
+       still ends the run. CLAUDE.md documented in-PR. ~978
+       insertions / 11 files. The loop is CLOSED: earn →
+       outfit → portal → fight → return.
+    b. **PR #75** (parallel session): ring tiles no longer
+       deform in lockstep; aliased tile geometry made
+       unreachable. Small render/geometry fix, no plan
+       impact.
+    c. **Gauntlet experiment** — PR #76
+       (claude/gauntlet-completion-wq2uv2) attempted the
+       ENTIRE remaining roadmap in one looped session.
+       Result "ok" but user CLOSED IT UNMERGED: one giant
+       multi-milestone PR is the wrong review unit.
+       PROCESS RULING: gauntlet-style loops continue ONE
+       roadmap step at a time, each on its own sandbox
+       branch + PR into the plan branch. The closed branch
+       stays readable as reference (its GAUNTLET_LOG.md
+       records decisions/pitfalls) but nothing from it is
+       pre-approved. Next: (h) bosses via a boss-only
+       gauntlet.
+
 20. **living-entity (new content task).** New non-threatening
     entity type that grazes on game material. Specifications:
     - New `EntityType` value (default name `CREATURE`;
@@ -1498,16 +1532,11 @@ observes the three strategy guardrails (decision #36e).
      + station-only loadout swap. MUST define the mid-wave docking rule
      (waves stay on the base map this plan). Medium. Accepted scope
      flag, decision #37f.
-2. **(k) Portals + map descriptors** (moved ahead of (h) — user call,
-   2026-07-24) — the traversable portal entity on the thin descriptor
-   layer. **Upgraded to THE KEYSTONE of the game loop by PR #73
-   (decision #39d)**: the Overworld hub and the wave maps are
-   currently disjoint (no in-game path; wave maps have no commerce),
-   so (k) must connect Overworld ↔ wave maps via portals AND carry
-   run state (credits / inventory / outfit / score) across map
-   transitions — nothing does that today. Descriptor layer stays
-   thin as scoped in #36e; the run-state carry is the real added
-   scope.
+2. ~~**(k) Portals + map descriptors**~~ — **DONE** (PR #74, decision
+   #41a). MAP_DESCRIPTORS registry + transitionToMap run-state carry +
+   portal/return-portal POIs; the earn → outfit → fight → return loop
+   is closed. Fresh-per-entry excursions; death still ends the run
+   (penalty design stays with the tuning pass, step 6).
 3. **(h) Bosses** — WAVE-MAP capstones (the wave maps are the nodes,
    decision #39e). Consumes doc §6 (model (d): salvage/discount
    payouts, NO unlock plumbing; weapon-bosses wield themed player
