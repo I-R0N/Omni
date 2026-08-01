@@ -146,12 +146,24 @@ export enum EnemySubtype {
   //           via portal.  Engine-managed (GameEngine.updateDragon); the AI
   //           'dragon' strategy is a no-op.
   DRAGON   = 'DRAGON',
+  // (h) BOSSES — wave-arena capstones (decision #39e).  A boss is NOT a new
+  // entity category: it is an ordinary wave enemy built from the same
+  // ENEMY_VARIANTS / ENEMY_BEHAVIOR tables and tracked as a COUNTED wave
+  // enemy, so the existing clear-the-field completion rule already gates on
+  // killing it.  What makes it a boss is a BOSS_DEFS row (phases + payout)
+  // plus the WaveSystem boss-wave cadence.
+  //   BOSS_WARDEN — the chassis boss: a shielded, armored siege platform.
+  BOSS_WARDEN = 'BOSS_WARDEN',
 }
 
 // Distinct procedural polygon shapes for native enemy rendering — chosen so
 // each enemy archetype reads as a different silhouette without sprite art.
 export type EnemyShape =
-  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon';
+  | 'triangle' | 'arrow' | 'hexagon' | 'octagon' | 'diamond' | 'pentagon' | 'chevron' | 'star' | 'cross' | 'circle' | 'nest' | 'bubble' | 'dragon'
+  // (h) bosses — deliberately larger, heavier outlines than any rank-and-file
+  // silhouette.  'warden' is a bastion prow: a broad ram face over a wide,
+  // buttressed hull.
+  | 'warden';
 
 // Drop item kinds.  Per-type properties (collectible vs environmental debris,
 // …) live in the DROP_TYPES registry in constants.ts — the single source of
@@ -208,6 +220,30 @@ export interface ConsumeConfig {
   pull?: number;          // optional inward tug (accel) on mobile candidates in
                           // sense range — the suck-in before the swallow.  Tiles
                           // (static) are never pulled.
+}
+
+// Brood-spawner config (Stage 4 Nest; reused by (h) boss phases).  Births
+// `batch` `subtype` brood every `interval` seconds, up to `maxBrood` live units
+// of that subtype.  Lives either on the archetype (ENEMY_VARIANTS.spawner) or,
+// for a boss phase, stamped per-entity (GameEntity.spawner) — updateNests reads
+// the per-entity one first, so a phase can raise or drop escorts with no
+// bespoke spawn pass.
+export interface SpawnerConfig {
+  subtype: EnemySubtype;
+  interval: number;
+  batch: number;
+  maxBrood: number;
+}
+
+// POISE ((h) bosses): resistance to the generic per-hit stagger + knockback in
+// the PhysicsSystem projectile path.  A heavy hull should not be reeled around
+// the arena by chip fire, but a real hit should still register — so the
+// knockback impulse is scaled and the hit-stun only lands at or above a damage
+// floor.  Deliberately a plain archetype field, NOT a boss branch: any heavy
+// enemy can carry it.  Absent → today's behaviour (full kick, always stun).
+export interface PoiseConfig {
+  stunDamage: number;  // per-hit damage at/above which the hit-stun still applies
+  knockScale: number;  // multiplier on the damage-scaled knockback impulse
 }
 
 // Live instance on the player (GameEntity.statusEffects).
@@ -433,6 +469,10 @@ export interface GameEntity {
   // Counterplay trait: armored enemies shrug off per-hit damage below
   // `chipThreshold`, scaled by `(1 - reduction)` — demands big-hit weapons.
   armor?: { chipThreshold: number; reduction: number };
+  // Stagger resistance ((h) bosses).  Stamped at spawn from the archetype's
+  // ENEMY_VARIANTS.poise; read by the PhysicsSystem hit-feedback block so chip
+  // fire can't lock a heavy hull in permanent hit-stun or shove it around.
+  poise?: PoiseConfig;
   // Hit-feedback stagger: while > 0 the AI applies no movement force, so a
   // projectile knockback reads as a brief reel.  Set on hit, ticked by AISystem.
   hitStun?: number;
@@ -580,6 +620,24 @@ export interface GameEntity {
   // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
   // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
   spawnTimer?: number;
+  // Per-entity brood spawner override ((h) bosses).  updateNests reads this
+  // FIRST and falls back to the archetype's ENEMY_VARIANTS.spawner, so a boss
+  // PHASE can switch escort broods on and off without a bespoke spawn pass.
+  // Absent → the archetype config applies.
+  spawner?: SpawnerConfig;
+  // Per-entity weapon override ((h) bosses).  Merged over the archetype weapon
+  // by WeaponSystem.updateEnemyShooting, so a boss phase can re-tune its gun
+  // (cadence / count / damage) through the same Partial<WeaponConfig> pattern
+  // the archetypes already use.  Absent → the archetype weapon as-is.
+  weaponOverride?: Partial<WeaponConfig>;
+  // ── Boss ((h)) ──────────────────────────────────────────────────────────
+  // `isBoss` marks a wave capstone: it drives the HUD boss bar, the render
+  // aura and the model-(d) payout in GameEngine.handleEntityDeath.
+  // `bossPhase` is the index of the currently-applied BOSS_DEFS phase
+  // (GameEngine.updateBosses stamps a phase once, on the health-fraction
+  // transition); -1 means "spawned, no phase applied yet".
+  isBoss?: boolean;
+  bossPhase?: number;
   // Swarm movement scratch (Stage 4): per-gnat timer/phase reused by the
   // DBG-selectable swarm modes (vortex dart cadence, weave phase accumulator,
   // burst coast/dash cadence) — see AISystem.updateSwarm.
@@ -1249,6 +1307,21 @@ export interface EngineStats {
   /** Enemies left to destroy this wave (unspawned remainder + alive).
    *  Completion model: the wave ends only when this reaches 0. */
   enemiesRemaining?: number;
+  /** Live boss readout ((h)) — present only while a capstone boss is alive,
+   *  so the HUD can show a named bar with its phase pips.  `healthFrac` /
+   *  `shieldFrac` are 0..1; `phase` is the 0-based BOSS_DEFS phase index. */
+  boss?: {
+    name: string;
+    healthFrac: number;
+    shieldFrac: number;
+    phase: number;
+    phaseCount: number;
+    color: string;
+  };
+  /** Live boss shop discount ((h) payout model (d)): the fraction taken off
+   *  every catalog price and every resale value, plus the seconds left on the
+   *  timed window.  Undefined when no window is running. */
+  bossDiscount?: { fraction: number; secondsLeft: number };
   /** Run score — animated integer ticker toward the true run total. */
   score?: number;
   /** Kill-combo readout: active multiplier (1 = no combo), the kill

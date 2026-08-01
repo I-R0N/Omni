@@ -1,6 +1,6 @@
 
 
-import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig } from './types';
+import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig } from './types';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -3131,8 +3131,13 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // Nest spawner (Stage 4): periodically births `batch` `subtype` brood every
   // `interval` seconds, up to `maxBrood` live brood (a hard cap on the
   // self-replicating population).  Brood are spawned at the nest and DON'T gate
-  // wave completion (Stage 2b countsTowardWave=false).
-  spawner?: { subtype: EnemySubtype; interval: number; batch: number; maxBrood: number };
+  // wave completion (Stage 2b countsTowardWave=false).  A boss PHASE stamps the
+  // same shape per-entity (GameEntity.spawner) to raise / drop escorts.
+  spawner?: SpawnerConfig;
+  // Stagger resistance ((h)): a heavy hull ignores the per-hit stun below
+  // `stunDamage` and takes `knockScale`× the normal knockback impulse, so chip
+  // fire can't lock it up or shove it around.  Absent → full kick, always stun.
+  poise?: PoiseConfig;
   // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
   // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
   // consumer.
@@ -3316,6 +3321,25 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
     shoots: false, contactDamage: 16,
     consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
   },
+  // ── (h) Bosses ──
+  // Warden (BOSS_WARDEN): the CHASSIS boss — the plain capstone that proves the
+  // framework needs no new mechanics.  A huge, heavy bastion prow that holds
+  // mid-range and lobs slow, heavy siege bolts on a readable telegraph.  Its
+  // defence is layered rather than novel: a full barrier shield in phase 1
+  // (the generalized absorption path), ARMOR underneath it (the trait shipped
+  // with the Tank), and POISE so a stream of chip fire can neither stagger it
+  // nor push it off its line.  Phase 2 blows the barrier AND the plating off
+  // and calls a swarm escort — a pure damage race.  SHOOTING role: it keeps
+  // its distance and makes you come to it.
+  [EnemySubtype.BOSS_WARDEN]: {
+    color: '#38bdf8', size: 82, health: 120, // PROVISIONAL — see BOSS_CONSTANTS
+    maxSpeed: 3.2, accel: 2.0, turnRate: 1.0,
+    sprite: ASSETS.ENEMY_TANK, mass: 140, shape: 'warden',
+    shoots: true, contactDamage: 18,
+    weapon: { cooldown: 2.0, damage: 14, speed: 8, size: 12, color: '#7dd3fc', glow: true },
+    telegraph: 0.8,
+    poise: { stunDamage: 12, knockScale: 0.12 },
+  },
 };
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
@@ -3495,19 +3519,28 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 };
 
 // ── Enemy counterplay traits ──────────────────────────────────────────────────
-// Soft-counter levers stamped on an enemy at spawn (WaveSystem.spawnEnemy).
+// Soft-counter levers stamped on an enemy at spawn (WaveSystem.buildEnemy).
 // SOFT by design: a chip weapon still works, just slowly, while the demanded
-// tool trivialises the threat.  v1 = armor only (Tank); evasive / front-shield /
-// regen join with their enemies + the bosses.
+// tool trivialises the threat.  The trait-counterplay map that keeps every
+// weapon a "right answer" somewhere is WEAPONS_AMMO_PLAN §7.
 //   armor.chipThreshold — per-hit damage at/above this lands in full
 //   armor.reduction     — fraction cut from hits BELOW the threshold
 // So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
 // Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
 // through.  AoE/explosion damage isn't chip-resisted (it's an answer).
-export const ENEMY_TRAITS: Partial<Record<EnemySubtype, {
+//
+// A trait SET is also what a (h) boss phase carries (BossPhaseDef.traits): a
+// phase REPLACES the set, so a boss can trade one defence for another as it
+// breaks down.  evasive / front-shield / regen join in milestones B2 / B3.
+export interface EnemyTraitSet {
   armor?: { chipThreshold: number; reduction: number };
-}>> = {
+}
+export const ENEMY_TRAITS: Partial<Record<EnemySubtype, EnemyTraitSet>> = {
   [EnemySubtype.RAMMER_3]: { armor: { chipThreshold: 6, reduction: 0.7 } }, // Tank
+  // Warden (chassis boss): the same chip-resist lesson at capstone scale — its
+  // phase table re-states it (and trades it away in phase 2), but the archetype
+  // row is what a DBG/one-off spawn gets before the first phase stamps.
+  [EnemySubtype.BOSS_WARDEN]: { armor: { chipThreshold: 8, reduction: 0.65 } },
 };
 
 // Maps each subtype to its role — used by AI routing and shooting logic.
@@ -3525,6 +3558,7 @@ export const ENEMY_ROLE: Record<EnemySubtype, EnemyRole> = {
   [EnemySubtype.NEST]:      EnemyRole.SHOOTING, // stationary spawner (no-move guard)
   [EnemySubtype.BUBBLE]:    EnemyRole.RAMMING,  // passive until provoked, then rushes
   [EnemySubtype.DRAGON]:    EnemyRole.RAMMING,  // engine-managed roamer (no-op AI)
+  [EnemySubtype.BOSS_WARDEN]: EnemyRole.SHOOTING, // holds mid-range and shells you
 };
 
 // ── AI behavior-dispatch table (Stage 2a) ─────────────────────────────────────
@@ -3560,7 +3594,141 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
   [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
   [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
+  // (h) bosses ride the EXISTING strategies — the boss-ness lives in the
+  // BOSS_DEFS phase table + traits, never in a bespoke movement routine.
+  [EnemySubtype.BOSS_WARDEN]: { move: 'skirmisher' },
 };
+
+// ── (h) Bosses ────────────────────────────────────────────────────────────────
+// Bosses are WAVE-ARENA CAPSTONES (decision #39e): every
+// BOSS_CONSTANTS.WAVE_INTERVAL-th wave of an arena is a boss wave — the boss
+// warps in through the shared rift VFX (GameEngine.openPortal) alongside a
+// reduced normal spawn budget, and the wave only clears when it is dead.  The
+// Overworld hub runs no waves, so it gets no bosses for free.
+//
+// A boss is NOT a new entity category.  It is an ENEMY_VARIANTS archetype like
+// any other, routed through ENEMY_BEHAVIOR and tracked as a COUNTED wave enemy,
+// with a BOSS_DEFS row on top describing its PHASES.  A phase is expressed
+// entirely through fields the existing systems already read — a
+// `Partial<WeaponConfig>` override, a shield (arc or bubble), a brood spawner,
+// a trait set, a speed multiplier, a colour — so a phase change is a STAMP,
+// never a script (strategy guardrail #36e).  GameEngine.updateBosses applies a
+// phase once, on the health-fraction transition.
+//
+// PAYOUT — model (d) (WEAPONS_AMMO_PLAN §6 / decision #37e, settled): a boss
+// pays SALVAGE and a timed SHOP DISCOUNT.  There is deliberately NO
+// weapon-unlock plumbing: weapons stay purely purchased and the boss is an
+// income accelerator.
+export const BOSS_CONSTANTS = {
+  /** A boss wave every Nth wave (0-based index where (index + 1) % N === 0).
+   *  PROVISIONAL: 5 puts the first capstone on wave 5, which is currently the
+   *  Bulwark intro — see the log's FOR-USER-REVIEW item 1. */
+  WAVE_INTERVAL: 5,
+  /** The normal spawn budget of a boss wave, scaled down — the boss IS most of
+   *  the wave, so a capstone isn't also a crowd.  PROVISIONAL. */
+  COMPANION_BUDGET_FRAC: 0.55,
+  /** Score paid on a boss kill, on top of the normal tier kill points. */
+  SCORE: 2500,
+  /** Salvage units sprayed on a boss kill — the model-(d) income accelerator.
+   *  PROVISIONAL sizing against today's economy: combat income runs ≈5–7
+   *  units/wave and a snitch catch pays 8, so 12 (≈12,000 credits) is worth
+   *  roughly two waves of fighting without trivialising a 25k–60k module. */
+  SALVAGE_DROPS: 12,
+  /** Timed shop discount earned per boss kill: `fraction` off every catalog
+   *  price for `seconds` of sim time, capped at FRACTION_MAX.  Killing another
+   *  boss inside the window stacks the fraction and refreshes the clock.
+   *  TIMED rather than run-permanent so it reads as a beat ("cash in now")
+   *  rather than a silent permanent buff — and see MODULE_RESALE: resale is
+   *  priced off the SAME discounted number, or buy-low/sell-high is a pump.
+   *  PROVISIONAL. */
+  DISCOUNT_FRACTION: 0.15,
+  DISCOUNT_FRACTION_MAX: 0.35,
+  DISCOUNT_SECONDS: 180,
+  /** Entrance / death rift VFX (GameEngine.openPortal). */
+  PORTAL_RADIUS: 300,
+  PORTAL_DURATION: 1.1,
+  /** Aura ring drawn around a live boss (RenderSystem). */
+  AURA_SCALE: 1.24,
+  AURA_ALPHA: 0.5,
+} as const;
+
+/** One phase of a boss fight.  Entered when health/maxHealth ≤ `atHealthFrac`
+ *  (phases listed in DESCENDING order; phase 0 must be 1 = full health).  Every
+ *  field maps onto machinery that already exists — see the block comment. */
+export interface BossPhaseDef {
+  atHealthFrac: number;
+  /** Banner text on entry (a normal wave announcement). */
+  announce?: string;
+  /** Hull tint for the phase (also the aura + HUD bar colour). */
+  color?: string;
+  /** Multiplier on the archetype maxSpeed while in this phase. */
+  speedMult?: number;
+  /** Weapon override merged over the archetype weapon (GameEntity
+   *  .weaponOverride → WeaponSystem.updateEnemyShooting). */
+  weapon?: Partial<WeaponConfig>;
+  /** Shield raised for this phase — a full bubble, or a tracking sector when
+   *  `arc` is set (the Bulwark's geometry).  ABSENT → any existing shield is
+   *  dropped on entry, so a phase can also mean "barrier blown". */
+  shield?: { amount: number; regen: number; arc?: { deg: number; slew: number } };
+  /** Escort brood spawned while in this phase (GameEntity.spawner →
+   *  GameEngine.updateNests).  Absent → escorts stop. */
+  spawner?: SpawnerConfig;
+  /** Traits active in this phase, REPLACING the archetype's ENEMY_TRAITS row —
+   *  so a phase can trade a defence away as well as add one. */
+  traits?: EnemyTraitSet;
+}
+
+export interface BossDef {
+  /** Display name for the HUD boss bar + banners. */
+  name: string;
+  /** Phases, descending by `atHealthFrac`; index 0 must be 1. */
+  phases: BossPhaseDef[];
+}
+
+export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
+  // ── Warden — the chassis boss ──
+  // Phase 1  a barrier shield over armor plating: chip fire does almost
+  //          nothing, so you have to bring a big hit (or wear the shield down
+  //          and then bring one).
+  // Phase 2  barrier blown AND plating gone: it speeds up, shortens its beat
+  //          and calls a swarm escort — every weapon works now, the question is
+  //          whether you can out-damage the escort.
+  [EnemySubtype.BOSS_WARDEN]: {
+    name: 'WARDEN',
+    phases: [
+      {
+        atHealthFrac: 1,
+        color: '#38bdf8',
+        shield: { amount: 80, regen: 5 },
+        traits: { armor: { chipThreshold: 8, reduction: 0.65 } },
+      },
+      {
+        atHealthFrac: 0.5,
+        announce: 'WARDEN — BARRIER DOWN',
+        color: '#f97316',
+        speedMult: 1.35,
+        weapon: { cooldown: 1.2, damage: 11, speed: 9, size: 10, count: 2, spread: 12, color: '#fdba74', glow: true },
+        spawner: { subtype: EnemySubtype.SWARM, interval: 5.0, batch: 3, maxBrood: 9 },
+      },
+    ],
+  },
+};
+
+/** Boss rotation — each boss wave takes the next entry, cycling.  Order is the
+ *  intended teaching order (the plain chassis lesson first). */
+export const BOSS_ROTATION: EnemySubtype[] = [EnemySubtype.BOSS_WARDEN];
+
+/** True when the 0-based wave index is a boss-capstone wave. */
+export function isBossWave(index: number): boolean {
+  return BOSS_ROTATION.length > 0
+    && (index + 1) % BOSS_CONSTANTS.WAVE_INTERVAL === 0;
+}
+
+/** The boss subtype for a given 0-based boss-wave index (cycles the rotation). */
+export function bossForWave(index: number): EnemySubtype {
+  const n = Math.floor((index + 1) / BOSS_CONSTANTS.WAVE_INTERVAL) - 1;
+  return BOSS_ROTATION[Math.max(0, n) % BOSS_ROTATION.length];
+}
 
 // ── Wave definitions ──────────────────────────────────────────────────────────
 // Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each

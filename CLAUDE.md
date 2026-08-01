@@ -331,6 +331,14 @@ Notable existing field categories on `GameEntity`:
   `portalReady` (stamped per step by the interaction check when this
   portal wins the nearest-in-range arbitration; drives the render-side
   entry halo)
+- Boss ((h)): `isBoss` (drives the HUD boss bar, the render aura ring and
+  the model-(d) payout in `handleEntityDeath`), `bossPhase` (index of the
+  applied `BOSS_DEFS` phase; `-1` = spawned, no phase stamped yet).  Two
+  GENERIC extension points fall out and are reusable beyond bosses:
+  `weaponOverride` (a `Partial<WeaponConfig>` merged over the archetype
+  weapon by `WeaponSystem.updateEnemyShooting`) and `spawner` (a
+  `SpawnerConfig` `updateNests` reads BEFORE the archetype's own).  Plus
+  `poise` (see §5) — stagger resistance, not boss-only.
 - Player resources: `health`/`maxHealth`, `shield`/`maxShield`/
   `shieldRechargeTimer`/`shieldHitFlash`, `ownedWeapons`/
   `equippedWeapons` (the 2-slot loadout — see §5 WEAPONS note),
@@ -521,14 +529,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   reusable `GameEngine.openPortal(pos, {color,radius,duration})` (layered
   core-flash + rift ring + echo ring + vortex embers + sparks + a soft shake);
   `openDragonPortal` is a thin wrapper over it.
-  Optional ENEMY_VARIANTS
+  And the (h) BOSSES — WAVE-ARENA CAPSTONES, and the ONLY
+  addition here that is not a bespoke engine-managed roamer: a boss is an
+  ORDINARY `EntityType.ENEMY` built from these same tables and tracked as a
+  COUNTED wave enemy, so the existing clear-the-field rule already gates the
+  wave on killing it.  What makes it a boss is a `BOSS_DEFS` row of PHASES
+  (see §5) plus the WaveSystem cadence; the roster today is BOSS_WARDEN
+  ("Warden", the chassis boss — a slow shielded bastion that shells you from
+  mid-range, phase 2 blows the barrier + plating off and calls a SWARM
+  escort).  Optional ENEMY_VARIANTS
   fields drive them: `detonate: {radius,damage,knockback}` (stamped at spawn
   onto `explosionRadius/Damage/Knockback`), `shield`/`shieldRegen`
   (seeds `shield`/`maxShield`/`shieldRechargeRate`) + optional
   `shieldArc: {deg,spin}` (seeds `shieldArcHalfWidth`/`shieldArcSpin`/
   `shieldArcAngle` — a sweeping sector that only absorbs hits from the
-  covered side), and `consume`/`multiply`/`ambient` (the bubble's
-  eat-grow-split + always-present fauna flag).
+  covered side), `consume`/`multiply`/`ambient` (the bubble's
+  eat-grow-split + always-present fauna flag), and `poise:
+  {stunDamage,knockScale}` (stagger resistance — a heavy hull ignores the
+  per-hit hit-stun below `stunDamage` and takes a scaled-down knockback, so
+  chip fire can neither lock a boss up nor shove it off its line; a plain
+  archetype field, NOT a boss branch).
 - `WEAPONS`, `WEAPON_LIST`.  Ammo is DELETED as a system (pivot 1b): no
   drops, pool, per-shot costs, HUD strip, select gating, or dry-fallback —
   weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
@@ -614,15 +634,40 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
   Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
   DBG "Enemy scale" knob (Player section) with a live hp/dmg-mult readout.
-- `ENEMY_TRAITS` — enemy counterplay traits (the soft-counter engine).
-  v1 = `armor` only (Tank / RAMMER_3): per-hit damage below
+- `ENEMY_TRAITS` / `EnemyTraitSet` — enemy counterplay traits (the
+  soft-counter engine; the weapon x trait map that keeps every weapon a
+  "right answer" somewhere is `docs/WEAPONS_AMMO_PLAN.md` §7).
+  Today = `armor` (Tank / RAMMER_3 + the Warden boss): per-hit damage below
   `chipThreshold` is cut by `reduction`, so chip weapons (Blaster,
   Shotgun) plink while heavy hits (Cannon, Lightning, charged, a
   Gunnery-boosted Blaster past the threshold) punch through.  Stamped
-  at spawn (`WaveSystem.spawnEnemy`), applied in the PhysicsSystem
+  at spawn (`WaveSystem.buildEnemy`), applied in the PhysicsSystem
   projectile-damage path (gated by `physics.traitsEnabled`, DBG
   "Traits"); armored enemies show the REDUCED hit number as feedback.
-  evasive / front-shield / regen join with their enemies + the bosses.
+  A trait SET is also what a boss PHASE carries (`BossPhaseDef.traits`) — a
+  phase REPLACES the set, so a boss can trade a defence away as it breaks
+  down.  evasive / front-shield / regen join in the later (h) milestones.
+- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `isBossWave()` /
+  `bossForWave()` — the (h) BOSS capstone tables.  Every
+  `BOSS_CONSTANTS.WAVE_INTERVAL`-th wave of an ARENA is a boss wave
+  (decision #39e; the Overworld hub runs no waves, so it gets none for
+  free): `WaveSystem.startWave` spawns the rotation's next boss on the
+  offscreen ring, fires the shared `openPortal` entrance rift via the
+  `onBossSpawn` context hook, cuts the companion budget by
+  `COMPANION_BUDGET_FRAC`, and banners the boss name.  A `BossPhaseDef` is
+  a FULL description of the boss's current state — colour, `speedMult`,
+  `weapon` (`Partial<WeaponConfig>` → `GameEntity.weaponOverride`),
+  `shield` (bubble or tracking arc), `spawner` (`GameEntity.spawner` →
+  `updateNests`), `traits` — and fields ABSENT from a phase are CLEARED, so
+  a phase can drop a shield or stop escorts.  `GameEngine.updateBosses`
+  stamps a phase ONCE on the health-fraction transition
+  (`applyBossPhase`); nothing about a boss is bespoke scripting.
+  PAYOUT is model (d) (decision #37e): `payBossBounty` pays score + a
+  PHYSICAL salvage spray (`SALVAGE_DROPS`) + a TIMED shop discount
+  (`DISCOUNT_FRACTION` for `DISCOUNT_SECONDS`, stacking to
+  `DISCOUNT_FRACTION_MAX`).  There is deliberately NO weapon-unlock
+  plumbing — weapons stay purely purchased.  DBG: pause ▸ Debug Menu ▸
+  Bosses.
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
   framework (generic: `StatusEffectKind` / `EffectPayload` /
   `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
@@ -1128,7 +1173,22 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   debug overlays only).  DBG **Weapons** rows (grant + equip per weapon,
   `debugGrantWeapon`) are the wave-map test path for weapons now that
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
-  feeds them.
+  feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
+  with its full phase table, each click stacking another (the Dragon-menu
+  pattern).
+- **`window.__omniEngine` / `window.__omniStats` are debug handles.**
+  `App.tsx` assigns the live engine and the latest `EngineStats` payload to
+  `window`.  NOTHING in the game reads them — they exist so headless
+  Playwright smokes can drive the real engine in a real browser without a
+  test runner being added to the project (§7).  Two assignments, no
+  per-frame cost beyond the stats one already happening.
+- **A boss discount must price BOTH sides of the shop.**
+  `GameEngine.modulePrice(cost)` applies the (h) boss discount, and BOTH
+  `purchaseModule` and `resaleValue` (sell + scrap) go through it.  If
+  buying were discounted while sell-back stayed on full catalog cost,
+  buy-then-sell would net `discount - (1 - SELL_FRACTION)` of cost per
+  cycle — an infinite money pump above a 10% discount.  Any future price
+  modifier must join `modulePrice`, not add a second discount path.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through

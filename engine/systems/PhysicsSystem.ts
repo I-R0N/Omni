@@ -2897,10 +2897,15 @@ export class PhysicsSystem {
               // the hit reads (post-armor projDmg, so chip hits kick weakly).
               if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
                   const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
-                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG;
+                  // POISE ((h)): a heavy hull takes a scaled-down shove and only
+                  // staggers on a real hit, so a chip stream can neither push it
+                  // off its line nor hold it in permanent hit-stun.  Absent →
+                  // unchanged behaviour for every rank-and-file enemy.
+                  const poise = target.poise;
+                  const kick = projDmg * HIT_FEEDBACK.KICK_PER_DMG * (poise ? poise.knockScale : 1);
                   target.velocity.x += (proj.velocity.x / vmag) * kick;
                   target.velocity.y += (proj.velocity.y / vmag) * kick;
-                  target.hitStun = HIT_FEEDBACK.STUN_SEC;
+                  if (!poise || projDmg >= poise.stunDamage) target.hitStun = HIT_FEEDBACK.STUN_SEC;
                   target.hitFlash = 0.18; // bigger flash + scale-punch on impact
                   // Scale-punch magnitude ∝ damage / maxHealth, so a chip on a
                   // tanky beast barely flinches and a heavy hit on a frail enemy snaps.

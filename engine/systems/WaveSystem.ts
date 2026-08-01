@@ -11,6 +11,10 @@ import {
   SCORE_CONSTANTS,
   SHIELD_CONSTANTS,
   TIMED_WAVE_CONFIG,
+  BOSS_CONSTANTS,
+  BOSS_DEFS,
+  bossForWave,
+  isBossWave,
   getWaveDurationSec,
   getWaveSpawnBudget,
   buildWaveSpawnList,
@@ -134,19 +138,53 @@ export class WaveSystem {
     this.lastSpawnAtSec = -Infinity;
     this.durationSec = getWaveDurationSec(index);
 
-    const budget = Math.max(1, Math.round(getWaveSpawnBudget(index) * ctx.enemyScale));
+    // Boss capstone ((h)): every BOSS_CONSTANTS.WAVE_INTERVAL-th wave warps a
+    // boss in immediately and cuts the normal stream down — the boss IS most of
+    // the wave.  A DBG forced-enemy test suppresses it so enemy-isolation runs
+    // stay clean.
+    const boss = !ctx.forcedEnemy && isBossWave(index) ? bossForWave(index) : null;
+    const budget = Math.max(1, Math.round(
+      getWaveSpawnBudget(index) * ctx.enemyScale * (boss ? BOSS_CONSTANTS.COMPANION_BUDGET_FRAC : 1),
+    ));
     this.spawnList = buildWaveSpawnList(index, budget, ctx.forcedEnemy);
     this.scheduleSpawns(budget);
 
     this.waveState = 'active';
     const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
-    this.announcements.push({
-      text: `WAVE ${index + 1}`,
-      subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
-      color: '#ffffff',
-      lifetime: totalLife,
-      maxLifetime: totalLife,
-    });
+    if (boss) {
+      this.spawnBoss(boss, ctx);
+      this.announcements.push({
+        text: BOSS_DEFS[boss]?.name ?? 'BOSS',
+        subtext: `WAVE ${index + 1}  ·  CAPSTONE`,
+        color: '#f87171',
+        lifetime: totalLife,
+        maxLifetime: totalLife,
+      });
+    } else {
+      this.announcements.push({
+        text: `WAVE ${index + 1}`,
+        subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
+        color: '#ffffff',
+        lifetime: totalLife,
+        maxLifetime: totalLife,
+      });
+    }
+  }
+
+  /**
+   * Spawn the wave's boss on the offscreen ring and track it like any other
+   * COUNTED wave enemy — so the existing clear-the-field completion rule
+   * already gates on killing it, with zero boss-specific completion plumbing.
+   * The caller's `onBossSpawn` hook fires the entrance rift VFX.
+   */
+  private spawnBoss(subtype: EnemySubtype, ctx: WaveSpawnContext): GameEntity {
+    const id = nextId(`boss_${this.waveIndex}`);
+    const pos = this.findSpawnPoint(subtype, ctx);
+    const boss = this.buildEnemy(id, subtype, pos.x, pos.y, ctx, true);
+    ctx.entities.push(boss);
+    this.waveEnemyIds.add(id);
+    ctx.onBossSpawn?.(boss);
+    return boss;
   }
 
   /**
@@ -220,7 +258,18 @@ export class WaveSystem {
    * world coords so seam spawns don't land at ±MAP_WIDTH off the map.
    */
   private spawnEnemy(subtype: EnemySubtype, ctx: WaveSpawnContext) {
-    const { entities, player, physics, viewportHalfDiagonal } = ctx;
+    const pos = this.findSpawnPoint(subtype, ctx);
+    const id = nextId(`wave_${this.waveIndex}_${this.nextSpawnIdx}`);
+    const enemy = this.buildEnemy(id, subtype, pos.x, pos.y, ctx, true);
+    ctx.entities.push(enemy);
+    this.waveEnemyIds.add(id);
+  }
+
+  /** Pick an offscreen-ring position clear of static tiles for `subtype`.
+   *  Returns the shared `spawnPos` scratch — read it immediately, never keep
+   *  the reference.  Shared by the stream spawn and the boss capstone spawn. */
+  private findSpawnPoint(subtype: EnemySubtype, ctx: WaveSpawnContext): Vector2 {
+    const { player, physics, viewportHalfDiagonal } = ctx;
     const config = ENEMY_VARIANTS[subtype];
     const enemyHalfSize = config.size / 2;
     const safeRadius = enemyHalfSize + 30;
@@ -230,7 +279,6 @@ export class WaveSystem {
     const minSpawnDistance = viewportHalfDiagonal + WAVE_CONSTANTS.OFFSCREEN_MARGIN + enemyHalfSize;
     const baseAngle = Math.random() * Math.PI * 2;
     const pos = this.spawnPos;
-    let x = 0, y = 0;
     // Try up to 8 candidate positions; pick first one clear of static tiles.
     for (let attempt = 0; attempt < 8; attempt++) {
       const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
@@ -238,14 +286,9 @@ export class WaveSystem {
       pos.x = player.position.x + Math.cos(a) * dist;
       pos.y = player.position.y + Math.sin(a) * dist;
       wrapPosition(pos);
-      x = pos.x;
-      y = pos.y;
-      if (physics.isPositionClear(x, y, safeRadius)) break;
+      if (physics.isPositionClear(pos.x, pos.y, safeRadius)) break;
     }
-    const id = nextId(`wave_${this.waveIndex}_${this.nextSpawnIdx}`);
-    const enemy = this.buildEnemy(id, subtype, x, y, ctx, true);
-    entities.push(enemy);
-    this.waveEnemyIds.add(id);
+    return pos;
   }
 
   /**
@@ -268,6 +311,9 @@ export class WaveSystem {
       RAMMER_3: 3, SHOOTER_3: 3,
       KAMIKAZE: 2, BULWARK: 2, TURRET: 3,
       SWARM: 1, NEST: 3, BUBBLE: 2,
+      // Bosses sit above the tier ladder — the tier only scales the normal
+      // kill points; the real payout is the BOSS_CONSTANTS burst on top.
+      BOSS_WARDEN: 4,
     };
     const enemyTier = tierMap[subtype] ?? 1;
 
@@ -293,6 +339,7 @@ export class WaveSystem {
       mass: config.mass,
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
+      poise: config.poise,
       contactDamage: config.contactDamage,
       diesOnContact: config.diesOnContact,
       visionRange: ENEMY_CONSTANTS.VISION_RANGE,
@@ -324,6 +371,15 @@ export class WaveSystem {
     // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
     if (config.spawner) {
       enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+    }
+
+    // Boss ((h)): mark it so the HUD bar / render aura / payout paths pick it
+    // up.  The phase itself is applied by GameEngine.updateBosses on the first
+    // tick (phase 0 falls out of the normal health-fraction check), which keeps
+    // ONE code path responsible for phase state.
+    if (BOSS_DEFS[subtype]) {
+      enemy.isBoss = true;
+      enemy.bossPhase = -1; // "no phase applied yet" → phase 0 stamps next tick
     }
 
     // Bubble consumer (Stage 5): copy the consume config onto the entity so
@@ -457,6 +513,9 @@ export interface WaveSpawnContext {
   viewportHalfDiagonal: number;
   /** DBG enemy-test override: when set, every spawn is this subtype. */
   forcedEnemy?: EnemySubtype | null;
+  /** Fired once when a boss-wave capstone warps in ((h)) — GameEngine uses it
+   *  for the entrance rift VFX + the live-boss handle.  Absent → no VFX. */
+  onBossSpawn?: (boss: GameEntity) => void;
 }
 
 // Re-export for callers that want to destructure a Vector2 from enemy spawn
