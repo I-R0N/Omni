@@ -22,8 +22,8 @@ edited here.
 - [x] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
 - [x] **M4** — Phase 3 Pair B: SFX, then explosion variety
 - [x] **M5** — Phase 3 Pair C: controller/joystick, then menu help
-- [ ] **M6** — Polish batch: palette residual + map composition + minimap
-      faithfulness (optional: NPC station traffic — first to cut)
+- [x] **M6** — Polish batch: palette residual + map composition + minimap
+      faithfulness + NPC station traffic (the optional item — NOT cut)
 - [ ] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
 - [ ] **M8** — Performance pass (measure first, PR #69/#70 methodology)
 - [ ] **M9** — Visual quality pass
@@ -212,6 +212,38 @@ re-centres (rather than snapping to the mouse). That is the right feel
 for a twin-stick, but it means a player who switches from pad back to
 mouse mid-run keeps the pad heading until they move the mouse. Minor;
 noted for M10.
+
+### Iteration 6 — 2026-08-01 — M6: the polish batch (all four items)
+
+**Shipped** (commit `8a6a020`):
+
+- `TileRingConfig` + `PerMapVariantSpawn.tileRing`;
+  `BaseMapLayer.populateTilesFromPopulation()`; Overworld, Universe,
+  Pocket, Ring and SevenRings all route through it; MAP_POPULATION
+  updated to the values the maps actually produced.
+- `MINIMAP_CONSTANTS.BOSS_BLIP` / `RIVAL_BLIP` / `STATION_BLIP` + the
+  shape-per-class contact rendering.
+- Palette sweep: plastic-automata comment/code reconciled; metal glow
+  fuchsia → amber in BOTH the baked `SHARD_VARIANTS['metal-tile'].glow`
+  and the DBG cycle default.
+- `STATION_TRAFFIC` + `GameEngine.seedStationTraffic` /
+  `updateStationTraffic` — the optional NPC-traffic item.
+- CLAUDE.md updated in the same commit.
+
+**Validation**: build green; new 27-assertion smoke all passing; the five
+earlier smokes re-run and still green. The composition refactor is
+asserted to be visually neutral (per-map variant counts and the
+glass > plastic > metal ratio checked directly).
+
+**A real bug the smoke caught**: shuttles didn't move. `mass: Infinity`
+is what makes them inert scenery, but mass-∞ entities are by definition
+not integrated by PhysicsSystem — so an engine-managed mover has to own
+its own position, exactly as the snitch and dragon head do.
+
+**Watches**: SevenRings' four ring variants are now listed as radii in
+the table, which is more legible but also means the ring COUNT is no
+longer derived from `RING_COUNT`. If someone wants nine rings they edit
+the table, not a constant — intended, but worth knowing.
 
 ---
 
@@ -465,6 +497,8 @@ _(anything provisional or needing a human ruling)_
 | `EXPLOSION_PROFILES` (8 rows) | see constants | counts bounded by the M8 perf pass |
 | `EXPLOSION_HEAVY_MASS` | 16 | catches Tank/Bulwark/Turret/Nest |
 | `GAMEPAD_CONSTANTS` | deadzone 0.22, aim radius 240, trigger 0.4 | untested on real hardware |
+| `MINIMAP_CONSTANTS.BOSS_BLIP` / `RIVAL_BLIP` / `STATION_BLIP` | see constants | sized by eye at 75px and 280px |
+| `STATION_TRAFFIC` | 2 shuttles, speed 2.4, dock 6s | ambience only |
 
 ### M5-D1 — the right stick synthesises a cursor instead of setting rotation
 
@@ -511,6 +545,57 @@ gained Esc (pause/resume) and Q (cycle weapon).
 keyboard genuinely had no pause or cycle binding — the panel would have
 had two "—" cells for actions the pad could do. Small scope addition,
 logged here rather than assumed.
+
+### M6-D1 — MAP_POPULATION was updated to match the MAPS, not the reverse
+
+**Chosen**: the table's numbers were corrected to what the inline map
+code actually produced (e.g. Deep Space glass 14 → 27), then the maps
+were pointed at the table.
+
+**Why**: "make the table authoritative" could mean either direction, and
+taking the table's stale numbers literally would have silently halved
+Deep Space's terrain — a balance change smuggled in under a refactor.
+Preserving the shipped look and fixing the documentation is the
+reversible, honest reading. The smoke asserts the ratios survived.
+
+### M6-D2 — ring maps got a second composition shape rather than being forced into clusters
+
+**Chosen**: `TileRingConfig { radii, keepEvery }` alongside
+`tileCluster`.
+
+**Why**: a ring map's composition genuinely IS a list of radii; encoding
+it as clusters would have been a lie that produced the wrong geometry.
+The upside is that SevenRings' difficulty gradient is now readable off
+the table. **Alternative**: leave the ring maps hardcoded — rejected,
+that's exactly the drift the milestone is about.
+
+### M6-D3 — the metal glow moved to amber
+
+**Chosen**: `SHARD_VARIANTS['metal-tile'].glow.color` and the DBG cycle
+default both moved from fuchsia to amber.
+
+**Why**: this is the only item in the batch that changes how the game
+LOOKS, so it needs a reason beyond taste. The glow is a damage pulse on
+a steel slab; heated metal glows amber, and guardrail #1 says a mechanic
+should express the material simulation. Magenta read as an energy field
+belonging to some other material. The secondary win is that glass (cold
+sky) and metal (hot amber) now contrast by temperature rather than by
+arbitrary hue. **Revert**: two constants, both named in the commit.
+
+### M6-D4 — the optional NPC traffic was BUILT, not cut
+
+**Chosen**: shipped the cheap version.
+
+**Why**: the milestone says "optional if all three land clean" and they
+did — clean build, clean smokes, no regressions. The cheap version is
+~90 lines of engine code with no new entity category and no gameplay
+surface. **What was deliberately NOT built**: health, damage, cargo,
+interaction, or any second station network — each would turn scenery
+into a system, and multi-station networks are explicitly the Overworld
+plan's (decision #36e).
+
+**Revert**: delete `STATION_TRAFFIC`, the two engine methods and the
+`seedStationTraffic()` call in `loadMap`.
 
 ### Open for a human ruling
 
