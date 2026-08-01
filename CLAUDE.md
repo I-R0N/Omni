@@ -97,7 +97,8 @@ engine/
     WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
     DropSystem.ts         Salvage + health drop spawn / collection
     WaveSystem.ts         Completion-wave spawn scheduler + grace
-                          timer + spawn geometry.  A wave ends only when
+                          timer + spawn geometry + the (h) BOSS
+                          capstone cadence.  A wave ends only when
                           its full budget has spawned AND every spawned
                           COUNTED enemy is dead (clear-the-field;
                           `countsTowardWave !== false`); the clock just
@@ -850,6 +851,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   behind the pricing), `DROP_CONFIG` (per-source salvage/health drop
   chances + magnet/lifetime), `HEALTH_DROP_INTERVAL`, `DROP_PULL`
   (mutual drop attraction + merge band, any same-type collectible)
+- `AUDIO_CONSTANTS` / `SfxId` / `SfxDef` / `SFX_DEFS` / `WEAPON_SFX` —
+  the synthesized sound layer (see §8); `EXPLOSION_PROFILES` /
+  `ExplosionClass` / `EXPLOSION_HEAVY_MASS` — per-class death FX
+  (see §8)
+- `GAMEPAD_CONSTANTS` — deadzone / move curve / virtual-cursor aim
+  radius / trigger threshold / standard-layout button indices (see §8)
+- `DEATH_PENALTY_CYCLE` / `DEATH_PENALTY_TITHE_FRACTION` — the four
+  death-penalty candidates behind the DBG cycle, mildest default
+  (see §8); `STATION_TRAFFIC` — the ambient Overworld shuttles
 - `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS` (per-task min/max
   interval, cost weight, auto curve; includes `rivalScan` — the
   cadenced rival target re-acquire + loot-vacuum, see §8),
@@ -1386,8 +1396,10 @@ the following change:
   entity model rewrite, renderer swap).
 - A new build/deploy step enters the pipeline.
 - A new category of constant/config becomes load-bearing.
-- New `dropType`, `aiState`, `EntityType`, `WeaponType`, or `MapType`
-  values become wired up — or existing ones are removed.
+- New `dropType`, `aiState`, `EntityType`, `WeaponType`, `MapType`,
+  `GameState`, `EnemySubtype`, `EnemyShape`, `SfxId` or
+  `ExplosionClass` values become wired up — or existing ones are
+  removed.
 
 Aspirational designs and parking-lot ideas belong in
 `docs/POLISH_ARCHITECTURE.md` / `docs/PARKING_LOT.md` (which are not

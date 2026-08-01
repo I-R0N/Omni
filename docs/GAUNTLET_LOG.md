@@ -15,6 +15,94 @@ edited here.
 
 ---
 
+## COMPLETION SUMMARY
+
+**All ten milestones complete.** Build green, standalone build green,
+eight headless suites green (seven per-milestone smokes + the full-loop
+playtest), CLAUDE.md updated in the same commit as every change it
+describes.
+
+### What a human needs to decide (consolidated)
+
+1. **The salvage death penalty — the ruling the plan reserves
+   (decision #40a).** All four candidates ship behind pause ▸ Debug
+   Menu ▸ **"Death cost"**, defaulting to `none` (today's free
+   respawn — nothing changed until you choose). Two minutes per
+   candidate to try. **My recommendation: `repair`** — it has real
+   teeth (a full hull repair is ≈30 s of combat income at the tuned
+   rates), it can never make dying cheaper than flying home because it
+   is priced with the station's own repair rate, and unlike the
+   salvage-loss modes it doesn't punish a good run harder than a bad
+   one (`tithe`/`uninsured` scale with wealth, which reads as a tax on
+   success).
+2. **Boss cadence lands on a teaching wave.** Bosses arrive every 5th
+   wave, so the first one replaces most of the Bulwark intro (wave 5).
+   Playable, but you may prefer every 6th so the seven scripted intro
+   waves finish first. One constant:
+   `BOSS_CONSTANTS.WAVE_INTERVAL`.
+3. **Audio settings don't persist.** Volume/mute reset on reload,
+   because the project deliberately has no storage layer (CLAUDE.md §1,
+   decision #36d). Three lines of `localStorage` would fix it — but it
+   would be the first persisted state in the project, so it needs your
+   ruling rather than my quiet decision.
+4. **The gamepad is verified only against a stubbed API.** The mapping
+   assumes the W3C Standard Gamepad layout, which most modern pads
+   report, but no physical controller has touched this. Worth one pass
+   before ship.
+5. **The minimap's static terrain bake is saturated.** M9 dimmed it to
+   0.5 alpha so contacts read. The real fix is desaturating at BAKE
+   time so terrain is a ground plane — but that changes every map's
+   minimap, which is a design call.
+6. **Bastion's DPS floor.** 220 HP with phase-2 regen at 3.5 hp/s means
+   a very light loadout may not be able to kill it. Defensible for a
+   capstone; if unwanted, lower `perSec` rather than the HP.
+
+### Two real bugs found by the work, both fixed
+
+- **A money pump** (M7): purchases were discounted by the boss bonus
+  while sell-back was priced off FULL catalog cost — at the discount
+  cap, buy-then-sell profited 15 % of cost, infinitely. Now both sides
+  price off `modulePrice()`, with the invariant smoke-asserted at
+  0/5/15/25 %. This also **corrects M1-D3 in this log**, which claimed
+  the arithmetic was already safe.
+- **Dropped pause presses** (M5): pause was polled once per rendered
+  frame, and a real `Escape` tap is often shorter than a frame. Key
+  press EDGES are now queued in `handleKeyDown` and drained.
+
+Two more were caught by smokes before they shipped: a sliding regen
+burst-window that inverted its own trait (M2), and shuttles that never
+moved because `mass: Infinity` entities aren't integrated by physics
+(M6).
+
+### The three standing watches, resolved with data (M10)
+
+| watch | verdict |
+|---|---|
+| wave pacing without the card breather | **fine** — budgets escalate 6,7,8,9,(6),12,14,16,18,(11) over a 30→75 s stream window; boss waves cut their companion budget so a capstone isn't a crowd; the grace timer + wave-clear salvage spray is the breather |
+| Overcharge + Cannon ceiling | **fine** — fully outfitted, charged single-target DPS is **0.95×** sustained. The 1.0 s hold pays for itself only in AoE (2× radius, 1.5× splash), so the combo is a crowd tool, not a single-target dominator |
+| weaponless flight viability | **fine as designed** — firing correctly gates off, thrust gains exactly +10 %. A movement build that cannot kill: the intended trade, not a loophole |
+
+### Economy, before → after (measured, M7)
+
+| | before | after |
+|---|---|---|
+| arena income | 37,808 /min | 5,651 /min |
+| combat vs terrain income | 22 % / 78 % | ≈55 % / 45 % |
+| time to first module | 6 s | 42 s |
+| time to the Cannon | 1.6 min | 10.6 min |
+| whole catalog | ≈3 min | ≈60 min |
+
+### Performance (M8, base `8c68285` vs HEAD, same harness)
+
+No render regression on comparable content (dense shards 48.12 → 48.62 ms,
+portal churn 51.28 → 51.17 ms). Two zero-behaviour overheads fixed
+(per-frame `getGamepads()` allocation; two merged enemy walks),
+`updateGameLogic` −25 % on affected scenes. The residual sim delta is
+attributed to intended content (M4 particles, M7 drop rate), both
+already bounded by existing caps and cadenced tasks.
+
+---
+
 ## Milestone queue
 
 - [x] **M1** — (h) Bosses: framework + first boss (+ `evasive` trait)
@@ -27,7 +115,7 @@ edited here.
 - [x] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
 - [x] **M8** — Performance pass (measure first, PR #69/#70 methodology)
 - [x] **M9** — Visual quality pass
-- [ ] **M10** — Mechanical quality pass + final validation
+- [x] **M10** — Mechanical quality pass + final validation
 
 ---
 
@@ -375,6 +463,32 @@ screenshots re-captured and re-inspected.
 (clean hierarchy, fits without scrolling), both boss silhouettes at
 desktop, hit/damage feedback (damage numbers, hit flashes and the
 scale-punch all read consistently across the new entity classes).
+
+### Iteration 10 — 2026-08-01 — M10: mechanical pass + final validation
+
+**Full-loop playtest** (`playtest-loop.mjs`, 24 assertions, all passing)
+walks the real loop end to end: run opens lean on the hub → dock → buy →
+outfit (hull 100 → 125) → portal to an arena carrying salvage, outfit
+and hull DAMAGE → waves 1-4 normal, wave 5 a boss capstone → kill the
+boss (+10,600 salvage, +5 % discount) → return rift home → dock →
+repair (50 → 125 for ◈2,250) → die → death screen with the run summary.
+Every joint holds; no page errors across the whole loop.
+
+**Standing watches** — all three resolved with measurements; see the
+completion summary table at the top of this file.
+
+**Final validation**: `npm run build` green; `node
+scripts/inline-build.mjs` green (5.44 MB, 27 assets inlined); all seven
+milestone smokes re-run green; CLAUDE.md read through and reconciled
+(§2 WaveSystem line, §5 constant-block list for the audio / explosion /
+gamepad / death-penalty / traffic blocks, §10 accuracy triggers widened
+to the enum families this gauntlet added).
+
+**Two harness bugs worth noting** (not product bugs): the playtest
+initially assumed proximity alone docks — it doesn't, docking is the
+explicit `dockAtStation()` action the E key routes through — and used
+`'ring'` where the descriptor id is `'arena_ring'`. Both are the
+descriptor/interaction contracts working as documented.
 
 ---
 
