@@ -73,7 +73,7 @@ could not ask about)_
 - [x] **B1** — Capstone scheduling + boss chassis (cadence hook, boss
       archetype base, poise, intro rift + banner, model-(d) payout, DBG rows)
 - [x] **B2** — First weapon-boss + `evasive` trait
-- [ ] **B3** — Second weapon-boss + `front-shield` and `regen` traits
+- [x] **B3** — Second weapon-boss + `front-shield` and `regen` traits
 - [ ] **B4** — Presentation + validation pass (bosses only)
 
 ---
@@ -255,3 +255,109 @@ all pass**.
   two soft counters at once and could read as frustrating; the flank
   answer still works, and the arc slew (2.4 rad/s) is beatable. Flagged
   for the B4 playthrough.
+
+### Iteration 3 — 2026-08-01 — B3: BASTION + front-shield / regen
+
+**Shipped** (commit `2fd29ea`):
+
+- `BOSS_WEAPONS.SIEGE` (spreads `WEAPONS[CANNON]`, splash and all);
+  `EnemySubtype.BOSS_SIEGE` + the `'bastion'` hull; the archetype row
+  (2-shell burst, 1.0s telegraph, heaviest poise, long
+  `preferredDistance`); role/behavior rows; the 3-phase `BOSS_DEFS`
+  entry; `BOSS_ROTATION` now cycles Warden → Reaver → Bastion.
+- `ENEMY_VARIANTS.preferredDistance` — a per-archetype stand-off
+  override read by `AISystem.updateSkirmisher`, finally giving the
+  long-declared `GameEntity.preferredDistance` idea a consumer.
+- `EnemyTraitSet.frontShield` + `PhysicsSystem.sectorCoversHit` (the
+  arc geometry extracted out of `shieldCoversHit`) +
+  `frontShieldCoversHit` + the reduction in the projectile damage path.
+- `EnemyTraitSet.regen` + `constants.noteTraitDamage()` called from all
+  three player damage paths (projectile, lightning chain, shockwave
+  ring) + `GameEngine.updateEnemyRegen`.
+- `applyKamikazeBlastToPlayer` generalized to `applyBlastToPlayer(pos,
+  radius, damage, knockback)`; the enemy-owned Cannon path now calls it.
+- `RenderSystem`: the `'bastion'` hull + the front-shield plate arc.
+  `UIOverlay`: the DBG Bastion row.
+- CLAUDE.md updated in the SAME commit (§5 roster + both trait
+  paragraphs, §8 the player-not-in-currentMap.entities note).
+
+**Validation**: build green; `tsc --noEmit` unchanged. All three smokes
+green — B1 **50/50**, B2 **30/30**, B3 **33/33**.
+
+**A real gap the smoke caught**: an ENEMY-owned explosive shell could
+not damage the player at all. The shockwave ring only ever sweeps
+`currentMap.entities`, and the player is NOT in that list (it is
+appended to `frameEntities` each step) — so the `e.id === 'player'`
+shield-absorb branch inside `updateExplosionRings` is dead code, and an
+artillery boss's signature weapon would have been a pure light show.
+CLAUDE.md's claim that an enemy-owned ring "threatens the player" was
+therefore inaccurate; it has been corrected. Fixed by following the
+precedent the kamikaze already set for exactly this reason — a direct,
+shield-respecting blast — rather than by widening the ring machinery,
+which would have changed merge-blowback and every other ring too.
+
+**Decisions taken** (alternatives considered):
+
+- **D11 — the regen burst window is a FIXED bucket, not sliding.** A
+  sliding window (refreshed by each hit) measures "damage until the
+  player pauses": a sustained Blaster stream reaches any threshold in a
+  few shots, so chip damage would shut the healing off and the trait
+  would invert into "regen only helps against burst". Fixed buckets put
+  the arithmetic exactly on the §7 table instead. Asserted directly:
+  10 + 10 across two windows never gates, while 4 × 4 inside one does.
+  (The prior-art branch shipped the sliding version and caught it a
+  milestone later; this is the pitfall being used as an input.)
+- **D12 — front-shield has NO pool.** The Bulwark's arc shield already
+  covers "a directional barrier you can burn through". Giving the plate
+  a pool would duplicate it and make face-tanking viable again once the
+  pool broke. A permanent percentage cut keeps the answer geometric.
+  The reduction (75%) is deliberately not 100% so a face-tanking player
+  still makes progress, just badly — soft counter, per the framework.
+- **D13 — trait ordering: plate and armor reduce BEFORE the regen
+  bucket sees the damage.** So bursting a plated target means bursting
+  it from behind, which is what makes Bastion's phase 2 the hard part
+  rather than two independent nuisances. The alternative (bucket sees
+  raw damage) would have made the plate irrelevant to the regen check.
+- **D14 — the enemy AoE reaches the player by DIRECT blast, not by
+  widening the ring.** Adding the player to the ring's candidate set
+  would silently change every other damaging ring (merge blow-back,
+  player Cannon self-damage) — out of scope and risky. The direct path
+  already exists for the kamikaze and was written for this exact
+  reason. Generalizing its helper cost three lines.
+- **D15 — Bastion's escort is TURRET.** Warden ends on swarm, Reaver on
+  kamikaze; a stationary emplacement that pins the player in the open
+  is the third distinct pressure, and it is the enemy the Burst Rifle's
+  §7 entry points at.
+
+**§7 counterplay table, verified against what is LIVE** (the milestone
+asks that every weapon be a "right answer" somewhere):
+
+| Weapon | Its live answer | Where that lives now |
+|---|---|---|
+| Blaster | armor, via a charged slug or a Gunnery-boosted shot past the threshold | Tank (thr 6), Warden p1 (thr 8), Reaver p3 (thr 6) |
+| Burst Rifle | stationary high-HP sustained DPS | Turret, Nest, Bastion p3's turret escort |
+| Shotgun | **evasive** (a cone forgives juking) + **regen** (18 in one bucket clears the 16 gate) | Reaver p1–p2, Bastion p2–p3 |
+| Laser | **front-shield** (ricochets arrive from behind) + line rake vs crowds | Bastion p1–p2, every escort brood |
+| Lightning | armor (9 ≥ both thresholds) + evasive (chains never travel, so are never dodged) + front-shield (chain damage bypasses the projectile path) | all four traits |
+| Seeker | **evasive — the designated answer** (the dodge is blind to homing) | Reaver p1–p2 |
+| Cannon | **armor** (designated, 18) + front-shield (the ring bypasses the plate) + **regen** (18 + 10 splash opens the burn) | all four traits |
+
+Every weapon appears at least once; four appear as *the* designated
+answer to a specific trait.
+
+**Watches**:
+
+- **The Blaster's entry is the weakest one.** Its base 4 damage is under
+  both armor thresholds, so its answer is conditional on Overcharge
+  being installed (charged slug) or Gunnery stacking past 6. That is
+  what §7 already says ("✦ charged slug only"), but it means a lean
+  early run has no armor answer at all — which is exactly when it meets
+  the wave-5 Warden. Flagged for the tuning pass; the cheap lever is
+  the Warden's `chipThreshold` (8 → 6).
+- **Bastion phase 2 runs plate + regen at 3.5 hp/s over 150 base HP.**
+  A very light loadout may not out-damage it. Defensible for a
+  capstone, and the burn window is generous once you land any burst,
+  but it is the highest DPS floor in the game. See B4.
+- The front-shield plate renders as an arc but has no pool bar, by
+  design. If playtesting shows people expect to "break" it, the fix is
+  a label, not a pool.
