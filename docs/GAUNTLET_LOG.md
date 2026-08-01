@@ -25,7 +25,7 @@ edited here.
 - [x] **M6** — Polish batch: palette residual + map composition + minimap
       faithfulness + NPC station traffic (the optional item — NOT cut)
 - [x] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
-- [ ] **M8** — Performance pass (measure first, PR #69/#70 methodology)
+- [x] **M8** — Performance pass (measure first, PR #69/#70 methodology)
 - [ ] **M9** — Visual quality pass
 - [ ] **M10** — Mechanical quality pass + final validation
 
@@ -284,6 +284,60 @@ Mk trade-in.
 
 **Validation**: build green; new 21-assertion economy smoke passing; the
 before/after measured twice with the harness.
+
+### Iteration 8 — 2026-08-01 — M8: performance pass
+
+Measure-first, per the PR #69/#70 methodology. The base commit
+(`8c68285`) was built in a throwaway worktree and run through an
+IDENTICAL four-scene harness (`measure-perf.mjs`), so the comparison is
+same-machine, same-browser, same-scene.
+
+**Caveat stated up front**: headless Chromium software-renders, so
+render dominates at ~50 ms and the ABSOLUTE numbers mean nothing about
+real hardware. The base-vs-HEAD delta in the same environment is what is
+being read.
+
+**BEFORE / AFTER (ms per frame, mean)**
+
+| scene | render base→head | updPhys base→head | updLogic base→head |
+|---|---|---|---|
+| dense shards | 48.12 → 48.62 | 1.52 → 1.59 | 0.31 → 0.35 |
+| boss fight + SFX* | 49.31 → 55.36 | 1.15 → 1.41 | 0.25 → 0.30 |
+| overworld + traffic | 48.74 → 48.25 | 0.55 → 1.44 | 0.20 → 0.40 |
+| portal churn | 51.28 → 51.17 | 0.51 → 1.39 | 0.18 → 0.47 |
+
+\* not a like-for-like scene: the base has no bosses, so it ran a
+nest+swarm cloud instead. Listed for completeness, not attribution.
+
+**No render regression on comparable content** — the new draw work
+(boss aura, front-shield arc, minimap contact shapes) allocates nothing
+per frame and doesn't show up.
+
+**Fixed (zero-behaviour)**
+
+1. `navigator.getGamepads()` ran every rendered frame and allocates a
+   fresh snapshot array per call — 60 allocations/second of garbage on
+   any session without a pad. Now gated on `padPresent`, driven by the
+   browser's own `gamepadconnected`/`disconnected` events.
+2. `updateBosses` and `updateEnemyRegen` each walked the enemy index
+   every sim step; merged into `updateBossesAndTraits`.
+
+`updateGameLogic` fell ~25 % on the affected scenes (0.55 → 0.40,
+0.64 → 0.47).
+
+**Attributed, deliberately NOT "fixed"**: the residual Overworld
+`updPhys` gap (0.55 → 1.44) is intended CONTENT — M4's explosion
+profiles (5-54 particles per death where the base spawned none from
+`startExplosion`) and M7's higher enemy drop rate (0.80 → 1.40 expected
+drops per kill). Both feed passes already bounded by `MAX_PARTICLES` /
+`MAX_ACTIVE_DROPS` and cadenced by the `dropScan` / `dropMerge`
+PerfController tasks, so the cost scales with the caps rather than with
+the content. Reducing it would mean reducing the feature, which is a
+behaviour change and out of scope for a perf pass.
+
+**Validation**: all seven smokes re-run and pass. The M5 gamepad smoke
+was updated to dispatch `gamepadconnected` — which is what a real
+browser does and what the new gate requires.
 
 ---
 
@@ -717,6 +771,34 @@ otherwise log". With sell-back at 90 % of current price, upgrading Hull
 Mk I → Mk II is: tap the tile, Sell, tap Mk II, Buy — two clicks in the
 same panel, net 6,400 vs 10,000 direct. Not clunky. **Logged, not
 built.**
+
+### M8-D1 — the gamepad poll is gated on browser events, not on a frame counter
+
+**Chosen**: `padPresent`, set by `gamepadconnected` / `gamepaddisconnected`.
+
+**Alternatives**: (a) poll every N frames — cheaper, but it adds input
+latency and is a behaviour change; (b) leave it — a per-frame allocation
+for every player who never touches a pad. The events fire exactly when a
+pad appears, so gating on them is free AND behaviour-identical.
+
+**Consequence worth knowing**: a test double that only replaces
+`navigator.getGamepads` no longer works; it has to dispatch the event
+too. The M5 smoke was updated accordingly, which arguably makes it a
+more faithful stub than it was.
+
+### M8-D2 — the residual sim cost was attributed, not optimised away
+
+**Chosen**: report the Overworld `updPhys` delta as intended content
+(M4 particles + M7 drop rate) and leave it.
+
+**Why**: the milestone is explicit — "fix with zero-behaviour changes
+… no behaviour-changing perf edits without logging them as such". The
+only ways to close that gap are fewer explosion particles or fewer
+drops, both of which are the features themselves. Both are already
+bounded by hard caps and cadenced tasks, so the cost has a ceiling. If a
+human later decides the explosion counts are too rich, the numbers are
+one table (`EXPLOSION_PROFILES`) — but that is a design call, not a perf
+one.
 
 ### Open for a human ruling
 
