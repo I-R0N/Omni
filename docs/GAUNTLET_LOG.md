@@ -26,7 +26,7 @@ edited here.
       faithfulness + NPC station traffic (the optional item — NOT cut)
 - [x] **M7** — Economy & progression tuning pass (incl. salvage death penalty)
 - [x] **M8** — Performance pass (measure first, PR #69/#70 methodology)
-- [ ] **M9** — Visual quality pass
+- [x] **M9** — Visual quality pass
 - [ ] **M10** — Mechanical quality pass + final validation
 
 ---
@@ -338,6 +338,43 @@ behaviour change and out of scope for a perf pass.
 **Validation**: all seven smokes re-run and pass. The M5 gamepad smoke
 was updated to dispatch `gamepadconnected` — which is what a real
 browser does and what the new gate requires.
+
+### Iteration 9 — 2026-08-01 — M9: visual quality pass
+
+Method: captured the new surfaces at phone (390×844) and desktop scale
+with Playwright and LOOKED at them. Every fix below came from a
+screenshot, not from reasoning about the markup.
+
+**Fixed (commit `5cb36fa`)**
+
+1. **Boss bar collided with the wave chip** at phone width — the two
+   most important readouts in a boss fight, overlapping. Bar moved
+   below the chip stack on narrow screens.
+2. **Boss phase banners overflowed** — "REAVER RAISES ITS GUARD"
+   rendered as "ER RAISES ITS G" (the canvas banner is fixed-size and
+   doesn't wrap). Shortened to GUARD UP / ENRAGED / HULL SEALED /
+   PLATING BREACHED, with the constraint documented on `BossPhaseDef`.
+3. **Pause panel overflowed horizontally** — the controls table's
+   min-width propagated up through the flex column (the flexbox
+   `min-width: auto` trap), clipping the volume readout and the Ship
+   Status hint. `min-w-0` on the column and the scroller.
+4. **Big hulls lost their silhouette** — a flat 1.5 px outline reads on
+   a 28-unit drone and vanishes on a 92-unit boss, letting the body
+   gradient swallow the polygon. Outline width now scales with radius;
+   also sharpens the dragon head and nest.
+5. **Minimap contacts drowned in terrain** — M6's station squares and
+   portal diamonds disappeared into the saturated static bake. Static
+   layer now draws at `STATIC_LAYER_ALPHA` 0.5 under the contacts.
+6. **Shuttle name tag removed** — ambient scenery had a permanent
+   floating world label.
+
+**Validation**: build green, all seven smokes re-run and pass,
+screenshots re-captured and re-inspected.
+
+**Checked and found FINE** (no change): the death screen at phone scale
+(clean hierarchy, fits without scrolling), both boss silhouettes at
+desktop, hit/damage feedback (damage numbers, hit flashes and the
+scale-punch all read consistently across the new entity classes).
 
 ---
 
@@ -800,6 +837,27 @@ human later decides the explosion counts are too rich, the numbers are
 one table (`EXPLOSION_PROFILES`) — but that is a design call, not a perf
 one.
 
+### M9-D1 — the enemy outline scales with hull radius
+
+**Chosen**: `lineWidth = max(1.5, r * 0.05)` for every enemy, not a
+boss-only special case.
+
+**Why**: the problem is scale, not boss-ness — the dragon head and the
+nest have it too. A general rule fixes them all and means a future big
+enemy is correct for free. **Alternative**: an `isBoss` branch, which
+would have left the dragon looking like a blob.
+
+### M9-D2 — minimap terrain dimmed rather than re-baked
+
+**Chosen**: draw the existing static canvas at 0.5 alpha under the
+contacts.
+
+**Why**: one constant, instantly reversible, and it fixes the actual
+complaint (contacts unreadable). The deeper fix — desaturating the
+colours at BAKE time so terrain is a proper ground plane — changes how
+every map's minimap looks and is more than a visual pass should do
+unilaterally. Logged for review below.
+
 ### Open for a human ruling
 
 - **The gamepad is untested on real hardware.** The smoke drives a
@@ -809,6 +867,13 @@ one.
   most modern pads report. Worth one pass with a physical pad before
   ship.
 
+- **The minimap's static terrain bake is saturated.** M9 dimmed it to
+  0.5 alpha so contacts read, which fixes the symptom. The underlying
+  issue is that terrain colours are baked at full saturation and so
+  compete with the contact layer instead of sitting behind it. The
+  proper fix is to desaturate at bake time (one pass in the static-layer
+  builder), but that changes how every map's minimap looks, which is a
+  design call rather than a correction.
 - **Audio settings don't persist.** Volume/mute reset every page load,
   because this game deliberately has no storage layer (CLAUDE.md §1,
   decision #36d). That is a genuine annoyance for a muted player. The
