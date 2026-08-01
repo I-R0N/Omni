@@ -20,7 +20,7 @@ edited here.
 - [x] **M1** — (h) Bosses: framework + first boss (+ `evasive` trait)
 - [x] **M2** — (h) Bosses: second boss + `front-shield` / `regen` traits
 - [x] **M3** — Phase 3 Pair A: death/completion screen + stat legibility
-- [ ] **M4** — Phase 3 Pair B: SFX, then explosion variety
+- [x] **M4** — Phase 3 Pair B: SFX, then explosion variety
 - [ ] **M5** — Phase 3 Pair C: controller/joystick, then menu help
 - [ ] **M6** — Polish batch: palette residual + map composition + minimap
       faithfulness (optional: NPC station traffic — first to cut)
@@ -153,6 +153,35 @@ M2 smokes still green.
 **Watches**: `runSeconds` is SIM time, so it excludes pauses and station
 visits — correct for "how long did the run take" but it will read lower
 than wall clock, which may surprise. Noted rather than changed.
+
+### Iteration 4 — 2026-08-01 — M4: SFX + explosion variety
+
+**Shipped** (commit `5a39ddb`):
+
+- `engine/systems/AudioSystem.ts` — lazy gesture-unlocked `AudioContext`,
+  master gain + mute, per-def rate limit, global voice cap, tone/noise
+  synthesis. ~200 lines, owns no game state.
+- `AUDIO_CONSTANTS` / `SfxId` / `SfxDef` / `SFX_DEFS` (23 voices) /
+  `WEAPON_SFX` in constants.
+- 13 `audio.play` call sites: weapon fire (per family) + charged, enemy
+  hit, player hull vs shield hit, three death weights, both pickups,
+  dock, portal, wave start (an edge detector on `waves.waveIndex`) and
+  clear, boss spawn / phase / death.
+- `EXPLOSION_PROFILES` (8 classes) + `EXPLOSION_HEAVY_MASS`;
+  `explosionClassOf` + a profile-driven `startExplosion`.
+- Sound settings row in the pause menu (`EngineStats.audio`), engine API
+  `setVolume` / `toggleMute`.
+- CLAUDE.md updated in the same commit (§2 layout, §8 two new notes).
+
+**Validation**: build green; new 17-assertion smoke all passing (the
+gesture unlock is verified with a real Playwright click, not an engine
+call); M1-M3 smokes still green.
+
+**Watches**: 23 synthesized voices mixed by ear against silence, not
+against the game running. The M9 coherence pass should re-check levels
+with everything firing at once — the likeliest problem is that
+`hitEnemy` at 0.10 gain is still too present during a sustained
+Burst-Rifle stream.
 
 ---
 
@@ -328,6 +357,57 @@ renders them struck through in rose.
 +40 hull and gives you nothing" is the actual lesson of the adjacency
 system, and it is the cheapest possible way to teach it.
 
+### M4-D1 — synthesized audio, no asset pipeline
+
+**Chosen**: every effect is built from an oscillator sweep and/or a
+filtered noise burst at play time, described by an `SFX_DEFS` row.
+
+**Alternatives**: (a) sampled audio files in `public/assets` — rejected
+because it adds a download budget, a manifest to keep in sync, and a
+licensing question, for a game whose entire visual language is already
+procedural; (b) a third-party audio library — rejected on the same
+no-dependencies grounds the rest of the engine is built on. The
+milestone itself specified "synthesized/procedural, no external asset
+pipeline", so this is the plan's call as much as mine.
+
+**Revert**: delete `AudioSystem.ts`, the `SFX_*` block, and the 13 call
+sites (all one-liners).
+
+### M4-D2 — one fire voice per weapon FAMILY, not per weapon
+
+**Chosen**: `WEAPON_SFX` maps each `WeaponType` to one of seven family
+voices.
+
+**Why**: the loadout should be audible, but seven near-identical "pew"
+variants read as noise rather than as information. The seven families
+(clean pew / rapid tick / noisy boom / bright ping / crackle / whoosh /
+low thump) are genuinely distinct instruments.
+
+### M4-D3 — the `heavy` explosion class is selected by MASS
+
+**Chosen**: `explosionClassOf` sorts an enemy into `heavy` when
+`mass >= EXPLOSION_HEAVY_MASS` (16), rather than from a list of
+archetypes.
+
+**Why**: mass is already the game's "how substantial is this" number,
+so a NEW enemy archetype gets a correct death for free instead of
+needing a row in yet another table. Today it catches Tank / Bulwark /
+Turret / Nest and leaves the light tier on `ship`. **Alternative**: an
+explicit `ENEMY_EXPLOSION_CLASS` record — more control, more drift.
+
+**Revert**: replace the mass check with a subtype switch.
+
+### M4-D4 — audio settings are NOT persisted
+
+**Chosen**: volume and mute live on the AudioSystem for the session
+only.
+
+**Why**: CLAUDE.md §1 is explicit that there is no persistence beyond
+in-memory run state, and durable persistence is fenced off for the
+Overworld plan (decision #36d). Adding `localStorage` for one slider
+would be the first crack in that. Flagged as a real usability cost
+below.
+
 ---
 
 ## For user review
@@ -350,8 +430,19 @@ _(anything provisional or needing a human ruling)_
 | `BOSS_WEAPONS.SIEGE` damage / AoE | 13 + 8 splash @ r120 | 2-shell salvo |
 | `frontShield` | 190°, 0.75 reduction | plate strength |
 | `regen` p2 / p3 | 3.5 / 6 hp/s, window 0.35s, threshold 16, pause 2.5s | burst gate |
+| `AUDIO_CONSTANTS` | vol 0.55, ceiling 0.5, 24 voices | mixed by ear; recheck in M9 |
+| `SFX_DEFS` (23 rows) | see constants | every gain/duration is first-pass |
+| `EXPLOSION_PROFILES` (8 rows) | see constants | counts bounded by the M8 perf pass |
+| `EXPLOSION_HEAVY_MASS` | 16 | catches Tank/Bulwark/Turret/Nest |
 
 ### Open for a human ruling
+
+- **Audio settings don't persist.** Volume/mute reset every page load,
+  because this game deliberately has no storage layer (CLAUDE.md §1,
+  decision #36d). That is a genuine annoyance for a muted player. The
+  fix is three lines of `localStorage` — but it would be the first
+  persisted state in the project, so it needs a ruling rather than a
+  quiet decision.
 
 - **Death consequence.** M3 ships free respawn behind a summary screen
   (mildest candidate, per the decision rules). The real ruling —
