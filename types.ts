@@ -1454,6 +1454,11 @@ export interface EngineStats {
   /** Full weapon catalog for the pause-menu DEBUG weapons rows (built only
    *  while paused).  `slot` = equipped loadout slot (0/1) or null. */
   weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
+  /** Sound settings (Phase 3 Pair B).  `ready` is false until the first user
+   *  gesture unlocks the AudioContext — mobile browsers refuse to start one
+   *  otherwise, so the settings row says "tap anywhere" rather than lying
+   *  about being on. */
+  audio?: { volume: number; muted: boolean; ready: boolean };
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

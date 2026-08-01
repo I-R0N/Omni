@@ -52,6 +52,8 @@ interface UIOverlayProps {
   onResume?: () => void;
   onRestart?: () => void;
   onRespawn?: () => void;
+  onSetVolume?: (v: number) => void;
+  onToggleMute?: () => void;
   onToggleDebug?: () => void;
   onCycleTrailShape?: () => void;
   onCycleTrailEmitMode?: () => void;
@@ -168,6 +170,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onRespawn,
+  onSetVolume,
+  onToggleMute,
   onToggleDebug,
   onCycleTrailShape,
   onCycleTrailEmitMode,
@@ -1761,6 +1765,44 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ? <span className="text-emerald-300">enabled</span>
                   : <span className="text-slate-500">no Overcharge</span>)}
               </div>
+            </div>
+
+            {/* Sound (Phase 3 Pair B).  Volume + mute only — every effect is
+                synthesized, so there is nothing to download and nothing to
+                configure beyond level.  Until the first gesture unlocks the
+                AudioContext the row says so rather than pretending. */}
+            <div className="bg-slate-800/60 border border-slate-600/40 rounded-lg p-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 className="text-sky-300 text-[11px] font-bold uppercase tracking-widest shrink-0">Sound</h3>
+                <button
+                  onClick={onToggleMute}
+                  className={`px-3 py-1 rounded text-[11px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
+                    stats.audio?.muted
+                      ? 'bg-red-900/50 text-red-300 hover:bg-red-800/60'
+                      : 'bg-emerald-800/50 text-emerald-200 hover:bg-emerald-700/60'
+                  }`}
+                >
+                  {stats.audio?.muted ? 'Muted' : 'On'}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round((stats.audio?.volume ?? 0) * 100)}
+                  onChange={e => onSetVolume?.(Number(e.target.value) / 100)}
+                  disabled={stats.audio?.muted}
+                  className="flex-1 min-w-[140px] accent-sky-400 disabled:opacity-40"
+                  aria-label="Volume"
+                />
+                <span className="text-white text-xs font-bold tabular-nums w-10 text-right">
+                  {Math.round((stats.audio?.volume ?? 0) * 100)}
+                </span>
+              </div>
+              {stats.audio && !stats.audio.ready && !stats.audio.muted && (
+                <p className="text-slate-500 text-[10px] mt-1.5">
+                  Audio starts on your first tap or key press — browsers block it until then.
+                </p>
+              )}
             </div>
 
             {/* Modules & cargo — the same hex-tile language as the station

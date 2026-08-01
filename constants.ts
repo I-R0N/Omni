@@ -2011,6 +2011,240 @@ export const EXPLOSION_CONSTANTS = {
   SIZE_MULTIPLIER: -1.8
 };
 
+// ── Death-explosion variety (Phase 3 Pair B) ──────────────────────────────────
+// Every death used to look the same: the entity vanished and its debris spray
+// carried the whole read.  Now `GameEngine.explosionClassOf` sorts the dying
+// entity into a CLASS and `startExplosion` plays that class's profile through
+// the EXISTING ParticleSystem + shockwave ring — per-class palette, counts,
+// speeds, sizes and ring size.  No new particle engine, no new entity type.
+//
+// The palette's FIRST colour is the core flash; the rest are the debris tints,
+// picked per particle.  `tint: true` mixes the dying entity's own colour into
+// the debris so a green enemy and a violet one still read as themselves.
+// Counts are deliberately modest — a wave clear kills a dozen things at once,
+// and the perf pass (M8) owns the ceiling.  All PROVISIONAL.
+export interface ExplosionProfile {
+  /** Core flash + debris colours (index 0 is the flash). */
+  palette: string[];
+  /** Debris particle count, and speed / size / lifetime bands. */
+  count: number;
+  speedMin: number; speedMax: number;
+  sizeMin: number; sizeMax: number;
+  lifeMin: number; lifeMax: number;
+  /** Cosmetic shockwave ring radius as a multiple of the entity's size
+   *  (0 = no ring — small fry don't get one). */
+  ringScale: number;
+  /** Mix the entity's own colour into the debris tints. */
+  tint: boolean;
+  /** Which death sound plays with it. */
+  sfx: SfxId;
+}
+
+/** Mass at or above which an enemy dies as a 'heavy' rather than a 'ship'.
+ *  Mass is already the game's "how substantial is this" number, so sorting on
+ *  it means a NEW enemy archetype gets the right death for free.  Today this
+ *  catches Tank (18), Bulwark (16), Turret (50) and Nest (60), and leaves the
+ *  Drone/Charger/Skirmisher/Orbiter/Sniper/Kamikaze tier on 'ship'. */
+export const EXPLOSION_HEAVY_MASS = 16;
+
+export type ExplosionClass =
+  | 'player' | 'gnat' | 'ship' | 'heavy' | 'boss' | 'rival' | 'bubble' | 'dragon';
+
+export const EXPLOSION_PROFILES: Record<ExplosionClass, ExplosionProfile> = {
+  // The player: the biggest, whitest, slowest-fading blast in the game — a
+  // death should feel like the end of something.
+  player: {
+    palette: ['#ffffff', '#fde047', '#fb923c', '#f87171', '#e2e8f0'],
+    count: 46, speedMin: 3, speedMax: 15, sizeMin: 1.5, sizeMax: 4.5,
+    lifeMin: 0.5, lifeMax: 1.3, ringScale: 7, tint: false, sfx: 'explodePlayer',
+  },
+  // Swarm gnats pop in bulk — a handful of sparks, no ring, no tail.  Cheap by
+  // necessity: a nest's brood can die twenty at a time.
+  gnat: {
+    palette: ['#ccfbf1', '#2dd4bf'],
+    count: 5, speedMin: 2, speedMax: 6, sizeMin: 0.8, sizeMax: 1.8,
+    lifeMin: 0.15, lifeMax: 0.35, ringScale: 0, tint: true, sfx: 'explodeSmall',
+  },
+  // Rank-and-file ships: a warm flash and a spray in their own hull colour.
+  ship: {
+    palette: ['#ffffff', '#fbbf24', '#f97316'],
+    count: 16, speedMin: 2.5, speedMax: 9, sizeMin: 1.2, sizeMax: 3,
+    lifeMin: 0.3, lifeMax: 0.7, ringScale: 2.2, tint: true, sfx: 'explodeSmall',
+  },
+  // Heavies (Tank / Bulwark / Turret / Nest): slower, sootier, with a real ring.
+  heavy: {
+    palette: ['#ffedd5', '#f97316', '#7c2d12', '#44403c'],
+    count: 26, speedMin: 2, speedMax: 8, sizeMin: 1.8, sizeMax: 4,
+    lifeMin: 0.45, lifeMax: 1.0, ringScale: 3.4, tint: true, sfx: 'explodeHeavy',
+  },
+  // Bosses: the heavy profile turned up, in the boss's phase colour.
+  boss: {
+    palette: ['#ffffff', '#fca5a5', '#f97316', '#fde047'],
+    count: 54, speedMin: 3, speedMax: 16, sizeMin: 2, sizeMax: 5.5,
+    lifeMin: 0.5, lifeMax: 1.4, ringScale: 6, tint: true, sfx: 'bossDeath',
+  },
+  // Rivals are player-like ships, so they die like the player — smaller, but
+  // with the same white-hot core rather than an enemy's orange.
+  rival: {
+    palette: ['#ffffff', '#e2e8f0', '#38bdf8'],
+    count: 22, speedMin: 3, speedMax: 11, sizeMin: 1.4, sizeMax: 3.4,
+    lifeMin: 0.35, lifeMax: 0.9, ringScale: 3, tint: true, sfx: 'explodeSmall',
+  },
+  // A bubble bursts rather than explodes: a wet, slow, translucent splatter
+  // with no flash and no ring.
+  bubble: {
+    palette: ['#a5f3fc', '#67e8f9', '#22d3ee'],
+    count: 18, speedMin: 1, speedMax: 5, sizeMin: 2, sizeMax: 5,
+    lifeMin: 0.4, lifeMax: 1.1, ringScale: 0, tint: true, sfx: 'explodeSmall',
+  },
+  // The dragon keeps its bespoke rift-collapse death (GameEngine.dragonDeath);
+  // this row is what a segment-less head falls back to.
+  dragon: {
+    palette: ['#ffffff', '#34d399', '#facc15'],
+    count: 40, speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5,
+    lifeMin: 0.4, lifeMax: 1.0, ringScale: 5, tint: true, sfx: 'explodeHeavy',
+  },
+};
+
+// ── Audio (Phase 3 Pair B) ────────────────────────────────────────────────────
+// Every sound is SYNTHESIZED at play time from an oscillator sweep and/or a
+// filtered noise burst — no asset pipeline, nothing to download.  A sound is a
+// row in SFX_DEFS: config-as-code, like every other tuning table here.  The
+// engine (AudioSystem) owns the WebAudio plumbing and the safety rails
+// (gesture unlock, per-def rate limit, global voice cap); this block is purely
+// what things sound like.  All values PROVISIONAL — mixed by ear against the
+// existing FX, revisit in the M9 visual/audio coherence pass.
+export const AUDIO_CONSTANTS = {
+  DEFAULT_VOLUME: 0.55,
+  /** Absolute ceiling the user's 0..1 volume scales into — headroom so a
+   *  dense frame of voices can't clip. */
+  MASTER_CEILING: 0.5,
+  /** Concurrent voices; over this, new sounds are dropped rather than mixed.
+   *  A cluster kill thins instead of turning into a wall. */
+  MAX_VOICES: 24,
+  NOISE_BUFFER_SEC: 1,
+};
+
+export type SfxId =
+  // Weapons — one voice per FAMILY, not per weapon, so the loadout reads
+  | 'fireBlaster' | 'fireBurst' | 'fireShotgun' | 'fireBouncer'
+  | 'fireLightning' | 'fireHoming' | 'fireCannon' | 'fireCharged'
+  // Feedback
+  | 'hitEnemy' | 'hitPlayer' | 'shieldHit'
+  | 'explodeSmall' | 'explodeHeavy' | 'explodePlayer'
+  // World / flow
+  | 'pickupSalvage' | 'pickupHealth' | 'dock' | 'portal'
+  | 'waveStart' | 'waveClear'
+  | 'bossSpawn' | 'bossPhase' | 'bossDeath';
+
+export interface SfxDef {
+  /** Total voice length, seconds. */
+  dur: number;
+  /** Attack ramp, seconds (clamped to half `dur`). */
+  attack: number;
+  /** Peak level before the master gain. */
+  gain: number;
+  /** ± random detune in semitones, so repeats don't comb. */
+  detuneVar: number;
+  /** Minimum seconds between two plays of THIS id — the voice-storm guard. */
+  minGap: number;
+  /** Oscillator sweep (the "tone" half of the sound). */
+  tone?: { wave: OscillatorType; from: number; to: number };
+  /** Filtered noise burst (the "body" half — debris, air, impact). */
+  noise?: { type: BiquadFilterType; from: number; to: number; q: number; level: number };
+}
+
+export const SFX_DEFS: Record<SfxId, SfxDef> = {
+  // ── Weapon families.  Each one is the shape of its projectile: the Blaster
+  // is a short clean pew, the Shotgun is mostly noise, the Cannon is a low
+  // thump with a long tail, Lightning is a bright crackle. ──
+  fireBlaster:  { dur: 0.09, attack: 0.004, gain: 0.16, detuneVar: 1.5, minGap: 0.045,
+                  tone: { wave: 'square', from: 780, to: 280 } },
+  fireBurst:    { dur: 0.07, attack: 0.003, gain: 0.13, detuneVar: 2.0, minGap: 0.03,
+                  tone: { wave: 'square', from: 960, to: 420 } },
+  fireShotgun:  { dur: 0.20, attack: 0.004, gain: 0.20, detuneVar: 1.2, minGap: 0.08,
+                  tone: { wave: 'sawtooth', from: 320, to: 90 },
+                  noise: { type: 'bandpass', from: 2200, to: 500, q: 0.7, level: 1.5 } },
+  fireBouncer:  { dur: 0.13, attack: 0.003, gain: 0.15, detuneVar: 2.5, minGap: 0.05,
+                  tone: { wave: 'triangle', from: 1250, to: 620 } },
+  fireLightning:{ dur: 0.22, attack: 0.002, gain: 0.15, detuneVar: 3.0, minGap: 0.06,
+                  tone: { wave: 'sawtooth', from: 1800, to: 700 },
+                  noise: { type: 'highpass', from: 1800, to: 5000, q: 0.5, level: 1.1 } },
+  fireHoming:   { dur: 0.28, attack: 0.02,  gain: 0.13, detuneVar: 1.5, minGap: 0.07,
+                  tone: { wave: 'sine', from: 300, to: 900 },
+                  noise: { type: 'bandpass', from: 900, to: 2400, q: 1.2, level: 0.8 } },
+  fireCannon:   { dur: 0.34, attack: 0.005, gain: 0.26, detuneVar: 1.0, minGap: 0.10,
+                  tone: { wave: 'sawtooth', from: 190, to: 42 },
+                  noise: { type: 'lowpass', from: 1400, to: 180, q: 0.8, level: 1.4 } },
+  fireCharged:  { dur: 0.40, attack: 0.01,  gain: 0.30, detuneVar: 0.8, minGap: 0.12,
+                  tone: { wave: 'sawtooth', from: 620, to: 70 },
+                  noise: { type: 'lowpass', from: 3000, to: 260, q: 0.7, level: 1.3 } },
+
+  // ── Feedback.  Kept quiet and SHORT: these fire constantly, so they have to
+  // sit under the weapon layer rather than compete with it. ──
+  hitEnemy:     { dur: 0.06, attack: 0.002, gain: 0.10, detuneVar: 3.0, minGap: 0.035,
+                  noise: { type: 'bandpass', from: 2600, to: 900, q: 1.4, level: 1.0 } },
+  hitPlayer:    { dur: 0.18, attack: 0.003, gain: 0.24, detuneVar: 1.5, minGap: 0.09,
+                  tone: { wave: 'square', from: 220, to: 70 },
+                  noise: { type: 'lowpass', from: 1200, to: 200, q: 0.8, level: 1.1 } },
+  shieldHit:    { dur: 0.16, attack: 0.003, gain: 0.16, detuneVar: 2.0, minGap: 0.08,
+                  tone: { wave: 'sine', from: 1500, to: 480 } },
+
+  // ── Deaths.  Three weights, matched to the EXPLOSION_PROFILES classes so the
+  // sound and the particle burst agree about how big the thing was. ──
+  explodeSmall: { dur: 0.30, attack: 0.004, gain: 0.20, detuneVar: 2.5, minGap: 0.05,
+                  noise: { type: 'lowpass', from: 2400, to: 220, q: 0.7, level: 1.4 } },
+  explodeHeavy: { dur: 0.60, attack: 0.006, gain: 0.30, detuneVar: 1.2, minGap: 0.08,
+                  tone: { wave: 'sawtooth', from: 150, to: 34 },
+                  noise: { type: 'lowpass', from: 1800, to: 110, q: 0.6, level: 1.6 } },
+  explodePlayer:{ dur: 1.10, attack: 0.008, gain: 0.36, detuneVar: 0,   minGap: 0.5,
+                  tone: { wave: 'sawtooth', from: 260, to: 26 },
+                  noise: { type: 'lowpass', from: 2600, to: 70, q: 0.6, level: 1.7 } },
+
+  // ── World / flow.  Rising shapes for good things, and the two POI sounds
+  // share a "systems engaging" family so docking and warping feel related. ──
+  pickupSalvage:{ dur: 0.09, attack: 0.002, gain: 0.11, detuneVar: 3.5, minGap: 0.04,
+                  tone: { wave: 'triangle', from: 900, to: 1500 } },
+  pickupHealth: { dur: 0.20, attack: 0.005, gain: 0.15, detuneVar: 1.0, minGap: 0.08,
+                  tone: { wave: 'sine', from: 620, to: 1250 } },
+  dock:         { dur: 0.45, attack: 0.02,  gain: 0.20, detuneVar: 0,   minGap: 0.3,
+                  tone: { wave: 'sine', from: 220, to: 660 },
+                  noise: { type: 'lowpass', from: 500, to: 1600, q: 0.8, level: 0.5 } },
+  portal:       { dur: 0.75, attack: 0.03,  gain: 0.26, detuneVar: 0.5, minGap: 0.2,
+                  tone: { wave: 'sine', from: 160, to: 1400 },
+                  noise: { type: 'bandpass', from: 400, to: 4200, q: 1.0, level: 0.9 } },
+  waveStart:    { dur: 0.55, attack: 0.02,  gain: 0.22, detuneVar: 0,   minGap: 0.5,
+                  tone: { wave: 'square', from: 180, to: 300 } },
+  waveClear:    { dur: 0.70, attack: 0.02,  gain: 0.24, detuneVar: 0,   minGap: 0.5,
+                  tone: { wave: 'triangle', from: 520, to: 1560 } },
+
+  // ── Boss.  Deliberately the lowest and longest voices in the game — a boss
+  // should be audible as an event before you find it on screen. ──
+  bossSpawn:    { dur: 1.20, attack: 0.05,  gain: 0.34, detuneVar: 0,   minGap: 0.8,
+                  tone: { wave: 'sawtooth', from: 70, to: 190 },
+                  noise: { type: 'lowpass', from: 300, to: 2600, q: 0.9, level: 1.0 } },
+  bossPhase:    { dur: 0.65, attack: 0.01,  gain: 0.30, detuneVar: 0,   minGap: 0.4,
+                  tone: { wave: 'square', from: 420, to: 120 },
+                  noise: { type: 'bandpass', from: 1600, to: 400, q: 1.1, level: 0.9 } },
+  bossDeath:    { dur: 1.60, attack: 0.01,  gain: 0.38, detuneVar: 0,   minGap: 0.8,
+                  tone: { wave: 'sawtooth', from: 220, to: 20 },
+                  noise: { type: 'lowpass', from: 3200, to: 60, q: 0.6, level: 1.8 } },
+};
+
+/** Which fire voice each weapon uses.  One per FAMILY, deliberately: seven
+ *  near-identical sounds would read as noise, while the Blaster / Burst /
+ *  Shotgun / Bouncer / Lightning / Homing / Cannon shapes are genuinely
+ *  distinct instruments. */
+export const WEAPON_SFX: Record<WeaponType, SfxId> = {
+  [WeaponType.BLASTER]:   'fireBlaster',
+  [WeaponType.BURST]:     'fireBurst',
+  [WeaponType.SHOTGUN]:   'fireShotgun',
+  [WeaponType.BOUNCER]:   'fireBouncer',
+  [WeaponType.LIGHTNING]: 'fireLightning',
+  [WeaponType.HOMING]:    'fireHoming',
+  [WeaponType.CANNON]:    'fireCannon',
+};
+
 export const PARTICLE_CONSTANTS = {
   LIFETIME_MIN: 0.25,
   LIFETIME_MAX: 0.45,

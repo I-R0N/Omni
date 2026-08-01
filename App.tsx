@@ -340,6 +340,14 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.respawnFromDeath();
   };
 
+  const handleSetVolume = (v: number) => {
+      if (engineRef.current) engineRef.current.setVolume(v);
+  };
+
+  const handleToggleMute = () => {
+      if (engineRef.current) engineRef.current.toggleMute();
+  };
+
   const handleSpawnBoss = (id: string) => {
       if (engineRef.current) engineRef.current.debugSpawnBoss(id);
   };
@@ -514,6 +522,8 @@ const App: React.FC = () => {
         onSpawnRival={handleSpawnRival}
         onSpawnBoss={handleSpawnBoss}
         onRespawn={handleRespawn}
+        onSetVolume={handleSetVolume}
+        onToggleMute={handleToggleMute}
         onPerfRecToggle={handlePerfRecToggle}
         onPerfRecCycleScene={handlePerfRecCycleScene}
         onPerfRecExport={handlePerfRecExport}

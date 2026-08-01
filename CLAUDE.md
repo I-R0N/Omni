@@ -1238,6 +1238,33 @@ its descriptor id and call `this.addReturnPortal()` at the end of its
   it moves something invisible.  INACTIVE modules still report their
   contributions — rendered struck through, which is what makes a failed
   adjacency read as a cost.
+- **Sound is SYNTHESIZED, and every call site is unconditional.**
+  `AudioSystem` builds each effect at play time from an oscillator
+  sweep and/or a filtered noise burst described by an `SFX_DEFS` row —
+  no asset pipeline, nothing in `assets.ts`, nothing to download.
+  Three rails make `audio.play(id)` safe to call from a hot path:
+  the AudioContext is created LAZILY on the first real user gesture
+  (mobile browsers refuse otherwise, so everything before that is a
+  no-op), each def's `minGap` drops repeats of the SAME id inside it
+  (a shotgun cone / cluster kill thins instead of stacking), and a
+  global `MAX_VOICES` cap drops the overflow.  Voices are created per
+  shot and disposed by their own `onended` — a WebAudio node is cheap
+  and pooling oscillators is not worth it.  Volume + mute live on the
+  system, ride `EngineStats.audio`, and are NOT persisted (this game
+  has no storage).  A new sound is one `SfxId` + one `SFX_DEFS` row +
+  one call site; weapon fire maps through `WEAPON_SFX` by FAMILY, not
+  per weapon.
+- **Death FX are per-CLASS, through the existing particle system.**
+  `GameEngine.explosionClassOf` sorts a dying entity into an
+  `ExplosionClass` (player / gnat / ship / heavy / boss / rival /
+  bubble / dragon) and `startExplosion` plays that class's
+  `EXPLOSION_PROFILES` row — palette, counts, speed/size/lifetime
+  bands, ring scale, and the matching death sound — through
+  `spawnParticles` + `spawnShockwave`.  No new particle engine and no
+  new entity type.  The `heavy` class is selected by `mass >=
+  EXPLOSION_HEAVY_MASS` rather than by an archetype list, so a NEW
+  enemy gets the right death for free; `tint: true` mixes the entity's
+  own colour into the debris so the hull stays recognisable.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through
