@@ -41,30 +41,148 @@ re-derived against the current tip; every divergence is logged below.
 
 ---
 
+## COMPLETION SUMMARY
+
+**All four milestones complete.** `npm run build` green; `npx tsc
+--noEmit` shows only the two errors that were already on the base commit
+(`constants.ts` `defaultOutcome`, `ShardSystem.ts`
+`requireSizeDeltaFraction`); four headless Playwright suites green across
+three consecutive full rounds — **147 assertions** (B1 50, B2 30, B3 33,
+B4 34). CLAUDE.md was updated in the same commit as every change it
+describes.
+
+### What shipped
+
+**A boss is an ordinary wave enemy.** Not a new entity category, not an
+engine-managed roamer: an `ENEMY_VARIANTS` archetype routed through
+`ENEMY_BEHAVIOR` and tracked as a COUNTED wave enemy, so the existing
+clear-the-field rule already gates the wave on killing it with zero
+boss-specific completion plumbing. What makes it a boss is a `BOSS_DEFS`
+row of PHASES, and every phase field lands on machinery that already
+existed — a `Partial<WeaponConfig>` override, a shield (bubble or arc), a
+brood spawner, a trait set, a speed multiplier, a colour. Fields absent
+from a phase are CLEARED, so "barrier blown" is as expressible as "shield
+up". Nothing is bespoke scripting (guardrail #36e).
+
+**Three capstones**, one per range band, rotating every 5th wave:
+
+| | WARDEN | REAVER | BASTION |
+|---|---|---|---|
+| role | the chassis boss | weapon-boss 1 | weapon-boss 2 |
+| band | mid | close (brawler) | long (620-unit stand-off) |
+| gun | heavy bolts | the player's **Shotgun** | the player's **Plasma Cannon** |
+| traits | shield → armor → none | **evasive** → +arc shield → armor | **front-shield** → +**regen** → regen |
+| escort | swarm | kamikaze | turret |
+
+Both weapon-bosses wield a themed variant of the literal player archetype
+(`BOSS_WEAPONS` spreads `WEAPONS[SHOTGUN]` / `WEAPONS[CANNON]`), so the
+telegraph reads "that's MY gun" with no parallel weapon table
+(WEAPONS_AMMO_PLAN §6).
+
+**Three new counterplay traits**, plus a fourth lever:
+- `evasive` — a REAL dodge (perpendicular juke out of a closing straight
+  shot), blind to homing by design so the **Seeker is the designated
+  answer**; one juke per cooldown, so cones and chains still land.
+- `front-shield` — a permanent directional plate on the entity's FACING
+  with no pool, so face-tanking never becomes viable. Its answers fall
+  out of WHERE damage is applied: chains and rings damage outside the
+  projectile path and bypass it for free, a Laser ricochet arrives from
+  behind, and a slow fortress can be flanked.
+- `regen` — healing gated by a **FIXED** damage bucket, not a sliding
+  one. That distinction is the whole trait (see D11).
+- `poise` — a plain archetype field (not a boss branch) so chip fire
+  can't hold a heavy hull in permanent hit-stun or shove it around.
+
+**Payout is model (d), strictly** (decision #37e): score + a physical
+salvage spray + a TIMED shop discount. No unlock plumbing anywhere — the
+smokes assert the owned-weapon set, the gun slots and the inventory are
+byte-identical across a boss kill.
+
+### One real gap found and fixed
+
+An ENEMY-owned explosive shell could not damage the player **at all**.
+The shockwave ring only sweeps `currentMap.entities`, and the player is
+not in that list (it is appended to `frameEntities` each step) — so the
+`e.id === 'player'` shield-absorb branch inside `updateExplosionRings`
+was dead code, and an artillery boss's signature weapon would have been a
+light show. CLAUDE.md claimed enemy-owned rings "threaten the player";
+that was wrong and has been corrected. Fixed on the precedent the
+kamikaze already set for the same reason — `applyKamikazeBlastToPlayer`
+generalized to `applyBlastToPlayer(pos, radius, damage, knockback)` —
+rather than by widening the ring machinery, which would have silently
+changed merge-blowback and player-Cannon self-damage too.
+
+### The §7 counterplay table, as LIVE
+
+| Weapon | Its live answer | Where |
+|---|---|---|
+| Blaster | armor, via a charged slug or a Gunnery-boosted shot past the threshold | Tank, Warden p1, Reaver p3 |
+| Burst Rifle | stationary high-HP sustained DPS | Turret, Nest, Bastion p3's escort |
+| Shotgun | **evasive** (a cone forgives juking) + **regen** (18 in one bucket clears the 16 gate) | Reaver p1–p2, Bastion p2–p3 |
+| Laser | **front-shield** (ricochets arrive from behind) + line rake vs crowds | Bastion p1–p2, every escort brood |
+| Lightning | armor + evasive (chains never travel, so are never dodged) + front-shield (chain damage bypasses the projectile path) | all four traits |
+| Seeker | **evasive — the designated answer** | Reaver p1–p2 |
+| Cannon | **armor** (designated) + front-shield (the ring bypasses the plate) + **regen** (18 + 10 splash) | all four traits |
+
+Every weapon is a right answer somewhere; four are *the* answer to a
+specific trait.
+
+### Performance
+
+No new per-frame gradient allocations: the aura ring, the front-shield
+plate, all three boss hulls, the minimap blip and the chevron are solid
+strokes and fills, and the hull body still rides the cached
+`enemyBodyGrad`. Measured with the in-game Perf REC harness, same-harness
+A/B on the same map, 12s each:
+
+| scene | render avg | sim avg | live enemies |
+|---|---|---|---|
+| control — wave 5 stream, no capstone | 62.32 ms | 1.68 ms | 7 |
+| wave 5 capstone (Warden) | 51.37 ms | 1.41 ms | 4 |
+| wave 15 capstone (Bastion, plate+regen) | 54.32 ms | 1.50 ms | 7 |
+
+A boss wave is **cheaper** than the equivalent non-boss wave, because the
+capstone replaces companions rather than adding to them. Caveat stated
+plainly: the absolute FPS in this headless container is software-
+rasterized and is **not** comparable to the PR #70 hardware baselines —
+only the same-harness A/B delta is meaningful here.
+
+---
+
 ## FOR USER REVIEW
 
-_(consolidated at the top; each item is a judgment call this session
-could not ask about)_
+_(consolidated; each is a judgment call this session could not ask about)_
 
 1. **Boss cadence lands on the scripted teaching waves.** Bosses arrive
    every `BOSS_CONSTANTS.WAVE_INTERVAL` = 5 waves, so the first capstone
-   is wave 5 — which is currently the Bulwark intro
-   (`WAVE_DEFINITIONS[4]`). The boss REPLACES most of that wave's
-   budget, so the Bulwark lesson is diluted. Alternative: 6, so all
-   seven scripted intro waves finish before the first capstone. One
-   constant.
-2. **Every boss tuning number is provisional.** HP pools, payout size,
-   discount rate/duration, trait thresholds — all named in
-   `BOSS_CONSTANTS` / `BOSS_DEFS` / `ENEMY_TRAITS` and commented
-   PROVISIONAL. The plan reserves economy/progression tuning for
-   roadmap step 6; these numbers are sized against today's income
-   (≈5–7 salvage/wave, 1000 credits each, modules 25k–60k) but not
-   playtested.
-3. **The shop discount is TIMED, not permanent.** See DECISION D3 —
-   a permanent discount plus full-price resale is a money pump. This
-   session chose a timed window AND priced resale off the same
-   discounted price. If you prefer a permanent discount, the resale
-   coupling must stay.
+   is wave 5 — currently the Bulwark intro (`WAVE_DEFINITIONS[4]`), whose
+   budget the boss mostly replaces. Alternative: **6**, so all seven
+   scripted intro waves finish first. One constant.
+2. **The Blaster's counterplay entry is the weakest in the table.** Its
+   base 4 damage is under both armor thresholds, so its answer is
+   conditional on Overcharge (charged slug) or Gunnery stacking past 6.
+   That is what §7 already says, but it means a lean early run has no
+   armor answer at the exact moment it meets the wave-5 Warden. Cheap
+   lever if you want it softened: the Warden's `chipThreshold`, 8 → 6.
+3. **Bastion's DPS floor.** 150 base HP with phase-2 regen at 3.5 hp/s
+   behind a 75% front plate means a very light loadout may not be able to
+   kill it. Defensible for a capstone — and the burn window is generous
+   once any burst lands — but it is the highest DPS floor in the game.
+   Lower `perSec` rather than the HP if it needs to come down.
+4. **Every boss tuning number is provisional** and commented as such:
+   HP pools, payout size (12 salvage ≈ 12,000 credits ≈ two waves of
+   combat income), discount rate/duration, all four trait thresholds.
+   Sized against today's economy, not playtested. The plan reserves
+   economy/progression tuning for roadmap step 6.
+5. **The shop discount is TIMED, not permanent** — and resale is priced
+   off the same discounted number. Both are deliberate: a permanent
+   discount against full-price sell-back is an infinite money pump above
+   10%. If you prefer a permanent discount, the resale coupling must
+   stay.
+6. **Reaver phase 2 stacks a tracking arc shield ON TOP of evasion** —
+   two soft counters at once. The flank answer still works and the arc
+   slew (2.4 rad/s) is beatable, but it is the most demanding phase in
+   the set and is worth a look in a real playthrough.
 
 ---
 
@@ -74,7 +192,7 @@ could not ask about)_
       archetype base, poise, intro rift + banner, model-(d) payout, DBG rows)
 - [x] **B2** — First weapon-boss + `evasive` trait
 - [x] **B3** — Second weapon-boss + `front-shield` and `regen` traits
-- [ ] **B4** — Presentation + validation pass (bosses only)
+- [x] **B4** — Presentation + validation pass (bosses only)
 
 ---
 
@@ -361,3 +479,70 @@ answer to a specific trait.
 - The front-shield plate renders as an arc but has no pool bar, by
   design. If playtesting shows people expect to "break" it, the fix is
   a label, not a pool.
+
+### Iteration 4 — 2026-08-01 — B4: presentation, payoff, validation
+
+**Shipped** (commit `4e4de8a`):
+
+- Boss HUD bar rebuilt for PHONE scale: a numeric HP percentage beside
+  the phase pips, a thicker track, `w-[min(560px,92vw)]` and a
+  responsive top offset. Measured in the real DOM at 390×844.
+- `MINIMAP_CONSTANTS.BOSS_BLIP` + the ringed boss contact (clamps to the
+  border like an enemy blip rather than being culled).
+- Off-screen chevron: a boss is exempt from the enemy-chevron budget AND
+  the distance fade, draws at 1.6×, and labels itself with its name.
+- `BOSS_CONSTANTS.DEATH_DEBRIS` + the payoff beat in `payBossBounty` —
+  rift collapse, phase-colour debris burst, heavy shake, and a banner
+  naming the boss and its payout (salvage + the discount now running).
+- CLAUDE.md final sync in the SAME commit (§5 payout/legibility).
+
+**Validation**: build green; `tsc --noEmit` unchanged; **all four suites
+green across three consecutive full rounds**, 147 assertions. The new B4
+suite runs at phone scale and walks the whole loop end to end — hub →
+portal (credits/outfit carried) → arena waves → capstone → HUD measured
+in the DOM → boss findable behind a crowd → kill (spray/debris/rift/
+banner/score/discount) → wave completion → return portal (score, credits
+and discount carried) → the discount reaching a real catalog price → a
+new run clearing it.
+
+**Perf**: see the completion summary table. No new per-frame gradient
+allocations; a boss wave measures cheaper than the equivalent non-boss
+wave on the same harness.
+
+**Decisions taken**:
+
+- **D16 — the boss chevron and minimap blip are exempt from the caps.**
+  Both indicator paths budget how many contacts they draw
+  (`MAX_VISIBLE_ENEMY`) and fade distant ones. A capstone starved out by
+  fourteen stragglers is precisely the failure the indicator exists to
+  prevent, so a boss bypasses both. Asserted with a crowd in the way.
+- **D17 — the death banner names the DISCOUNT, not just the kill.** The
+  salvage spray is visible on the ground; the discount is invisible
+  until you fly home and open a station menu. Naming it in the banner is
+  the cheapest way to make the model-(d) payout legible at the moment it
+  is earned.
+- **D18 — perf is reported as a same-harness A/B, not against the PR #70
+  baselines.** This container renders in software at ~15 FPS, so the
+  absolute numbers say nothing about the game on real hardware. Quoting
+  them against a hardware baseline would have been misleading; the
+  control-vs-boss delta on the identical harness is the honest
+  measurement and is what the summary reports.
+
+**Four harness flakes fixed** (all of them tests measuring a live world
+rather than the behaviour under test — worth recording because each one
+would have read as a product bug):
+
+1. A 0.12s `hitStun` read 200 ms after the shot → sample the PEAK.
+2. Escort brood polled on wall clock while the sim ran slower than wall
+   clock → poll until they appear, with a timeout.
+3. The front/rear plate ratio picking up crash damage from a player
+   parked inside a 92-unit hull, AND splash from the boss's own gun
+   detonating nearby (an enemy ring excludes only its direct-hit target,
+   not its owner) → move the player clear and silence the gun.
+4. A siege shell whose flight depended on the map's terrain layout →
+   drive `handleProjectileHit` directly with the same shell.
+
+**Watches carried out of the gauntlet**: the three FOR-USER-REVIEW
+tuning items (cadence, Blaster's armor answer, Bastion's DPS floor) plus
+the Reaver phase-2 double-counter, all consolidated at the top of this
+log. Nothing is left red or half-finished.
